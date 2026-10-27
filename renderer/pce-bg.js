@@ -1,0 +1,130 @@
+/*
+ * pce-bg.js — PCEStudio VDC/VCE background renderer (card #5).
+ *
+ * Renders one 256x232 RGB frame from a VRAM dump, a colour-table dump and a
+ * handful of register values, exactly as the HuC6270 VDC background layer and
+ * the HuC6260 VCE colour decoder produce it in 256x224 mode.  This is
+ * PCEStudio's own model, written from the Hudson HuC6270/HuC6260 manuals
+ * (facts and page references in docs/RENDERER.md); Mednafen was used as a
+ * reference for verification only — no emulator code is copied or linked.
+ *
+ * Input (see tools/mcs-extract.py for where the values come from):
+ *   vram: Uint8Array, 131072 bytes = 65536 uint16 little-endian words
+ *   cram: Uint8Array, 1024 bytes = 512 uint16 LE colour-table entries
+ *         (bits 0-8 colour — G=6-8, R=3-5, B=0-2 — bit 8+ ignored for RGB)
+ *   regs: { BYR, BXR, MWR, BG_YOffset, scanline, ... }
+ *   firstScanline: VCE scanline of captured row 0 (18 for slstart=4:
+ *     Mednafen DisplayRect.y = 14 + slstart, 14 lines of top blanking)
+ *
+ * Layer scope: background only (CR bit 7, no sprites).  Colour 0 of any BG
+ * palette is fixed up to CRAM[0x000] (the backdrop entry), per the VDC
+ * datasheet and Mednafen's FixPCache behaviour.
+ *
+ * Dual use: CommonJS module in Node (tests/check.js) and a browser global
+ * (renderer/index.html) via a UMD-style wrapper.
+ */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) {
+    module.exports = factory();
+  } else {
+    root.PCEStudio = root.PCEStudio || {};
+    root.PCEStudio.bg = factory();
+  }
+})(typeof self !== "undefined" ? self : this, function () {
+  "use strict";
+
+  /* VCE: 9-bit colour to RGB.  Each channel is 3 bits scaled by 36
+   * (0, 36, ..., 252). */
+  function decodeCram(cram) {
+    var table = new Uint8Array(512 * 3);
+    for (var i = 0; i < 512; i++) {
+      var v = cram[i * 2] | (cram[i * 2 + 1] << 8);
+      table[i * 3] = 36 * ((v >> 3) & 7);      /* red   */
+      table[i * 3 + 1] = 36 * ((v >> 6) & 7);  /* green */
+      table[i * 3 + 2] = 36 * (v & 7);         /* blue  */
+    }
+    return table;
+  }
+
+  /* MWR bits 4-5: BAT width (0:32, 1:64, 2/3:128); bit 6: BAT height
+   * (0:32, 1:64). */
+  function batGeometry(mwr) {
+    var widths = [32, 64, 128, 128];
+    var w = widths[(mwr >> 4) & 3];
+    var h = (mwr & 0x40) ? 64 : 32;
+    var shift = 5 + ((mwr >> 4) & 3);
+    return { width: w, height: h, shift: shift,
+             wmask: w - 1, hmask: h - 1 };
+  }
+
+  /* One rendered frame.
+   *
+   * Vertical calibration, from the dump's own counters (nothing is fitted to
+   * the picture): the VDC's VDW phase begins at VCE line 17 — one line before
+   * the first captured line (captured row 0 = VCE line 14 + slstart = 18,
+   * DisplayRect.y in Mednafen's pce module; VDW line 0 = VCE 17 follows from
+   * the state: RCRCount counts display lines since VDW entry and equals
+   * scanline - 17 at the save instant).  So captured row r shows
+   * BG_YOffset = BYR + vdwLine + r with
+   *   vdwLine = RCRCount - (scanline - firstScanline) + r.
+   * A 1-line error here shifts the picture by one row and the diff test
+   * fails loudly, so this is self-calibrating. */
+  function renderFrame(opts) {
+    var vram = opts.vram, cram = opts.cram, regs = opts.regs;
+    var width = opts.width || 256;
+    var height = opts.height || 232;
+    var firstScanline = opts.firstScanline != null ? opts.firstScanline : 18;
+    var rgb = decodeCram(cram);
+    var geom = batGeometry(regs.MWR);
+    var bxr = regs.BXR & 0x3FF;                 /* BXR is 10 bits */
+    var byr = regs.BYR & 0x1FF;                 /* BYR is 9 bits */
+    var vdwLine0 = regs.RCRCount - (regs.scanline - firstScanline);
+    var px = new Uint8Array(width * height * 3);
+
+    for (var r = 0; r < height; r++) {
+      /* 9-bit counters wrap; mask to stay inside the BAT mask arithmetic */
+      var bgY = (byr + vdwLine0 + r) & 0x1FF;
+      var bgX = bxr;
+      var batY = ((bgY >> 3) & geom.hmask) << geom.shift;
+      var row = bgY & 7;
+
+      for (var x = 0; x < width; x++) {
+        var col = (bgX + x) & 7;
+        var batIdx = (((bgX + x) >> 3) & geom.wmask) | batY;
+        var bat = vram[batIdx * 2] | (vram[batIdx * 2 + 1] << 8);
+        var ch = bat & 0xFFF;
+        var pal = (bat >> 12) & 0xF;
+        var addr = ch * 16 + row;
+        /* Characters >= 0x800 lie beyond the 32768-word VRAM: writes there
+         * are dropped (VRAM_Size in Mednafen's pce module) and the display
+         * reads the zero-filled tile cache, so the pixel colour is 0. */
+        var pix;
+        if (ch >= 0x800) {
+          pix = 0;
+        } else {
+          /* bit 7 of a plane byte is the leftmost pixel (FixTileCache
+           * reference): pixel at column c reads bit 7 - c. */
+          var bit = 7 - col;
+          var w0 = vram[addr * 2] | (vram[addr * 2 + 1] << 8);
+          var w1 = vram[(addr + 8) * 2] | (vram[(addr + 8) * 2 + 1] << 8);
+          pix = ((w0 >> bit) & 1)
+              | (((w0 >> (bit + 8)) & 1) << 1)
+              | (((w1 >> bit) & 1) << 2)
+              | (((w1 >> (bit + 8)) & 1) << 3);
+        }
+        var ci = pix === 0 ? 0x000 : (pal << 4) | pix;
+        var o = (r * width + x) * 3;
+        px[o] = rgb[ci * 3];
+        px[o + 1] = rgb[ci * 3 + 1];
+        px[o + 2] = rgb[ci * 3 + 2];
+      }
+    }
+    return { width: width, height: height, pixels: px };
+  }
+
+  return {
+    decodeCram: decodeCram,
+    batGeometry: batGeometry,
+    renderFrame: renderFrame
+  };
+});
