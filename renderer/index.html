@@ -1,7 +1,12 @@
 <!doctype html>
-<!-- PCEStudio background renderer — browser view (card #5).
+<!-- PCEStudio background renderer — browser view (cards #5 and #9).
      Shows the renderer's output next to Mednafen's F9 screenshot for the
-     three test dumps.  Serve the repo root and open renderer/index.html:
+     three test dumps, and exports the same picture as a .pce: the constant
+     viewer code bank (renderer/viewer-bank0.bin) plus the picture's data
+     banks, built by renderer/pce-rom.js.  Bank 0 is identical to the PCEAS
+     build's, and when tools/gen/viewerN.pce has been built the page says
+     whether the two files are byte-for-byte equal.
+     Serve the repo root and open renderer/index.html:
          python3 -m http.server 8000
      Dumps live in tests/dumps/sceneN/ (see tools/capture.sh). -->
 <html>
@@ -17,10 +22,13 @@
   figcaption { margin-bottom: 0.3rem; color: #aaa; }
   canvas { image-rendering: pixelated; background: #000; }
   #status { color: #f88; white-space: pre; }
+  #exportstatus { color: #8f8; white-space: pre; }
+  #download { font: inherit; }
+  #download[disabled] { opacity: 0.4; }
 </style>
 </head>
 <body>
-<h1>PCEStudio background renderer — renderer vs Mednafen F9</h1>
+<h1>PCEStudio background renderer — renderer vs Mednafen F9, export .pce</h1>
 <p><label>scene
   <select id="scene">
     <option value="scene1">scene1 — flat</option>
@@ -39,11 +47,22 @@
     <canvas id="ref" width="256" height="232"></canvas>
   </figure>
 </div>
+<p>
+  <button id="download" disabled>Download .pce</button>
+  <span id="exportstatus"></span>
+</p>
 <script src="pce-bg.js"></script>
+<script src="pce-rom.js"></script>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 const status = (t) => { $("status").textContent = t; };
+const exportStatus = (t) => { $("exportstatus").textContent = t; };
+
+let bank0 = null;          // the constant viewer code bank, fetched once
+let picture = null;        // the scene's data for pce-rom.js
+let sceneName = null;
+let romUrl = null;
 
 function putImage(canvas, img) {
   const ctx = canvas.getContext("2d");
@@ -61,31 +80,118 @@ async function loadPng(url) {
   ctx.drawImage(bmp, 0, 0);
 }
 
+async function loadBank0() {
+  if (!bank0) {
+    const res = await fetch("viewer-bank0.bin");
+    if (!res.ok) throw new Error(`viewer-bank0.bin: HTTP ${res.status}`);
+    bank0 = new Uint8Array(await res.arrayBuffer());
+  }
+  return bank0;
+}
+
+async function hexSha256(bytes) {
+  if (!crypto.subtle) return null;
+  const d = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(d))
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/* Compare the browser's bytes with the PCEAS build, if this checkout has
+ * one.  tools/gen/ is a build directory (gitignored), so a fresh clone says
+ * "not available" rather than failing — the Node test is the authoritative
+ * check (tests/check-export.js). */
+async function comparePceas(scene, romBytes) {
+  const viewer = scene.replace(/^scene/, "viewer");
+  let ref;
+  try {
+    const res = await fetch(`../tools/gen/${viewer}.pce`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    ref = new Uint8Array(await res.arrayBuffer());
+  } catch (e) {
+    return `built ${romBytes.length} bytes; PCEAS reference not available ` +
+           `here (${e.message})`;
+  }
+  let diffs = 0, first = -1;
+  if (ref.length === romBytes.length) {
+    for (let i = 0; i < ref.length; i++) {
+      if (ref[i] !== romBytes[i]) { diffs++; if (first < 0) first = i; }
+    }
+  } else {
+    diffs = -1;
+  }
+  const sha = await hexSha256(romBytes);
+  if (diffs === 0)
+    return `built ${romBytes.length} bytes, sha256 ${sha.slice(0, 16)}… — ` +
+           `byte-for-byte equal to the PCEAS build`;
+  if (diffs > 0)
+    return `DIFFERS from the PCEAS build: ${diffs} bytes, first at 0x` +
+           `${first.toString(16)}`;
+  return `DIFFERS from the PCEAS build: ${romBytes.length} vs ${ref.length} bytes`;
+}
+
+function offerDownload(romBytes) {
+  if (romUrl) URL.revokeObjectURL(romUrl);
+  romUrl = URL.createObjectURL(
+    new Blob([romBytes], { type: "application/octet-stream" }));
+  $("download").disabled = false;
+}
+
+$("download").addEventListener("click", () => {
+  if (!romUrl) return;
+  const a = document.createElement("a");
+  a.href = romUrl;
+  a.download = `${sceneName.replace(/^scene/, "picture")}.pce`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
 async function show(scene) {
   const base = `../tests/dumps/${scene}/`;
   try {
     status(`loading ${scene}…`);
-    const [vram, cram, regs] = await Promise.all([
+    exportStatus("");
+    $("download").disabled = true;
+    const [vram, cram, regs, regionsDoc, code] = await Promise.all([
       (await fetch(base + "vram.bin")).arrayBuffer(),
       (await fetch(base + "cram.bin")).arrayBuffer(),
       (await fetch(base + "regs.json")).json(),
+      (await fetch(base + "regions.json")).json(),
+      loadBank0(),
     ]);
-    const frame = PCEStudio.bg.renderFrame({
+    picture = {
       vram: new Uint8Array(vram),
       cram: new Uint8Array(cram),
+      regs,
+      regions: regionsDoc.tile_regions,
+      bank0: code,
+    };
+    sceneName = scene;
+
+    const frame = PCEStudio.bg.renderFrame({
+      vram: picture.vram,
+      cram: picture.cram,
       regs,
       width: 256,
       height: 232,
     });
     putImage($("out"), frame);
     await loadPng(base + "mednafen.png");
+
+    const romBytes = PCEStudio.rom.buildRom(picture);
+    offerDownload(romBytes);
+    exportStatus(await comparePceas(scene, romBytes));
     status(`scanline ${regs.scanline}, BG_YOffset ${regs.BG_YOffset}, BYR ${regs.BYR}`);
   } catch (e) {
     status(`error: ${e}`);
+    exportStatus("");
   }
 }
 
 $("scene").addEventListener("change", (ev) => show(ev.target.value));
+/* ?scene=scene2 opens a given scene (the headless check uses it). */
+const wanted = new URLSearchParams(location.search).get("scene");
+if (wanted && /^scene[123]$/.test(wanted)) $("scene").value = wanted;
 show($("scene").value);
 </script>
 </body>

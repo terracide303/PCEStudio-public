@@ -46,6 +46,18 @@ Verify:
 pceas            # prints: PC Engine Assembler (v 3.23-52a556a, 2018-05-28)
 ```
 
+### The browser's bank 0 asset (#9)
+
+The browser export copies the viewer's code bank rather than assembling 6280
+code itself. After `make -C tools`, extract it from the PCEAS build:
+
+```sh
+make -C tools bank0   # writes renderer/viewer-bank0.bin (8 KiB, committed)
+```
+
+`tools/extract_bank0.py` reads bank 0 from all three viewer ROMs and refuses
+unless they are identical. The export test fails if the asset is stale.
+
 PCEAS also looks for include files in `PCE_INCLUDE`. `tools/hello.asm` needs
 none, and neither does the #8 viewer: it is a **self-contained adaptation** of
 HuDK (MIT, licence notice in the file) rather than an include of it, because
@@ -69,6 +81,17 @@ pointing at a cleared tile, then the background is enabled.
 ```sh
 mednafen tools/hello.pce
 ```
+
+## The browser export and its checks (#9)
+
+```sh
+node tests/check-export.js          # browser .pce == PCEAS .pce, all scenes
+tools/capture.sh 1 browser          # run the browser-built ROM in Mednafen
+node tests/check-viewer.js          # frame/state diff for viewer and browser ROMs
+```
+
+How the browser lays out the ROM, where its bank 0 comes from, and what the
+evidence does and does not prove: [`EXPORT.md`](EXPORT.md).
 
 The window title is `hello` and the screen is solid red. Press `F9` for an
 unscaled 256x224 snapshot (saved in `~/.mednafen/snaps/`; outputs 256x232).

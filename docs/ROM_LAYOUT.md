@@ -1,4 +1,4 @@
-# ROM layout of the viewer (card #8)
+# ROM layout of the viewer (cards #8 and #9)
 
 Where the viewer ROM puts its data, and where `viewer.asm` reads it from.
 This is the contract #9 (the browser .pce builder) glues into: bank 0 never
@@ -6,7 +6,13 @@ changes, and every data block sits at a fixed place.
 
 All values are little-endian. All offsets are ROM byte offsets. A HuCard ROM
 is a multiple of 8 KiB; gaps between banks and the padding of the last bank
-are filled with `0xff`.
+are filled with `0xff`. The image is headerless (`pceas -raw`) and has
+`4 + max(1, ceil(tiles / 8 KiB))` banks.
+
+Two builders implement this contract and must agree byte for byte:
+`tools/genviewer.py` (writes the `.asm` banks PCEAS assembles) and
+`renderer/pce-rom.js` (the browser export, #9). Their agreement on the sample
+scenes is measured in [`EXPORT.md`](EXPORT.md).
 
 ## Bank map
 
@@ -19,6 +25,11 @@ are filled with `0xff`.
 
 `tools/genviewer.py` emits exactly the banks each picture needs (one
 `.incbin` per 8 KiB slice), so nothing ever spills past a bank boundary.
+
+Bank 0 — the viewer code — is `renderer/viewer-bank0.bin` for the browser
+export. It is extracted from the PCEAS build by `make -C tools bank0`; every
+viewer ROM has the same bank 0 (the code never changes, only the data banks),
+and `tools/extract_bank0.py` refuses to write the asset if they differ.
 
 ## Bank 1 — config block, offset 0 (`$4000` in the MPR2 window)
 
@@ -55,6 +66,12 @@ offset 0. The viewer streams this from the MPR2 window and re-maps to the
 next bank every 8 KiB, so region boundaries need not line up with banks.
 Up to 48 KiB (banks 4–9).
 
+The region list is picture data, read by both builders from
+`tests/dumps/sceneN/regions.json` (`tile_regions`: `[char0, tileCount]` pairs
+in descriptor order). `char0` is the first 16-bit VRAM character number;
+the descriptor's destination is `char0 * 16` words and its word count is
+`tileCount * 16`.
+
 Regions whose destination is beyond the 64 KiB VRAM (dest ≥ 32768 words) are
 **not included** — writes beyond 32768 words are dropped on the hardware
 side, which is also what the renderer model does (`renderer/pce-bg.js`), so
@@ -76,7 +93,8 @@ the browser must not emit them either.
 - It does **not zero VRAM** before copying: regions outside the copied data
   are whatever VRAM held. That matches HuDK's loaders — the browser's job is
   to lay out the picture (or accept undefined junk) there.
-- It does not check the version byte or the reserved bytes (browser
-  compatibility is #9's concern).
+- It does not check the version byte or the reserved bytes. The browser
+  export (#9) writes version 1 and zero reserved bytes, but does not verify
+  bytes in a ROM it did not build.
 - Tile regions must not overlap each other or the BAT in VRAM; the viewer
   copies them in order without checking.

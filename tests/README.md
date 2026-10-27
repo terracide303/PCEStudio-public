@@ -1,8 +1,10 @@
-# The renderer checks (#5, #6)
+# The renderer and export checks (#5, #6, #8, #9)
 
 ```sh
 node tests/check.js             # diff the renderer against Mednafen, all scenes
 node tests/renderer-mutation.js # prove that diff test fails on a broken renderer
+node tests/check-viewer.js      # viewer/browser ROM captures vs the renderer
+node tests/check-export.js      # the browser's .pce vs the PCEAS build, byte for byte
 ```
 
 ## `check.js` — the diff (#5)
@@ -39,6 +41,25 @@ testing nothing), `UNEXPECTED` (exit 0 but not a clean three-scene pass), and
 Exit 0 only when the baseline is diff 0 on all three scenes and both real
 mutations are `DETECTED`.
 
+## `check-viewer.js` — the ROM shows the picture (#8, #9)
+
+For each `dumps/viewerN/` and `dumps/browserN/` capture it renders the #5
+scene with `renderer/pce-bg.js` and requires the captured Mednafen frame to
+match it byte for byte, and the captured VRAM/CRAM/static VDC registers to
+match the scene dump. `viewerN` ROMs come from PCEAS (`capture.sh N viewer`);
+`browserN` ROMs come from `renderer/pce-rom.js` (`capture.sh N browser`), so
+#9's export is checked by running its own bytes. Details:
+[`../docs/EXPORT.md`](../docs/EXPORT.md).
+
+## `check-export.js` — byte equality (#9)
+
+Builds each sample scene's ROM with `renderer/pce-rom.js` — the module
+`renderer/index.html` loads — and compares it byte for byte with the PCEAS
+build `tools/gen/viewerN.pce`. Also loads the module through its
+browser-global branch and requires the same bytes. Prints the first differing
+offset if any; exit 0 only if all three scenes match. `--write N` writes
+`tools/gen/browserN.pce`, which `capture.sh N browser` runs.
+
 ## What this does NOT prove
 
 **It does not prove the renderer is correct.** Two mutations on three dumps do
@@ -65,3 +86,11 @@ or a wrong register decode is not measured here.
 or refactored, `renderer-mutation.js` fails with `NOT APPLIED` rather than
 quietly passing; that is deliberate, but it means the test needs updating when
 the renderer's text changes even if its behaviour does not.
+
+**`check-export.js` does not prove the picture or the console.** Byte equality
+says the browser and PCEAS builders agree; `check-viewer.js` says the bytes
+match the renderer in Mednafen. Neither is a HuCard on real hardware, and
+neither checks the TurboGrafx bit-reversed image (#25). It also does not
+execute the page's download wiring — only the module it calls. It covers the
+three sample scenes, not every BAT size, region count or tile size the layout
+allows.

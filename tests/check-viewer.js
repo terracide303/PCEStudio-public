@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /*
- * tests/check-viewer.js — diff the #8 viewer's Mednafen frames against the
- * #5 renderer (card #8's closing measurement).
+ * tests/check-viewer.js — diff a viewer ROM's Mednafen frames against the
+ * #5 renderer (card #8's closing measurement; also used for #9's
+ * browser-built ROMs, tests/dumps/browserN/).
  *
  * NOTE: written by @design because the card's close condition needs a diff
  * script; per the workshop role split this is flagged for @review to read
  * cold (same arrangement as tests/check.js for #5).
  *
- * For every tests/dumps/viewer<N>/ directory with a mednafen.png:
+ * For every tests/dumps/{viewer,browser}<N>/ directory with a mednafen.png:
  *   - renders the frame for #5's scene N with renderer/pce-bg.js from
  *     tests/dumps/sceneN/{vram.bin,cram.bin,regs.json} — the renderer is the
  *     pixel reference (#5 proved it matches Mednafen's own scene ROMs) — and
@@ -119,7 +120,7 @@ const VDC_REGS = ["MWR", "BXR", "BYR", "CR", "VSR", "VDR", "HSR", "HDR"];
 
 function checkViewer(dir) {
   const name = path.basename(dir);
-  const scene = name.replace(/^viewer/, "scene");
+  const scene = name.replace(/^(?:viewer|browser)/, "scene");
   const scenedir = path.join(path.dirname(dir), scene);
   const problems = [];
 
@@ -170,20 +171,22 @@ function main() {
     return 2;
   }
   const dirs = fs.readdirSync(dumps).filter((d) =>
-    /^viewer[0-9]$/.test(d) &&
+    /^(?:viewer|browser)[0-9]$/.test(d) &&
     fs.existsSync(path.join(dumps, d, "mednafen.png")) &&
-    fs.existsSync(path.join(dumps, "scene" + d.slice(6), "regs.json")))
+    fs.existsSync(path.join(dumps, "scene" + d.replace(/^(?:viewer|browser)/, ""),
+                            "regs.json")))
     .sort().map((d) => path.join(dumps, d));
   if (dirs.length === 0) {
-    console.error("no viewer dumps with a matching scene found — run " +
-                  "tools/capture.sh N viewer first");
+    console.error("no viewer/browser dumps with a matching scene found — " +
+                  "run tools/capture.sh N viewer (or browser) first");
     return 2;
   }
   let failed = 0;
   for (const dir of dirs) failed += checkViewer(dir);
   console.log(failed === 0
-    ? `PASS: viewer matches the renderer pixel for pixel on ${dirs.length} scene(s)`
-    : `FAIL: ${failed} viewer capture(s) differ`);
+    ? `PASS: viewer/browser ROMs match the renderer pixel for pixel on ` +
+      `${dirs.length} capture(s)`
+    : `FAIL: ${failed} viewer/browser capture(s) differ`);
   return failed === 0 ? 0 : 1;
 }
 

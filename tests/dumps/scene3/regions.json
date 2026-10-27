@@ -1,0 +1,4 @@
+{
+  "comment": "Tile regions of scene3 for docs/ROM_LAYOUT.md: [char0, tile count] in descriptor order. Read by tools/genviewer.py and renderer/pce-rom.js; values are tools/genroms.py SCENES[3]['tiles'].",
+  "tile_regions": [[256, 32], [496, 32]]
+}
