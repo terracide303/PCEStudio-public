@@ -10,7 +10,8 @@ working examples use. It is a **build tool, not part of PCEStudio**: per
 so its source and binary are not vendored in this repository.
 
 **Installed here:** `pceas` 3.23 (`52a556a`, 2018-05-28) at
-`~/.local/bin/pceas`, which is already on `PATH`.
+`/Volumes/External II/pce-tools/bin/pceas`, linked from `~/.local/bin/pceas`
+(on `PATH`). Tools live on External II: the internal disk has no room.
 
 ### Installing it (reproducible)
 
@@ -18,14 +19,15 @@ The upstream repository has no releases, so build it from source outside the
 project tree:
 
 ```sh
-mkdir -p "$HOME/pce-tools" && cd "$HOME/pce-tools"
+T="/Volumes/External II/pce-tools"; mkdir -p "$T/bin" && cd "$T"
 git clone https://github.com/uli/huc.git huc-src
 cd huc-src
 git checkout 52a556a0556abb67a12889ca7047366a8cb2f59e
 mkdir -p bin
 make -C src/mkit/as \
   CFLAGS='-g -O2 -Dosx -DGIT_VERSION=\"52a556a\" -DGIT_DATE=\"2018-05-28\"'
-install -m 755 bin/pceas "$HOME/.local/bin/pceas"
+install -m 755 bin/pceas "$T/bin/pceas"
+ln -sf "$T/bin/pceas" "$HOME/.local/bin/pceas"
 ```
 
 Two workarounds, both measured on this Mac (Darwin 25.3.0, Apple clang):
