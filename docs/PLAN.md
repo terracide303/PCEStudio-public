@@ -41,7 +41,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ### The PCE picture in the browser {refined} !9
 - [x] #5 The background renderer draws exactly what the VDC and VCE draw ~M — node tests/check.js reports diff 0 for scene1/2/3 (commit edeea21) @design #ds-pro
   Read the HuC6270 and HuC6260 manuals (see #1's note) before writing a line; PCEHeroTN's sim/ and docs/ show how we learned the VDC. Plain JavaScript, no framework, no emulator code borrowed (keeps the licence ours).
-- [c] #6 The renderer test fails on a broken renderer ~S — tests/ runs the three dumps against the screenshots, reports the diff, and fails when a palette index or a tile row is deliberately broken @test +review #ds-flash
+- [x] #6 The renderer test fails on a broken renderer ~S — reviewed by @workshop (Claude, builder was ds-flash): node tests/renderer-mutation.js rerun, baseline diff 0 on 3 scenes, palette-index and tile-row breaks DETECTED with measured counts, blind checker MISSED, no-op NO-OP @workshop +review #ds-flash
   - 2026-10-27 @test: mutation test added: node tests/renderer-mutation.js — 3 dumps diff 0 baseline; palette-index and tile-row breaks both DETECTED with the measured byte count; blind-checker and no-op self-tests pass; what it cannot prove is in tests/README.md
 
 ### The viewer ROM {refined} !9
