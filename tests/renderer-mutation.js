@@ -98,7 +98,14 @@ const BLIND_CHECK_SRC = CHECK_SRC.replace(
   "if (false) {"
 );
 
+/* The three #5 scene dumps.  Other captures in dumps/ (viewerN, browserN,
+ * usN, painted) are other cards' evidence: check.js checks them too, but this
+ * mutation test only knows the sceneN pictures, and its parsers read
+ * `sceneN:` lines.  Before 2026-10-28 this filter took every dump with a
+ * mednafen.png, so it started reporting CRASH on the viewer/browser/us
+ * captures as soon as #8/#9/#25 added them — found while running #10. */
 const SCENES = fs.readdirSync(DUMPS)
+  .filter((d) => /^scene\d+$/.test(d))
   .filter((d) => fs.existsSync(path.join(DUMPS, d, "mednafen.png")))
   .sort();
 

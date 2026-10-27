@@ -6,6 +6,10 @@ the constant viewer code bank plus the data banks at the fixed places of
 **byte-for-byte equal** to the ROM PCEAS assembles from
 `tools/gen/viewerN.asm`, and that ROM shows the picture in Mednafen.
 
+The editor (#10) exports through this same builder: its picture is a
+`{vram, cram, regs, regions}` object, so nothing here changes for it — see
+[`EDITOR.md`](EDITOR.md).
+
 ## Inputs
 
 | input | size | where it comes from |
