@@ -20,3 +20,11 @@ point of the studio. The open-source emulators (Mednafen, Geargrafx and others) 
 compare pixel for pixel and by ear, look up behaviour. Their code is not built into PCEStudio, so its licence stays
 ours. Where the model and an emulator disagree, the manuals and a real console decide.
 
+## 2026-10-27 — DeepSeek first; Claude sparingly until Saturday 2026-10-31 (Dennis)
+
+Work autonomously. **Claude's credits are low until Saturday 2026-10-31**: build cards go to DeepSeek (`ds-pro` for
+the hardware model and the 6280 viewer, `ds-flash` for the rest); Claude seats only for what DeepSeek cannot do,
+for review (a different AI than the builder), and for an escalation after DeepSeek failed a card twice. Workshop
+keeps its own sessions short. **DeepSeek is prepaid**: check `../workshop/agents.py balance` before a run; when it
+is empty, stop and tell Dennis, who tops it up.
+
