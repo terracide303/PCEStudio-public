@@ -5,10 +5,12 @@
 #
 #   tools/capture.sh 1|2|3          # the #5 scene ROMs (gen/sceneN.pce)
 #   tools/capture.sh 1|2|3 viewer   # the #8 viewer ROMs (gen/viewerN.pce)
+#   tools/capture.sh 1|2|3 browser  # the #9 browser-built ROMs
+#                                   # (gen/browserN.pce, from renderer/pce-rom.js)
 #
-# The two modes only differ in the ROM that is built and run and in the dump
-# directory (tests/dumps/sceneN vs tests/dumps/viewerN); the route below is
-# the same for both.
+# The modes differ only in the ROM that is built and run and in the dump
+# directory (tests/dumps/sceneN / viewerN / browserN); the route below is the
+# same for all three.
 #
 # Route (command line only — this Mac's user must never receive synthesized
 # keyboard/mouse events, so there is no F9 hotkey here):
@@ -33,12 +35,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SCENE="${1:?usage: capture.sh 1|2|3 [scene|viewer]}"
+SCENE="${1:?usage: capture.sh 1|2|3 [scene|viewer|browser]}"
 MODE="${2:-scene}"
 case "$MODE" in
   scene)  NAME="scene${SCENE}" ;;
   viewer) NAME="viewer${SCENE}" ;;
-  *) echo "mode must be scene or viewer" >&2; exit 2 ;;
+  browser) NAME="browser${SCENE}" ;;
+  *) echo "mode must be scene, viewer or browser" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -48,7 +51,12 @@ MCSDIR="$HOME/.mednafen/mcs"
 mkdir -p "$DUMPDIR" "$SCRATCH"
 
 echo "== build $NAME"
-make -C tools "gen/$NAME.pce"
+if [ "$MODE" = browser ]; then
+  # the browser path's own builder, not PCEAS (cards #9)
+  node tests/check-export.js --write "$SCENE"
+else
+  make -C tools "gen/$NAME.pce"
+fi
 
 pkill -x mednafen 2>/dev/null || true
 sleep 1

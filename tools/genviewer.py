@@ -13,9 +13,11 @@ places docs/ROM_LAYOUT.md defines, so `viewer.asm` finds it:
   gen/viewerN/tiles.bin    the tile regions, concatenated in descriptor order
   gen/viewerN/viewerN.asm  includes viewer.asm + the data banks (.incbin)
 
-The tile regions are the same ones genroms.py wrote for the scene ROMs
-(SCENES[scene]["tiles"]), now read back out of the dump's vram.bin — the
-viewer shows the sample data, not a regenerated copy of it.
+The tile regions come from tests/dumps/sceneN/regions.json — the same file
+renderer/pce-rom.js reads for #9's browser export, so both builders lay out
+the same picture from the same description.  The data itself is read back out
+of the dump's vram.bin: the viewer shows the sample data, not a regenerated
+copy of it.
 
 This script is tooling for #8's evidence; the viewer itself knows none of
 this — it follows the config block.
@@ -27,8 +29,6 @@ import struct
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)          # -I does not add the script's dir
-from genroms import SCENES
 
 OUT = os.path.join(HERE, "gen")
 
@@ -52,6 +52,17 @@ def bat_words(mwr):
     return width * height
 
 
+def load_regions(dumpdir):
+    """The picture's tile regions, as [char0, count] pairs in descriptor order.
+
+    This file is picture data, not tooling: renderer/pce-rom.js reads the same
+    one for the browser export (#9).  See docs/ROM_LAYOUT.md.
+    """
+    with open(os.path.join(dumpdir, "regions.json")) as f:
+        doc = json.load(f)
+    return [(int(char0), int(count)) for char0, count in doc["tile_regions"]]
+
+
 def build(scene):
     name = f"viewer{scene}"
     dumpdir = os.path.join(HERE, "..", "tests", "dumps", f"scene{scene}")
@@ -67,7 +78,7 @@ def build(scene):
     words = bat_words(mwr)
 
     regions = []
-    for char0, count in SCENES[scene]["tiles"]:
+    for char0, count in load_regions(dumpdir):
         dest = char0 * 16
         if dest >= 32768:
             # matches the renderer model (and the scene ROMs): VRAM writes

@@ -1,13 +1,14 @@
-# Builds the #7 hello ROM, the #5 test-scene ROMs and the #8 viewer ROMs.
+# Builds the #7 hello ROM, the #5 test-scene ROMs and the #8 viewer ROMs,
+# and extracts #9's constant viewer bank for the browser.
 # PCEAS is an external tool; see ../docs/BUILD.md.
 
 PCEAS ?= pceas
 PYTHON ?= python3
 
 SCENES := 1 2 3
+VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,$(SCENES)))
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) \
-     $(addprefix gen/viewer,$(addsuffix .pce,$(SCENES)))
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS)
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -25,14 +26,22 @@ gen/scene%.pce: gen/scene%.asm
 # tests/dumps/sceneN laid out by genviewer.py at the fixed places of
 # docs/ROM_LAYOUT.md.  pceas resolves .include/.incbin against the working
 # directory, hence the cd (make -C tools runs here anyway).
-gen/viewer%.asm: genviewer.py genroms.py
+gen/viewer%.asm: genviewer.py ../tests/dumps/scene%/regions.json
 	mkdir -p gen
 	$(PYTHON) -I genviewer.py $*
 
 gen/viewer%.pce: gen/viewer%.asm viewer.asm
 	$(PCEAS) -raw -o $@ $<
 
+# #9's constant code bank: the browser export copies bank 0 verbatim, so it
+# is extracted from the PCEAS build and committed.  Refuses if the three
+# viewer ROMs disagree about bank 0 (extract_bank0.py).
+bank0: ../renderer/viewer-bank0.bin
+
+../renderer/viewer-bank0.bin: extract_bank0.py $(VIEWERS)
+	$(PYTHON) -I extract_bank0.py $@ $(VIEWERS)
+
 clean:
 	rm -f hello.pce hello.sym hello.lst gen/*.pce gen/*.sym gen/*.lst
 
-.PHONY: all clean
+.PHONY: all clean bank0
