@@ -102,6 +102,62 @@ node tests/check-viewer.js
 `tests/dumps/browserN/` holds those captures (`mednafen.png`, `vram.bin`,
 `cram.bin`, `regs.json`, `mednafen.log`), recorded 2026-10-28.
 
+## The US HuCard (TurboGrafx-16) image — card #25
+
+The page has a **TurboGrafx HuCard** checkbox. Ticked, the button offers the
+same picture as a **US image**: the .pce with every byte's bits reversed
+(bit 0 ↔ bit 7, bit 1 ↔ bit 6, …). The card's reason is that US HuCards read
+their ROM with the data lines D7..D0; that is the card's statement, not
+something this repo verified (see the limit below). The transform is
+`PCEStudio.rom.reverseBits(bytes)` in `renderer/pce-rom.js`; nothing else about
+the image changes (same length, same banks). The download is named
+`pictureN-us.pce`; `?us=1` on the page URL opens with the box already ticked
+(so the headless check can run the US path without synthesizing a click), and
+`tools/capture.sh N us` builds `tools/gen/usN.pce` with the module and runs it.
+
+### Evidence
+
+```sh
+node tests/check-us-card.js     # every byte, all three scenes
+node tests/check-export.js      # the .pce path is unchanged (#9)
+```
+
+Measured 2026-10-28 (`node tests/check-us-card.js`, exit 0):
+
+| scene | bytes | US sha256 (first 16) | bytes differing from the .pce |
+|-------|-------|----------------------|-------------------------------|
+| 1 | 40960 | `b9a7524eb16830b8` | 3511 |
+| 2 | 40960 | `097fbd25e4847539` | 5546 |
+| 3 | 40960 | `8a3d67dbaf6c0e2c` | 10429 |
+
+The test checks every byte against an independent bit loop, checks that
+reversing back returns the .pce exactly, and requires the image to differ from
+the .pce (most of the ROM is `0x00`/`0xff` padding, which is its own reverse).
+It loads the module through its browser-global branch too, and it runs the
+comparison on the un-reversed .pce and on a one-byte error to show the
+comparison can fail. The real page reports the same bytes itself:
+
+```sh
+# served as in the #9 section above
+… --dump-dom "http://127.0.0.1:8123/renderer/index.html?scene=scene1&us=1"
+# → US HuCard: 40960 bytes, every byte the bit-reverse of the .pce
+#   (3511 bytes differ), sha256 b9a7524eb16830b8…
+```
+
+### What an emulator says — and what it cannot
+
+**Mednafen 1.32.1 shows the US image as a blank screen.** Measured 2026-10-28:
+`tools/capture.sh 1 us` recorded 256×232 with a single colour
+`(252, 252, 252)` in all 59,392 pixels, against 120 distinct colours for the
+same picture's .pce. That is expected from Mednafen's source, not a defect in
+our image: `src/pce/huc.cpp` `HuC_Load` reads the file into ROM unchanged (it
+only skips a 512-byte copier header and picks the SF2 mapper for large ROMs),
+and neither `pce.cpp` nor `Documentation/pce.html` has a US/region mode, so
+Mednafen has nothing that would decode a bit-reversed image. **An emulator run
+therefore cannot say whether the US image is right** — the only check left for
+it is a TurboGrafx-16 (or a flash cart), which is Dennis's, and the card stays
+`[~]` until that photo is in `docs/`.
+
 ## What this does NOT prove
 
 - **Not the download wiring.** The test and the headless run exercise
@@ -112,7 +168,7 @@ node tests/check-viewer.js
   renderer on Mednafen. Neither says the data is a picture someone wanted.
 - **Not the console.** Byte equality and Mednafen are not a HuCard on real
   hardware; the Tang Nano check belongs to #8's photo, and the TurboGrafx
-  bit-reversed image is #25.
+  US image runs on nothing here — Mednafen shows it blank (above).
 - **Not every picture.** The three sample scenes cover 32/64/128-wide BATs,
   one- and two-bank BATs, and 1–2 tile regions. A 64-row BAT, 8 regions, a
   full 6 tile banks, or a picture that trips a validation error is not

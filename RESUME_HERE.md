@@ -83,10 +83,28 @@ there, never copied here).
 DeepSeek cards (#ds-flash) need `DEEPSEEK_API_KEY` set before `agents.py` can
 start them.
 
+**#25 is [~], software done, hardware test open.** The page has a TurboGrafx
+checkbox (`?us=1` for a headless run); `renderer/pce-rom.js`'s `reverseBits()`
+gives the US image, which is the .pce with every byte's bits reversed.
+`node tests/check-us-card.js` exits 0: scenes 1/2/3 are 40960 bytes, every byte
+the bit-reverse of the .pce (3,511/5,546/10,429 bytes differ; sha256
+`b9a7524e…`/`097fbd25…`/`8a3d67db…`), the comparison rejects the un-reversed
+and one-byte-error images, and the real page reports the same bytes headlessly.
+**Measured limit: Mednafen 1.32.1 shows the US image as a single-colour white
+frame** (`tests/dumps/us1/`, 59,392/59,392 pixels `(252,252,252)` vs 120
+colours for scene1) — and that matches its source: `src/pce/huc.cpp`'s
+`HuC_Load` copies the file unchanged and Mednafen has no US/region mode, so no
+emulator run can confirm the image. The card stays `[~]` for Dennis: run
+`tools/gen/us1.pce` (sha256 `b9a7524e…`, built by `node tests/check-us-card.js
+--write 1`) on a TurboGrafx-16 or its flash cart and photograph it into
+`docs/`. Details: [`docs/EXPORT.md`](docs/EXPORT.md).
+
 ## Next action
 
 `../workshop/board.py next PCEStudio --who design`. #8 stays parked until
 Dennis photographs `tools/gen/viewer1.pce` on the Tang Nano; #9's browser
 export is done and ready for @review (it wrote `tests/check-export.js`, so it
-should be read cold, like the #5/#8 tests).
+should be read cold, like the #5/#8 tests). #25's software is done and its
+test is flagged for @review (also written by @design); #25 waits on Dennis's
+TurboGrafx photo of `tools/gen/us1.pce`.
 

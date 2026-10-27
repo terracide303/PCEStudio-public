@@ -5,6 +5,7 @@ node tests/check.js             # diff the renderer against Mednafen, all scenes
 node tests/renderer-mutation.js # prove that diff test fails on a broken renderer
 node tests/check-viewer.js      # viewer/browser ROM captures vs the renderer
 node tests/check-export.js      # the browser's .pce vs the PCEAS build, byte for byte
+node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
 ```
 
 ## `check.js` — the diff (#5)
@@ -59,6 +60,20 @@ build `tools/gen/viewerN.pce`. Also loads the module through its
 browser-global branch and requires the same bytes. Prints the first differing
 offset if any; exit 0 only if all three scenes match. `--write N` writes
 `tools/gen/browserN.pce`, which `capture.sh N browser` runs.
+
+## `check-us-card.js` — the US image is the exact bit-reverse (#25)
+
+Builds each scene's .pce with `renderer/pce-rom.js` and the US image with its
+`reverseBits()`, then requires, byte by byte, that every byte of the image is
+the bit-reverse of the .pce's byte at the same offset — measured with a bit
+loop written in the test, not the module's table. It also requires the image to
+reverse back to the .pce exactly and to differ from it on this data (0x00 and
+0xff are self-reverse; most of the ROM is padding). It loads the module through
+its browser-global branch too, and it proves the comparison can fail by running
+it on the un-reversed .pce and on a one-byte error. `--write N` writes
+`tools/gen/usN.pce`, which `capture.sh N us` runs. **It does not prove the US
+image runs on a TurboGrafx**: Mednafen shows it blank (it has no US/region
+mode), so that is a hardware question, not a test result here.
 
 ## What this does NOT prove
 

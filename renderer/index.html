@@ -49,6 +49,8 @@
 </div>
 <p>
   <button id="download" disabled>Download .pce</button>
+  <label><input type="checkbox" id="us">
+    TurboGrafx HuCard (US — every byte's bits reversed)</label>
   <span id="exportstatus"></span>
 </p>
 <script src="pce-bg.js"></script>
@@ -62,7 +64,9 @@ const exportStatus = (t) => { $("exportstatus").textContent = t; };
 let bank0 = null;          // the constant viewer code bank, fetched once
 let picture = null;        // the scene's data for pce-rom.js
 let sceneName = null;
+let romPce = null;         // the scene's PC Engine bytes, before any reversal
 let romUrl = null;
+let downloadName = "picture.pce";
 
 function putImage(canvas, img) {
   const ctx = canvas.getContext("2d");
@@ -129,22 +133,46 @@ async function comparePceas(scene, romBytes) {
   return `DIFFERS from the PCEAS build: ${romBytes.length} vs ${ref.length} bytes`;
 }
 
-function offerDownload(romBytes) {
+function offerDownload(romBytes, name) {
   if (romUrl) URL.revokeObjectURL(romUrl);
   romUrl = URL.createObjectURL(
     new Blob([romBytes], { type: "application/octet-stream" }));
+  downloadName = name;
   $("download").disabled = false;
+}
+
+/* #25: the US HuCard (TurboGrafx-16) image is the .pce with every byte's bits
+ * reversed.  The checkbox swaps which bytes the button offers; the PCEAS
+ * comparison always talks about the .pce itself. */
+async function rebuildExport() {
+  if (!romPce) return;
+  const base = sceneName.replace(/^scene/, "picture");
+  if ($("us").checked) {
+    const us = PCEStudio.rom.reverseBits(romPce);
+    let differ = 0;
+    for (let i = 0; i < us.length; i++) if (us[i] !== romPce[i]) differ++;
+    offerDownload(us, `${base}-us.pce`);
+    const sha = await hexSha256(us);
+    exportStatus(`US HuCard: ${us.length} bytes, every byte the bit-reverse of ` +
+                 `the .pce (${differ} bytes differ)` +
+                 (sha ? `, sha256 ${sha.slice(0, 16)}…` : ""));
+  } else {
+    offerDownload(romPce, `${base}.pce`);
+    exportStatus(await comparePceas(sceneName, romPce));
+  }
 }
 
 $("download").addEventListener("click", () => {
   if (!romUrl) return;
   const a = document.createElement("a");
   a.href = romUrl;
-  a.download = `${sceneName.replace(/^scene/, "picture")}.pce`;
+  a.download = downloadName;
   document.body.appendChild(a);
   a.click();
   a.remove();
 });
+
+$("us").addEventListener("change", () => { rebuildExport(); });
 
 async function show(scene) {
   const base = `../tests/dumps/${scene}/`;
@@ -179,8 +207,8 @@ async function show(scene) {
     await loadPng(base + "mednafen.png");
 
     const romBytes = PCEStudio.rom.buildRom(picture);
-    offerDownload(romBytes);
-    exportStatus(await comparePceas(scene, romBytes));
+    romPce = romBytes;
+    await rebuildExport();
     status(`scanline ${regs.scanline}, BG_YOffset ${regs.BG_YOffset}, BYR ${regs.BYR}`);
   } catch (e) {
     status(`error: ${e}`);
@@ -189,9 +217,12 @@ async function show(scene) {
 }
 
 $("scene").addEventListener("change", (ev) => show(ev.target.value));
-/* ?scene=scene2 opens a given scene (the headless check uses it). */
+/* ?scene=scene2 opens a given scene (the headless check uses it); ?us=1
+ * opens with the TurboGrafx checkbox ticked, so the US path can be run from
+ * the command line without synthesizing a click (the headless check). */
 const wanted = new URLSearchParams(location.search).get("scene");
 if (wanted && /^scene[123]$/.test(wanted)) $("scene").value = wanted;
+if (new URLSearchParams(location.search).get("us") === "1") $("us").checked = true;
 show($("scene").value);
 </script>
 </body>
