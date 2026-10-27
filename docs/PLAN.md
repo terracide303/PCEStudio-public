@@ -27,7 +27,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
   The hardware facts are already ours: the Hudson manuals for the HuC6270 VDC, HuC6260 VCE and HuC6280 are in `/Volumes/External/MiniST_Project/PCEHeroTN/docs/datasheets/` (read them there; never copy them into this repo). Mednafen is installed for checking pictures.
 - [ ] #3 Anything worth keeping from #1 is INSTALLED AND CONFIRMED LOADED — the skill is in `../workshop/skills/<name>/SKILL.md`, `install_skills.sh` has been run, and **a fresh session has named it out loud as one it can see.** Surveyed is not installed; installed is not loaded @scout
   **A skill that did not load fails silently** — the session works normally and quietly lacks the thing it was added for. So this card does not close on "I installed it"; it closes on a new session listing it. See `../workshop/skills/README.md`.
-- [ ] #2 The one thing this project must do is written down, with how we will know it works — one paragraph, and a measurement @you
+- [x] #2 The one thing this project must do is written down, with how we will know it works — Dennis, 2026-10-27: "like ppu.toys, an AI dev studio that can port to a real PC Engine / TurboGrafx": make PC Engine pictures in the browser by the real hardware rules, with an AI that helps make them, exported so they run on a real PC Engine and TurboGrafx. It works when a picture made in the studio runs on a real console @you
   Not a feature list. The single outcome that makes it worth doing, and the observation that would prove it.
 
 ### The rulebook grows, or none of this was worth setting up
@@ -64,6 +64,13 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 - [?] #15 The renderer: a scroll and a palette change per scanline ~M @design #opus
 - [?] #16 The viewer: the raster table driven by the line interrupt (RCR) ~M @design #opus
 - [?] #17 An effect editor: colour gradients, wobble, parallax bands ~M @design #ds-flash
+
+### The AI in the studio !6
+- [?] #24 Describe it, get it: a sentence ("a sunset sky over a scrolling sea") becomes palettes, tiles and scanline effects the PC Engine can really show, in the editor, ready to change by hand ~L @design #opus
+  Which AI the page talks to, and how (the user's own key, or Claude through the page), is a decision for Dennis before this is refined.
+
+### TurboGrafx as well as PC Engine !7
+- [?] #25 The export can write a TurboGrafx HuCard image: the US cards swap the data lines, so each byte's bits are reversed; a checkbox, and the image runs on a TurboGrafx (or its flash cart) as well ~S @design #ds-flash
 
 ## Phase 3 — Polish
 
