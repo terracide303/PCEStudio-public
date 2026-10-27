@@ -24,7 +24,10 @@ The regions are **picture data**, not build tooling: `tools/genviewer.py`
 reads the same `regions.json` for the PCEAS path, so there is one description
 of where a picture's tiles live. Regions whose VRAM destination word is
 `>= 32768` are dropped by both builders (the VDC drops those writes, and the
-renderer model draws colour 0 there).
+renderer model draws colour 0 there). A region that starts below 32768 but
+ends past it is refused by both builders: its data cannot be laid out
+truthfully, because a slice would truncate it while the descriptor still
+promises the full length.
 
 `bank0` is extracted from the PCEAS build, not assembled in the browser:
 
@@ -54,7 +57,7 @@ in bank 2 and the padding of the last bank. The image is
 `4 + max(1, ceil(tiles / 8192))` banks, the same bank count PCEAS emits for
 the generated `.asm`. `pce-rom.js` throws rather than writing a ROM the layout
 cannot hold (more than 8 regions, more than 2 BAT banks, more than 6 tile
-banks, wrong-sized dumps).
+banks, wrong-sized dumps, a tile region that runs past the 32768-word VRAM).
 
 ## Evidence
 

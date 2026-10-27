@@ -85,6 +85,14 @@ def build(scene):
             # beyond 32768 words are dropped, so the viewer does not load
             # these tiles either
             continue
+        if dest + count * 16 > 32768:
+            # starts inside VRAM but runs past it: slicing would truncate the
+            # data while the descriptor still promises the full length, so the
+            # viewer would read the next region's bytes as this one's tail.
+            # renderer/pce-rom.js refuses the same input; docs/EXPORT.md.
+            raise ValueError(
+                f"region [{char0}, {count}]: words {dest}..{dest + count * 16} "
+                f"run past the 32768-word VRAM")
         regions.append((dest, count * 16))
     assert len(regions) <= MAX_REGIONS, regions
 

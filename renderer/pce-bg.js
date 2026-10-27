@@ -11,7 +11,9 @@
  * Input (see tools/mcs-extract.py for where the values come from):
  *   vram: Uint8Array, 131072 bytes = 65536 uint16 little-endian words
  *   cram: Uint8Array, 1024 bytes = 512 uint16 LE colour-table entries
- *         (bits 0-8 colour — G=6-8, R=3-5, B=0-2 — bit 8+ ignored for RGB)
+ *         (bits 0-8 colour — G=6-8, R=3-5, B=0-2).  Bit 8 is the top bit of
+ *         green, not a separate CG bit; bits above 8 are not exercised by any
+ *         dump, so what the VCE does with them is not modelled here.
  *   regs: { BYR, BXR, MWR, BG_YOffset, scanline, ... }
  *   firstScanline: VCE scanline of captured row 0 (18 for slstart=4:
  *     Mednafen DisplayRect.y = 14 + slstart, 14 lines of top blanking)
@@ -47,12 +49,16 @@
   }
 
   /* MWR bits 4-5: BAT width (0:32, 1:64, 2/3:128); bit 6: BAT height
-   * (0:32, 1:64). */
+   * (0:32, 1:64).  The row stride is the width in words, so codes 3 and 2
+   * share shift 7: the VDC manual's SCREEN table gives 011 as 128x32 and
+   * 111 as 128x64, same as 010/110 (HuC6270 VDC manual, H7-8/H7-9). */
   function batGeometry(mwr) {
+    var mode = (mwr >> 4) & 3;
     var widths = [32, 64, 128, 128];
-    var w = widths[(mwr >> 4) & 3];
+    var shifts = [5, 6, 7, 7];
+    var w = widths[mode];
     var h = (mwr & 0x40) ? 64 : 32;
-    var shift = 5 + ((mwr >> 4) & 3);
+    var shift = shifts[mode];
     return { width: w, height: h, shift: shift,
              wmask: w - 1, hmask: h - 1 };
   }

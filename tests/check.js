@@ -6,14 +6,22 @@
  * needs a diff script; per the workshop role split this is flagged for @review
  * to read cold, and #6 will make the renderer fail against it on purpose.
  *
- * For every tests/dumps/<scene>/ directory:
- *   vram.bin     VDC VRAM from the Mednafen save state (mcs-extract.py)
- *   cram.bin     VCE colour table from the same state
- *   regs.json    registers incl. the scanline calibration values
- *   mednafen.png the recorded raw frame (256x232 RGB, unfiltered — the last
- *                qtrecord frame, same source surface as Mednafen's F9 shot)
- * it renders the frame with renderer/pce-bg.js and requires pixel-for-pixel
- * equality with the PNG (diff 0).  Exit code 0 only if all scenes match.
+ * For every tests/dumps/<scene>/ directory it reads vram.bin (VDC VRAM from
+ * the Mednafen save state), cram.bin (VCE colour table), regs.json (the
+ * scanline calibration values) and mednafen.png (the recorded raw frame,
+ * 256x232 RGB, unfiltered — the last qtrecord frame, same source surface as
+ * Mednafen's F9 shot), renders the frame with
+ * renderer/pce-bg.js and requires pixel-for-pixel equality with the PNG
+ * (diff 0).  Exit code 0 only if every picture matches.
+ *
+ * A dump whose CR has bit 7 clear is not a picture: the VDC background is
+ * off, so whatever the frame contains says nothing about the renderer.
+ * tests/dumps/us1 is exactly that — Mednafen shows the US HuCard image
+ * blank (every VDC register 0), which is the emulator not running the image
+ * (#25), not a rendered picture.  Such a dump is reported by name and NOT
+ * counted.  The set is explicit below: a dump with the background off that
+ * is not on that list fails the run, so a bad capture cannot hide as a
+ * "not a picture".
  */
 
 "use strict";
@@ -86,6 +94,14 @@ function decodePng(buf) {
   return { width, height, pixels: out };
 }
 
+/* Dumps that are not pictures, with the measured reason.  A dump whose CR has
+ * bit 7 (background enable) clear is skipped only if it is named here. */
+const NOT_PICTURES = {
+  us1: "Mednafen shows the US HuCard image blank: every VDC register 0 " +
+       "(CR=0x00, no background), so it is the emulator not running the " +
+       "image (#25), not a rendered picture",
+};
+
 function checkScene(dir) {
   const name = path.basename(dir);
   const vram = fs.readFileSync(path.join(dir, "vram.bin"));
@@ -93,12 +109,25 @@ function checkScene(dir) {
   const regs = JSON.parse(fs.readFileSync(path.join(dir, "regs.json"), "utf8"));
   const ref = decodePng(fs.readFileSync(path.join(dir, "mednafen.png")));
 
+  /* CR bit 7 = BB (background blanking): 0 clears the background, 1 displays
+   * it (VDC manual, CR R05, p. H7-5). */
+  if (!(regs.CR & 0x80)) {
+    if (!Object.prototype.hasOwnProperty.call(NOT_PICTURES, name)) {
+      console.log(`${name}: NOT A PICTURE (CR=0x${regs.CR.toString(16)}) and ` +
+                  `not on the documented skip list — FAIL`);
+      return { kind: "error" };
+    }
+    console.log(`${name}: not a picture, skipped (not counted): ` +
+                NOT_PICTURES[name]);
+    return { kind: "not-picture" };
+  }
+
   const got = bg.renderFrame({ vram, cram, regs, width: 256, height: 232 });
 
   if (got.width !== ref.width || got.height !== ref.height) {
     console.log(`${name}: SIZE MISMATCH renderer ${got.width}x${got.height} ` +
                 `vs png ${ref.width}x${ref.height}`);
-    return 1;
+    return { kind: "error" };
   }
   let diffs = 0;
   const samples = [];
@@ -116,12 +145,12 @@ function checkScene(dir) {
   }
   if (diffs === 0) {
     console.log(`${name}: OK (${got.width}x${got.height}, diff 0)`);
-    return 0;
+    return { kind: "ok" };
   }
   console.log(`${name}: ${diffs} differing pixels of ` +
               `${ref.width * ref.height * 3} bytes`);
   samples.forEach((s) => console.log(`  ${s}`));
-  return 1;
+  return { kind: "error" };
 }
 
 function main() {
@@ -137,11 +166,22 @@ function main() {
     console.error("no scene dumps with mednafen.png found");
     return 2;
   }
-  let failed = 0;
-  for (const dir of dirs) failed += checkScene(dir);
-  console.log(failed === 0
-    ? `PASS: renderer matches Mednafen pixel for pixel on ${dirs.length} scene(s)`
-    : `FAIL: ${failed} scene(s) differ`);
+  let failed = 0, pictures = 0;
+  const skipped = [];
+  for (const dir of dirs) {
+    const result = checkScene(dir);
+    if (result.kind === "ok") pictures++;
+    else if (result.kind === "not-picture") skipped.push(path.basename(dir));
+    else failed++;
+  }
+  if (failed === 0) {
+    console.log(`PASS: renderer matches Mednafen pixel for pixel on ` +
+                `${pictures} scene(s)`);
+    if (skipped.length > 0)
+      console.log(`skipped (not pictures, not counted): ${skipped.join(", ")}`);
+  } else {
+    console.log(`FAIL: ${failed} scene(s) differ`);
+  }
   return failed === 0 ? 0 : 1;
 }
 
