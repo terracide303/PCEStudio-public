@@ -1,0 +1,447 @@
+<!doctype html>
+<!-- PCEStudio editor — tiles, palettes from the VCE's 512 colours, and the
+     background map (card #10).
+     Serve the repo root and open renderer/editor.html:
+         python3 -m http.server 8000
+     Everything is kept in the shape the VDC holds it (renderer/pce-editor.js):
+     16 background palettes of 16, 8x8 tiles of 4-bit colour numbers, the
+     32x32 BAT.  The preview is drawn by renderer/pce-bg.js, the same model
+     #5 proved pixel-for-pixel against Mednafen, so what you see is what the
+     VDC draws.  "Download .pce" builds the ROM with #9's builder
+     (renderer/pce-rom.js) and the constant viewer bank.
+     ?demo=1 paints the demo picture on load (the headless check uses it);
+     a fresh page starts blank so a picture can be painted from scratch. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>PCEStudio — editor</title>
+<style>
+  body { font: 13px system-ui, sans-serif; background: #111; color: #ddd;
+         margin: 1rem; }
+  h1 { font-size: 1.15rem; margin: 0 0 0.6rem; }
+  h2 { font-size: 0.85rem; font-weight: 600; color: #aaa; margin: 0 0 0.3rem;
+       text-transform: uppercase; letter-spacing: 0.04em; }
+  .row { display: flex; gap: 1.2rem; align-items: flex-start;
+         flex-wrap: wrap; }
+  section { background: #181818; border: 1px solid #2a2a2a; border-radius: 6px;
+            padding: 0.7rem; }
+  canvas { image-rendering: pixelated; background: #000; display: block; }
+  #map { width: 384px; height: 384px; cursor: crosshair; }
+  #preview { width: 384px; height: 336px; }
+  #tile { width: 192px; height: 192px; cursor: crosshair; }
+  #palgrid { display: grid; grid-template-columns: repeat(16, 14px);
+             gap: 1px; margin-bottom: 0.5rem; }
+  .sw { width: 14px; height: 14px; cursor: pointer;
+        box-sizing: border-box; }
+  .sw.sel { outline: 2px solid #fff; outline-offset: 1px; }
+  .sw.backdrop { border: 1px dashed #888; }
+  .palrow { display: flex; align-items: center; gap: 4px; margin-bottom: 1px; }
+  .palrow.current { background: #262626; }
+  .palnum { width: 16px; text-align: right; color: #777; font: 11px monospace; }
+  #picker { display: grid; grid-template-columns: repeat(64, 9px); gap: 1px; }
+  #picker div { width: 9px; height: 9px; cursor: pointer; }
+  #stats { color: #8f8; white-space: pre; font: 12px monospace; }
+  #exportstatus { color: #8fc; white-space: pre; font: 12px monospace; }
+  #msg { color: #f88; white-space: pre-wrap; min-height: 1.2em;
+         font: 12px monospace; margin: 0.4rem 0; }
+  #tileinfo { color: #aaa; font: 12px monospace; margin: 0.3rem 0; }
+  button { font: inherit; background: #2c2c2c; color: #ddd; border: 1px solid
+           #444; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+  button:hover { background: #3a3a3a; }
+  label { user-select: none; }
+  .note { color: #888; font-size: 12px; max-width: 24rem; }
+  #export[disabled] { opacity: 0.4; }
+</style>
+</head>
+<body>
+<h1>PCEStudio editor — paint tiles, choose palettes from the 512 colours,
+    paint the map</h1>
+
+<div class="row" style="margin-bottom:0.6rem">
+  <button id="new">New picture</button>
+  <button id="demo">Load demo picture</button>
+  <button id="export" disabled>Download .pce</button>
+  <button id="rules">Check the rules</button>
+  <label><input type="checkbox" id="us"> TurboGrafx HuCard (US)</label>
+  <span id="exportstatus"></span>
+</div>
+<div id="msg"></div>
+
+<div class="row">
+  <section>
+    <h2>Palettes — click a swatch, then a colour from the 512</h2>
+    <div id="palrows"></div>
+    <h2 style="margin-top:0.6rem">VCE colour table (512 × 9-bit)</h2>
+    <div id="picker"></div>
+    <p class="note">A swatch is one of a palette's 16 colours. Colour 0 of
+      every palette (dashed) is the shared backdrop: the VDC shows CRAM $000
+      for every colour-0 pixel whatever palette the cell names. The BAT's
+      palette field is 4 bits, so there are 16 palettes and a 17th is
+      refused; a palette has 16 colours and a 17th is refused.</p>
+  </section>
+
+  <section>
+    <h2>Tile</h2>
+    <canvas id="tile" width="8" height="8"></canvas>
+    <div id="tileinfo"></div>
+    <button id="newtile">New tile</button>
+    <p class="note">Click or drag to paint with the selected colour number.
+      A tile is 8×8 pixels, each a 4-bit colour number 0–15; the 17th colour
+      is refused.</p>
+  </section>
+
+  <section>
+    <h2>Background map (BAT, 32×32 tiles)</h2>
+    <canvas id="map" width="256" height="256"></canvas>
+    <p class="note">
+      <label><input type="radio" name="mode" value="select" checked>
+        select a cell's tile</label>
+      <label><input type="radio" name="mode" value="paint">
+        paint cells with the selected tile</label><br>
+      The line at row 224 is the bottom of the 256×224 view; rows below it
+      exist in the BAT and are not displayed at BYR = 0.</p>
+  </section>
+
+  <section>
+    <h2>Preview — the VDC model (256×224)</h2>
+    <canvas id="preview" width="256" height="224"></canvas>
+    <div id="stats"></div>
+  </section>
+</div>
+
+<script src="pce-bg.js"></script>
+<script src="pce-rom.js"></script>
+<script src="pce-editor.js"></script>
+<script>
+"use strict";
+const ed = PCEStudio.editor;
+const $ = (id) => document.getElementById(id);
+const say = (t) => { $("msg").textContent = t || ""; };
+
+let pic = ed.newPicture();
+let selPalette = 0;      // the swatch the picker edits
+let selEntry = 1;        // the colour number the tile brush paints
+let selTile = ed.FIRST_CHAR;
+let mode = "select";
+let bank0 = null;
+let romUrl = null;
+
+/* ---- colour helpers ---------------------------------------------------- */
+function css(colour) {
+  const c = ed.colourChannels(colour);
+  return `rgb(${c.r * 36},${c.g * 36},${c.b * 36})`;
+}
+function entryColour(palette, entry) {
+  return entry === 0 ? pic.backdrop : pic.palettes[palette][entry];
+}
+
+/* ---- palette panel ----------------------------------------------------- */
+function drawPalettes() {
+  const host = $("palrows");
+  host.textContent = "";
+  for (let p = 0; p < ed.PALETTES; p++) {
+    const row = document.createElement("div");
+    row.className = "palrow" + (p === selPalette ? " current" : "");
+    const n = document.createElement("span");
+    n.className = "palnum";
+    n.textContent = p;
+    row.appendChild(n);
+    for (let e = 0; e < ed.ENTRIES; e++) {
+      const sw = document.createElement("div");
+      sw.className = "sw" + (e === 0 ? " backdrop" : "") +
+        (p === selPalette && e === selEntry ? " sel" : "");
+      sw.style.background = css(entryColour(p, e));
+      sw.title = `palette ${p} colour ${e}` +
+        (e === 0 ? " (shared backdrop)" : "");
+      sw.addEventListener("mousedown", () => {
+        selPalette = p; selEntry = e;
+        drawPalettes();
+        say("");
+      });
+      row.appendChild(sw);
+    }
+    host.appendChild(row);
+  }
+}
+
+function drawPicker() {
+  const host = $("picker");
+  if (host.children.length) return;
+  for (let g = 0; g < 8; g++) {
+    for (let rb = 0; rb < 64; rb++) {
+      const r = rb >> 3, b = rb & 7;
+      const colour = ed.colourWord(r, g, b);
+      const cell = document.createElement("div");
+      cell.style.background = css(colour);
+      cell.title = `$${colour.toString(16)} r${r} g${g} b${b}`;
+      cell.addEventListener("mousedown", () => {
+        try {
+          if (selEntry === 0) {
+            ed.setBackdrop(pic, colour);
+            say(`backdrop = $${colour.toString(16)}`);
+          } else {
+            ed.setPaletteColour(pic, selPalette, selEntry, colour);
+            say(`palette ${selPalette} colour ${selEntry} = ` +
+                `$${colour.toString(16)}`);
+          }
+          redraw();
+        } catch (e) { say(e.message); }
+      });
+      host.appendChild(cell);
+    }
+  }
+}
+
+/* ---- tile -------------------------------------------------------------- */
+const tileCtx = $("tile").getContext("2d");
+function drawTile() {
+  const px = ed.tilePixels(pic, selTile);
+  const pal = ed.tilePalette(pic, selTile);
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      tileCtx.fillStyle = css(entryColour(pal, px[y * 8 + x]));
+      tileCtx.fillRect(x, y, 1, 1);
+    }
+  }
+  $("tileinfo").textContent = `tile $${selTile.toString(16).toUpperCase()}` +
+    ` · palette ${pal} · ${ed.coloursInTile(pic, selTile).length} colour(s)`;
+}
+
+function tilePixel(ev) {
+  const r = ev.target.getBoundingClientRect();
+  const x = Math.floor((ev.clientX - r.left) / r.width * 8);
+  const y = Math.floor((ev.clientY - r.top) / r.height * 8);
+  return { x: Math.max(0, Math.min(7, x)), y: Math.max(0, Math.min(7, y)) };
+}
+
+let painting = false;
+function paintAt(ev) {
+  const p = tilePixel(ev);
+  try {
+    ed.paintTileIndex(pic, selTile, p.x, p.y, selEntry);
+    redraw();
+  } catch (e) { say(e.message); }
+}
+$("tile").addEventListener("mousedown", (ev) => {
+  painting = true; paintAt(ev); ev.preventDefault();
+});
+window.addEventListener("mousemove", (ev) => {
+  if (painting && ev.target === $("tile")) paintAt(ev);
+});
+window.addEventListener("mouseup", () => { painting = false; });
+
+$("newtile").addEventListener("click", () => {
+  try {
+    selTile = ed.newTile(pic, selPalette);
+    selEntry = selEntry || 1;
+    redraw();
+    say(`new tile $${selTile.toString(16).toUpperCase()} in palette ` +
+        `${selPalette}`);
+  } catch (e) { say(e.message); }
+});
+
+/* ---- map --------------------------------------------------------------- */
+const mapCtx = $("map").getContext("2d");
+function drawMap() {
+  const data = mapCtx.createImageData(256, 256);
+  for (let my = 0; my < ed.BAT_H; my++) {
+    for (let mx = 0; mx < ed.BAT_W; mx++) {
+      const char = ed.mapCell(pic, mx, my);
+      const tile = pic.tiles[char];
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+          const v = tile ? tile.pixels[y * 8 + x] : 0;
+          const colour = tile ? entryColour(tile.palette, v) : pic.backdrop;
+          const c = ed.colourChannels(colour);
+          const o = ((my * 8 + y) * 256 + mx * 8 + x) * 4;
+          data.data[o] = c.r * 36; data.data[o + 1] = c.g * 36;
+          data.data[o + 2] = c.b * 36; data.data[o + 3] = 255;
+        }
+      }
+    }
+  }
+  mapCtx.putImageData(data, 0, 0);
+  mapCtx.strokeStyle = "rgba(255,255,255,0.12)";
+  for (let i = 0; i <= 32; i++) {
+    mapCtx.beginPath();
+    mapCtx.moveTo(i * 8 + 0.5, 0); mapCtx.lineTo(i * 8 + 0.5, 256);
+    mapCtx.moveTo(0, i * 8 + 0.5); mapCtx.lineTo(256, i * 8 + 0.5);
+    mapCtx.stroke();
+  }
+  mapCtx.strokeStyle = "rgba(255,255,255,0.55)";
+  mapCtx.beginPath();
+  mapCtx.moveTo(0, 224.5); mapCtx.lineTo(256, 224.5);
+  mapCtx.stroke();
+}
+
+function mapCellAt(ev) {
+  const r = ev.target.getBoundingClientRect();
+  const mx = Math.floor((ev.clientX - r.left) / r.width * 32);
+  const my = Math.floor((ev.clientY - r.top) / r.height * 32);
+  return { mx: Math.max(0, Math.min(31, mx)),
+           my: Math.max(0, Math.min(31, my)) };
+}
+
+let mapPainting = false;
+function mapAt(ev) {
+  const c = mapCellAt(ev);
+  if (mode === "paint") {
+    try {
+      ed.paintMapCell(pic, c.mx, c.my, selTile);
+      redraw();
+    } catch (e) { say(e.message); }
+  } else {
+    selTile = ed.mapCell(pic, c.mx, c.my);
+    selPalette = ed.tilePalette(pic, selTile);
+    redraw();
+  }
+}
+$("map").addEventListener("mousedown", (ev) => {
+  mapPainting = true; mapAt(ev); ev.preventDefault();
+});
+window.addEventListener("mousemove", (ev) => {
+  if (mapPainting && ev.target === $("map")) mapAt(ev);
+});
+window.addEventListener("mouseup", () => { mapPainting = false; });
+document.querySelectorAll("input[name=mode]").forEach((el) =>
+  el.addEventListener("change", () => { mode = el.value; }));
+
+/* ---- preview + ROM ------------------------------------------------------ */
+const previewCtx = $("preview").getContext("2d");
+function drawPreview() {
+  const data = ed.toPicture(pic);
+  const frame = PCEStudio.bg.renderFrame({
+    vram: data.vram, cram: data.cram, regs: ed.viewRegs(pic),
+    width: ed.VIEW_W, height: ed.VIEW_H
+  });
+  const img = previewCtx.createImageData(ed.VIEW_W, ed.VIEW_H);
+  img.data.set(frame.pixels);
+  previewCtx.putImageData(img, 0, 0);
+
+  const st = ed.stats(pic);
+  const banks = 4 + Math.max(1, Math.ceil(st.tiles * 32 / 8192));
+  $("stats").textContent =
+    `${ed.VIEW_W}x${ed.VIEW_H} · ${st.tiles} tile(s) ` +
+    `$${st.charsFirst.toString(16).toUpperCase()}–` +
+    `$${st.charsLast.toString(16).toUpperCase()} · ` +
+    `${st.palettesUsed} palette(s) · ROM ${banks * 8192} bytes`;
+}
+
+function redraw() {
+  drawPalettes();
+  drawTile();
+  drawMap();
+  drawPreview();
+}
+
+/* ---- export (card #9's builder) ---------------------------------------- */
+async function loadBank0() {
+  if (!bank0) {
+    const res = await fetch("viewer-bank0.bin");
+    if (!res.ok) throw new Error(`viewer-bank0.bin: HTTP ${res.status}`);
+    bank0 = new Uint8Array(await res.arrayBuffer());
+  }
+  return bank0;
+}
+
+async function sha256(bytes) {
+  const d = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(d)).map((b) =>
+    b.toString(16).padStart(2, "0")).join("");
+}
+
+async function buildRom() {
+  const data = ed.toPicture(pic);
+  return PCEStudio.rom.buildRom({
+    bank0: await loadBank0(),
+    vram: data.vram, cram: data.cram,
+    regs: data.regs, regions: data.regions
+  });
+}
+
+$("export").addEventListener("click", async () => {
+  try {
+    const rom = await buildRom();
+    const us = $("us").checked;
+    const bytes = us ? PCEStudio.rom.reverseBits(rom) : rom;
+    if (romUrl) URL.revokeObjectURL(romUrl);
+    romUrl = URL.createObjectURL(
+      new Blob([bytes], { type: "application/octet-stream" }));
+    const a = document.createElement("a");
+    a.href = romUrl;
+    a.download = us ? "picture-us.pce" : "picture.pce";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    $("exportstatus").textContent =
+      `${us ? "US HuCard" : "PC Engine"}: ${bytes.length} bytes, sha256 ` +
+      `${(await sha256(bytes)).slice(0, 16)}…`;
+  } catch (e) { say(e.message); }
+});
+
+/* ---- start ------------------------------------------------------------- */
+function loadDemo() {
+  try {
+    pic = ed.demoPicture();
+    selTile = ed.FIRST_CHAR;
+    selPalette = 0;
+    selEntry = 1;
+    const problems = ed.validate(pic);
+    say(problems.length ? "invalid: " + problems.slice(0, 3).join("; ")
+                        : "");
+    redraw();
+    return pic;
+  } catch (e) { say(e.message); return null; }
+}
+
+$("demo").addEventListener("click", () => { loadDemo(); report(); });
+$("new").addEventListener("click", () => {
+  pic = ed.newPicture();
+  selTile = ed.FIRST_CHAR;
+  selPalette = 0;
+  selEntry = 1;
+  say("");
+  redraw();
+  report();
+});
+
+/* The headless check reads #exportstatus: ?demo=1 paints the demo, builds
+ * the ROM with #9's builder and says exactly what it built. */
+async function report() {
+  try {
+    const rom = await buildRom();
+    const st = ed.stats(pic);
+    $("exportstatus").textContent =
+      `picture ${ed.VIEW_W}x${ed.VIEW_H}, ${st.tiles} tiles, ` +
+      `${st.palettesUsed} palettes, ${ed.validate(pic).length} problem(s) · ` +
+      `ROM ${rom.length} bytes, sha256 ${(await sha256(rom)).slice(0, 16)}…`;
+    $("export").disabled = false;
+  } catch (e) { $("exportstatus").textContent = "error: " + e.message; }
+}
+
+/* Two calls the VDC cannot show, made on the page's own picture: a 17th
+ * palette and a 17th colour in a tile.  The editor must refuse both. */
+function checkRules() {
+  const refused = [], accepted = [];
+  const attempt = (label, fn) => {
+    try { fn(); accepted.push(label); } catch (e) { refused.push(label + " (" + e.code + ")"); }
+  };
+  attempt("palette 16", () => ed.setPaletteColour(pic, 16, 1, 0));
+  attempt("palette entry 16", () => ed.setPaletteColour(pic, 0, 16, 0));
+  attempt("pixel colour 16", () => ed.paintTileIndex(pic, selTile, 0, 0, 16));
+  const msg = `rules: ${refused.length}/3 refused — ${refused.join("; ")}` +
+              (accepted.length ? ` — ACCEPTED: ${accepted.join("; ")}` : "");
+  say(msg);
+  return { refused, accepted };
+}
+
+$("rules").addEventListener("click", () => { checkRules(); });
+
+drawPicker();
+redraw();
+const params = new URLSearchParams(location.search);
+if (params.get("demo") === "1") { loadDemo(); report(); }
+if (params.get("rules") === "1") { checkRules(); }
+</script>
+</body>
+</html>

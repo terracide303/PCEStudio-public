@@ -9,10 +9,13 @@
 #                                   # (gen/browserN.pce, from renderer/pce-rom.js)
 #   tools/capture.sh 1|2|3 us       # the #25 US HuCard images
 #                                   # (gen/usN.pce, bit-reversed browser ROM)
+#   tools/capture.sh painted        # the #10 editor's picture
+#                                   # (gen/painted.pce, built by
+#                                   # tests/check-editor.js --write)
 #
 # The modes differ only in the ROM that is built and run and in the dump
-# directory (tests/dumps/sceneN / viewerN / browserN / usN); the route below
-# is the same for all of them.
+# directory (tests/dumps/sceneN / viewerN / browserN / usN / painted); the
+# route below is the same for all of them.
 #
 # Route (command line only — this Mac's user must never receive synthesized
 # keyboard/mouse events, so there is no F9 hotkey here):
@@ -37,14 +40,19 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SCENE="${1:?usage: capture.sh 1|2|3 [scene|viewer|browser]}"
-MODE="${2:-scene}"
+SCENE="${1:?usage: capture.sh 1|2|3 [scene|viewer|browser|us] | capture.sh painted}"
+if [ "$SCENE" = painted ]; then
+  MODE=painted
+else
+  MODE="${2:-scene}"
+fi
 case "$MODE" in
   scene)  NAME="scene${SCENE}" ;;
   viewer) NAME="viewer${SCENE}" ;;
   browser) NAME="browser${SCENE}" ;;
   us) NAME="us${SCENE}" ;;
-  *) echo "mode must be scene, viewer, browser or us" >&2; exit 2 ;;
+  painted) NAME="painted" ;;
+  *) echo "mode must be scene, viewer, browser, us or painted" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -60,6 +68,9 @@ if [ "$MODE" = browser ]; then
 elif [ "$MODE" = us ]; then
   # the browser's US image: its .pce with every byte's bits reversed (#25)
   node tests/check-us-card.js --write "$SCENE"
+elif [ "$MODE" = painted ]; then
+  # #10: the editor's picture, exported by #9's builder
+  node tests/check-editor.js --write
 else
   make -C tools "gen/$NAME.pce"
 fi

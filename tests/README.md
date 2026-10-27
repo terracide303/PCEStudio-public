@@ -1,4 +1,4 @@
-# The renderer and export checks (#5, #6, #8, #9)
+# The renderer and export checks (#5, #6, #8, #9, #10)
 
 ```sh
 node tests/check.js             # diff the renderer against Mednafen, all scenes
@@ -6,6 +6,7 @@ node tests/renderer-mutation.js # prove that diff test fails on a broken rendere
 node tests/check-viewer.js      # viewer/browser ROM captures vs the renderer
 node tests/check-export.js      # the browser's .pce vs the PCEAS build, byte for byte
 node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
+node tests/check-editor.js      # the editor's refusals, picture, export and capture
 ```
 
 ## `check.js` — the diff (#5)
@@ -75,6 +76,33 @@ it on the un-reversed .pce and on a one-byte error. `--write N` writes
 image runs on a TurboGrafx**: Mednafen shows it blank (it has no US/region
 mode), so that is a hardware question, not a test result here.
 
+## `check-editor.js` — the editor's picture reaches the console (#10)
+
+The editor (`renderer/pce-editor.js`) keeps a picture in the VDC's own shape:
+16 palettes of 16 CRAM colours, 8×8 tiles of 4-bit colour numbers, the 32×32
+BAT. This check (written by @design, flagged for @review) requires:
+
+- **the refusals**: a 17th colour in a tile (pixel number 16 and above), a 17th
+  palette, a 17th colour in a palette, a colour the tile's own palette does not
+  hold, a character past the 32768-word VRAM and the range guards all throw
+  with their documented `code`; a legal paint afterwards must still succeed;
+- **the picture**: `demoPicture()` paints a 256×224 picture from scratch
+  through the editor's calls (nothing from `dumps/`), `validate()` reports no
+  problems, and every pixel of the 256×224 frame recomputed from the editor
+  model equals `pce-bg.js` drawing `toPicture()`'s VRAM and CRAM;
+- **the export**: `pce-rom.js`'s ROM carries the editor's config, palettes,
+  BAT and tiles at the places `ROM_LAYOUT.md` documents, at the size the bank
+  formula gives; `--write` writes `tools/gen/painted.pce` for
+  `capture.sh painted`;
+- **the console**: `dumps/painted/` (the Mednafen capture of that ROM) has the
+  editor's VRAM, palettes and registers, and its recorded frame equals
+  `pce-bg.js` drawing the editor's picture with the capture's calibration —
+  diff 0. `check.js` also lists `painted` with the scenes;
+- **the browser-global branch** refuses the same calls and builds the same
+  bytes.
+
+Details and the headless page output: [`../docs/EDITOR.md`](../docs/EDITOR.md).
+
 ## What this does NOT prove
 
 **It does not prove the renderer is correct.** Two mutations on three dumps do
@@ -109,3 +137,9 @@ neither checks the TurboGrafx bit-reversed image (#25). It also does not
 execute the page's download wiring — only the module it calls. It covers the
 three sample scenes, not every BAT size, region count or tile size the layout
 allows.
+
+**`check-editor.js` does not prove the page's editing.** It calls the same
+functions the page's handlers call, but not the handlers; no synthetic mouse
+input is used anywhere. It does not prove the download wiring, and it uses one
+32×32 BAT with no scroll and one region. It says the demo picture reaches
+Mednafen unchanged, not that the editor is pleasant or the picture wanted.

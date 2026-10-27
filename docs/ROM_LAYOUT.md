@@ -88,6 +88,16 @@ the browser must not emit them either.
 - `copy_words` reads through the 8 KiB MPR2 window (`$4000`–`$5fff`) and
   re-maps to the next bank when the pointer crosses the window.
 
+## Pictures the editor makes (#10)
+
+`renderer/pce-editor.js` writes this layout directly: tiles are handed out
+from character `$40` (the first character after the 32×32 BAT at words
+0–`$3FF`), the map is the 32×32 BAT (MWR = 0), and there is **one** region —
+`[[$40, tileCount]]` — so the descriptors hold the whole tile set. Its BAT is
+always 1024 words (banks 2 only) and its tiles start at VRAM word `$400`; the
+ROM is `4 + max(1, ceil(tiles·32 / 8 KiB))` banks, as the formula above.
+There are at most 1536 tiles (banks 4–9).
+
 ## What the viewer does not do
 
 - It does **not zero VRAM** before copying: regions outside the copied data

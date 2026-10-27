@@ -99,12 +99,27 @@ emulator run can confirm the image. The card stays `[~]` for Dennis: run
 --write 1`) on a TurboGrafx-16 or its flash cart and photograph it into
 `docs/`. Details: [`docs/EXPORT.md`](docs/EXPORT.md).
 
+**#10 is done.** `renderer/editor.html` + `renderer/pce-editor.js`: paint 8×8
+tiles, choose palette colours from the VCE's 512, paint the 32×32 BAT, with
+the preview drawn by `pce-bg.js` and the export built by `pce-rom.js` (#9).
+The picture is kept in the VDC's own shape (16 palettes of 16, 4-bit pixels,
+the shared backdrop, ROM limits), and the editor refuses what the VDC cannot
+show: a 17th colour in a tile, a 17th palette, a 17th colour in a palette, a
+colour outside the tile's palette, a character past the 32768-word VRAM.
+`node tests/check-editor.js` exits 0: 12/12 refusals with their codes; the
+demo picture (256×224, 896 cells, 133 tiles after dedupe, 6 palettes) is
+recomputed from the editor model and equals `pce-bg.js` drawing it; the ROM
+(40960 bytes, sha256 `670001f5…`) carries exactly the editor's config,
+palettes, BAT and tiles; `tests/dumps/painted/` is that ROM's Mednafen capture
+— its VRAM/CRAM/regs are the editor's and its frame equals the editor's
+picture, diff 0 — and `node tests/check.js` now reports 11 dumps diff 0. The
+real page headlessly reports the same bytes and `rules: 3/3 refused`. Details
+and limits: [`docs/EDITOR.md`](docs/EDITOR.md). The test was written by
+@design and is flagged for @review to read cold.
+
 ## Next action
 
-`../workshop/board.py next PCEStudio --who design`. #8 stays parked until
-Dennis photographs `tools/gen/viewer1.pce` on the Tang Nano; #9's browser
-export is done and ready for @review (it wrote `tests/check-export.js`, so it
-should be read cold, like the #5/#8 tests). #25's software is done and its
-test is flagged for @review (also written by @design); #25 waits on Dennis's
-TurboGrafx photo of `tools/gen/us1.pce`.
+`../workshop/board.py next PCEStudio --who design`. #11 (@review) reads Phase
+1 cold, #5–#10. #8 stays parked until Dennis photographs `tools/gen/viewer1.pce`
+on the Tang Nano; #25 waits on Dennis's TurboGrafx photo of `tools/gen/us1.pce`.
 
