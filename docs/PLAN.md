@@ -25,7 +25,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ## Phase 0 — Know what exists before writing anything
 
 ### The ground is surveyed {refined} !9
-- [ ] #1 What already exists for making PC Engine graphics is found and judged ~S — docs/SURVEY.md names at least four candidates (PCE tile/palette editors, HuC and PCEAS, web pixel editors with palette limits, ppu.toys as the SNES idea) with licence, what each does and does NOT do, and ends in use-it / adapt-it / write-our-own for the renderer, the editor and the viewer ROM; and which open-source PCE emulators to use as references and checks (accuracy, licence; their code is not built in, docs/DECISIONS.md) @scout #sonnet
+- [ ] #1 What already exists for making PC Engine graphics is found and judged ~S — docs/SURVEY.md names at least four candidates (PCE tile/palette editors, HuC and PCEAS, web pixel editors with palette limits, ppu.toys as the SNES idea) with licence, what each does and does NOT do, and ends in use-it / adapt-it / write-our-own for the renderer, the editor and the viewer ROM; and which open-source PCE emulators to use as references and checks (accuracy, licence; their code is not built in, docs/DECISIONS.md) @scout #ds-flash
   The hardware facts are already ours: the Hudson manuals for the HuC6270 VDC, HuC6260 VCE and HuC6280 are in `/Volumes/External/MiniST_Project/PCEHeroTN/docs/datasheets/` (read them there; never copy them into this repo). Mednafen is installed for checking pictures.
 - [ ] #3 Anything worth keeping from #1 is INSTALLED AND CONFIRMED LOADED — the skill is in `../workshop/skills/<name>/SKILL.md`, `install_skills.sh` has been run, and **a fresh session has named it out loud as one it can see.** Surveyed is not installed; installed is not loaded @scout
   **A skill that did not load fails silently** — the session works normally and quietly lacks the thing it was added for. So this card does not close on "I installed it"; it closes on a new session listing it. See `../workshop/skills/README.md`.
@@ -39,13 +39,13 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ## Phase 1 — A picture on a real PC Engine (the whole chain, once)
 
 ### The PCE picture in the browser {refined} !9
-- [ ] #5 The background renderer draws exactly what the VDC and VCE draw ~M — a browser renderer for 256x224: 8x8 4-bit tiles, the BAT (tile number + palette), 16 palettes of 16 colours out of the VCE's 512; for three VRAM+palette dumps saved from Mednafen it matches Mednafen's screenshot pixel for pixel (diff 0, script in tests/) @design #opus
+- [ ] #5 The background renderer draws exactly what the VDC and VCE draw ~M — a browser renderer for 256x224: 8x8 4-bit tiles, the BAT (tile number + palette), 16 palettes of 16 colours out of the VCE's 512; for three VRAM+palette dumps saved from Mednafen it matches Mednafen's screenshot pixel for pixel (diff 0, script in tests/) @design #ds-pro
   Read the HuC6270 and HuC6260 manuals (see #1's note) before writing a line; PCEHeroTN's sim/ and docs/ show how we learned the VDC. Plain JavaScript, no framework, no emulator code borrowed (keeps the licence ours).
-- [ ] #6 The renderer test fails on a broken renderer ~S — tests/ runs the three dumps against the screenshots, reports the diff, and fails when a palette index or a tile row is deliberately broken @test #sonnet +review
+- [ ] #6 The renderer test fails on a broken renderer ~S — tests/ runs the three dumps against the screenshots, reports the diff, and fails when a palette index or a tile row is deliberately broken @test +review #ds-flash
 
 ### The viewer ROM {refined} !9
 - [ ] #7 The PCE assembler builds a ROM here ~S — PCEAS (from HuC) installed on this Mac; tools/hello.asm builds hello.pce, which shows a coloured screen in Mednafen; the install steps are in docs/BUILD.md @design #ds-flash
-- [ ] #8 A 6280 viewer shows a picture from data at fixed places ~M — viewer.asm loads 16 palettes into the VCE, tiles and the BAT into VRAM, sets the VDC to 256x224 and shows them; with #5's sample data it looks the same in Mednafen as in the browser renderer, and on the Tang Nano with PCEHeroTN (photo in docs/) @design #opus
+- [ ] #8 A 6280 viewer shows a picture from data at fixed places ~M — viewer.asm loads 16 palettes into the VCE, tiles and the BAT into VRAM, sets the VDC to 256x224 and shows them; with #5's sample data it looks the same in Mednafen as in the browser renderer, and on the Tang Nano with PCEHeroTN (photo in docs/) @design #ds-pro
   The bank layout of the data goes in docs/ROM_LAYOUT.md: #9 depends on it.
 
 ### A .pce file out of the browser {refined} !8
