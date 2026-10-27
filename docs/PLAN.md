@@ -46,7 +46,8 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 
 ### The viewer ROM {refined} !9
 - [x] #7 The PCE assembler builds a ROM here ~S — PCEAS 3.23 (52a556a, uli/huc) built from source and installed at ~/.local/bin/pceas; make -C tools builds tools/hello.pce (8192 bytes, sha256 9be7ead2...); Mednafen 1.32.1 shows a solid red screen, docs/hello-mednafen.png is 256x232 with every pixel RGB (252,0,0); install/build steps in docs/BUILD.md @design #ds-flash
-- [ ] #8 A 6280 viewer shows a picture from data at fixed places ~M — viewer.asm loads 16 palettes into the VCE, tiles and the BAT into VRAM, sets the VDC to 256x224 and shows them; with #5's sample data it looks the same in Mednafen as in the browser renderer, and on the Tang Nano with PCEHeroTN (photo in docs/) @design #ds-pro
+- [~] #8 A 6280 viewer shows a picture from data at fixed places ~M — viewer.asm loads 16 palettes into the VCE, tiles and the BAT into VRAM, sets the VDC to 256x224 and shows them; with #5's sample data it looks the same in Mednafen as in the browser renderer, and on the Tang Nano with PCEHeroTN (photo in docs/) @design #ds-pro
+  - 2026-10-28 @design: Mednafen part proven: node tests/check-viewer.js exits 0 - viewer1/2/3 frames diff 0 vs the renderer (card #5's pixel reference) and the captured VRAM/CRAM/VDC registers match the scene dumps. Card stays [~] for the Tang Nano photo (Dennis's part): flash tools/gen/viewer1.pce with 'openFPGALoader -b tangnano20k --external-flash -o 0x400000' and photograph it. The data layout for #9 is in docs/ROM_LAYOUT.md.
   The bank layout of the data goes in docs/ROM_LAYOUT.md: #9 depends on it.
 
 ### A .pce file out of the browser {refined} !8

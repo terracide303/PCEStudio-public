@@ -1,4 +1,4 @@
-# RESUME HERE — 2026-10-27
+# RESUME HERE — 2026-10-28
 
 **One page. The live state. Every claim carries how it was measured.**
 If a detail is not here, it is history, not current truth.
@@ -38,8 +38,30 @@ vendored (`docs/DECISIONS.md`). `make -C tools` builds `tools/hello.pce`
 `docs/hello-mednafen.png` is 256x232 with every pixel RGB `(252, 0, 0)`. The
 install and build steps are in `docs/BUILD.md`.
 
-Nothing else is built yet: no renderer or editor. Facts come from the Hudson
-manuals in PCEHeroTN's `docs/datasheets/` (read there, never copied here).
+**#5 is done** (renderer, diff 0) and **#6 is done** (its mutation test): the
+browser background renderer `renderer/pce-bg.js` renders the three
+deterministic scenes of `tools/genroms.py` pixel-for-pixel against Mednafen's
+recorded frames — `node tests/check.js` exits 0; #6 proved the test fails on a
+deliberately broken renderer. The renderer model and how the dumps were
+measured are in `docs/RENDERER.md`; dumps (committed evidence) live in
+`tests/dumps/sceneN/` (vram.bin, cram.bin, regs.json, mednafen.png).
+
+**#8 is started, not finished.** `tools/viewer.asm` is a self-contained
+adaptation of HuDK (MIT notice in the file; PCEAS 3.23 cannot assemble HuDK
+sources directly) that loads the config, 16 palettes, BAT and tiles from the
+fixed places of [`docs/ROM_LAYOUT.md`](docs/ROM_LAYOUT.md) and shows them.
+`tools/genviewer.py` lays #5's sample data into those places and
+`make -C tools gen/viewerN.pce` assembles the ROM. **Proven in Mednafen:**
+`node tests/check-viewer.js` exits 0 — for all three scenes the viewer's
+recorded frame matches the renderer (diff 0) and the captured VRAM/CRAM/VDC
+registers match the scene dumps (capture route: `tools/capture.sh N viewer`,
+command line only, no keystrokes). **Still open: the Tang Nano photo**
+(Dennis's part — flash `tools/gen/viewer1.pce` with
+`openFPGALoader -b tangnano20k --external-flash -o 0x400000` and photograph
+it); the card stays `[~]` until then.
+
+Facts come from the Hudson manuals in PCEHeroTN's `docs/datasheets/` (read
+there, never copied here).
 
 DeepSeek cards (#ds-flash) need `DEEPSEEK_API_KEY` set before `agents.py` can
 start them.
@@ -47,7 +69,4 @@ start them.
 ## Next action
 
 `../workshop/board.py next PCEStudio --who design`
-
-That is **#5**: the browser background renderer. #3 stays parked until a card
-pays for a PCE lesson.
 

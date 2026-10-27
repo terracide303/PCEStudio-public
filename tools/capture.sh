@@ -1,9 +1,14 @@
 #!/bin/bash
-# capture.sh — run one PCEStudio test-scene ROM in Mednafen and harvest the
-# evidence card #5 needs: the save state (VRAM + colour table dump) and an
+# capture.sh — run one PCEStudio ROM in Mednafen and harvest the evidence
+# card #5 (and #8) needs: the save state (VRAM + colour table dump) and an
 # exact frame of what Mednafen displayed.
 #
-#   tools/capture.sh 1|2|3
+#   tools/capture.sh 1|2|3          # the #5 scene ROMs (gen/sceneN.pce)
+#   tools/capture.sh 1|2|3 viewer   # the #8 viewer ROMs (gen/viewerN.pce)
+#
+# The two modes only differ in the ROM that is built and run and in the dump
+# directory (tests/dumps/sceneN vs tests/dumps/viewerN); the route below is
+# the same for both.
 #
 # Route (command line only — this Mac's user must never receive synthesized
 # keyboard/mouse events, so there is no F9 hotkey here):
@@ -18,7 +23,7 @@
 #     CloseGame()); `-autosave 1` then writes the state, which is extracted
 #     with mcs-extract.py.
 #
-# Produces tests/dumps/sceneN/:
+# Produces tests/dumps/<name>/:
 #   vram.bin       VDC VRAM from the autosave state (mcs-extract.py)
 #   cram.bin       VCE colour table from the same state
 #   regs.json      registers + scanline calibration values
@@ -28,8 +33,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SCENE="${1:?usage: capture.sh 1|2|3}"
-NAME="scene${SCENE}"
+SCENE="${1:?usage: capture.sh 1|2|3 [scene|viewer]}"
+MODE="${2:-scene}"
+case "$MODE" in
+  scene)  NAME="scene${SCENE}" ;;
+  viewer) NAME="viewer${SCENE}" ;;
+  *) echo "mode must be scene or viewer" >&2; exit 2 ;;
+esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
 SCRATCH="/Volumes/External II/scratch"

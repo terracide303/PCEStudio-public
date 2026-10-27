@@ -47,8 +47,11 @@ pceas            # prints: PC Engine Assembler (v 3.23-52a556a, 2018-05-28)
 ```
 
 PCEAS also looks for include files in `PCE_INCLUDE`. `tools/hello.asm` needs
-none; the viewer in #8 will point `PCE_INCLUDE` at the MIT HuDK `include/`
-directory instead of copying it into this repo.
+none, and neither does the #8 viewer: it is a **self-contained adaptation** of
+HuDK (MIT, licence notice in the file) rather than an include of it, because
+PCEAS 3.23 cannot assemble HuDK sources — they use `.define` and expect an
+`-I` include path, neither of which this PCEAS has. See
+[`ROM_LAYOUT.md`](ROM_LAYOUT.md) for what the viewer reads from where.
 
 ## Building the hello ROM
 

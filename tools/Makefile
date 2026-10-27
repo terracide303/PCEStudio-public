@@ -1,4 +1,4 @@
-# Builds the #7 hello ROM and the #5 test-scene ROMs.
+# Builds the #7 hello ROM, the #5 test-scene ROMs and the #8 viewer ROMs.
 # PCEAS is an external tool; see ../docs/BUILD.md.
 
 PCEAS ?= pceas
@@ -6,7 +6,8 @@ PYTHON ?= python3
 
 SCENES := 1 2 3
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES)))
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) \
+     $(addprefix gen/viewer,$(addsuffix .pce,$(SCENES)))
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -18,6 +19,17 @@ gen/scene%.asm: genroms.py
 	$(PYTHON) -I genroms.py
 
 gen/scene%.pce: gen/scene%.asm
+	$(PCEAS) -raw -o $@ $<
+
+# The viewer ROMs are viewer.asm (bank 0, fixed) plus the picture data of
+# tests/dumps/sceneN laid out by genviewer.py at the fixed places of
+# docs/ROM_LAYOUT.md.  pceas resolves .include/.incbin against the working
+# directory, hence the cd (make -C tools runs here anyway).
+gen/viewer%.asm: genviewer.py genroms.py
+	mkdir -p gen
+	$(PYTHON) -I genviewer.py $*
+
+gen/viewer%.pce: gen/viewer%.asm viewer.asm
 	$(PCEAS) -raw -o $@ $<
 
 clean:
