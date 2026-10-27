@@ -44,7 +44,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 - [ ] #6 The renderer test fails on a broken renderer ~S — tests/ runs the three dumps against the screenshots, reports the diff, and fails when a palette index or a tile row is deliberately broken @test +review #ds-flash
 
 ### The viewer ROM {refined} !9
-- [ ] #7 The PCE assembler builds a ROM here ~S — PCEAS (from HuC) installed on this Mac; tools/hello.asm builds hello.pce, which shows a coloured screen in Mednafen; the install steps are in docs/BUILD.md @design #ds-flash
+- [x] #7 The PCE assembler builds a ROM here ~S — PCEAS 3.23 (52a556a, uli/huc) built from source and installed at ~/.local/bin/pceas; make -C tools builds tools/hello.pce (8192 bytes, sha256 9be7ead2...); Mednafen 1.32.1 shows a solid red screen, docs/hello-mednafen.png is 256x232 with every pixel RGB (252,0,0); install/build steps in docs/BUILD.md @design #ds-flash
 - [ ] #8 A 6280 viewer shows a picture from data at fixed places ~M — viewer.asm loads 16 palettes into the VCE, tiles and the BAT into VRAM, sets the VDC to 256x224 and shows them; with #5's sample data it looks the same in Mednafen as in the browser renderer, and on the Tang Nano with PCEHeroTN (photo in docs/) @design #ds-pro
   The bank layout of the data goes in docs/ROM_LAYOUT.md: #9 depends on it.
 

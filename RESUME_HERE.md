@@ -31,18 +31,23 @@ what each does not do. Its verdicts, recorded in `docs/DECISIONS.md`:
   (GPL-3.0) is the debugger/VRAM/MCP check; Mesen2 is a fallback only. No
   emulator code is built in.
 
-Nothing is built yet; no ROM, renderer or editor exists. PCEAS is not installed
-(#7). Facts come from the Hudson manuals in PCEHeroTN's `docs/datasheets/`
-(read there, never copied here).
+**#7 is done.** PCEAS 3.23 (`52a556a`, from `uli/huc`) is built from source and
+installed at `~/.local/bin/pceas`; it is an external build tool and is not
+vendored (`docs/DECISIONS.md`). `make -C tools` builds `tools/hello.pce`
+(8 KiB, sha256 `9be7ead2…`), and Mednafen 1.32.1 shows it as a solid red screen:
+`docs/hello-mednafen.png` is 256x232 with every pixel RGB `(252, 0, 0)`. The
+install and build steps are in `docs/BUILD.md`.
+
+Nothing else is built yet: no renderer or editor. Facts come from the Hudson
+manuals in PCEHeroTN's `docs/datasheets/` (read there, never copied here).
 
 DeepSeek cards (#ds-flash) need `DEEPSEEK_API_KEY` set before `agents.py` can
 start them.
 
 ## Next action
 
-`../workshop/board.py next PCEStudio --who scout`
+`../workshop/board.py next PCEStudio --who design`
 
-That is **#3**: take what is worth keeping from #1 (the PCE hardware-limits /
-"does not do" facts) into `../workshop/skills/<name>/SKILL.md`, run
-`install_skills.sh`, and have a **fresh session name the skill out loud**.
-Surveyed is not installed; installed is not loaded.
+That is **#5**: the browser background renderer. #3 stays parked until a card
+pays for a PCE lesson.
+
