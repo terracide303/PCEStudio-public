@@ -1,5 +1,7 @@
 # Plan — PCEStudio
 
+What it is: [docs/SPEC.md](SPEC.md) — an AI dev studio for the PC Engine / TurboGrafx.
+
 **Phase → Feature → Story. A story closes on evidence, never on opinion.**
 
 ```
@@ -48,32 +50,55 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 
 ### A .pce file out of the browser {refined} !8
 - [ ] #9 The browser glues the viewer and the picture into a .pce ~S — for the same data the browser's .pce is byte-for-byte equal to the one PCEAS builds, and it shows the picture in Mednafen @design #ds-flash
+- [ ] #25 The export also writes a TurboGrafx HuCard image ~S — a checkbox reverses the bits of every byte (US HuCards swap the data lines); the image is byte-for-byte the bit-reverse of the .pce, and it runs on a TurboGrafx or its flash cart (photo in docs/) @design #ds-flash
 
 ### A first editor {refined} !7
 - [ ] #10 Paint tiles, choose palettes from the 512 colours, paint the background map ~L — in the browser a 256x224 picture is drawn from scratch, exported with #9, and runs in Mednafen; the editor refuses anything the VDC cannot show (a 17th colour in a tile, a 17th palette) @design #ds-flash
 - [ ] #11 Phase 1 read cold ~M — docs/REVIEW.md lists what the evidence does not support, for #5 to #10 @review #sonnet
 
-## Phase 2 — Sprites and scanline magic
+## Phase 2 — The PC Engine's own tricks (docs/SPEC.md, "PC Engine tricks")
 
-### Sprites !6
+### Sprites !8
 - [?] #12 Sprites in the renderer: 16x16 to 32x64, 16 sprite palettes, priority, at most 16 sprites and 256 pixels a line ~M @design #opus
 - [?] #13 A sprite editor and the SATB in the export ~M @design #ds-flash
 - [?] #14 The viewer loads the sprites (SATB DMA) ~S @design #sonnet
+- [?] #28 Flicker multiplexing: more than 16 sprites on a line by rotating the sprite order each frame, with an example toy ~M @design #opus
 
-### Scanline effects !6
+### Scanline effects (the line interrupt) !8
 - [?] #15 The renderer: a scroll and a palette change per scanline ~M @design #opus
 - [?] #16 The viewer: the raster table driven by the line interrupt (RCR) ~M @design #opus
 - [?] #17 An effect editor: colour gradients, wobble, parallax bands ~M @design #ds-flash
+- [?] #29 Example toys for the classics: line-scroll parallax, a sky gradient, a pseudo-3D road, a fixed status bar, palette cycling ~M @design #ds-flash
 
+### The model's panels !6
+- [?] #26 The VDC's registers per line, the VCE palettes, the VRAM map, the SATB, and "follow a pixel" ~M @design #ds-flash
+- [?] #27 Wide modes: 256, 336 and 512 px (the three dot clocks), in the renderer and the viewer ~M @design #opus
+
+## Phase 3 — Toys as code, compiled for the real thing
+
+### Toys in the browser !7
+- [?] #30 A Lua subset runs live: init(), frame(t, f), raster(line), pad[1..5], bram ~L @design #opus
+
+### The compiler and the validator !7
+- [?] #31 The toy compiles to HuC6280 code (through PCEAS) and runs the same in Mednafen as in the browser ~L @design #opus
+- [?] #32 The validator: frame time at 60 Hz, sprites per line, VRAM and ROM fit, VCE writes in the blank, value ranges; export refuses a toy that fails ~L @design #opus
+- [?] #33 Phase 3 read cold ~M @review #sonnet
+
+## Phase 4 — Sound
+
+### The PSG !5
+- [?] #34 The PSG in the browser: 6 channels of 32-step 5-bit waves, noise, LFO, DDA samples; matches Mednafen by ear ~L @design #opus
+- [?] #35 A wave and sound editor, and sound in toys and exported ROMs ~M @design #ds-flash
+
+## Phase 5 — The AI link
+
+### The studio for agents !6
+- [?] #36 An MCP server: an agent reads and sets registers, renders a frame, runs the validator and exports a ROM ~L @design #opus
 ### The AI in the studio !6
 - [?] #24 Describe it, get it: a sentence ("a sunset sky over a scrolling sea") becomes palettes, tiles and scanline effects the PC Engine can really show, in the editor, ready to change by hand ~L @design #opus
   Which AI the page talks to, and how (the user's own key, or Claude through the page), is a decision for Dennis before this is refined.
 
-### TurboGrafx as well as PC Engine !7
-- [?] #25 The export can write a TurboGrafx HuCard image: the US cards swap the data lines, so each byte's bits are reversed; a checkbox, and the image runs on a TurboGrafx (or its flash cart) as well ~S @design #ds-flash
-
-## Phase 3 — Polish
-
+## Phase 6 — Polish and share
 ### Photo import !4
 - [?] #18 A photo becomes a PCE picture: 16 palettes of 16 chosen, each tile on its best palette ~L @design #opus
 
@@ -82,6 +107,9 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 
 ### Public release !5
 - [?] #20 PCEStudio goes public: the repo, and the page to use it ~S @you
+
+### Share !3
+- [?] #37 Publish a toy and play other people's ~L @design
 
 ## Ideas
 
