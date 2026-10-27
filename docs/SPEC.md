@@ -42,7 +42,7 @@ it does not have.
 
 ## The parts
 
-1. **The model** — the VDC, VCE and PSG in the browser, exact enough that a picture matches Mednafen pixel for pixel
+1. **The model** — **our own** VDC, VCE and PSG in the browser (not an emulator's code: see DECISIONS.md), exact enough that a picture matches Mednafen pixel for pixel
    and a sound matches by ear. With the PCE's own panels: VDC registers (all 20, per line), VCE palettes, VRAM map,
    SATB, PSG channels, "follow a pixel" (which tile, palette, sprite and register made it).
 2. **The editors** — tiles, palettes, BAT, sprites, raster table, PSG waves; image import that fits a picture into
