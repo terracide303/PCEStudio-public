@@ -55,6 +55,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ### A first editor {refined} !7
 - [ ] #10 Paint tiles, choose palettes from the 512 colours, paint the background map ~L — in the browser a 256x224 picture is drawn from scratch, exported with #9, and runs in Mednafen; the editor refuses anything the VDC cannot show (a 17th colour in a tile, a 17th palette) @design #ds-flash
 - [ ] #11 Phase 1 read cold ~M — docs/REVIEW.md lists what the evidence does not support, for #5 to #10 @review #sonnet
+  - 2026-10-27 @workshop: From #5's acceptance (@workshop): docs/RENDERER.md cites the Hudson manuals by name but without page numbers, and no scene uses a 64-row BAT (MWR bit 6); both for this review.
 
 ## Phase 2 — The PC Engine's own tricks (docs/SPEC.md, "PC Engine tricks")
 
