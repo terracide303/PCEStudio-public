@@ -7,10 +7,12 @@
 #   tools/capture.sh 1|2|3 viewer   # the #8 viewer ROMs (gen/viewerN.pce)
 #   tools/capture.sh 1|2|3 browser  # the #9 browser-built ROMs
 #                                   # (gen/browserN.pce, from renderer/pce-rom.js)
+#   tools/capture.sh 1|2|3 us       # the #25 US HuCard images
+#                                   # (gen/usN.pce, bit-reversed browser ROM)
 #
 # The modes differ only in the ROM that is built and run and in the dump
-# directory (tests/dumps/sceneN / viewerN / browserN); the route below is the
-# same for all three.
+# directory (tests/dumps/sceneN / viewerN / browserN / usN); the route below
+# is the same for all of them.
 #
 # Route (command line only — this Mac's user must never receive synthesized
 # keyboard/mouse events, so there is no F9 hotkey here):
@@ -41,7 +43,8 @@ case "$MODE" in
   scene)  NAME="scene${SCENE}" ;;
   viewer) NAME="viewer${SCENE}" ;;
   browser) NAME="browser${SCENE}" ;;
-  *) echo "mode must be scene, viewer or browser" >&2; exit 2 ;;
+  us) NAME="us${SCENE}" ;;
+  *) echo "mode must be scene, viewer, browser or us" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -54,6 +57,9 @@ echo "== build $NAME"
 if [ "$MODE" = browser ]; then
   # the browser path's own builder, not PCEAS (cards #9)
   node tests/check-export.js --write "$SCENE"
+elif [ "$MODE" = us ]; then
+  # the browser's US image: its .pce with every byte's bits reversed (#25)
+  node tests/check-us-card.js --write "$SCENE"
 else
   make -C tools "gen/$NAME.pce"
 fi

@@ -29,6 +29,10 @@
  *
  * Dual use: CommonJS module in Node (tests/check-export.js) and a browser
  * global (renderer/index.html) via a UMD-style wrapper, same as pce-bg.js.
+ *
+ * #25: reverseBits() turns that image into the US HuCard (TurboGrafx-16)
+ * image — the same bytes with every byte's bits reversed.  The page's
+ * checkbox calls it; the .pce path above is untouched.
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
@@ -75,6 +79,32 @@
   function u16(out, off, v) {
     out[off] = v & 0xFF;
     out[off + 1] = (v >> 8) & 0xFF;
+  }
+
+  /* US HuCard (TurboGrafx-16) images hold every byte with its bits reversed:
+   * bit 0 becomes bit 7, bit 1 becomes bit 6, and so on.  That is the card's
+   * rule (US HuCards swap the data lines); no source in this repo confirms
+   * the hardware claim — docs/EXPORT.md says what is and is not verified.  A
+   * US image is the PC Engine image with all eight bits of every byte
+   * reversed — a transform that is its own inverse
+   * (reverseBits(reverseBits(x)) === x).  The page's checkbox and
+   * tests/check-us-card.js both call this; nothing else in the ROM changes. */
+  var BIT_REVERSED = (function () {
+    var table = new Uint8Array(256);
+    for (var b = 0; b < 256; b++) {
+      var r = 0;
+      for (var i = 0; i < 8; i++) r |= ((b >> i) & 1) << (7 - i);
+      table[b] = r;
+    }
+    return table;
+  })();
+
+  function reverseBits(bytes) {
+    need(bytes && typeof bytes.length === "number",
+         "reverseBits: expected a byte array");
+    var out = new Uint8Array(bytes.length);
+    for (var i = 0; i < bytes.length; i++) out[i] = BIT_REVERSED[bytes[i]];
+    return out;
   }
 
   function concat(parts) {
@@ -177,6 +207,7 @@
   return {
     BANK: BANK,
     batWords: batWords,
-    buildRom: buildRom
+    buildRom: buildRom,
+    reverseBits: reverseBits
   };
 });
