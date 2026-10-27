@@ -22,9 +22,9 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 
 ## Phase 0 — Know what exists before writing anything
 
-### The ground is surveyed {refined}
-- [ ] #1 The working examples for a software project are found and judged — at least three candidates read (not just their READMEs), each with licence, maturity, what it is proven on and **what it does not do**; verdict recorded in `../workshop/CATALOGUE.md`; ends in use-it / adapt-it / write-our-own, with a reason @scout
-  **This is rule 1 as the first card.** Something already does most of this and works. Find it before inventing a worse one.
+### The ground is surveyed {refined} !9
+- [ ] #1 What already exists for making PC Engine graphics is found and judged ~S — docs/SURVEY.md names at least four candidates (PCE tile/palette editors, HuC and PCEAS, web pixel editors with palette limits, ppu.toys as the SNES idea) with licence, what each does and does NOT do, and ends in use-it / adapt-it / write-our-own for the renderer, the editor and the viewer ROM @scout #sonnet
+  The hardware facts are already ours: the Hudson manuals for the HuC6270 VDC, HuC6260 VCE and HuC6280 are in `/Volumes/External/MiniST_Project/PCEHeroTN/docs/datasheets/` (read them there; never copy them into this repo). Mednafen is installed for checking pictures.
 - [ ] #3 Anything worth keeping from #1 is INSTALLED AND CONFIRMED LOADED — the skill is in `../workshop/skills/<name>/SKILL.md`, `install_skills.sh` has been run, and **a fresh session has named it out loud as one it can see.** Surveyed is not installed; installed is not loaded @scout
   **A skill that did not load fails silently** — the session works normally and quietly lacks the thing it was added for. So this card does not close on "I installed it"; it closes on a new session listing it. See `../workshop/skills/README.md`.
 - [ ] #2 The one thing this project must do is written down, with how we will know it works — one paragraph, and a measurement @you
@@ -33,3 +33,53 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ### The rulebook grows, or none of this was worth setting up
 - [?] #4 The first retrospective has been run, and `../workshop/RULES.md` has more than one rule — the five questions in `../workshop/RETROSPECTIVE.md` answered, and whatever they produced landed in RULES.md, CATALOGUE.md, check.sh or skills/ @workshop
   **Left UNREFINED on purpose — you cannot reflect on a project that has not done anything yet.** Refine it when the first phase closes, or after any day that cost more than it should have. It is on the board from day one because a ritual nobody owns is the one that gets skipped in the week it would have mattered, and the rulebook growing is the only reason this method beats just working.
+
+## Phase 1 — A picture on a real PC Engine (the whole chain, once)
+
+### The PCE picture in the browser {refined} !9
+- [ ] #5 The background renderer draws exactly what the VDC and VCE draw ~M — a browser renderer for 256x224: 8x8 4-bit tiles, the BAT (tile number + palette), 16 palettes of 16 colours out of the VCE's 512; for three VRAM+palette dumps saved from Mednafen it matches Mednafen's screenshot pixel for pixel (diff 0, script in tests/) @design #opus
+  Read the HuC6270 and HuC6260 manuals (see #1's note) before writing a line; PCEHeroTN's sim/ and docs/ show how we learned the VDC. Plain JavaScript, no framework, no emulator code borrowed (keeps the licence ours).
+- [ ] #6 The renderer test fails on a broken renderer ~S — tests/ runs the three dumps against the screenshots, reports the diff, and fails when a palette index or a tile row is deliberately broken @test #sonnet +review
+
+### The viewer ROM {refined} !9
+- [ ] #7 The PCE assembler builds a ROM here ~S — PCEAS (from HuC) installed on this Mac; tools/hello.asm builds hello.pce, which shows a coloured screen in Mednafen; the install steps are in docs/BUILD.md @design #ds-flash
+- [ ] #8 A 6280 viewer shows a picture from data at fixed places ~M — viewer.asm loads 16 palettes into the VCE, tiles and the BAT into VRAM, sets the VDC to 256x224 and shows them; with #5's sample data it looks the same in Mednafen as in the browser renderer, and on the Tang Nano with PCEHeroTN (photo in docs/) @design #opus
+  The bank layout of the data goes in docs/ROM_LAYOUT.md: #9 depends on it.
+
+### A .pce file out of the browser {refined} !8
+- [ ] #9 The browser glues the viewer and the picture into a .pce ~S — for the same data the browser's .pce is byte-for-byte equal to the one PCEAS builds, and it shows the picture in Mednafen @design #ds-flash
+
+### A first editor {refined} !7
+- [ ] #10 Paint tiles, choose palettes from the 512 colours, paint the background map ~L — in the browser a 256x224 picture is drawn from scratch, exported with #9, and runs in Mednafen; the editor refuses anything the VDC cannot show (a 17th colour in a tile, a 17th palette) @design #ds-flash
+- [ ] #11 Phase 1 read cold ~M — docs/REVIEW.md lists what the evidence does not support, for #5 to #10 @review #sonnet
+
+## Phase 2 — Sprites and scanline magic
+
+### Sprites !6
+- [?] #12 Sprites in the renderer: 16x16 to 32x64, 16 sprite palettes, priority, at most 16 sprites and 256 pixels a line ~M @design #opus
+- [?] #13 A sprite editor and the SATB in the export ~M @design #ds-flash
+- [?] #14 The viewer loads the sprites (SATB DMA) ~S @design #sonnet
+
+### Scanline effects !6
+- [?] #15 The renderer: a scroll and a palette change per scanline ~M @design #opus
+- [?] #16 The viewer: the raster table driven by the line interrupt (RCR) ~M @design #opus
+- [?] #17 An effect editor: colour gradients, wobble, parallax bands ~M @design #ds-flash
+
+## Phase 3 — Polish
+
+### Photo import !4
+- [?] #18 A photo becomes a PCE picture: 16 palettes of 16 chosen, each tile on its best palette ~L @design #opus
+
+### Data for homebrew !3
+- [?] #19 Export tiles, palettes and the map as raw files and as a HuC include ~S @design #ds-flash-low
+
+### Public release !5
+- [?] #20 PCEStudio goes public: the repo, and the page to use it ~S @you
+
+## Ideas
+
+### Later
+- [?] #21 SuperGrafx: two background layers ~L
+- [?] #22 A CD-ROM image instead of a HuCard ~L
+- [?] #23 Animation: several pictures in one ROM ~M
+
