@@ -1,0 +1,92 @@
+<!doctype html>
+<!-- PCEStudio background renderer — browser view (card #5).
+     Shows the renderer's output next to Mednafen's F9 screenshot for the
+     three test dumps.  Serve the repo root and open renderer/index.html:
+         python3 -m http.server 8000
+     Dumps live in tests/dumps/sceneN/ (see tools/capture.sh). -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>PCEStudio — background renderer</title>
+<style>
+  body { font: 14px system-ui, sans-serif; background: #111; color: #ddd;
+         margin: 1.5rem; }
+  h1 { font-size: 1.2rem; }
+  .row { display: flex; gap: 2rem; align-items: flex-start; }
+  figure { margin: 0.5rem 0; }
+  figcaption { margin-bottom: 0.3rem; color: #aaa; }
+  canvas { image-rendering: pixelated; background: #000; }
+  #status { color: #f88; white-space: pre; }
+</style>
+</head>
+<body>
+<h1>PCEStudio background renderer — renderer vs Mednafen F9</h1>
+<p><label>scene
+  <select id="scene">
+    <option value="scene1">scene1 — flat</option>
+    <option value="scene2">scene2 — scroll</option>
+    <option value="scene3">scene3 — wide</option>
+  </select>
+</label>
+<span id="status"></span></p>
+<div class="row">
+  <figure>
+    <figcaption>renderer/pce-bg.js</figcaption>
+    <canvas id="out" width="256" height="232"></canvas>
+  </figure>
+  <figure>
+    <figcaption>mednafen.png (F9, raw)</figcaption>
+    <canvas id="ref" width="256" height="232"></canvas>
+  </figure>
+</div>
+<script src="pce-bg.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const status = (t) => { $("status").textContent = t; };
+
+function putImage(canvas, img) {
+  const ctx = canvas.getContext("2d");
+  const data = ctx.createImageData(canvas.width, canvas.height);
+  data.data.set(img.pixels.subarray
+    ? img.pixels.subarray(0, data.data.length)
+    : img.pixels.slice(0, data.data.length));
+  ctx.putImageData(data, 0, 0);
+}
+
+async function loadPng(url) {
+  const blob = await (await fetch(url)).blob();
+  const bmp = await createImageBitmap(blob);
+  const ctx = $("ref").getContext("2d");
+  ctx.drawImage(bmp, 0, 0);
+}
+
+async function show(scene) {
+  const base = `../tests/dumps/${scene}/`;
+  try {
+    status(`loading ${scene}…`);
+    const [vram, cram, regs] = await Promise.all([
+      (await fetch(base + "vram.bin")).arrayBuffer(),
+      (await fetch(base + "cram.bin")).arrayBuffer(),
+      (await fetch(base + "regs.json")).json(),
+    ]);
+    const frame = PCEStudio.bg.renderFrame({
+      vram: new Uint8Array(vram),
+      cram: new Uint8Array(cram),
+      regs,
+      width: 256,
+      height: 232,
+    });
+    putImage($("out"), frame);
+    await loadPng(base + "mednafen.png");
+    status(`scanline ${regs.scanline}, BG_YOffset ${regs.BG_YOffset}, BYR ${regs.BYR}`);
+  } catch (e) {
+    status(`error: ${e}`);
+  }
+}
+
+$("scene").addEventListener("change", (ev) => show(ev.target.value));
+show($("scene").value);
+</script>
+</body>
+</html>
