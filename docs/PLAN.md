@@ -39,7 +39,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ## Phase 1 — A picture on a real PC Engine (the whole chain, once)
 
 ### The PCE picture in the browser {refined} !9
-- [~] #5 The background renderer draws exactly what the VDC and VCE draw ~M — a browser renderer for 256x224: 8x8 4-bit tiles, the BAT (tile number + palette), 16 palettes of 16 colours out of the VCE's 512; for three VRAM+palette dumps saved from Mednafen it matches Mednafen's screenshot pixel for pixel (diff 0, script in tests/) @design #ds-pro
+- [x] #5 The background renderer draws exactly what the VDC and VCE draw ~M — node tests/check.js reports diff 0 for scene1/2/3 (commit edeea21) @design #ds-pro
   Read the HuC6270 and HuC6260 manuals (see #1's note) before writing a line; PCEHeroTN's sim/ and docs/ show how we learned the VDC. Plain JavaScript, no framework, no emulator code borrowed (keeps the licence ours).
 - [ ] #6 The renderer test fails on a broken renderer ~S — tests/ runs the three dumps against the screenshots, reports the diff, and fails when a palette index or a tile row is deliberately broken @test +review #ds-flash
 
