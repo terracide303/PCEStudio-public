@@ -11,7 +11,12 @@ If a detail is not here, it is history, not current truth.
 
 ## Where we stand
 
-Nothing yet. The first card is the survey of what already exists.
+Nothing built yet. The plan is on the board (docs/PLAN.md), written 2026-10-27 with Dennis:
+four parts — a renderer that draws exactly like the VDC/VCE (Phase 1, Claude), a 6280 viewer ROM (Claude),
+the .pce export and the editor (DeepSeek, reviewed). Facts come from the Hudson manuals in PCEHeroTN's
+docs/datasheets/ (read there, never copied here). Mednafen is installed; PCEAS is not yet (#7).
+
+DeepSeek cards (#ds-flash) need DEEPSEEK_API_KEY set before agents.py can start them.
 
 ## Next action
 
