@@ -22,11 +22,15 @@ captured row 0 = VCE scanline `14 + slstart = 18`.  *Source: Mednafen 1.32.1
 `src/pce/pce.cpp` (DisplayRect) and `src/pce/vce.cpp` (StartFrame); the crop
 is Mednafen's, our dumps and screenshots are both made with it.*
 
-**VDC BAT.** BAT word: bits 0–11 tile (character code), bits 12–15 palette;
-BAT lives at VRAM address 0.  MWR bits 4–5 set BAT width (0:32, 1:64, 2/3:128
-chars), bit 6 sets height (0:32, 1:64).  *Source: Hudson HuC6270 VDC manual
-(PCEHeroTN `docs/datasheets/text/HuC6270 VDC Manual …`), register and BAT
-entry chapters; HuDK `include/vdc.inc` confirms the bit positions.*
+**VDC BAT.** BAT word: bits 0–11 tile (character code), bits 12–15 CG COLOR
+(palette); BAT lives at VRAM address 0.  MWR bits 4–5 set BAT width (0:32, 1:64, 2/3:128
+chars), bit 6 sets height (0:32, 1:64).  The SCREEN table gives `011` as
+128×32 and `111` as 128×64, the same sizes as `010`/`110` — the row stride is
+the width in words for every code, so codes 2 and 3 share a stride of 128.
+*Source: Hudson HuC6270 VDC manual, PCEHeroTN `docs/datasheets/text/HuC6270
+VDC Manual - registers, VRAM write sequence, slots.txt`: MWR R09 p. H7-8,
+SCREEN table p. H7-9; BAT 2.3.2 p. H7-14 (word layout on the same page);
+HuDK `include/vdc.inc` confirms the bit positions.*
 
 **Tile decode.** Tile = character code × 16 VRAM words: words 0–7 are
 CH0 (bits 0–7) + CH1 (bits 8–15) for rows 0–7, words 8–15 are CH2/CH3.
@@ -35,11 +39,13 @@ i.e. **MSB = leftmost pixel** — and the pixel value is bit·CH0 + bit·CH1·2 
 bit·CH2·4 + bit·CH3·8.  Colour 0 of any BG palette is forced to CRAM entry
 0x000 (the backdrop).  Character codes ≥ 0x800 address beyond the
 32768-word VRAM; writes there are dropped and the display reads a zero tile
-(colour 0).  *Source: VDC manual (CG addressing, palette fixup); Mednafen
-`src/hw_video/huc6270/vdc.cpp` (FixTileCache: `tc[7-x] = bit x`, read at
-`bg_tile_cache[bat & 0xFFF][BG_YOffset & 7][BG_XOffset & 0x7]`; FixPCache:
-palette colour 0 → CRAM[0x000]; VRAM_Size = 32768 in `src/pce/pce.cpp`) as
-reference.*
+(colour 0).  *Source: VDC manual, CG 2.3.3 p. H7-15 (where a
+character's 16 words live); the palette fixup and the ≥ 0x800 rule are
+Mednafen behaviour, not statements found in the manual text searched here —
+Mednafen `src/hw_video/huc6270/vdc.cpp` (FixTileCache: `tc[7-x] = bit x`,
+read at `bg_tile_cache[bat & 0xFFF][BG_YOffset & 7][BG_XOffset & 0x7]`;
+FixPCache: palette colour 0 → CRAM[0x000]; VRAM_Size = 32768 in
+`src/pce/pce.cpp`) as reference.*
 
 **Scroll.** BG_YOffset latches per line at the HDS_PART2 hblank phase: the
 pending increment is applied and BG_YOffset = BG_YMoo, where BG_YMoo = BYR
@@ -48,15 +54,22 @@ thereafter; BG_XOffset latches to BXR at HDS_PART3 of the same line.  Both
 are 9-bit (BYR) / 10-bit (BXR) counters that wrap.  In Mednafen's timing the
 VDC's VDW phase begins at VCE line 17, one line before the first captured
 row (DisplayRect.y = 14 + slstart = 18), so captured row 0 is VDW line 1.
-*Source: VDC manual (BYR/BXR); Mednafen vdc.cpp (IncRCR, HPHASE_HDS_PART2/
-PART3) as reference.*
+*Source: VDC manual, BXR R07 and BYR R08 p. H7-7, 2.3.1–2.3.2 scroll control
+p. H7-13; Mednafen vdc.cpp (IncRCR, HPHASE_HDS_PART2/PART3) as reference.*
 
-**VCE colour.** CRAM: 512 entries of 9 bits — G=bits 6–8, R=bits 3–5,
-B=bits 0–2; RGB = 36 × channel (0…252).  The CG bit (bit 8 of the 16-bit
-storage, written via $0405) is a no-op for RGB output.  BG pixel → CRAM index
-`(palette<<4)|colour`.  *Source: Hudson HuC6260 VCE manual (CRAM layout);
-Mednafen `src/pce/vce.cpp` (`b=36*(x&7); r=36*((x&0x38)>>3); g=36*((x&0x1C0)>>6)`)
-as reference.*
+**VCE colour.** CRAM: 512 addresses × 9 bits (2.2.1, p. H6-4); each 3 bits
+are shared for G, R and B (2.2.2, p. H6-5).  This model reads them as
+G=bits 6–8, R=bits 3–5, B=bits 0–2 with RGB = 36 × channel (0…252).  There
+is no separate CG bit: bit 8 of the 16-bit storage is the **top bit of
+green**, and the renderer decodes it as such.  Bits 9+ are zero in every dump
+here, so this model claims nothing about what the VCE does with them.  BG
+pixel → CRAM index `(palette<<4)|colour`.  *Source: Hudson HuC6260 VCE
+manual, PCEHeroTN `docs/datasheets/text/HuC6260 VCE Manual - 0400 physical
+1FE400, dot clock select.txt`, 2.2.1 p. H6-4 and 2.2.2 p. H6-5; the
+channel order comes from Mednafen `src/pce/vce.cpp`
+(`b=36*(x&7); r=36*((x&0x38)>>3); g=36*((x&0x1C0)>>6)`) as reference — the
+manual's figure 2-2-1 is not transcribed in the text file, so the positions
+cannot be read from it.*
 
 ## The test ROMs (`tools/genroms.py`)
 
@@ -66,10 +79,16 @@ static, deterministic picture and loop.  They share the canonical HuDK
 *source: HuDK `include/vdc.s`, the working example `tools/hello.asm` uses the
 same values*), differ in MWR/BXR/BYR, and fill:
 
-- **CRAM**: entry i = (i·7 mod 512) — a bijection, so all 512 entries are
-  distinct — with the CG bit set on three displayed entries (scene 1 only,
-  to prove it is a no-op); entry 0x000 = 0x1FF (white backdrop canary) and
-  0x100 = 0x049 (blanking canary — appears only if a row leaves VDW).
+- **CRAM**: entry i = (i·7 mod 512) — a bijection mod 512 — OR'd with 0x100
+  on three entries, then 0x000 and 0x100 replaced by the canaries below.  All
+  three scenes share this table (same md5).  Bit 8 is green's top bit, and the
+  scenes really display it: the backdrop 0x1FF has it set on every colour-0
+  pixel, and 53 / 16 / 50 of the entries scenes 1 / 2 / 3 display (121 / 33 /
+  113 distinct) have it set.  Only one of the three OR'd entries, 0x0F5, is
+  displayed (in scene 2).  So the table *exercises* bit 8; it does not prove
+  anything a no-op (`docs/REVIEW.md`, finding 3).  Entry 0x000 = 0x1FF (white
+  backdrop canary) and 0x100 = 0x049 (blanking canary — appears only if a row
+  leaves VDW).  `tools/genroms.py`'s `cr_words` carries the same note.
 - **tiles**: scene 1 pseudo-random 8-bit rows (all 16 palettes, colour-0
   pixels present, 12-bit character codes 0x040+/0xF00+); scene 2 single-pixel
   checkerboards per plane (bit-order torture); scene 3 broad stripes.

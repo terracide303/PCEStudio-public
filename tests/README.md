@@ -2,6 +2,7 @@
 
 ```sh
 node tests/check.js             # diff the renderer against Mednafen, all scenes
+node tests/check-review-fixes.js # #38: each review fix, and it fails before
 node tests/renderer-mutation.js # prove that diff test fails on a broken renderer
 node tests/check-viewer.js      # viewer/browser ROM captures vs the renderer
 node tests/check-export.js      # the browser's .pce vs the PCEAS build, byte for byte
@@ -14,7 +15,25 @@ node tests/check-editor.js      # the editor's refusals, picture, export and cap
 For each `dumps/sceneN/`, renders `mednafen.png`'s frame from `vram.bin`,
 `cram.bin` and `regs.json` with `renderer/pce-bg.js` and compares every RGB
 byte. Prints `diff 0` or the differing-byte count plus sample pixels. Exit 0
-only if all three scenes match. This is #5's closing measurement.
+only if every picture matches.
+
+A dump whose CR has bit 7 clear (background off) is not a picture and is
+**not counted**: `dumps/us1` is Mednafen failing to run the US HuCard image
+(#25), not a rendered frame. The skip list is explicit and named dumps only;
+an unnamed background-off dump fails the run. So the shipped count is **10
+pictures**, not 11. This is #5's closing measurement.
+
+## `check-review-fixes.js` — the #38 fixes, and that they were needed
+
+The five small fixes from `docs/REVIEW.md` (finding 2: SCREEN code 3 BAT
+stride; finding 3: the CG-bit claim; finding 4: us1 counted as a picture;
+finding 7: a straddling tile region; finding 9: manual page numbers) each get
+a check. For each one the same predicate also runs against the pre-fix
+version — a source-string substitution that reproduces the defect, the
+review's own quoted output, or the review's quoted claim — and must reject
+it. Run the whole test against the commit before the fix and it reports 13
+failures; against the fix, 0. It is written by @design and flagged for
+@review to read cold.
 
 ## `renderer-mutation.js` — the diff test can fail (#6)
 

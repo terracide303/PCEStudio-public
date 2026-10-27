@@ -112,7 +112,9 @@ recomputed from the editor model and equals `pce-bg.js` drawing it; the ROM
 (40960 bytes, sha256 `670001f5…`) carries exactly the editor's config,
 palettes, BAT and tiles; `tests/dumps/painted/` is that ROM's Mednafen capture
 — its VRAM/CRAM/regs are the editor's and its frame equals the editor's
-picture, diff 0 — and `node tests/check.js` now reports 11 dumps diff 0. The
+picture, diff 0 — and `node tests/check.js` reports 10 pictures diff 0.
+(`us1` is no longer counted: its CR is 0, so Mednafen was not running the US
+image — #38, docs/REVIEW.md finding 4.) The
 real page headlessly reports the same bytes and `rules: 3/3 refused`. Details
 and limits: [`docs/EDITOR.md`](docs/EDITOR.md). The test was written by
 @design and is flagged for @review to read cold.

@@ -19,7 +19,9 @@
  *            descriptor order (tests/dumps/sceneN/regions.json for the
  *            sample scenes).  Regions whose VRAM destination word is 32768
  *            or higher are dropped: the VDC drops those writes and the
- *            renderer model reads them as colour 0.
+ *            renderer model reads them as colour 0.  A region that starts
+ *            below 32768 but ends past it throws (it cannot be described
+ *            truthfully; docs/EXPORT.md).
  *
  * Output: Uint8Array, an 8 KiB-banked headerless HuCard image.  Banks are
  * filled with 0xff; bank 1 holds the 64-byte config at offset 0 and the 16
@@ -156,6 +158,13 @@
            "region " + r + ": word count does not fit the descriptor (" +
            count * 16 + ")");
       if (dest >= 32768) continue;   /* writes past VRAM are dropped */
+      /* A region that starts inside VRAM but ends past it would be sliced
+       * short while its descriptor still promises the full length: the
+       * viewer would read the next region's bytes as this one's tail.
+       * docs/EXPORT.md says this throws, so it does. */
+      need(dest + count * 16 <= 32768,
+           "region " + r + ": words " + dest + ".." + (dest + count * 16) +
+           " run past the 32768-word VRAM");
       regions.push([dest, count * 16]);
     }
     need(regions.length <= MAX_REGIONS,

@@ -42,12 +42,15 @@ SATB = 0x7F00
 
 
 def cr_words():
-    """VCE colour table: all 512 entries distinct, plus CG bits on a few.
+    """VCE colour table: 512 9-bit values, plus 0x100 OR'd onto three entries.
 
     Entry i -> colour (i * 7) & 0x1FF (a bijection mod 512, so every 9-bit
-    value appears exactly once).  The CG bit (bit 8, written via $0405) is set
-    on a few entries that scene 1 displays, to verify it is a no-op for RGB
-    output.
+    value appears exactly once), OR'd with 0x100 on a few entries.  Bit 8 is
+    the top bit of green, not a separate CG bit, so that OR changes the
+    colour — it does not test a no-op (docs/REVIEW.md, finding 3).  Measured
+    on the dumps: 258 of the 512 values end with bit 8 set, and the scenes
+    display many of them (the backdrop 0x1FF always).  The data is left as it
+    was published so the captures stay comparable.
     """
     cg = {0x010, 0x0F5, 0x155}
     words = [((i * 7) & 0x1FF) | (0x100 if i in cg else 0) for i in range(512)]
