@@ -28,3 +28,10 @@ for review (a different AI than the builder), and for an escalation after DeepSe
 keeps its own sessions short. **DeepSeek is prepaid**: check `../workshop/agents.py balance` before a run; when it
 is empty, stop and tell Dennis, who tops it up.
 
+## 2026-10-27 — Claude is the project manager (Dennis)
+
+@workshop runs on Claude and manages PCEStudio as autonomously as possible: it routes cards, starts and follows the
+DeepSeek seats, checks their evidence, closes or escalates cards, and goes straight on to the next card without
+waiting for Dennis. Its own Claude use is the main Claude spend until Saturday, so it waits on agents with
+`agents.py wait` (no polling), reads logs only when a card fails, and keeps messages to Dennis to a line.
+
