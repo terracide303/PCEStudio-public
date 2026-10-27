@@ -41,7 +41,8 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ### The PCE picture in the browser {refined} !9
 - [x] #5 The background renderer draws exactly what the VDC and VCE draw ~M — node tests/check.js reports diff 0 for scene1/2/3 (commit edeea21) @design #ds-pro
   Read the HuC6270 and HuC6260 manuals (see #1's note) before writing a line; PCEHeroTN's sim/ and docs/ show how we learned the VDC. Plain JavaScript, no framework, no emulator code borrowed (keeps the licence ours).
-- [ ] #6 The renderer test fails on a broken renderer ~S — tests/ runs the three dumps against the screenshots, reports the diff, and fails when a palette index or a tile row is deliberately broken @test +review #ds-flash
+- [c] #6 The renderer test fails on a broken renderer ~S — tests/ runs the three dumps against the screenshots, reports the diff, and fails when a palette index or a tile row is deliberately broken @test +review #ds-flash
+  - 2026-10-27 @test: mutation test added: node tests/renderer-mutation.js — 3 dumps diff 0 baseline; palette-index and tile-row breaks both DETECTED with the measured byte count; blind-checker and no-op self-tests pass; what it cannot prove is in tests/README.md
 
 ### The viewer ROM {refined} !9
 - [x] #7 The PCE assembler builds a ROM here ~S — PCEAS 3.23 (52a556a, uli/huc) built from source and installed at ~/.local/bin/pceas; make -C tools builds tools/hello.pce (8192 bytes, sha256 9be7ead2...); Mednafen 1.32.1 shows a solid red screen, docs/hello-mednafen.png is 256x232 with every pixel RGB (252,0,0); install/build steps in docs/BUILD.md @design #ds-flash
