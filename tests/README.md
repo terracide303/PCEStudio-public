@@ -6,6 +6,9 @@ node tests/check-il.js          # #31: the three #30 toys through Lua -> IL -> t
 node tests/check-il-console.js  # #31 parts A and C: the palette toy and
                                 # parallax.lua through IL -> C -> llvm-mos ->
                                 # Mednafen, frames and state vs the browser
+node tests/check-validate.js    # #32: the validator on the IL — the five #29
+                                # toys' budgets, the parallax cycle prediction,
+                                # over-budget toys refused, and the export gate
 node tests/check.js             # diff the renderer against Mednafen, all scenes
 node tests/check-review-fixes.js # #38: each review fix, and it fails before
 node tests/renderer-mutation.js # #6/#39: prove that diff test fails on a broken renderer
@@ -734,3 +737,30 @@ for pixel.
 example has been exported to a `.pce` (that is #31's next half) or run in an
 emulator. The toys and this check were written by the same seat (rule 2: a cold
 break is owed).
+
+## `check-validate.js` — the validator (#32)
+
+`renderer/pce-validate.js` prices a toy on its IL: it runs the reference IL
+interpreter with one observer per instruction and computes `frame()`'s cycles,
+every `raster(line)` call's cycles, the sprite budget (#50's model), VRAM and
+ROM fit, each raster entry's replay cost against part C's blank, and the value
+ranges. `docs/VALIDATE.md` gives the per-op cycle table and says where each
+number comes from (the HuC6280 timings' shapes; a scale calibrated on part A's
+7,417-cycle palette frame and part C's 1,204-cycle parallax `frame()`).
+
+`node tests/check-validate.js` exits 0 with 143 checks. The five #29 toys pass
+and their budgets are printed; parallax's prediction is held out of the
+calibration and must be within the stated 15% of part C's TMA measurements
+(`frame()` 1,203 vs 1,204, mean `raster()` 1,398 vs 1,510, −7.4%). A frame()
+loop too long is refused `validate-frame-budget`, 17 sprites on a line
+`validate-sprite-line` (16 is the 256-px boundary and passes), a ROM estimated
+past 1 MB `validate-rom`, and `reg("BXR", 2000)` the host's `reg-range`; all
+four are also refused by `tools/toyc/emit.js`, which runs the validator before
+the C emitter and exits 1 with the code. `road.lua` passes with `135 cycles`
+of warning on every line: part C's replay handler fits two registers, not a
+register and a colour word.
+
+Not proven: the table is calibrated on two toys and Mednafen only; the ROM
+estimate is ±2x per function; the rate and blank overruns are warnings, not
+refusals (the five toys must pass). The test was written by the seat that
+wrote the validator (rule 2: a cold break is owed).

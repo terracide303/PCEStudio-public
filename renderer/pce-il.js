@@ -1846,6 +1846,7 @@
       var fn = functions[fid];
       var code = fn.code;
       var pc = 0;
+      var onOp = typeof options.onOp === "function" ? options.onOp : null;
       frame.upvals = upvals;
       function cnt(operand) {
         if (!operand) return undefined;
@@ -1856,6 +1857,10 @@
       while (pc < code.length) {
         var ins = code[pc];
         checkBudget(ins.line);
+        /* #32's observation point: one call per executed instruction.  It
+         * sees the function id (the hooks are program.hooks.frame/raster), the
+         * IL instruction and its frame, and cannot change what the IL does. */
+        if (onOp) onOp(fid, ins, frame);
         switch (ins.t) {
         case "const":
           frame.regs[ins.dst].v = ins.k.t === "nil" ? undefined
