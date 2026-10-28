@@ -52,6 +52,7 @@
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const vm = require("vm");
 const { pathToFileURL } = require("url");
@@ -681,7 +682,7 @@ function checkBrowser() {
     console.log("NOT RUN  browser: " + CHROME + " is not installed");
     return "not-run";
   }
-  const profile = path.join(process.env.TMPDIR || path.dirname(PAGE),
+  const profile = path.join(process.env.TMPDIR || os.tmpdir(),
                             "pcestudio-chrome-" + process.pid);
   const url = pathToFileURL(PAGE).href +
     "?selftest=1&frames=40&example=palette";
