@@ -132,3 +132,40 @@ Dennis: "just copy it inside, we'll fix licences later". The maintained HuC (pce
 replaces the 2026-10-27 rule that PCEAS stays an external tool. PCEStudio is **private**; before it is ever made
 public the HuC copy needs a settled licence or must be removed with its history. #54 builds PCEAS from this copy;
 #31 weighs compiling toys through HuC's C compiler.
+
+## 2026-10-28 — the #16 viewer's raster chain: parallel arrays, not a record walker
+
+The #16 table (per-scanline VDC/VCE writes run from the viewer's RCR interrupt) is stored as **16 parallel
+per-step arrays** in a fixed 3856-byte image at bank 1 offset `$640`, copied to RAM `$2800` (the layout:
+[`ROM_LAYOUT.md`](ROM_LAYOUT.md); the #15 scene ROMs' proven r_step/r_chain pattern is its ancestor).  The
+alternatives were tried and rejected on the HBlank budget, which the Mednafen 1.32.1 phase machine fixes
+(`vdc.cpp` `IncRCR`/`Run`; [`MANUALS.md`](MANUALS.md) §16):
+
+- **A record walker** (one header per step: op byte, chain word, then the values the op names — the scene ROMs'
+  shape).  Rejected: chasing the variable-length payload costs an indirect walk per value, and the worst step (all
+  op bits, two colour-table writes) measures over the ~111-cycle BXR-latch budget — the interrupt fires only ~4
+  VDC masters before HBlank's end, so the budget is the distance to the *latches*, not to the line's end.
+- **A dispatch table of eight op-shaped handlers.**  Rejected for size: eight handlers × the boot-time table copy
+  bloats bank 0 past its fixed contract, and the per-handler duplication is what the op-byte mask avoids.
+- **Page-aligned value arrays** (so a step's lo/hi pair never crosses a page).  Rejected: 224 bytes of padding per
+  array would not fit bank 1 beside the SAT.  The arrays are **packed** (240 bytes apart, `r_chain_lo` alone
+  page-aligned via a 12-byte pad): crossing a page costs one extra cycle on the affected reads, and the measured
+  worst step (~108 cycles) stays inside the budget.
+
+Two handler variants (plain / frame-counter) are dispatched through a RAM patch (`$2020`, the irq1 vector's cell)
+instead of one handler testing the flag per interrupt: the flag test costs cycles on **every** step, the patch
+costs once at boot.  No `pha/phx/phy` in the handler: the main loop is `bra loop` and touches nothing the handler
+uses, so there is nothing to save — and the saves are 9 of the cycles the budget was short by.  Entry lines run
+0–240 (`rcr = 0x40 + line`; line 0 fires as VDW starts, line 240 in the HBlank after the last display line); the
+step cell `< $30` and frame counter `< $31` keep the #15 scene ROMs' contract that `tools/raster-patch.py` reads
+back.
+
+
+## 2026-10-28 — Music is made in a tracker: Furnace (Dennis)
+
+Dennis: "a tracker, use the best one". The pick is **Furnace** (github.com/tildearrow/furnace): free and open,
+actively developed (last push 2026-10-27), supports the PC Engine's PSG including noise and DDA samples, and its
+`.fur` format is documented. DefleMask, the other PCE tracker, is closed and paid. Furnace stays the user's own
+program; PCEStudio reads the songs it saves (our own reader), plays them through `renderer/pce-psg.js` in the
+browser, and puts them in the exported ROM with a HuC6280 sound driver. Which driver (an existing one or our own)
+is #35's first question.
