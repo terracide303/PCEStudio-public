@@ -206,18 +206,30 @@ What is left on #35: that cycle model (for sample equality), the export path
 page that plays a DMF, and sound in toys (#30). Both checkers were written by
 the builder — @review owes them a cold break (rule 2). `docs/HUTRACK.md`.
 
-**#31 is half done (the IL).** `docs/IL.md` defines PCEStudio's typed IL;
-`renderer/pce-il.js` lowers the #30 Lua subset to it (through Fengari's own
-parser, not a second one) and a reference interpreter runs it over
-`renderer/pce-toyhost.js`, the host the Lua runtime now uses too
-(`renderer/pce-toys.js` was refactored onto it; its 718 checks still pass).
-`node tests/check-il.js` exits 0: 973 checks — #30's three toys through
-Lua → IL → interpreter give byte-equal state, identical raster tables and
-diff-0 pixels to the Fengari run for 40 frames each, the IL's structure and
-types are asserted, and the host's and the IL's refusals come back by code.
-NOT done: machine code (the backends — IL → C/LLVM for llvm-mos, IL → C for
-HuC, IL → direct HuC6280 — and their comparison are the card's next half), a
-browser page for the IL, strings/passwords/`note`, table reads.
+**#31: the IL half and part A of the console half are done; the card is not.**
+`docs/IL.md` defines PCEStudio's typed IL; `renderer/pce-il.js` lowers the #30
+Lua subset to it (through Fengari's own parser, not a second one) and a
+reference interpreter runs it over `renderer/pce-toyhost.js`, the host the Lua
+runtime now uses too (`renderer/pce-toys.js` was refactored onto it; its 718
+checks still pass). `node tests/check-il.js` exits 0: 973 checks — #30's three
+toys through Lua → IL → interpreter give byte-equal state, identical raster
+tables and diff-0 pixels to the Fengari run for 40 frames each, the IL's
+structure and types are asserted, and the host's and the IL's refusals come
+back by code. **Part A of the console half** adds `renderer/pce-cgen.js` (IL →
+C), `tools/toyc/` (the console runtime), `tools/build-toyc.sh` (llvm-mos's PCE
+target, installed externally under `/Volumes/External II/pce-tools/llvm-mos`)
+and `tools/capture-toy.sh`. `node tests/check-il-console.js` exits 0: 47
+checks — #30's palette toy through IL → C → llvm-mos → an 8 KiB ROM, run in
+Mednafen; the ROM rebuilds byte-identically, the last 8 of 149 recorded frames
+are diff 0 in order against the browser's frames 5..12 (exactly one
+alignment), vram/cram/sat are byte-equal at the aligned frame, and the TMA
+timer measures **7,417 cycles/frame** (~6.2% of a 60 Hz frame). Code: used
+.text 2,725 B + .rodata 10 B of the 8 KiB bank. NOT done: part B (HuC), part C
+(`raster()` on the console), part D (the measured llvm-mos vs HuC vs direct
+comparison), any toy but the palette one, sprites/pads, a browser page for the
+IL, strings/passwords/`note`, table reads; recursion and repeated closure
+sites are unguarded; rule 2 cold breaks are owed for both test files.
+`docs/IL.md` §9 has the measurements and the two llvm-mos findings.
 
 ## Next action
 

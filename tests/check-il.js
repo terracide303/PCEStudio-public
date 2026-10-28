@@ -543,4 +543,18 @@ function main() {
               "the IL's structure and both refusal sets");
 }
 
-main();
+/* #31 part A's console test needs the SAME toy source this file runs, not a
+ * copy that could drift: requiring this file defines the sources and runs
+ * nothing (require.main is not this module), so tests/check-il-console.js
+ * compiles exactly these strings. */
+if (require.main === module) main();
+
+module.exports = {
+  FRAMES: FRAMES,
+  SETUP: SETUP,
+  TOY_PALETTE: TOY_PALETTE,
+  TOY_RASTER: TOY_RASTER,
+  TOY_SPRITE: TOY_SPRITE,
+  TOY_BREADTH: TOY_BREADTH,
+  TOY_HELPERS: TOY_HELPERS
+};

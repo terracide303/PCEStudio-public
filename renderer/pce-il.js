@@ -56,10 +56,11 @@
  * plus the host's own codes, unchanged (reg-forbidden, reg-range, pal-range,
  * vram-range, sat-range, sprite-range, raster-line, raster-line-full).
  *
- * What this file deliberately does NOT do: machine code. The backends
- * (IL -> C/LLVM for llvm-mos, IL -> C for HuC, IL -> direct HuC6280) and
- * their comparison are the card's next half. No backend-specific choice is
- * baked in here; the IL's types and op list are what they will read.
+ * What this file deliberately does NOT do: machine code. The backend is
+ * renderer/pce-cgen.js (part A: the IL -> C -> llvm-mos route, docs/IL.md
+ * §9); the HuC route, a direct HuC6280 generator and their comparison are
+ * later. No backend-specific choice is baked in here; the IL's types and op
+ * list are what every backend reads.
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {

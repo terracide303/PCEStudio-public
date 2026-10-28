@@ -134,15 +134,55 @@ def parse_png(data):
 
 def main():
     if len(sys.argv) < 3:
-        print(f"usage: {sys.argv[0]} IN.mov OUT.png [CROPW CROPH [XSTEP]]",
+        print(f"usage: {sys.argv[0]} IN.mov OUT.png [CROPW CROPH [XSTEP]]\n"
+              f"       {sys.argv[0]} IN.mov --all OUTDIR [CROPW CROPH [XSTEP]]",
               file=sys.stderr)
         return 2
-    src, out = sys.argv[1], sys.argv[2]
-    crop = (int(sys.argv[3]), int(sys.argv[4])) if len(sys.argv) >= 5 else None
-    xstep = int(sys.argv[5]) if len(sys.argv) >= 6 else 1
+    src = sys.argv[1]
+    all_mode = sys.argv[2] == "--all"
+    out = sys.argv[3] if all_mode else sys.argv[2]
+    crop_args = sys.argv[4:] if all_mode else sys.argv[3:]
+    crop = (int(crop_args[0]), int(crop_args[1])) if len(crop_args) >= 2 else None
+    xstep = int(crop_args[2]) if len(crop_args) >= 3 else 1
 
     data = open(src, "rb").read()
     print(f"{src}: {len(data)} bytes")
+
+    def crop_rows(rows, w, h):
+        if not crop:
+            return w, h, rows
+        cw, ch = crop
+        if cw * xstep > w or ch > h:
+            print(f"crop {cw}x{ch} xstep {xstep} larger than frame {w}x{h}",
+                  file=sys.stderr)
+            raise SystemExit(1)
+        return cw, ch, [b"".join(r[x * 3:x * 3 + 3]
+                                 for x in range(0, cw * xstep, xstep))
+                        for r in rows[:ch]]
+
+    if all_mode:
+        # Every complete PNG the container carries, in order: #31 part A
+        # compares a run of consecutive Mednafen frames with the browser's.
+        os.makedirs(out, exist_ok=True)
+        hit = 0
+        n = 0
+        while True:
+            hit = data.find(PNG_SIG, hit)
+            if hit < 0:
+                break
+            v = valid_png_at(data, hit)
+            if not v:
+                hit += 1
+                continue
+            w, h, end = v
+            rw, rh, rows = parse_png(data[hit:end])
+            rw, rh, rows = crop_rows(rows, rw, rh)
+            path = os.path.join(out, "frame%04d.png" % n)
+            write_png(path, rw, rh, rows)
+            n += 1
+            hit = end
+        print(f"wrote {n} frames to {out} ({rw}x{rh})")
+        return 0 if n else 1
 
     # Walk signature hits backwards until one validates; the mov's trailing
     # atoms come after the last frame, so the last complete PNG is the frame.
@@ -165,16 +205,7 @@ def main():
     print(f"last frame: {w}x{h}")
 
     rw, rh, rows = parse_png(png)
-    if crop:
-        cw, ch = crop
-        if cw * xstep > w or ch > h:
-            print(f"crop {cw}x{ch} xstep {xstep} larger than frame {w}x{h}",
-                  file=sys.stderr)
-            return 1
-        rows = [b"".join(r[x * 3:x * 3 + 3]
-                         for x in range(0, cw * xstep, xstep))
-                for r in rows[:ch]]
-        rw, rh = cw, ch
+    rw, rh, rows = crop_rows(rows, rw, rh)
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
     write_png(out, rw, rh, rows)
     print(f"wrote {out}: {rw}x{rh}")
