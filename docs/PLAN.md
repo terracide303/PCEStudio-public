@@ -71,9 +71,9 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ## Phase 2 — The PC Engine's own tricks (docs/SPEC.md, "PC Engine tricks")
 
 ### Sprites !8
-- [?] #12 Sprites in the renderer: 16x16 to 32x64, 16 sprite palettes, priority, at most 16 sprites and 256 pixels a line ~M @design #opus
+- [ ] #12 Sprites in the renderer: 16x16 to 32x64, 16 sprite palettes, priority, at most 16 sprites and 256 pixels a line ~M — renderer/pce-sprites.js draws the SATB as the VDC does: 64 entries, sizes 16x16 to 32x64, X/Y flips, 16 sprite palettes (VCE 0x100+), priority against the BG and between sprites, at most 16 sprites a line (the rest dropped, in SATB order); our own test ROMs cover each size, both flips, both priorities and a 17-sprite line, captured from Mednafen the command-line way, diff 0 on every capture; then a different seat () breaks it per RULES.md rule 2 and the test catches every break it finds @workshop #ds-pro
 - [?] #13 A sprite editor and the SATB in the export ~M @design #ds-flash
-- [?] #14 The viewer loads the sprites (SATB DMA) ~S @design #sonnet
+- [ ] #14 The viewer loads the sprites (SATB DMA) ~S — viewer.asm loads a SATB and starts the VDC's SATB DMA each frame (DCR/SATB registers, Hudson VDC manual pages cited); the browser export carries it (docs/ROM_LAYOUT.md updated); for #12's sprite scenes the viewer's Mednafen frame equals the renderer's, diff 0 @workshop #ds-pro
 - [?] #28 Flicker multiplexing: more than 16 sprites on a line by rotating the sprite order each frame, with an example toy ~M @design #opus
 
 ### Scanline effects (the line interrupt) !8
