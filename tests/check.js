@@ -34,6 +34,14 @@
  * first (checkRaster below: the table must describe what the ROM actually
  * wrote — the save state's registers, colour table and RCR chain are the
  * witnesses), and the renderer gets the table as opts.raster.
+ *
+ * #28: a dump with flicker.json is the flicker viewer's capture.  Besides
+ * the single-frame check above (the dump's own state must render its last
+ * frame — the rotated SATB really reached the VDC), it carries the last N
+ * recorded frames (flicker-0..N-1.png): checkFlicker below renders frame N
+ * of the rotation from the base SAT and requires all N consecutive phases
+ * diff 0, then measures the union of the captured frames: every sprite of
+ * the fixture shows in at least one frame and is dropped in at least one.
  */
 
 "use strict";
@@ -43,6 +51,7 @@ const path = require("path");
 const zlib = require("zlib");
 const bg = require("../renderer/pce-bg.js");
 const sprites = require("../renderer/pce-sprites.js");
+const flicker = require("../renderer/pce-flicker.js");
 
 /* ---- minimal PNG reader: 8-bit, non-interlaced, colour types 0/2/6 ---- */
 function decodePng(buf) {
@@ -323,6 +332,260 @@ function checkScene(dir) {
   return { kind: "error" };
 }
 
+/* ---- #28: the flicker capture -----------------------------------------
+ *
+ * A dump with flicker.json is the viewer ROM of a flicker picture.  The ROM
+ * was built from a base SAT plus a rotation rule (step, phases and the
+ * band's geometry — tools/genroms.py wrote gen/<scene>.flicker.json and
+ * genviewer.py put step/phases in the config); capture.sh keeps the last
+ * `phases` recorded frames as flicker-0..N-1.png (consecutive).
+ *
+ * The frames are rendered from the BASE SAT rotated by the rule, not from
+ * the dump's saved SATB, so a viewer that did not rotate, rotated by the
+ * wrong step, or built its copies at the wrong VRAM address cannot pass.
+ *
+ *   - the viewer's VRAM $7f00 holds the scene's base SAT (phase 0's copy);
+ *   - exactly one q0 makes all N frames byte-equal to renders of phases
+ *     (q0+i) mod N — the card's "each frame diff 0 against the renderer's
+ *     frame N", and the proof the frames are CONSECUTIVE phases (a static
+ *     SAT has no q0: the N renders differ);
+ *   - the saved SATB is the last frame's phase (the DMA carried the rotated
+ *     SAT the rule names);
+ *   - the union: at a pixel only sprite i can paint — its exclusive columns
+ *     outside sprite i-1's 16-px body, where sprite i is opaque and the
+ *     background is not — every captured frame shows sprite i exactly in
+ *     the frames the rule keeps it, every sprite shows at least once (the
+ *     union is all of them) and is dropped at least once (it really was
+ *     multiplexed).
+ *
+ * The kept-set arithmetic (which 16 of N sprites survive the VDC's line
+ * search in phase q) is pce-flicker.js's, the renderer's model; the
+ * measurement is on the captured pixels.  Both the model and the captures
+ * are held to the fixture rule genroms.py wrote, and the frame diffs make
+ * the pictures the renderer's.
+ */
+const FLICKER_SAT = 0x7f00;
+
+function pixelDiff(a, b) {
+  let n = Math.abs(a.pixels.length - b.pixels.length);
+  const len = Math.min(a.pixels.length, b.pixels.length);
+  for (let i = 0; i < len; i++) if (a.pixels[i] !== b.pixels[i]) n++;
+  return n;
+}
+
+function sameRgb(a, b) {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+function rgbAt(img, x, y) {
+  const o = (y * img.width + x) * 3;
+  return [img.pixels[o], img.pixels[o + 1], img.pixels[o + 2]];
+}
+
+function checkFlicker(dir) {
+  const name = path.basename(dir);
+  const rule = JSON.parse(fs.readFileSync(path.join(dir, "flicker.json"),
+                                          "utf8"));
+  const scene = path.join(__dirname, "dumps", rule.scene);
+  const problems = [];
+  const phases = rule.phases;
+
+  const sceneVram = fs.readFileSync(path.join(scene, "vram.bin"));
+  const cram = fs.readFileSync(path.join(scene, "cram.bin"));
+  const regs = JSON.parse(fs.readFileSync(path.join(scene, "regs.json"),
+                                          "utf8"));
+  const base = Buffer.from(sceneVram.slice(FLICKER_SAT * 2,
+                                          FLICKER_SAT * 2 + 512));
+  const vvram = fs.readFileSync(path.join(dir, "vram.bin"));
+  const firstScanline = 14 + (regs.slstart != null ? regs.slstart : 4);
+  const opts = { vram: sceneVram, cram, regs, height: 232, firstScanline };
+  const vdwLine0 = regs.RCRCount - (regs.scanline - firstScanline);
+
+  /* 1. the viewer's phase-0 copy is the scene's base SAT, and the scene's
+   * populated entries are exactly 0..sprites-1 (sprite i is SAT entry i —
+   * the rule's geometry and the union check both name sprites that way). */
+  if (!vvram.slice(FLICKER_SAT * 2, FLICKER_SAT * 2 + 512).equals(base))
+    problems.push(`${name}: VRAM $7f00 is not the base SAT of ` +
+                  `${rule.scene} (phase 0's copy is missing or rotated)`);
+  let populated = 0;
+  for (let i = 0; i < 64; i++) {
+    const y = base[i * 8] | (base[i * 8 + 1] << 8);
+    const x = base[i * 8 + 2] | (base[i * 8 + 3] << 8);
+    if (y || x) {
+      if (i >= rule.sprites)
+        problems.push(`${name}: SAT entry ${i} is populated but the rule ` +
+                      `says ${rule.sprites} sprites`);
+      populated++;
+    }
+  }
+  if (populated !== rule.sprites)
+    problems.push(`${name}: ${populated} populated SAT entries, the rule ` +
+                  `says ${rule.sprites}`);
+
+  /* 2. the consecutive frames and the phase renders */
+  const frames = [];
+  for (let i = 0; i < phases; i++) {
+    const p = path.join(dir, `flicker-${i}.png`);
+    if (!fs.existsSync(p)) {
+      console.log(`${name}: missing ${path.basename(p)} — re-run ` +
+                  `tools/capture.sh flicker`);
+      return 1;
+    }
+    frames.push(decodePng(fs.readFileSync(p)));
+  }
+  const phaseImg = [];
+  for (let q = 0; q < phases; q++)
+    phaseImg.push(flicker.renderFrame(Object.assign({ sat: base }, opts),
+                                      rule, q));
+  for (let a = 0; a < phases; a++)
+    for (let b = a + 1; b < phases; b++)
+      if (pixelDiff(phaseImg[a], phaseImg[b]) === 0)
+        problems.push(`${name}: phases ${a} and ${b} render identically; the ` +
+                      `fixture cannot tell them apart`);
+
+  let q0 = null, q0Count = 0;
+  const diffs = [];
+  for (let q = 0; q < phases; q++) {
+    let d = 0;
+    for (let i = 0; i < frames.length; i++)
+      d += pixelDiff(frames[i], phaseImg[(q + i) % phases]);
+    diffs.push(d);
+    if (d === 0) { q0 = q; q0Count++; }
+  }
+  if (q0Count !== 1) {
+    problems.push(`${name}: ${q0Count} phase alignment(s) make all ` +
+                  `${frames.length} frames diff 0 (want exactly 1; diff ` +
+                  `counts by starting phase ${diffs.join("/")})`);
+  }
+
+  /* 3. the saved SATB is the last frame's phase */
+  if (q0 != null) {
+    const lastPhase = (q0 + frames.length - 1) % phases;
+    const want = Buffer.from(flicker.rotateSat(base, rule.step, lastPhase));
+    const have = fs.readFileSync(path.join(dir, "sat.bin"));
+    if (!have.equals(want))
+      problems.push(`${name}: sat.bin is not phase ${lastPhase} — the last ` +
+                    `frame's rotated SATB did not reach the VDC`);
+  }
+
+  /* 4. the sprites, measured on the captures.
+   *
+   * A signature pixel per sprite: inside the columns only that sprite can
+   * paint (sprite i-1's 16-px body ends 6 columns into sprite i at 10-px
+   * spacing; the first and last sprites use the band edge) and where the
+   * sprite alone paints over the background.  In a frame that does not show
+   * sprite i the same pixel is background, so the colour tests the sprite's
+   * presence directly — no other sprite can paint there. */
+  const boxBg = sprites.renderFrame(Object.assign(
+    { sat: new Uint8Array(flicker.BYTES) }, opts));
+  const x0 = rule.sat_x0 - 32, dx = rule.sat_dx;
+  const yTop = rule.sat_y - 64;
+  const sigs = [];
+  for (let i = 0; i < rule.sprites; i++) {
+    const aloneSat = new Uint8Array(flicker.BYTES);
+    aloneSat.set(base.slice(i * 8, i * 8 + 8), i * 8);     /* 4 words */
+    const alone = sprites.renderFrame(Object.assign({ sat: aloneSat }, opts));
+    const xLo = x0 + i * dx + (i === 0 ? 0 : 6);
+    const xHi = x0 + i * dx + (i === rule.sprites - 1 ? rule.width - 1 : 9);
+    let sig = null;
+    for (let y = yTop; y < yTop + rule.height && !sig; y++) {
+      const ry = y - vdwLine0;
+      if (ry < 0 || ry >= alone.height) continue;
+      for (let x = Math.max(0, xLo); x <= Math.min(alone.width - 1, xHi);
+           x++) {
+        if (!sameRgb(rgbAt(alone, x, ry), rgbAt(boxBg, x, ry))) {
+          sig = { x: x, y: ry, alone: alone };
+          break;
+        }
+      }
+    }
+    if (!sig) {
+      problems.push(`${name}: sprite ${i} paints no pixel outside sprite ` +
+                    `${i - 1}'s body — the fixture cannot name it in a ` +
+                    `capture`);
+    }
+    sigs.push(sig);
+  }
+
+  /* 4a. the fixture's own static scene capture: the 16-strip search on the
+   * base SAT keeps 16 of the 24, and the capture shows exactly those. */
+  let sceneShown = null;
+  const scenePng = path.join(scene, "mednafen.png");
+  if (fs.existsSync(scenePng)) {
+    const ref = decodePng(fs.readFileSync(scenePng));
+    const kept0 = flicker.keptSprites(rule, base, yTop, 0);
+    let shown = 0;
+    for (let i = 0; i < rule.sprites; i++) {
+      const sig = sigs[i];
+      if (!sig) continue;
+      const got = sameRgb(rgbAt(ref, sig.x, sig.y),
+                          rgbAt(sig.alone, sig.x, sig.y));
+      const want = kept0.indexOf(i) >= 0;
+      if (got) shown++;
+      if (got !== want)
+        problems.push(`${name}: ${rule.scene} shows sprite ${i} = ${got}, ` +
+                      `the phase-0 search keeps it = ${want}`);
+    }
+    sceneShown = shown;
+    if (shown !== Math.min(rule.keep, rule.sprites))
+      problems.push(`${name}: ${rule.scene} shows ${shown} sprites, the ` +
+                    `16-strip search keeps ${Math.min(rule.keep,
+                                                     rule.sprites)}`);
+  }
+
+  /* 4b. the union over the consecutive frames: every sprite shows in the
+   * frames the rule keeps it, none in all of them. */
+  const seenCounts = [];
+  if (q0 != null) {
+    let shownAll = 0, bad = 0;
+    for (let i = 0; i < rule.sprites; i++) {
+      const sig = sigs[i];
+      if (!sig) { bad++; continue; }
+      const kept = [];
+      for (let q = 0; q < phases; q++)
+        kept.push(flicker.keptSprites(rule, base, yTop, q).indexOf(i) >= 0);
+      let seen = 0;
+      for (let f = 0; f < frames.length; f++) {
+        const q = (q0 + f) % phases;
+        const got = sameRgb(rgbAt(frames[f], sig.x, sig.y),
+                            rgbAt(sig.alone, sig.x, sig.y));
+        if (got !== kept[q]) {
+          problems.push(`${name}: sprite ${i} is ${kept[q] ? "" : "not "}` +
+                        `kept in phase ${q} but frame ${f} ` +
+                        `${got ? "shows" : "does not show"} it`);
+          bad++;
+        }
+        if (got) seen++;
+      }
+      seenCounts.push(seen);
+      if (seen > 0) shownAll++;
+      if (seen === phases)
+        problems.push(`${name}: sprite ${i} shows in all ${phases} frames ` +
+                      `— it was never multiplexed`);
+      if (rule.shown && seen !== rule.shown[i])
+        problems.push(`${name}: sprite ${i} shows in ${seen} frames, the ` +
+                      `rule says ${rule.shown[i]}`);
+    }
+    if (bad || shownAll !== rule.sprites)
+      problems.push(`${name}: union ${shownAll}/${rule.sprites} sprites, ` +
+                    `${bad} disagreement(s)`);
+  }
+
+  if (problems.length === 0) {
+    const counts = seenCounts.join(",");
+    console.log(`${name}: OK (${frames.length} consecutive frames = ` +
+                `phases ${q0}..${(q0 + frames.length - 1) % phases}, diff 0; ` +
+                `sat.bin = the last frame's phase; ${rule.scene} shows ` +
+                `${sceneShown}/${rule.sprites} sprites (the ` +
+                `${rule.keep}-strip limit); union ` +
+                `${rule.sprites}/${rule.sprites} sprites, shown per sprite ` +
+                `${counts})`);
+    return 0;
+  }
+  problems.forEach((s) => console.log(s));
+  return 1;
+}
+
 function main() {
   const dumps = path.join(__dirname, "dumps");
   if (!fs.existsSync(dumps)) {
@@ -336,17 +599,21 @@ function main() {
     console.error("no scene dumps with mednafen.png found");
     return 2;
   }
-  let failed = 0, pictures = 0;
+  let failed = 0, pictures = 0, flickers = 0;
   const skipped = [];
   for (const dir of dirs) {
     const result = checkScene(dir);
     if (result.kind === "ok") pictures++;
     else if (result.kind === "not-picture") skipped.push(path.basename(dir));
     else failed++;
+    /* #28: a flicker dump also carries the N consecutive rotation frames */
+    if (fs.existsSync(path.join(dir, "flicker.json")))
+      checkFlicker(dir) === 0 ? flickers++ : failed++;
   }
   if (failed === 0) {
     console.log(`PASS: renderer matches Mednafen pixel for pixel on ` +
-                `${pictures} scene(s)`);
+                `${pictures} scene(s)` +
+                (flickers ? ` and ${flickers} flicker capture(s)` : ""));
     if (skipped.length > 0)
       console.log(`skipped (not pictures, not counted): ${skipped.join(", ")}`);
   } else {

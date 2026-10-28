@@ -48,6 +48,13 @@
 #                                   # /3, 512 at /2 (256 at /4, the other
 #                                   # modes), read from the state's VCECR, not
 #                                   # from the scene name.
+#   tools/capture.sh flicker        # #28: the viewer ROM of sprite13, whose
+#                                   # VBlank handler rotates the SAT order
+#                                   # (gen/flicker.pce).  The last 4 recorded
+#                                   # frames are kept as flicker-0..3.png
+#                                   # (consecutive rotation phases; 3 is also
+#                                   # mednafen.png) plus flicker.json, the
+#                                   # rotation rule.
 #
 # Scenes 4-9, 8b, 8c are #39's (docs/REVIEW.md finding 1: each is NOT
 # periodic in the dimension a renderer break would cut — see genroms.py).
@@ -95,6 +102,8 @@ elif [ "$SCENE" = spainted ]; then
   MODE=spainted
 elif [ "$SCENE" = effect ]; then
   MODE=effect
+elif [ "$SCENE" = flicker ]; then
+  MODE=flicker
 else
   MODE="${2:-scene}"
 fi
@@ -115,7 +124,8 @@ case "$MODE" in
   painted) NAME="painted" ;;
   spainted) NAME="spainted" ;;
   effect) NAME="effect1" ;;
-  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, wide, painted, spainted or effect" >&2; exit 2 ;;
+  flicker) NAME="flicker" ;;
+  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, wide, painted, spainted, effect or flicker" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -152,8 +162,11 @@ else
   make -C tools "gen/$NAME.pce"
 fi
 
-pkill -x mednafen 2>/dev/null || true
-sleep 1
+# Only the Mednafen process THIS script starts is signalled (as
+# tools/capture-review16.sh already does): the working tree and the machine
+# are shared with other seats, and a `pkill -x mednafen` here killed another
+# seat's capture mid-run (#28, measured 2026-10-28: a concurrent raster13
+# capture had our sprite13 emulator killed by SIGKILL before it saved).
 
 # One mednafen run + harvest.  Returns 3 if the state was saved during
 # pre-VDW blanking (scanline calibration unusable — rerun), 0 on success,
@@ -168,17 +181,19 @@ run_once() {
     -qtrecord "$MOV" -qtrecord.vcodec png \
     -qtrecord.w_double_threshold 0 -qtrecord.h_double_threshold 0 \
     -autosave 1 "tools/gen/$NAME.pce" > "$LOGDIR/mdfn-$NAME.log" 2>&1 &
+  mdfn_pid=$!
 
   echo "== let the OSD messages fade and the picture settle"
   sleep "${SLEEP:-9}"
 
   echo "== clean exit (SIGINT -> CloseGame -> autosave)"
-  pkill -INT -x mednafen
+  kill -INT "$mdfn_pid" 2>/dev/null || true
   for i in $(seq 1 15); do
-    pgrep -x mednafen >/dev/null || break
+    kill -0 "$mdfn_pid" 2>/dev/null || break
     sleep 1
   done
-  pkill -9 -x mednafen 2>/dev/null || true
+  kill -9 "$mdfn_pid" 2>/dev/null || true
+  wait "$mdfn_pid" 2>/dev/null || true
 
   new_mcs=$(ls -t "$MCSDIR"/"$NAME".*.mca 2>/dev/null | head -1 || true)
   if [ -z "$new_mcs" ]; then
@@ -240,6 +255,33 @@ PYEOF
   read -r CROPW CROPSTEP <<< "$CROP"
   python3 -I "$TOOLS/movframes.py" "$MOV" "$DUMPDIR/mednafen.png" \
     "$CROPW" 232 "$CROPSTEP"
+  if [ "$MODE" = flicker ]; then
+    # #28: the last 4 recorded frames are 4 successive rotation phases (the
+    # viewer's VBlank handler advances one phase per frame).  movframes.py
+    # --all writes every frame; keep the last four, oldest first, as
+    # flicker-0..3.png (3 is the same frame as mednafen.png), and copy the
+    # rule the ROM was built from next to them.
+    FRAMES="$SCRATCH/$NAME-frames"
+    rm -rf "$FRAMES"
+    if ! python3 -I "$TOOLS/movframes.py" "$MOV" --all "$FRAMES" \
+        "$CROPW" 232 "$CROPSTEP" > "$LOGDIR/movframes-$NAME.log"; then
+      echo "could not extract the movie's frames"; return 4
+    fi
+    # the rotation's phase count is the rule's (tools/genroms.py)
+    K=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["phases"])' \
+        tools/gen/sprite13.flicker.json)
+    n=$(find "$FRAMES" -name 'frame*.png' | wc -l | tr -d ' ')
+    if [ "$n" -lt "$K" ]; then
+      echo "only $n frame(s) recorded, need $K consecutive"; return 4
+    fi
+    for i in $(seq 0 $((K - 1))); do
+      src=$(printf 'frame%04d.png' $((n - K + i)))
+      cp "$FRAMES/$src" "$DUMPDIR/flicker-$i.png"
+    done
+    cp "tools/gen/sprite13.flicker.json" "$DUMPDIR/flicker.json"
+    echo "flicker: $n frames recorded, kept the last $K"
+    rm -rf "$FRAMES"
+  fi
   cp "$LOGDIR/mdfn-$NAME.log" "$DUMPDIR/mednafen.log"
   if [ "$MODE" = dma ]; then
     # #49: the transfer descriptor the ROM was generated from, kept beside the

@@ -6,7 +6,7 @@ PCEAS ?= pceas
 PYTHON ?= python3
 
 SCENES := 1 2 3 4 5 6 7 8 8b 8c 9 11 12 13 14
-SPRITES := 1 2 3 4 5 6 7 8 9 10 11 12
+SPRITES := 1 2 3 4 5 6 7 8 9 10 11 12 13
 # #15's raster-scene ROMs (genroms.py's RASTER_SCENES): per-scanline BXR/
 # BYR/CR/VCE-colour-table writes chained off the RCR line interrupt.
 # 6-10 are #43's (REVIEW-15's misses on structured tiles).
@@ -32,8 +32,13 @@ DMAROMS := $(addprefix gen/dma,$(addsuffix .pce,1 2 3))
 # #27: the wide-mode ROMs (genroms.py's SPRITE_SCENES wide336/wide512) — the
 # /3 and /2 dot clocks with the 336- and 512-dot display windows.
 WIDEROMS := gen/wide336.pce gen/wide512.pce
+# #28: the flicker viewer ROM — viewer.asm's flicker rotation (assembled
+# with FLICKER defined, so the shared bank 0 the browser export and the #68
+# trace fixtures pin is unchanged), driven by sprite13's picture data and
+# the rotation rule genroms.py writes.
+FLICKER_ROM := gen/flicker.pce
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS) $(DMAROMS) $(WIDEROMS)
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS) $(DMAROMS) $(WIDEROMS) $(FLICKER_ROM)
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -115,6 +120,19 @@ gen/raster%.raster.json: genroms.py
 	$(PYTHON) -I genroms.py
 
 gen/vraster%.pce: gen/vraster%.asm viewer.asm
+	$(PCEAS) -raw -o $@ $<
+
+# #28: the flicker viewer ROM.  genviewer.py writes gen/flicker.asm with
+# `FLICKER = 1` before viewer.asm's include; the config carries step/phases.
+gen/sprite13.flicker.json: genroms.py
+	mkdir -p gen
+	$(PYTHON) -I genroms.py
+
+gen/flicker.asm: genviewer.py ../tests/dumps/sprite13/regions.json gen/sprite13.flicker.json
+	mkdir -p gen
+	$(PYTHON) -I genviewer.py flicker
+
+gen/flicker.pce: gen/flicker.asm viewer.asm
 	$(PCEAS) -raw -o $@ $<
 
 # #9's constant code bank: the browser export copies bank 0 verbatim, so it

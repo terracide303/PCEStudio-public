@@ -58,7 +58,9 @@ and `tools/extract_bank0.py` refuses to write the asset if they differ.
 | `0x07` | 1    | CR (the final VDC control register value, bit 7 = background on; bit 2 = RC is ORed in when a raster table is present, #16) |
 | `0x08` | 1    | region count (0–13) |
 | `0x09` | 1    | raster-table flag (#16): 1 = the table image at bank 1 offset `0x640` is present and the viewer runs it; 0 = no table |
-| `0x0A` | 4×13 | region descriptors, one per tile region (13 is the room before the palette at `0x40`: `(0x40 - 0x0A) / 4`) |
+| `0x0A` | 4×13 | region descriptors, one per tile region (13 is the room before the palette at `0x40`: `(0x40 - 0x0A) / 4`; they end at `0x3E`) |
+| `0x3E` | 1    | flicker step (#28): 0 = no flicker; else the SAT-order rotation per frame, in entries.  Read only by `FLICKER` builds of the viewer (`tools/viewer.asm`) |
+| `0x3F` | 1    | flicker phases (#28): the number of rotated SAT copies the viewer builds, 1–8 (copy _p_ at VRAM `$7f00 - p*$100`).  0 in every non-flicker picture |
 
 A region descriptor is two 16-bit words: the **VRAM destination word
 address** and the **word count** of the tile data.
@@ -83,6 +85,20 @@ Pictures without sprites carry a zero SAT here, which is loaded harmlessly
 The SAT is picture data from VRAM word `$7f00` of the picture's own dump,
 exactly like the BAT and the tiles; both builders read it from `vram.bin`
 at that fixed address.
+
+**#28 flicker.**  A `FLICKER` build (`gen/flicker.asm`, built by
+`tools/genviewer.py flicker`) does not copy this SAT once.  With config byte
+`$3E` = step and `$3F` = phases it builds `phases` rotated copies in VRAM at
+word `$7f00 - p*$100` (phase 0 stays at `$7f00`, so the SAT above is phase
+0's copy), rotating the 256-word array left by `4*step*p` words, and a VBlank
+irq1 handler writes DVSSR to select one per frame (the rule is in
+[`RENDERER.md`](RENDERER.md) §#28).  The copies occupy words
+`$7f00 - (phases-1)*$100 .. $7fff`; `genviewer.py` refuses a picture whose
+copy regions land in that span.  The step and phase count come from
+`tools/gen/sprite13.flicker.json` (written by `tools/genroms.py`), so the
+ROM, the capture and `tests/check.js` read one rule.  The flicker code is
+assembled only into `FLICKER` builds: every other viewer ROM keeps the same
+bank 0 (the browser export and the #68 trace fixtures pin it).
 
 ## Bank 1 — the raster table, offset `0x640` (`$4640`) (#16)
 
@@ -223,6 +239,12 @@ the browser must not emit them either.
   `$4440`) is copied to VRAM `$7f00`. Sprites are still off, so the first
   displayed frame's SATB already holds this SAT (2.4.2 SATB p. H7-20: the
   CPU cannot write the SATB directly).
+- #28, when config byte `$3E` is nonzero (`FLICKER` builds only): instead of
+  one copy, `flicker_setup` builds `$3F` rotated copies (above), installs a
+  VBlank irq1 handler through RAM `$2020`, and the handler advances the
+  phase and writes DVSSR once per frame; the config CR is written with VC
+  (bit 3) ORed in.  Flicker and raster tables are mutually exclusive (RC
+  and VC would share irq1); `genviewer.py` never sets both.
 - `copy_words` reads through the 8 KiB MPR2 window (`$4000`–`$5fff`) and
   re-maps to the next bank when the pointer crosses the window.
 - Finally CR from the config turns the layers on: bit 7 = background,

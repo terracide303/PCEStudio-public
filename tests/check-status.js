@@ -36,12 +36,14 @@
  *
  * The Mednafen save states record the VDC status register (regs.json's
  * `status`, mcs-extract.py).  For every dump whose ROM never reads the
- * register (no raster.json — the #15/#16 raster ROMs' irq1 handler reads
- * $0000 and clears bits 0-5) the saved value must equal the model's
- * accumulated frame SR.  For the raster dumps the saved 0 cannot be compared:
- * the handler read and cleared it; the check records that and requires the
- * model to have RR enabled and set, so the two facts (a match happened, a
- * read cleared it) are consistent.
+ * register (no raster.json, no flicker.json) the saved value must equal the
+ * model's accumulated frame SR.  For dumps whose ROM runs an irq1 handler
+ * that reads $0000 every interrupt and clears bits 0-5 — the #15/#16 raster
+ * chains (RC) and #28's flicker viewer (VC) — the saved 0 cannot be
+ * compared: the handler read and cleared it.  The check records that and
+ * requires the model to have the interrupt enabled and its condition set
+ * (RR for a raster table, VD for flicker), so the two facts (a condition
+ * happened, a read cleared it) are consistent.
  *
  * #49 adds one bit to that comparison: DV (SR bit 4), the VRAM-to-VRAM
  * DMA-done flag, which #50's per-frame SR does not cover (that is CC/OR/RR/
@@ -129,6 +131,10 @@ function loadDump(name) {
       ? fs.readFileSync(path.join(dir, "sat.bin")) : null,
     raster: fs.existsSync(path.join(dir, "raster.json"))
       ? JSON.parse(fs.readFileSync(path.join(dir, "raster.json"), "utf8"))
+      : null,
+    /* #28: the flicker viewer's VBlank handler reads SR too */
+    flicker: fs.existsSync(path.join(dir, "flicker.json"))
+      ? JSON.parse(fs.readFileSync(path.join(dir, "flicker.json"), "utf8"))
       : null
   };
   d.firstScanline = 14 + (regs.slstart != null ? regs.slstart : 4);
@@ -364,7 +370,7 @@ function compareMednafen(dump, model, notes) {
     notes.push(`${dump.name}: no status in the save state, not compared`);
     return problems;
   }
-  if (!dump.raster) {
+  if (!dump.raster && !dump.flicker) {
     /* #49: DV (SR bit 4) is the VRAM-to-VRAM DMA-done flag: gated by DCR
      * bit 1 (DVC), and the save's LENR = $FFFF shows the transfer finished
      * (see the header).  Zero for every dump with DVC clear. */
@@ -376,20 +382,28 @@ function compareMednafen(dump, model, notes) {
     }
     return problems;
   }
-  /* the raster chain's handler reads and clears SR */
+  /* an irq1 handler (raster chain or #28 flicker) reads and clears SR */
   if (saved !== 0) {
     problems.push(`${dump.name}: saved status is $${saved.toString(16)}, ` +
                   "expected 0 — the irq1 handler reads SR and clears it on " +
-                  "every RCR interrupt");
+                  `every ${dump.flicker ? "VBlank" : "RCR"} interrupt`);
   }
-  if (!(model.frame.rrBit)) {
+  if (dump.raster && !(model.frame.rrBit)) {
     problems.push(`${dump.name}: RR is enabled and the table has matches, ` +
                   "so the model must report an RR bit before the read; it " +
                   "does not");
   }
+  if (dump.flicker && !(model.frame.vdBit)) {
+    problems.push(`${dump.name}: VC is enabled (CR bit 3) and the ROM's ` +
+                  "VBlank handler read SR, so the model must report a VD " +
+                  "bit before the read; it does not");
+  }
   notes.push(`${dump.name}: saved status 0 — the handler read and cleared ` +
-             `it; model RC-enabled RR ${model.frame.rrBit ? "set" : "clear"} ` +
-             `(not a register comparison)`);
+             `it; model ` +
+             (dump.flicker
+               ? `VC-enabled VD ${model.frame.vdBit ? "set" : "clear"}`
+               : `RC-enabled RR ${model.frame.rrBit ? "set" : "clear"}`) +
+             ` (not a register comparison)`);
   return problems;
 }
 
@@ -589,8 +603,9 @@ function main() {
   for (let i = 0; i < dumps.length; i++) {
     const dump = dumps[i], model = models[i];
     const problems = compareDump(dump, model);
-    if (!dump.raster && dump.regs.status != null) comparable++;
-    if (dump.raster && dump.regs.status != null) cleared++;
+    const readCleared = dump.raster || dump.flicker;
+    if (!readCleared && dump.regs.status != null) comparable++;
+    if (readCleared && dump.regs.status != null) cleared++;
     problems.push(...compareMednafen(dump, model, notes));
     okv(`${dump.name}: the model's status lines and frame agree with the ` +
         `independent computation`, problems);
@@ -626,7 +641,7 @@ function main() {
 
   console.log(`status: ${dumps.length} dumps — ${comparable} save states ` +
               `compared register-for-register, ${cleared} read-cleared ` +
-              `(raster chain)`);
+              `(raster/flicker handlers)`);
   notes.slice(0, 3).forEach((n) => console.log(`  ${n}`));
   if (failures) {
     console.log(`FAIL: ${failures} problem(s) in ${checks} checks`);
