@@ -1,0 +1,202 @@
+<!doctype html>
+<!-- PCEStudio toys — a Lua toy runs live in the page (card #30, first half).
+     The toy's register, palette and SAT writes land in the same arrays the
+     model reads; every frame is drawn by renderer/pce-sprites.js over
+     renderer/pce-bg.js, the models proven against Mednafen (cards #5/#12), so
+     this page has no second renderer. The Lua VM is Fengari
+     (vendor/fengari/fengari-web.js); docs/TOYS.md says why.
+     Serve the repo root and open renderer/toys.html:
+         python3 -m http.server 8000
+     ?demo=1 starts the default toy on load. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>PCEStudio — toys</title>
+<style>
+  body { font: 13px system-ui, sans-serif; background: #111; color: #ddd;
+         margin: 1rem; }
+  h1 { font-size: 1.15rem; margin: 0 0 0.6rem; }
+  .row { display: flex; gap: 1.2rem; align-items: flex-start; flex-wrap: wrap; }
+  section { background: #181818; border: 1px solid #2a2a2a; border-radius: 6px;
+            padding: 0.7rem; }
+  canvas { image-rendering: pixelated; background: #000; width: 512px;
+           height: 448px; display: block; }
+  textarea { width: 46rem; height: 24rem; font: 12px/1.4 ui-monospace, monospace;
+             background: #0c0c0c; color: #ddd; border: 1px solid #333;
+             border-radius: 4px; padding: 0.5rem; }
+  button { font: inherit; background: #2c2c2c; color: #ddd; border: 1px solid
+           #444; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+  button:hover { background: #3a3a3a; }
+  button:disabled { opacity: 0.4; }
+  #status { color: #8fc; font: 12px ui-monospace, monospace; white-space: pre; }
+  #error { color: #f88; font: 12px ui-monospace, monospace; white-space: pre-wrap;
+           min-height: 1.2em; }
+  #log { color: #aaa; font: 11px ui-monospace, monospace; white-space: pre-wrap;
+         max-height: 8rem; overflow: auto; }
+  label.pad { display: inline-block; margin-right: 0.6rem; user-select: none; }
+  .hint { color: #888; }
+</style>
+</head>
+<body>
+<h1>PCEStudio — toys (Lua, live)</h1>
+<p class="hint">init() runs once; frame(t, f) runs every frame; raster(line) runs
+for each VDW display line 0..223. reg("BXR"/"BYR"/"CR", v), pal(addr, word),
+vram[word], sprite(i, {x=,y=,pattern=,palette=}), pad[1..5].<br>
+The picture is drawn by renderer/pce-sprites.js + renderer/pce-bg.js — the
+same models the editor and the Mednafen checks use.</p>
+<div class="row">
+  <section>
+    <div id="status">stopped</div>
+    <canvas id="out" width="256" height="224"></canvas>
+    <p>
+      <button id="run">Run</button>
+      <button id="stop" disabled>Stop</button>
+      <span id="error"></span>
+    </p>
+    <p>pad 1:
+      <label class="pad"><input type="checkbox" data-pad="up">up</label>
+      <label class="pad"><input type="checkbox" data-pad="down">down</label>
+      <label class="pad"><input type="checkbox" data-pad="left">left</label>
+      <label class="pad"><input type="checkbox" data-pad="right">right</label>
+      <label class="pad"><input type="checkbox" data-pad="i">I</label>
+      <label class="pad"><input type="checkbox" data-pad="ii">II</label>
+      <label class="pad"><input type="checkbox" data-pad="select">Select</label>
+      <label class="pad"><input type="checkbox" data-pad="run">Run</label>
+    </p>
+    <pre id="log"></pre>
+  </section>
+  <section>
+    <textarea id="source" spellcheck="false"></textarea>
+  </section>
+</div>
+<script src="../vendor/fengari/fengari-web.js"></script>
+<script src="pce-bg.js"></script>
+<script src="pce-sprites.js"></script>
+<script src="pce-toys.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const canvas = $("out");
+const ctx = canvas.getContext("2d");
+const image = ctx.createImageData(canvas.width, canvas.height);
+
+const DEFAULT_SOURCE = `-- palette cycling: the VCE's palette 0 changes every frame.
+function init()
+  for y = 0, 27 do
+    for x = 0, 31 do vram[y * 32 + x] = 0x0040 end
+  end
+  -- tile $40: colour 1, with a diagonal in colour 15
+  for row = 0, 7 do
+    local w0, w1 = 0, 0
+    for col = 0, 7 do
+      local c = (col == row) and 15 or 1
+      if c % 2 >= 1 then w0 = w0 | (1 << (7 - col)) end
+      if c >= 2 and (c % 4) >= 2 then w0 = w0 | (1 << (15 - col)) end
+      if c >= 4 and (c % 8) >= 4 then w1 = w1 | (1 << (7 - col)) end
+      if c >= 8 then w1 = w1 | (1 << (15 - col)) end
+    end
+    vram[0x40 * 16 + row] = w0
+    vram[0x40 * 16 + 8 + row] = w1
+  end
+end
+
+function frame(t, f)
+  for e = 1, 15 do
+    pal(e, rgb((e + f) % 8, f % 8, (e * 3 + f) % 8))
+  end
+end
+`;
+
+$("source").value = DEFAULT_SOURCE;
+
+let runtime = null;
+let running = false;
+let raf = null;
+let nextFrame = 0;
+let lastTime = 0;
+let lastF = 0;
+
+function showError(e) {
+  $("error").textContent = (e.code ? e.code + ": " : "") + e.message;
+}
+
+function put(frame) {
+  image.data.set(frame.pixels);
+  /* the model gives RGB only; set the alpha the canvas needs */
+  for (let i = 3; i < image.data.length; i += 4) image.data[i] = 255;
+  ctx.putImageData(image, 0, 0);
+}
+
+function pad1() {
+  const buttons = {};
+  document.querySelectorAll("[data-pad]").forEach((el) => {
+    if (el.checked) buttons[el.dataset.pad] = true;
+  });
+  return buttons;
+}
+
+function stop() {
+  running = false;
+  if (raf) cancelAnimationFrame(raf);
+  raf = null;
+  $("run").disabled = false;
+  $("stop").disabled = true;
+  $("status").textContent = "stopped at frame " + lastF;
+}
+
+function start() {
+  stop();
+  $("error").textContent = "";
+  $("log").textContent = "";
+  if (runtime) { runtime.dispose(); runtime = null; }
+  try {
+    runtime = PCEStudio.toys.create($("source").value, { budgetMs: 100 });
+    runtime.load();
+  } catch (e) {
+    showError(e);
+    return;
+  }
+  running = true;
+  lastF = 0;
+  nextFrame = 0;
+  lastTime = performance.now();
+  $("run").disabled = true;
+  $("stop").disabled = false;
+  $("run").textContent = "Restart";
+  raf = requestAnimationFrame(tick);
+}
+
+function tick(now) {
+  if (!running) return;
+  const step = 1000 / 60;
+  if (now - lastTime < step) {
+    raf = requestAnimationFrame(tick);
+    return;
+  }
+  lastTime = now - ((now - lastTime) % step);
+  try {
+    runtime.setPad(1, pad1());
+    const frame = runtime.frame(lastF);
+    put(frame);
+    lastF++;
+    $("status").textContent = "frame " + lastF + "  (" +
+      frame.width + "x" + frame.height + ")" +
+      (frame.raster ? "  raster: " + frame.raster.entries.length + " lines" : "");
+    if (runtime.log.length) {
+      $("log").textContent = runtime.log.slice(-20).join("\n");
+    }
+  } catch (e) {
+    showError(e);
+    stop();
+    return;
+  }
+  raf = requestAnimationFrame(tick);
+}
+
+$("run").addEventListener("click", start);
+$("stop").addEventListener("click", stop);
+
+if (location.search.indexOf("demo=1") >= 0) start();
+</script>
+</body>
+</html>

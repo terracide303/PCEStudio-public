@@ -1,4 +1,4 @@
-# The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #15, #38, #39, #40, #42, #48)
+# The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #15, #38, #39, #40, #42, #48, #30)
 
 ```sh
 node tests/check.js             # diff the renderer against Mednafen, all scenes
@@ -19,6 +19,9 @@ node tests/check-wave.js        # the wave editor's export vs PCEAS and Mednafen
 node tests/check-hutrack.js     # #35: the vendored HuTrack ROM's recording carries the DMF's melody
 node tests/check-dmf.js         # #35: our DMF reader + the JS HuTrack player vs the same recording
 node tests/psg-mutation.js      # #63: REVIEW-34's 15 breaks must all be DETECTED
+node tests/check-toys.js        # #30: three Lua toys run live in Node for 40 frames,
+                                # every frame diff 0 against hand-built states through
+                                # the same model, plus the refusals by code
 ```
 
 The audio suites' models and limits are documented in `docs/PSG.md`,
@@ -596,3 +599,30 @@ stubbed, and no synthetic mouse input is used anywhere. It does not prove the
 download wiring, and it uses one
 32×32 BAT with no scroll and one region. It says the demo picture reaches
 Mednafen unchanged, not that the editor is pleasant or the picture wanted.
+
+## `check-toys.js` — the Lua toys (#30)
+
+`renderer/pce-toys.js` runs a Lua toy (Fengari) and writes the toy's register,
+palette, SAT, VRAM and raster writes into the arrays `renderer/pce-sprites.js`
+and `renderer/pce-bg.js` already read; it draws nothing itself. The check runs
+three toys for 40 frames each — palette cycling, scrolling with the
+`raster(line)` callback, and a sprite reading `pad[1]` — and, for every frame,
+builds the same state by hand in JavaScript from each toy's written
+specification, renders it through the same model, and requires:
+
+- `vram`, `cram`, `sat`, `regs` byte-for-byte equal;
+- the raster table (base, baseCram, entries including `cramPrev`) deep equal;
+- pixels diff 0.
+
+It also covers the two raster forms (a table registered in `init()`, a callback
+defined in `init()`), the refusals by code (`reg-forbidden`, `reg-range`,
+`pal-range`, `vram-range`, `sprite-range`, `raster-line`, `raster-line-full`,
+`password-value`, `password-code`, `toy-timeout`, `toy-error` with
+`toy.lua:<line>`), the sandbox doors, and the password round trip.
+
+**It does not prove hardware or the browser.** The hand-built expectation and
+the runtime share the model, so a model bug cancels out; the check proves the
+runtime lands the toy's writes where the model reads them, not that the model
+is the VDC/VCE. The page `renderer/toys.html` is not executed here (no
+browser), and `raster(line)` is 224 Lua calls, not an RCR ISR — pricing and
+compiling that are #32/#31.
