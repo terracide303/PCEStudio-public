@@ -1,6 +1,6 @@
 /*
- * pce-editor.js — PCEStudio's first editor: tiles, palettes, the background
- * map (card #10).
+ * pce-editor.js — PCEStudio's editor: tiles, palettes, the background map
+ * (card #10), and sprite patterns, sprite palettes and the SAT (card #13).
  *
  * The picture is kept in exactly the shape the VDC holds it, so there is no
  * "editor format" to convert:
@@ -13,6 +13,24 @@
  *   - the map is the BAT: 32x32 words (2 colours of 256x224 are the visible
  *     28 rows), each word = character code (bits 0-11) + palette (12-15).
  *   - scroll: BXR/BYR, as the config block carries them.
+ *   - 16 sprite palettes of 16 colours: CRAM entries $100-$1FF.  Sprite
+ *     pixel 0 is transparent, so a sprite palette's entry 0 never shows on a
+ *     sprite (CRAM[$100] is the BG-off blanking fill).
+ *   - a sprite PATTERN is the shape and pixels of a sprite: 16 or 32 pixels
+ *     wide, 16/32/64 tall (the six CGX/CGY sizes), 4-bit colour numbers.
+ *     It is stored in 64-word VRAM cells exactly like the VDC reads it
+ *     (pce-sprites.js): CGX/CGY mask the pattern code's low bits and add the
+ *     block/half select, so 16x32 reserves 4 cells and reads cells +0/+2,
+ *     16x64 reserves 8 and reads +0/+2/+4/+6, 32-wide reads each block's
+ *     left/right cell pair.  Patterns are packed after the tiles, so they can
+ *     never overlap the picture's characters, and a pattern whose cells would
+ *     reach the SAT at VRAM $7F00 is refused.
+ *   - the SAT: up to 64 entries of 4 words (Y, X, pattern << 1,
+ *     palette/SPBG/CGX/HFLIP/CGY/VFLIP), written to VRAM $7F00 where the
+ *     viewer's DVSSR/SATB DMA reads it (card #14).
+ *   - the line budget: the VDC collects at most 16 strips (16-px sprite
+ *     columns) per display line, in SAT order; sprites past that are dropped.
+ *     spriteLineBudget() reports it the way pce-sprites.js draws it.
  *
  * The editor REFUSES anything the VDC cannot show, and the refusals carry a
  * machine-readable `code` so a caller (the page, a test, the future MCP
@@ -32,6 +50,17 @@
  *                  1536 tiles.
  *   no-tile        a character code with no tile behind it.
  *   map-range / pixel-range / colour-range   out-of-range coordinates.
+ *
+ * Sprites (card #13) add their own refusals, each with a code:
+ *   65th-sprite        the SAT has 64 entries.
+ *   sprite-pattern-vram a pattern's 64-word cells would reach the SAT at
+ *                      VRAM $7F00 (or run past the 32768-word VRAM).
+ *   17th-colour        entry 16 of a sprite palette; a palette has 16.
+ *   17th-sprite-palette  sprite palette 16; the VDC has 16.
+ *   sprite-size        a size the VDC cannot draw: only 16/32 wide and
+ *                      16/32/64 tall (CGX/CGY).
+ *   sprite-pattern-range / sprite-pixel-range / sprite-range /
+ *   sprite-palette-range / sprite-flag-range   out-of-range values.
  *
  * Facts (BAT word layout, 4-bit pixels, palette fixup, VRAM size, CRAM
  * layout) are from the Hudson HuC6270/HuC6260 manuals, as recorded in
@@ -65,7 +94,32 @@
   var LAST_CHAR = 0x7FF;        /* past this is beyond the 32768-word VRAM */
   var MAX_TILES = 1536;         /* ROM_LAYOUT.md banks 4-9 = 48 KiB */
   var CR_BG_ON = 0x80;          /* CR bit 7: background on */
+  var CR_SPRITES_ON = 0x40;     /* CR bit 6: SB, sprite layer on */
   var MWR_32x32 = 0x00;
+
+  /* ---- sprites (card #13) ---------------------------------------------- */
+
+  var SPRITE_PALETTES = 16;     /* CRAM entries $100-$1FF */
+  var SPRITE_ENTRIES = 16;
+  var MAX_SPRITES = 64;         /* the SAT holds 64 entries */
+  var SAT_ADDR = 0x7F00;        /* DVSSR: the SAT source in VRAM words */
+  var SAT_CELL = SAT_ADDR / 64; /* cell $1FC: the first cell the SAT occupies */
+  var LINE_STRIPS = 16;         /* the VDC collects 16 strips a line */
+  var STRIP_PX = 16;            /* one strip is 16 pixels wide */
+  var VIEW_H_LINES = VIEW_H;
+
+  /* The six sizes the VDC draws.  cells = the reserved 64-word span; align =
+   * the pattern code's required alignment from the CGX/CGY masks; the odd
+   * cells of a 16x32/16x64 span are reserved but never read (the VDC reads
+   * +0/+2/... only), exactly as tools/genroms.py's pack_patterns packs. */
+  var SPRITE_SIZES = [
+    { width: 16, height: 16, cells: 1, align: 1, cgx: 0, cgy: 0 },
+    { width: 32, height: 16, cells: 2, align: 2, cgx: 1, cgy: 0 },
+    { width: 16, height: 32, cells: 4, align: 4, cgx: 0, cgy: 1 },
+    { width: 32, height: 32, cells: 4, align: 4, cgx: 1, cgy: 1 },
+    { width: 16, height: 64, cells: 8, align: 8, cgx: 0, cgy: 2 },
+    { width: 32, height: 64, cells: 8, align: 8, cgx: 1, cgy: 2 }
+  ];
 
   /* ---- errors ---------------------------------------------------------- */
 
@@ -111,6 +165,12 @@
       for (var e = 0; e < ENTRIES; e++) entries[e] = 0;
       palettes.push(entries);
     }
+    var spritePalettes = [];
+    for (var sp = 0; sp < SPRITE_PALETTES; sp++) {
+      var sentries = new Array(SPRITE_ENTRIES);
+      for (var se = 0; se < SPRITE_ENTRIES; se++) sentries[se] = 0;
+      spritePalettes.push(sentries);
+    }
     var tiles = new Array(LAST_CHAR + 1);
     tiles[FIRST_CHAR] = { palette: 0, pixels: new Uint8Array(PIXELS) };
     var map = new Uint16Array(BAT_W * BAT_H);
@@ -121,7 +181,10 @@
       tiles: tiles,
       map: map,
       nextChar: FIRST_CHAR + 1,
-      scroll: { BXR: 0, BYR: 0 }
+      scroll: { BXR: 0, BYR: 0 },
+      spritePalettes: spritePalettes,
+      spritePatterns: [],
+      sprites: []
     };
   }
 
@@ -204,7 +267,17 @@
     if (char > LAST_CHAR)
       refuse("vram-range", "tiles would run past " + hex(LAST_CHAR) + ", the " +
              "last character inside the 32768-word VRAM");
+    /* A tile pushes the sprite patterns further into VRAM (they are packed
+     * after the tiles).  The VDC cannot show a pattern that reaches the SAT,
+     * so a tile that would push one there is refused instead. */
+    var wasNext = pic.nextChar;
     pic.nextChar++;
+    if (pic.spritePatterns.length && patternLayout(pic).endCell > SAT_CELL) {
+      pic.nextChar = wasNext;
+      refuse("tile-space", "this tile would push the sprite patterns into " +
+             "the SAT at VRAM " + hex(SAT_ADDR) + "; the VDC cannot show " +
+             "both — remove a sprite pattern or use fewer tiles");
+    }
     pic.tiles[char] = { palette: palette, pixels: new Uint8Array(PIXELS) };
     return char;
   }
@@ -320,6 +393,246 @@
     return count - kept.length;
   }
 
+  /* ---- sprites: patterns, palettes and the SAT (card #13) -------------- */
+
+  function spriteSize(width, height) {
+    for (var i = 0; i < SPRITE_SIZES.length; i++) {
+      var s = SPRITE_SIZES[i];
+      if (s.width === width && s.height === height) return s;
+    }
+    return null;
+  }
+
+  function getSpritePattern(pic, index) {
+    if (!isInt(index) || index < 0 || index >= pic.spritePatterns.length)
+      refuse("sprite-pattern-range", "sprite pattern " + index + " does not " +
+             "exist (there " + (pic.spritePatterns.length === 1 ? "is" : "are") +
+             " " + pic.spritePatterns.length + ")");
+    return pic.spritePatterns[index];
+  }
+
+  /* Where every pattern's cells land in VRAM, recomputed from the picture's
+   * current tile count.  Patterns are packed in creation order after the
+   * tiles, each at the alignment its CGX/CGY mask requires, and a reserved
+   * span exactly as tools/genroms.py's pack_patterns reserves it.  Returns
+   * the first cell of each pattern and the one-past-last cell. */
+  function patternLayout(pic) {
+    var cursor = Math.ceil(pic.nextChar / 4);   /* word = char*16, cell = 64 */
+    var codes = [], first = null;
+    for (var i = 0; i < pic.spritePatterns.length; i++) {
+      var pat = pic.spritePatterns[i];
+      var size = spriteSize(pat.width, pat.height);
+      if (!size)
+        refuse("sprite-size", "sprite pattern " + i + " is " + pat.width + "x" +
+               pat.height + "; the VDC draws 16 or 32 wide and 16, 32 or 64 tall");
+      var base = Math.ceil(cursor / size.align) * size.align;
+      if (first === null) first = base;
+      codes.push(base);
+      cursor = base + size.cells;
+    }
+    return { codes: codes, firstCell: first, endCell: cursor,
+             cellCount: first === null ? 0 : cursor - first };
+  }
+
+  /* A pattern is created for one of the six sizes the VDC draws.  Its cells
+   * are packed after the tiles; if they would reach the SAT at VRAM $7F00
+   * (the last four 64-word cells of VRAM) the VDC cannot show the pattern,
+   * so it is refused and the picture is left unchanged. */
+  function newSpritePattern(pic, width, height) {
+    var size = spriteSize(width, height);
+    if (!size)
+      refuse("sprite-size", "the VDC draws 16x16, 32x16, 16x32, 32x32, " +
+             "16x64 or 32x64; " + width + "x" + height + " is not one of them");
+    var pat = { width: width, height: height,
+                pixels: new Uint8Array(width * height) };
+    pic.spritePatterns.push(pat);
+    var layout = patternLayout(pic);
+    if (layout.endCell > SAT_CELL) {
+      pic.spritePatterns.pop();
+      refuse("sprite-pattern-vram", "a " + width + "x" + height + " pattern " +
+             "needs cells " + layout.codes[layout.codes.length - 1] + ".." +
+             (layout.endCell - 1) + ", but the SAT occupies cells " + SAT_CELL +
+             ".." + (SAT_CELL + 3) + " at VRAM " + hex(SAT_ADDR) + " (the " +
+             "32768-word VRAM ends there); the VDC cannot show it");
+    }
+    return pic.spritePatterns.length - 1;
+  }
+
+  function spritePatternCount(pic) { return pic.spritePatterns.length; }
+
+  function spritePatternSize(pic, index) {
+    var pat = getSpritePattern(pic, index);
+    return { width: pat.width, height: pat.height };
+  }
+
+  function spritePatternPixels(pic, index) {
+    return getSpritePattern(pic, index).pixels;
+  }
+
+  /* Paint one sprite-pattern pixel with a 4-bit colour number.  The colour
+   * NUMBER is not a palette entry: the sprite's palette (chosen per SAT
+   * entry) maps it when the VDC draws.  Number 0 is transparent. */
+  function paintSpriteIndex(pic, pattern, x, y, index) {
+    var pat = getSpritePattern(pic, pattern);
+    checkInt("x", x, 0, pat.width - 1, "sprite-pixel-range");
+    checkInt("y", y, 0, pat.height - 1, "sprite-pixel-range");
+    if (isInt(index) && index >= SPRITE_ENTRIES)
+      refuse("17th-colour", "a sprite pixel is 4 bits: colour numbers 0-15; " +
+             index + " is past the 16 colours a sprite pattern can show");
+    if (!isInt(index) || index < 0)
+      refuse("colour-index", "a sprite pixel colour number must be 0-15, got " +
+             index);
+    pat.pixels[y * pat.width + x] = index;
+  }
+
+  function setSpritePaletteColour(pic, palette, entry, colour) {
+    if (isInt(palette) && palette === SPRITE_PALETTES)
+      refuse("17th-sprite-palette", "the VDC has " + SPRITE_PALETTES +
+             " sprite palettes (CRAM $100-$1FF); palette " + palette +
+             " is the 17th, and the editor will not store it");
+    if (!isInt(palette) || palette < 0 || palette >= SPRITE_PALETTES)
+      refuse("sprite-palette-range", "sprite palette must be an integer " +
+             "0..15, got " + palette);
+    if (isInt(entry) && entry === SPRITE_ENTRIES)
+      refuse("17th-colour", "a sprite palette has " + SPRITE_ENTRIES +
+             " colours; entry " + entry + " is the 17th, and the editor will " +
+             "not store it");
+    if (!isInt(entry) || entry < 0 || entry >= SPRITE_ENTRIES)
+      refuse("sprite-entry-range", "sprite palette entry must be an integer " +
+             "0..15, got " + entry);
+    checkColour(colour);
+    pic.spritePalettes[palette][entry] = colour;
+  }
+
+  function spritePaletteColours(pic, palette) {
+    checkInt("sprite palette", palette, 0, SPRITE_PALETTES - 1,
+             "sprite-palette-range");
+    return pic.spritePalettes[palette].slice();
+  }
+
+  /* Place one sprite in the SAT: display X/Y (0-255, 0-223), a pattern, one
+   * of the 16 sprite palettes, SPBG priority (1 = in front of the background)
+   * and the two flips.  The pattern decides the size. */
+  function addSprite(pic, spec) {
+    spec = spec || {};
+    if (pic.sprites.length >= MAX_SPRITES)
+      refuse("65th-sprite", "the SAT holds " + MAX_SPRITES + " entries; this " +
+             "is sprite " + (MAX_SPRITES + 1) + ", and the VDC cannot show it");
+    var pattern = spec.pattern;
+    if (!isInt(pattern) || pattern < 0 || pattern >= pic.spritePatterns.length)
+      refuse("sprite-pattern-range", "sprite pattern " + pattern + " does not " +
+             "exist");
+    checkInt("x", spec.x, 0, VIEW_W - 1, "sprite-range");
+    checkInt("y", spec.y, 0, VIEW_H - 1, "sprite-range");
+    if (isInt(spec.palette) && spec.palette === SPRITE_PALETTES)
+      refuse("17th-sprite-palette", "the VDC has " + SPRITE_PALETTES +
+             " sprite palettes; palette " + spec.palette + " is the 17th");
+    var palette = spec.palette === undefined ? 0 : spec.palette;
+    checkInt("sprite palette", palette, 0, SPRITE_PALETTES - 1,
+             "sprite-palette-range");
+    var priority = spec.priority === undefined ? 1 : spec.priority;
+    checkInt("priority", priority, 0, 1, "sprite-flag-range");
+    var hflip = spec.hflip === undefined ? 0 : spec.hflip;
+    var vflip = spec.vflip === undefined ? 0 : spec.vflip;
+    checkInt("hflip", hflip, 0, 1, "sprite-flag-range");
+    checkInt("vflip", vflip, 0, 1, "sprite-flag-range");
+    pic.sprites.push({ x: spec.x, y: spec.y, pattern: pattern,
+                       palette: palette, priority: priority,
+                       hflip: hflip, vflip: vflip });
+    return pic.sprites.length - 1;
+  }
+
+  function removeSprite(pic, index) {
+    if (!isInt(index) || index < 0 || index >= pic.sprites.length)
+      refuse("sprite-range", "sprite " + index + " does not exist");
+    pic.sprites.splice(index, 1);
+  }
+
+  function clearSprites(pic) { pic.sprites.length = 0; }
+
+  /* The strips one display line's sprites ask for: in SAT order, at most 16
+   * strips are kept; a 32-px sprite is two strips, so its right half can be
+   * the first one dropped (the way pce-sprites.js draws it). */
+  function spriteLineBudget(pic, line) {
+    checkInt("line", line, 0, VIEW_H_LINES - 1, "line-range");
+    var used = 0, dropped = 0, entries = [];
+    for (var i = 0; i < pic.sprites.length; i++) {
+      var s = pic.sprites[i];
+      var pat = getSpritePattern(pic, s.pattern);
+      if (line < s.y || line >= s.y + pat.height) continue;
+      var strips = pat.width / STRIP_PX;
+      var kept = Math.min(strips, LINE_STRIPS - used);
+      used += kept;
+      dropped += strips - kept;
+      entries.push({ sprite: i, strips: strips, kept: kept,
+                     dropped: strips - kept });
+    }
+    return { line: line, strips: used, pixels: used * STRIP_PX,
+             limitStrips: LINE_STRIPS, limitPixels: LINE_STRIPS * STRIP_PX,
+             dropped: dropped, entries: entries };
+  }
+
+  /* Every display line's budget, plus the worst line and how many lines drop
+   * strips.  This is what the page shows live. */
+  function spriteBudget(pic) {
+    var lines = [], worst = null, droppedLines = 0;
+    for (var y = 0; y < VIEW_H_LINES; y++) {
+      var b = spriteLineBudget(pic, y);
+      lines.push(b);
+      if (b.dropped) droppedLines++;
+      if (!worst || b.strips > worst.strips ||
+          (b.strips === worst.strips && b.dropped > worst.dropped)) worst = b;
+    }
+    return { lines: lines, worst: worst, droppedLines: droppedLines,
+             limitStrips: LINE_STRIPS, limitPixels: LINE_STRIPS * STRIP_PX,
+             spriteCount: pic.sprites.length, maxSprites: MAX_SPRITES };
+  }
+
+  /* The 256 SAT words the editor would write to VRAM $7F00.  Entry i is
+   * words 4i..4i+3: Y, X, pattern << 1, attributes (palette, SPBG, CGX,
+   * HFLIP, CGY, VFLIP) — docs/RENDERER.md's word layout. */
+  function satWords(pic) {
+    var layout = patternLayout(pic);
+    var words = new Array(256).fill(0);
+    for (var i = 0; i < pic.sprites.length; i++) {
+      var s = pic.sprites[i];
+      var pat = pic.spritePatterns[s.pattern];
+      var size = spriteSize(pat.width, pat.height);
+      words[i * 4] = (s.y + 64) & 0x3FF;          /* SAT Y: 64 = row 0 */
+      words[i * 4 + 1] = (s.x + 32) & 0x3FF;      /* SAT X: 32 = column 0 */
+      words[i * 4 + 2] = (layout.codes[s.pattern] << 1) & 0x7FF;
+      words[i * 4 + 3] = (s.palette & 0xF) | ((s.priority & 1) << 7) |
+                         (size.cgx << 8) | ((s.hflip & 1) << 11) |
+                         (size.cgy << 12) | ((s.vflip & 1) << 15);
+    }
+    return words;
+  }
+
+  /* Write one pattern's pixels into its 64-word cells: block b, half c (a
+   * 32-px sprite has two 16-px halves), plane k at +16k, row; word bit 15 is
+   * the strip's leftmost pixel. */
+  function writeSpritePattern(vram, pat, base) {
+    var width = pat.width, height = pat.height;
+    var halves = width === 32 ? 2 : 1;
+    for (var b = 0; b < height / 16; b++) {
+      for (var half = 0; half < halves; half++) {
+        var cell = base + b * 2 + half;
+        for (var row = 0; row < 16; row++) {
+          for (var k = 0; k < 4; k++) {
+            var word = 0;
+            for (var xin = 0; xin < 16; xin++) {
+              var v = pat.pixels[(b * 16 + row) * width + half * 16 + xin];
+              if (v & (1 << k)) word |= 1 << (15 - xin);
+            }
+            var w = cell * 64 + k * 16 + row;
+            vram[w * 2] = word & 0xFF;
+            vram[w * 2 + 1] = (word >> 8) & 0xFF;
+          }
+        }
+      }
+    }
+  }
+
   /* ---- what the hardware would hold ----------------------------------- */
 
   /* The picture as the viewer ROM lays it out: 32768 words of VRAM (BAT at
@@ -330,6 +643,15 @@
   function toPicture(pic) {
     var vram = new Uint8Array(65536);
     var i, m;
+
+    /* The sprite patterns are packed after the tiles; refuse a picture whose
+     * patterns would reach the SAT (the same rule newSpritePattern applies at
+     * creation — a later tile could have pushed them). */
+    var layout = patternLayout(pic);
+    if (layout.endCell > SAT_CELL)
+      refuse("sprite-pattern-vram", "the sprite patterns end at cell " +
+             layout.endCell + ", past the SAT at cell " + SAT_CELL +
+             " (VRAM " + hex(SAT_ADDR) + "); the VDC cannot show them");
 
     for (i = 0; i < BAT_W * BAT_H; i++) {
       var char = pic.map[i];
@@ -364,6 +686,18 @@
       }
     }
 
+    /* sprite patterns: cells after the tiles, at the codes the SAT names */
+    for (i = 0; i < pic.spritePatterns.length; i++)
+      writeSpritePattern(vram, pic.spritePatterns[i], layout.codes[i]);
+
+    /* the SAT at VRAM $7F00 (the DVSSR source the viewer's SATB DMA reads) */
+    var sat = satWords(pic);
+    for (i = 0; i < sat.length; i++) {
+      var satOff = SAT_ADDR * 2 + i * 2;
+      vram[satOff] = sat[i] & 0xFF;
+      vram[satOff + 1] = (sat[i] >> 8) & 0xFF;
+    }
+
     var cram = new Uint8Array(1024);
     for (var p = 0; p < PALETTES; p++) {
       for (var e = 0; e < ENTRIES; e++) {
@@ -373,13 +707,29 @@
         cram[off + 1] = (colour >> 8) & 0xFF;
       }
     }
+    for (var sp = 0; sp < SPRITE_PALETTES; sp++) {
+      for (var se = 0; se < SPRITE_ENTRIES; se++) {
+        var sc = pic.spritePalettes[sp][se];
+        var soff = (0x100 + sp * SPRITE_ENTRIES + se) * 2;
+        cram[soff] = sc & 0xFF;
+        cram[soff + 1] = (sc >> 8) & 0xFF;
+      }
+    }
+
+    /* Two copy regions: the tiles from $40, then the sprite patterns.  The
+     * pattern region starts at its first packed cell (the alignment gap after
+     * the tiles is left uncopied, i.e. zero). */
+    var regions = [[FIRST_CHAR, tileCount(pic)]];
+    if (pic.spritePatterns.length)
+      regions.push([layout.firstCell * 4, layout.cellCount * 4]);
 
     return {
       vram: vram,
       cram: cram,
       regs: { BXR: pic.scroll.BXR, BYR: pic.scroll.BYR,
-              MWR: MWR_32x32, CR: CR_BG_ON },
-      regions: [[FIRST_CHAR, tileCount(pic)]],
+              MWR: MWR_32x32,
+              CR: CR_BG_ON | (pic.sprites.length ? CR_SPRITES_ON : 0) },
+      regions: regions,
       width: VIEW_W,
       height: VIEW_H
     };
@@ -394,7 +744,8 @@
   function viewRegs(pic) {
     return {
       BXR: pic.scroll.BXR, BYR: pic.scroll.BYR,
-      MWR: MWR_32x32, CR: CR_BG_ON,
+      MWR: MWR_32x32,
+      CR: CR_BG_ON | (pic.sprites.length ? CR_SPRITES_ON : 0),
       RCRCount: 0, scanline: 18
     };
   }
@@ -432,11 +783,65 @@
                         pic.palettes[p][e]);
     if (!isInt(pic.backdrop) || pic.backdrop < 0 || pic.backdrop >= VCE_COLOURS)
       problems.push("backdrop = " + pic.backdrop);
+
+    /* sprites (card #13) */
+    if (pic.spritePatterns.length > 16)
+      problems.push(pic.spritePatterns.length + " sprite patterns; the ROM " +
+                    "layout gives 6 banks for tiles and patterns");
+    for (var sp = 0; sp < pic.spritePatterns.length; sp++) {
+      var pat = pic.spritePatterns[sp];
+      if (!spriteSize(pat.width, pat.height))
+        problems.push("sprite pattern " + sp + " is " + pat.width + "x" +
+                      pat.height + " (no CGX/CGY size)");
+      else if (pat.pixels.length !== pat.width * pat.height)
+        problems.push("sprite pattern " + sp + " has " + pat.pixels.length +
+                      " pixels, expected " + pat.width * pat.height);
+      else
+        for (var pi = 0; pi < pat.pixels.length; pi++)
+          if (!isInt(pat.pixels[pi]) || pat.pixels[pi] < 0 ||
+              pat.pixels[pi] >= SPRITE_ENTRIES)
+            problems.push("sprite pattern " + sp + " pixel " + pi + " = " +
+                          pat.pixels[pi]);
+    }
+    if (pic.spritePatterns.length) {
+      var layout = patternLayout(pic);
+      if (layout.endCell > SAT_CELL)
+        problems.push("sprite patterns end at cell " + layout.endCell +
+                      ", past the SAT at cell " + SAT_CELL);
+    }
+    if (pic.sprites.length > MAX_SPRITES)
+      problems.push(pic.sprites.length + " sprites; the SAT holds " +
+                    MAX_SPRITES);
+    for (var si = 0; si < pic.sprites.length; si++) {
+      var spr = pic.sprites[si];
+      if (!isInt(spr.pattern) || spr.pattern < 0 ||
+          spr.pattern >= pic.spritePatterns.length)
+        problems.push("sprite " + si + " names pattern " + spr.pattern);
+      if (!isInt(spr.x) || spr.x < 0 || spr.x >= VIEW_W)
+        problems.push("sprite " + si + " x = " + spr.x);
+      if (!isInt(spr.y) || spr.y < 0 || spr.y >= VIEW_H)
+        problems.push("sprite " + si + " y = " + spr.y);
+      if (!isInt(spr.palette) || spr.palette < 0 ||
+          spr.palette >= SPRITE_PALETTES)
+        problems.push("sprite " + si + " palette = " + spr.palette);
+      for (var f = 0; f < 3; f++) {
+        var name = ["priority", "hflip", "vflip"][f];
+        var val = spr[name];
+        if (val !== 0 && val !== 1)
+          problems.push("sprite " + si + " " + name + " = " + val);
+      }
+    }
+    for (var spp = 0; spp < SPRITE_PALETTES; spp++)
+      for (var spe = 0; spe < SPRITE_ENTRIES; spe++) {
+        var spc = pic.spritePalettes[spp][spe];
+        if (!isInt(spc) || spc < 0 || spc >= VCE_COLOURS)
+          problems.push("sprite palette " + spp + " entry " + spe + " = " + spc);
+      }
     return problems;
   }
 
   function stats(pic) {
-    var used = {}, distinct = {}, tiles = 0;
+    var used = {}, distinct = {}, tiles = 0, patternCells = 0;
     for (var c = FIRST_CHAR; c < pic.nextChar; c++) {
       var t = pic.tiles[c];
       if (!t) continue;
@@ -444,12 +849,23 @@
       used[t.palette] = true;
       for (var i = 0; i < PIXELS; i++) distinct[t.pixels[i]] = true;
     }
+    for (var sp = 0; sp < pic.spritePatterns.length; sp++) {
+      var pat = pic.spritePatterns[sp];
+      var size = spriteSize(pat.width, pat.height);
+      patternCells += size ? size.cells : 0;
+    }
+    var tileBytes = tiles * 32;
+    var patternBytes = patternCells * 128;   /* 64 words = 128 bytes a cell */
     return {
       tiles: tiles,
       palettesUsed: Object.keys(used).length,
       colourNumbers: Object.keys(distinct).length,
       charsFirst: FIRST_CHAR,
-      charsLast: pic.nextChar - 1
+      charsLast: pic.nextChar - 1,
+      spritePatterns: pic.spritePatterns.length,
+      spritePatternCells: patternCells,
+      sprites: pic.sprites.length,
+      regionBytes: tileBytes + patternBytes
     };
   }
 
@@ -651,6 +1067,116 @@
     return pic;
   }
 
+  /* ---- the sprite demo (card #13) -------------------------------------- */
+
+  /* "Sprites over the bay": a background painted from scratch — a transparent
+   * left half and an opaque ramp on the right, for the SPBG priority rule —
+   * then six patterns (one per VDC size), all 16 sprite palettes, and 36
+   * sprites into the SAT: every size, both flips, both priorities, an overlap
+   * and a crowded line where 21 strips are requested and the VDC keeps 16.
+   * Every pixel of every tile and pattern is painted through this module's
+   * own calls; nothing comes from tests/dumps/. */
+
+  var SPRITE_RAMP = [c(0, 1, 3), c(0, 2, 4), c(1, 3, 5), c(2, 4, 5),
+                     c(3, 5, 6), c(4, 5, 6), c(5, 6, 7), c(7, 7, 7)];
+
+  function spritePaletteWord(pal, entry) {
+    return colourWord(1 + ((entry * 3 + pal) % 7),
+                      1 + ((entry + pal * 2) % 7),
+                      1 + ((entry * 2 + pal * 3) % 7));
+  }
+
+  function paintSpriteDemoPattern(pic, pattern, id) {
+    var size = spritePatternSize(pic, pattern);
+    for (var y = 0; y < size.height; y++) {
+      for (var x = 0; x < size.width; x++) {
+        var idx = (x === 0 || y === 0 || x === size.width - 1 ||
+                   y === size.height - 1) ? 0
+                : 1 + ((x * 3 + y * 5 + id * 7) % 15);
+        paintSpriteIndex(pic, pattern, x, y, idx);
+      }
+    }
+  }
+
+  function spriteDemoPicture() {
+    var pic = newPicture();
+    setBackdrop(pic, c(0, 0, 1));                       /* deep navy */
+
+    /* the right half's opaque ramp: one tile per tile row, all pixels the
+     * row's colour NUMBER, so the background's low nibble is never 0 */
+    for (var e = 0; e < SPRITE_RAMP.length; e++)
+      setPaletteColour(pic, 1, 1 + e, SPRITE_RAMP[e]);
+
+    var rowTiles = [];
+    for (var ty = 0; ty < VIEW_H / TILE; ty++) {
+      var char = newTile(pic, 1);
+      var index = 1 + (ty % SPRITE_RAMP.length);
+      for (var py = 0; py < TILE; py++)
+        for (var px = 0; px < TILE; px++)
+          paintTileIndex(pic, char, px, py, index);
+      rowTiles.push(char);
+      for (var mx = 0; mx < BAT_W; mx++)
+        paintMapCell(pic, mx, ty, mx < BAT_W / 2 ? FIRST_CHAR : char);
+    }
+    dedupeTiles(pic);
+
+    /* all 16 sprite palettes, entry 0 left transparent/black */
+    for (var pal = 0; pal < SPRITE_PALETTES; pal++)
+      for (var se = 1; se < SPRITE_ENTRIES; se++)
+        setSpritePaletteColour(pic, pal, se, spritePaletteWord(pal, se));
+
+    /* one pattern per size, in SPRITE_SIZES order */
+    var patterns = [];
+    for (var sz = 0; sz < SPRITE_SIZES.length; sz++) {
+      var p = newSpritePattern(pic, SPRITE_SIZES[sz].width,
+                               SPRITE_SIZES[sz].height);
+      paintSpriteDemoPattern(pic, p, sz);
+      patterns.push(p);
+    }
+
+    /* the size row: all six sizes, distinct palettes */
+    addSprite(pic, { x: 8, y: 8, pattern: patterns[0], palette: 0 });
+    addSprite(pic, { x: 32, y: 8, pattern: patterns[1], palette: 1 });
+    addSprite(pic, { x: 72, y: 8, pattern: patterns[2], palette: 2 });
+    addSprite(pic, { x: 96, y: 8, pattern: patterns[3], palette: 3 });
+    addSprite(pic, { x: 136, y: 8, pattern: patterns[4], palette: 4 });
+    addSprite(pic, { x: 160, y: 8, pattern: patterns[5], palette: 5 });
+
+    /* flips: X, Y, both, a 32-px X-flip (halves swap) and a 16x32 Y-flip */
+    addSprite(pic, { x: 8, y: 88, pattern: patterns[0], palette: 6, hflip: 1 });
+    addSprite(pic, { x: 32, y: 88, pattern: patterns[0], palette: 7, vflip: 1 });
+    addSprite(pic, { x: 56, y: 88, pattern: patterns[0], palette: 8,
+                     hflip: 1, vflip: 1 });
+    addSprite(pic, { x: 80, y: 88, pattern: patterns[1], palette: 9, hflip: 1 });
+    addSprite(pic, { x: 120, y: 88, pattern: patterns[2], palette: 10,
+                     vflip: 1 });
+
+    /* priority: SPBG=0 over the transparent left half shows; SPBG=0 over the
+     * opaque right half is hidden; SPBG=1 over it shows; two sprites overlap
+     * and the lower SAT index wins where both are opaque */
+    addSprite(pic, { x: 8, y: 152, pattern: patterns[0], palette: 11,
+                     priority: 0 });
+    addSprite(pic, { x: 160, y: 152, pattern: patterns[0], palette: 12,
+                     priority: 0 });
+    addSprite(pic, { x: 184, y: 152, pattern: patterns[0], palette: 13 });
+    addSprite(pic, { x: 216, y: 152, pattern: patterns[0], palette: 14 });
+    addSprite(pic, { x: 224, y: 152, pattern: patterns[0], palette: 15,
+                     priority: 0 });
+
+    /* the crowded line: 15 strips, then a 32-px sprite whose left strip is
+     * the 16th and whose right strip is dropped, then four more sprites that
+     * are dropped entirely — 21 strips requested, 16 kept */
+    for (var i = 0; i < 15; i++)
+      addSprite(pic, { x: 8 + 13 * i, y: 200, pattern: patterns[0],
+                       palette: i % SPRITE_PALETTES });
+    addSprite(pic, { x: 203, y: 200, pattern: patterns[1], palette: 3 });
+    for (var j = 0; j < 4; j++)
+      addSprite(pic, { x: 210 + 13 * j, y: 200, pattern: patterns[0],
+                       palette: j });
+
+    return pic;
+  }
+
   return {
     VCE_COLOURS: VCE_COLOURS,
     PALETTES: PALETTES,
@@ -663,6 +1189,14 @@
     FIRST_CHAR: FIRST_CHAR,
     LAST_CHAR: LAST_CHAR,
     MAX_TILES: MAX_TILES,
+    SPRITE_PALETTES: SPRITE_PALETTES,
+    SPRITE_ENTRIES: SPRITE_ENTRIES,
+    MAX_SPRITES: MAX_SPRITES,
+    SAT_ADDR: SAT_ADDR,
+    SAT_CELL: SAT_CELL,
+    LINE_STRIPS: LINE_STRIPS,
+    STRIP_PX: STRIP_PX,
+    SPRITE_SIZES: SPRITE_SIZES,
 
     colourWord: colourWord,
     colourChannels: colourChannels,
@@ -683,10 +1217,26 @@
     mapCell: mapCell,
     dedupeTiles: dedupeTiles,
 
+    newSpritePattern: newSpritePattern,
+    spritePatternCount: spritePatternCount,
+    spritePatternSize: spritePatternSize,
+    spritePatternPixels: spritePatternPixels,
+    paintSpriteIndex: paintSpriteIndex,
+    setSpritePaletteColour: setSpritePaletteColour,
+    spritePaletteColours: spritePaletteColours,
+    addSprite: addSprite,
+    removeSprite: removeSprite,
+    clearSprites: clearSprites,
+    spriteLineBudget: spriteLineBudget,
+    spriteBudget: spriteBudget,
+    patternLayout: patternLayout,
+    satWords: satWords,
+
     toPicture: toPicture,
     viewRegs: viewRegs,
     validate: validate,
     stats: stats,
-    demoPicture: demoPicture
+    demoPicture: demoPicture,
+    spriteDemoPicture: spriteDemoPicture
   };
 });

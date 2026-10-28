@@ -142,11 +142,31 @@ VRAM); both fixed, sprite3/sprite10 rebuilt and re-captured, details in
 [`tests/README.md`](tests/README.md). Tests written by @design — flagged for
 @review to read cold.
 
+**#13 is done.** `renderer/editor.html` + `renderer/pce-editor.js` gain
+sprites: paint patterns at the six VDC sizes (16×16 … 32×64), choose from the
+16 sprite palettes (CRAM `$100`–`$1FF`), place up to 64 sprites (X, Y,
+pattern/size, palette, SPBG priority, both flips) into the SAT at VRAM
+`$7F00`, and see the per-line budget live. Refusals carry codes: `65th-sprite`,
+`sprite-pattern-vram` (a pattern whose cells reach the SAT), `17th-colour` (a
+sprite palette entry 16), `17th-sprite-palette`, `sprite-size`. Patterns are
+packed after the tiles into 64-word cells at their CGX/CGY alignment, so they
+never overlap the characters; CR is `$C0` when a picture has sprites.
+`node tests/check-editor.js` exits 0: 21/21 refusals; the sprite demo (36
+sprites, all six sizes, all 16 palettes, a 21-strip line of which the VDC
+keeps 16) equals `pce-bg.js` + `pce-sprites.js` from two independent paths,
+and the budget equals `collectStrips` on all 224 lines; the exported ROM
+(40960 B, sha256 `9dc564c5…`) captured in Mednafen (`tests/dumps/spainted`, no
+synthetic input) has frame diff 0 with VRAM/CRAM/SAT equal to the editor's;
+`node tests/check.js` reported 47 pictures diff 0 at #13's close (#42 is
+adding more captures). The #10 background demo's
+ROM is unchanged (`486477d6…`). The test was written by @design and is flagged
+for @review cold. Details and limits: [`docs/EDITOR.md`](docs/EDITOR.md).
+
 ## Next action
 
 `../workshop/board.py next PCEStudio --who design`. #11 (@review) reads Phase
 1 cold, #5–#10, and #14's viewer evidence. #8 stays parked until Dennis
 photographs `tools/gen/viewer1.pce` on the Tang Nano; #25 waits on Dennis's
-TurboGrafx photo of `tools/gen/us1.pce`. #13 ("A sprite editor and the SATB
-in the export") is still backlog.
+TurboGrafx photo of `tools/gen/us1.pce`. #42 (viewer-test gaps) and #13's cold
+review are the open threads.
 

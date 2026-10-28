@@ -25,7 +25,7 @@ Progress tab is drawn from these tables.
 | Viewer ROM on real hardware | WAITING | Dennis: real PC Engine + flash cart, MiSTer or Tang Nano; photo into `docs/` | #8 |
 | Browser `.pce` export | PROVEN | `node tests/check-export.js`: 3 scenes byte-equal to PCEAS | #9 — `renderer/pce-rom.js` |
 | TurboGrafx (bit-reversed) export | NOT PROVEN | `node tests/check-us-card.js` passes; no TurboGrafx-16 here to run it on | #25 |
-| Editor (tiles, palettes, map) | PROVEN | `node tests/check-editor.js`: 12/12 refusals, painted picture diff 0 in Mednafen | #10 — `renderer/editor.html` |
+| Editor (tiles, palettes, map) | PROVEN | `node tests/check-editor.js`: 12/12 background refusals (21/21 with #13's sprite refusals), painted picture diff 0 in Mednafen | #10 — `renderer/editor.html` |
 | Phase 1 read cold | PROVEN | `docs/REVIEW.md`, 12 findings, all fixed by #38/#39 | #11 |
 
 ## Phase 2 — The PC Engine's own tricks
@@ -34,8 +34,8 @@ Progress tab is drawn from these tables.
 |---|---|---|---|
 | Sprites in the renderer | PROVEN | `node tests/check.js`: 11 sprite scenes diff 0; breaker's 24 mutants all detected | #12, #40 — `renderer/pce-sprites.js` |
 | Viewer loads sprites (SATB DMA) | PROVEN | `node tests/check-viewer.js`: 17 captures (viewer1-3, browser1-3, vsprite1-11) diff 0 against the renderer, VRAM/CRAM/SATB equal the scene dumps; vsprite3's missing red half (found by Dennis) fixed. Breaker from another seat running | #14 |
-| Sprite editor + SATB in export | UNTESTED | in progress | #13 |
-| Scanline effects in the renderer | PROVEN | `node tests/check.js`: raster1-5 (status bar, BXR wobble, BYR split, colour gradient, CR on/off) diff 0 against Mednafen, 46 pictures in all. Not proven: VCE writes mid-line, real-hardware IRQ latency. DeepSeek did this Opus card. Breaker running | #15 — `docs/RENDERER.md` |
+| Sprite editor + SATB in export | PROVEN | `node tests/check-editor.js`: 21/21 refusals with codes (65th sprite, pattern past VRAM, 17th sprite-palette colour, illegal size), a sprite scene painted through the editor's calls equals pce-bg.js + pce-sprites.js, 16-strip budget line-by-line equal, and the exported ROM's Mednafen capture (`tests/dumps/spainted`) has frame diff 0 with VRAM/CRAM/SAT equal to the editor's | #13 — `renderer/editor.html`, `renderer/pce-editor.js` |
+| Scanline effects in the renderer | PROVEN | `node tests/check.js`: raster1-5 (status bar, BXR wobble, BYR split, colour gradient, CR on/off) diff 0 against Mednafen, 47 pictures in all (46 when #15 closed; #13 added spainted). Not proven: VCE writes mid-line, real-hardware IRQ latency. DeepSeek did this Opus card. Breaker running | #15 — `docs/RENDERER.md` |
 | Scanline effects in the viewer (RCR) | UNTESTED | | #16 |
 | Wide modes (256/336/512) | UNTESTED | | #27 |
 
