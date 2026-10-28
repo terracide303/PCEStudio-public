@@ -1,5 +1,12 @@
 <!doctype html>
-<!-- PCEStudio — the studio (card #75, first and second halves).
+<!-- PCEStudio — the studio (cards #75 and #77).
+
+     The editor is CodeMirror 5.65.16 (MIT, vendored under vendor/codemirror
+     with its notice) with Lua highlighting, line numbers and an opt-in Vim
+     keymap. The toy is a file set beside main.lua (tiles/palettes/sprites/
+     waves as JSON assets), saved as one versioned JSON envelope whose shape
+     follows ppu.toys' packed toy (docs/PPU-TOYS.md §3, credited below), and
+     autosaved to this browser. docs/STUDIO.md §2.2/§5/§7 is the mapping.
 
      One page shaped like ppu.toys' Studio: a code column on the left with the
      model's panel dock under it, and the live output column on the right with
@@ -33,6 +40,7 @@
        ?demo=<palette|raster|sprite>  load that example
        ?frame=N                       seek to frame N and pause (a screenshot)
        ?paused=1                      load without autoplay
+       ?tab=assets                    open the ASSETS file list
        ?docs=<chapter>                open the Docs panel at a chapter
        ?selftest=1&frames=40          run the example headlessly, write the
                                       result to <pre id="selftest"> and the title
@@ -48,6 +56,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Pixelify+Sans:wght@600&display=swap">
+<!-- CodeMirror 5.65.16, MIT (vendor/codemirror/LICENSE): the editor core
+     styles. The scripts are loaded by the bootstrap before the page's own
+     scripts, and only when the DOM can host CodeMirror (#77). -->
+<link rel="stylesheet" href="../vendor/codemirror/lib/codemirror.css">
 <style>
   :root {
     /* ppu.toys' design tokens, adapted (source URL in the credit block). */
@@ -218,6 +230,30 @@
     font: 12px/1.55 var(--mono); tab-size: 2; white-space: pre;
     overflow: auto; min-width: 0;
   }
+  /* CodeMirror replaces the textarea when a real DOM is available. It owns
+     its own gutter, so the plain gutter in the markup is hidden with it. */
+  .editor.cm-on { display: block; }
+  .editor.cm-on .gutter, .editor.cm-on #source { display: none; }
+  .editor .CodeMirror {
+    height: 100%; background: var(--code); color: var(--text2);
+    font: 12px/1.55 var(--mono); tab-size: 2;
+  }
+  .editor .CodeMirror-gutters {
+    background: var(--code); border-right: 1px solid var(--line2);
+    color: var(--faint);
+  }
+  .editor .CodeMirror-linenumber { color: var(--faint); padding: 0 8px 0 0; }
+  .editor .CodeMirror-cursor { border-left-color: var(--text); }
+  .editor .CodeMirror-activeline-background { background: rgba(255,149,64,.045); }
+  .editor .CodeMirror-selected { background: rgba(255,149,64,.14); }
+  .editor .cm-keyword { color: var(--accent); }
+  .editor .cm-atom, .editor .cm-number { color: #c792ea; }
+  .editor .cm-string, .editor .cm-string-2 { color: #9ccc9c; }
+  .editor .cm-comment { color: var(--dim); font-style: italic; }
+  .editor .cm-builtin, .editor .cm-def { color: var(--cyan); }
+  .editor .cm-variable, .editor .cm-variable-2 { color: var(--text2); }
+  .editor .cm-operator { color: var(--muted); }
+  .editor.no-gutter .CodeMirror-gutters { display: none; }
   .assets { padding: 14px 18px; overflow: auto; }
   .assets h2 {
     font-size: 11px; letter-spacing: 0.1em; color: var(--muted);
@@ -225,6 +261,22 @@
   }
   .assets p { color: var(--muted); max-width: 46rem; }
   .assets ul { color: var(--muted); font: 12px var(--mono); }
+  .asset-list { list-style: none; margin: 12px 0 0; padding: 0;
+    border-top: 1px solid var(--line2); }
+  .asset-row {
+    display: grid; grid-template-columns: minmax(0,1fr) 72px 64px 62px;
+    align-items: center; gap: 10px; padding: 7px 4px;
+    border-bottom: 1px solid var(--line2); font: 12px var(--mono);
+  }
+  .asset-row .a-name { color: var(--text2); overflow: hidden;
+    text-overflow: ellipsis; }
+  .asset-row .a-kind, .asset-row .a-size { color: var(--dim); }
+  .asset-row .a-kind { text-transform: uppercase; letter-spacing: .06em;
+    font-size: 10px; }
+  .asset-row .a-open { justify-self: end; }
+  .asset-row.is-main .a-name { color: var(--text); }
+  .asset-row.is-on .a-name { color: var(--accent); }
+  .asset-row .a-bad { color: var(--bad); }
 
   /* ---------- the panel dock ---------- */
   .dock {
@@ -561,11 +613,7 @@
                   aria-selected="false">ASSETS</button>
         </div>
         <div class="file-bar">
-          <div class="file-tabs">
-            <button type="button" class="file-tab is-on" id="file-main">main.lua</button>
-            <button type="button" class="file-tab file-add" id="btn-newfile"
-                    title="One Lua file per toy">+</button>
-          </div>
+          <div class="file-tabs" id="file-tabs"></div>
           <div class="file-status">
             <span id="keys-status">plain keys</span>
             <span class="dot">·</span>
@@ -578,13 +626,15 @@
         </div>
         <div class="assets" id="assets-pane" hidden>
           <h2>ASSETS</h2>
-          <p>No image sources in this card. A toy writes its own tiles into
-            VRAM with <code>vram[addr] = word</code> and its colours with
-            <code>pal(addr, word)</code>; the PNG importer and <code>dma()</code>
-            placement are cards #24/#71.</p>
-          <ul id="asset-list">
-            <li>main.lua — the toy's Lua source</li>
-          </ul>
+          <p>The toy's files beside <code>main.lua</code>, in ppu.toys' shape:
+            <code>tiles.json</code> (8×8 tiles, 4-bit colour numbers),
+            <code>palettes.json</code> (32 palettes of 16 VCE words),
+            <code>sprites.json</code> (the SAT) and <code>waves.json</code>
+            (the PSG's channels). They are editable here and travel in the
+            toy's one JSON file; the importer that feeds them to a running
+            toy is card #24/#71, so for now a toy writes its own VRAM/CRAM
+            with <code>vram[]</code>/<code>pal()</code>.</p>
+          <div class="asset-list" id="asset-list"></div>
         </div>
       </div>
 
@@ -711,7 +761,8 @@
   <div class="pop-head"><span>SETTINGS</span>
     <button type="button" class="pop-close" id="settings-close"
             aria-label="Close settings">×</button></div>
-  <div class="set-row"><span class="set-label">Editor keys</span>
+  <div class="set-row"><span class="set-label">Editor keys
+    <span class="set-hint">CodeMirror's Vim mode, off by default</span></span>
     <span class="seg">
       <button type="button" id="keys-plain" class="is-on">Plain</button>
       <button type="button" id="keys-vim">Vim</button>
@@ -729,11 +780,13 @@
     <button type="button" class="pop-close" id="open-close"
             aria-label="Close open">×</button></div>
   <div class="pop-note">Built-in examples (the three toys tests/check-il.js
-    runs)</div>
+    runs), or a saved toy (<code>.pce.json</code>, one envelope carrying
+    every file) / a plain <code>.lua</code></div>
   <div id="example-list"></div>
   <div class="pop-sep"></div>
   <button type="button" class="pop-item" id="open-file">From file…</button>
-  <input type="file" id="file-input" accept=".lua,.txt" hidden>
+  <input type="file" id="file-input"
+         accept=".json,.pce.json,.lua,.txt,application/json,text/plain" hidden>
 </div>
 
 <!-- Docs: #61's generated reference, docked in the studio with ppu.toys'
@@ -772,6 +825,27 @@
 <div class="toast" id="toast" role="status" hidden></div>
 <pre class="selftest" id="selftest" hidden></pre>
 
+<!-- CodeMirror 5.65.16, MIT (vendor/codemirror/LICENSE). Loaded only when the
+     document can host it: the tests' stub DOM has no createRange/navigator,
+     so it keeps the plain textarea fallback there while a real browser gets
+     the CodeMirror editor. The tags are assembled rather than written
+     literally so the test's script scan does not try to execute a vendor
+     file in the stub. -->
+<script>
+(function () {
+  if (typeof document === "undefined" || typeof navigator === "undefined" ||
+      typeof document.createRange !== "function") return;
+  var files = [
+    "../vendor/codemirror/lib/codemirror.js",
+    "../vendor/codemirror/mode/lua/lua.js",
+    "../vendor/codemirror/addon/selection/active-line.js",
+    "../vendor/codemirror/keymap/vim.js"
+  ];
+  for (var i = 0; i < files.length; i++) {
+    document.write("<" + "script src=\"" + files[i] + "\"><" + "/script>");
+  }
+})();
+</script>
 <script src="../vendor/fengari/fengari-web.js"></script>
 <script src="pce-bg.js"></script>
 <script src="pce-sprites.js"></script>
@@ -873,6 +947,34 @@ const EXAMPLES = [
     source: TOY_RASTER },
   { id: "sprite", name: "sprite-pad.lua", title: "Sprite and pad",
     source: TOY_SPRITE }
+];
+
+/* ---------------------------------------------------------------------
+ * A toy is a file set, not one string: main.lua plus the four asset files
+ * ppu.toys keeps beside it (tiles, palettes, sprites, waves). The files are
+ * text; their shapes follow renderer/pce-editor.js's picture and
+ * renderer/pce-wave.js's document so the importer (#24/#71) can read them
+ * later. This card makes them first-class files — editable, saved and
+ * autosaved with the toy — not a second runtime surface.
+ *
+ * The envelope follows ppu.toys' packed toy (docs/PPU-TOYS.md §3, MIT,
+ * Copyright (c) 2026 Liora Labs): a version, title, description, a `files`
+ * list of {name, source} in order, and a `sources` list for binary payloads
+ * (empty here until #24). Credit: docs/STUDIO.md §0.
+ * ------------------------------------------------------------------ */
+const TOY_VERSION = "pce.studio/1";
+const TOY_KEY = "pcestudio.toy.v1";
+const TOY_KEY_LEGACY = "pcestudio.toy";
+const SETTINGS_KEY = "pcestudio.settings.v1";
+const DEFAULT_ASSET_FILES = [
+  { name: "tiles.json", kind: "tiles",
+    source: '{\n  "version": 1,\n  "tiles": []\n}\n' },
+  { name: "palettes.json", kind: "palettes",
+    source: '{\n  "version": 1,\n  "backdrop": 0,\n  "background": [],\n  "sprites": []\n}\n' },
+  { name: "sprites.json", kind: "sprites",
+    source: '{\n  "version": 1,\n  "sprites": []\n}\n' },
+  { name: "waves.json", kind: "waves",
+    source: '{\n  "version": 1,\n  "channels": []\n}\n' }
 ];
 
 /* The panel strip, in ppu.toys' order and with the PCE's own answers.
@@ -1150,8 +1252,19 @@ let activePanel = "screen";
 let visiblePanels = PANELS.map((p) => p.id);
 let lineNumbers = true;
 let crtDefault = false;
+let vimOn = false;
 let palCells = null;
 let toastTimer = null;
+
+/* The toy's file set and the editor in front of it. `current.source` stays
+ * the Lua the runtime runs (main.lua); an asset edit never changes it. */
+let files = [];
+let activeFile = "main.lua";
+let toyTitle = "palette-cycle";
+let toyDescription = "";
+let editor = null;            /* the CodeMirror instance, when mounted */
+let switchingFile = false;    /* setValue while switching is not an edit */
+let restoredFromStorage = false;
 
 /* ---- the canvas ------------------------------------------------------- */
 const canvas = $("out");
@@ -1199,6 +1312,7 @@ function rebuild() {
   }
   const factory = current.mode === "il" ? PCEStudio.il : PCEStudio.toys;
   if (!factory) throw new Error("the " + current.mode + " runtime did not load");
+  current.source = mainSource();
   const rt = factory.create(current.source, { budgetMs: 120 });
   rt.load();
   runtime = rt;
@@ -1685,38 +1799,486 @@ function togglePop(id) {
   if (id === "open-pop") $("btn-open").setAttribute("aria-expanded", String(show));
 }
 
-/* ---- examples and files ---------------------------------------------- */
+/* ---- the toy's files -------------------------------------------------- */
 function findExample(id) {
   return EXAMPLES.find((e) => e.id === id) || null;
 }
-function loadExample(id, quiet) {
-  const ex = findExample(id);
-  if (!ex) return false;
-  current.example = ex;
-  current.source = ex.source;
-  $("source").value = ex.source;
-  $("doc-title").textContent = ex.name;
-  drawGutter();
-  if (!applySource()) return false;
-  if (!quiet) toast("Opened " + ex.name + ".");
-  return true;
+
+function newToyFiles(luaSource) {
+  const out = [{ name: "main.lua", kind: "lua", source: luaSource }];
+  for (const a of DEFAULT_ASSET_FILES) {
+    out.push({ name: a.name, kind: a.kind, source: a.source });
+  }
+  return out;
+}
+
+function findFile(name) {
+  for (const f of files) if (f.name === name) return f;
+  return null;
+}
+
+/* The Lua the runtime runs. An asset tab never changes it. */
+function mainSource() {
+  const f = findFile("main.lua");
+  if (f) return f.source;
+  return current.source || "";
+}
+
+function fileKind(name) {
+  if (/\.lua$/.test(name)) return "lua";
+  if (/^tiles\.json$/.test(name)) return "tiles";
+  if (/^palettes\.json$/.test(name)) return "palettes";
+  if (/^sprites\.json$/.test(name)) return "sprites";
+  if (/^waves\.json$/.test(name)) return "waves";
+  return "json";
+}
+
+/* What the editor shows, whichever editor is mounted. CodeMirror replaces the
+ * textarea in a real browser; the tests' stub DOM keeps the textarea. */
+function editorText() {
+  if (editor) return editor.getValue();
+  return $("source").value;
+}
+function setEditorText(text) {
+  if (editor) editor.setValue(String(text == null ? "" : text));
+  else $("source").value = String(text == null ? "" : text);
+  if (!editor) drawGutter();
 }
 
 function drawGutter() {
+  if (editor) return;
   const lines = $("source").value.split("\n").length;
   let out = "";
   for (let i = 1; i <= lines; i++) out += i + "\n";
   $("gutter").textContent = out;
 }
 
-function saveFile() {
-  const name = current.example ? current.example.name : "toy.lua";
+/* Every edit lands in the active file and, when that file is main.lua, in the
+ * Lua the Run button compiles. Autosave on every edit is the ppu.toys
+ * contract (`saved in this browser`); a failed write is a convenience lost,
+ * not a broken toy. */
+function onEditorChange() {
+  const text = editorText();
+  const f = findFile(activeFile);
+  if (f) f.source = text;
+  current.source = mainSource();
+  setSaved("edited — Run to apply");
+  persistToy();
+  if (!$("assets-pane").hidden) renderAssets();
+}
+
+/* Mount CodeMirror over the textarea. Only a real DOM can host it; the stub
+ * check leaves the textarea, and the headless-browser run proves CodeMirror
+ * itself (Lua mode, line numbers, Vim keymap, text == what runs). */
+function mountEditor() {
+  if (editor) return true;
+  const CM = typeof window !== "undefined" ? window.CodeMirror : null;
+  if (typeof CM !== "function" || !$("source")) return false;
+  try {
+    editor = CM.fromTextArea($("source"), {
+      mode: "lua",
+      lineNumbers: lineNumbers,
+      styleActiveLine: true,
+      indentUnit: 2,
+      tabSize: 2,
+      lineWrapping: false,
+      keyMap: vimOn ? "vim" : "default",
+      extraKeys: {
+        Tab: (cm) => {
+          if (cm.somethingSelected()) cm.indentSelection("add");
+          else cm.replaceSelection("  ", "end");
+        },
+        "Shift-Tab": "indentLess"
+      }
+    });
+    $("editor-pane").classList.add("cm-on");
+    $("editor-pane").classList.toggle("no-gutter", !lineNumbers);
+    editor.on("change", () => {
+      if (switchingFile) return;
+      onEditorChange();
+    });
+    return true;
+  } catch (e) {
+    editor = null;
+    return false;
+  }
+}
+
+function updateFileTabs() {
+  const host = $("file-tabs");
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  /* ppu.toys' file bar carries the code files; an asset gets a tab while it
+   * is the file in the editor, and the ASSETS tab lists the whole set. */
+  const shown = files.filter((f) => fileKind(f.name) === "lua" ||
+                                    f.name === activeFile);
+  for (const f of shown) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "file-tab" + (f.name === activeFile ? " is-on" : "");
+    b.textContent = f.name;
+    b.title = f.name + " (" + fileKind(f.name) + ")";
+    b.addEventListener("click", () => selectFile(f.name));
+    host.appendChild(b);
+  }
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "file-tab file-add";
+  add.id = "btn-newfile";
+  add.title = "One Lua file per toy; assets are the files beside it";
+  add.textContent = "+";
+  add.addEventListener("click", () =>
+    toast("One Lua file per toy; the asset files beside main.lua are #24's importer."));
+  host.appendChild(add);
+}
+
+function renderAssets() {
+  const host = $("asset-list");
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  for (const f of files) {
+    const row = document.createElement("div");
+    row.className = "asset-row" + (f.name === "main.lua" ? " is-main" : "") +
+      (f.name === activeFile ? " is-on" : "");
+    const name = document.createElement("span");
+    name.className = "a-name";
+    name.textContent = f.name;
+    const kind = document.createElement("span");
+    kind.className = "a-kind";
+    kind.textContent = fileKind(f.name);
+    const size = document.createElement("span");
+    size.className = "a-size";
+    size.textContent = f.source.length + " B";
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "btn-mini a-open";
+    open.textContent = "Edit";
+    open.addEventListener("click", () => selectFile(f.name));
+    row.appendChild(name); row.appendChild(kind); row.appendChild(size);
+    row.appendChild(open);
+    host.appendChild(row);
+  }
+}
+
+/* Switch the editor to a file. The file set never changes here; only which
+ * one is on screen, and the document title says which. */
+function selectFile(name) {
+  const f = findFile(name);
+  if (!f) return false;
+  if (activeFile !== name && !switchingFile) {
+    const cur = findFile(activeFile);
+    if (cur) cur.source = editorText();
+  }
+  activeFile = name;
+  switchingFile = true;
+  setEditorText(f.source);
+  switchingFile = false;
+  if (editor) editor.setOption("mode", fileKind(name) === "lua" ? "lua" : null);
+  $("doc-title").textContent = name;
+  updateFileTabs();
+  renderAssets();
+  selectCodeTab("code");
+  return true;
+}
+
+function loadExample(id, quiet, noApply) {
+  const ex = findExample(id);
+  if (!ex) return false;
+  current.example = ex;
+  toyTitle = ex.name.replace(/\.lua$/, "");
+  toyDescription = ex.title || "";
+  files = newToyFiles(ex.source);
+  current.source = ex.source;
+  activeFile = "main.lua";
+  switchingFile = true;
+  setEditorText(ex.source);
+  switchingFile = false;
+  if (editor) editor.setOption("mode", "lua");
+  $("doc-title").textContent = ex.name;
+  updateFileTabs();
+  renderAssets();
+  if (noApply) return true;
+  if (!applySource()) return false;
+  persistToy();
+  if (!quiet) toast("Opened " + ex.name + ".");
+  return true;
+}
+
+/* ---- the toy file: one JSON envelope, ppu.toys' shape with credit ------ */
+function toyRefuse(code, message) {
+  const e = new Error(message);
+  e.code = code;
+  return e;
+}
+
+function toyEnvelope() {
+  const cur = findFile(activeFile);
+  if (cur) cur.source = editorText();
+  current.source = mainSource();
+  return {
+    version: TOY_VERSION,
+    title: toyTitle || "",
+    description: toyDescription || "",
+    files: files.map((f) => ({ name: f.name, source: f.source })),
+    sources: []
+  };
+}
+
+function toyEnvelopeText() {
+  return JSON.stringify(toyEnvelope(), null, 2) + "\n";
+}
+
+/* ppu.toys' guards (docs/PPU-TOYS.md §3): flat safe names, no duplicates,
+ * main.lua required, a version check with a named error, and validate the
+ * whole file before anything is replaced. */
+function validToyFileName(name) {
+  return typeof name === "string" &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) &&
+    name.indexOf("..") < 0;
+}
+
+function parseToyFile(text, fileName) {
+  if (!/^\s*\{/.test(text)) {
+    /* A plain .lua is a one-file toy; the asset files get their defaults. */
+    const title = String(fileName || "toy.lua").replace(/\.(lua|txt)$/i, "");
+    return { version: TOY_VERSION, title: title, description: "",
+             files: newToyFiles(text), sources: [] };
+  }
+  let env;
+  try { env = JSON.parse(text); }
+  catch (e) {
+    throw toyRefuse("toy-file-json", "not a JSON toy file: " + (e.message || e));
+  }
+  if (!env || typeof env !== "object" || Array.isArray(env))
+    throw toyRefuse("toy-file-json", "a toy file is one JSON object");
+  if (env.version !== TOY_VERSION)
+    throw toyRefuse("toy-file-version", "a toy file is version " +
+      TOY_VERSION + " (got " + JSON.stringify(env.version) + "); its shape " +
+      "follows ppu.toys' packed toy, docs/PPU-TOYS.md §3");
+  if (!Array.isArray(env.files) || env.files.length === 0)
+    throw toyRefuse("toy-file-files", "the toy file has no files");
+  const seen = {};
+  const out = [];
+  for (const f of env.files) {
+    if (!f || !validToyFileName(f.name))
+      throw toyRefuse("toy-file-name", "unsafe or missing file name " +
+        JSON.stringify(f && f.name));
+    if (seen[f.name])
+      throw toyRefuse("toy-file-duplicate", "duplicate file " + f.name);
+    if (typeof f.source !== "string")
+      throw toyRefuse("toy-file-source", f.name + " has no text source");
+    seen[f.name] = true;
+    out.push({ name: f.name, kind: fileKind(f.name), source: f.source });
+  }
+  if (!seen["main.lua"])
+    throw toyRefuse("toy-file-main", "the toy file has no main.lua");
+  if (env.sources !== undefined &&
+      (!Array.isArray(env.sources) || env.sources.length))
+    throw toyRefuse("toy-file-sources", "binary sources are card #24; " +
+      "this card carries text files only");
+  return {
+    version: TOY_VERSION,
+    title: typeof env.title === "string" ? env.title : "",
+    description: typeof env.description === "string" ? env.description : "",
+    files: out,
+    sources: []
+  };
+}
+
+/* Load a toy from text. Validation happens before any state is replaced, the
+ * ppu.toys pack/unpack order. */
+function openToy(text, fileName, opts) {
+  const env = parseToyFile(text, fileName);
+  files = env.files.map((f) => ({ name: f.name, kind: f.kind, source: f.source }));
+  toyTitle = env.title || String(fileName || "toy")
+    .replace(/\.(pce\.json|json|lua|txt)$/i, "");
+  toyDescription = env.description;
+  current.example = null;
+  activeFile = "main.lua";
+  current.source = mainSource();
+  switchingFile = true;
+  setEditorText(current.source);
+  switchingFile = false;
+  if (editor) editor.setOption("mode", "lua");
+  $("doc-title").textContent = "main.lua";
+  updateFileTabs();
+  renderAssets();
+  if (!opts || opts.apply !== false) applySource();
+  if (!opts || opts.persist !== false) persistToy();
+  return env;
+}
+
+function toyFileName() {
+  let base = (toyTitle || "toy").replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  if (!base) base = "toy";
+  return base.replace(/\.(lua|json)$/i, "") + ".pce.json";
+}
+
+function downloadText(name, text, type) {
   const a = document.createElement("a");
   a.download = name;
-  a.href = "data:text/plain;charset=utf-8," + encodeURIComponent(current.source);
+  a.href = "data:" + (type || "text/plain") + ";charset=utf-8," +
+    encodeURIComponent(text);
   a.click();
+}
+
+function saveToyFile() {
+  const text = toyEnvelopeText();
+  const name = toyFileName();
+  downloadText(name, text, "application/json");
+  persistToy();
   setSaved("saved " + name);
   toast("Saved " + name + ".");
+  return { name: name, text: text };
+}
+
+/* Autosave: the whole file set and the editor settings, so a reload restores
+ * the toy the author was looking at, not just one Lua string. */
+function persistToy() {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    localStorage.setItem(TOY_KEY, toyEnvelopeText());
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      vim: vimOn, lineNumbers: lineNumbers, crtDefault: crtDefault
+    }));
+    return true;
+  } catch (e) { return false; }
+}
+
+function persistSettings() {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      vim: vimOn, lineNumbers: lineNumbers, crtDefault: crtDefault
+    }));
+    return true;
+  } catch (e) { return false; }
+}
+
+function loadSettings() {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    vimOn = !!s.vim;
+    lineNumbers = s.lineNumbers !== false;
+    crtDefault = !!s.crtDefault;
+  } catch (e) { /* a corrupt setting is not a broken toy */ }
+}
+
+function loadStoredToy() {
+  try {
+    if (typeof localStorage === "undefined") return false;
+    const raw = localStorage.getItem(TOY_KEY);
+    if (raw) {
+      openToy(raw, "saved toy", { apply: false, persist: false });
+      restoredFromStorage = true;
+      setSaved("restored from this browser");
+      return true;
+    }
+    const legacy = localStorage.getItem(TOY_KEY_LEGACY);
+    if (legacy) {
+      files = newToyFiles(legacy);
+      toyTitle = "saved toy";
+      toyDescription = "";
+      activeFile = "main.lua";
+      current.example = null;
+      current.source = legacy;
+      switchingFile = true;
+      setEditorText(legacy);
+      switchingFile = false;
+      $("doc-title").textContent = "main.lua";
+      updateFileTabs();
+      renderAssets();
+      persistToy();
+      setSaved("restored from this browser");
+      return true;
+    }
+  } catch (e) { /* corrupt autosave: fall back to the examples */ }
+  return false;
+}
+
+/* ---- settings and shortcuts ------------------------------------------- */
+function setVim(on, quiet) {
+  vimOn = !!on;
+  if (editor) {
+    try { editor.setOption("keyMap", vimOn ? "vim" : "default"); }
+    catch (e) { /* the keymap addon did not load; plain editing stays */ }
+  }
+  applyEditorSettings();
+  persistSettings();
+  if (!quiet) toast(vimOn
+    ? "Vim keys on (CodeMirror's vim mode)."
+    : "Plain editor keys.");
+  return vimOn;
+}
+
+function applyEditorSettings() {
+  if (editor) {
+    editor.setOption("lineNumbers", lineNumbers);
+    try { editor.setOption("keyMap", vimOn ? "vim" : "default"); } catch (e) {}
+  }
+  $("editor-pane").classList.toggle("no-gutter", !lineNumbers);
+  $("toggle-gutter").textContent = lineNumbers ? "On" : "Off";
+  $("keys-plain").classList.toggle("is-on", !vimOn);
+  $("keys-vim").classList.toggle("is-on", vimOn);
+  $("keys-status").textContent = vimOn ? "vim on" : "plain keys";
+  $("toggle-crt-default").textContent = crtDefault ? "On" : "Off";
+  $("canvas-wrap").classList.toggle("crt", crtDefault);
+  $("btn-crt").classList.toggle("is-on", crtDefault);
+  $("btn-crt").setAttribute("aria-pressed", String(crtDefault));
+}
+
+/* Is the key event going into a text field? Then Space and R are characters,
+ * not transport. CodeMirror's input is a textarea inside .CodeMirror. */
+function typingTarget(target) {
+  let el = target || null;
+  while (el) {
+    const tag = String(el.tagName || "").toUpperCase();
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+    if (el.classList && el.classList.contains && el.classList.contains("CodeMirror"))
+      return true;
+    el = el.parentNode || null;
+  }
+  return false;
+}
+
+function closeOverlays() {
+  hidePop("panels-pop"); hidePop("settings-pop"); hidePop("open-pop");
+  $("export-modal").hidden = true;
+  closeDocs();
+  return true;
+}
+
+/* ppu.toys' shortcut table (docs/STUDIO.md §5.1) where the PCE has the same
+ * action. Modifier shortcuts work while typing; Space/R do not, or the editor
+ * could not type an R. Poke undo/redo is absent because our panels are
+ * read-only; CodeMirror's own undo covers edits. */
+function handleShortcut(e) {
+  if (!e) return false;
+  const mod = !!(e.ctrlKey || e.metaKey);
+  const key = e.key || "";
+  const code = e.code || "";
+  if (mod) {
+    if (key === "Enter") { if (!applySource()) return true; play(); return true; }
+    if (key === ".") { pause(); seek(Math.min(lengthFrames - 1, currentFrame + 1)); return true; }
+    if (key === ",") { pause(); seek(Math.max(0, currentFrame - 1)); return true; }
+    if (key.toLowerCase() === "s") { saveToyFile(); return true; }
+    return false;
+  }
+  if (key === "Escape") return closeOverlays();
+  if (typingTarget(e.target)) return false;
+  if (code === "Space" || key === " " || key === "Spacebar") {
+    if (playing) pause(); else play();
+    return true;
+  }
+  if (code === "KeyR" || key === "r" || key === "R") {
+    stop(); play();
+    return true;
+  }
+  return false;
 }
 
 /* ---- checks ----------------------------------------------------------- */
@@ -1741,7 +2303,11 @@ function framesEqual(a, b) {
 function runFrames(count, exampleId, mode) {
   const ex = exampleId ? findExample(exampleId) : null;
   if (exampleId && !ex) throw new Error("no example " + exampleId);
-  const source = ex ? ex.source : $("source").value;
+  if (!ex) {
+    const cur = findFile(activeFile);
+    if (cur) cur.source = editorText();
+  }
+  const source = ex ? ex.source : mainSource();
   const oldMode = current.mode;
   if (ex) current.example = ex;
   current.source = source;
@@ -1828,7 +2394,7 @@ function bind() {
   });
   $("btn-panels").addEventListener("click", () => togglePop("panels-pop"));
   $("btn-settings").addEventListener("click", () => togglePop("settings-pop"));
-  $("btn-save").addEventListener("click", saveFile);
+  $("btn-save").addEventListener("click", saveToyFile);
   $("btn-open").addEventListener("click", () => togglePop("open-pop"));
   $("btn-docs").addEventListener("click", toggleDocs);
   $("btn-docs").setAttribute("aria-haspopup", "dialog");
@@ -1836,33 +2402,24 @@ function bind() {
   $("dock-guide").addEventListener("click", () =>
     openDocs(docsChapterFor(activePanel)));
 
-  /* code pane */
+  /* code pane. The file tabs are built by updateFileTabs(), so every tab has
+   * its handler from the moment it exists. */
   $("tab-code").addEventListener("click", () => selectCodeTab("code"));
   $("tab-assets").addEventListener("click", () => selectCodeTab("assets"));
-  $("file-main").addEventListener("click", () => selectCodeTab("code"));
-  $("btn-newfile").addEventListener("click", () =>
-    toast("One Lua file per toy in this card; assets are #24/#71."));
-  $("source").addEventListener("input", () => {
-    current.source = $("source").value;
-    drawGutter();
-    setSaved("edited — Run to apply");
-    if (typeof localStorage !== "undefined") {
-      try { localStorage.setItem("pcestudio.toy", current.source); } catch (e) {}
-    }
-  });
+  $("source").addEventListener("input", onEditorChange);
   $("source").addEventListener("scroll", () => {
     $("gutter").scrollTop = $("source").scrollTop;
   });
+  /* The textarea fallback's Tab, for a DOM CodeMirror cannot mount in. */
   $("source").addEventListener("keydown", (e) => {
-    if (e.key !== "Tab") return;
+    if (e.key !== "Tab" || editor) return;
     e.preventDefault();
     const el = $("source");
     const start = el.selectionStart || 0;
     const end = el.selectionEnd || 0;
     el.value = el.value.slice(0, start) + "  " + el.value.slice(end);
     el.selectionStart = el.selectionEnd = start + 2;
-    current.source = el.value;
-    drawGutter();
+    onEditorChange();
   });
 
   /* output head and transport */
@@ -1930,8 +2487,8 @@ function bind() {
       e.preventDefault();
       return;
     }
-    if (e.code === "Space") { if (playing) pause(); else play(); e.preventDefault(); }
-    else if (e.code === "KeyR") { stop(); play(); e.preventDefault(); }
+    /* Space / R are the page-wide transport shortcuts (handleShortcut); the
+     * event bubbles to the window listener when the canvas has focus. */
   });
   canvas.addEventListener("keyup", (e) => {
     if (PAD_KEYS[e.code]) {
@@ -1942,24 +2499,17 @@ function bind() {
 
   /* settings */
   $("settings-close").addEventListener("click", () => hidePop("settings-pop"));
-  $("keys-plain").addEventListener("click", () => {
-    $("keys-plain").classList.add("is-on");
-    $("keys-vim").classList.remove("is-on");
-    $("keys-status").textContent = "plain keys";
-    toast("Plain editor keys.");
-  });
-  $("keys-vim").addEventListener("click", () =>
-    toast("Vim keys are not in this card; the editor is plain (ppu.toys has vim opt-in)."));
+  $("keys-plain").addEventListener("click", () => setVim(false));
+  $("keys-vim").addEventListener("click", () => setVim(true));
   $("toggle-gutter").addEventListener("click", () => {
     lineNumbers = !lineNumbers;
-    $("editor-pane").classList.toggle("no-gutter", !lineNumbers);
-    $("toggle-gutter").textContent = lineNumbers ? "On" : "Off";
+    applyEditorSettings();
+    persistSettings();
   });
   $("toggle-crt-default").addEventListener("click", () => {
     crtDefault = !crtDefault;
-    $("toggle-crt-default").textContent = crtDefault ? "On" : "Off";
-    $("canvas-wrap").classList.toggle("crt", crtDefault);
-    $("btn-crt").classList.toggle("is-on", crtDefault);
+    applyEditorSettings();
+    persistSettings();
   });
 
   /* open */
@@ -1970,33 +2520,24 @@ function bind() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      current.source = String(reader.result || "");
-      current.example = null;
-      $("source").value = current.source;
-      $("doc-title").textContent = file.name;
-      drawGutter();
-      applySource();
-      hidePop("open-pop");
-      toast("Opened " + file.name + ".");
+      const text = String(reader.result || "");
+      try {
+        openToy(text, file.name);
+        hidePop("open-pop");
+        toast("Opened " + file.name + ".");
+      } catch (e) {
+        showError(e);
+        toast("Cannot open " + file.name + " — " + (e.code || "error"));
+      }
     };
     reader.readAsText(file);
   });
 
-  /* keyboard shortcuts outside the editor: ppu.toys' set, plus Run */
+  /* keyboard shortcuts outside the editor: ppu.toys' set (docs/STUDIO.md
+   * §5) with the PCE's meaning. The handler is a named function so the
+   * evidence can execute each shortcut without synthetic OS input. */
   window.addEventListener("keydown", (e) => {
-    const mod = e.ctrlKey || e.metaKey;
-    if (!mod) {
-      if (e.key === "Escape") {
-        hidePop("panels-pop"); hidePop("settings-pop"); hidePop("open-pop");
-        $("export-modal").hidden = true;
-        closeDocs();
-      }
-      return;
-    }
-    if (e.key === "Enter") { if (!applySource()) return; play(); e.preventDefault(); }
-    else if (e.key === ".") { pause(); seek(Math.min(lengthFrames - 1, currentFrame + 1)); e.preventDefault(); }
-    else if (e.key === ",") { pause(); seek(Math.max(0, currentFrame - 1)); e.preventDefault(); }
-    else if (e.key.toLowerCase() === "s") { saveFile(); e.preventDefault(); }
+    if (handleShortcut(e)) e.preventDefault();
   });
 }
 
@@ -2015,6 +2556,7 @@ function buildDocs() {
 }
 
 function init() {
+  loadSettings();
   buildDock();
   buildPanelsMenu();
   buildExamplesMenu();
@@ -2030,27 +2572,22 @@ function init() {
   const panelParam = qs.get("panel");
   if (panelParam && PANELS.some((p) => p.id === panelParam)) selectPanel(panelParam);
 
-  let startExample = EXAMPLES[0];
+  const startExample = EXAMPLES[0];
   const demo = qs.get("demo");
-  if (demo) startExample = findExample(demo) || startExample;
-  else {
-    try {
-      const saved = typeof localStorage !== "undefined"
-        ? localStorage.getItem("pcestudio.toy") : null;
-      if (saved) {
-        current.source = saved;
-        current.example = null;
-        $("doc-title").textContent = "saved toy";
-      }
-    } catch (e) { /* storage is a convenience, not a promise */ }
-  }
-  if (demo || !current.source) {
-    current.example = startExample;
-    current.source = startExample.source;
-    $("doc-title").textContent = startExample.name;
-  }
-  $("source").value = current.source;
-  drawGutter();
+  let opened = false;
+  if (demo) opened = loadExample((findExample(demo) ? demo : startExample.id),
+                                  true, true);
+  if (!opened) opened = loadStoredToy();
+  if (!opened) loadExample(startExample.id, true, true);
+
+  /* The editor is mounted after the file set exists, so fromTextArea takes
+   * the active file's text; a DOM that cannot host CodeMirror keeps the
+   * textarea, and every code path reads through editorText(). */
+  mountEditor();
+  selectFile(activeFile);
+  applyEditorSettings();
+  if (!editor) drawGutter();
+  persistToy();
   $("seek").max = String(lengthFrames - 1);
 
   if (qs.get("selftest")) {
@@ -2085,12 +2622,16 @@ function init() {
   }
 
   if (!applySource()) return;
+  if (restoredFromStorage) setSaved("restored from this browser");
   const at = qs.get("frame");
   if (at !== null) { seek(parseInt(at, 10) || 0); pause(); }
   else if (qs.get("paused")) pause();
   else play();
   const docsParam = qs.get("docs");
   if (docsParam) openDocs(docsParam === "1" ? "" : docsParam);
+  /* ?tab=assets is how the #77 screenshot opens the ASSETS tab without
+   * synthetic input. */
+  if (qs.get("tab") === "assets") selectCodeTab("assets");
 }
 
 /* The tests read the page's own state through this object: no second copy of
@@ -2116,7 +2657,49 @@ PCEStudio.studio = {
   docsPage: docsPageHtml,
   docsChapter: () => $("docs-panel").dataset.chapter,
   openDocs: openDocs,
-  closeDocs: closeDocs
+  closeDocs: closeDocs,
+  /* #77 — the editor and the toy's files. The evidence reads and drives the
+   * page's own state here; there is no second copy of the toy. */
+  files: () => files.map((f) => ({ name: f.name, kind: f.kind,
+                                   source: f.source })),
+  fileNames: () => files.map((f) => f.name),
+  activeFile: () => activeFile,
+  selectFile: selectFile,
+  editorText: editorText,
+  setEditorText: (text) => {
+    switchingFile = true;
+    setEditorText(text);
+    switchingFile = false;
+    const f = findFile(activeFile);
+    if (f) f.source = editorText();
+    current.source = mainSource();
+    drawGutter();
+    persistToy();
+    setSaved("edited — Run to apply");
+  },
+  editorKind: () => editor ? "codemirror" : "textarea",
+  isPlaying: () => playing,
+  pad: () => Object.assign({}, heldPad),
+  editorOptions: () => {
+    if (!editor) return null;
+    const mode = editor.getOption("mode");
+    return {
+      mode: typeof mode === "string" ? mode : (mode && mode.name) || null,
+      lineNumbers: editor.getOption("lineNumbers"),
+      keyMap: editor.getOption("keyMap")
+    };
+  },
+  codeMirror: () => editor,
+  vim: () => vimOn,
+  setVim: setVim,
+  settings: () => ({ vim: vimOn, lineNumbers: lineNumbers,
+                     crtDefault: crtDefault }),
+  envelope: toyEnvelope,
+  envelopeText: toyEnvelopeText,
+  saveToy: saveToyFile,
+  openToy: openToy,
+  parseToy: parseToyFile,
+  handleShortcut: handleShortcut
 };
 
 init();

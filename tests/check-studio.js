@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*
- * tests/check-studio.js — the evidence for #75's first half (layout + run +
- * panels).
+ * tests/check-studio.js — the evidence for #75 (layout + run + panels) and
+ * #77 (the CodeMirror editor, the toy's files, save/open, autosave, Vim).
  *
  * NOTE: written by @design because the card names this file. Under the
  * workshop role split a test written by the builder is flagged for @review to
@@ -39,18 +39,29 @@
  *     must have at least one listener, and a handler that throws fails the
  *     run. Range/select controls that carry state (source, seek, length) are
  *     exercised too.
- *  7. --browser (optional): the real page is loaded in headless Google
+ *  7. #77: the vendored CodeMirror files and notice; the five-file toy; the
+ *     editor's text is the Lua that runs (an edit changes pixels) and an
+ *     asset edit does not; save/reopen of one pce.studio/1 envelope is
+ *     byte-identical; autosave restores the editor, runtime text and assets
+ *     on a second page with the same storage; the ppu.toys guards refuse by
+ *     code; a plain .lua opens as a toy.
+ *  8. #77: every PCE meaning of docs/STUDIO.md §5's shortcut table executes
+ *     (Space, R, Ctrl+Enter, Ctrl+., Ctrl+,, Ctrl+S, Escape, Tab and the pad
+ *     keys), and Settings → Vim is an opt-in that persists.
+ *  9. --browser (optional): the real page is loaded in headless Google
  *     Chrome with ?selftest=1&frames=40; the DOM must say PASS 40 frames and
  *     its frame-39 digest must equal the one computed here from check-toys'
  *     hand-built expected state. A second load with ?docs=sprites must show
- *     the Docs panel open with the generated reference. This is the
- *     headless-browser evidence the card asks for; without the flag the
- *     suite still covers 1-6 in the stub DOM.
+ *     the Docs panel open with the generated reference. A third, an HTTP
+ *     iframe driver, proves CodeMirror itself (Lua mode, gutter, line
+ *     numbers, active line), save/reopen, Vim, the real DOM shortcuts and
+ *     autosave across a reload. Without the flag the suite still covers 1-8
+ *     in the stub DOM.
  *
  * Not measured here: layout and CSS (a screenshot is the evidence, under
  * $TMPDIR and described in docs/STUDIO.md), a real canvas's pixels (the stub
  * context records nothing), the toy compiler/export (#31, second half of
- * #75), sound (#71), and the agent link (#24).
+ * #75), sound (#71), the asset importer (#24/#71), and the agent link (#24).
  *
  *   node tests/check-studio.js
  *   node tests/check-studio.js --browser
@@ -58,11 +69,12 @@
 "use strict";
 
 const fs = require("fs");
+const http = require("http");
 const os = require("os");
 const path = require("path");
 const vm = require("vm");
 const { pathToFileURL } = require("url");
-const { execFileSync } = require("child_process");
+const { execFileSync, spawn } = require("child_process");
 
 const sprites = require("../renderer/pce-sprites.js");
 
@@ -277,6 +289,22 @@ function stubContext() {
   });
 }
 
+/* A localStorage stand-in: the stub DOM has no browser storage, and #77's
+ * autosave is part of what this page promises. The same object is passed to
+ * two runPage() calls to model a reload. */
+function makeStorage() {
+  const map = new Map();
+  return {
+    getItem(key) { return map.has(String(key)) ? map.get(String(key)) : null; },
+    setItem(key, value) { map.set(String(key), String(value)); },
+    removeItem(key) { map.delete(String(key)); },
+    clear() { map.clear(); },
+    key(i) { return Array.from(map.keys())[i] || null; },
+    get length() { return map.size; },
+    dump() { return new Map(map); }
+  };
+}
+
 function makeStubDom() {
   const all = [];
   const byId = new Map();
@@ -428,7 +456,7 @@ function pageParts() {
   return { srcs, inline };
 }
 
-function runPage(search) {
+function runPage(search, storage) {
   const parts = pageParts();
   if (!parts.inline) throw new Error("studio.html has no inline script");
   if (!parts.srcs.length) throw new Error("studio.html names no scripts");
@@ -454,6 +482,8 @@ function runPage(search) {
     removeEventListener() {},
     document: dom.document,
     URLSearchParams,
+    localStorage: storage || makeStorage(),
+    FileReader: function FileReader() {},
     __now: 0
   };
   sandbox.performance = { now: () => sandbox.__now };
@@ -470,7 +500,8 @@ function runPage(search) {
   }
   vm.runInContext(parts.inline, sandbox,
     { filename: "renderer/studio.html <inline>" });
-  return { sandbox, dom, raf, loaded, inline: parts.inline };
+  return { sandbox, dom, raf, loaded, inline: parts.inline,
+           storage: sandbox.localStorage };
 }
 
 /* ---- 1. the page boots ------------------------------------------------- */
@@ -489,6 +520,8 @@ function checkBoot(page) {
         "the page loads renderer/pce-il.js (the Lua/IL switch)");
   check(page.loaded.some((s) => /pce-panels\.js$/.test(s)),
         "the page loads renderer/pce-panels.js (the #26 panels)");
+  check(studio.vim() === false, "plain editor keys are the default");
+  check(studio.files().length === 5, "the page starts with a five-file toy");
   const ids = studio.examples.map((e) => e.id).sort();
   eq("the example ids", ids, ["palette", "raster", "sprite"]);
 
@@ -718,7 +751,10 @@ function checkButtons(page) {
         "every button handler was executed (" + clicked + " executions, " +
         buttons.length + " buttons)");
 
-  /* The other controls that carry state, exercised on the real page code. */
+  /* The other controls that carry state, exercised on the real page code.
+   * The button pass above clicked the asset tabs too, so come back to
+   * main.lua: an asset edit must not become the Lua that runs. */
+  studio.selectFile("main.lua");
   const source = page.dom.get("source");
   const before = source.value;
   source.value = before + "\n-- edited by the check\n";
@@ -764,8 +800,544 @@ function checkButtons(page) {
         "the page can be left paused at frame 0");
 }
 
-/* ---- 6. the real headless browser (optional) --------------------------- */
-function checkBrowser() {
+/* ---- 6. #77: the editor and files ------------------------------------- */
+function shortcut(studio, ev) {
+  const e = Object.assign({
+    key: "", code: "", ctrlKey: false, metaKey: false, shiftKey: false,
+    altKey: false, target: null,
+    preventDefault() {}, stopPropagation() {}
+  }, ev || {});
+  return studio.handleShortcut(e);
+}
+
+function codeOf(fn) {
+  try { fn(); return "no-throw"; }
+  catch (e) { return e.code || ("plain:" + (e.message || e)); }
+}
+
+function checkFiles(page) {
+  const studio = page.sandbox.PCEStudio.studio;
+  const html = fs.readFileSync(PAGE, "utf8");
+
+  /* The editor is CodeMirror in a real browser, vendored with its notice. */
+  const cmPath = path.join(__dirname, "..", "vendor", "codemirror");
+  check(fs.existsSync(path.join(cmPath, "LICENSE")) &&
+        /MIT License/.test(fs.readFileSync(path.join(cmPath, "LICENSE"), "utf8")),
+        "CodeMirror is vendored with its MIT notice");
+  for (const f of ["lib/codemirror.js", "lib/codemirror.css",
+                   "mode/lua/lua.js", "addon/selection/active-line.js",
+                   "keymap/vim.js"]) {
+    check(fs.existsSync(path.join(cmPath, f)),
+          "vendor/codemirror/" + f + " is present");
+  }
+  check(html.indexOf("vendor/codemirror/lib/codemirror.js") >= 0 &&
+        html.indexOf("vendor/codemirror/mode/lua/lua.js") >= 0 &&
+        html.indexOf("vendor/codemirror/keymap/vim.js") >= 0,
+        "studio.html loads CodeMirror, its Lua mode and its Vim keymap");
+  check(studio.editorKind() === "textarea",
+        "the stub DOM keeps the textarea fallback (real DOM: CodeMirror)");
+
+  /* A toy is a file set beside main.lua. */
+  studio.loadExample("palette", true);
+  studio.pause();
+  const names = studio.fileNames();
+  check(names.length === 5 &&
+        names[0] === "main.lua" &&
+        names.indexOf("tiles.json") >= 0 &&
+        names.indexOf("palettes.json") >= 0 &&
+        names.indexOf("sprites.json") >= 0 &&
+        names.indexOf("waves.json") >= 0,
+        "a toy is main.lua plus tiles/palettes/sprites/waves beside it (" +
+        names.join(", ") + ")");
+  check(studio.activeFile() === "main.lua",
+        "main.lua is the active file after loading an example");
+
+  /* The editor's text is what runs. Change a colour the palette toy writes
+   * every frame and the pixels must move; the source the page reports must
+   * be the editor's text, not the example on disk. */
+  const original = studio.examples[0].source;
+  const edited = original.replace(
+    "rgb((e + f) % 8, f % 8, (e * 3 + f) % 8)", "rgb(0, 0, 0)");
+  check(edited !== original, "the check can produce a different toy source");
+  const baseFrames = studio.runFrames(3, "palette", "lua");
+  studio.setEditorText(edited);
+  const editedFrames = studio.runFrames(3, null, "lua");
+  check(studio.editorText() === edited,
+        "the editor returns the text that was put in it");
+  check(studio.current().source === edited,
+        "the Lua the page will run is the editor's text");
+  let moved = 0;
+  for (let i = 0; i < Math.min(baseFrames[2].pixels.length,
+                               editedFrames[2].pixels.length); i++) {
+    if (baseFrames[2].pixels[i] !== editedFrames[2].pixels[i]) moved++;
+  }
+  check(moved > 0, "an edit to the editor's text changes the frame it runs (" +
+        moved + " bytes moved in frame 2)");
+
+  /* An asset edit must not become the Lua that runs. */
+  studio.selectFile("tiles.json");
+  const assetText = '{"version":1,"tiles":[{"char":64,"palette":0}]}\n';
+  studio.setEditorText(assetText);
+  check(studio.current().source === edited,
+        "editing an asset file leaves the running Lua unchanged");
+  check(studio.files().find((f) => f.name === "tiles.json").source === assetText,
+        "the asset edit lands in tiles.json");
+  check(studio.activeFile() === "tiles.json",
+        "selecting an asset makes it the editor's file");
+  studio.selectFile("main.lua");
+  check(studio.editorText() === edited && studio.activeFile() === "main.lua",
+        "switching back restores main.lua's editor text");
+
+  /* Save and reopen: one JSON envelope, byte-identical both ways. */
+  const saved = studio.saveToy();
+  check(/\.pce\.json$/.test(saved.name),
+        "Save file names a .pce.json envelope (got " + saved.name + ")");
+  let env = null;
+  try { env = JSON.parse(saved.text); } catch (e) { /* checked below */ }
+  check(!!env && env.version === "pce.studio/1",
+        "the saved toy carries version pce.studio/1");
+  check(!!env && Array.isArray(env.files) && env.files.length === 5 &&
+        env.files[0].name === "main.lua" &&
+        env.files.some((f) => f.name === "tiles.json"),
+        "the envelope carries every file in order, main.lua first");
+  check(!!env && Array.isArray(env.sources) && env.sources.length === 0,
+        "the envelope keeps ppu.toys' sources slot (empty until #24)");
+  check(!!env && env.files[0].source === edited &&
+        env.files.find((f) => f.name === "tiles.json").source === assetText,
+        "the envelope's sources are the editor's exact texts");
+  const before = studio.envelopeText();
+  studio.loadExample("raster", true);           /* move away from the toy */
+  studio.openToy(saved.text, saved.name);
+  const after = studio.envelopeText();
+  check(saved.text === after, "a saved toy reopened is byte-identical");
+  check(before === after, "reopening does not rewrite the toy silently");
+  check(studio.editorText() === edited && studio.current().source === edited,
+        "reopening restores the editor and the Lua that runs");
+  check(studio.files().length === 5 &&
+        studio.files().find((f) => f.name === "tiles.json").source === assetText,
+        "reopening restores the asset files too");
+
+  /* Autosave is the whole toy, not one string. Run a second page against the
+   * same storage: that is a reload for the page's purposes. */
+  check(page.storage.getItem("pcestudio.toy.v1") !== null,
+        "edits autosave the toy to browser storage");
+  const reloaded = runPage("", page.storage);
+  const again = reloaded.sandbox.PCEStudio.studio;
+  check(again.editorText() === edited,
+        "autosave survives a reload (the editor comes back with the edit)");
+  check(again.current().source === edited,
+        "autosave survives a reload (the reloaded page runs the same Lua)");
+  check(again.files().find((f) => f.name === "tiles.json").source === assetText,
+        "autosave survives a reload (asset files included)");
+  check(/restored from this browser/.test(
+          reloaded.dom.get("saved").textContent),
+        "the reloaded page says it restored the toy from this browser");
+
+  /* The ppu.toys guards: version, names, duplicates, main.lua. Validate
+   * before replacing anything, and refuse with a code. */
+  const good = JSON.parse(saved.text);
+  check(codeOf(() => studio.parseToy(
+          JSON.stringify(Object.assign({}, good, { version: "ppu.toys/1" })),
+          "x.pce.json")) === "toy-file-version",
+        "a foreign version is refused by code (toy-file-version)");
+  const dup = JSON.parse(saved.text);
+  dup.files.push(JSON.parse(JSON.stringify(dup.files[0])));
+  check(codeOf(() => studio.parseToy(JSON.stringify(dup), "x.pce.json")) ===
+        "toy-file-duplicate", "a duplicate file name is refused");
+  const unsafe = JSON.parse(saved.text);
+  unsafe.files[0].name = "../evil.lua";
+  check(codeOf(() => studio.parseToy(JSON.stringify(unsafe), "x.pce.json")) ===
+        "toy-file-name", "an unsafe file name is refused");
+  const noMain = JSON.parse(saved.text);
+  noMain.files = noMain.files.slice(1);
+  check(codeOf(() => studio.parseToy(JSON.stringify(noMain), "x.pce.json")) ===
+        "toy-file-main", "a toy without main.lua is refused");
+  check(codeOf(() => studio.parseToy("{ not json", "x.pce.json")) ===
+        "toy-file-json", "a broken envelope is refused by code (toy-file-json)");
+  const plain = studio.parseToy("function init() end\n", "one.lua");
+  check(plain.files.length === 5 && plain.files[0].name === "main.lua" &&
+        plain.files[0].source === "function init() end\n",
+        "a plain .lua opens as a toy with the default asset files");
+
+  /* Leave the page on the palette example, paused. */
+  studio.loadExample("palette", true);
+  studio.pause();
+}
+
+/* ---- 7. every PCE shortcut of docs/STUDIO.md §5 ------------------------ */
+function checkShortcuts(page) {
+  const studio = page.sandbox.PCEStudio.studio;
+  const storage = page.storage;
+
+  /* Space: play / pause, but only outside a text field. */
+  studio.loadExample("palette", true);
+  studio.pause();
+  check(shortcut(studio, { key: " ", code: "Space" }) === true,
+        "Space is a page shortcut");
+  check(studio.isPlaying() === true, "Space plays");
+  shortcut(studio, { key: " ", code: "Space" });
+  check(studio.isPlaying() === false, "Space pauses");
+  const typing = page.dom.document.createElement("textarea");
+  check(shortcut(studio, { key: " ", code: "Space", target: typing }) === false,
+        "Space in a text field is a character, not transport");
+  check(studio.isPlaying() === false, "typing Space does not start the toy");
+
+  /* R: restart from frame 0 and play. */
+  studio.seek(5);
+  check(shortcut(studio, { key: "r", code: "KeyR" }) === true,
+        "R is a page shortcut");
+  check(studio.current().frame === 0 && studio.isPlaying() === true,
+        "R restarts at frame 0 and plays");
+  studio.pause();
+
+  /* Ctrl/Cmd+Enter: compile the editor's text and run. */
+  const ctrlRun = studio.editorText() + "\n-- ctrl+enter\n";
+  studio.setEditorText(ctrlRun);
+  check(shortcut(studio, { key: "Enter", ctrlKey: true }) === true,
+        "Ctrl+Enter is a page shortcut");
+  check(studio.current().source.endsWith("-- ctrl+enter\n") &&
+        studio.isPlaying() === true,
+        "Ctrl+Enter runs the editor's text");
+  studio.pause();
+
+  /* Ctrl/Cmd+. and Ctrl/Cmd+, step one frame. */
+  studio.seek(3);
+  check(shortcut(studio, { key: ".", ctrlKey: true }) === true,
+        "Ctrl+. is a page shortcut");
+  check(studio.current().frame === 4, "Ctrl+. steps one frame forward");
+  check(shortcut(studio, { key: ",", metaKey: true }) === true,
+        "Cmd+, is a page shortcut");
+  check(studio.current().frame === 3, "Ctrl/Cmd+, steps one frame back");
+
+  /* Ctrl/Cmd+S saves the toy envelope, not just main.lua. */
+  studio.setEditorText(studio.editorText() + "\n-- saved by shortcut\n");
+  check(shortcut(studio, { key: "s", ctrlKey: true }) === true,
+        "Ctrl+S is a page shortcut");
+  const storedToy = storage.getItem("pcestudio.toy.v1") || "";
+  check(storedToy.indexOf("-- saved by shortcut") >= 0 &&
+        /"files"/.test(storedToy),
+        "Ctrl+S saves the whole toy envelope");
+
+  /* Escape closes whatever is open. */
+  page.dom.get("open-pop").hidden = false;
+  page.dom.get("settings-pop").hidden = false;
+  check(shortcut(studio, { key: "Escape" }) === true,
+        "Escape is a page shortcut");
+  check(page.dom.get("open-pop").hidden === true &&
+        page.dom.get("settings-pop").hidden === true,
+        "Escape closes the open popovers");
+
+  /* Tab indents in the editor's fallback (CodeMirror handles it in a real
+   * browser; the headless run exercises that one). */
+  studio.selectFile("main.lua");
+  const source = page.dom.get("source");
+  const beforeTab = source.value;
+  source.selectionStart = source.selectionEnd = 0;
+  for (const fn of source.listeners.keydown || []) {
+    fn({ key: "Tab", code: "Tab", target: source,
+         preventDefault() {}, stopPropagation() {} });
+  }
+  check(source.value === "  " + beforeTab,
+        "Tab inserts two spaces in the fallback editor");
+
+  /* The pad keys while the output has focus (ppu.toys' §5.1 controller row,
+   * with the PCE's 2-button pad). */
+  const canvas = page.dom.get("out");
+  for (const fn of canvas.listeners.keydown || []) {
+    fn({ code: "KeyL", key: "l", target: canvas,
+         preventDefault() {}, stopPropagation() {} });
+  }
+  check(studio.pad().right === true, "L holds pad right while the output has focus");
+  for (const fn of canvas.listeners.keyup || []) {
+    fn({ code: "KeyL", key: "l", target: canvas,
+         preventDefault() {}, stopPropagation() {} });
+  }
+  check(studio.pad().right === undefined, "releasing L releases pad right");
+
+  /* Vim is opt-in in Settings; the button pass above may have left it on. */
+  studio.setVim(false);
+  check(studio.vim() === false, "plain keys are the default after toggling");
+  studio.setVim(true);
+  check(studio.vim() === true && studio.settings().vim === true,
+        "Settings → Vim turns the Vim keymap on");
+  check(/(\"vim\":true)/.test(storage.getItem("pcestudio.settings.v1") || ""),
+        "the Vim choice is saved with the settings");
+  studio.setVim(false);
+  check(studio.vim() === false, "Settings → Plain turns it off again");
+
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
+/* ---- 8. the real headless browser (optional) --------------------------- */
+/* The #77 browser evidence needs a page that can edit, reload and read the
+ * studio back. A same-origin iframe driver served over HTTP does that with
+ * no dependencies: the studio's own PCEStudio.studio object is the API the
+ * driver uses, and localStorage is a real browser's. */
+const DRIVER_HTML = [
+  '<!doctype html><meta charset="utf-8"><title>RUNNING</title>',
+  '<pre id="driver-result">RUNNING</pre>',
+  '<script>',
+  '(function () {',
+  '  var log = [], failed = 0;',
+  '  function ck(ok, name) { log.push((ok ? "PASS " : "FAIL ") + name);',
+  '    if (!ok) failed++; }',
+  '  function done() {',
+  '    var pre = document.getElementById("driver-result");',
+  '    pre.textContent = log.join("\\n");',
+  '    document.title = failed ? "FAIL" : "PASS";',
+  '  }',
+  '  function waitStudio(win) {',
+  '    return new Promise(function (resolve) {',
+  '      var n = 0;',
+  '      var t = setInterval(function () {',
+  '        if (win.PCEStudio && win.PCEStudio.studio) { clearInterval(t);',
+  '          resolve(win.PCEStudio.studio); }',
+  '        else if (++n > 400) { clearInterval(t); resolve(null); }',
+  '      }, 25);',
+  '    });',
+  '  }',
+  '  function loadFrame(src) {',
+  '    return new Promise(function (resolve) {',
+  '      var f = document.createElement("iframe");',
+  '      f.style.width = "1280px"; f.style.height = "900px";',
+  '      f.onload = function () {',
+  '        waitStudio(f.contentWindow).then(function (s) {',
+  '          resolve({ frame: f, win: f.contentWindow, studio: s });',
+  '        });',
+  '      };',
+  '      f.src = src;',
+  '      document.body.appendChild(f);',
+  '    });',
+  '  }',
+  '  (async function () {',
+  '    var url = "/renderer/studio.html?paused=1";',
+  '    var a = await loadFrame(url);',
+  '    var s = a.studio;',
+  '    if (!s) { ck(false, "the studio booted in the iframe"); done(); return; }',
+  '    var doc = a.win.document;',
+  '    var opt = s.editorOptions() || {};',
+  '    ck(s.editorKind() === "codemirror",',
+  '       "CodeMirror is the editor in a real browser (got " + s.editorKind() + ")");',
+  '    ck(opt.mode === "lua", "the editor is in CodeMirror\'s Lua mode (" + opt.mode + ")");',
+  '    ck(opt.lineNumbers === true, "the editor shows line numbers");',
+  '    ck(opt.keyMap === "default", "plain keys are CodeMirror\'s default");',
+  '    var gutter = doc.querySelector(".CodeMirror-gutters");',
+  '    var nums = doc.querySelectorAll(".CodeMirror-linenumber");',
+  '    ck(!!doc.querySelector(".CodeMirror") && !!gutter && nums.length > 0,',
+  '       "the CodeMirror DOM has a gutter and " + nums.length + " line numbers");',
+  '    ck(doc.querySelectorAll(".cm-keyword").length > 0,',
+  '       "Lua keywords are highlighted (" +',
+  '       doc.querySelectorAll(".cm-keyword").length + " tokens)");',
+  '    ck(doc.querySelectorAll(".CodeMirror-activeline-background").length > 0,',
+  '       "the cursor line is highlighted like ppu.toys\' editor");',
+  '    ck(s.editorText() === s.current().source,',
+  '       "the editor\'s text is the Lua the page runs");',
+  '',
+  '    var marker = "-- autosave-marker-77";',
+  '    var edited = marker + "\\n" + s.editorText();',
+  '    s.setEditorText(edited);',
+  '    ck(s.editorText() === edited && s.current().source === edited,',
+  '       "an edit is both the editor text and the running Lua");',
+  '    var code = doc.querySelector(".CodeMirror-code");',
+  '    ck(!!code && code.textContent.indexOf("autosave-marker-77") >= 0,',
+  '       "CodeMirror renders the edit in its own DOM");',
+  '',
+  '    s.selectFile("tiles.json");',
+  '    var asset = \'{"version":1,"tiles":[{"char":64,"marker":"asset-77"}]}\\n\';',
+  '    s.setEditorText(asset);',
+  '    ck(s.current().source === edited,',
+  '       "editing an asset does not change the running Lua");',
+  '    s.selectFile("main.lua");',
+  '    ck(s.editorText() === edited, "main.lua comes back with the edit");',
+  '',
+  '    var saved = s.saveToy();',
+  '    s.loadExample("raster", true);',
+  '    s.openToy(saved.text, saved.name);',
+  '    ck(saved.text === s.envelopeText(),',
+  '       "save then reopen is byte-identical in the browser");',
+  '    ck(s.editorText() === edited && s.current().source === edited,',
+  '       "reopening restores the editor and the Lua that runs");',
+  '',
+  '    s.setVim(true);',
+  '    ck((s.editorOptions() || {}).keyMap === "vim",',
+  '       "Settings -> Vim selects CodeMirror\'s vim keymap");',
+  '    try {',
+  '      ck(/"vim":true/.test(a.win.localStorage.getItem("pcestudio.settings.v1") || ""),',
+  '         "the Vim choice is saved in the browser settings");',
+  '    } catch (e) { ck(false, "browser settings are readable"); }',
+  '    s.setVim(false);',
+  '',
+  '    s.pause();',
+  '    a.win.dispatchEvent(new a.win.KeyboardEvent("keydown",',
+  '      { key: " ", code: "Space", bubbles: true }));',
+  '    ck(s.isPlaying() === true, "Space plays in the real page");',
+  '    a.win.dispatchEvent(new a.win.KeyboardEvent("keydown",',
+  '      { key: " ", code: "Space", bubbles: true }));',
+  '    ck(s.isPlaying() === false, "Space pauses in the real page");',
+  '    s.seek(2); s.pause();',
+  '    a.win.dispatchEvent(new a.win.KeyboardEvent("keydown",',
+  '      { key: ".", code: "Period", ctrlKey: true, bubbles: true }));',
+  '    ck(s.current().frame === 3, "Ctrl+. steps a frame in the real page");',
+  '    s.seek(4); s.pause();',
+  '    a.win.dispatchEvent(new a.win.KeyboardEvent("keydown",',
+  '      { key: "r", code: "KeyR", bubbles: true }));',
+  '    ck(s.current().frame === 0 && s.isPlaying() === true,',
+  '       "R restarts at frame 0 in the real page");',
+  '    s.pause();',
+  '',
+  '    var cv = doc.getElementById("out");',
+  '    cv.dispatchEvent(new a.win.KeyboardEvent("keydown",',
+  '      { key: "l", code: "KeyL", bubbles: true }));',
+  '    ck(s.pad().right === true, "L holds pad right on the focused output");',
+  '    cv.dispatchEvent(new a.win.KeyboardEvent("keyup",',
+  '      { key: "l", code: "KeyL", bubbles: true }));',
+  '    ck(s.pad().right === undefined, "releasing L releases pad right");',
+  '',
+  '    s.setEditorText(edited);',
+  '    a.win.dispatchEvent(new a.win.KeyboardEvent("keydown",',
+  '      { key: "s", code: "KeyS", ctrlKey: true, bubbles: true }));',
+  '    var stored = "";',
+  '    try { stored = a.win.localStorage.getItem("pcestudio.toy.v1") || ""; }',
+  '    catch (e) {}',
+  '    ck(stored.indexOf("autosave-marker-77") >= 0,',
+  '       "Ctrl+S saves the toy envelope to the browser");',
+  '',
+  '    var cm = s.codeMirror();',
+  '    s.setEditorText("x = 1\\n");',
+  '    cm.setCursor({ line: 0, ch: 0 });',
+  '    cm.focus();',
+  '    var input = cm.getInputField();',
+  '    var tabEvent = new a.win.KeyboardEvent("keydown",',
+  '      { key: "Tab", code: "Tab", bubbles: true, cancelable: true });',
+  '    try { Object.defineProperty(tabEvent, "keyCode", { get: function () { return 9; } });',
+  '          Object.defineProperty(tabEvent, "which", { get: function () { return 9; } }); }',
+  '    catch (e) {}',
+  '    input.dispatchEvent(tabEvent);',
+  '    ck(cm.getValue().indexOf("  x = 1") === 0,',
+  '       "Tab inserts two spaces in CodeMirror (got " +',
+  '       JSON.stringify(cm.getValue()) + ")");',
+  '',
+  '    /* Leave the toy the author was editing, then load the page again with',
+  '     * the same browser profile: the autosave must bring it back. */',
+  '    s.setEditorText(edited);',
+  '    var b = await loadFrame(url);',
+  '    var s2 = b.studio;',
+  '    ck(!!s2, "the studio boots again on a reload");',
+  '    if (s2) {',
+  '      ck(s2.editorKind() === "codemirror",',
+  '         "CodeMirror mounts again after a reload");',
+  '      ck(s2.editorText() === edited,',
+  '         "autosave survives a reload: the editor text comes back");',
+  '      ck(s2.current().source === edited,',
+  '         "autosave survives a reload: the reloaded page runs the edit");',
+  '      ck(s2.files().some(function (f) {',
+  '           return f.name === "tiles.json" && f.source === asset; }),',
+  '         "autosave survives a reload: asset files included");',
+  '      var note = b.win.document.getElementById("saved");',
+  '      ck(!!note && /restored from this browser/.test(note.textContent),',
+  '         "the reloaded page says it restored the toy from this browser");',
+  '    }',
+  '    done();',
+  '  })().catch(function (e) {',
+  '    ck(false, "driver threw: " + (e && e.message ? e.message : e));',
+  '    done();',
+  '  });',
+  '})();',
+  '</script>'
+].join("\n");
+
+function startStudioServer() {
+  const root = path.resolve(__dirname, "..");
+  const types = {
+    ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8", ".json": "application/json",
+    ".png": "image/png", ".bin": "application/octet-stream"
+  };
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      const url = new URL(req.url, "http://127.0.0.1");
+      if (url.pathname === "/__driver.html") {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(DRIVER_HTML);
+        return;
+      }
+      const rel = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+      const file = path.resolve(root, rel);
+      if (file !== root && !file.startsWith(root + path.sep)) {
+        res.writeHead(403); res.end("forbidden"); return;
+      }
+      fs.readFile(file, (err, data) => {
+        if (err) { res.writeHead(404); res.end("not found"); return; }
+        res.writeHead(200, { "content-type":
+          types[path.extname(file).toLowerCase()] || "application/octet-stream" });
+        res.end(data);
+      });
+    });
+    server.listen(0, "127.0.0.1", () =>
+      resolve({ server, port: server.address().port }));
+  });
+}
+
+function spawnChrome(args, timeoutMs) {
+  return new Promise((resolve) => {
+    const child = spawn(CHROME, args, { stdio: ["ignore", "pipe", "ignore"] });
+    let out = "";
+    child.stdout.on("data", (d) => { out += d; });
+    const timer = setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch (e) {}
+      resolve({ out, timedOut: true });
+    }, timeoutMs);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ out, code });
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      resolve({ out, error });
+    });
+  });
+}
+
+async function checkBrowserDriver() {
+  const { server, port } = await startStudioServer();
+  const profile = path.join(process.env.TMPDIR || os.tmpdir(),
+                            "pcestudio-chrome-77-" + process.pid);
+  let dom = "";
+  try {
+    const res = await spawnChrome([
+      "--headless=new", "--disable-gpu", "--no-sandbox",
+      "--user-data-dir=" + profile,
+      "--virtual-time-budget=30000",
+      "--dump-dom", "http://127.0.0.1:" + port + "/__driver.html"
+    ], 120000);
+    dom = res.out || "";
+    if (res.timedOut) check(false, "headless Chrome driver finished in time");
+    if (res.error) check(false, "headless Chrome driver started (" +
+      res.error.message + ")");
+  } finally {
+    server.close();
+  }
+  const m = dom.match(/id="driver-result"[^>]*>([\s\S]*?)<\/pre>/);
+  const text = m ? m[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&") : "";
+  const lines = text.split("\n").filter((l) => /^(PASS|FAIL) /.test(l));
+  if (!lines.length) {
+    check(false, "the headless browser driver produced a result (" +
+      (text.trim().slice(0, 120) || "no #driver-result") + ")");
+    return "fail";
+  }
+  for (const line of lines) {
+    check(line.slice(0, 4) === "PASS", "browser driver: " + line.slice(5));
+  }
+  console.log("      browser driver: " + lines.length + " checks, " +
+    lines.filter((l) => l.slice(0, 4) === "FAIL").length + " failed");
+  try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {}
+  return lines.every((l) => l.slice(0, 4) === "PASS") ? "pass" : "fail";
+}
+
+async function checkBrowser() {
   if (!fs.existsSync(CHROME)) {
     console.log("NOT RUN  browser: " + CHROME + " is not installed");
     return "not-run";
@@ -829,11 +1401,16 @@ function checkBrowser() {
               ", #61 reference + ppu.toys layout");
   try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {}
   try { fs.rmSync(docsProfile, { recursive: true, force: true }); } catch (e) {}
-  return /^PASS 40 frames/.test(text) ? "pass" : "fail";
+
+  /* #77: CodeMirror, assets, save/reopen, autosave across a reload, Vim and
+   * every PCE shortcut, in a real browser over HTTP. */
+  const driver = await checkBrowserDriver();
+
+  return /^PASS 40 frames/.test(text) && driver === "pass" ? "pass" : "fail";
 }
 
 /* ---- main ------------------------------------------------------------- */
-function main() {
+async function main() {
   const started = Date.now();
   let page;
   try {
@@ -847,9 +1424,11 @@ function main() {
   checkFortyFrames(page);
   checkIlSwitch(page);
   checkButtons(page);
+  checkFiles(page);
+  checkShortcuts(page);
 
   let browser = "not-requested";
-  if (process.argv.indexOf("--browser") >= 0) browser = checkBrowser();
+  if (process.argv.indexOf("--browser") >= 0) browser = await checkBrowser();
 
   const ms = Date.now() - started;
   if (failures.length) {
@@ -859,10 +1438,13 @@ function main() {
   }
   console.log("PASS  " + checks + " checks, " + FRAMES +
               " frames diff 0 vs check-toys' expected state, Lua == IL for 3 " +
-              "examples, every button's handler executed (" + buttonCount +
-              " buttons)" +
-              (browser === "pass" ? ", headless Chrome says PASS 40" : "") +
+              "examples, editor/files/shortcuts, every button's handler " +
+              "executed (" + buttonCount + " buttons)" +
+              (browser === "pass" ? ", headless Chrome: PASS 40 + driver" : "") +
               " (" + ms + " ms)");
 }
 
-main();
+main().catch((e) => {
+  console.log("FAIL  " + (e && e.stack ? e.stack : e));
+  process.exit(1);
+});
