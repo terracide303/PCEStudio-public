@@ -345,21 +345,28 @@ from the panel's or renderer's functions.
 
 - **follow a pixel**: a 13×12 grid plus pixels on every non-empty SAT sprite
   (1320 traces in all) — the layer, 9-bit index and CRAM word, the BAT
-  word/character/palette/tile row/column/colour number or the sprite
+  word/character/palette/tile row/column/colour number/**tileWord**
+  (the first plane, `char*16+row`) and **beyondVram** or the sprite
   number/pattern/palette/colour/cell/strip, the line's BXR/BYR/CR/BG_YOffset,
-  and the RGB against `mednafen.png` at the same pixel. 92 traces land on a
-  sprite and 41 on the blanking fill.
+  the embedded **20-register `vdc` block against that row** (with a changed
+  row required on a raster table, so a block hard-wired to row 0 cannot
+  pass), and the RGB against `mednafen.png` at the same pixel. 92 traces land
+  on a sprite and 41 on the blanking fill.
 - **the VRAM map**: `copyRegions` equals `regions.json`'s descriptor list
   where that file exists; the segments partition all 32768 words exactly
-  once; the BAT follows MWR and the SAT the dump's SATB; every SAT-named
-  pattern cell is in a sprite-pattern segment.
+  once; the BAT follows MWR and the SAT the dump's SATB; the SAT's pattern
+  cells (derived from its own words, not from the panel's `patternCells`)
+  are in sprite-pattern segments and are exactly the map's derived cells.
 - **the register panel**: `registerLines()` against `raster.json` entry by
   entry — the values between writes, the entry on its own line, `rcr`, the
   RCR chain arm, and the 20-register view's per-line CR/BXR/BYR.
 - **the VCE panel**: 32×16, against each line's colour table on the raster
-  dumps and the saved CRAM on the others.
-- **the SAT panel**: 64 rows equal to `sat.bin`'s words, with the CGX/CGY
-  size and cell count.
+  dumps and the saved CRAM on the others; every entry's word, **RGB**
+  (`R/G/B = 36*((w>>3)/(w>>6)/(w&7)&7)`) and index/palette/entry are decoded
+  here from that word.
+- **the SAT panel**: 64 rows equal to `sat.bin`'s words, with **Y/X/row0/
+  leftX** from those words and the CGX/CGY cells compared **element by
+  element** with the cells the pattern number names.
 - the editor's own demo and sprite pictures through the same file, and the
   browser-global branch giving the same traces.
 
@@ -367,8 +374,14 @@ Dumps: `scene1` (background), `sprite1` (sprites), `raster1`/`raster4`/
 `raster5` (BYR / per-line colour / per-line CR), `painted` (#10's picture),
 `scene4` (64-wide BAT) and `scene9` (characters ≥ `$800`). The check fails
 on five self-mutations tried (priority rule, plane bit order, per-line BXR,
-region length, colour high bit); those are the builder's own mutants, so a
-breaker still owes it a cold pass.
+region length, colour high bit) and on all five breaks `docs/REVIEW-26.md`
+found it missing (#56: VCE red/green swap P06, SAT X/Y swap P07, 32-wide
+cells P08, row-0 `vdc` block P16, second-plane `tileWord` P17). STILL NOT
+PROVEN after #56: the eight dumps carry no HFLIP/VFLIP sprite (S01/S02 rest
+on the editor's sprite picture) and no SPBG=0 sprite over an opaque
+background (P01b changes only the editor model); REVIEW-26's two
+dump-coverage additions (`sprite10`/`sprite3`, `sprite2`/`spainted`) are not
+part of this check yet.
 
 ## What this does NOT prove
 
