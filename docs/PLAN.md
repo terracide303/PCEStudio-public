@@ -132,6 +132,7 @@ Card close condition is the workshop seat's to judge; routed, not closed.
   - 2026-10-28 @workshop: Dennis 2026-10-28 (docs/DECISIONS.md): saves are PASSWORDS, not bram — give toys a password helper (pack a few values into a short code, show it, accept it back, refuse a wrong one); pads are 2-button only.
 - [?] #45 Pads and the timer: $1000 2-button pad and the 5-pad multitap, $1C00 timer, in the browser and the viewer ~M @design #ds-flash !6
   - 2026-10-28 @workshop: Dennis 2026-10-28: 2-button pads only (I, II, Select, Run), up to five through the multitap; the 6-button pad is out.
+  - 2026-10-28 @workshop: Worked example: ChibiAkumas lesson P14 'Joystick Reading on the PC Engine' (https://www.chibiakumas.com/6502/platform5.php), alongside the pad notes in docs/MANUALS.md.
 
 ### The compiler and the validator !7
 - [?] #31 The toy compiles to HuC6280 code (through PCEAS) and runs the same in Mednafen as in the browser ~L @design #opus
@@ -153,6 +154,7 @@ Card close condition is the workshop seat's to judge; routed, not closed.
 - [?] #35 A wave and sound editor, and sound in toys and exported ROMs ~M @design #ds-flash
   - 2026-10-28 @workshop: Orientation: https://www.copetti.org/writings/consoles/pc-engine/ (Dennis 2026-10-28), sound section and references.
   - 2026-10-28 @workshop: Dennis 2026-10-28 (docs/DECISIONS.md): music comes from a tracker, and the tracker is Furnace (github.com/tildearrow/furnace). This card becomes: (1) read Furnace's .fur songs for the PC Engine (its format doc in the Furnace repo; our own reader, no Furnace code in the repo), (2) play them in the browser through #34's renderer/pce-psg.js, compared with Furnace's own WAV export of the same song numerically, (3) a HuC6280 sound driver in the exported ROM that plays the song in Mednafen the same way (recorded WAV compared). First step: survey the existing PCE drivers that can play tracker data (e.g. a VGM/register-stream player, Furnace's own export options, drivers in vendor/huc, the pce-dev-kit audio tools) with licence, size and CPU cost per frame, and pick one or say why our own. Plus a small wave editor for the 32-step waveforms. Install Furnace (if needed for the WAV references) under '/Volumes/External II/pce-tools/furnace'.
+  - 2026-10-28 @workshop: Dennis 2026-10-28: ChibiAkumas lesson P48 'Sound on the PC Engine' (https://www.chibiakumas.com/6502/platform5.php#LessonP48): a worked minimal PSG driver — channel select $0800, master volume $0801, 12-bit pitch $0802/3 (inverted sense), channel on/volume $0804, balance $0805, wave data $0806, noise $0807 — a readable example for the driver survey; not an authority (the PSG manual is).
 
 ## Phase 5 — The AI link
 
