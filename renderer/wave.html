@@ -1,0 +1,419 @@
+<!doctype html>
+<!-- PCEStudio wave editor — the six PSG channels' 32-step waveforms, their
+     frequencies, levels and balances, the noise generator (channels 5 and 6)
+     and the LFO (card #35, first increment).
+     Serve the repo root and open renderer/wave.html:
+         python3 -m http.server 8000
+     Everything is kept in the shape the PSG holds it (renderer/pce-wave.js):
+     32 steps of 5 bits per channel, a 12-bit frequency, AL 0..31, two 4-bit
+     balance levels, R7's noise enable and NF, R1 and the LFO's R8/R9.  The
+     page refuses what the PSG cannot take, with the same codes the module
+     raises (a wave step past 31, a frequency past 4095, noise on channels
+     1-4, ...).
+     "Play" is renderer/pce-psg.js — the model #34 proved sample-for-sample
+     against Mednafen — rendering the register writes this patch exports, so
+     what you hear is what the .pce plays.  "Download .pce" is
+     renderer/pce-wave.js's buildRom(): the same 8 KiB HuCard image PCEAS
+     assembles from tools/genwave.py's asm (tests/check-wave.js compares them
+     byte for byte, and Mednafen's recording of that ROM sample for sample).
+     ?selfcheck=1 builds the demo patch and reports the ROM's size and sha256
+     in #selfcheck (the headless check reads it; docs/WAVE.md). -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>PCEStudio — wave editor</title>
+<style>
+  body { font: 13px system-ui, sans-serif; background: #111; color: #ddd;
+         margin: 1rem; }
+  h1 { font-size: 1.15rem; margin: 0 0 0.6rem; }
+  h2 { font-size: 0.85rem; font-weight: 600; color: #aaa; margin: 0 0 0.3rem;
+       text-transform: uppercase; letter-spacing: 0.04em; }
+  .row { display: flex; gap: 0.9rem; align-items: flex-start;
+         flex-wrap: wrap; }
+  section { background: #181818; border: 1px solid #2a2a2a; border-radius: 6px;
+            padding: 0.6rem; width: 17rem; }
+  section.off { opacity: 0.45; }
+  canvas { image-rendering: pixelated; background: #000; display: block; }
+  .wave { width: 15.4rem; height: 7rem; cursor: crosshair;
+          border: 1px solid #333; }
+  button { font: inherit; background: #2c2c2c; color: #ddd; border: 1px solid
+           #444; border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+  button:hover { background: #3a3a3a; }
+  select, input[type=number] { background: #111; color: #ddd;
+                               border: 1px solid #444; border-radius: 3px;
+                               font: inherit; }
+  input[type=number] { width: 3.8rem; }
+  label { user-select: none; }
+  .ctrl { display: flex; gap: 0.45rem; align-items: center; flex-wrap: wrap;
+          margin-top: 0.35rem; font: 12px monospace; color: #aaa; }
+  .ctrl b { color: #ccc; font-weight: 600; }
+  .hz { color: #8cf; }
+  #msg { color: #f88; white-space: pre-wrap; min-height: 1.2em;
+         font: 12px monospace; margin: 0.4rem 0; }
+  #status { color: #8f8; white-space: pre; font: 12px monospace; }
+  .note { color: #888; font-size: 12px; max-width: 30rem; }
+  #global { width: auto; }
+  #selfcheck { color: #8cf; font: 12px monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>PCEStudio wave editor — six 32-step waves, the PSG's tones, noise and LFO</h1>
+
+<div class="row" style="margin-bottom:0.6rem">
+  <button id="play">Play</button>
+  <button id="stop" disabled>Stop</button>
+  <button id="demo">Load demo chord</button>
+  <button id="lfo">Load LFO demo</button>
+  <button id="new">New sound</button>
+  <button id="export">Download .pce</button>
+  <span id="status"></span>
+</div>
+<div id="msg"></div>
+
+<div class="row" id="chans"></div>
+
+<div class="row" style="margin-top:0.6rem">
+  <section id="global">
+    <h2>Main volume (R1)</h2>
+    <div class="ctrl">
+      <b>L</b><input type="number" id="gvL" min="0" max="15" value="15">
+      <b>R</b><input type="number" id="gvR" min="0" max="15" value="15">
+      <span class="hz" id="gvdb">0.0 dB</span>
+    </div>
+    <h2 style="margin-top:0.6rem">LFO (R8/R9) — ch2 is the carrier</h2>
+    <div class="ctrl">
+      <select id="lfoctl">
+        <option value="0">off</option>
+        <option value="1">LFCTL 1 (×1)</option>
+        <option value="2">LFCTL 2 (×4)</option>
+        <option value="3">LFCTL 3 (×16)</option>
+      </select>
+      <b>R8</b><input type="number" id="lfofreq" min="0" max="255" value="255">
+      <span class="hz" id="lfohz"></span>
+    </div>
+    <p class="note" id="lfonote" style="margin:0.5rem 0 0">With the LFO on,
+      channel 2 stops sounding and its wave becomes the LFO shape; channel 1's
+      frequency is modulated by it.</p>
+  </section>
+  <section style="width:auto">
+    <h2>What the export is</h2>
+    <p class="note">A <em>patch</em>: the six channels sound together and hold
+      (there is no note sequence here — the tracker is the other half of #35).
+      The .pce is an 8 KiB HuCard that writes the PSG registers at reset and
+      loops; Mednafen plays it and <code>tests/check-wave.js</code> compares
+      that recording with the model's PCM sample for sample.</p>
+    <p class="note">Balance and main volume: high nibble left, low nibble
+      right, 15 = full and 0 = silent.  Values are 1.5 dB apart
+      (HuC6280 PSG manual PB-3/PB-4).</p>
+  </section>
+</div>
+
+<div id="selfcheck"></div>
+
+<script src="pce-psg.js"></script>
+<script src="pce-wave.js"></script>
+<script>
+(function () {
+  "use strict";
+  var W = window.PCEStudio.wave;
+  var PSG = window.PCEStudio.psg;
+  var CHAN_NAMES = ["ch1", "ch2", "ch3", "ch4", "ch5", "ch6"];
+  var sound = W.newSound();
+  var msg = document.getElementById("msg");
+  var status = document.getElementById("status");
+  var audio = null;
+  var source = null;
+
+  function say(text) { msg.textContent = text; }
+
+  function refreshStatus() {
+    try {
+      var st = W.stats(sound);
+      status.textContent = st.writes + " writes · " + st.cycles +
+        " CPU cycles · " + st.bytes + "-byte ROM · " + st.on + "/6 on" +
+        (st.noise ? " · noise " + st.noise : "") + (st.lfo ? " · LFO" : "");
+    } catch (e) { status.textContent = ""; say(e.message); }
+  }
+
+  /* ---- one channel card ------------------------------------------------- */
+
+  var cards = [];
+  function buildChannel(c) {
+    var sec = document.createElement("section");
+    sec.innerHTML =
+      '<h2>' + CHAN_NAMES[c] + ' — draw the 32 steps</h2>' +
+      '<canvas class="wave" width="256" height="112"></canvas>' +
+      '<div class="ctrl"><select class="preset">' +
+      Object.keys(W.PRESETS).map(function (n) {
+        return '<option>' + n + '</option>';
+      }).join("") + '</select></div>' +
+      '<div class="ctrl"><b>F</b><input type="number" class="freq" min="0" ' +
+      'max="4095" value="254"><span class="hz"></span></div>' +
+      '<div class="ctrl"><b>AL</b><input type="number" class="al" min="0" ' +
+      'max="31" value="31"></div>' +
+      '<div class="ctrl"><b>bal L</b><input type="number" class="balL" ' +
+      'min="0" max="15" value="15"><b>R</b><input type="number" class="balR" ' +
+      'min="0" max="15" value="15"></div>' +
+      (c >= 4 ?
+        '<div class="ctrl"><label><input type="checkbox" class="nz"> ' +
+        'noise</label><b>NF</b><input type="number" class="nf" min="0" ' +
+        'max="31" value="15"></div>' : '') +
+      '<div class="ctrl"><label><input type="checkbox" class="on"> on</label>' +
+      '</div>';
+    var card = {
+      sec: sec,
+      canvas: sec.querySelector(".wave"),
+      preset: sec.querySelector(".preset"),
+      freq: sec.querySelector(".freq"),
+      al: sec.querySelector(".al"),
+      balL: sec.querySelector(".balL"),
+      balR: sec.querySelector(".balR"),
+      nz: sec.querySelector(".nz"),
+      nf: sec.querySelector(".nf"),
+      on: sec.querySelector(".on"),
+      hz: sec.querySelector(".hz")
+    };
+    cards[c] = card;
+    wire(card, c);
+    return sec;
+  }
+
+  function drawWave(c) {
+    var card = cards[c];
+    var ctx = card.canvas.getContext("2d");
+    var w = card.canvas.width, h = card.canvas.height;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, w, h);
+    var step = w / W.STEPS;
+    var wave = sound.channels[c].wave;
+    for (var i = 0; i < W.STEPS; i++) {
+      var v = wave[i];
+      var x = i * step;
+      ctx.fillStyle = "#1d3b2a";
+      ctx.fillRect(x + 1, 0, step - 2, h);
+      ctx.fillStyle = "#5cd08a";
+      var bh = (v + 1) / (W.WAVE_MAX + 1) * h;
+      ctx.fillRect(x + 1, h - bh, step - 2, bh);
+    }
+  }
+
+  function sync(c) {
+    var ch = sound.channels[c];
+    var card = cards[c];
+    card.freq.value = ch.freq;
+    card.al.value = ch.al;
+    card.balL.value = (ch.balance >> 4) & 15;
+    card.balR.value = ch.balance & 15;
+    card.on.checked = ch.on;
+    card.hz.textContent = W.toneHz(ch.freq).toFixed(1) + " Hz";
+    if (ch.noise) {
+      card.nz.checked = ch.noise.on;
+      card.nf.value = ch.noise.nf;
+      card.nf.disabled = !ch.noise.on;
+    }
+    card.sec.className = ch.on ? "" : "off";
+    drawWave(c);
+  }
+
+  function syncAll() {
+    for (var c = 0; c < W.CHANNELS; c++) sync(c);
+    var g = sound.mainVolume;
+    document.getElementById("gvL").value = (g >> 4) & 15;
+    document.getElementById("gvR").value = g & 15;
+    document.getElementById("lfoctl").value = String(sound.lfo.ctl);
+    document.getElementById("lfofreq").value = sound.lfo.freq;
+    var lfoHz = W.CLOCK / (64 * Math.max(1, sound.channels[1].freq) *
+                           Math.max(1, sound.lfo.freq));
+    document.getElementById("lfohz").textContent =
+      sound.lfo.ctl ? lfoHz.toFixed(3) + " Hz" : "off";
+    refreshStatus();
+  }
+
+  /* edit through the module, so the page and the tests refuse the same
+   * things */
+  function guard(fn) {
+    try { fn(); say(""); } catch (e) { say(e.code + ": " + e.message); }
+  }
+
+  function wire(card, c) {
+    var painting = false;
+    function paint(ev) {
+      var r = card.canvas.getBoundingClientRect();
+      var x = (ev.clientX - r.left) / r.width * card.canvas.width;
+      var y = (ev.clientY - r.top) / r.height * card.canvas.height;
+      var step = Math.max(0, Math.min(W.STEPS - 1, Math.floor(x /
+        (card.canvas.width / W.STEPS))));
+      var v = W.WAVE_MAX - Math.round(y / card.canvas.height * W.WAVE_MAX);
+      guard(function () { W.paintStep(sound, c, step, v); });
+      drawWave(c);
+      refreshStatus();
+    }
+    card.canvas.addEventListener("mousedown", function (ev) {
+      painting = true; paint(ev); ev.preventDefault();
+    });
+    card.canvas.addEventListener("mousemove", function (ev) {
+      if (painting) paint(ev);
+    });
+    document.addEventListener("mouseup", function () { painting = false; });
+
+    card.preset.addEventListener("change", function () {
+      guard(function () { W.setPreset(sound, c, card.preset.value); });
+      sync(c);
+    });
+    card.freq.addEventListener("change", function () {
+      guard(function () { W.setFreq(sound, c, +card.freq.value); });
+      syncAll();
+    });
+    card.al.addEventListener("change", function () {
+      guard(function () { W.setLevel(sound, c, +card.al.value); });
+      syncAll();
+    });
+    card.balL.addEventListener("change", function () {
+      guard(function () {
+        W.setBalance(sound, c, (+card.balL.value << 4) | (+card.balR.value));
+      });
+      syncAll();
+    });
+    card.balR.addEventListener("change", function () {
+      guard(function () {
+        W.setBalance(sound, c, (+card.balL.value << 4) | (+card.balR.value));
+      });
+      syncAll();
+    });
+    card.on.addEventListener("change", function () {
+      W.setChannelOn(sound, c, card.on.checked);
+      syncAll();
+    });
+    if (card.nz) {
+      card.nz.addEventListener("change", function () {
+        guard(function () {
+          W.setNoise(sound, c, { on: card.nz.checked, nf: +card.nf.value });
+        });
+        syncAll();
+      });
+      card.nf.addEventListener("change", function () {
+        guard(function () {
+          W.setNoise(sound, c, { on: card.nz.checked, nf: +card.nf.value });
+        });
+        syncAll();
+      });
+    }
+  }
+
+  document.getElementById("gvL").addEventListener("change", function () {
+    guard(function () {
+      W.setMainVolume(sound, (+document.getElementById("gvL").value << 4) |
+                             +document.getElementById("gvR").value);
+    });
+    syncAll();
+  });
+  document.getElementById("gvR").addEventListener("change", function () {
+    guard(function () {
+      W.setMainVolume(sound, (+document.getElementById("gvL").value << 4) |
+                             +document.getElementById("gvR").value);
+    });
+    syncAll();
+  });
+  document.getElementById("lfoctl").addEventListener("change", function () {
+    guard(function () {
+      W.setLfo(sound, { ctl: +document.getElementById("lfoctl").value,
+                        freq: +document.getElementById("lfofreq").value });
+    });
+    syncAll();
+  });
+  document.getElementById("lfofreq").addEventListener("change", function () {
+    guard(function () {
+      W.setLfo(sound, { ctl: +document.getElementById("lfoctl").value,
+                        freq: +document.getElementById("lfofreq").value });
+    });
+    syncAll();
+  });
+
+  /* ---- play ------------------------------------------------------------- */
+
+  function stop() {
+    if (source) { try { source.stop(); } catch (e) {} source = null; }
+    document.getElementById("stop").disabled = true;
+  }
+
+  document.getElementById("play").addEventListener("click", function () {
+    stop();
+    try {
+      var out = W.render(sound, 2);
+      if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)(
+        { sampleRate: PSG.SAMPLE_RATE });
+      var buf = audio.createBuffer(2, out.pcm.length / 2, PSG.SAMPLE_RATE);
+      var l = buf.getChannelData(0), r = buf.getChannelData(1);
+      for (var i = 0; i < out.pcm.length / 2; i++) {
+        l[i] = out.pcm[2 * i] / 32768;
+        r[i] = out.pcm[2 * i + 1] / 32768;
+      }
+      source = audio.createBufferSource();
+      source.buffer = buf;
+      source.loop = true;
+      source.connect(audio.destination);
+      source.start();
+      document.getElementById("stop").disabled = false;
+      say("");
+    } catch (e) { say(e.code ? e.code + ": " + e.message : String(e)); }
+  });
+  document.getElementById("stop").addEventListener("click", stop);
+
+  /* ---- load / export ---------------------------------------------------- */
+
+  function load(s) { stop(); sound = s; syncAll(); }
+
+  document.getElementById("new").addEventListener("click", function () {
+    load(W.newSound());
+  });
+  document.getElementById("demo").addEventListener("click", function () {
+    load(W.demoSound());
+  });
+  document.getElementById("lfo").addEventListener("click", function () {
+    load(W.lfoSound());
+  });
+  document.getElementById("export").addEventListener("click", function () {
+    try {
+      var rom = W.buildRom(sound);
+      var blob = new Blob([rom], { type: "application/octet-stream" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "wave.pce";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      say("");
+    } catch (e) { say(e.code ? e.code + ": " + e.message : String(e)); }
+  });
+
+  /* ---- the page --------------------------------------------------------- */
+
+  var chans = document.getElementById("chans");
+  for (var c = 0; c < W.CHANNELS; c++) chans.appendChild(buildChannel(c));
+  syncAll();
+
+  var params = new URLSearchParams(window.location.search);
+  if (params.has("demo")) { load(W.demoSound()); }
+  if (params.has("lfo")) { load(W.lfoSound()); }
+  if (params.has("selfcheck")) {
+    /* build both demo patches and report the images, so a headless run can
+     * confirm the page exports what node's pce-wave.js builds (docs/WAVE.md
+     * records the expected lines) */
+    var lines = [];
+    var demos = { wave1: W.demoSound(), wave2: W.lfoSound() };
+    Object.keys(demos).forEach(function (name) {
+      var rom = W.buildRom(demos[name]);
+      var sum = 0x811c9dc5;                    /* FNV-1a, enough to compare */
+      for (var i = 0; i < rom.length; i++) {
+        sum ^= rom[i];
+        sum = Math.imul(sum, 0x01000193) >>> 0;
+      }
+      lines.push(name + " bytes=" + rom.length + " fnv=" +
+                 sum.toString(16).padStart(8, "0"));
+    });
+    document.getElementById("selfcheck").textContent = lines.join("\n");
+  }
+})();
+</script>
+</body>
+</html>
