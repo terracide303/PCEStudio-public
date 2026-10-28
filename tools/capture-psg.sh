@@ -1,7 +1,7 @@
 #!/bin/bash
 # capture-psg.sh — run one #34 PSG test ROM in Mednafen and record its audio
 #
-#   tools/capture-psg.sh [1..7]      # psg1..psg7 (tools/gen/psgN.pce)
+#   tools/capture-psg.sh [1..10]     # psg1..psg10 (tools/gen/psgN.pce)
 #   tools/capture-psg.sh 6b          # psg6b
 #
 # The #34 PSG test ROMs are pure audio: they write PSG registers for a few
@@ -36,11 +36,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-N="${1:?usage: capture-psg.sh 1..7|6b}"
+N="${1:?usage: capture-psg.sh 1..10|6b}"
 NAME="psg${N}"
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
-SCRATCH="/Volumes/External II/scratch"
+SCRATCH="${SCRATCH:-${TMPDIR:-/tmp}/pce-psg-capture}"
+LOG="${TMPDIR:-/tmp}/mdfn-$NAME.log"
 
 mkdir -p "$DUMPDIR" "$SCRATCH"
 
@@ -58,7 +59,7 @@ echo "== launch mednafen ($NAME)"
 mednafen -force_module pce_fast -pce_fast.ocmultiplier 1 \
   -autosave 0 -sound 1 -sound.driver dummy -sound.rate 44100 \
   -soundrecord "$WAV" \
-  "tools/gen/$NAME.pce" > "/tmp/mdfn-$NAME.log" 2>&1 &
+  "tools/gen/$NAME.pce" > "$LOG" 2>&1 &
 
 echo "== let the audio settle"
 sleep "${SLEEP:-8}"
@@ -79,6 +80,6 @@ echo "wav: $WAV ($(stat -f%z "$WAV") bytes)"
 echo "== harvest"
 mv "$WAV" "$DUMPDIR/mednafen.wav"
 cp "tools/gen/$NAME.trace.json" "$DUMPDIR/trace.json"
-cp "/tmp/mdfn-$NAME.log" "$DUMPDIR/mednafen.log"
+cp "$LOG" "$DUMPDIR/mednafen.log"
 echo "== done: $DUMPDIR"
 ls -la "$DUMPDIR"
