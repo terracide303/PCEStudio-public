@@ -415,7 +415,9 @@
       return img;   /* SB clear: no sprites (CR R05, manual p. H7-5) */
     }
     var sat = opts.sat;
-    var vram = opts.vram;
+    /* #49: pce-bg.js applies an opts.dma transfer and returns the VRAM it
+     * drew; the sprite layer reads the same post-transfer bytes. */
+    var vram = img.vram || opts.vram;
     var width = img.width, height = img.height;
     var firstScanline = opts.firstScanline != null ? opts.firstScanline : 18;
     /* The sprite layer of captured row r is the one the VDC collects for

@@ -106,7 +106,7 @@ below is also a row in #26's "all 20 registers" panel.
 | EX bits 4–5: external sync (00 = both inputs, 01 = VSYNC input, 11 = both outputs, 10 invalid) | H7-6 | **GAP 11** |
 | SB bit 6: sprites on/off; takes effect from the next horizontal display period | H7-6 | #12, #13, #15 |
 | BB bit 7: background on/off; takes effect from the next horizontal display period | H7-6 | #5, #8, #15 |
-| SB=BB=0 starts **burst mode** next frame: the VDC stops accessing VRAM, VRAM→VRAM transfer always possible, VD0–7 = "L", SPBG = "H" (colour address $100) | H7-6 | #5 (the $100 fill, measured as scene8), **GAP 2** (the transfer half) |
+| SB=BB=0 starts **burst mode** next frame: the VDC stops accessing VRAM, VRAM→VRAM transfer always possible, VD0–7 = "L", SPBG = "H" (colour address $100) | H7-6 | #5 (the $100 fill, measured as scene8); the transfer half is #49 (its ROMs start the DMA in burst mode) |
 | TE bits 8–9: DISP output select (display / burst position / internal HSYNC) | H7-6 | **GAP 11** |
 | DR bit 10: DRAM refresh addresses only when the background access width is 2 or 4 dots | H7-6 | not used (SRAM VRAM) — record only |
 | IW bits 11–12: MAWR/MAAR auto-increment +1 / +32 / +64 / +128 after each high-byte access | H7-6 | #7/#8 use +1; **GAP 4**/bulk loads would use the larger steps |
@@ -135,10 +135,10 @@ below is also a row in #26's "all 20 registers" panel.
 
 | Register / rule | Page | Card |
 |---|---|---|
-| DCR (R0F): DSC bit 0 (SATB-done IRQ), DVC bit 1 (VRAM-done IRQ), SI/D bit 2 (source inc/dec), DI/D bit 3 (dest inc/dec), DSR bit 4 (VRAM→SATB auto-repeat) | H7-11 | DSR: #14; interrupts: **GAP 6**; SI/D, DI/D: **GAP 2** |
-| SOUR (R10) / DESR (R11): 16-bit source and destination; do not update during a transfer | H7-11/12 | **GAP 2** |
-| LENA/LENR (R12): length = M−1, up to 64K words; the transfer starts on the **high-byte write** | H7-12 (called LENA on H7-2, LENR on H7-12 — the manual's own inconsistency; see §8) | **GAP 2** |
-| VRAM→VRAM transfer only during VBlank or burst mode; a transfer that overruns VBlank is **not** resumed next VBlank; it is cancelled when the vertical display period starts and no done status is raised | H7-12, H7-4 | **GAP 2** |
+| DCR (R0F): DSC bit 0 (SATB-done IRQ), DVC bit 1 (VRAM-done IRQ), SI/D bit 2 (source inc/dec), DI/D bit 3 (dest inc/dec), DSR bit 4 (VRAM→SATB auto-repeat) | H7-11 | DSR: #14; SI/D, DI/D and the DVC→DV gate: #49 (modelled, `renderer/pce-vram.js`); DSC→DS (SATB channel): #14/#50; GAP 6's other flags: #50 |
+| SOUR (R10) / DESR (R11): 16-bit source and destination; do not update during a transfer | H7-11/12 | **#49** (counters; post-transfer values kept) |
+| LENA/LENR (R12): length = M−1, up to 64K words; the transfer starts on the **high-byte write** | H7-12 (called LENA on H7-2, LENR on H7-12 — the manual's own inconsistency; see §8) | **#49** (ends `$FFFF`, MacDonald §15.1 GAP 2) |
+| VRAM→VRAM transfer only during VBlank or burst mode; a transfer that overruns VBlank is **not** resumed next VBlank; it is cancelled when the vertical display period starts and no done status is raised | H7-12, H7-4 | **#49** (model applies a started transfer to completion, the measured note's rule; the captures keep CR=0 until the transfer ends, so none depends on it — see §15.3 item 7) |
 | VRAM→SATB: **256 words**, at the beginning of the next VBlank, triggered by the **high-byte write of DVSSR (R13)** | H7-12 | #14, #42 |
 | The CPU cannot write the SATB; only the VRAM→SATB transfer can | H7-20 | #14 |
 
@@ -364,7 +364,7 @@ studio; the parts that matter to a future CD path are below.
 | `EX_SCRMOD` ($25, p.29): clock 5 or 7 MHz; **horizontal 10–34 characters at 5 MHz, 16–44 at 7 MHz (odd values disallowed); vertical 10–30**; default 5 MHz 32×30 | 29 | #27 (real width/height limits), **GAP 1** |
 | `EX_DOTMOD` ($24, p.29): VM/SM access width; `EX_IMODE` ($26): IW +1/+32/+64/+128; `EX_VMODE`/`EX_HMODE` ($27/$28): the increment that matches the screen mode | 29 | **GAP 9** (VM/SM); #7 (bulk +32/+64/+128) |
 | `EX_VSYNC` ($29), `EX_RCRON`/`EX_RCROFF` ($2A/$2B), `EX_IRQON/OFF`, `EX_BGON/OFF`, `EX_SPRON/OFF`, `EX_DSPON/OFF` | 30–31 | #15, #16 |
-| `EX_DMAMOD` ($34), `EX_SPRDMA` ($35), `EX_SATCLR` ($36), `EX_SPRPUT` ($37), `EX_SETDMA` ($3B): the BIOS's own DMA and SAT wrappers | 32–33 | #14, **GAP 2** |
+| `EX_DMAMOD` ($34), `EX_SPRDMA` ($35), `EX_SATCLR` ($36), `EX_SPRPUT` ($37), `EX_SETDMA` ($3B): the BIOS's own DMA and SAT wrappers | 32–33 | #14, #49 (the VRAM half; the BIOS wrappers themselves are not run) |
 | `EX_SETRCR` ($38), `EX_SETRED` ($39), `EX_SETWRIT` ($3A) | 33 | #15, **GAP 8** (`EX_SETRED` is the read path) |
 | `EX_COLORCMD` ($3C): set/read background and sprite palettes from buffers | 34 | #10, #17, **GAP 8** (read) |
 | Math calls: BIN↔BCD, random, 8/16-bit multiply and divide, square root, sine, cosine, arctangent | 34–36 | #31 (a toy runtime could use these) |
@@ -440,9 +440,12 @@ for #26 while this is read — so the references name symbols, not lines.
 7. **No read path.** MAAR/VRR and CTR are unmodelled (`pce-rom.js`,
    `pce-bg.js`) → **GAP 8**. The viewer also never uses the larger IW steps
    (+32/+64/+128) for bulk loads; every copy is +1 (H7-6).
-8. **VRAM→VRAM DMA is absent.** DCR's DSR is modelled only as "load the SAT
-   every VBlank" (#14); SOUR/DESR/LENR and SI/D/DI/D have no code and no card
-   → **GAP 2**. The render model also assumes a static SAT within a frame.
+8. **VRAM→VRAM DMA was absent; #49 modelled it.** `renderer/pce-vram.js`
+   runs SOUR/DESR/LENR and DCR's SI/D, DI/D and the DVC→DV gate; the three
+   captures `tests/dumps/dma1-3` hold it to Mednafen word for word
+   (docs/RENDERER.md, "VRAM-to-VRAM DMA"). DCR's DSR remains only "load the
+   SAT every VBlank" (#14). The render model still assumes a static SAT
+   within a frame.
 9. **The sprite budget is hard-coded to 16 strips** (`strips.length < 16` in
    `collectStrips`), which is what the tests measured, but the manual's limit
    is "16 sprites" *plus* a search limit that depends on HBlank and SM
@@ -548,7 +551,7 @@ these notes; the section names below are the citation.
 | GAP | Note section | What it settles — and what it does not | Route |
 |---|---|---|---|
 | **1** window and border | pcetech §7 "Display details", §9 "Display parameter settings", §5.1 CR; sgxtech "Video Priority Controller" (SGX only) | Frame = **263 lines, fixed**, split 14 top blanking / 242 active display / 4 bottom / 3 sync. The VDC shows graphics only inside VDS+VSW … +VDW; the overscan colour is shown elsewhere. Overscan = colour 0 of sprite palette 0 (`$100`); the active-area backdrop = colour 0 of background palette 0 (`$000`). `$0A`/`$0B` may change on any line; `$0C`–`$0E` only outside the active display. The measured tables include the exact 256×240 row our viewer writes (HDS=2 HSW=2 HDE=4 HDW=`$1F`; VDS=`$0F` VSW=2 VDW=`$EF` VCR=`$0C`) and the standard 224 row (VDS=`$17` VDW=`$DF`). At the 5 MHz clock a line is "roughly 342 dots", so a 256-px window leaves a left/right border. Does **not** settle the BB=0/SB=1 fill (§15.3). | #48 (renderer half; viewer/editor split to #67) |
-| **2** VRAM→VRAM copy | pcetech §5.4 "DMA" | LENR = words M−1 (`0` = 1, `$FFFF` = 64K; the note's "1 byte" is a typo) and the MSB write starts it. SOUR/DESR/LENR are counters and keep their post-transfer values; LENR ends `$FFFF`. IW does not change the DMA step (always +1). MAWR/MARR/read buffer/write latch are untouched. Both DMAs may run together; SAT-DMA-done is four lines after the display ends. **Contradicts H7-12 on an overrun**: the note says DMA is "halted (not aborted), and resumes", the manual says cancelled with no done status. | #49 |
+| **2** VRAM→VRAM copy | pcetech §5.4 "DMA" | LENR = words M−1 (`0` = 1, `$FFFF` = 64K; the note's "1 byte" is a typo) and the MSB write starts it. SOUR/DESR/LENR are counters and keep their post-transfer values; LENR ends `$FFFF`. IW does not change the DMA step (always +1). MAWR/MARR/read buffer/write latch are untouched. Both DMAs may run together; SAT-DMA-done is four lines after the display ends. **Contradicts H7-12 on an overrun**: the note says DMA is "halted (not aborted), and resumes", the manual says cancelled with no done status. | #49 (modelled in `renderer/pce-vram.js`; `tests/check-dma.js` + `dma1-3`) |
 | **3** pads and timer | pcetech §4 "I/O port", §2.1 "Interrupts", §2.2 "Timer" | The 2-button protocol (SEL = directions, CLR low = enabled, inputs inverted, the exact D3–D0 table, a delay after SEL) and the Turbo Tap 5-pad serial counter with its reset quirk (`$01`/`$03`). `$1000`: D7 CD sense, D6 country, D5/D4 = 1. Timer: 7-bit, decremented at fMASTER/1024 = 6992 Hz independent of CSL/CSH; `$00` counts as 1 and `$7F` as 128; IRQ on the 0→`$7F` underflow, then immediate reload; a read returns the reloaded value; it keeps counting without an acknowledge; disabled returns the last counter; re-enabling reloads the latch; any write to `$1403` acknowledges. Does **not** settle the 6-button pad (GAP 10). | #45 |
 | **4** ROM over 80 KB | pcetech §3 "Memory map"; sgxtech "HuC6280 memory map"; hes spec [MEMORY MAP] | The measured decode is HuCard ROM `$00`–`$7F` (128 × 8 KB = **1 MB**), `$80`–`$F7` unused (`$FF`), F8–FB work RAM (SGX 32 KB; on a PC-Engine F9–FB mirror F8); a ROM under 1 MB may be mirrored. The HES map agrees: ROM `0x000000–0x0FFFFF`, RAM `0x1F0000–0x1F7FFF`. **This contradicts the 2 MB limit** in §5.1 and `renderer/pce-rom.js` `MAX_ROM_BANKS = 256`, the limit #46 closed on (e7c547c). #57 set it to 128 (1 MB). | #46, #57 |
 | **5** where a save lives | pcetech §8 "CD-ROM" → "Battery backed RAM (BRAM)" | 2 KB at physical `$1EE000`–`$1EE7FF` (the first 2 KB of page F7), locked at power-up (reads `$FF`, writes ignored), unlocked by bit 7 of `$1807`, locked by reading `$1803`; the System Card and Tennokoe Bank use it in low speed. A bare HuCard has no save RAM. | GAP 5 stays Dennis's SPEC decision |
@@ -630,7 +633,11 @@ these notes; the section names below are the citation.
    says a real console need not be blank. Pictures that stay inside 2,048
    background / 512 sprite patterns are unaffected.
 7. **VRAM→VRAM overrun.** H7-12: cancelled, no done status. pcetech §5.4:
-   halted and resumed. No model yet, so #49 must pick one and say why.
+   halted and resumed. **#49 picked the measured note's rule** (a started
+   transfer is applied to completion) because pcetech was measured on a
+   TurboGrafx-16 and Mednafen does the same, and the capture ROMs finish
+   their transfers in burst mode before the display starts, so no capture
+   depends on the choice — recorded, not hardware-proven.
 8. **PSG frequency register `F = 0`.** Hudson (P8-3/P8-9) says `F = 0` is
    forbidden. pcetech §10: `$000` is the lowest frequency, `$001` the highest,
    `$FFF` the next-to-lowest. #34 must measure or decide; the manual row is

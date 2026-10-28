@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""genroms.py — generate the PCEStudio test-scene ROMs (cards #5, #39, #12, #15).
+"""genroms.py — generate the PCEStudio test-scene ROMs (cards #5, #39, #12, #15, #49).
 
 Each scene is a HuCard ROM that initialises the VDC/VCE (the canonical HuDK
 256x240 init values — VDW = $00EF, 240 display lines, H7-10 — see
@@ -45,6 +45,11 @@ The scenes differ in what they exercise in the renderer:
                    both sides (a window narrower than the 256-dot VCE raster)
   scene14 "short"   VDW=199, VCR=44 — a short picture leaving border at the
                    bottom (the rest of the 263-line frame is the front porch)
+
+  #49's DMA scenes are their own list (DMA_SCENES below): scene 4's picture
+  plus one VDC VRAM-to-VRAM block transfer, one forward, one decrementing and
+  one overlapping its source; each ROM waits in burst mode until the transfer
+  has finished, then shows the result.
 
 Scenes 4-9 are #39's: each turns one of docs/REVIEW.md finding 1's renderer
 breaks into a visible picture change (see tests/renderer-mutation.js).
@@ -1655,7 +1660,126 @@ def raster_json(name):
     }
 
 
-def gen_asm(scene):
+# ---- #49: the VRAM-to-VRAM DMA ROMs ------------------------------------
+# Each is one scene's exact picture data (so that scene's dump is the
+# pre-transfer VRAM the model starts from) plus one VDC block transfer before
+# the background is switched on.  The transfer runs while CR = 0, i.e. in
+# burst mode, where VRAM-to-VRAM DMA is always allowed (VDC manual p. H7-12)
+# and the display cannot start mid-transfer — so the contested "overrun"
+# rule (manual: cancelled; MacDonald §15.1 GAP 2: halted and resumed) is not
+# what any capture depends on.  The wait loop then lets the transfer finish
+# before CR is written; see dma_wait below for its length.
+#
+# The base is scene 4 (a 64x32 BAT whose tile = 0x080 | ((x+2y)&0x3F), so its
+# 64 tiles 0x080..0x0BF = VRAM words $800..$BFF are all inside the 32K-word
+# VRAM and all on screen).  Every transfer moves whole 16-word characters
+# between regions the BAT names, so the copy changes the picture as well as
+# VRAM.  (Scene 1 cannot serve: its odd-column tiles at 0xF00 are beyond the
+# 32768-word VRAM on purpose — scene9's witness — so a copy there would move
+# the zero-filled upper half, not tile data.)
+#
+# The three cases are one variable apart:
+#   dma1  forward: tiles 0x080..0x08F copied onto tiles 0x090..0x09F, both
+#         addresses incrementing, DVC (DCR bit 1) set -> the done IRQ bit DV
+#         is raised (SR bit 4), which the save state shows.
+#   dma2  decrementing: tiles 0x090..0x09F copied to 0x080..0x08F with SI/D
+#         and DI/D both set, so the source is read from $9ff down and each
+#         tile's 16 words land reversed.
+#   dma3  overlapping: 512 words from $900 (tiles 0x090..0x0AF) written to
+#         $940, which overlaps the source's tail.  The hardware reads and
+#         writes one word at a time, so the first 64 words repeat; a model
+#         that snapshots the source (memmove) gives a different VRAM.
+DMA_SCENES = {
+    "1": dict(scene=4, sour=0x0800, desr=0x0900, lenr=0x00FF,
+              dcr=0x0010 | 0x02,
+              note="forward copy of tiles 0x080-0x08F onto 0x090-0x09F; "
+                   "DVC set (the VRAM-to-VRAM done interrupt)"),
+    "2": dict(scene=4, sour=0x09FF, desr=0x08FF, lenr=0x00FF,
+              dcr=0x0010 | 0x04 | 0x08,
+              note="decrementing copy: tiles 0x090-0x09F read backwards into "
+                   "0x080-0x08F (SI/D and DI/D set)"),
+    "3": dict(scene=4, sour=0x0900, desr=0x0940, lenr=0x01FF,
+              dcr=0x0010,
+              note="overlapping copy: 512 words from 0x900 written over the "
+                   "source's own tail at 0x940"),
+}
+
+
+def dma_json(name):
+    """The transfer a DMA ROM runs, as data — tools/capture.sh copies this
+    into tests/dumps/dmaN/dma.json so the check reads the same descriptor the
+    ROM was generated from."""
+    s = DMA_SCENES[name]
+    return {
+        "base": f"scene{s['scene']}",
+        "base_vram": f"tests/dumps/scene{s['scene']}/vram.bin",
+        "sour": s["sour"],
+        "desr": s["desr"],
+        "lenr": s["lenr"],
+        "dcr": s["dcr"],
+        "words": (s["lenr"] & 0xFFFF) + 1,
+        "note": s["note"],
+    }
+
+
+def emit_vram_dma(out, spec):
+    """Emit one VRAM-to-VRAM DMA (SOUR/DESR/LENR, DCR) and a wait.
+
+    Register pages: DCR R0F p. H7-11 (bit 1 DVC, bit 2 SI/D, bit 3 DI/D,
+    bit 4 DSR), SOUR R10 p. H7-11, DESR R11 p. H7-11, LENR R12 p. H7-12
+    (length = words-1, the high-byte write starts the transfer).  The
+    direction bits are kept from the descriptor; DSR stays set as the rest of
+    the scene ROMs set it (harmless with sprites off)."""
+    dcr = spec["dcr"] & 0xFFFF
+    bits = []
+    if dcr & 0x01:
+        bits.append("DSC=1")
+    if dcr & 0x02:
+        bits.append("DVC=1")
+    if dcr & 0x04:
+        bits.append("SI/D=1 (source decrements)")
+    if dcr & 0x08:
+        bits.append("DI/D=1 (destination decrements)")
+    if dcr & 0x10:
+        bits.append("DSR=1")
+    out.append(f"        ; ---- #49 VRAM-to-VRAM DMA: {spec['note']}")
+    out.append("        ; DCR R0F p. H7-11: " + ", ".join(bits))
+    out.append("        st0 #$0f")
+    out.append(f"        st1 #${dcr & 0xff:02x}")
+    out.append(f"        st2 #${(dcr >> 8) & 0xff:02x}")
+    out.append("        st0 #$10                   ; SOUR R10 p. H7-11")
+    out.append(f"        st1 #${spec['sour'] & 0xff:02x}")
+    out.append(f"        st2 #${(spec['sour'] >> 8) & 0xff:02x}")
+    out.append("        st0 #$11                   ; DESR R11 p. H7-11")
+    out.append(f"        st1 #${spec['desr'] & 0xff:02x}")
+    out.append(f"        st2 #${(spec['desr'] >> 8) & 0xff:02x}")
+    out.append("        st0 #$12                   ; LENR R12 p. H7-12")
+    out.append(f"        st1 #${spec['lenr'] & 0xff:02x}")
+    out.append(f"        st2 #${(spec['lenr'] >> 8) & 0xff:02x}"
+               "                   ; high-byte write STARTS the transfer")
+    out.append("        ; Wait while the display is still off (CR = 0, burst")
+    out.append("        ; mode): the transfer runs in that free time (p. H7-12).")
+    out.append("        ; 8 x 256 iterations ~= 10k CPU cycles ~= 22 lines, well")
+    out.append("        ; past the 512-word maximum (~2.3 lines at 227 words/")
+    out.append("        ; line), so no capture depends on the overrun rule")
+    out.append("        ; (H7-12 cancel vs MacDonald halt-and-resume).")
+    out.append("        ldx #$00")
+    out.append("        ldy #$08")
+    out.append("dma_wait:")
+    out.append("        dex")
+    out.append("        bne dma_wait")
+    out.append("        dey")
+    out.append("        bne dma_wait")
+    out.append("")
+
+
+def gen_dma_asm(name):
+    """the base scene's picture data and init, plus one DMA before the
+    background is switched on."""
+    return gen_asm(DMA_SCENES[name]["scene"], dma=DMA_SCENES[name])
+
+
+def gen_asm(scene, dma=None):
     s = SCENES[scene]
     cram = cr_words()
     cram_lo = [w & 0xFF for w in cram]
@@ -1759,6 +1883,8 @@ def gen_asm(scene):
         out.append("")
         for p in range(len(lo_pages)):
             page_tables.append((label, p, lo_pages[p], hi_pages[p]))
+    if dma is not None:
+        emit_vram_dma(out, dma)
     if s["cr"] & 0x80:
         out.append("        ; turn the background on (CR bit 7)")
     else:
@@ -1818,6 +1944,15 @@ def main():
         jpath = os.path.join(OUT, f"raster{name[1:]}.raster.json")
         with open(jpath, "w") as f:
             json.dump(raster_json(name), f, indent=1, sort_keys=True)
+        print(f"wrote {jpath}")
+    for name in DMA_SCENES:
+        path = os.path.join(OUT, f"dma{name}.asm")
+        with open(path, "w") as f:
+            f.write(gen_dma_asm(name))
+        print(f"wrote {path}")
+        jpath = os.path.join(OUT, f"dma{name}.json")
+        with open(jpath, "w") as f:
+            json.dump(dma_json(name), f, indent=1, sort_keys=True)
         print(f"wrote {jpath}")
     # sanity: scene 3 BAT formula in ROM == formula in generator
     for x in range(128):

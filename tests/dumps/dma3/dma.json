@@ -1,0 +1,10 @@
+{
+ "base": "scene4",
+ "base_vram": "tests/dumps/scene4/vram.bin",
+ "dcr": 16,
+ "desr": 2368,
+ "lenr": 511,
+ "note": "overlapping copy: 512 words from 0x900 written over the source's own tail at 0x940",
+ "sour": 2304,
+ "words": 512
+}

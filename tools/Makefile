@@ -26,8 +26,11 @@ RASTER_ROMS := $(addprefix gen/raster,$(addsuffix .pce,$(RASTERS)))
 # ROMs run, but as viewer data (bank 1's raster-table image) driven by
 # viewer.asm's own irq1 chain.
 VRASTERS := $(addprefix gen/vraster,$(addsuffix .pce,$(RASTERS)))
+# #49: the VRAM-to-VRAM DMA ROMs (genroms.py's DMA_SCENES), scene 4's picture
+# plus one block transfer; capture.sh 1..3 dma.
+DMAROMS := $(addprefix gen/dma,$(addsuffix .pce,1 2 3))
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS)
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS) $(DMAROMS)
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -56,6 +59,15 @@ gen/raster%.asm: genroms.py
 	$(PYTHON) -I genroms.py
 
 gen/raster%.pce: gen/raster%.asm
+	$(PCEAS) -raw -o $@ $<
+
+# #49's VRAM-to-VRAM DMA ROMs (genroms.py's DMA_SCENES); the generator also
+# writes gen/dmaN.json, the transfer descriptor capture.sh keeps with the dump.
+gen/dma%.asm: genroms.py
+	mkdir -p gen
+	$(PYTHON) -I genroms.py
+
+gen/dma%.pce: gen/dma%.asm
 	$(PCEAS) -raw -o $@ $<
 
 # The viewer ROMs are viewer.asm (bank 0, fixed) plus the picture data of

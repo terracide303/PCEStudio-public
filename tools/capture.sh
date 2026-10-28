@@ -20,6 +20,9 @@
 #                                   # (gen/vspriteN.pce, SATB DMA in the viewer)
 #   tools/capture.sh 1..12 sprite    # the #12 sprite-scene ROMs
 #                                   # (gen/spriteN.pce; the dump gains sat.bin)
+#   tools/capture.sh 1..3 dma        # #49: the VRAM-to-VRAM DMA ROMs
+#                                   # (gen/dmaN.pce; the dump gains dma.json,
+#                                   # the descriptor the ROM was built from)
 #   tools/capture.sh 12 bsprite     # #42: the browser export of a sprite
 #                                   # scene (gen/bsprite12.pce, written by
 #                                   # tests/check-export.js --write sprite12)
@@ -99,15 +102,19 @@ case "$MODE" in
   bsprite) NAME="bsprite${SCENE}" ;;
   raster) NAME="raster${SCENE}" ;;
   vraster) NAME="vraster${SCENE}" ;;
+  dma)    NAME="dma${SCENE}" ;;
   painted) NAME="painted" ;;
   spainted) NAME="spainted" ;;
   effect) NAME="effect1" ;;
-  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, painted, spainted or effect" >&2; exit 2 ;;
+  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, painted, spainted or effect" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
 SCRATCH="/Volumes/External II/scratch"
 MCSDIR="$HOME/.mednafen/mcs"
+# Log scratch under $TMPDIR (never a hard-coded /tmp: the system disk on some
+# machines is nearly full).
+LOGDIR="${TMPDIR:-/tmp}"
 
 mkdir -p "$DUMPDIR" "$SCRATCH"
 
@@ -151,7 +158,7 @@ run_once() {
     -pce.xscale 1 -pce.yscale 1 \
     -qtrecord "$MOV" -qtrecord.vcodec png \
     -qtrecord.w_double_threshold 0 -qtrecord.h_double_threshold 0 \
-    -autosave 1 "tools/gen/$NAME.pce" > "/tmp/mdfn-$NAME.log" 2>&1 &
+    -autosave 1 "tools/gen/$NAME.pce" > "$LOGDIR/mdfn-$NAME.log" 2>&1 &
 
   echo "== let the OSD messages fade and the picture settle"
   sleep "${SLEEP:-9}"
@@ -209,7 +216,12 @@ regs["slend"] = int(sys.argv[3])
 json.dump(regs, open(sys.argv[1], "w"), indent=1, sort_keys=True)
 PYEOF
   python3 -I "$TOOLS/movframes.py" "$MOV" "$DUMPDIR/mednafen.png" 256 232 4
-  cp "/tmp/mdfn-$NAME.log" "$DUMPDIR/mednafen.log"
+  cp "$LOGDIR/mdfn-$NAME.log" "$DUMPDIR/mednafen.log"
+  if [ "$MODE" = dma ]; then
+    # #49: the transfer descriptor the ROM was generated from, kept beside the
+    # capture so the check reads the same registers the ROM wrote.
+    cp "tools/gen/$NAME.json" "$DUMPDIR/dma.json"
+  fi
   if [ -z "${KEEP_MOV:-}" ]; then rm -f "$MOV"; fi
   echo "== done: $DUMPDIR"
   ls -la "$DUMPDIR"

@@ -30,6 +30,9 @@
  *     Mednafen DisplayRect.y = 14 + slstart, 14 lines of top blanking)
  *   raster: optional #15 raster table (see buildRows below) — per-scanline
  *     CPU writes to BXR/BYR/CR and the VCE colour table.
+ *   dma: optional #49 VRAM-to-VRAM transfer { sour, desr, lenr, dcr }; the
+ *     renderer applies it through renderer/pce-vram.js before drawing, so
+ *     `vram` is the state before the transfer.
  *
  * Layer scope: background only; the sprite layer composes on top of the
  * colour-index buffer via pce-sprites.js (#12).  CR bit 7 (BB) is modelled:
@@ -85,6 +88,21 @@
       words[i] = cram[i * 2] | (cram[i * 2 + 1] << 8);
     }
     return decodeCramWords(words);
+  }
+
+  /* #49: the VRAM the renderer draws when the picture ran a VRAM-to-VRAM
+   * DMA — renderer/pce-vram.js applies the completed transfer to the
+   * pre-transfer bytes.  In Node the model is required; in the browser it is
+   * the PCEStudio.vram global (pce-vram.js loaded before this file). */
+  function dmaVram(opts) {
+    var model = (typeof module === "object" && module.exports)
+      ? require("./pce-vram.js")
+      : (typeof PCEStudio !== "undefined" ? PCEStudio.vram : null);
+    if (!model) {
+      throw new Error("renderer/pce-bg.js: opts.dma needs pce-vram.js loaded " +
+                      "first");
+    }
+    return model.runDma(opts.vram, opts.dma).vram;
   }
 
   /* MWR bits 4-5: BAT width (0:32, 1:64, 2/3:128); bit 6: BAT height
@@ -391,6 +409,13 @@
     if (rows === undefined) {
       rows = buildRows(opts);
     }
+    /* #49: a VRAM-to-VRAM DMA ran before this frame.  renderer/pce-vram.js
+     * applies it to the pre-transfer VRAM; the renderer draws the result.
+     * The frame is a settled one, so the transfer has had its free time
+     * (VBlank/burst) and is complete (see pce-vram.js on the overrun case). */
+    if (opts.dma) {
+      vram = dmaVram(opts);
+    }
 
     var geom = batGeometry(regs.MWR);
     var bxr = regs.BXR & 0x3FF;                 /* BXR is 10 bits */
@@ -455,7 +480,7 @@
         idx[r * width + x] = 0x100;
       }
     }
-    return { width: width, height: height, indices: idx };
+    return { width: width, height: height, indices: idx, vram: vram };
   }
 
   function renderFrame(opts) {

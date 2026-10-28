@@ -47,6 +47,11 @@ WANTED = {
     "VCR": ("VDC", "u16"),
     "DCR": ("VDC", "u16"),
     "SATB": ("VDC", "u16"),
+    # #49: the VRAM-to-VRAM DMA counters (VDC manual R10/R11/R12 p. H7-11/12;
+    # after a transfer they hold their post-transfer values, LENR = $FFFF)
+    "SOUR": ("VDC", "u16"),
+    "DESR": ("VDC", "u16"),
+    "LENR": ("VDC", "u16"),
     "status": ("VDC", "u8"),
     "RCRCount": ("VDC", "u32"),
     "BG_YOffset": ("VDC", "u32"),

@@ -43,6 +43,16 @@
  * model to have RR enabled and set, so the two facts (a match happened, a
  * read cleared it) are consistent.
  *
+ * #49 adds one bit to that comparison: DV (SR bit 4), the VRAM-to-VRAM
+ * DMA-done flag, which #50's per-frame SR does not cover (that is CC/OR/RR/
+ * VD).  It is set only when DCR bit 1 (DVC) enables it — pcetech §5 "a
+ * status bit is set only when its enable bit is set" — and the save's
+ * post-transfer LENR = $FFFF shows the transfer completed (pcetech §5.4;
+ * MANUALS.md §15.1 GAP 2).  Only tests/dumps/dma1 sets DVC; dma2/dma3 are
+ * the negative control.  renderer/pce-vram.js owns the rule and
+ * tests/check-dma.js holds it to the capture; the term below is zero for
+ * every other dump.
+ *
  * The scenes where the flags show:
  *   sprite4  — 19 sprites on row 66 and sprite 0 overlapping sprite 1:
  *              OR and CC on VDW lines 2..17;
@@ -355,9 +365,14 @@ function compareMednafen(dump, model, notes) {
     return problems;
   }
   if (!dump.raster) {
-    if (model.frame.sr !== saved) {
+    /* #49: DV (SR bit 4) is the VRAM-to-VRAM DMA-done flag: gated by DCR
+     * bit 1 (DVC), and the save's LENR = $FFFF shows the transfer finished
+     * (see the header).  Zero for every dump with DVC clear. */
+    const dv = (dump.regs.DCR & 0x02) && dump.regs.LENR === 0xFFFF ? 0x10 : 0;
+    if ((model.frame.sr | dv) !== saved) {
       problems.push(`${dump.name}: saved VDC status $${saved.toString(16)}, ` +
-                    `the model's frame SR is $${model.frame.sr.toString(16)}`);
+                    `the model's frame SR is $${model.frame.sr.toString(16)}` +
+                    (dv ? ` (+ DV $10)` : ""));
     }
     return problems;
   }

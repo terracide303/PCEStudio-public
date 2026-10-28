@@ -5,6 +5,8 @@ node tests/check.js             # diff the renderer against Mednafen, all scenes
 node tests/check-review-fixes.js # #38: each review fix, and it fails before
 node tests/renderer-mutation.js # #6/#39: prove that diff test fails on a broken renderer
 node tests/check-viewer.js      # viewer/browser/vsprite ROM captures vs the renderer
+node tests/check-dma.js         # #49: the VRAM-to-VRAM DMA model vs 3 Mednafen captures,
+                                # word for word + the post-transfer registers
 node tests/check-export.js      # the browser's .pce vs the PCEAS build, byte for byte
 node tests/check-python-builder.js # #60: genviewer.py and pce-rom.js agree at 9/13/14 regions
 node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
@@ -44,10 +46,11 @@ data — and `scene8`, `scene8b` and `scene8c` are the diff-0 proofs (#39).
 HuCard image blank (every VDC register 0), which is the emulator not running
 the image (#25), not a rendered frame. The skip list is explicit and named
 dumps only; an unnamed background-off dump whose capture is not the backdrop
-fails the run as a diff. The shipped count is **72 pictures** (scenes 1-9,
+fails the run as a diff. The shipped count is **75 pictures** (scenes 1-9,
 5b, 8b, 8c, the #48 window scenes 11-14, painted, spainted, viewer 1-3 and
 7, browser 1-3, sprite 1-12,
-vsprite 1-12, bsprite 12, raster 1-10, browser 10), us1 skipped.  A dump
+vsprite 1-12, bsprite 12, raster 1-10, browser 10, and #49's dma1-3), us1
+skipped.  A dump
 whose window is smaller than the captured frame must also show CRAM[0x100]
 on every border pixel and the picture inside (check.js's `checkWindow`,
 computed from the raw registers; scenes 11-14 print their window rectangle
@@ -76,6 +79,32 @@ the sprite scenes (see below). Sprite 12 is #42's: 64 sprites in an 8×8
 grid, one per SAT entry, so entries 20-63 are live and entry 63
 (bottom-right) is visible — REVIEW-14's A2 break (a viewer copying only the
 first 20 SAT entries) is reachable, below.
+
+## The DMA check (#49)
+
+`tests/check-dma.js` reads each `dumps/dmaN/` (built by `tools/genroms.py`'s
+`DMA_SCENES`, captured with `tools/capture.sh N dma`) and its `dma.json` —
+the SOUR/DESR/LENR/DCR the ROM was generated from.  It runs
+`renderer/pce-vram.js`'s `runDma` on the base scene's pre-transfer VRAM and:
+
+- requires the capture's VRAM equal to the model's **word for word** (all
+  32768 words, first differing word reported);
+- requires the captured SOUR/DESR/LENR to equal the model's post-transfer
+  counters (they keep their new values, LENR = `$FFFF` — MacDonald §15.1
+  GAP 2) and the captured DCR to equal the descriptor's;
+- requires SR bit 4 (DV) to equal the model's DVC-gated flag: set on dma1
+  (DCR `$12`), clear on dma2/dma3 (DCR without bit 1), so the gate has a
+  positive and a negative capture;
+- for dma3, whose destination overlaps its source, computes the
+  snapshot/memmove copy and requires the capture to differ from it (448
+  words) — the hardware moves one word at a time;
+- renders the frame from scene 4's pre-transfer VRAM plus the descriptor
+  through `pce-bg.js` (its `opts.dma` path) and requires the recorded frame
+  byte for byte.
+
+`check.js` also renders every dmaN dump from its own captured VRAM (75
+pictures).  The model, its sources and its limits are in
+[`../docs/RENDERER.md`](../docs/RENDERER.md), "VRAM-to-VRAM DMA".
 
 ## The sprite scenes (#12, #40)
 
