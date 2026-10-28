@@ -162,23 +162,29 @@ adding more captures). The #10 background demo's
 ROM is unchanged (`486477d6…`). The test was written by @design and is flagged
 for @review cold. Details and limits: [`docs/EDITOR.md`](docs/EDITOR.md).
 
-**#35 step 1 is done, not the card.** HuTrack is vendored
-(`vendor/hutrack`, pinned `ac598f84`, MIT, 68 files in `MANIFEST.sha256`, no
-example songs) and its engine + converter play **our own DMF** on Mednafen:
-`tools/genhutrack.py` writes an 8-note DMF 24 (C4 E4 G4 C5 B4 G4 E4 C4 over
-C3/G3), the converter emits 10 includes (7,904 B, committed under
-`tests/dumps/hutrack1/`), and `tools/build-hutrack.sh` (PCEAS 4.x — 3.23
-cannot assemble the engine; build one from `vendor/huc`) makes a 139,264 B ROM
-(sha256 `c683188f…`). `tools/capture-hutrack.sh` records
-`tests/dumps/hutrack1/mednafen.wav` (308,843 frames = 7.003 s, RMS 4,971.2
-L/R); `node tests/check-hutrack.js` re-checks the vendor manifest and the
-committed fixtures, rebuilds the ROM byte-identically, and recovers the
-melody, the bass (`C3 G3 C3 G3`) and 0.8 s note onsets from the audio alone.
-Measured: DMF's octave byte is one below the sounding octave. What is left on
-#35: the JS DMF reader/player through `renderer/pce-psg.js` compared
-sample-for-sample with this WAV; the export path; DDA/SFX/effects; sound in
-toys (#30). The checker and fixture were written by the builder — @review owes
-them a cold break (rule 2). `docs/HUTRACK.md`.
+**#35 step 2 is done, not the card.** `renderer/pce-dmf.js` is our own DMF
+reader and `renderer/pce-song.js` is a JS port of the parts of HuTrack's
+engine a plain DMF song uses (the two Reset rounds, the VBlank tick, the
+row/order flow, `anchor = note + 60` into HuTrack's period tables with its
+octave shifts/clamp, the volume and waveform envelopes, and `.copy.wave`'s
+control toggles around the 32-step upload), feeding `renderer/pce-psg.js`.
+`node tests/check-dmf.js` exits 0: it decodes the converter's committed
+compressed pattern includes with the ENGINE's mask/skip rules and gets the
+same note rows as our reader; it asserts the emitted sequence (446 power-on
+writes, the first note's 84 writes on the sixth EngineCall, 10 writes on
+every later frame, melody every 48 VBlanks and bass every 96, periods 427/
+339/285/213/226/855/571 within 0.5% of equal temperament); and against
+`tests/dumps/hutrack1/mednafen.wav` it measures the first note 74 samples
+before the recording's, the melody's peak within 0.44 Hz on all 8 notes, and
+the RMS ratio within 2% on E4×2/C5/B4 (C4/G4 are phase-sensitive because the
+bass's second harmonic lands on the melody's note). **Not sample-exact:** the
+engine writes inside the VBlank IRQ and its per-write cycle offsets (IRQ
+entry, 7 kHz timer, instruction stream) are not modelled, so the two voices'
+relative phase is not the console's — waveform correlation 0.864 over 1.4 s.
+What is left on #35: that cycle model (for sample equality), the export path
+(song + HuTrack in the `.pce`), effect columns/arpeggio/DDA/SFX, a browser
+page that plays a DMF, and sound in toys (#30). Both checkers were written by
+the builder — @review owes them a cold break (rule 2). `docs/HUTRACK.md`.
 
 ## Next action
 
