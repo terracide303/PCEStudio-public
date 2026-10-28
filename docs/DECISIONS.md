@@ -270,3 +270,8 @@ layout, panels, workflow, keyboard shortcuts and how examples and docs sit besid
 ppu.toys feels at home. What stays ours: the code, the CSS and every asset (the hosted Studio is not in the MIT
 repo, so its files are not ours to copy), the name and the PC Engine content. Its author has blessed the idea;
 Dennis may tell him the studio deliberately mirrors his layout.
+
+**Update, same day (Dennis):** "we can take whatever from their website if needed, they are fine with that." So
+the Studio's own files (layout, CSS, icons, UI code) may be taken and adapted where that is quicker than
+rebuilding them, with credit to ppu.toys / Liora Labs kept next to what is taken (a comment in the file and a line
+in the README). Their written OK is Dennis's to keep; the files taken are listed in docs/STUDIO.md.
