@@ -6,6 +6,7 @@ node tests/check-review-fixes.js # #38: each review fix, and it fails before
 node tests/renderer-mutation.js # #6/#39: prove that diff test fails on a broken renderer
 node tests/check-viewer.js      # viewer/browser/vsprite ROM captures vs the renderer
 node tests/check-export.js      # the browser's .pce vs the PCEAS build, byte for byte
+node tests/check-python-builder.js # #60: genviewer.py and pce-rom.js agree at 9/13/14 regions
 node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
 node tests/check-editor.js      # the editor's refusals, picture, export and capture,
                                 # plus the effect edges and the page's Remove buttons (#52)
@@ -279,6 +280,42 @@ sprite12` writes `tools/gen/bsprite12.pce` for `capture.sh 12 bsprite`
 (#42: REVIEW-14's J1-J3 were caught only by this byte equality because the
 browser ROM had never been run on a sprite scene — the bsprite12 capture
 closes that gap in `check-viewer.js`).
+
+## `check-python-builder.js` — both builders agree past the committed fixtures (#60)
+
+`check-export.js` compares `renderer/pce-rom.js` against a *committed*
+`tools/gen/*.pce`, and the largest committed picture has 2 copy regions, so
+`tools/genviewer.py`'s 13-descriptor cap is exercised by no fixture.
+REVIEW-46's breaker showed what that costs: `MAX_REGIONS` 13→8 (G11) and
+13→255 (G16) both ran every suite green. This check builds the same synthetic
+pictures — made from `dumps/scene1`'s VRAM/CRAM/registers — through both real
+paths (a scratch `genviewer.py` + PCEAS 3.23, and `pce-rom.js`) and requires
+the same outcome:
+
+- **9 regions × 16 chars** and **13 regions × 16 chars** — both build, the
+  ROMs byte-equal. 9 is G11's witness (a cap of 8 refuses it); 13 pins the
+  cap's upper edge.
+- **14 regions × 16 chars** — both refuse at the descriptor count: genviewer.py
+  with its `AssertionError`, pce-rom.js with `"14 regions, the config block
+  holds 13"`. 14 is G16's witness (a removed cap builds).
+- **13 regions × 2048 chars** — the largest picture the config can describe;
+  both build byte-equal at 108 banks (864 KiB). This is also the G15 evidence:
+  the Python builder's `PCEAS_MAX_BANKS` guard cannot fire for any legal input
+  (108 < 128), so 128→256 stays **NO-OP**, by measurement, not by a missed
+  test. It becomes reachable only with 16+ descriptors (132 banks) — the
+  layout choice on #58. See REVIEW-46.md residual weakness 3.
+
+Exit 0 only when all four pictures have the same outcome through both
+builders. Exit 1 is a disagreement — a refusal mismatch (G11/G16), differing
+bytes, a failure this check cannot classify as the descriptor cap, or the
+comparator's own self-test failing. Exit 2 is NOT RUN (no `python3`/`pceas`,
+missing dump or bank-0 asset): nothing was measured, and that must not read as
+a pass. What it does NOT prove: agreement on these four pictures is not
+agreement on every BAT size, region shape or the sprite scenes' SG regions;
+it rebuilds genviewer.py in a scratch tree rather than `make -C tools`, so
+stale committed fixtures are check-export's business; and byte equality says
+the builders agree, not that the ROM shows the picture on a console
+(check-viewer.js) or a HuCard.
 
 ## `check-us-card.js` — the US image is the exact bit-reverse (#25)
 
