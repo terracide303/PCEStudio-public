@@ -7,7 +7,8 @@ node tests/renderer-mutation.js # #6/#39: prove that diff test fails on a broken
 node tests/check-viewer.js      # viewer/browser/vsprite ROM captures vs the renderer
 node tests/check-export.js      # the browser's .pce vs the PCEAS build, byte for byte
 node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
-node tests/check-editor.js      # the editor's refusals, picture, export and capture
+node tests/check-editor.js      # the editor's refusals, picture, export and capture,
+                                # plus the effect edges and the page's Remove buttons (#52)
 ```
 
 ## `check.js` — the diff (#5, #39, #12, #40, #15)
@@ -316,7 +317,19 @@ BAT. This check (written by @design, flagged for @review) requires:
   `pce-bg.js` drawing the editor's picture with the capture's calibration —
   diff 0. `check.js` also lists `painted` with the scenes;
 - **the browser-global branch** refuses the same calls and builds the same
-  bytes.
+  bytes;
+- **the effect edges** (#52, from `REVIEW-13-17`): two parallax bands that
+  share exactly one boundary line are refused with `raster-line-full`, the
+  legal maxima BXR 1023 / BYR 511 are accepted (1024 / 512 refused), and every
+  table's entry lines strictly increase — the order the ROM's RCR chain arms
+  them in — including one table with all three effects at once;
+- **the page's Remove buttons** (#52): `renderer/editor.html` is executed in
+  a stub DOM (this project has no jsdom — the page's own inline script and
+  its declared script order), all three effects are set, and `#cleargrad`,
+  `#clearwob` and `#clearbands` are clicked: each must clear its own effect
+  and leave the other two. The harness names its own failure modes (the page
+  not running, a button with no single handler, the setup not taking, a
+  handler that throws).
 
 Details and the headless page output: [`../docs/EDITOR.md`](../docs/EDITOR.md).
 
@@ -399,8 +412,10 @@ execute the page's download wiring — only the module it calls. It covers the
 three sample scenes, not every BAT size, region count or tile size the layout
 allows.
 
-**`check-editor.js` does not prove the page's editing.** It calls the same
-functions the page's handlers call, but not the handlers; no synthetic mouse
-input is used anywhere. It does not prove the download wiring, and it uses one
+**`check-editor.js` does not prove the page's editing.** It executes the
+three Remove buttons' click handlers in a stub DOM (#52), but not the other
+handlers on the page, and not a real browser: layout, CSS and a real click are
+stubbed, and no synthetic mouse input is used anywhere. It does not prove the
+download wiring, and it uses one
 32×32 BAT with no scroll and one region. It says the demo picture reaches
 Mednafen unchanged, not that the editor is pleasant or the picture wanted.
