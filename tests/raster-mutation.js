@@ -192,11 +192,13 @@ const BLIND_CHECK_SRC = CHECK_SRC.replace(
 );
 
 /* Every picture dump except the named not-pictures (us1, check.js's
- * NOT_PICTURES).  Rendering all of them is what turns "the mutation changed
- * raster8" into "the mutation changed exactly raster8". */
+ * NOT_PICTURES), plus #81's toypalette — an animated toy capture that
+ * check.js skips by name and check-il-console.js judges.  Rendering all of
+ * them is what turns "the mutation changed raster8" into "the mutation
+ * changed exactly raster8". */
 const DUMP_NAMES = fs.readdirSync(DUMPS)
   .filter((d) => fs.existsSync(path.join(DUMPS, d, "mednafen.png")))
-  .filter((d) => d !== "us1")
+  .filter((d) => d !== "us1" && d !== "toypalette")
   .sort();
 
 /* If a source line is refactored these substitutions silently become
@@ -224,7 +226,9 @@ const OK_RE = /^(\w+): OK \((\d+)x(\d+), diff 0\)$/gm;
 const DIFF_RE = /^(\w+): (\d+) differing pixels of (\d+) bytes$/gm;
 const DISAGREE_RE = /^(\w+): sprites renderer disagrees with bg renderer on a sprite-free dump$/gm;
 const RASTER_ERR_RE = /^(\w+): raster\.json does not match the save state:$/gm;
-const PASS_RE = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)$/m;
+/* #28: a tree that carries the flicker capture adds " and N flicker
+ * capture(s)" to the summary; the count and the FAIL line are unchanged. */
+const PASS_RE = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)(?: and \d+ flicker capture\(s\))?$/m;
 const FAIL_RE = /^FAIL: (\d+) scene\(s\) differ$/m;
 
 /* ---- renderer loading ---------------------------------------------------- */
@@ -328,6 +332,10 @@ function runCheck(bgSource, spritesSource, checkerSource) {
     fs.mkdirSync(path.join(tmp, "tests"));
     fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), bgSource);
     fs.writeFileSync(path.join(tmp, "renderer", "pce-sprites.js"), spritesSource);
+    /* #28: check.js also requires pce-flicker.js when it loads; without it
+     * every run looks like a CRASH with no per-dump report. */
+    fs.copyFileSync(path.join(ROOT, "renderer", "pce-flicker.js"),
+                    path.join(tmp, "renderer", "pce-flicker.js"));
     /* #16 moved the raster-table check out of check.js into the shared
      * tests/check-raster.js; check.js requires it from its own directory, so
      * a copy without it throws on load and every run looks like a CRASH. */

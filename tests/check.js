@@ -26,9 +26,14 @@
  * that.  tests/dumps/us1 stays on the skip list for its own reason — it is
  * Mednafen showing the US HuCard image blank (every VDC register 0), which
  * is the emulator not running the image (#25), not a picture that exercises
- * the renderer.  The skip list is explicit below and a dump with the
- * background off that is not on it is rendered like any other, so a bad
- * capture cannot hide behind a blanket "not a picture" rule.
+ * the renderer.  tests/dumps/toypalette is the second entry (#81): #31 part
+ * A's capture route records a 149-frame animation and saves its state when
+ * Mednafen is interrupted, so the state is a frame of the animation rather
+ * than the recorded last frame; those frames are check-il-console.js's
+ * evidence, aligned against the browser run.  The skip list is explicit
+ * below and a dump with the background off that is not on it is rendered
+ * like any other, so a bad capture cannot hide behind a blanket "not a
+ * picture" rule.
  *
  * A dump with raster.json (the #15 raster scenes) is verified against it
  * first (checkRaster below: the table must describe what the ROM actually
@@ -230,6 +235,16 @@ const NOT_PICTURES = {
   us1: "Mednafen shows the US HuCard image blank: every VDC register 0 " +
        "(CR=0x00, no background), so it is the emulator not running the " +
        "image (#25), not a picture that exercises the renderer",
+  /* #81: #31 part A's dump is an animated toy.  Measured while adding this
+   * entry: the state is one line off with check.js's default crop because
+   * capture-toy.sh records slstart 3 in meta.json, not regs.json (29280
+   * differing bytes at the default 4; diff 0 with slstart 3), so the skip is
+   * for the capture route — a saved animation frame whose phase need not be
+   * the last recorded frame — and not for a renderer difference. */
+  toypalette: "an animated toy capture (#31 part A), judged frame by frame " +
+       "against the browser run by tests/check-il-console.js: its saved state " +
+       "is one frame of a 149-frame animation, not the still scene this " +
+       "check diffs against the recorded last frame",
 };
 
 /* ---- the #15 raster-table checks -------------------------------------- */

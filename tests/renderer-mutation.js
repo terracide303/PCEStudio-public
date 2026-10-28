@@ -227,10 +227,19 @@ const NOOP_MUTATION = {
   to: "var pal = ((bat >> 12) & 0xF) | 0;",
 };
 
-/* A checker that has had its eyes removed: still prints OK, still exits 0. */
+/* A checker that has had its eyes removed: still prints OK, still exits 0.
+ * The #28 flicker capture is judged by checkFlicker's own frame comparison
+ * (its verdict is "exactly one zero-diff phase alignment"), which a gutted
+ * pixel loop cannot make pass — so the blind copy does not run that check.
+ * This self-test is about the scene dumps' comparison; leaving the flicker
+ * check in made every blind run fail on flicker alone and hid whether the
+ * mutation under test was seen. */
 const BLIND_CHECK_SRC = CHECK_SRC.replace(
   "if (got.pixels[i] !== ref.pixels[i]) {",
   "if (false) {"
+).replace(
+  "if (fs.existsSync(path.join(dir, \"flicker.json\")))",
+  "if (false && fs.existsSync(path.join(dir, \"flicker.json\")))"
 );
 
 /* The scene dumps.  Other captures in dumps/ (viewerN, browserN, usN,
@@ -253,6 +262,9 @@ function requireOneOccurrence(haystack, needle, what) {
   }
 }
 requireOneOccurrence(CHECK_SRC, "if (got.pixels[i] !== ref.pixels[i]) {", "check.js comparison line");
+requireOneOccurrence(CHECK_SRC,
+  "if (fs.existsSync(path.join(dir, \"flicker.json\")))",
+  "check.js flicker dispatch line");
 for (const m of [...MUTATIONS, NOOP_MUTATION])
   requireOneOccurrence(RENDERER_SRC, m.from, `mutation ${m.id} source line`);
 if (SCENES.length === 0) {
@@ -262,7 +274,9 @@ if (SCENES.length === 0) {
 
 const OK_RE = /^(scene\w+): OK \((\d+)x(\d+), diff 0\)$/gm;
 const DIFF_RE = /^(scene\w+): (\d+) differing pixels of (\d+) bytes$/gm;
-const PASS_RE = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)$/m;
+/* #28: a tree that carries the flicker capture adds " and N flicker
+ * capture(s)" to the summary; the count and the FAIL line are unchanged. */
+const PASS_RE = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)(?: and \d+ flicker capture\(s\))?$/m;
 const FAIL_RE = /^FAIL: (\d+) scene\(s\) differ$/m;
 
 /* ---- renderer loading ---------------------------------------------------- */
@@ -327,9 +341,13 @@ function runCheck(rendererSource, checkerSource, dumpsDir) {
     fs.mkdirSync(path.join(tmp, "tests"));
     fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), rendererSource);
     /* check.js also requires pce-sprites.js (#12); the sprite scenes are not
-     * in this harness's scene list, but the module must load. */
+     * in this harness's scene list, but the module must load.  #28 adds
+     * pce-flicker.js, required by check.js when it loads the flicker dump's
+     * source; without it every run looks like a CRASH. */
     fs.copyFileSync(path.join(ROOT, "renderer", "pce-sprites.js"),
                     path.join(tmp, "renderer", "pce-sprites.js"));
+    fs.copyFileSync(path.join(ROOT, "renderer", "pce-flicker.js"),
+                    path.join(tmp, "renderer", "pce-flicker.js"));
     /* #16 moved the raster-table check out of check.js into the shared
      * tests/check-raster.js; without it check.js throws on load (require
      * resolves against the copy's own directory) and every run looks like a

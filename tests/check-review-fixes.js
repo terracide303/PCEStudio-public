@@ -316,14 +316,16 @@ const OLD_CHECK_SRC = preFixSource(CHECK_SRC,
  * scenes (scene11-14: 224 lines, VDS-shifted, narrow HDW, short VDW) and the
  * count is 72; #49 adds the three VRAM-to-VRAM DMA ROMs (dma1-3) for 75;
  * #68 adds raster11 and vraster11 for 77; #27 adds the two wide-mode frames
- * (wide336 at 341x232, wide512 at 512x232) for 79 —
+ * (wide336 at 341x232, wide512 at 512x232) for 79; #76 adds 7 more (dma4,
+ * dma5, sprite14-17, wide512b) —
  * but a count alone would let
  * one scene drop out while another silently took its place, so the set is
  * checked name by name.  #68 adds raster11 (the frame counter + two CRAM
  * words table, REVIEW-16 B15) and its viewer ROM vraster11; #69 adds raster12
  * and vraster12 (the same table with the second word on the cell the line's
- * first pixels use — the visible-second-word fixture).  us1 is the only
- * dump that is not a picture. */
+ * first pixels use — the visible-second-word fixture).  us1 and toypalette
+ * (#81) are the dumps that are not counted as pictures; see check.js's
+ * NOT_PICTURES. */
 const EXPECTED_SCENES = [
   /* scene ROMs, #5/#6/#15/#39/#43 */
   "scene1", "scene2", "scene3", "scene4", "scene5", "scene6", "scene7",
@@ -354,6 +356,15 @@ const EXPECTED_SCENES = [
   "raster12", "vraster12",
   /* #27: the /3 and /2 dot clocks (336- and 512-dot display windows) */
   "wide336", "wide512",
+  /* #76: REVIEW-48-50's four misses — dma4/dma5 (one DMA step bit alone),
+   * sprite14/15 (16 and 17 strips on a line), sprite16/17 (transparent vs
+   * opaque sprite-0 overlap) and wide512b (VCE CR $07, DCC=11) */
+  "dma4", "dma5", "sprite14", "sprite15", "sprite16", "sprite17",
+  "wide512b",
+  /* #28: sprite13 (the flicker fixture's static capture) and flicker (the
+   * viewer's rotation frames); #74: raster13/vraster13 (colour-only and BYR
+   * steps alternating) */
+  "sprite13", "flicker", "raster13", "vraster13",
 ];
 
 function outputProblems(stdout, status) {
@@ -361,7 +372,7 @@ function outputProblems(stdout, status) {
   if (status !== 0) problems.push(`check.js exited ${status}`);
   if (/^us1:\s*OK\b/m.test(stdout))
     problems.push("us1 is still reported OK, i.e. counted as diff 0");
-  const m = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)$/m
+  const m = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)(?: and \d+ flicker capture\(s\))?$/m
     .exec(stdout);
   if (!m) problems.push("no PASS summary line");
   else if (Number(m[1]) !== EXPECTED_SCENES.length)
@@ -382,6 +393,12 @@ function outputProblems(stdout, status) {
                   "set: " + extra.join(", "));
   if (!/^us1: not a picture, skipped/m.test(stdout))
     problems.push("us1 is not reported as skipped by name");
+  /* #81: the toy capture is skipped by name WITH its reason — the reason has
+   * to send the reader to the check that does judge it. */
+  if (!/^toypalette: not a picture, skipped \(not counted\): .*check-il-console\.js/m
+      .test(stdout))
+    problems.push("toypalette is not reported as skipped by name with its " +
+                  "reason (check-il-console.js)");
   return problems;
 }
 
@@ -458,6 +475,48 @@ function outputProblems(stdout, status) {
          `(exit ${run.status})`);
 }
 
+/* #81: the toy skip is by NAME, not by what a capture carries.  The same
+ * toy dump under a name that is not on check.js's NOT_PICTURES — with its
+ * meta.json and its frames/ directory present — is rendered as any other
+ * still and must fail as a pixel diff.  A structural rule (skip anything
+ * with a frames/ directory or a meta.json, or a blanket "captures are not
+ * pictures") fails this guard, so the entry cannot grow into a hiding place
+ * and the scene comparison is not loosened. */
+{
+  const run = runUnlistedToyCopy();
+  const stdout = run.stdout || "";
+  if (run.status !== 0 && /^toycopy: [1-9]\d* differing pixels/m.test(stdout) &&
+      !/^toycopy: not a picture, skipped/m.test(stdout))
+    pass("guard: the toy dump under an unlisted name still fails check.js " +
+         "as a pixel diff (#81)");
+  else
+    fail("guard: the unlisted copy of the toy dump did not fail check.js as " +
+         `a pixel diff (exit ${run.status})`);
+}
+
+/* Self-test of that guard: a skip keyed on what a capture CARRIES instead of
+ * its name must be rejected by it.  The mutated check.js skips any dump with
+ * a frames/ directory — the shape a "toy captures mark themselves" rule would
+ * take — and the unlisted copy (which has frames/) must come out skipped,
+ * i.e. the guard above goes red.  Without this the guard could be vacuous. */
+{
+  const anchor = "  if (Object.prototype.hasOwnProperty.call(NOT_PICTURES, name)) {";
+  const structural = CHECK_SRC.replace(anchor,
+    "  if (fs.existsSync(path.join(dir, \"frames\"))) {\n" +
+    "    console.log(`${name}: not a picture, skipped (not counted): toy route`);\n" +
+    "    return { kind: \"not-picture\" };\n" +
+    "  }\n" + anchor);
+  const run = structural === CHECK_SRC ? null : runUnlistedToyCopy(structural);
+  if (run && run.status === 0 &&
+      /^toycopy: not a picture, skipped/m.test(run.stdout || ""))
+    pass("self-test: a frames/-directory skip rule is caught by the guard " +
+         "(it skips the unlisted copy)");
+  else
+    fail("self-test: the frames/-directory skip rule was not caught by the " +
+         "guard " + (run ? `(exit ${run.status})` : "(the substitution did " +
+         "not apply — check.js's skip block changed)"));
+}
+
 /* The pre-#39 check.js's blanket CR-off rule rejects scene8 — the exact
  * regression the CR model removes (scene8's capture is the backdrop). */
 {
@@ -471,6 +530,28 @@ function outputProblems(stdout, status) {
          `(exit ${run.status})`);
 }
 
+/* #81: the real check.js and renderer, on a temp tree whose only dump is the
+ * toy capture symlinked under a name check.js's NOT_PICTURES does not carry.
+ * The dump keeps everything the capture route wrote (meta.json, frames/), so
+ * only the NAME can make check.js skip it.  `checkSrc` lets the self-test
+ * swap in a check.js with a structural skip rule. */
+function runUnlistedToyCopy(checkSrc) {
+  const tmp = tmpdir("pce-check-unlisted-");
+  fs.mkdirSync(path.join(tmp, "tests"));
+  fs.symlinkSync(path.join(ROOT, "renderer"), path.join(tmp, "renderer"), "dir");
+  fs.writeFileSync(path.join(tmp, "tests", "check.js"), checkSrc || CHECK_SRC);
+  /* check.js requires pce-sprites.js/pce-flicker.js through the renderer
+   * symlink and this shared module by relative path. */
+  fs.copyFileSync(path.join(__dirname, "check-raster.js"),
+                  path.join(tmp, "tests", "check-raster.js"));
+  const dumps = path.join(tmp, "tests", "dumps");
+  fs.mkdirSync(dumps);
+  fs.symlinkSync(path.join(__dirname, "dumps", "toypalette"),
+                 path.join(dumps, "toycopy"), "dir");
+  return spawnSync(process.execPath, [path.join(tmp, "tests", "check.js")],
+    { encoding: "utf8", timeout: 120000 });
+}
+
 function runCheckGuardDump(rendererSrc) {
   const tmp = tmpdir("pce-check-guard-");
   fs.mkdirSync(path.join(tmp, "renderer"));
@@ -478,9 +559,12 @@ function runCheckGuardDump(rendererSrc) {
   fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), rendererSrc);
   /* check.js also requires pce-sprites.js (#12) and, since #16, the shared
    * tests/check-raster.js — the copy must carry both or check.js throws on
-   * load and this guard cannot tell a crash from a pass. */
+   * load and this guard cannot tell a crash from a pass.  #28: pce-flicker.js
+   * is a third renderer module check.js requires. */
   fs.copyFileSync(path.join(ROOT, "renderer", "pce-sprites.js"),
                   path.join(tmp, "renderer", "pce-sprites.js"));
+  fs.copyFileSync(path.join(ROOT, "renderer", "pce-flicker.js"),
+                  path.join(tmp, "renderer", "pce-flicker.js"));
   fs.copyFileSync(path.join(__dirname, "check-raster.js"),
                   path.join(tmp, "tests", "check-raster.js"));
   fs.writeFileSync(path.join(tmp, "tests", "check.js"), CHECK_SRC);
@@ -508,9 +592,11 @@ function runScene8With(rendererSrc, checkSrc) {
   fs.mkdirSync(path.join(tmp, "tests"));
   fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), rendererSrc);
   /* check.js also requires pce-sprites.js (#12) and, since #16, the shared
-   * tests/check-raster.js (see runCheckGuardDump). */
+   * tests/check-raster.js (see runCheckGuardDump); #28 adds pce-flicker.js. */
   fs.copyFileSync(path.join(ROOT, "renderer", "pce-sprites.js"),
                   path.join(tmp, "renderer", "pce-sprites.js"));
+  fs.copyFileSync(path.join(ROOT, "renderer", "pce-flicker.js"),
+                  path.join(tmp, "renderer", "pce-flicker.js"));
   fs.copyFileSync(path.join(__dirname, "check-raster.js"),
                   path.join(tmp, "tests", "check-raster.js"));
   fs.writeFileSync(path.join(tmp, "tests", "check.js"), checkSrc);
