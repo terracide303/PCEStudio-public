@@ -601,3 +601,10 @@ first:
 coming out for it. There's a few tricks I'm doing to make this a reality and it's actually going to be the subject
 of my next video." So: no source to read now; #31 goes ahead with llvm-mos/HuC, and watches for his video and the
 compiler's release, to compare tricks once they are public.
+
+**More from a.gilbert (2026-10-28):** "The authored Lua on the site is lowered to an IL where I do all the analysis
+and machine code generation. That architectural decision was the main breakthrough."
+For PCEStudio this means the pipeline is **Lua subset → our own intermediate language (IL) → analysis → code**:
+the IL is where the validator (#32) counts cycles per frame, sprites per line and memory, and where `raster()` is
+checked against the line budget; code generation then goes from the IL — either to C (or LLVM IR) for llvm-mos,
+or straight to HuC6280 code. The IL is the part to get right first; it is ours to design (his is not public).
