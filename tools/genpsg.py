@@ -50,6 +50,16 @@ The tests:
   psg6b LFO: the same with LFCTL=2 (4x deviation), the tone sweeps
         ~352..589 Hz
   psg7  DDA: ch1 in DDA mode stepped 0,2,...,30 (16 held levels)
+  psg8  12-bit frequency: F=0x8FE (R2=0xFE, R3=0x08) -> 48.6 Hz — the
+        only ROM that sets R3's bit 11 (REVIEW-34 M02)
+  psg9  R7 written with ch3 selected (Mednafen ignores R7 for ch0-3), then
+        ch3 enabled and playing its 440 Hz tone — REVIEW-34 M08
+  psg10 DDA exit: ch1 loads a wave, enters DDA and holds 0x1F, then leaves
+        DDA for waveform mode — the wave index must restart at 0
+        (REVIEW-34 M14)
+
+The last three are #63's fixtures: each reaches a register state that the
+earlier eight ROMs never do, and each is a gap docs/REVIEW-34.md measured.
 
 Generated assembly lands in tools/gen/psgN.asm (build with PCEAS, see
 docs/BUILD.md); the trace in tools/gen/psgN.trace.json.  This script is
@@ -195,6 +205,36 @@ TESTS = {
                  psg(1, 0xFF)]
                 + sum(([psg(6, level)] + delay(D2)
                        for level in range(0, 32, 2)), [])),
+    },
+    "psg8": {
+        "what": "12-bit frequency: ch1 tone with F=0x8FE (R2=0xFE, "
+                "R3=0x08 = 0x800|0x0FE) -> 7159090/(64*2302) = 48.6 Hz; "
+                "the only ROM that sets R3's bit 11",
+        "ops": ([psg(0, 0), psg(4, 0x00), psg(2, 0xFE), psg(3, 0x08)]
+                + wave(SQUARE) + [psg(5, 0xFF), psg(1, 0xFF),
+                                  psg(4, 0x9F)]),
+    },
+    "psg9": {
+        "what": "noise register on a tone channel: ch3 is selected, "
+                "R7=0x8F is written (Mednafen ignores R7 while ch0-3 is "
+                "selected), then ch3 is enabled (R4=0x9F) and plays its "
+                "440 Hz tone",
+        "ops": ([psg(0, 3), psg(4, 0x00), psg(2, 0xFE), psg(3, 0x00)]
+                + wave(SQUARE) + [psg(5, 0xFF), psg(1, 0xFF),
+                                  psg(7, 0x8F), psg(4, 0x9F)]),
+    },
+    "psg10": {
+        "what": "DDA exit: ch1 loads a square wave then writes 10 more "
+                "values, leaving the wave index at 10; enters DDA "
+                "(R4=0x40 then 0xDF) and holds level 0x1F (R6), then "
+                "leaves DDA for waveform mode (R4=0x9F) — the wave index "
+                "must restart at sample 0",
+        "ops": ([psg(0, 0), psg(4, 0x00), psg(2, 0xFE), psg(3, 0x00)]
+                + wave(SQUARE + [0x00] * 10)
+                + [psg(5, 0xFF), psg(1, 0xFF)]
+                + [psg(4, 0x40), psg(4, 0xDF), psg(6, 0x1F)]
+                + delay(D2)
+                + [psg(4, 0x9F)]),
     },
 }
 

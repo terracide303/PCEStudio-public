@@ -10,7 +10,14 @@ node tests/check-python-builder.js # #60: genviewer.py and pce-rom.js agree at 9
 node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
 node tests/check-editor.js      # the editor's refusals, picture, export and capture,
                                 # plus the effect edges and the page's Remove buttons (#52)
+node tests/check-psg.js         # the PSG model vs 11 Mednafen recordings, sample for sample (#34, #63)
+node tests/check-wave.js        # the wave editor's export vs PCEAS and Mednafen (#35, #62)
+node tests/psg-mutation.js      # #63: REVIEW-34's 15 breaks must all be DETECTED
 ```
+
+The three audio suites are documented in `docs/PSG.md` and `docs/WAVE.md`;
+`psg-mutation.js`'s result classes and blind spots are in its header and in
+`docs/PSG.md` § "REVIEW-34's four misses, and what #63 added".
 
 ## `check.js` — the diff (#5, #39, #12, #40, #15)
 

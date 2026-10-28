@@ -5,7 +5,8 @@
  *
  * NOTE: written by @design as part of #34 because the card's close condition
  * needs a diff script; per the workshop role split this is flagged for @review
- * to read cold.
+ * to read cold.  #63 (@test) added the psg8/psg9/psg10 fixture-coverage
+ * assertions and docs; the equality check itself is unchanged.
  *
  * For every tests/dumps/psgN/ directory it reads mednafen.wav (the audio
  * Mednafen recorded from the PSG test ROM — PCM16 LE stereo at 44100 Hz,
@@ -24,6 +25,14 @@
  * recording is the PSG clocking its channels for minutes of frame budgets
  * whose per-frame overshoot cycles through the trace's frames.pattern.
  * Exit code 0 only if every recording matches exactly.
+ *
+ * #63: psg8/psg9/psg10 (REVIEW-34's M02/M08/M14 states) are additionally
+ * required to reach the register state they exist for and to sound like
+ * they claim.  Equality alone cannot tell a fixture that covers a break
+ * from one that never reaches the state: a dump with no R3 bit 11 passes
+ * exactly as well as one with it.  tests/psg-mutation.js re-runs all 15 of
+ * REVIEW-34's breaks against these fixtures; M10 (LFCTL=3) is caught by
+ * #62's wave3 in tests/check-wave.js, not by a psg6c here.
  *
  * Beyond the equality each dump prints diagnostics for the report — the
  * measured pitch, levels and spectra that say what the sound actually is
@@ -264,11 +273,159 @@ function diagnose(name, samples, trace) {
     const distinct = new Set(centers.map((v) => Math.round(v / 8)));
     console.log(`    ${evs.length} DDA holds, centre levels: ` +
                 `${centers.join(", ")} (${distinct.size} distinct)`);
+  } else if (name === "psg8") {
+    console.log(`    pitch ${zcPitch(samples, 22050, 22050, 44100, 0)
+      .toFixed(2)} Hz (F=0x8FE -> ` +
+      `${NOMINAL_HZ.psg8.toFixed(2)} Hz; the M02 mask would hear 440.45); ` +
+      `RMS L ${rms(samples, 22050, 22050, 0).toFixed(1)}`);
+  } else if (name === "psg9") {
+    console.log(`    pitch ${zcPitch(samples, 22050, 22050, 44100, 0)
+      .toFixed(2)} Hz, RMS L ${rms(samples, 22050, 22050, 0).toFixed(1)} ` +
+      `(ch3 tone; R7 is ignored by Mednafen on ch0-3)`);
+  } else if (name === "psg10") {
+    const exit = ddaExitState(trace);
+    const ri = sampleIdx(trace, exit.r6.f, exit.r6.t);
+    const xi = sampleIdx(trace, exit.f, exit.t);
+    let peak = 0;
+    for (let f = ri; f < xi; f++)
+      peak = Math.max(peak, Math.abs(samples[2 * f]));
+    console.log(`    DDA hold samples ${ri}..${xi} peak ${peak}; after the ` +
+      `exit, pitch ${zcPitch(samples, xi + 100, 2000, 44100, 0).toFixed(2)} ` +
+      `Hz over samples ${xi + 100}..${xi + 2100}`);
   }
 }
 
 function deepEqual(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/* ---- #63: the four REVIEW-34 misses and the fixtures that reach them ----
+ * Sample equality proves the model matches Mednafen *on these recordings*;
+ * it does not prove a recording reaches the register state a break needs --
+ * a dump that never writes R3's bit 11 passes exactly as well as one that
+ * does.  genpsg.py's psg8/psg9/psg10 are #63's fixtures for the misses that
+ * no earlier ROM reached (M02, M08, M14).  These assertions read the
+ * recorded trace and the recorded audio and require each fixture to still
+ * reach the state and produce the sound it claims, so a fixture that drifts
+ * out of coverage fails by name instead of quietly passing.
+ *
+ * M10 (LFCTL=3) is not asserted here: psg6c was not added because #62's
+ * wave3 already writes R9=0x83 then 0x03 and tests/check-wave.js compares
+ * that recording sample for sample (measured: check-psg.js PASS while
+ * check-wave.js fails on wave3).  See tests/psg-mutation.js. */
+
+/* channel-scoped events: R0 sets the selected channel, every R1-R9 write
+ * belongs to the channel selected at that moment */
+function scopedEvents(trace) {
+  let select = 0;
+  const out = [];
+  for (const e of trace.events) {
+    if (e.reg === 0) select = e.value & 0x07;
+    out.push({ f: e.f, t: e.t, reg: e.reg, value: e.value, select });
+  }
+  return out;
+}
+
+/* the first DDA->waveform transition on an enabled channel, from a channel
+ * that latched an R6 value while in DDA (psg10's state; REVIEW-34 M14) */
+function ddaExitState(trace) {
+  const control = [0, 0, 0, 0, 0, 0];
+  const r6InDda = [null, null, null, null, null, null];
+  let select = 0;
+  for (const e of trace.events) {
+    if (e.reg === 0) { select = e.value & 0x07; continue; }
+    if (select > 5) continue;
+    if (e.reg === 4) {
+      if ((control[select] & 0x40) && !(e.value & 0x40) &&
+          (e.value & 0x80)) {
+        return { select, f: e.f, t: e.t, value: e.value,
+                 r6: r6InDda[select] };
+      }
+      control[select] = e.value;
+    } else if (e.reg === 6 && (control[select] & 0x40)) {
+      r6InDda[select] = { f: e.f, t: e.t, value: e.value };
+    }
+  }
+  return null;
+}
+
+const NOMINAL_HZ = {
+  psg8: 7159090 / (64 * 0x8FE),   /* F=0x8FE -> 48.60 Hz */
+  psg9: 7159090 / (64 * 254),     /* F=254   -> 440.45 Hz */
+  psg10: 7159090 / (64 * 254),
+};
+
+/* Returns a failure string, or null when the fixture still covers its state.
+ * Two independent readings:
+ *   - the trace must contain the register state the break needs;
+ *   - the audio must have the sound the fixture claims (pitch / DDA hold),
+ *     which is what makes the state audible to the equality check. */
+function assertFixture(name, trace, samples) {
+  const evs = scopedEvents(trace);
+  if (name === "psg8") {
+    const i = evs.findIndex((e) => e.reg === 3 && (e.value & 0x08));
+    if (i < 0)
+      return "no R3 write sets bit 11 (value & 0x08) — the 12-bit " +
+             "frequency high nibble is no longer reached";
+    const ch = evs[i].select;
+    if (!evs.slice(i).some((e) => e.select === ch && e.reg === 4 &&
+                                  (e.value & 0x80)))
+      return `the channel (${ch}) that got R3 bit 11 is never enabled`;
+    /* the low pitch is the audible consequence: the M02 mask (0x07) would
+     * hear 440 Hz here */
+    const p = zcPitch(samples, 22050, 22050, 44100, 0);
+    if (Math.abs(p - NOMINAL_HZ.psg8) > NOMINAL_HZ.psg8 * 0.1)
+      return `pitch ${p.toFixed(2)} Hz, not the ~` +
+             `${NOMINAL_HZ.psg8.toFixed(2)} Hz of F=0x8FE (bit 11 is not ` +
+             `sounding)`;
+    return null;
+  }
+  if (name === "psg9") {
+    const i = evs.findIndex((e) => e.reg === 7 && e.select === 3 &&
+                                   (e.value & 0x80));
+    if (i < 0)
+      return "no R7 write with bit 7 set while channel 3 (0-based) is " +
+             "selected — the ch3 R7 state is no longer reached";
+    if (!evs.some((e) => e.select === 3 && e.reg === 4 && (e.value & 0x80)))
+      return "channel 3 is never enabled after R7";
+    /* pristine Mednafen ignores R7 here and plays the tone (the M08 mutant
+     * renders a held level instead, with no zero crossings) */
+    const p = zcPitch(samples, 22050, 22050, 44100, 0);
+    if (Math.abs(p - NOMINAL_HZ.psg9) > NOMINAL_HZ.psg9 * 0.05)
+      return `pitch ${p.toFixed(2)} Hz, not the ~` +
+             `${NOMINAL_HZ.psg9.toFixed(2)} Hz tone ch3 should play with ` +
+             `R7 ignored`;
+    return null;
+  }
+  if (name === "psg10") {
+    const exit = ddaExitState(trace);
+    if (!exit)
+      return "no DDA -> waveform-mode transition on an enabled channel — " +
+             "the M14 state is no longer reached";
+    if (!exit.r6)
+      return "the channel enters and leaves DDA without an R6 write while " +
+             "in DDA — there is no held level for the exit to reset from";
+    const ri = sampleIdx(trace, exit.r6.f, exit.r6.t);
+    const xi = sampleIdx(trace, exit.f, exit.t);
+    /* the DDA hold is a level: before the exit it must reach the ~0x1F
+     * output; the waveform after the exit is periodic */
+    let peak = 0;
+    for (let f = ri; f < xi; f++)
+      peak = Math.max(peak, Math.abs(samples[2 * f]));
+    if (xi - ri < 10)
+      return `only ${xi - ri} samples between the DDA R6 and the exit — ` +
+             `the held level is too short to measure`;
+    if (peak < 3000)
+      return `the DDA hold (samples ${ri}..${xi}) peaks at ${peak} — ` +
+             `not the ~0x1F level psg10 claims`;
+    const p = zcPitch(samples, 22050, 22050, 44100, 0);
+    if (Math.abs(p - NOMINAL_HZ.psg10) > NOMINAL_HZ.psg10 * 0.05)
+      return `pitch ${p.toFixed(2)} Hz after the DDA exit, not the ~` +
+             `${NOMINAL_HZ.psg10.toFixed(2)} Hz waveform it should leave ` +
+             `into`;
+    return null;
+  }
+  return null;
 }
 
 function checkDump(dir) {
@@ -292,6 +449,13 @@ function checkDump(dir) {
   if (!deepEqual(trace, fresh)) {
     console.log(`${name}: dump's trace.json differs from tools/gen/'s — ` +
                 `re-run tools/capture-psg.sh (or genpsg.py changed since)`);
+    return false;
+  }
+
+  /* #63: the fixture must still reach the state it exists for */
+  const uncovered = assertFixture(name, trace, wav.samples);
+  if (uncovered) {
+    console.log(`${name}: FIXTURE NO LONGER COVERS ITS STATE — ${uncovered}`);
     return false;
   }
 

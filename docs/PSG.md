@@ -1,16 +1,18 @@
-# pce-psg — the PSG in the browser (card #34)
+# pce-psg — the PSG in the browser (card #34, extended by #63)
 
 **2026-10-28.** `renderer/pce-psg.js` is the HuC6280 PSG model: a literal
 transcription of the PSG pipeline Mednafen 1.32.1's `pce_fast` core
 produces — `PCEFast_PSG` (`src/pce_fast/psg.cpp`) writing into
 `Blip_Buffer` (`src/sound/Blip_Buffer.{h,cpp}`) at 44100 Hz.
-`tools/genpsg.py` builds eight tiny test ROMs, `tools/capture-psg.sh`
+`tools/genpsg.py` builds eleven tiny test ROMs, `tools/capture-psg.sh`
 records each one's audio in Mednafen to a WAV, and `tests/check-psg.js`
 replays each ROM's register-write trace through the model and requires
-sample-for-sample equality with the recording. All eight pass with diff 0.
+sample-for-sample equality with the recording. All eleven pass with diff 0.
 Register semantics cite the HuC6280 PSG manual (the scan `docs/MANUALS.md`
 indexes; PB-N page markers below); where pce_fast itself is a documented
 guess, the model replicates the emulator and this page says so.
+`tests/psg-mutation.js` re-runs the 15 breaks of `docs/REVIEW-34.md` and
+requires every one DETECTED (#63).
 
 ## What is modelled
 
@@ -175,10 +177,21 @@ so only the documented defaults are load-bearing.
   frame count from the WAV length alone, replays the trace, and requires
   sample-for-sample equality (first mismatch reported with its
   neighbourhood). The printed diagnostics are measurements of the
-  recording, not pass criteria. Per the workshop role split the script
-  is flagged for @review to read cold (file header).
+  recording, not pass criteria. Since #63, psg8/psg9/psg10 are also
+  required to *reach* the register state they exist for and to have the
+  sound they claim (48.6 Hz / a 440 Hz ch3 tone / a DDA hold then a
+  waveform) — equality alone cannot tell a fixture that covers a break from
+  one that never reaches it. Per the workshop role split the script is
+  flagged for @review to read cold (file header).
+- `tests/psg-mutation.js` (#63) — applies each of `docs/REVIEW-34.md`'s 15
+  source breaks to `renderer/pce-psg.js` in throwaway trees, measures the
+  PCM difference itself, and requires the shipped checker to fail with a
+  first-differing-sample report on a recording the break changed. It also
+  tests itself (a gutted checker must report MISSED; an identical
+  substitution must be NO-OP; a psg8 that loses R3 bit 11, and a psg8 paired
+  with psg1's 440 Hz WAV, must both be refused by name).
 
-## What the eight recordings prove
+## What the eleven recordings prove
 
 | dump | measurement |
 | --- | --- |
@@ -189,9 +202,50 @@ so only the documented defaults are load-bearing.
 | psg5 | noise on both channels, RMS 8289.3/8289.3 |
 | psg6 / psg6b | LFO sweeps 414.5-479.1 Hz / 366.1-581.4 Hz, then the dying tail of the frozen carrier |
 | psg7 | 16 DDA holds, 16 distinct levels −5805..5127 |
+| psg8 | 12-bit frequency: F=0x8FE (R2=0xFE, R3=0x08) → pitch 49.0 Hz (48.60 nominal, zc resolution), RMS L 5899 — the mutant that drops bit 11 hears 440.4 Hz |
+| psg9 | R7 written with ch3 selected, then ch3 enabled: pitch 440.0 Hz, RMS L 5902 — Mednafen ignores R7 on ch0-3; the mutant renders a held level |
+| psg10 | DDA hold peak 6069 at samples 2..76, then after R4=0x9F the pitch is 441.0 Hz over samples 176..2176 — the wave restarted at sample 0 (the mutant re-latches at index 10) |
 
-All eight: model PCM == Mednafen WAV, diff 0 (685862/693204/286384/
-138048/691736/691736/693204/688798 samples).
+All eleven: model PCM == Mednafen WAV, diff 0 (685862/693204/286384/
+138048/691736/691736/693204/688798/615366/619772/618302 samples).
+
+## REVIEW-34's four misses, and what #63 added
+
+`docs/REVIEW-34.md` broke the model 15 ways and the eight recordings then in
+place caught 11. The four misses were one class — register states no ROM
+reached:
+
+- **M02, R3's high nibble.** Every recorded R3 write was `0x00`, so the
+  `(V & 0x07) << 8` mask dropped a bit that was never set. **psg8** now writes
+  R3=0x08 (F=0x8FE → 48.6 Hz); the mutant hears 440.4 Hz. #62's wave1 does
+  **not** cover this: its only non-zero R3 is `0x04` (channel 4's bass at
+  F=1151 = 0x47F), and the M02 mask keeps nibble bits 0-2, so `0x04` passes
+  through unchanged (measured: check-wave.js stays green on M02).
+- **M08, R7 on channel 3.** The only R7 writes selected ch4/ch5. **psg9**
+  selects ch3 (0-based), writes R7=0x8F, then enables the tone channel;
+  Mednafen ignores R7 there, the `select >= 3` mutant does not.
+- **M10, LFCTL=3.** No psg6c was added: **#62's wave3 already writes
+  R9=0x83 then 0x03** and `tests/check-wave.js` compares that recording
+  sample for sample. Measured: check-psg.js is green on the M10 mutant and
+  check-wave.js fails on wave3 (first differing sample 130).
+- **M14, the DDA→waveform index reset.** psg7 enters DDA and never leaves.
+  **psg10** loads a wave, writes 10 more values (index 10), enters DDA and
+  holds 0x1F, then returns to waveform mode with R4=0x9F; the model restarts
+  at sample 0 and this matches Mednafen diff 0.
+
+`tests/psg-mutation.js` re-runs all 15 breaks against these fixtures:
+**15/15 DETECTED** (M10 by check-wave.js/wave3, the other 14 by
+check-psg.js), the review's unused-variable control is NO-OP with both
+checkers green, and the suite's own self-tests (blind checker, identical
+substitution, two doctored psg8 fixtures) all say no.
+
+**Not proven by any of this:** the witness is still Mednafen, not hardware
+(GAP 14's noise polynomial in particular); the mutation edits break the
+model's source, not `genpsg.py`'s cycle simulation, the trace provenance
+check or `solveFrames`' WAV arithmetic; and 15 handed-over breaks are not a
+complete break of the PSG — register states outside them (R8 mid-recording,
+select > 5, waveform rewrites while enabled, frame-boundary writes) are not
+measured here.
 
 ## Gaps
 
