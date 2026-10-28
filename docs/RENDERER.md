@@ -1,4 +1,4 @@
-# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster, #16 the viewer's raster chain, #48 display window, #49 VRAM-to-VRAM DMA, #27 the three dot clocks)
+# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster, #16 the viewer's raster chain, #48 display window, #49 VRAM-to-VRAM DMA, #27 the three dot clocks, #28 flicker multiplexing)
 
 `renderer/pce-bg.js` renders one 256×232 RGB frame from a VDC VRAM dump and a
 VCE colour-table dump, drawing exactly what the VDC background layer and the
@@ -549,6 +549,77 @@ entry's value, CR = `$84`, BYR = 0).  `tools/capture-ares.sh` /
 `vraster4` is out because its frame counter makes two runs differ by
 phase.
 
+### #28 — flicker multiplexing (rotating the SAT order)
+
+The VDC's line search keeps at most 16 strips (16-px sprite columns) per
+display line, in SATB order — the rest of the line's sprites are dropped
+(manual 2.4.3 p. H7-19..H7-24; the model is `pce-sprites.js` `collectLine`).
+A picture with more sprites than that shows all of them over time by
+rotating the SAT order every frame, so the 16 the search keeps are a
+different window of the populated entries each frame.  The rule is written
+once and mirrored in three places:
+
+- **`renderer/pce-flicker.js` (the renderer's frame N).**  Frame _p_'s SAT
+  entry _k_ is the base entry `(k + step*p) mod 64` — equivalently, the
+  256-word SAT array rotated left by `4*step*p` words.  `renderFrame` draws
+  it through `pce-sprites.js` exactly as the VDC draws any SAT; `keptSprites`
+  names the entries the 16-strip search collects on a line (the base sprite
+  each surviving slot holds).
+- **`tools/viewer.asm` (`FLICKER` builds).**  `flicker_setup` builds
+  `phases` rotated copies in VRAM at word `$7f00 - p*$100` from the ROM SAT
+  at bank 1 `$4440`, each as two contiguous segments (words `W..255` then
+  `0..W-1`, `W = 4*step*p mod 256`) — the whole 256-word array, so the word
+  rotation is entry rotation with no per-entry index arithmetic.  A VBlank
+  irq1 handler (VC, CR bit 3) advances the phase and writes DVSSR; the
+  SATB DMA loads the copy it names at the next VBlank.  Reading VDC status
+  clears VD and drops the level-sensed IRQ1 line (SR R00 p. H7-4).
+  *Why the write lands a frame ahead:* Mednafen services the SATB DMA when
+  the display leaves VDW and raises the VBlank IRQ later, at the first
+  blanking line's HDW phase (`vdc.cpp` `NeedSATDMATest` / `DoVBIRQTest`;
+  manual DVSSR R13 p. H7-12: the transfer starts at the next VBlank,
+  triggered by the high-byte write).  This is the emulator's timing for the
+  write, not a console measurement — the fixture proves the frames are
+  consecutive phases, not that the write beat a hardware race.
+- **`tools/genroms.py` `SPRITE_SCENES["sprite13"]` (the fixture rule).**
+  24 16x16 sprites on one band, 10 px apart, `step` 6 with 4 phases, written
+  to `gen/sprite13.flicker.json` — the one file `tools/genviewer.py` (the
+  ROM's config bytes `$3E`/`$3F`), `tools/capture.sh` (the dump's
+  `flicker.json`) and `tests/check.js` all read, so the ROM, the capture
+  and the check cannot drift from one another.  With step 6 the kept
+  windows are 0–15, 6–21, 12–3, 18–9: the union is all 24 and every sprite
+  is shown 2 or 3 of the 4 frames (64 slots over 24 sprites cannot divide
+  evenly, so a uniform 3-of-4 is impossible).
+
+**Evidence.**  `tools/genroms.py` builds `gen/sprite13.pce` (the static
+24-sprite scene: `tests/dumps/sprite13`, check.js diff 0 — the 16-strip
+limit at 24 sprites) and the flicker viewer ROM `gen/flicker.pce` is built
+by `tools/genviewer.py flicker` from that picture's data.  `tools/capture.sh
+flicker` captures it in Mednafen (command line only, no synthetic input) and
+keeps the last four recorded frames as `tests/dumps/flicker/flicker-0..3.png`
+(`movframes.py --all`, the consecutive frames) plus the state and the rule.
+`node tests/check.js` then reports: the viewer's VRAM `$7f00` is the base
+SAT; **exactly one starting phase makes all four frames diff 0** against
+the renderer's phases `q0..q0+3` (measured `q0` = 2 → phases 2, 3, 0, 1);
+the saved SATB is the last frame's phase (1), so the DMA carried the rotated
+SAT; and the **union** — measured on the captured pixels at a pixel only
+each sprite can paint (its columns outside sprite _i-1_'s 16-px body) —
+shows all 24 sprites, each in 2 or 3 of the 4 frames and absent in the
+others, matching the rule's arithmetic.  The frames are rendered from the
+**base SAT rotated by the rule**, not from the dump's saved SATB, so a
+viewer that did not rotate, rotated by the wrong step, or wrote the copies
+to the wrong address cannot pass.
+
+The flicker code is assembled only into flicker builds (`FLICKER = 1` in
+`gen/flicker.asm`, `.ifdef` in `viewer.asm`): the shared bank 0 that the
+browser export and the #68 `vtrace` fixtures pin stays byte-identical
+(measured: `viewer1`, `vsprite1` and `vraster2` rebuild to their old
+sha256), so this does not move any other card's evidence.
+
+*Not proven:* real hardware; the DVSSR write's ordering is Mednafen's
+wiring plus the manual's "next VBlank" wording.  A cold break of
+`checkFlicker` by a different seat is owed (RULES.md rule 2) before the card
+closes.
+
 ### #49 — VRAM-to-VRAM DMA (SOUR/DESR/LENR, DCR)
 
 `renderer/pce-vram.js` is the renderer's VRAM model: the 32K-word store the
@@ -801,6 +872,8 @@ bash tools/capture.sh 1 sprite                 # capture sprite scene 1 (adds sa
 bash tools/capture.sh 1 raster                 # capture raster scene 1 (adds raster.json)
 bash tools/capture.sh 1 vraster                # #16: capture the raster viewer
 bash tools/capture.sh effect                   # #16: the editor's effect picture
+bash tools/capture.sh 13 sprite                # #28: the flicker fixture's scene ROM
+bash tools/capture.sh flicker                  # #28: the flicker viewer (4 frames)
 node tests/check.js                            # diff renderer vs Mednafen, all scenes
 python3 -m http.server 8000                    # then open renderer/index.html
 ```
@@ -816,8 +889,11 @@ flips, both SPBG priorities, the 16-strip line limit, clipping and
 sprite-on-background-off), and per-scanline raster writes (raster scenes
 1–5: BXR, BYR, CR's SB/BB and VCE colour-table writes, applied at the
 line the manual makes them valid).  Not modelled: the 4-colour sprite mode
-(word 2 bit 0) and the SATB DMA's DCR repeat bit (the scenes' static SAT
-never changes).  Since #50 the status register's four picture conditions
+(word 2 bit 0) and the SATB DMA's own timing.  Since #28 the DCR repeat bit
+(DSR) and a per-frame DVSSR change are exercised — the flicker viewer's SAT
+changes every frame and the capture proves the VDC loaded the rotation the
+rule names — but the model draws frame N from that SAT rather than
+simulating the transfer.  Since #50 the status register's four picture conditions
 (OR, CC, RR, VD) are modelled from the same SAT/register data; the DS/DV
 block-transfer bits are not (no DMA completion is modelled), and a CPU read
 of SR clearing bits 0-5 is only accounted for in the tests, not simulated.

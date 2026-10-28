@@ -788,6 +788,60 @@ def _sprites(*args):
     return [_spr(*a) for a in args]
 
 
+# The VDC's per-line sprite search stops after 16 strips (VDC manual 2.4.3,
+# p. H7-19..H7-24; model: renderer/pce-sprites.js collectLine).  The flicker
+# fixture rotates the SAT order by `step` entries each frame so a different
+# 8 of its 24 sprites miss the search each frame.
+FLICKER_KEEP = 16
+
+
+def flicker_rule(name):
+    """The #28 fixture's parameters, as the one JSON genviewer.py, capture.sh
+    and tests/check.js read:
+
+      scene, step, phases, sprites   the rotation: frame p's SAT entry k is
+                                     the base SAT entry (k + step*p) mod
+                                     sprites  (viewer.asm builds the copies;
+                                     renderer/pce-flicker.js is the model)
+      keep                           the VDC's 16-strip search limit
+      sat_y, sat_x0, sat_dx, width, height
+                                     the band's geometry: sprite i covers
+                                     SAT X sat_x0+dx*i .. +width-1 (16x16),
+                                     all at SAT Y sat_y
+
+    The generator asserts the fixture really exercises the technique: all
+    sprites on one band, constant spacing, at least one sprite dropped every
+    frame (N > keep), and the union of `phases` frames showing every sprite
+    (with the per-sprite show counts in "shown", so a check can hold the
+    viewer to the same arithmetic)."""
+    s = SPRITE_SCENES[name]
+    f = s["flicker"]
+    sp = s["sprites"]
+    n, step, phases = len(sp), f["step"], f["phases"]
+    ys = sorted({x["y"] for x in sp})
+    assert len(ys) == 1, (name, "flicker sprites are not on one band")
+    xs = [x["x"] for x in sp]
+    dx = xs[1] - xs[0]
+    assert all(b - a == dx for a, b in zip(xs, xs[1:])), (name, xs)
+    assert {x["cgx"] for x in sp} == {0} and {x["cgy"] for x in sp} == {0}, \
+        (name, "flicker sprites must be 16x16 (one strip each)")
+    shown = []
+    for i in range(n):
+        shown.append(sum(1 for p in range(phases)
+                         if (i - p * step) % n < FLICKER_KEEP))
+    assert all(c > 0 for c in shown), (name, "a sprite never shows", shown)
+    assert n > FLICKER_KEEP, (name, "no sprite is ever dropped")
+    return dict(
+        comment="#28 flicker fixture: frame p's SAT order is the base order "
+                "rotated left by step*p entries (viewer.asm flicker_setup, "
+                "mirrored by renderer/pce-flicker.js); the VDC's 16-strip "
+                "line search then drops a different set each frame.",
+        scene=name, step=step, phases=phases, sprites=n, keep=FLICKER_KEEP,
+        shown=shown,
+        sat_y=ys[0], sat_x0=xs[0], sat_dx=dx,
+        width=16, height=16)
+
+
 SPRITE_SCENES = {
     # sprite1 "sizes": all six sizes on one row, distinct palettes.  Every
     # sprite has a different pattern range, so a renderer that misreads CGX/
@@ -968,6 +1022,29 @@ SPRITE_SCENES = {
                      tiles=[(0x040, 32), (0xF00, 16)],
                      sprites=_sprites(*[(32 + (i & 7) * 28, 66 + (i >> 3) * 24,
                                          i & 0xF) for i in range(64)])),
+    # sprite13 "flicker" (#28): 24 16x16 sprites on one band (SAT Y 66 =
+    # display row 2), 10 px apart.  A line holds 16 strips, so this static
+    # ROM shows 16 and drops the last 8 (check.js: the 16-strip limit at 24
+    # sprites — sprite4 already proves 19).  The scene is the source picture
+    # of the flicker viewer ROM (genviewer.py's `flicker` spec): the viewer
+    # rotates the SAT order by `flicker["step"]` entries each VBlank so the
+    # 8 dropped sprites change every frame; the parameters ride in
+    # tools/gen/sprite13.flicker.json, which genviewer.py, capture.sh and
+    # tests/check.js all read (the rule is written once, in
+    # renderer/pce-flicker.js + viewer.asm, and mirrored by the check).
+    # 24 sprites over 4 phases with step 6: the kept windows are 0-15,
+    # 6-21, 12-3, 18-9, so the union is all 24 and every sprite is shown 2
+    # or 3 of the 4 frames (4 of 24 always kept would be uniform 3/4; 64
+    # slots over 24 sprites cannot divide evenly).  The 10-px spacing
+    # leaves every sprite 4
+    # columns (its x_i+6..x_i+9) that sprite i-1's 16-px body cannot
+    # cover, so the union check can name a pixel only sprite i can paint.
+    "sprite13": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                     bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                     tiles=[(0x040, 32), (0xF00, 16)],
+                     flicker=dict(step=6, phases=4),
+                     sprites=_sprites(*[(32 + 10 * i, 66, i & 0xF)
+                                        for i in range(24)])),
 }
 
 SG_FORMULA_ASM = """\
@@ -2058,6 +2135,13 @@ def main():
         with open(path, "w") as f:
             f.write(gen_sprite_asm(name))
         print(f"wrote {path}")
+        if "flicker" in SPRITE_SCENES[name]:
+            # #28: the flicker rule (genviewer.py's flicker ROM, capture.sh's
+            # dump copy, tests/check.js's frame-N model all read this file)
+            jpath = os.path.join(OUT, f"{name}.flicker.json")
+            with open(jpath, "w") as f:
+                json.dump(flicker_rule(name), f, indent=1, sort_keys=True)
+            print(f"wrote {jpath}")
     for name in RASTER_SCENES:
         path = os.path.join(OUT, f"raster{name[1:]}.asm")
         with open(path, "w") as f:
