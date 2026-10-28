@@ -1,6 +1,6 @@
 {
  "name": "wave1",
- "what": "the six-voice chord: six wave shapes, the manual's scale-table frequencies (PB-12), AL and balance varied per channel, noise on channel 6 (NF 10) under the sine",
+ "what": "the six-voice chord: six wave shapes, the manual's scale-table frequencies (PB-12) at F=254/214/170/127/107 plus a bass at F=1151 (R3's high nibble in use), AL and balance varied per channel, noise on channel 6 (NF 10) under the sine",
  "clock": 7159090,
  "sample_rate": 44100,
  "events": [
@@ -686,13 +686,13 @@
    "f": 0,
    "t": 805,
    "reg": 2,
-   "value": 143
+   "value": 127
   },
   {
    "f": 0,
    "t": 812,
    "reg": 3,
-   "value": 0
+   "value": 4
   },
   {
    "f": 0,

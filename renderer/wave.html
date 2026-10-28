@@ -400,7 +400,8 @@
      * confirm the page exports what node's pce-wave.js builds (docs/WAVE.md
      * records the expected lines) */
     var lines = [];
-    var demos = { wave1: W.demoSound(), wave2: W.lfoSound() };
+    var demos = { wave1: W.demoSound(), wave2: W.lfoSound(),
+                  wave3: W.lfo3Sound() };
     Object.keys(demos).forEach(function (name) {
       var rom = W.buildRom(demos[name]);
       var sum = 0x811c9dc5;                    /* FNV-1a, enough to compare */

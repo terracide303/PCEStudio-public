@@ -152,16 +152,19 @@
     return s;
   }
 
-  /* the demo patch: six channels, six wave shapes, the manual's scale-table
-   * chord #34's psg2 plays (PB-12), with the balance and levels varied so a
-   * recording shows all of them, and noise on channels 5 and 6 */
+  /* the demo patch: six channels, six wave shapes, #34's psg2 chord (the
+   * manual's scale-table frequencies, PB-12) with the balance and levels
+   * varied so a recording shows all of them, and noise on channel 6.  Channel
+   * 4 is a bass at F=1151 (97.2 Hz) instead: it is the one voice whose
+   * frequency needs R3's high nibble, so a wrong MSB write cannot hide
+   * (REVIEW-34 lists that as a gap in #34's own recordings). */
   function demoSound() {
     var s = newSound();
     var plan = [
       { wave: PRESETS.square, freq: 254, al: 31, balance: 0xFF, noise: null },
       { wave: PRESETS.saw, freq: 214, al: 24, balance: 0xFF, noise: null },
       { wave: PRESETS.triangle, freq: 170, al: 31, balance: 0xF0, noise: null },
-      { wave: PRESETS.pulse, freq: 143, al: 24, balance: 0x0F, noise: null },
+      { wave: PRESETS.pulse, freq: 1151, al: 24, balance: 0x0F, noise: null },
       { wave: PRESETS.invsaw, freq: 127, al: 31, balance: 0xFF,
         noise: { on: false, nf: 0x0F } },
       { wave: PRESETS.sine, freq: 107, al: 20, balance: 0xFF,
@@ -194,6 +197,25 @@
     s.channels[1].on = true;
     for (var c = 2; c < CHANNELS; c++) s.channels[c].on = false;
     s.lfo = { freq: 0xFF, ctl: 1 };
+    return s;
+  }
+
+  /* the widest LFO: the same tone with LFCTL 3 (x16 deviation), the shift-4
+   * end of RecalcFreqCache, kept as the model's worst case rather than a
+   * musical patch.  The 12-bit sum is 254 + (la - 16) x 16 and is masked to
+   * 4095, so as the carrier walks la = 0..31 the frequency runs 4094, 4095,
+   * 0 (-> 4096), 1, 17, 33, ... 494 — i.e. 27 Hz, the tiny-F high-frequency
+   * average path, then down from 6.6 kHz to 226 Hz.  A wrong shift, mask or
+   * fast-path threshold changes the recording; REVIEW-34 lists 'LFO mode 3'
+   * as a miss in #34's own captures. */
+  function lfo3Sound() {
+    var s = lfoSound();
+    s.lfo = { freq: 0xFF, ctl: 3 };
+    return s;
+  }
+  function lfo3Sound() {
+    var s = lfoSound();
+    s.lfo = { freq: 0xFF, ctl: 3 };
     return s;
   }
 
@@ -536,6 +558,7 @@
     newSound: newSound,
     demoSound: demoSound,
     lfoSound: lfoSound,
+    lfo3Sound: lfo3Sound,
     setWave: setWave,
     setPreset: setPreset,
     paintStep: paintStep,

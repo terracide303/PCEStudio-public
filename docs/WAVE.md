@@ -7,7 +7,7 @@ the LFO. `renderer/wave.html` is the page that paints them and plays them.
 The page's Play button is `renderer/pce-psg.js`, the model #34 proved
 sample-for-sample against Mednafen, so what the editor hears is what the
 exported ROM plays — and that equality is what `tests/check-wave.js`
-measures: two Mednafen recordings of exported ROMs, both diff 0.
+measures: three Mednafen recordings of exported ROMs, all diff 0.
 
 ## What this increment is, and what it is not
 
@@ -74,30 +74,35 @@ sound.json, trace.json, mednafen.log) by the #34 route: pce_fast,
    (provenance: the editor's document is the one that was recorded);
 2. `buildRom()` equals `tools/gen/waveN.pce` from PCEAS, byte for byte;
 3. `pce-wave.js`'s `trace()` equals `tools/genwave.py`'s (the JS port of
-   #34's simulator and the Python original agree on all 237/240 writes);
+   #34's simulator and the Python original agree on all 237/240/240 writes);
 4. `renderer/pce-psg.js`'s PCM equals the WAV sample for sample, with the
    frame count solved from the WAV length alone.
 
 | dump | what it is | recorded | result |
 | --- | --- | --- | --- |
-| wave1 | six voices, six wave shapes, the manual's scale-table chord (PB-12) at F=254/214/170/143/127/107, AL 31/24/31/24/31/20, balance 0xFF/0xFF/0xF0/0x0F/0xFF/0xFF, noise on ch6 (NF 10) | 216,625 sample frames | **diff 0** (433,250 samples) |
-| wave2 | LFO: ch1 square at F=254, ch2 saw carrier, LFCTL 1, R8=255 → 1.727 Hz | 220,297 sample frames | **diff 0** (440,594 samples) |
+| wave1 | six voices, six wave shapes: the manual's scale-table chord (PB-12) at F=254/214/170/127/107 plus a bass at F=1151 (so R3's high nibble is in use — REVIEW-34 records that as a gap in #34's own recordings), AL 31/24/31/24/31/20, balance 0xFF/0xFF/0xF0/0x0F/0xFF/0xFF, noise on ch6 (NF 10) | 220,297 sample frames | **diff 0** (440,594 samples) |
+| wave2 | the LFO: ch1 square at F=254, ch2 saw carrier, LFCTL 1, R8=255 → 1.727 Hz | 220,297 sample frames | **diff 0** (440,594 samples) |
+| wave3 | the model's worst LFO case: the wave2 patch with LFCTL 3 (shift 4). The 12-bit sum wraps, so F runs 4094, 4095, 0 (→4096), 1, 17 … 494 — 27 Hz, the tiny-F fast path, then 6.6 kHz down to 226 Hz. REVIEW-34's "LFO mode 3" miss | 221,031 sample frames | **diff 0** (442,062 samples) |
 
-ROM sha256: wave1 `423c1e9f0e128e2b…`, wave2 `c870b8203fca0448…` (8,192
-bytes; rebuild with `node tools/wavesounds.js && python3 -I tools/genwave.py
-&& pceas -raw -o tools/gen/waveN.pce tools/gen/waveN.asm`).
+ROM sha256: wave1 `f1d3bfb78e3c8f8e…`, wave2 `c870b8203fca0448…`, wave3
+`ccc3a599387e28fe…` (8,192 bytes each; rebuild with `node
+tools/wavesounds.js && python3 -I tools/genwave.py && pceas -raw -o
+tools/gen/waveN.pce tools/gen/waveN.asm`).
 
-The recordings measure what the patch is meant to be: wave1's FFT peaks are
-440.1 / 880.2 / 658.1 / 1321.6 / 1761.7 / 2201.8 / 2641.9 / 522.2 Hz — the
-manual's chord and its harmonics — with RMS L 7192.4 / R 7062.0 (the
-asymmetric balances); wave2's pitch runs 419.9–473.7 Hz over 212 windows.
+The recordings measure what the patches are meant to be: wave1's loudest FFT
+peaks are 440.1 / 880.2 / 658.1 / 1321.6 / 1761.7 / 2201.8 / 2641.9 / 522.2 Hz
+— the chord and its harmonics, over the 97.2 Hz bass — with RMS L 7192.4 / R
+7078.0 (the asymmetric balances); wave2's dominant FFT bin runs 419.9–468.3 Hz
+over 104 windows (theory 416..470); wave3's runs 226.1–3730.6 Hz, which is
+what the wrap through F=1 should look like, not a musical sweep.
 
 **The page.** `renderer/wave.html` is a second, independent exporter path
 (same module, run in the browser). A headless run of `?selfcheck=1` reports
 
 ```
-wave1 bytes=8192 fnv=a59831b8
+wave1 bytes=8192 fnv=664372cc
 wave2 bytes=8192 fnv=c103f241
+wave3 bytes=8192 fnv=027f37b9
 ```
 
 identical to node's `buildRom()` of the same patches — the FNV-1a of the
@@ -115,7 +120,8 @@ whole image. Reproduce with:
   cold — a builder that emits the right ROM from a wrong document, a wave
   write at the wrong register, a balance nibble swapped, a noise NF off by
   one. Only `buildRom()`'s agreement with PCEAS and the WAV diff constrain
-  those, and both come from the same module.
+  those, and both come from the same module. The LFO's LFCTL 2 is not itself
+  recorded: ctl 1 and ctl 3 bracket its shift, and ctl 2 is interpolated.
 - **DDA** (R4 bit 6) is not in the editor.
 - **No sequence**: a patch holds. Songs, and the tracker, are the rest of #35.
 - **Sound in toys** waits on #30/#31.
