@@ -109,3 +109,12 @@ by Claude on 2026-10-27 and both files are corrected. ppu.toys is MIT (Liora Lab
 used where they fit, with the licence notice kept and credit given. Card #53 studies how it builds its toy runtime,
 validator, CLI and agent link, and says what is worth reusing for Phases 3 and 5, including whether its Rust code
 is worth taking over as-is (PCEStudio itself is JavaScript in the browser, Python tools and PCEAS assembly).
+
+## 2026-10-28 — Saves are passwords; pads are 2-button (Dennis)
+
+docs/MANUALS.md found two promises in SPEC.md the hardware set does not keep (GAP 5, GAP 10):
+- **Saves:** a bare HuCard has no save memory; the 2 KB backup RAM is the CD unit's (or a Tennokoe's). Dennis: "we
+  can do saves as passwords". Toys get a password helper (state packed into a short code shown on screen and typed
+  back) instead of `bram`.
+- **6-button pad:** no manual here documents it, and Dennis notes it was used for Street Fighter II on the PC Engine
+  and little else. Left out: pads are 2-button (I, II, Select, Run), up to five with the multitap.

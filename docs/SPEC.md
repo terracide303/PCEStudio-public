@@ -25,8 +25,8 @@ it does not have.
 | 256 or 512 px wide | **dot clocks of 5.37, 7.16 and 10.74 MHz**: 256, 336 or 512 px | a width switch, with what each costs |
 | 64 KB VRAM, DMA | **64 KB VRAM**, VRAM→VRAM DMA, **sprite table (SATB) DMA every frame** | a VRAM map that fills up as you use it |
 | S-DSP, BRR samples | **PSG: 6 channels of 32-step, 5-bit wavetables**, noise on 5–6, LFO, **DDA** (direct samples) | a PSG with wave drawing and DDA samples |
-| SRAM | **backup RAM (2 KB, Tennokoe / CD)** | a save slot of the real size |
-| 2 pads | **5 pads with a multitap**; 2- or 6-button pads | `pad[1..5]` |
+| SRAM | **no save memory on a bare HuCard** (the 2 KB backup RAM is in the CD unit / Tennokoe) | **passwords** (Dennis, 2026-10-28) |
+| 2 pads | **5 pads with a multitap**; 2-button pads (the 6-button pad is left out: Dennis, 2026-10-28) | `pad[1..5]` |
 
 ## PC Engine tricks, built in (each with an example toy)
 
@@ -50,7 +50,7 @@ it does not have.
 2. **The editors** — tiles, palettes, BAT, sprites, raster table, PSG waves; image import that fits a picture into
    16 palettes of 16 with dithering, and tells you what it had to give up.
 3. **Toys as code** — small programs (a Lua subset): `init()`, `frame(t, f)`, `raster(line)` for the line interrupt,
-   `pad[1..5]`, `bram` for saves. They run live in the browser.
+   `pad[1..5]`, `password` for saves. They run live in the browser.
 4. **The compiler and the validator** — the same toy compiled to HuC6280 code (assembled with PCEAS), checked before
    it is allowed out: frame time at 60 Hz on the 7.16 MHz CPU, sprites per line, VRAM and ROM fit, VCE writes in
    the blank, value ranges. Export: `.pce` (PC Engine) and a bit-reversed image for a TurboGrafx.
