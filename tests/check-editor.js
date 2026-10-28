@@ -52,6 +52,28 @@
  *     must be exactly the editor's, and Mednafen's frame must equal
  *     pce-sprites.js drawing the editor's picture — diff 0.
  *
+ * Card #17 adds the scanline effects (the #15 raster table):
+ *  9. Each of the three effects, built through the editor's calls, gives the
+ *     table you can compute by hand for a small case: a gradient of $000 to
+ *     $1FF over 7 lines is 73 per line (asserted entry by entry), a 2-px
+ *     sine with period 4 is BXR 10,12,10,8,… (and speed 1 shifts it a line a
+ *     frame), two parallax bands at 2 and -1 px/frame on frame 5 are BXR 10
+ *     and 1019.  rcr = 0x40 + line and base/baseCram are asserted too.
+ * 10. The preview equals pce-bg.js drawing that table — for the gradient,
+ *     the wobble and the bands, and for a sprite picture through
+ *     pce-sprites.js — and differs from the same picture without the table,
+ *     so the effect is really the table's.  Readable witnesses: the
+ *     gradient's first/last rows are the two colours, the wobble moves a
+ *     bar at a hand-computed line, and the two bands show different colours
+ *     at the same column.
+ * 11. The effect refusals: a line outside the 224-line display (0..223), a
+ *     backwards range, two bands on one line (raster-line-full), BXR 1024 /
+ *     BYR 512 (register-range), a VCE colour 512, a 17th palette, a
+ *     gradient on the backdrop entry, a zero-period wobble and a negative
+ *     frame — each with its documented code, and a legal setup still works.
+ *     The browser-global branch must give the same tables, previews and
+ *     refusals.
+ *
  *   node tests/check-editor.js                 # check both captures
  *   node tests/check-editor.js --write         # write tools/gen/painted.pce
  *   node tests/check-editor.js --write sprite  # write tools/gen/spainted.pce
@@ -87,6 +109,10 @@ const SPRITE_CAPTURE = path.join(HERE, "dumps", "spainted");
 const SAT_BYTE = 0x7F00 * 2;   /* the SAT at VRAM word $7F00 */
 const EDITOR_SRC = fs.readFileSync(
   path.join(HERE, "..", "renderer", "pce-editor.js"), "utf8");
+const BG_SRC = fs.readFileSync(
+  path.join(HERE, "..", "renderer", "pce-bg.js"), "utf8");
+const SPRITES_SRC = fs.readFileSync(
+  path.join(HERE, "..", "renderer", "pce-sprites.js"), "utf8");
 
 /* ---- minimal PNG reader (same as tests/check.js) ----------------------- */
 function decodePng(buf) {
@@ -675,11 +701,364 @@ function checkCapture(pic, data, sprite, captureDir) {
   return problems;
 }
 
+/* ---- 6. the effect editor: #15's raster table (card #17) --------------- */
+/* A 256x224 picture of two tiles: colour number 1 (black) everywhere, and
+ * colour number 2 (white) in every map column whose index is 4 mod 8 — eight
+ * 8-px bars, so a per-line BXR shift is visible.  Every pixel of every tile
+ * and map cell is painted through the editor's calls. */
+function effectSceneStripes(editor) {
+  const p = editor.newPicture();
+  editor.setBackdrop(p, 0);
+  editor.setPaletteColour(p, 0, 1, editor.colourWord(0, 0, 0));
+  editor.setPaletteColour(p, 0, 2, editor.colourWord(7, 7, 7));
+  const black = editor.newTile(p, 0);
+  const white = editor.newTile(p, 0);
+  for (let y = 0; y < 8; y++)
+    for (let x = 0; x < 8; x++) {
+      editor.paintTileIndex(p, black, x, y, 1);
+      editor.paintTileIndex(p, white, x, y, 2);
+    }
+  for (let my = 0; my < editor.BAT_H; my++)
+    for (let mx = 0; mx < editor.BAT_W; mx++)
+      editor.paintMapCell(p, mx, my, mx % 8 === 4 ? white : black);
+  return p;
+}
+
+function entryAt(table, line) {
+  for (const e of table.entries) if (e.line === line) return e;
+  return null;
+}
+
+/* 6a. the hand-computed tables: each effect built through the editor's own
+ * calls, with the entries asserted against arithmetic done here (not by
+ * calling the editor's helpers). */
+function checkEffectTables(editor, label) {
+  const problems = [];
+  const P = (s) => problems.push(label + ": " + s);
+
+  /* gradient: $000 -> $1FF over VDW lines 0..7.  Each channel goes 0..7 over
+   * 7 steps, so line L is channel round(7L/7) = L and the word is
+   * (L<<6)|(L<<3)|L = 73L: 0, 73, 146, ..., 511. */
+  {
+    const p = editor.newPicture();
+    editor.setPaletteColour(p, 0, 1, 0);
+    editor.setGradient(p, { palette: 0, entry: 1, from: 0,
+      to: editor.colourWord(7, 7, 7), line0: 0, line1: 7 });
+    const t = editor.toRaster(p, 0);
+    if (!t) P("gradient: toRaster returned null");
+    else {
+      if (!t.baseCram || t.baseCram.length !== 512)
+        P("gradient: baseCram is not 512 words");
+      else if (t.baseCram[1] !== 0)
+        P("gradient: baseCram[1] = " + t.baseCram[1] + ", expected 0");
+      if (!t.base || t.base.bxr !== 0 || t.base.byr !== 0 ||
+          t.base.cr !== 0x80)
+        P("gradient: base is " + JSON.stringify(t.base) +
+          ", expected {bxr:0, byr:0, cr:$80}");
+      if (t.entries.length !== 8)
+        P("gradient: " + t.entries.length + " entries, expected 8");
+      for (let L = 0; L < 8; L++) {
+        const e = entryAt(t, L);
+        if (!e) { P("gradient: no entry at line " + L); continue; }
+        if (e.rcr !== 0x40 + L)
+          P("gradient line " + L + ": rcr " + e.rcr + ", expected " +
+            (0x40 + L));
+        if (e.bxr !== undefined)
+          P("gradient line " + L + " writes bxr");
+        if (!e.cram || e.cram.length !== 1 || e.cram[0][0] !== 1)
+          P("gradient line " + L + ": cram " + JSON.stringify(e.cram) +
+            ", expected [[1, ...]]");
+        else if (e.cram[0][1] !== 73 * L)
+          P("gradient line " + L + ": word $" +
+            e.cram[0][1].toString(16) + ", expected $" +
+            (73 * L).toString(16));
+      }
+    }
+  }
+
+  /* wobble: BXR = 10 + round(2*sin(2*pi*L/4)) at frame 0 is
+   * 10, 12, 10, 8, 10, 12, 10, 8; speed 1 moves the sine a line a frame,
+   * so at frame 1 line 0 is 12 and line 1 is 10. */
+  {
+    const p = editor.newPicture();
+    editor.setScroll(p, { BXR: 10 });
+    editor.setWobble(p, { amplitude: 2, period: 4, speed: 0,
+      line0: 0, line1: 7 });
+    const t0 = editor.toRaster(p, 0);
+    const want0 = [10, 12, 10, 8, 10, 12, 10, 8];
+    if (!t0) P("wobble: toRaster returned null");
+    else {
+      if (t0.entries.length !== 8)
+        P("wobble: " + t0.entries.length + " entries, expected 8");
+      if (t0.base.bxr !== 10)
+        P("wobble: base.bxr " + t0.base.bxr + ", expected 10");
+      for (let L = 0; L < 8; L++) {
+        const e = entryAt(t0, L);
+        if (!e || e.bxr !== want0[L])
+          P("wobble frame 0 line " + L + ": bxr " + (e && e.bxr) +
+            ", expected " + want0[L]);
+      }
+    }
+    editor.setWobble(p, { amplitude: 2, period: 4, speed: 1,
+      line0: 0, line1: 7 });
+    const t1 = editor.toRaster(p, 1);
+    const want1 = [12, 10, 8, 10, 12, 10, 8, 10];
+    if (!t1) P("wobble frame 1: toRaster returned null");
+    else for (let L = 0; L < 8; L++) {
+      const e = entryAt(t1, L);
+      if (!e || e.bxr !== want1[L])
+        P("wobble speed 1, frame 1, line " + L + ": bxr " + (e && e.bxr) +
+          ", expected " + want1[L]);
+    }
+    /* a 10-bit register wraps: amplitude 8 with period 128 is +8 at line 32
+     * and -8 = $3F8 (1016) at line 96 */
+    editor.setScroll(p, { BXR: 0 });
+    editor.setWobble(p, { amplitude: 8, period: 128, speed: 0,
+      line0: 0, line1: 223 });
+    const t2 = editor.toRaster(p, 0);
+    if (!t2) P("wobble wrap: toRaster returned null");
+    else {
+      const a = entryAt(t2, 32), b = entryAt(t2, 96), c = entryAt(t2, 64);
+      if (!a || a.bxr !== 8)
+        P("wobble line 32: bxr " + (a && a.bxr) + ", expected 8");
+      if (!c || c.bxr !== 0)
+        P("wobble line 64: bxr " + (c && c.bxr) + ", expected 0");
+      if (!b || b.bxr !== 1016)
+        P("wobble line 96: bxr " + (b && b.bxr) + ", expected 1016");
+    }
+  }
+
+  /* parallax bands: two bands, 2 px/frame on lines 0..111 and -1 px/frame
+   * on 112..223; at frame 5 that is BXR 10 and -5 = $3FB (1019). */
+  {
+    const p = editor.newPicture();
+    editor.setParallaxBands(p, [
+      { line0: 0, line1: 111, speed: 2 },
+      { line0: 112, line1: 223, speed: -1 }
+    ]);
+    const t = editor.toRaster(p, 5);
+    if (!t) P("bands: toRaster returned null");
+    else {
+      if (t.entries.length !== 224)
+        P("bands: " + t.entries.length + " entries, expected 224");
+      const checks = [[0, 10], [111, 10], [112, 1019], [223, 1019]];
+      for (const [L, want] of checks) {
+        const e = entryAt(t, L);
+        if (!e || e.bxr !== want)
+          P("bands frame 5 line " + L + ": bxr " + (e && e.bxr) +
+            ", expected " + want);
+        else if (e.rcr !== 0x40 + L)
+          P("bands line " + L + ": rcr " + e.rcr + ", expected " + (0x40 + L));
+      }
+      const t0 = editor.toRaster(p, 0);
+      for (const L of [0, 111, 112, 223]) {
+        const e = t0 && entryAt(t0, L);
+        if (!e || e.bxr !== 0)
+          P("bands frame 0 line " + L + ": bxr " + (e && e.bxr) +
+            ", expected 0");
+      }
+    }
+  }
+
+  /* no effects is no table (the flat picture path) */
+  {
+    const t = editor.toRaster(editor.newPicture(), 0);
+    if (t !== null) P("a picture with no effects has a raster table");
+  }
+
+  return problems;
+}
+
+/* 6b. the preview is pce-bg.js/pce-sprites.js on that table, and the table
+ * is what changes the picture.  For each scene: build the table, draw it
+ * with the renderer directly, draw the editor's preview, require 0 differing
+ * bytes; draw the same picture without the table and require it to differ;
+ * then read hand-computed pixels. */
+function checkEffectPreview(editor, rendererBg, rendererSprites, label) {
+  const problems = [];
+  const P = (s) => problems.push(label + ": " + s);
+
+  const render = (p, frame, withTable, useSprites) => {
+    const data = editor.toPicture(p);
+    const opts = { vram: data.vram, cram: data.cram, regs: editor.viewRegs(p),
+      width: editor.VIEW_W, height: editor.VIEW_H };
+    if (useSprites)
+      opts.sat = data.vram.slice(editor.SAT_ADDR * 2,
+                                 editor.SAT_ADDR * 2 + 512);
+    if (withTable) opts.raster = editor.toRaster(p, frame);
+    return useSprites ? rendererSprites.renderFrame(opts)
+                      : rendererBg.renderFrame(opts);
+  };
+
+  const checkScene = (name, p, frame, useSprites) => {
+    const table = editor.toRaster(p, frame);
+    if (!table || !table.entries.length) {
+      P(name + ": no raster entries, so there is nothing to preview");
+      return null;
+    }
+    const viaRenderer = render(p, frame, true, useSprites);
+    const preview = editor.renderPreview(p, frame);
+    const d = diffPixels(preview, viaRenderer,
+      name + ": editor preview vs the renderer on the table");
+    if (d) P(d);
+    const flat = render(p, frame, false, useSprites);
+    let diffs = 0;
+    for (let i = 0; i < preview.pixels.length; i++)
+      if (preview.pixels[i] !== flat.pixels[i]) diffs++;
+    if (diffs === 0)
+      P(name + ": the preview equals the picture without the table — the " +
+        "effect is not visible");
+    return preview;
+  };
+
+  /* the gradient: a black field with white bars, entry 1 graded $000->$1FF
+   * over the whole display.  The first row is the first colour and the last
+   * row the second (both in map column 0, the black tile). */
+  {
+    const p = effectSceneStripes(editor);
+    editor.setGradient(p, { palette: 0, entry: 1, from: 0,
+      to: editor.colourWord(7, 7, 7), line0: 0, line1: 223 });
+    const preview = checkScene("gradient", p, 0, false);
+    if (preview) {
+      const top = pixelAt(preview, 0, 0), bot = pixelAt(preview, 0, 223);
+      if (!samePixel(top, [0, 0, 0]))
+        P("gradient: row 0 pixel is " + top.join(",") + ", expected 0,0,0");
+      if (!samePixel(bot, [252, 252, 252]))
+        P("gradient: row 223 pixel is " + bot.join(",") +
+          ", expected 252,252,252");
+    }
+  }
+
+  /* the wobble: bars at map columns 4 mod 8, amplitude 8, period 128.  Line
+   * 32 has bxr 8, so pixel x=39 moves from bar (map column 4, white) to the
+   * black tile at map column 5; line 64 has bxr 0 and stays white. */
+  {
+    const p = effectSceneStripes(editor);
+    editor.setWobble(p, { amplitude: 8, period: 128, speed: 0,
+      line0: 0, line1: 223 });
+    const preview = checkScene("wobble", p, 0, false);
+    if (preview) {
+      const moved = pixelAt(preview, 39, 32), still = pixelAt(preview, 39, 64);
+      if (!samePixel(moved, [0, 0, 0]))
+        P("wobble: (39,32) is " + moved.join(",") +
+          "; with bxr 8 it should be the black tile");
+      if (!samePixel(still, [252, 252, 252]))
+        P("wobble: (39,64) is " + still.join(",") +
+          "; with bxr 0 it should still be the white bar");
+    }
+  }
+
+  /* the parallax bands at frame 5: bxr 10 on lines 0..111, 1019 on
+   * 112..223.  At x=39 the upper band lands on map column 6 (black) and the
+   * lower on map column 4 (the white bar) — each band its own speed. */
+  {
+    const p = effectSceneStripes(editor);
+    editor.setParallaxBands(p, [
+      { line0: 0, line1: 111, speed: 2 },
+      { line0: 112, line1: 223, speed: -1 }
+    ]);
+    const preview = checkScene("bands", p, 5, false);
+    if (preview) {
+      const upper = pixelAt(preview, 39, 50), lower = pixelAt(preview, 39, 150);
+      if (!samePixel(upper, [0, 0, 0]))
+        P("bands: (39,50) is " + upper.join(",") +
+          "; bxr 10 should land on the black tile");
+      if (!samePixel(lower, [252, 252, 252]))
+        P("bands: (39,150) is " + lower.join(",") +
+          "; bxr 1019 should land on the white bar");
+      if (samePixel(upper, lower))
+        P("bands: the two bands show the same colour at x=39");
+    }
+  }
+
+  /* the sprite scene with a gradient: pce-sprites.js composes the layers on
+   * the same table, and its preview must equal the renderer's frame.  The
+   * scene's right half paints palette 1 entries 1..8, so grading entry 1 is
+   * visible. */
+  {
+    const p = editor.spriteDemoPicture();
+    editor.setGradient(p, { palette: 1, entry: 1, from: 0,
+      to: editor.colourWord(7, 7, 7), line0: 0, line1: 223 });
+    checkScene("sprite scene", p, 0, true);
+  }
+
+  return problems;
+}
+
+/* 6c. the effect refusals. */
+function checkEffectRefusals(editor, label) {
+  const p = editor.newPicture();
+  const cases = [
+    ["a gradient line past the display (224)",
+     () => editor.setGradient(p, { palette: 0, entry: 1, from: 0, to: 511,
+       line0: 224, line1: 224 }), "line-range"],
+    ["a gradient line before the display (-1)",
+     () => editor.setGradient(p, { palette: 0, entry: 1, from: 0, to: 511,
+       line0: -1, line1: 4 }), "line-range"],
+    ["a backwards gradient range",
+     () => editor.setGradient(p, { palette: 0, entry: 1, from: 0, to: 511,
+       line0: 10, line1: 9 }), "line-range"],
+    ["a wobble line past the display",
+     () => editor.setWobble(p, { amplitude: 1, period: 4, speed: 0,
+       line0: 0, line1: 224 }), "line-range"],
+    ["a band line past the display",
+     () => editor.setParallaxBands(p, [{ line0: 0, line1: 224, speed: 0 }]),
+     "line-range"],
+    ["two bands on one line",
+     () => editor.setParallaxBands(p, [
+       { line0: 0, line1: 111, speed: 2 },
+       { line0: 100, line1: 200, speed: -1 }]), "raster-line-full"],
+    ["BXR 1024 (a 10-bit register)",
+     () => editor.setScroll(p, { BXR: 1024 }), "register-range"],
+    ["BYR 512 (a 9-bit register)",
+     () => editor.setScroll(p, { BYR: 512 }), "register-range"],
+    ["a gradient colour 512",
+     () => editor.setGradient(p, { palette: 0, entry: 1, from: 512, to: 0,
+       line0: 0, line1: 1 }), "colour-range"],
+    ["a 17th palette in a gradient",
+     () => editor.setGradient(p, { palette: 16, entry: 1, from: 0, to: 1,
+       line0: 0, line1: 1 }), "17th-palette"],
+    ["a gradient on the backdrop entry",
+     () => editor.setGradient(p, { palette: 0, entry: 0, from: 0, to: 1,
+       line0: 0, line1: 1 }), "backdrop-entry"],
+    ["a wobble amplitude past a 10-bit swing",
+     () => editor.setWobble(p, { amplitude: 1024 }), "register-range"],
+    ["a wobble period of 0",
+     () => editor.setWobble(p, { period: 0 }), "wobble-range"],
+    ["a negative frame",
+     () => editor.toRaster(p, -1), "frame-range"]
+  ];
+  const problems = [];
+  for (const [name, fn, code] of cases) {
+    const r = refusal(editor, fn, code, label + ": " + name);
+    if (r) problems.push(r);
+  }
+  /* the refusals must leave a legal setup possible */
+  try {
+    editor.setScroll(p, { BXR: 1, BYR: 2 });
+    editor.setGradient(p, { palette: 0, entry: 1, from: 0, to: 511,
+      line0: 0, line1: 1 });
+    editor.setWobble(p, { amplitude: 1, period: 4, speed: 1,
+      line0: 0, line1: 1 });
+    editor.setParallaxBands(p, [{ line0: 0, line1: 0, speed: 0 }]);
+    const t = editor.toRaster(p, 0);
+    if (!t || !t.entries.length)
+      problems.push(label + ": a legal effect setup produced no table");
+  } catch (e) {
+    problems.push(label + ": a legal effect setup was refused: " + e.message);
+  }
+  return { problems, count: cases.length };
+}
+
 /* ---- 5. the browser-global branch ------------------------------------- */
 function loadBrowserGlobal() {
   const sandbox = { self: null };
   sandbox.self = sandbox;
   vm.createContext(sandbox);
+  /* the page loads pce-bg.js, pce-sprites.js and then pce-editor.js; the
+   * editor's preview needs the first two, so the branch loads them too */
+  vm.runInContext(BG_SRC, sandbox, { filename: "pce-bg.js" });
+  vm.runInContext(SPRITES_SRC, sandbox, { filename: "pce-sprites.js" });
   vm.runInContext(EDITOR_SRC, sandbox, { filename: "pce-editor.js" });
   if (!sandbox.PCEStudio || !sandbox.PCEStudio.editor)
     throw new Error("pce-editor.js did not install PCEStudio.editor");
@@ -769,6 +1148,20 @@ function main() {
         `run: tools/capture.sh spainted`);
   }
 
+  /* 6. the effect editor (#17) */
+  const effectTables = checkEffectTables(ed, "node");
+  const effectRefusals = checkEffectRefusals(ed, "node");
+  const effectPreview = checkEffectPreview(ed, bg, sprites, "node");
+  const effectProblems =
+    effectTables.concat(effectRefusals.problems, effectPreview);
+  if (effectProblems.length) effectProblems.forEach(fail);
+  else out(`effects: three #15 tables computed by hand — gradient $000->$1FF ` +
+           `over 8 lines = 73 a line, wobble 2 px / 4 lines = 10,12,10,8… ` +
+           `(speed 1, frame 1 = 12,10,8,10…), bands 2 / -1 px a frame at ` +
+           `frame 5 = 10 / 1019; each preview == pce-bg.js on that table ` +
+           `(and != the no-table frame); ${effectRefusals.count}/` +
+           `${effectRefusals.count} effect refusals with their codes`);
+
   /* 5. the browser-global branch */
   const globalEditor = loadBrowserGlobal();
   const gref = checkRefusals(globalEditor);
@@ -784,13 +1177,19 @@ function main() {
     bank0, vram: gsdata.vram, cram: gsdata.cram,
     regs: gsdata.regs, regions: gsdata.regions
   });
+  const geff = checkEffectTables(globalEditor, "browser");
+  const geffRef = checkEffectRefusals(globalEditor, "browser");
+  const geffPrev = checkEffectPreview(globalEditor, bg, sprites, "browser");
+  const geffProblems = geff.concat(geffRef.problems, geffPrev);
   const sameBytes = Buffer.from(grom).equals(Buffer.from(romBytes)) &&
                     Buffer.from(gsrom).equals(Buffer.from(spriteRom));
-  if (gref.problems.length || !sameBytes)
-    fail(`browser-global branch: ${gref.problems.join("; ") ||
+  if (gref.problems.length || !sameBytes || geffProblems.length)
+    fail(`browser-global branch: ${gref.problems.concat(geffProblems).join("; ") ||
          "same refusals, different bytes"}`);
   else out(`browser-global branch: same ${gref.count}/${gref.count} ` +
-           `refusals, same ${grom.length} and ${gsrom.length} bytes`);
+           `refusals, ${geffRef.count}/${geffRef.count} effect refusals, ` +
+           `same effect tables and previews, same ${grom.length} and ` +
+           `${gsrom.length} bytes`);
 
   /* 4. the captures */
   const haveCapture = fs.existsSync(path.join(CAPTURE, "mednafen.png"));
@@ -823,11 +1222,14 @@ function main() {
 
   out(failed === 0
     ? (haveCapture && haveSpriteCapture
-      ? "PASS: the editor paints tiles and sprites, refuses what the VDC " +
-        "cannot show, exports #9's ROM and Mednafen shows both pictures"
-      : "PASS: the editor paints tiles and sprites, refuses what the VDC " +
-        "cannot show and exports #9's ROM — a Mednafen capture is still to " +
-        "be made")
+      ? "PASS: the editor paints tiles and sprites, writes #15's raster " +
+        "table for the three scanline effects and previews it through " +
+        "pce-bg.js/pce-sprites.js, refuses what the VDC cannot show, " +
+        "exports #9's ROM and Mednafen shows both pictures"
+      : "PASS: the editor paints tiles and sprites, writes #15's raster " +
+        "table for the three scanline effects and previews it through " +
+        "pce-bg.js/pce-sprites.js, refuses what the VDC cannot show and " +
+        "exports #9's ROM — a Mednafen capture is still to be made")
     : `FAIL: ${failed} problem(s)`);
   return failed === 0 ? 0 : 1;
 }

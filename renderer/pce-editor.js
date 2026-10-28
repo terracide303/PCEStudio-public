@@ -62,23 +62,48 @@
  *   sprite-pattern-range / sprite-pixel-range / sprite-range /
  *   sprite-palette-range / sprite-flag-range   out-of-range values.
  *
+ * Scanline effects (card #17) write the #15 raster table — the per-VDW-line
+ * CPU writes the viewer will run from the RCR line interrupt (#16):
+ *   setGradient       one palette entry interpolated between two colours,
+ *                     one write per line (colour gradient / sky)
+ *   setWobble         BXR per line from a sine (amplitude, period, speed)
+ *   setParallaxBands  BXR per band of lines, each band its own speed
+ *   setScroll         the BXR/BYR the effects are relative to
+ * toRaster(pic, frame) returns the table in exactly pce-bg.js's #15 shape
+ *   { base: {bxr, byr, cr}, baseCram: [512 9-bit words],
+ *     entries: [{line, rcr, bxr?, cram?: [[addr, word]]}, ...] }
+ * and renderPreview(pic, frame) is pce-bg.js/pce-sprites.js drawing that
+ * table — the page draws nothing separately.  The refusals for effects:
+ *   register-range   a VDC register value outside its width (BXR 10 bits,
+ *                    BYR 9; a wobble amplitude past a 10-bit swing).
+ *   line-range       a line outside the 224-line display (0..223), or a
+ *                    range that runs backwards.
+ *   raster-line-full two parallax bands cover the same line: a line carries
+ *                    one raster entry, so one BXR value; the ROM's RCR chain
+ *                    fires one interrupt per line (docs/RENDERER.md #15).
+ *   wobble-range / parallax-range / frame-range   bad effect parameters.
+ * The table's computed BXR is masked to 10 bits like the register itself
+ * (the reference raster2's wobble is masked the same way, tools/genroms.py).
+ * The picture's export does NOT carry the table yet: the viewer runs the
+ * raster table in #16, and #17 does not fake that (docs/EDITOR.md).
+ *
  * Facts (BAT word layout, 4-bit pixels, palette fixup, VRAM size, CRAM
  * layout) are from the Hudson HuC6270/HuC6260 manuals, as recorded in
  * docs/RENDERER.md; the ROM limits are docs/ROM_LAYOUT.md's.  This module
- * does not render: renderer/pce-bg.js is the model, and the editor preview
- * and the tests draw through it so there is one picture definition.
+ * has no renderer of its own: renderPreview is pce-bg.js/pce-sprites.js,
+ * and the tests draw through the same model so there is one definition.
  *
  * Dual use: CommonJS module in Node (tests/check-editor.js) and a browser
  * global (renderer/editor.html) via a UMD-style wrapper, like pce-bg.js.
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require("./pce-bg.js"), require("./pce-sprites.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
-    root.PCEStudio.editor = factory();
+    root.PCEStudio.editor = factory(root.PCEStudio.bg, root.PCEStudio.sprites);
   }
-})(typeof self !== "undefined" ? self : this, function () {
+})(typeof self !== "undefined" ? self : this, function (rendererBg, rendererSprites) {
   "use strict";
 
   var VCE_COLOURS = 512;        /* 9-bit codes; entry n = (G<<6)|(R<<3)|B */
@@ -107,6 +132,14 @@
   var LINE_STRIPS = 16;         /* the VDC collects 16 strips a line */
   var STRIP_PX = 16;            /* one strip is 16 pixels wide */
   var VIEW_H_LINES = VIEW_H;
+
+  /* ---- scanline effects (card #17) ------------------------------------- */
+
+  var RASTER_LINES = VIEW_H;    /* VDW lines 0..223 = the 224-line display */
+  var RASTER_LINE_MAX = RASTER_LINES - 1;
+  var BXR_MAX = 0x3FF;          /* BXR R07 is 10 bits (VDC manual H7-7) */
+  var BYR_MAX = 0x1FF;          /* BYR R08 is 9 bits (VDC manual H7-7) */
+  var RCR_BASE = 0x40;          /* RCR R06 = 0x40 + VDW line (#15) */
 
   /* The six sizes the VDC draws.  cells = the reserved 64-word span; align =
    * the pattern code's required alignment from the CGX/CGY masks; the odd
@@ -182,6 +215,7 @@
       map: map,
       nextChar: FIRST_CHAR + 1,
       scroll: { BXR: 0, BYR: 0 },
+      raster: { gradient: null, wobble: null, bands: [] },
       spritePalettes: spritePalettes,
       spritePatterns: [],
       sprites: []
@@ -633,6 +667,258 @@
     }
   }
 
+  /* ---- scanline effects: #15's raster table (card #17) ------------------ */
+
+  function rasterState(pic) {
+    if (!pic.raster) pic.raster = { gradient: null, wobble: null, bands: [] };
+    return pic.raster;
+  }
+
+  function checkRegister(name, value, max, bits) {
+    if (!isInt(value) || value < 0 || value > max)
+      refuse("register-range", name + " is a " + bits + "-bit VDC register " +
+             "(0.." + max + "), got " + value);
+  }
+
+  function checkRasterLine(name, line) {
+    if (!isInt(line) || line < 0 || line > RASTER_LINE_MAX)
+      refuse("line-range", name + " line " + line + " is outside the display " +
+             "(VDW lines 0.." + RASTER_LINE_MAX + "); the VDC shows no such " +
+             "line");
+  }
+
+  function checkRasterRange(name, line0, line1) {
+    checkRasterLine(name + " start", line0);
+    checkRasterLine(name + " end", line1);
+    if (line0 > line1)
+      refuse("line-range", name + " starts at line " + line0 + " and ends at " +
+             line1 + "; a range cannot run backwards");
+  }
+
+  /* The BXR/BYR the effects are relative to, as pce-bg.js's #15 table takes
+   * them: base.bxr is the register value a line with no entry would hold. */
+  function setScroll(pic, spec) {
+    spec = spec || {};
+    var bxr = spec.BXR === undefined ? pic.scroll.BXR : spec.BXR;
+    var byr = spec.BYR === undefined ? pic.scroll.BYR : spec.BYR;
+    checkRegister("BXR", bxr, BXR_MAX, 10);
+    checkRegister("BYR", byr, BYR_MAX, 9);
+    pic.scroll.BXR = bxr;
+    pic.scroll.BYR = byr;
+  }
+
+  /* A colour gradient: CRAM entry palette*16 + entry, written once per line
+   * between two VCE colours.  Line L gets the per-channel interpolation
+   * mix(from, to, (L-line0)/(line1-line0)) — at line0 the first colour, at
+   * line1 the second (a one-line gradient is the first colour).  Entry 0 is
+   * the shared backdrop (CRAM $000) and is not a palette entry to gradient:
+   * the renderer shows CRAM[0] for every colour-0 pixel whatever palette, so
+   * a per-palette colour-0 write would never show (setBackdrop is one
+   * colour). */
+  function setGradient(pic, spec) {
+    spec = spec || {};
+    var palette = spec.palette === undefined ? 0 : spec.palette;
+    var entry = spec.entry === undefined ? 1 : spec.entry;
+    if (isInt(palette) && palette === PALETTES)
+      refuse("17th-palette", "the VDC has " + PALETTES + " background " +
+             "palettes (BAT bits 12-15); palette " + palette + " is the 17th");
+    checkInt("palette", palette, 0, PALETTES - 1, "palette-range");
+    if (isInt(entry) && entry === ENTRIES)
+      refuse("17th-colour", "a palette has " + ENTRIES + " colours; entry " +
+             entry + " is the 17th, and the editor will not store it");
+    if (!isInt(entry) || entry < 0 || entry >= ENTRIES)
+      refuse("entry-range", "entry must be an integer 0..15, got " + entry);
+    if (entry === 0)
+      refuse("backdrop-entry", "colour 0 of every palette is the shared " +
+             "backdrop (CRAM $000); a gradient writes palette entries 1..15 " +
+             "(use setBackdrop for the one shared colour)");
+    checkColour(spec.from);
+    checkColour(spec.to);
+    var line0 = spec.line0 === undefined ? 0 : spec.line0;
+    var line1 = spec.line1 === undefined ? RASTER_LINE_MAX : spec.line1;
+    checkRasterRange("gradient", line0, line1);
+    var g = { palette: palette, entry: entry, from: spec.from, to: spec.to,
+              line0: line0, line1: line1 };
+    rasterState(pic).gradient = g;
+    return g;
+  }
+
+  /* A wobble: BXR on every line of the range from a sine, relative to the
+   * scroll.  For line L at frame f (speed is lines per frame — the sine
+   * slides by `speed` lines each frame):
+   *   bxr = (BXR + round(amplitude * sin(2*pi*(L-line0+speed*f)/period)))
+   *         & 0x3FF
+   * The mask is the register's own 10-bit width, the same mask the reference
+   * raster2 applies (tools/genroms.py raster_wobble).  period is in lines;
+   * amplitude is in pixels (a 10-bit register swing). */
+  function setWobble(pic, spec) {
+    spec = spec || {};
+    var amplitude = spec.amplitude === undefined ? 0 : spec.amplitude;
+    if (!isInt(amplitude) || amplitude < 0 || amplitude > BXR_MAX)
+      refuse("register-range", "wobble amplitude " + amplitude + " is not a " +
+             "BXR swing: BXR is a 10-bit register (0.." + BXR_MAX + ")");
+    var period = spec.period === undefined ? 64 : spec.period;
+    if (!isInt(period) || period < 1)
+      refuse("wobble-range", "wobble period must be an integer number of " +
+             "lines >= 1, got " + period);
+    var speed = spec.speed === undefined ? 0 : spec.speed;
+    if (!isInt(speed))
+      refuse("wobble-range", "wobble speed must be an integer number of " +
+             "lines per frame, got " + speed);
+    var line0 = spec.line0 === undefined ? 0 : spec.line0;
+    var line1 = spec.line1 === undefined ? RASTER_LINE_MAX : spec.line1;
+    checkRasterRange("wobble", line0, line1);
+    var w = { amplitude: amplitude, period: period, speed: speed,
+              line0: line0, line1: line1 };
+    rasterState(pic).wobble = w;
+    return w;
+  }
+
+  function wobbleOffset(w, line, frame) {
+    var phase = (line - w.line0 + w.speed * frame) / w.period;
+    return Math.round(w.amplitude * Math.sin(2 * Math.PI * phase));
+  }
+
+  /* Parallax bands: each band covers lines line0..line1 and scrolls at its
+   * own speed (pixels per frame): bxr = (BXR + speed*frame) & 0x3FF on every
+   * line of the band.  Bands may not overlap — a VDW line carries one raster
+   * entry, so one band's BXR (the ROM's RCR chain fires one interrupt per
+   * line, #15); overlapping bands are refused rather than silently picking
+   * one. */
+  function setParallaxBands(pic, bands) {
+    if (!Array.isArray(bands))
+      refuse("parallax-range", "parallax bands must be an array of " +
+             "{line0, line1, speed}, got " + typeof bands);
+    var out = [];
+    for (var i = 0; i < bands.length; i++) {
+      var b = bands[i] || {};
+      var speed = b.speed === undefined ? 0 : b.speed;
+      if (!isInt(speed))
+        refuse("parallax-range", "band " + i + " speed must be an integer " +
+               "number of pixels per frame, got " + speed);
+      checkRasterRange("band " + i, b.line0, b.line1);
+      out.push({ line0: b.line0, line1: b.line1, speed: speed });
+    }
+    var sorted = out.slice().sort(function (a, b) { return a.line0 - b.line0; });
+    for (i = 1; i < sorted.length; i++) {
+      if (sorted[i].line0 <= sorted[i - 1].line1)
+        refuse("raster-line-full", "bands covering lines " +
+               sorted[i - 1].line0 + ".." + sorted[i - 1].line1 + " and " +
+               sorted[i].line0 + ".." + sorted[i].line1 + " overlap: a VDW " +
+               "line carries one raster entry (one BXR value), and the ROM's " +
+               "RCR chain fires one interrupt per line");
+    }
+    rasterState(pic).bands = out;
+    return out;
+  }
+
+  function clearGradient(pic) { rasterState(pic).gradient = null; }
+  function clearWobble(pic) { rasterState(pic).wobble = null; }
+  function clearBands(pic) { rasterState(pic).bands = []; }
+
+  function clearEffects(pic) {
+    rasterState(pic).gradient = null;
+    rasterState(pic).wobble = null;
+    rasterState(pic).bands = [];
+  }
+
+  /* The 512 9-bit CRAM words the picture's palettes hold, in the raster
+   * table's baseCram order: background palettes at 0..255 (entry 0 = the
+   * shared backdrop) and sprite palettes at $100..$1FF. */
+  function cramWords(pic) {
+    var words = new Array(VCE_COLOURS);
+    var p, e;
+    for (p = 0; p < PALETTES; p++) {
+      for (e = 0; e < ENTRIES; e++)
+        words[p * ENTRIES + e] = e === 0 ? pic.backdrop : pic.palettes[p][e];
+    }
+    for (p = 0; p < SPRITE_PALETTES; p++) {
+      for (e = 0; e < SPRITE_ENTRIES; e++)
+        words[0x100 + p * SPRITE_ENTRIES + e] = pic.spritePalettes[p][e];
+    }
+    for (var i = 0; i < words.length; i++) {
+      if (!isInt(words[i]) || words[i] < 0 || words[i] >= VCE_COLOURS)
+        refuse("colour-range", "CRAM entry " + i + " = " + words[i] +
+               "; a VCE colour is 9 bits (0..511)");
+    }
+    return words;
+  }
+
+  function bandAt(bands, line) {
+    for (var i = 0; i < bands.length; i++)
+      if (line >= bands[i].line0 && line <= bands[i].line1) return bands[i];
+    return null;
+  }
+
+  /* The #15 raster table these effects write, or null when there are none.
+   * One entry per VDW line carrying anything: the line's BXR (wobble and
+   * the band it is in, added — a wobbling band) and the gradient's colour
+   * write.  No effect writes a line it does not cover, so a line outside
+   * every range keeps the register value the previous entry left, exactly
+   * as pce-bg.js's buildRows applies #15's per-line rules.
+   *
+   * `frame` is the editor's time in frames: the wobble's sine slides by
+   * `speed` lines a frame and a band's scroll advances by `speed` pixels a
+   * frame.  frame 0 is the static picture. */
+  function toRaster(pic, frame) {
+    frame = frame === undefined ? 0 : frame;
+    if (!isInt(frame) || frame < 0)
+      refuse("frame-range", "raster frame must be a non-negative integer, " +
+             "got " + frame);
+    var fx = pic.raster || {};
+    var gradient = fx.gradient || null;
+    var wobble = fx.wobble || null;
+    var bands = fx.bands || [];
+    if (!gradient && !wobble && !bands.length) return null;
+
+    checkRegister("BXR", pic.scroll.BXR, BXR_MAX, 10);
+    checkRegister("BYR", pic.scroll.BYR, BYR_MAX, 9);
+    var base = { bxr: pic.scroll.BXR, byr: pic.scroll.BYR,
+                 cr: CR_BG_ON | (pic.sprites.length ? CR_SPRITES_ON : 0) };
+    var entries = [];
+    for (var L = 0; L <= RASTER_LINE_MAX; L++) {
+      var entry = { line: L, rcr: RCR_BASE + L };
+      var hasBxr = false, offset = 0;
+      if (wobble && L >= wobble.line0 && L <= wobble.line1) {
+        offset += wobbleOffset(wobble, L, frame);
+        hasBxr = true;
+      }
+      var band = bandAt(bands, L);
+      if (band) {
+        offset += band.speed * frame;
+        hasBxr = true;
+      }
+      if (hasBxr) entry.bxr = (base.bxr + offset) & BXR_MAX;
+      if (gradient && L >= gradient.line0 && L <= gradient.line1) {
+        var t = gradient.line0 === gradient.line1 ? 0
+              : (L - gradient.line0) / (gradient.line1 - gradient.line0);
+        entry.cram = [[gradient.palette * ENTRIES + gradient.entry,
+                       mix(gradient.from, gradient.to, t)]];
+      }
+      if (entry.bxr !== undefined || entry.cram) entries.push(entry);
+    }
+    return { base: base, baseCram: cramWords(pic), entries: entries };
+  }
+
+  /* The page's preview: pce-bg.js/pce-sprites.js drawing toPicture()'s data
+   * with toRaster()'s table — nothing is drawn separately.  With sprites in
+   * the picture the sprite layer is composed by pce-sprites.js, which reads
+   * the same table (its per-line CR and colour table). */
+  function renderPreview(pic, frame) {
+    if (!rendererBg || !rendererSprites)
+      refuse("no-renderer", "the preview needs renderer/pce-bg.js and " +
+             "renderer/pce-sprites.js loaded before pce-editor.js");
+    var data = toPicture(pic);
+    var opts = {
+      vram: data.vram, cram: data.cram, regs: viewRegs(pic),
+      sat: data.vram.slice(SAT_ADDR * 2, SAT_ADDR * 2 + 512),
+      width: VIEW_W, height: VIEW_H
+    };
+    var raster = toRaster(pic, frame);
+    if (raster) opts.raster = raster;
+    return rendererSprites.renderFrame(opts);
+  }
+
   /* ---- what the hardware would hold ----------------------------------- */
 
   /* The picture as the viewer ROM lays it out: 32768 words of VRAM (BAT at
@@ -837,6 +1123,13 @@
         if (!isInt(spc) || spc < 0 || spc >= VCE_COLOURS)
           problems.push("sprite palette " + spp + " entry " + spe + " = " + spc);
       }
+
+    /* scanline effects (card #17): the table must build */
+    if (pic.raster && (pic.raster.gradient || pic.raster.wobble ||
+                       (pic.raster.bands && pic.raster.bands.length))) {
+      try { toRaster(pic, 0); }
+      catch (e) { problems.push("raster effects: " + e.message); }
+    }
     return problems;
   }
 
@@ -1197,6 +1490,10 @@
     LINE_STRIPS: LINE_STRIPS,
     STRIP_PX: STRIP_PX,
     SPRITE_SIZES: SPRITE_SIZES,
+    RASTER_LINES: RASTER_LINES,
+    RASTER_LINE_MAX: RASTER_LINE_MAX,
+    BXR_MAX: BXR_MAX,
+    BYR_MAX: BYR_MAX,
 
     colourWord: colourWord,
     colourChannels: colourChannels,
@@ -1231,6 +1528,17 @@
     spriteBudget: spriteBudget,
     patternLayout: patternLayout,
     satWords: satWords,
+
+    setScroll: setScroll,
+    setGradient: setGradient,
+    clearGradient: clearGradient,
+    setWobble: setWobble,
+    clearWobble: clearWobble,
+    setParallaxBands: setParallaxBands,
+    clearBands: clearBands,
+    clearEffects: clearEffects,
+    toRaster: toRaster,
+    renderPreview: renderPreview,
 
     toPicture: toPicture,
     viewRegs: viewRegs,
