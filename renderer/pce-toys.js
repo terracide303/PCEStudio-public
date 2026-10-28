@@ -52,44 +52,48 @@
   if (typeof module === "object" && module.exports) {
     module.exports = factory(require("./pce-bg.js"),
                              require("./pce-sprites.js"),
+                             require("./pce-toyhost.js"),
                              require("../vendor/fengari/fengari-node.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.toys = factory(root.PCEStudio.bg, root.PCEStudio.sprites,
-                                  root.fengari);
+                                  root.PCEStudio.toyhost, root.fengari);
   }
-})(typeof self !== "undefined" ? self : this, function (bg, sprites, F) {
+})(typeof self !== "undefined" ? self : this,
+   function (bg, sprites, toyhost, F) {
   "use strict";
 
-  var WIDTH = 256;               /* the toy frame: 32 BAT columns, 28 rows */
-  var HEIGHT = 224;
-  var VDW_LINES = HEIGHT;        /* VDW display lines 0..223 */
-  var FIRST_SCANLINE = 18;       /* the editor's preview calibration */
-  var CR_BG_ON = 0x80;           /* CR bit 7, BB: background on */
-  var BXR_MAX = 0x3FF;           /* VDC R07, 10 bits (manual H7-7) */
-  var BYR_MAX = 0x1FF;           /* VDC R08, 9 bits (manual H7-7) */
-  var CR_MAX = 0xFF;             /* VDC R05, 8 bits (manual H7-5) */
-  var ALLOWED_REGS = { BXR: BXR_MAX, BYR: BYR_MAX, CR: CR_MAX };
-  var VRAM_WORDS = 32768;
-  var CRAM_ENTRIES = 512;
-  var SAT_ENTRIES = 64;
-  var RASTER_WRITES_MAX = 64;    /* colour writes one line may carry */
-  var LINE_STRIPS = 16;
+  /* The toy's own contract — the register ranges, the SAT composition, the
+   * one-entry-per-line raster table, the pads, the frame flow — lives in
+   * renderer/pce-toyhost.js, once, for both front ends (this Lua runtime and
+   * the IL interpreter in renderer/pce-il.js). This file is the Lua VM, the
+   * sandbox and the Lua-side plumbing onto that host. */
+  var WIDTH = toyhost.WIDTH;
+  var HEIGHT = toyhost.HEIGHT;
+  var VDW_LINES = toyhost.VDW_LINES;
   var HOOK_COUNT = 10000;        /* Lua instructions between budget checks */
   var DEFAULT_BUDGET_MS = 100;
-  var LOG_MAX = 200;
 
   /* ---- refusals -------------------------------------------------------- */
 
-  function ToyError(code, message) {
-    this.name = "ToyError";
-    this.code = code;
-    this.message = message;
-  }
-  ToyError.prototype = Object.create(Error.prototype);
-  ToyError.prototype.constructor = ToyError;
+  /* The host throws this class; the runtime must expose the same one, so a
+   * refusal the host raises is still `instanceof toys.ToyError` here and in
+   * tests/check-toys.js. */
+  var ToyError = toyhost.ToyError;
 
   function refuse(code, message) { throw new ToyError(code, message); }
+
+  /* Run a host call from inside a Lua C function: a host refusal gets the
+   * toy's own file:line in front of it, as every refusal in this runtime
+   * does. */
+  function luaHost(L, fn) {
+    try {
+      return fn();
+    } catch (e) {
+      if (e instanceof ToyError) luaFail(L, e.code, e.message);
+      throw e;
+    }
+  }
 
   /* A refusal raised inside a host function: read the toy's own file:line
    * from the Lua call stack before throwing, so the message names the line
@@ -418,15 +422,15 @@
 
   /* ---- small helpers --------------------------------------------------- */
 
+  /* The type check only: a Lua 5.3 integer (1 is an integer, 1.0 is not).
+   * The range check belongs to the host, so the Lua run and the IL run
+   * refuse with the same words (renderer/pce-toyhost.js intIn). The lo/hi
+   * here only shape the "must be an integer" message. */
   function intArg(L, idx, name, lo, hi, code) {
     if (!F.lua.lua_isinteger(L, idx)) {
       luaFail(L, code, name + " must be an integer " + lo + ".." + hi);
     }
-    var v = F.lua.lua_tointeger(L, idx);
-    if (v < lo || v > hi) {
-      luaFail(L, code, name + " must be " + lo + ".." + hi + ", got " + v);
-    }
-    return v;
+    return F.lua.lua_tointeger(L, idx);
   }
 
   function tableFieldInt(L, tIdx, field, def, lo, hi, code) {
@@ -467,25 +471,16 @@
     if (!L) refuse("no-vm", "Lua would not start (out of memory)");
 
     var budgetMs = options.budgetMs != null ? options.budgetMs : DEFAULT_BUDGET_MS;
-    var state = {
-      vram: new Uint8Array(65536),
-      cram: new Uint8Array(1024),
-      sat: new Uint8Array(512),
-      regs: { BXR: 0, BYR: 0, MWR: 0, CR: CR_BG_ON }
-    };
+    /* The toy's hardware state and frame flow, shared with the IL runtime. */
+    var host = toyhost.createHost();
+    var state = host.state;
+    var log = host.log;
     var pad = [];              /* pad[1..5] tables, registry refs */
-    var log = [];
-    var tableEntries = {};     /* line -> entry, table form, this frame */
-    var staticEntries = {};    /* line -> entry, registered outside a frame */
-    var inFrame = false;
-    var prevLineCram = {};     /* line -> [[addr,word]], previous frame */
-    var rasterContext = null;  /* {regs:{}, cram:[]} while a callback line runs */
     var callbackMode = false;
     var initialized = false;
     var broken = null;
     var lastFrame = null;
     var lastRaster = null;
-    var frameCount = 0;
     var runtime = null;
 
     /* -- sandbox -------------------------------------------------------- */
@@ -549,31 +544,25 @@
 
     /* -- VRAM: a word-addressed table over the byte array the model reads - */
 
-    function vramWord(addr) {
-      return state.vram[addr * 2] | (state.vram[addr * 2 + 1] << 8);
-    }
-    function setVramWord(addr, word) {
-      state.vram[addr * 2] = word & 0xFF;
-      state.vram[addr * 2 + 1] = (word >> 8) & 0xFF;
-    }
-
     (function installVram() {
       lua.lua_newtable(L);          /* the vram table */
       lua.lua_newtable(L);          /* its metatable */
       lua.lua_pushliteral(L, "__index");
       lua.lua_pushjsfunction(L, function (Lx) {
-        var addr = intArg(Lx, 2, "a VRAM word address", 0, VRAM_WORDS - 1,
+        var addr = intArg(Lx, 2, "a VRAM word address", 0, 32767,
                           "vram-range");
-        lua.lua_pushinteger(Lx, vramWord(addr));
+        lua.lua_pushinteger(Lx, luaHost(Lx, function () {
+          return host.vramGet(addr);
+        }));
         return 1;
       });
       lua.lua_rawset(L, -3);
       lua.lua_pushliteral(L, "__newindex");
       lua.lua_pushjsfunction(L, function (Lx) {
-        var addr = intArg(Lx, 2, "a VRAM word address", 0, VRAM_WORDS - 1,
+        var addr = intArg(Lx, 2, "a VRAM word address", 0, 32767,
                           "vram-range");
         var word = intArg(Lx, 3, "a VRAM word", 0, 0xFFFF, "vram-range");
-        setVramWord(addr, word);
+        luaHost(Lx, function () { host.vramSet(addr, word); });
         return 0;
       });
       lua.lua_rawset(L, -3);
@@ -587,130 +576,87 @@
       var nameV = lua.lua_tostring(Lx, 1);
       if (!nameV) luaFail(Lx, "reg-name", "reg(name, value): the name must be a string");
       var name = F.to_jsstring(nameV);
-      if (!Object.prototype.hasOwnProperty.call(ALLOWED_REGS, name)) {
-        luaFail(Lx, "reg-forbidden", "a toy may not set " + name +
-                "; it may set BXR, BYR and CR (the toy reference, #61)");
-      }
-      var max = ALLOWED_REGS[name];
-      var v = intArg(Lx, 2, name, 0, max, "reg-range");
-      state.regs[name] = v;
-      if (rasterContext) rasterContext.regs[name] = v;
+      var v = intArg(Lx, 2, name, 0, 0x3FF, "reg-range");
+      luaHost(Lx, function () { host.reg(name, v); });
       return 0;
     });
 
     /* -- VCE colour table ----------------------------------------------- */
 
     setGlobalFn("pal", function (Lx) {
-      var addr = intArg(Lx, 1, "a colour-table address", 0, CRAM_ENTRIES - 1,
+      var addr = intArg(Lx, 1, "a colour-table address", 0, 511,
                         "pal-range");
       var word = intArg(Lx, 2, "a colour word", 0, 0x1FF, "pal-range");
-      state.cram[addr * 2] = word & 0xFF;
-      state.cram[addr * 2 + 1] = (word >> 8) & 0xFF;
-      if (rasterContext) {
-        if (rasterContext.cram.length >= RASTER_WRITES_MAX) {
-          luaFail(Lx, "raster-line-full", "more than " + RASTER_WRITES_MAX +
-                  " colour writes on one line; the line interrupt runs once " +
-                  "and the next line starts from the register");
-        }
-        rasterContext.cram.push([addr, word]);
-      }
+      luaHost(Lx, function () { host.pal(addr, word); });
       return 0;
     });
 
     /* -- the SAT -------------------------------------------------------- */
 
-    function satWord(i, k) {
-      var o = (i * 4 + k) * 2;
-      return state.sat[o] | (state.sat[o + 1] << 8);
-    }
-    function setSatWord(i, k, v) {
-      var o = (i * 4 + k) * 2;
-      state.sat[o] = v & 0xFF;
-      state.sat[o + 1] = (v >> 8) & 0xFF;
-    }
-
     setGlobalFn("sat", function (Lx) {
-      var i = intArg(Lx, 1, "a SAT entry", 0, SAT_ENTRIES - 1, "sat-range");
+      var i = intArg(Lx, 1, "a SAT entry", 0, 63, "sat-range");
       var k = intArg(Lx, 2, "a SAT word (0..3)", 0, 3, "sat-range");
       var v = intArg(Lx, 3, "a SAT word", 0, 0xFFFF, "sat-range");
-      setSatWord(i, k, v);
+      luaHost(Lx, function () { host.sat(i, k, v); });
       return 0;
     });
 
-    /* sprite(i, {x=, y=, pattern=, palette=, spbg=, cgx=, hflip=, cgy=, vflip=})
-     * composes the four SAT words exactly as renderer/pce-sprites.js reads
-     * them (its module comment, HuC6270 manual 2.4): word0 = Y, word1 = X,
-     * word2 = pattern << 1, word3 = palette | SPBG<<7 | CGX<<8 | HFLIP<<11 |
-     * CGY<<12 | VFLIP<<15. SAT Y 64 is display row 0; SAT X 32 is display
-     * column 0. */
+    /* sprite(i, {x=, y=, pattern=, palette=, spbg=, cgx=, hflip=, cgy=, vflip=}).
+     * The composition (the four SAT words, the ranges, the defaults) is
+     * host.sprite; this wrapper only reads the Lua table and checks that a
+     * present field is an integer/boolean as the field's kind demands. */
     setGlobalFn("sprite", function (Lx) {
-      var i = intArg(Lx, 1, "a SAT entry", 0, SAT_ENTRIES - 1, "sprite-range");
+      var i = intArg(Lx, 1, "a SAT entry", 0, 63, "sprite-range");
       if (lua.lua_type(Lx, 2) !== lua.LUA_TTABLE) {
         luaFail(Lx, "sprite-range", "sprite(i, spec): spec must be a table");
       }
-      var x = tableFieldInt(Lx, 2, "x", 0, 0, 1023, "sprite-range");
-      var y = tableFieldInt(Lx, 2, "y", 0, 0, 1023, "sprite-range");
-      var pattern = tableFieldInt(Lx, 2, "pattern", 0, 0, 0x3FF, "sprite-range");
-      var palette = tableFieldInt(Lx, 2, "palette", 0, 0, 15, "sprite-range");
-      var cgy = tableFieldInt(Lx, 2, "cgy", 0, 0, 3, "sprite-range");
-      var spbg = tableFieldBool(Lx, 2, "spbg", false);
-      var cgx = tableFieldBool(Lx, 2, "cgx", false);
-      var hflip = tableFieldBool(Lx, 2, "hflip", false);
-      var vflip = tableFieldBool(Lx, 2, "vflip", false);
-      setSatWord(i, 0, y);
-      setSatWord(i, 1, x);
-      setSatWord(i, 2, (pattern << 1) & 0xFFFF);
-      setSatWord(i, 3, (palette | (spbg ? 0x80 : 0) | (cgx ? 0x100 : 0) |
-                        (hflip ? 0x800 : 0) | (cgy << 12) |
-                        (vflip ? 0x8000 : 0)) & 0xFFFF);
+      var spec = {};
+      var fields = [["x", 1023], ["y", 1023], ["pattern", 0x3FF],
+                    ["palette", 15], ["cgy", 3]];
+      for (var f = 0; f < fields.length; f++) {
+        var name = fields[f][0];
+        F.lua.lua_getfield(Lx, 2, F.to_luastring(name));
+        if (lua.lua_type(Lx, -1) !== lua.LUA_TNIL) {
+          spec[name] = intArg(Lx, -1, name, 0, fields[f][1], "sprite-range");
+        }
+        lua.lua_pop(Lx, 1);
+      }
+      var bools = ["spbg", "cgx", "hflip", "vflip"];
+      for (var b = 0; b < bools.length; b++) {
+        F.lua.lua_getfield(Lx, 2, F.to_luastring(bools[b]));
+        if (lua.lua_type(Lx, -1) !== lua.LUA_TNIL) {
+          spec[bools[b]] = lua.lua_toboolean(Lx, -1) ? true : false;
+        }
+        lua.lua_pop(Lx, 1);
+      }
+      luaHost(Lx, function () { host.sprite(i, spec); });
       return 0;
     });
 
     /* -- the raster table, the table form ------------------------------- */
 
-    /* raster(line, spec) registers one line's entry (VDW line 0..223) from
-     * inside frame(). A line gets ONE entry: the RCR interrupt fires once
-     * per line, and the model's table has one write per line (buildRows,
-     * last write wins), so a second registration is refused rather than
-     * silently dropped. spec = {bxr=, byr=, cr=, cram={{addr,word},...}}. */
+    /* raster(line, spec) registers one line's entry (VDW line 0..223). The
+     * one-entry rule, the cram write cap and the ranges are host.raster;
+     * this wrapper only reads the Lua table. */
     setGlobalFn("raster", function (Lx) {
-      var line = intArg(Lx, 1, "a raster line", 0, VDW_LINES - 1, "raster-line");
+      var line = intArg(Lx, 1, "a raster line", 0, VDW_LINES - 1,
+                        "raster-line");
       if (lua.lua_type(Lx, 2) !== lua.LUA_TTABLE) {
         luaFail(Lx, "raster-line", "raster(line, spec): spec must be a table");
       }
-      var store = inFrame ? tableEntries : staticEntries;
-      if (store[line]) {
-        luaFail(Lx, "raster-line-full", "VDW line " + line +
-                " already has a raster entry; the line interrupt fires once " +
-                "per line");
+      var spec = {};
+      var fields = [["bxr", 0x3FF], ["byr", 0x1FF], ["cr", 0xFF]];
+      for (var f = 0; f < fields.length; f++) {
+        F.lua.lua_getfield(Lx, 2, F.to_luastring(fields[f][0]));
+        if (lua.lua_type(Lx, -1) !== lua.LUA_TNIL) {
+          spec[fields[f][0]] = intArg(Lx, -1, fields[f][0], 0, fields[f][1],
+                                     "reg-range");
+        }
+        lua.lua_pop(Lx, 1);
       }
-      var entry = { line: line, rcr: 0x40 + line };
-      var has = false;
-      lua.lua_getfield(Lx, 2, F.to_luastring("bxr"));
-      if (lua.lua_type(Lx, -1) !== lua.LUA_TNIL) {
-        entry.bxr = intArg(Lx, -1, "bxr", 0, BXR_MAX, "reg-range");
-        has = true;
-      }
-      lua.lua_pop(Lx, 1);
-      lua.lua_getfield(Lx, 2, F.to_luastring("byr"));
-      if (lua.lua_type(Lx, -1) !== lua.LUA_TNIL) {
-        entry.byr = intArg(Lx, -1, "byr", 0, BYR_MAX, "reg-range");
-        has = true;
-      }
-      lua.lua_pop(Lx, 1);
-      lua.lua_getfield(Lx, 2, F.to_luastring("cr"));
-      if (lua.lua_type(Lx, -1) !== lua.LUA_TNIL) {
-        entry.cr = intArg(Lx, -1, "cr", 0, CR_MAX, "reg-range");
-        has = true;
-      }
-      lua.lua_pop(Lx, 1);
-      lua.lua_getfield(Lx, 2, F.to_luastring("cram"));
+      F.lua.lua_getfield(Lx, 2, F.to_luastring("cram"));
       if (lua.lua_type(Lx, -1) === lua.LUA_TTABLE) {
         var n = lua.lua_rawlen(Lx, -1);
-        if (n > RASTER_WRITES_MAX) {
-          luaFail(Lx, "raster-line-full", n + " colour writes on one line; a " +
-                  "line carries at most " + RASTER_WRITES_MAX);
-        }
         var writes = [];
         for (var w = 1; w <= n; w++) {
           lua.lua_rawgeti(Lx, -1, w);
@@ -718,8 +664,7 @@
             luaFail(Lx, "pal-range", "cram[" + w + "] must be {addr, word}");
           }
           lua.lua_rawgeti(Lx, -1, 1);
-          var addr = intArg(Lx, -1, "cram address", 0, CRAM_ENTRIES - 1,
-                            "pal-range");
+          var addr = intArg(Lx, -1, "cram address", 0, 511, "pal-range");
           lua.lua_pop(Lx, 1);
           lua.lua_rawgeti(Lx, -1, 2);
           var word = intArg(Lx, -1, "cram word", 0, 0x1FF, "pal-range");
@@ -727,15 +672,10 @@
           lua.lua_pop(Lx, 1);
           writes.push([addr, word]);
         }
-        if (writes.length) { entry.cram = writes; has = true; }
+        spec.cram = writes;
       }
       lua.lua_pop(Lx, 1);
-      if (!has) {
-        luaFail(Lx, "raster-line", "VDW line " + line + "'s entry sets nothing " +
-                "(bxr/byr/cr/cram are all absent)");
-      }
-      tableEntries[line] = entry;
-      store[line] = entry;
+      luaHost(Lx, function () { host.raster(line, spec); });
       return 0;
     });
 
@@ -752,20 +692,20 @@
       lua.lua_setglobal(L, F.to_luastring("pad"));
     })();
 
-    var PAD_FIELDS = ["up", "down", "left", "right", "i", "ii", "select", "run"];
+    var PAD_FIELDS = host.PAD_FIELDS;
 
+    /* The Lua runtime exposes the pads as five tables; refresh them from the
+     * host's one pad state before each frame. */
     function refreshPads() {
       for (var n = 1; n <= 5; n++) {
-        var b = padState[n] || {};
         for (var k = 0; k < PAD_FIELDS.length; k++) {
           var f = PAD_FIELDS[k];
           setRefField(pad[n], f, (function (v) {
             return function () { lua.lua_pushboolean(L, v); };
-          })(!!b[f]));
+          })(host.padValue(n, f)));
         }
       }
     }
-    var padState = {};
 
     /* -- print ---------------------------------------------------------- */
 
@@ -778,7 +718,7 @@
         parts.push(s ? F.to_jsstring(s) : "?");
         lua.lua_pop(Lx, 1);
       }
-      if (log.length < LOG_MAX) log.push(parts.join("\t"));
+      host.logLine(parts);
       return 0;
     });
 
@@ -855,165 +795,46 @@
 
     /* -- the frame ------------------------------------------------------ */
 
-    function snapshot() {
-      return {
-        vram: state.vram.slice(),
-        cram: state.cram.slice(),
-        sat: state.sat.slice(),
-        regs: { BXR: state.regs.BXR, BYR: state.regs.BYR,
-                MWR: state.regs.MWR, CR: state.regs.CR }
-      };
-    }
-
-    function modelOptions() {
-      return {
-        vram: state.vram,
-        cram: state.cram,
-        sat: state.sat,
-        regs: { BXR: state.regs.BXR, BYR: state.regs.BYR,
-                MWR: state.regs.MWR, CR: state.regs.CR,
-                RCRCount: 0, scanline: FIRST_SCANLINE },
-        width: WIDTH,
-        height: HEIGHT
-      };
-    }
-
-    function cramWords() {
-      var words = new Array(CRAM_ENTRIES);
-      for (var i = 0; i < CRAM_ENTRIES; i++) {
-        words[i] = state.cram[i * 2] | (state.cram[i * 2 + 1] << 8);
-      }
-      return words;
-    }
-
-    function buildRasterTable(baseRegs, baseCramWords) {
-      /* Both forms end up in tableEntries: the table form writes it from
-       * raster(line, spec), the callback form from the per-line journal. */
-      var entries = [];
-      for (var k in tableEntries) {
-        if (Object.prototype.hasOwnProperty.call(tableEntries, k)) {
-          entries.push(tableEntries[k]);
-        }
-      }
-      if (!entries.length) { prevLineCram = {}; return null; }
-      entries.sort(function (a, b) { return a.line - b.line; });
-      /* The VCE persists across frames, so a row above this frame's first
-       * write still shows the previous frame's value for that line. The
-       * model asks for that as cramPrev (buildRows, pce-bg.js); journal it
-       * from the previous frame. Without it a frame-varying table would
-       * show this frame's later values on the early rows. */
-      var nextPrev = {};
-      for (var i = 0; i < entries.length; i++) {
-        if (entries[i].cram && entries[i].cram.length) {
-          entries[i].cramPrev = prevLineCram[entries[i].line] || [];
-          nextPrev[entries[i].line] = entries[i].cram;
-        }
-      }
-      prevLineCram = nextPrev;
-      return {
-        base: baseRegs,
-        baseCram: baseCramWords,
-        entries: entries
-      };
-    }
-
-    function copyEntry(e) {
-      var c = { line: e.line, rcr: e.rcr };
-      if (e.bxr != null) c.bxr = e.bxr;
-      if (e.byr != null) c.byr = e.byr;
-      if (e.cr != null) c.cr = e.cr;
-      if (e.cram) {
-        c.cram = [];
-        for (var i = 0; i < e.cram.length; i++) {
-          c.cram.push([e.cram[i][0], e.cram[i][1]]);
-        }
-      }
-      return c;
-    }
-
-    function seedEntries() {
-      var out = {};
-      for (var k in staticEntries) {
-        if (Object.prototype.hasOwnProperty.call(staticEntries, k)) {
-          out[k] = copyEntry(staticEntries[k]);
-        }
-      }
-      return out;
-    }
+    /* The frame itself is host.beginFrame / markBase / beginLine / endLine /
+     * endFrame / render; this runtime only calls the toy's Lua hooks between
+     * those steps. The IL runtime (renderer/pce-il.js) walks the same steps. */
 
     function renderFrame(f) {
       return guard(function () {
-        frameCount = f;
         refreshPads();
-        tableEntries = seedEntries();
         lastRaster = null;
-        inFrame = true;
-
-        var baseRegs = null;
-        var baseCramWords = null;
+        host.beginFrame(f);
         try {
-        withBudget(function () {
-          callGlobal("frame", function () {
-            lua.lua_pushnumber(L, f / 60);
-            lua.lua_pushinteger(L, f);
-            return 2;
-          });
-          /* the frame's own writes are the base every line starts from;
-           * the line callbacks below must not move it */
-          baseRegs = { bxr: state.regs.BXR, byr: state.regs.BYR,
-                       cr: state.regs.CR };
-          baseCramWords = cramWords();
+          withBudget(function () {
+            callGlobal("frame", function () {
+              lua.lua_pushnumber(L, f / 60);
+              lua.lua_pushinteger(L, f);
+              return 2;
+            });
+            /* the frame's own writes are the base every line starts from;
+             * the line callbacks below must not move it */
+            host.markBase();
 
-          if (callbackMode) {
-            var entries = [];
-            for (var line = 0; line < VDW_LINES; line++) {
-              var ctx = { regs: {}, cram: [] };
-              rasterContext = ctx;
-              try {
-                callGlobal("raster", function () {
-                  lua.lua_pushinteger(L, line);
-                  return 1;
-                });
-              } finally {
-                rasterContext = null;
-              }
-              var any = false;
-              for (var r in ctx.regs) {
-                if (Object.prototype.hasOwnProperty.call(ctx.regs, r)) any = true;
-              }
-              if (any || ctx.cram.length) {
-                var entry = { line: line, rcr: 0x40 + line };
-                if (ctx.regs.BXR != null) entry.bxr = ctx.regs.BXR;
-                if (ctx.regs.BYR != null) entry.byr = ctx.regs.BYR;
-                if (ctx.regs.CR != null) entry.cr = ctx.regs.CR;
-                if (ctx.cram.length) entry.cram = ctx.cram;
-                entries.push(entry);
+            if (callbackMode) {
+              for (var line = 0; line < VDW_LINES; line++) {
+                host.beginLine();
+                try {
+                  callGlobal("raster", function () {
+                    lua.lua_pushinteger(L, line);
+                    return 1;
+                  });
+                } finally {
+                  host.endLine(line);
+                }
               }
             }
-            /* callback entries override the table form (the toy chose one) */
-            if (entries.length) {
-              for (var e = 0; e < entries.length; e++) {
-                tableEntries[entries[e].line] = entries[e];
-              }
-            }
-          }
-          lastRaster = buildRasterTable(baseRegs, baseCramWords);
-        });
+            lastRaster = host.endFrame();
+          });
         } finally {
-          inFrame = false;
+          if (host.inLine()) host.endLine(-1);
         }
 
-        var opts = modelOptions();
-        if (lastRaster) opts.raster = lastRaster;
-        var img = sprites.renderFrame(opts);
-        lastFrame = {
-          frame: f,
-          width: img.width,
-          height: img.height,
-          pixels: img.pixels,
-          raster: lastRaster,
-          state: snapshot()
-        };
+        lastFrame = host.render(f, lastRaster);
         return lastFrame;
       });
     }
@@ -1039,11 +860,8 @@
     }
 
     function setPad(n, buttons) {
-      if (!(n >= 1 && n <= 5) || n !== (n | 0)) {
-        refuse("pad-range", "pad number must be 1..5, got " + n);
-      }
-      padState[n] = buttons || {};
-      runtime.pad = padState;
+      host.setPad(n, buttons);
+      runtime.pad = host.padState;
       return runtime;
     }
 
@@ -1051,20 +869,20 @@
       /* the live hardware state the model reads; tests copy it */
       state: state,
       /* the model's exact input, shared (no copy) — #61/docs cannot drift */
-      options: modelOptions,
-      snapshot: snapshot,
+      options: host.options,
+      snapshot: host.snapshot,
       load: load,
       frame: renderFrame,
       setPad: setPad,
       dispose: function () { if (L) { lua.lua_close(L); L = null; } },
       log: log,
-      pad: padState,
+      pad: host.padState,
       get initialized() { return initialized; },
       get broken() { return broken; },
       get error() { return broken ? new ToyError(broken.code, broken.message) : null; },
       get last() { return lastFrame; },
       get lastRaster() { return lastRaster; },
-      get frameCount() { return frameCount; },
+      get frameCount() { return host.frameCount(); },
       get callbackRaster() { return callbackMode; },
       WIDTH: WIDTH,
       HEIGHT: HEIGHT,

@@ -206,6 +206,19 @@ What is left on #35: that cycle model (for sample equality), the export path
 page that plays a DMF, and sound in toys (#30). Both checkers were written by
 the builder — @review owes them a cold break (rule 2). `docs/HUTRACK.md`.
 
+**#31 is half done (the IL).** `docs/IL.md` defines PCEStudio's typed IL;
+`renderer/pce-il.js` lowers the #30 Lua subset to it (through Fengari's own
+parser, not a second one) and a reference interpreter runs it over
+`renderer/pce-toyhost.js`, the host the Lua runtime now uses too
+(`renderer/pce-toys.js` was refactored onto it; its 718 checks still pass).
+`node tests/check-il.js` exits 0: 973 checks — #30's three toys through
+Lua → IL → interpreter give byte-equal state, identical raster tables and
+diff-0 pixels to the Fengari run for 40 frames each, the IL's structure and
+types are asserted, and the host's and the IL's refusals come back by code.
+NOT done: machine code (the backends — IL → C/LLVM for llvm-mos, IL → C for
+HuC, IL → direct HuC6280 — and their comparison are the card's next half), a
+browser page for the IL, strings/passwords/`note`, table reads.
+
 ## Next action
 
 `../workshop/board.py next PCEStudio --who design`. #11 (@review) reads Phase
