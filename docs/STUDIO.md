@@ -426,8 +426,8 @@ What it does, in order:
 ```
 browser: PASS 40 frames · palette · frame 39 · 256x224 · pixels 172032 · digest f45fd1c2
 browser docs: docs-panel open, #61 reference + ppu.toys layout
-browser driver: 30 checks, 0 failed
-PASS  473 checks, … every button's handler executed (88 buttons), headless Chrome says PASS 40 (… ms)
+browser driver: 32 checks, 0 failed
+PASS  475 checks, … every button's handler executed (88 buttons), headless Chrome says PASS 40 (… ms)
 ```
 
 The first run is `?selftest=1&frames=40&example=palette`: the page runs 40 frames, and an FNV-1a digest of
@@ -442,9 +442,10 @@ dependency, no synthetic OS input) loads `renderer/studio.html?paused=1` and dri
 active-line highlight and highlighted Lua keywords; the editor's text is the running Lua, and CodeMirror's
 DOM renders the edit; an asset edit leaves the running Lua alone; save/reopen is byte-identical; Settings →
 Vim sets CodeMirror's `keyMap` to `vim` and is written to `localStorage`; Space, Ctrl+., R, Ctrl+S and Tab
-(dispatched as real DOM events) do their §5 action; the pad keys work on the focused output; and a second
-iframe load with the same profile restores the edited main.lua and `tiles.json` from autosave
-(`restored from this browser`), with CodeMirror mounted again.
+(dispatched as real DOM events) do their §5 action; the pad keys work on the focused output; **the same
+iframe is reloaded** (`location.reload()`) and a fresh tab is opened with the same profile — both restore
+the edited main.lua and `tiles.json` from autosave (`restored from this browser`), with CodeMirror mounted
+again.
 
 ### 11.3 Screenshots
 
