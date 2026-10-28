@@ -750,6 +750,19 @@ SPRITE_SCENES = {
                      sprites=_sprites(*[(32 + 14 * i, 66, i & 0xF)
                                         for i in range(15)]
                                       + [(242, 66, 15, 1, 1, 0)])),
+    # sprite12 "sat2063" (#42): 64 sprites in an 8x8 grid, one per SAT entry,
+    # so entries 20-63 are all live and entry 63 (bottom-right) is visible.
+    # REVIEW-14's A2 (a viewer copying only the first 20 SAT entries) was
+    # MISSED because every scene stopped at entry 19; here the A2 copy loses
+    # 44 sprites and sat.bin differs at byte 160 (entry 20).  Eight 16-px
+    # sprites per row = 128 px: inside the 16-strip / 256-px line budget, so
+    # the hardware drops nothing.  pal = i & 0xF (sprite5's grid extended),
+    # each sprite its own pattern cell.
+    "sprite12": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                     bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                     tiles=[(0x040, 32), (0xF00, 16)],
+                     sprites=_sprites(*[(32 + (i & 7) * 28, 66 + (i >> 3) * 24,
+                                         i & 0xF) for i in range(64)])),
 }
 
 SG_FORMULA_ASM = """\

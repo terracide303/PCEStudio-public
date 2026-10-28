@@ -15,10 +15,15 @@
 #   tools/capture.sh spainted       # the #13 editor's sprite scene
 #                                   # (gen/spainted.pce, built by
 #                                   # tests/check-editor.js --write sprite)
-#   tools/capture.sh 1..8 sprite    # the #12 sprite-scene ROMs
-#                                   # (gen/spriteN.pce; the dump gains sat.bin)
 #   tools/capture.sh 1..11 vsprite  # the #14 viewer ROMs of the sprite scenes
 #                                   # (gen/vspriteN.pce, SATB DMA in the viewer)
+#   tools/capture.sh 1..12 sprite    # the #12 sprite-scene ROMs
+#                                   # (gen/spriteN.pce; the dump gains sat.bin)
+#   tools/capture.sh 12 bsprite     # #42: the browser export of a sprite
+#                                   # scene (gen/bsprite12.pce, written by
+#                                   # tests/check-export.js --write sprite12)
+#   tools/capture.sh 7 viewer       # #42: scene7's viewer ROM (gen/viewer7.pce)
+#                                   # — its 128x64 BAT copy crosses $6000
 #   tools/capture.sh 1..5 raster    # the #15 raster-scene ROMs
 #                                   # (gen/rasterN.pce, per-scanline BXR/BYR/
 #                                   # CR/VCE-colour-table writes; the dump
@@ -80,10 +85,11 @@ case "$MODE" in
   us) NAME="us${SCENE}" ;;
   sprite) NAME="sprite${SCENE}" ;;
   vsprite) NAME="vsprite${SCENE}" ;;
+  bsprite) NAME="bsprite${SCENE}" ;;
   raster) NAME="raster${SCENE}" ;;
   painted) NAME="painted" ;;
   spainted) NAME="spainted" ;;
-  *) echo "mode must be scene, viewer, browser, us, sprite, vsprite, raster, painted or spainted" >&2; exit 2 ;;
+  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, painted or spainted" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -96,6 +102,10 @@ echo "== build $NAME"
 if [ "$MODE" = browser ]; then
   # the browser path's own builder, not PCEAS (cards #9)
   node tests/check-export.js --write "$SCENE"
+elif [ "$MODE" = bsprite ]; then
+  # #42: the browser export of a sprite scene, run in Mednafen — REVIEW-14's
+  # J1-J3 gap (the browser ROM carries the SAT but was never run on one)
+  node tests/check-export.js --write "sprite${SCENE}"
 elif [ "$MODE" = us ]; then
   # the browser's US image: its .pce with every byte's bits reversed (#25)
   node tests/check-us-card.js --write "$SCENE"

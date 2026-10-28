@@ -1,0 +1,4 @@
+{
+  "comment": "Tile regions of scene7 for docs/ROM_LAYOUT.md: [char0, tile count] in descriptor order. Read by tools/genviewer.py and renderer/pce-rom.js; values are tools/genroms.py SCENES[7]['tiles'] (#42: added so genviewer.py can build viewer7 — its 128x64 BAT is 16384 bytes and the BAT copy crosses the 8 KiB MPR2 window at $6000, REVIEW-14 break I).",
+  "tile_regions": [[512, 64]]
+}

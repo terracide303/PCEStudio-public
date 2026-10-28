@@ -20,9 +20,11 @@
  * branch (a vm context with `self` and no `module`) and requires the same
  * bytes, so the page's code path is not an untested copy.
  *
- *   node tests/check-export.js            # compare all three scenes
- *   node tests/check-export.js --write N  # write tools/gen/browserN.pce
- *                                         # (used by tools/capture.sh browser)
+ *   node tests/check-export.js               # compare all sample scenes
+ *   node tests/check-export.js --write N     # write tools/gen/browserN.pce
+ *                                            # (used by tools/capture.sh browser)
+ *   node tests/check-export.js --write spriteN  # write tools/gen/bspriteN.pce
+ *                                            # (#42: tools/capture.sh N bsprite)
  *
  * Exit 0 only if every scene matches.  What this does NOT prove: that the
  * page's fetch/download wiring runs (only the module it calls), and that the
@@ -89,16 +91,22 @@ function sha256(buf) {
 }
 
 function writeRom(scene) {
-  const out = path.join(GEN, `browser${scene}.pce`);
+  /* "1".."3" -> browserN.pce from sceneN; "spriteN" -> bspriteN.pce from
+   * spriteN (#42: REVIEW-14's J-gap — the browser export of a sprite scene
+   * is captured and run, not only byte-compared). */
+  const sprite = scene.startsWith("sprite");
+  const dump = sprite ? scene : `scene${scene}`;
+  const out = path.join(GEN, `${sprite ? "bsprite" + scene.slice(6) : "browser" + scene}.pce`);
   fs.mkdirSync(GEN, { recursive: true });
-  fs.writeFileSync(out, rom.buildRom(loadScene(`scene${scene}`)));
+  fs.writeFileSync(out, rom.buildRom(loadScene(dump)));
   console.log(`wrote ${out}`);
 }
 
 /* The compared pairs: dump directory -> PCEAS build in tools/gen/.  #14
- * adds the sprite scenes (vspriteN = the viewer ROM of spriteN). */
+ * adds the sprite scenes (vspriteN = the viewer ROM of spriteN); #42 adds
+ * sprite12 (SAT entries 20-63 live). */
 const PAIRS = [1, 2, 3].map((n) => ({ dump: `scene${n}`, pceas: `viewer${n}.pce` }))
-  .concat(Array.from({ length: 11 }, (_, i) => i + 1)
+  .concat(Array.from({ length: 12 }, (_, i) => i + 1)
     .map((n) => ({ dump: `sprite${n}`, pceas: `vsprite${n}.pce` })));
 
 function checkScenes() {
@@ -149,15 +157,15 @@ function main() {
       [1, 2, 3].forEach(writeRom);
       return 0;
     }
-    if (!/^[123]$/.test(scene)) {
-      console.error("usage: check-export.js --write [1|2|3]");
+    if (!/^[123]$/.test(scene) && !/^sprite[0-9]+$/.test(scene)) {
+      console.error("usage: check-export.js --write [1|2|3|spriteN]");
       return 2;
     }
-    writeRom(Number(scene));
+    writeRom(scene);
     return 0;
   }
   if (args.length !== 0) {
-    console.error("usage: check-export.js [--write [1|2|3]]");
+    console.error("usage: check-export.js [--write [1|2|3|spriteN]]");
     return 2;
   }
   return checkScenes();

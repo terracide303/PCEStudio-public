@@ -1,4 +1,4 @@
-# The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #15, #38, #39, #40)
+# The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #15, #38, #39, #40, #42)
 
 ```sh
 node tests/check.js             # diff the renderer against Mednafen, all scenes
@@ -27,11 +27,13 @@ data — and `scene8`, `scene8b` and `scene8c` are the diff-0 proofs (#39).
 HuCard image blank (every VDC register 0), which is the emulator not running
 the image (#25), not a rendered frame. The skip list is explicit and named
 dumps only; an unnamed background-off dump whose capture is not the backdrop
-fails the run as a diff. The shipped count is **46 pictures** (scenes 1-9,
-5b, 8b, 8c, painted, viewer 1-3, browser 1-3, sprite 1-11, vsprite 1-11,
-raster 1-5), us1 skipped. `dumps/vspriteN/` are #14's captures: the *viewer*
+fails the run as a diff. The shipped count is **51 pictures** (scenes 1-9,
+5b, 8b, 8c, painted, spainted, viewer 1-3 and 7, browser 1-3, sprite 1-12,
+vsprite 1-12, bsprite 12, raster 1-5), us1 skipped. `dumps/vspriteN/` are
+#14's captures: the *viewer*
 ROMs of the sprite scenes (`tools/capture.sh N vsprite`), whose SATB DMA
 loads the same SAT the sprite scene ROMs write directly.
+`sprite12`/`vsprite12`/`bsprite12`/`viewer7` are #42's (REVIEW-14, below).
 A dump with `raster.json` (the raster scenes, #15) is verified against it
 **before** rendering — the table must describe what the ROM actually wrote:
 entries' lines strictly increasing (VDW lines; 240 allowed for r5's HBlank
@@ -46,7 +48,10 @@ the dump with the table as `opts.raster` (`pce-sprites.js` gates the sprite
 layer with each row's CR).  The scenes and their witnesses are in
 `docs/RENDERER.md`'s #15 sections.
 Sprite 9-11 are #40's scenes, which close the three gaps REVIEW-12 found in
-the sprite scenes (see below).
+the sprite scenes (see below). Sprite 12 is #42's: 64 sprites in an 8×8
+grid, one per SAT entry, so entries 20-63 are live and entry 63
+(bottom-right) is visible — REVIEW-14's A2 break (a viewer copying only the
+first 20 SAT entries) is reachable, below.
 
 ## The sprite scenes (#12, #40)
 
@@ -154,11 +159,13 @@ testing nothing), `UNEXPECTED` (exit 0 but not a clean pass), and
 Exit 0 only when the baseline is diff 0 on all scenes, all ten breaks are
 DETECTED, and both self-tests hold.
 
-## `check-viewer.js` — the ROM shows the picture (#8, #9, #14)
+## `check-viewer.js` — the ROM shows the picture (#8, #9, #14, #42)
 
-For each `dumps/viewerN/`, `dumps/browserN/` and `dumps/vspriteN/` capture it
+For each `dumps/viewerN/`, `dumps/browserN/`, `dumps/vspriteN/` and
+`dumps/bspriteN/` capture it
 renders the matching scene — `sceneN` for the first two, `spriteN` for
-`vspriteN` — with the renderer (the sprites module when the scene has a
+`vspriteN`/`bspriteN` — with the renderer (the sprites module when the scene
+has a
 `sat.bin`, else the background module) and requires the captured Mednafen
 frame to match it byte for byte, and the captured VRAM/CRAM/static VDC
 registers to match the scene dump — for the sprite scenes also the SATB
@@ -168,7 +175,46 @@ DCR bit-4 DMA carried the SAT. `viewerN` ROMs come from PCEAS
 (`capture.sh N browser`), so #9's export is checked by running its own
 bytes; `vspriteN` ROMs are #14's *viewer* ROMs of the sprite scenes
 (`capture.sh N vsprite`), whose SATB DMA loads the same SAT the sprite
-scene ROMs write directly. Details: [`../docs/EXPORT.md`](../docs/EXPORT.md).
+scene ROMs write directly. #42 adds `bsprite12` (`capture.sh 12 bsprite`,
+the browser export of a sprite scene — REVIEW-14's J1-J3 gap: the browser
+ROM carries the SAT but had never been run on a sprite scene) and
+`viewer7` (`capture.sh 7 viewer`, whose 16384-byte BAT copy crosses the
+8 KiB MPR window). Details: [`../docs/EXPORT.md`](../docs/EXPORT.md).
+
+The #42 extension is `docs/REVIEW-14.md`'s settling evidence, measured on
+these captures with the break re-applied to `tools/viewer.asm` and the
+check run against the mutant capture:
+
+- **A2** (the SAT copy shortened to 80 words, `viewer.asm:249-251`) —
+  **DETECTED** on `vsprite12`: 27496 differing pixels, `vram differs at
+  byte 65184` and `sat.bin differs at byte 160` (entry 20). Every earlier
+  scene used only SAT entries 0-19, which is why REVIEW-14 missed it.
+- **I** (both `cmp #$60` bank-remap checks at `viewer.asm:286,301` made
+  `cmp #$70`) — **DETECTED** on `viewer7` (`vram differs at byte 8192`,
+  frame diff 0: the wrong BAT half is off-screen, so only the VRAM byte
+  equality catches it) and on `vsprite12` (4824 differing pixels and
+  `vram differs at byte 23552`: without the remap, the copy past $6000
+  reads MPR3 — bank 0, the code bank, which the viewer never maps — so
+  the last 16 SG cells hold boot-code bytes and 0xFF fill; the sprites
+  drawn from them change the frame).
+- **B** (the SAT copy grown to 512 words) — **NO-OP**, re-verified on
+  `vsprite12`: the capture is byte-identical to the pristine one (vram,
+  sat, cram, frame all sha256-equal) and the check passes. That is the
+  hardware, not a miss: the SATB DMA transfers exactly the fixed 256
+  words from DVSSR (VDC manual 2.4.2 SATB p. H7-20, DVSSR R13 p. H7-12 —
+  cited in `viewer.asm`), and the CPU's extra 256 writes land at MAWR
+  $8000+, past the 32768-word VRAM, where they are dropped (measured
+  Mednafen behaviour, recorded in `docs/RENDERER.md`; no manual text
+  states the drop). A check cannot DETECT a break the hardware turns
+  into a no-op.
+
+What this does NOT settle (blind spots, all in the REVIEW-14 appendix):
+the second remap site — `viewer.asm:301`, the check between a word's two
+bytes — is still unreachable because every region copy starts
+word-aligned at an even offset, so the straddling-word crossing has no
+witness; and the bank-remap branch is only proven for the two new
+crossing shapes (a 16384-byte BAT, a 9216-byte tile stream), not for
+every size the layout allows.
 
 Two bugs fell out of building the `vsprite` path (#14), both invisible to
 the frame checks and caught only by the VRAM byte equality:
@@ -198,8 +244,13 @@ Builds each sample scene's ROM with `renderer/pce-rom.js` — the module
 build `tools/gen/viewerN.pce` (for the sprite scenes `tools/gen/vspriteN.pce`,
 #14's sample-set extension). Also loads the module through its
 browser-global branch and requires the same bytes. Prints the first differing
-offset if any; exit 0 only if all 14 scenes match. `--write N` writes
-`tools/gen/browserN.pce`, which `capture.sh N browser` runs.
+offset if any; exit 0 only if all 15 pairs match (scene 1-3, sprite 1-12).
+`--write N` writes
+`tools/gen/browserN.pce`, which `capture.sh N browser` runs; `--write
+sprite12` writes `tools/gen/bsprite12.pce` for `capture.sh 12 bsprite`
+(#42: REVIEW-14's J1-J3 were caught only by this byte equality because the
+browser ROM had never been run on a sprite scene — the bsprite12 capture
+closes that gap in `check-viewer.js`).
 
 ## `check-us-card.js` — the US image is the exact bit-reverse (#25)
 
