@@ -95,6 +95,21 @@ def tile_word(scene, t, plane, row):
     every scene.  (An earlier version of this comment said LSB/bit x, which
     the captures contradict; #40, via sprite3's stripes.)
     """
+    if scene in RASTER_BANDS:
+        # #43's bands tiles: tile t is solid colour ((t - 0x040) % 7) + 1 —
+        # palette 0's seven bright hues (RASTER_HUES_CRAM).  32 mod 7 != 0,
+        # so a BYR row shift or a BXR column shift changes which hue each
+        # column shows, and the diagonal colour bands are visible to a
+        # person (REVIEW-15: r3's split and r2's wobble sat on noise).
+        c = ((t - 0x040) % 7) + 1
+        v = 0xFF if (c >> plane) & 1 else 0x00
+        return v if plane in (0, 2) else v << 8
+    if scene in RASTER_STRIPES:
+        # r7's stripes: tile 0x040 transparent (colour 0 -> CRAM[0x000]),
+        # tile 0x041 solid colour 7 — CH0..CH2 = 0xFF, CH3 = 0x00 (the #40
+        # stripes decode, MSB-first).
+        v = 0x00 if t == 0x040 else (0xFF if plane != 3 else 0x00)
+        return v if plane in (0, 2) else v << 8
     if scene == 2:
         # single-pixel checkerboard per plane: 0xAA / 0x55 by parity
         v = 0xAA if ((row + t + plane) & 1) else 0x55
@@ -111,6 +126,13 @@ def tile_word(scene, t, plane, row):
 
 def bat_entry(scene, x, y):
     """BAT word at (x, y): bits 0-11 tile (char code), bits 12-15 palette."""
+    if scene in RASTER_BANDS:
+        # #43's bands BAT: tile (x, y) = 0x040 + (x + 2y) & 31, palette 0 —
+        # diagonal seven-colour bands, non-periodic in both shifts
+        return 0x040 | ((x + 2 * y) & 31)
+    if scene in RASTER_STRIPES:
+        # r7's stripes BAT: transparent left of display column 128
+        return 0x040 if x < 16 else 0x041
     if scene == 3:
         pal = (x + 3 * y) & 0xF
     elif scene in (4, 8):
@@ -1075,6 +1097,39 @@ def raster_grad(s):
     return ((s * 13 + 0x40) & 0x1FF)
 
 
+def raster_ramp(s):
+    """r7/r10's per-line colour value for step s (s = 0..231): the full
+    9-bit linear ramp (s * 511) // 231, 0 -> 511.  Consecutive lines differ
+    (the blue channel steps every ~3 lines, red and green every ~29), so a
+    write one line early or late changes a whole solid region on most rows
+    (REVIEW-15's M10/M11 were 1-2 px per row on r4's noise), and the eye
+    sees a staircase gradient."""
+    return (s * 511) // 231
+
+
+# #43 (REVIEW-15's misses and weak witnesses): palette 0's colours 1..7
+# become seven bright, pairwise-distinct hues — cr_words()'s entries 1..7
+# are nearly-black blues that no eye tells apart.  The bands tiles display
+# colour ((t & 31) % 7) + 1, so the picture is seven-colour diagonal bands;
+# r7's per-line writes ramp CRAM[0x000] (backdrop, left half) and
+# CRAM[0x007] (palette-0 colour 7, right half) — the review's "a colour
+# that covers a large area each line".
+RASTER_HUES_CRAM = {0x001: 0x038, 0x002: 0x1C0, 0x003: 0x007, 0x004: 0x1F8,
+                    0x005: 0x1C7, 0x006: 0x03F, 0x007: 0x1FF}
+RASTER_BANDS = {"r6", "r8", "r9", "r10"}
+RASTER_STRIPES = {"r7"}
+
+
+def scene_cram_words(name):
+    """The colour table a raster scene's ROM boots with: cr_words() plus the
+    scene's overrides (the #43 hues).  gen_raster_asm and raster_json must
+    agree — check.js verifies the save state against baseCram."""
+    words = cr_words()
+    for addr, val in RASTER_SCENES.get(name, {}).get("cram_ov", {}).items():
+        words[addr] = val
+    return words
+
+
 def raster_entries(name):
     if name == "r1":
         return [{"line": L, "byr": 0x1FF} for L in range(160, 233)]
@@ -1088,6 +1143,38 @@ def raster_entries(name):
     if name == "r5":
         return [{"line": 100, "cr": 0x84}, {"line": 160, "cr": 0x44},
                 {"line": 240, "cr": 0xC4}]
+    if name == "r6":
+        # r3's two-step BYR split, on the bands picture (the band edges at
+        # lines 80/160 are visible; band 1 and band 3 scroll alike, band 2
+        # is offset — the top band keeps witnessing the frame-start latch)
+        return [{"line": 80, "byr": 0x30}, {"line": 160, "byr": 8}]
+    if name == "r7":
+        # per-line writes to the two solid regions: left half = backdrop
+        # CRAM[0x000] ramps 0 -> 511, right half = colour 7 CRAM[0x007]
+        # ramps 511 -> 0 — two large-area per-line gradients
+        return [{"line": s + 1,
+                 "cram": [[0x000, raster_ramp(s)],
+                          [0x007, 511 - raster_ramp(s)]]}
+                for s in range(232)]
+    if name == "r8":
+        # r2's wobble, but the chain starts at line 50: rows 1..49 display
+        # the previous frame's last write (wobble(182) = 45), not
+        # raster.base 0 — REVIEW-15's M6 witness (the BXR frame-start
+        # latch).  Under M6 the top 49 rows shift back by 5 columns.
+        return [{"line": s + 50, "bxr": raster_wobble(s)}
+                for s in range(183)]
+    if name == "r9":
+        # r2's wobble on the bands picture; captured with SLSTART=6
+        # SLEND=237 so vdwLine0 = 3 — REVIEW-15's M16 witness (hard-wiring
+        # 1 lands every entry two rows off)
+        return [{"line": s + 1, "bxr": raster_wobble(s)} for s in range(232)]
+    if name == "r10":
+        # per-line writes to CRAM[0x101] — sprite palette 0's colour 1 —
+        # over two solid-pattern sprites (SAT y=104: rows 40..103 and
+        # 40..55): the sprite bodies show the per-line ramp, REVIEW-15's
+        # M19 witness (sprite pixels decoded through the flat CRAM)
+        return [{"line": s + 1, "cram": [[0x101, raster_ramp(s)]]}
+                for s in range(232)]
     raise AssertionError(name)
 
 
@@ -1110,6 +1197,38 @@ RASTER_SCENES = {
     "r5": dict(kind="cr_table", mwr=0x00, bxr=0, byr=0, cr=0xC4, dcr=DCR,
                tiles=[(0x040, 32), (0xF00, 16)], entries=raster_entries("r5"),
                sprites=_sprites((40, 104, 1, 1, 0, 3), (220, 244, 2, 0))),
+    # #43 (REVIEW-15): the same effects on structured tiles, so a person can
+    # see them.  r6/r8/r9/r10 share the bands picture: BAT tile (x, y) =
+    # 0x040 + (x + 2y) & 31, each tile solid colour ((t & 31) % 7) + 1 of
+    # palette 0 — diagonal bands of seven bright hues (RASTER_HUES_CRAM),
+    # where a BYR or BXR change shifts the pattern.  r7 is the #40 stripes
+    # picture (colour 0 left of display column 128, colour 7 right): its
+    # per-line writes ramp CRAM[0x000] and CRAM[0x007], two solid regions
+    # covering the whole screen.  r9 uses r2's wobble table but is captured
+    # with the crop shifted (SLSTART=6) so its vdwLine0 is 3, not 1.
+    "r6": dict(kind="byr_table", mwr=0x00, bxr=0, byr=0, cr=0x84, dcr=DCR,
+               bg="bands", tiles=[(0x040, 32)], entries=raster_entries("r6"),
+               cram_ov=RASTER_HUES_CRAM),
+    "r7": dict(kind="cram_dual", mwr=0x00, bxr=0, byr=0, cr=0x84, dcr=DCR,
+               bg="stripes", tiles=[(0x040, 2)], entries=raster_entries("r7"),
+               cram_ov=RASTER_HUES_CRAM),
+    "r8": dict(kind="bxr_table", mwr=0x00, bxr=0, byr=0, cr=0x84, dcr=DCR,
+               bg="bands", tiles=[(0x040, 32)], entries=raster_entries("r8"),
+               cram_ov=RASTER_HUES_CRAM),
+    "r9": dict(kind="bxr_table", mwr=0x00, bxr=0, byr=0, cr=0x84, dcr=DCR,
+               bg="bands", tiles=[(0x040, 32)], entries=raster_entries("r9"),
+               cram_ov=RASTER_HUES_CRAM),
+    # r10: bands picture + two solid-pattern sprites (SPBG=1, sprite palette
+    # 0, every visible pixel colour 1 -> CRAM[0x101], which the chain ramps
+    # per line).  s0 is a 16x64 at SAT x=72 y=104 (display cols 40..55,
+    # rows 40..103), s1 a 16x16 at x=182 y=104 (cols 150..165, rows
+    # 40..55) — the per-line colour writes are visible on both sprite
+    # bodies, over the opaque bands picture.
+    "r10": dict(kind="cram_sprite", mwr=0x00, bxr=0, byr=0, cr=0xC4,
+                dcr=DCR, bg="bands", tiles=[(0x040, 32)],
+                entries=raster_entries("r10"), cram_ov=RASTER_HUES_CRAM,
+                sprites=_sprites((72, 104, 0, 1, 0, 3), (182, 104, 0, 1, 0, 0)),
+                solid_sprites=True),
 }
 
 
@@ -1119,12 +1238,13 @@ def gen_raster_asm(name):
     s = RASTER_SCENES[name]
     entries = s["entries"]
     n = len(entries)
-    cram = cr_words()
+    cram = scene_cram_words(name)
     cram_lo = [w & 0xFF for w in cram]
     cram_hi = [(w >> 8) & 1 for w in cram]
 
-    tile_bytes, regions = tile_region_bytes(1, s["tiles"])
-    bat_bytes = bat_bytes_full(1, 32, 32)
+    bg_scene = name if (name in RASTER_BANDS or name in RASTER_STRIPES) else 1
+    tile_bytes, regions = tile_region_bytes(name, s["tiles"])
+    bat_bytes = bat_bytes_full(bg_scene, 32, 32)
 
     sprites = s.get("sprites")
     if sprites:
@@ -1144,6 +1264,7 @@ def gen_raster_asm(name):
 
     # the step's write values (raster_json() emits the same values as the
     # JSON entries — one source of truth, two consumers)
+    step2_lo = step2_hi = []
     if s["kind"] in ("byr_const", "byr_table"):
         step_lo = [e["byr"] & 0xFF for e in entries]
         step_hi = [(e["byr"] >> 8) & 0xFF for e in entries]
@@ -1156,6 +1277,12 @@ def gen_raster_asm(name):
     elif s["kind"] == "cram_seq":
         step_lo = [e["cram"][0][1] & 0xFF for e in entries]
         step_hi = [(e["cram"][0][1] >> 8) & 0xFF for e in entries]
+    elif s["kind"] in ("cram_dual", "cram_sprite"):
+        step_lo = [e["cram"][0][1] & 0xFF for e in entries]
+        step_hi = [(e["cram"][0][1] >> 8) & 0xFF for e in entries]
+        if s["kind"] == "cram_dual":
+            step2_lo = [e["cram"][1][1] & 0xFF for e in entries]
+            step2_hi = [(e["cram"][1][1] >> 8) & 0xFF for e in entries]
     else:
         raise AssertionError(s["kind"])
 
@@ -1254,6 +1381,40 @@ def gen_raster_asm(name):
         out.append("        st2 #$20")
         out.append(SG_FORMULA_ASM % nblocks)
         out.append("")
+        if s.get("solid_sprites"):
+            # #43 r10: overwrite the cells the sprites READ (CGY blocks sit
+            # 2 apart) with a solid colour-1 pattern — SG0 = sixteen 0xFFFF
+            # words, SG1..SG3 = zero — so every visible pixel reads sprite
+            # palette 0's colour 1, CRAM[0x101], the entry the chain ramps
+            # per line (REVIEW-15's M19: visible sprites under per-line
+            # colour writes).
+            for spr, base in zip(sprites, bases):
+                h = [16, 32, 64, 64][spr["cgy"]]
+                for cell in [base + 2 * k for k in range(h // 16)]:
+                    lo = (cell * 64) & 0xFF
+                    hi = (cell * 64) >> 8
+                    out.append(f"        ; solid pix=1 pattern: SG cell "
+                               f"${cell:03x} (VRAM ${cell * 64:04x})")
+                    out.append("        st0 #$00")
+                    out.append(f"        st1 #${lo:02x}")
+                    out.append(f"        st2 #${hi:02x}")
+                    out.append("        st0 #$02")
+                    out.append("        clx")
+                    out.append(f"solid{cell:03x}:")
+                    out.append("        cpx #16")
+                    out.append(f"        bcs solid{cell:03x}z")
+                    out.append("        lda #$ff")
+                    out.append("        sta $0002")
+                    out.append("        sta $0003")
+                    out.append(f"        bra solid{cell:03x}n")
+                    out.append(f"solid{cell:03x}z:")
+                    out.append("        stz $0002")
+                    out.append("        stz $0003")
+                    out.append(f"solid{cell:03x}n:")
+                    out.append("        inx")
+                    out.append("        cpx #64")
+                    out.append(f"        bne solid{cell:03x}")
+                    out.append("")
         out.append("        ; SAT: 64 entries at VRAM 0x7F00 (DVSSR); the SATB")
         out.append("        ; DMA (DCR bit 4) copies it into the SATB every VBlank")
         out.append("        st0 #$00")
@@ -1327,6 +1488,28 @@ def gen_raster_asm(name):
         out.append("        adc #$00")
         out.append("        and #$01")
         out.append("        sta $0405")
+    elif s["kind"] == "cram_dual":
+        out.append("        stz $0402               ; CTA = 0x000 (backdrop entry,")
+        out.append("        stz $0403               ; the left half's colour)")
+        out.append("        lda r_step_lo, X")
+        out.append("        sta $0404")
+        out.append("        lda r_step_hi, X")
+        out.append("        sta $0405")
+        out.append("        lda #$07                ; CTA = 0x007 (palette 0 colour 7,")
+        out.append("        sta $0402               ; the right half's colour)")
+        out.append("        stz $0403")
+        out.append("        lda r_step2_lo, X")
+        out.append("        sta $0404")
+        out.append("        lda r_step2_hi, X")
+        out.append("        sta $0405")
+    elif s["kind"] == "cram_sprite":
+        out.append("        lda #$01                ; CTA = 0x101 (sprite palette 0's")
+        out.append("        sta $0402               ; colour 1 — the sprites' body)")
+        out.append("        sta $0403")
+        out.append("        lda r_step_lo, X")
+        out.append("        sta $0404")
+        out.append("        lda r_step_hi, X")
+        out.append("        sta $0405")
     else:
         out.append("        st0 #$" + {"byr_const": "08", "byr_table": "08",
                                       "bxr_table": "07",
@@ -1390,6 +1573,10 @@ def gen_raster_asm(name):
     out += emit_byte_table("r_step_lo", bytes(step_lo))
     out += emit_byte_table("r_step_hi", bytes(step_hi))
     out.append("")
+    if step2_lo:
+        out += emit_byte_table("r_step2_lo", bytes(step2_lo))
+        out += emit_byte_table("r_step2_hi", bytes(step2_hi))
+        out.append("")
     return "\n".join(out)
 
 
@@ -1407,7 +1594,7 @@ def raster_json(name):
                  "and the chain live in tools/genroms.py (gen_raster_asm)"),
         "base": {"bxr": s["bxr"], "byr": s["byr"], "cr": s["cr"],
                  "dcr": s["dcr"]},
-        "baseCram": cr_words(),
+        "baseCram": scene_cram_words(name),
         "entries": [dict(e, rcr=0x40 + e["line"]) for e in s["entries"]],
     }
 
@@ -1621,7 +1808,8 @@ def main():
         for e in entries:
             kinds.update(k for k in ("bxr", "byr", "cr", "cram") if k in e)
         want = {"byr_const": {"byr"}, "bxr_table": {"bxr"}, "byr_table": {"byr"},
-                "cram_seq": {"cram"}, "cr_table": {"cr"}}[s["kind"]]
+                "cram_seq": {"cram"}, "cr_table": {"cr"},
+                "cram_dual": {"cram"}, "cram_sprite": {"cram"}}[s["kind"]]
         assert kinds == want, (name, kinds, want)
         for e in entries:
             assert all(0 <= a < 512 and 0 <= v < 512

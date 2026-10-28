@@ -9,7 +9,8 @@ SCENES := 1 2 3 4 5 6 7 8 8b 8c 9
 SPRITES := 1 2 3 4 5 6 7 8 9 10 11 12
 # #15's raster-scene ROMs (genroms.py's RASTER_SCENES): per-scanline BXR/
 # BYR/CR/VCE-colour-table writes chained off the RCR line interrupt.
-RASTERS := 1 2 3 4 5
+# 6-10 are #43's (REVIEW-15's misses on structured tiles).
+RASTERS := 1 2 3 4 5 6 7 8 9 10
 # The viewer ROMs exist for the pictures that have a regions.json (scenes
 # 1-3, the #8/#9 samples, and scene 7 since #42 added its regions.json —
 # its 128x64 BAT crosses the 8 KiB MPR2 window, REVIEW-14 break I;
