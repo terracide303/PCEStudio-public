@@ -15,6 +15,7 @@ node tests/check-editor.js      # the editor's refusals, picture, export and cap
 node tests/check-psg.js         # the PSG model vs 11 Mednafen recordings, sample for sample (#34, #63)
 node tests/check-wave.js        # the wave editor's export vs PCEAS and Mednafen (#35, #62)
 node tests/check-hutrack.js     # #35: the vendored HuTrack ROM's recording carries the DMF's melody
+node tests/check-dmf.js         # #35: our DMF reader + the JS HuTrack player vs the same recording
 node tests/psg-mutation.js      # #63: REVIEW-34's 15 breaks must all be DETECTED
 ```
 
