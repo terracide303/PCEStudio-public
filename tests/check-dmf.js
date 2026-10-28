@@ -4,7 +4,9 @@
  *
  * NOTE: written by @design, the seat that wrote the reader, the player and
  * this file.  Workshop RULES.md rule 2: @review owes it a cold break before
- * its evidence closes anything.
+ * its evidence closes anything.  Section 2b was added by @test under #72 to
+ * close REVIEW-35's two MISSED breaks (M05, M06); tests/music-mutation.js
+ * re-runs the breaks @review chose and requires this check to catch them.
  *
  * What it checks, and against what:
  *
@@ -29,6 +31,20 @@
  *     both are right).  Songs that need effects, arpeggios, PCM or a
  *     non-1 time base must be refused by code, not played wrongly.
  *
+ *  2b. The envelopes in motion (#72).  REVIEW-35 (docs/REVIEW-35.md) broke
+ *     the player thirteen ways and this check MISSED two: M05, the volume
+ *     envelope's loop, and M06, the waveform envelope, because demo.dmf
+ *     carries one-step held envelopes whose loop branch is never entered.  A
+ *     second, legal song — the same channel-0 notes with a four-step looping
+ *     volume envelope and a three-waveform looping waveform envelope — is
+ *     traced, and each frame's writes are compared with the sequence
+ *     transcribed from the engine (HuTrack_parser.asm Channel.waveformEnv,
+ *     Channel.volumeEnv and Process.envelopes).  The fixture self-checks
+ *     refuse a fixture that can no longer tell the two breaks apart, so a
+ *     later weakening fails here instead of passing quietly.
+ *     tests/music-mutation.js re-runs M05 and M06 and requires this check to
+ *     fail on both.
+ *
  *  3. The rendered audio against the Mednafen recording.  The model is
  *     built from the same DMF and replayed through renderer/pce-psg.js;
  *     compared with tests/dumps/hutrack1/mednafen.wav: the first note's
@@ -51,6 +67,25 @@
  *   - hardware.  The witness is Mednafen's pce_fast recording.
  *   - that the DMF round-trips through Furnace (it has not been opened
  *     there; see docs/HUTRACK.md).
+ *   - that 2b proves the READER.  Its song is an object built from this
+ *     reader's output for demo.dmf, not a DMF file, so it proves the player's
+ *     envelope semantics; no DMF containing a looping envelope is ever
+ *     played here (tests/dumps/hutrack2 has one, but the player refuses that
+ *     song for its arpeggio and effect columns).  hutrack2's loop field is
+ *     witnessed indirectly, by check-export-song's converter comparison.
+ *   - the console, for 2b.  Its expected sequence is transcribed from the
+ *     engine's source; no Mednafen recording exercises a looping volume
+ *     envelope or a moving multi-waveform envelope at these values — which
+ *     is why REVIEW-35 had to use a probe.  An envelope error that leaves
+ *     the written value unchanged is out of reach.
+ *   - the upload's last control write.  The first-note block below asserts
+ *     this port's $40|vol (DDA on, channel off) as the wave upload's final
+ *     write; HuTrack_parser.asm `.copy.wave` line 1606 (`sty $804` after the
+ *     DMA) writes $80|delta — channel on at the PREVIOUS level — and
+ *     volumeEnv's own write follows it.  The two differ for the cycles
+ *     between them.  2b deliberately does not assert that byte (it compares
+ *     the 32 wave steps and the frame's volume step), so it stays valid if
+ *     the control sequence is corrected.  Reported, not fixed, by #72.
  */
 
 "use strict";
@@ -396,6 +431,129 @@ function checkPlayer() {
               "song-note", "a note above HuTrack's range");
 }
 
+/* ---- 2b. the envelopes in motion (#72, REVIEW-35 M05/M06) --------------- */
+
+/* demo.dmf's one instrument has {size:1, data:[31], loop:$FF} and
+ * {size:1, data:[0], loop:$FF}: no loop branch is ever entered, so forcing
+ * "never loop" (M05) or "never consult the envelope" (M06) is invisible.
+ *
+ * The fixture keeps the song's channel-0 notes and gives instrument 0 a
+ * four-step volume envelope that loops to step 1, and a three-waveform
+ * envelope that walks waves 0,1,2 and loops to 0.  Channels 1-5 are emptied
+ * so every write in the fixture is channel 0's, which makes "the frame's
+ * last channel-0 R4 write" unambiguous.  The values are chosen so that a
+ * loop writes a level and a waveform different from the ones a hold would
+ * keep (asserted below), which is what makes M05 and M06 visible. */
+function envelopeFixture(base) {
+  const f = JSON.parse(JSON.stringify(base));
+  const emptyRow = () => ({ note: null, octave: 0, volume: null,
+                            effects: [], fxSlots: [], instrument: null });
+  for (let ch = 1; ch < 6; ch++)
+    f.patterns[ch] = f.patterns[ch].map((pattern) => pattern.map(emptyRow));
+  f.instruments[0].volumeEnv = { size: 4, data: [31, 20, 10, 0], loop: 1 };
+  f.instruments[0].wavetableEnv = { size: 3, data: [0, 1, 2], loop: 0 };
+  f.wavetables = [
+    Array.from({ length: 32 }, (_, i) => i),            /* the DMF's ramp */
+    Array.from({ length: 32 }, (_, i) => 31 - i),
+    Array.from({ length: 32 }, (_, i) => (i * 7) % 32)
+  ];
+  return f;
+}
+
+function checkEnvelopes() {
+  console.log("player — the envelopes in motion (#72: a looping volume " +
+              "envelope and a looping waveform envelope)");
+  const fix = envelopeFixture(mod);
+
+  /* A fixture that drifts into a state the break cannot change would make
+   * the assertions below pass without proving anything.  Refuse that here. */
+  let legal = true;
+  try { songPlayer.checkSong(fix); } catch (e) { legal = false; }
+  check(legal, "fixture: the player accepts the song (checkSong)");
+  const ve = fix.instruments[0].volumeEnv;
+  const we = fix.instruments[0].wavetableEnv;
+  check(ve.size > 1 && ve.loop !== 0xff && ve.loop < ve.size &&
+        ve.data[ve.loop] !== ve.data[ve.size - 1],
+        `fixture: the volume envelope has ${ve.size} steps and loops to step ` +
+        `${ve.loop} (${ve.data[ve.loop]}), and its last step is ` +
+        `${ve.data[ve.size - 1]} — so a loop and a hold write different levels`);
+  check(we.size > 1 && we.loop !== 0xff && we.loop < we.size &&
+        we.data[we.loop] !== we.data[we.size - 1],
+        `fixture: the waveform envelope has ${we.size} waves and loops to ` +
+        `wave ${we.data[we.loop]}, and its last wave is ` +
+        `${we.data[we.size - 1]} — so a loop re-uploads a different waveform`);
+  check(new Set(ve.data).size === ve.size && new Set(we.data).size === we.size,
+        "fixture: every envelope step is a distinct value");
+  check(new Set(fix.wavetables.map((w) => w.join(","))).size ===
+        fix.wavetables.length &&
+        we.data.every((w) => fix.wavetables[w]),
+        `fixture: ${fix.wavetables.length} distinct waveforms, all referenced`);
+
+  const t = songPlayer.trace(fix, { count: 60 });
+
+  /* Channel 0's writes in one frame, in order; register 0 selects. */
+  function channel0(f) {
+    const out = [];
+    let selected = -1;
+    for (const e of t.events) {
+      if (e.f !== f) continue;
+      if (e.reg === 0) { selected = e.value; continue; }
+      if (selected === 0) out.push(e);
+    }
+    return out;
+  }
+
+  /* Transcribed from the engine, not from this port.  The note starts on
+   * frame 6 and the next one on frame 54.
+   *
+   *   Channel.waveformEnv: idx past the end with repeat != $FF reloads
+   *   idx = repeat and reads data[idx]; the wave is uploaded only when it
+   *   differs from uploadedWaveform.  Frames 6,7,8 select waves 0,1,2; frame
+   *   9 finds idx 3 >= 3, repeat 0, and selects wave 0 again.
+   *
+   *   Channel.volumeEnv: the same reload.  Frames 6..9 read data[0..3] =
+   *   31,20,10,0; frame 10 finds idx 4 >= 4, repeat 1, and reads data[1] =
+   *   20, then 10, 0, 20, ...  Math.volume is floor(31 * value / 31).
+   *
+   *   Process.envelopes runs SetFrequency, then waveformEnv, then
+   *   volumeEnv, so the frame's last channel-0 R4 write is the volume
+   *   envelope's value | $80. */
+  const table = [
+    [6, 0, 31], [7, 1, 20], [8, 2, 10], [9, 0, 0],
+    [10, 1, 20], [11, 2, 10], [12, 0, 0], [13, 1, 20],
+    [14, 2, 10], [15, 0, 0], [16, 1, 20], [17, 2, 10]
+  ];
+  let waveBad = null, volBad = null;
+  for (const [f, wave, vol] of table) {
+    const writes = channel0(f);
+    const steps = writes.filter((e) => e.reg === 6).map((e) => e.value);
+    const want = fix.wavetables[wave].map((v) => v & 0x1f);
+    if (!waveBad && (steps.length !== want.length ||
+                     !steps.every((v, i) => v === want[i])))
+      waveBad = `frame ${f}: expected the 32 steps of wave ${wave}, got ` +
+        (steps.length ? `${steps.length} step(s) starting at ${steps[0]}`
+                      : "no wave writes — the envelope was not consulted");
+    const r4 = writes.filter((e) => e.reg === 4);
+    const last = r4.length ? r4[r4.length - 1].value : null;
+    if (!volBad && last !== (vol | 0x80))
+      volBad = `frame ${f}: expected level ${vol} ` +
+        `($${(vol | 0x80).toString(16)}), ` +
+        (last === null ? "got no volume write"
+                       : `got level ${last & 0x1f} ($${last.toString(16)})`);
+  }
+  if (waveBad)
+    fail(`the waveform envelope walks waves 0,1,2 and loops to 0 — ${waveBad}`);
+  else
+    ok("the waveform envelope walks waves 0,1,2,0,... and re-uploads each " +
+       "(frames 6-17)");
+  if (volBad)
+    fail("the volume envelope loops back to step 1 instead of holding its " +
+         `last value — ${volBad}`);
+  else
+    ok("the volume envelope walks 31,20,10,0 and loops back to step 1 " +
+       "(20,10,0,...; frames 6-17)");
+}
+
 /* ---- 3. the audio ------------------------------------------------------- */
 
 const rendered = songPlayer.render(mod, psg, { count: 430 });
@@ -524,6 +682,7 @@ function checkAudio() {
 
 checkReader();
 checkPlayer();
+checkEnvelopes();
 checkAudio();
 
 console.log(failures ? `\n${failures} failure(s)` : "\nall checks passed");

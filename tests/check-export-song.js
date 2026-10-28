@@ -28,10 +28,29 @@
  *   4. Every refusal has its code, and the small assembler refuses what it
  *      cannot lay out truthfully.
  *
+ *   5. The engine image is copied whole (#72, REVIEW-35's M11).  Check 2
+ *      compares the ROM against renderer/hutrack-engine.bin, whose banks
+ *      $02-$07 and $0A-$0F are 0xff filler, so a buildSongRom that copied
+ *      only 15 of the 16 banks produced byte-identical ROMs (M11).  Check 5
+ *      drives buildSongRom with a synthetic 16-bank engine whose every bank,
+ *      including $0F, carries data, and requires the ROM's first sixteen
+ *      banks to be that engine byte for byte.  It needs no PCEAS and no
+ *      Python.  Its fixture self-checks refuse an engine whose tail bank is
+ *      filler, so the assertion cannot go quiet by losing its witness.
+ *      tests/music-mutation.js re-runs M11 and requires this check to fail.
+ *
  * NOTE: written by @design, the seat that wrote the converter and the
  * assembler.  Under workshop RULES.md rule 2 it is not proof of itself —
  * @review owes it a cold break (wrong mask bits, a skipped empty run, an
- * omitted include, a wrong byte order), before this card can close.
+ * omitted include, a wrong byte order), before this card can close.  Check 5
+ * was added by @test under #72, after REVIEW-35 ran that break and this
+ * check stayed green.
+ *
+ * Check 5 does NOT prove that the committed engine image uses its tail bank
+ * — it does not (bank $0F is 0xff filler) — so the witness is a synthetic
+ * image, not a real engine build.  It proves the copy is whole; it does not
+ * prove that anything plays from bank $0F, and no recording exercises a song
+ * whose engine data lives there.
  *
  * Needs no PCEAS and no Python for checks 1 and 4; check 2's witness is
  * skipped (reported, not passed) when PCEAS 4.x is unavailable.
@@ -337,6 +356,66 @@ function checkAssembler() {
         `references included (${Array.from(bank).join(",")})`);
 }
 
+/* ---- 5. the engine image is copied whole (#72, REVIEW-35's M11) -------- */
+
+/* The one committed engine image uses banks $00, $01, $08 and $09; every
+ * other bank is 0xff filler.  A fifteen-bank copy is therefore
+ * indistinguishable from a whole copy in check 2, which is exactly what
+ * REVIEW-35's M11 showed.  This assertion needs an engine whose tail bank is
+ * in use, so it builds one: every bank distinct, bank $0F carrying data. */
+function checkEngineCopy() {
+  console.log("engine copy — buildSongRom takes all 16 banks, tail included");
+  const banks = romlib.ENGINE_BANKS;
+  const engine = new Uint8Array(banks * BANK);
+  for (let b = 0; b < banks; b++)
+    for (let i = 0; i < BANK; i++)
+      engine[b * BANK + i] = (b * 31 + i * 17 + 1) & 0xff;
+  const tail = engine.subarray((banks - 1) * BANK);
+
+  check(tail.some((v) => v !== 0xff),
+        `fixture: engine bank $${(banks - 1).toString(16)} carries data ` +
+        `(${tail.filter((v) => v !== 0xff).length} of ${BANK} bytes are not ` +
+        `0xff, so a lost tail is visible)`);
+  check(new Set(Array.from({ length: banks }, (_, b) =>
+          engine.subarray(b * BANK, (b + 1) * BANK).join(","))).size === banks,
+        `fixture: all ${banks} engine banks are distinct, so each copy ` +
+        `misplacement is visible`);
+
+  const song = new Uint8Array(BANK);
+  for (let i = 0; i < BANK; i++) song[i] = (i * 5 + 3) & 0xff;
+  const rom = romlib.buildSongRom({ engine: engine, song: song });
+  check(rom.length === romlib.ROM_BANKS * BANK,
+        `the ROM is ${romlib.ROM_BANKS} banks (${rom.length} B)`);
+
+  let diff = -1;
+  for (let i = 0; i < engine.length; i++)
+    if (rom[i] !== engine[i]) { diff = i; break; }
+  check(diff < 0,
+        `buildSongRom copies all ${banks} engine banks — first difference: ` +
+        (diff < 0 ? "none"
+                  : `byte ${diff} (bank ${diff / BANK | 0}, offset ${diff % BANK})`));
+
+  /* Name the tail in its own assertion: a truncation must fail on the bank
+   * the committed image cannot reach. */
+  let tailDiff = -1;
+  for (let i = 0; i < BANK; i++)
+    if (rom[(banks - 1) * BANK + i] !== tail[i]) { tailDiff = i; break; }
+  check(tailDiff < 0,
+        `engine bank $${(banks - 1).toString(16)} (the tail) lands at byte ` +
+        `${(banks - 1) * BANK} — first difference: ` +
+        (tailDiff < 0 ? "none" : String(tailDiff)));
+
+  const at = romlib.SONG_BANK * BANK;
+  let songBad = -1;
+  for (let i = 0; i < song.length; i++)
+    if (rom[at + i] !== song[i]) { songBad = i; break; }
+  const after = rom.subarray(at + song.length);
+  check(songBad < 0 && !after.some((v) => v !== 0xff),
+        `the song lands at bank $${romlib.SONG_BANK.toString(16)} and the ` +
+        `rest of the ROM is 0xff` +
+        (songBad < 0 ? "" : ` (first difference: ${songBad})`));
+}
+
 /* ---- run ---------------------------------------------------------------- */
 
 const songs = SONGS;
@@ -352,6 +431,7 @@ for (const song of songs) {
 checkAgainstPceas(songs, built);
 checkRefusals(songs, mods);
 checkAssembler();
+checkEngineCopy();
 
 console.log(failures ? `\n${failures} failure(s)` : "\nall checks passed");
 process.exit(failures ? 1 : 0);

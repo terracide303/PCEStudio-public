@@ -145,6 +145,22 @@ What `node tests/check-dmf.js` proves:
   phase-sensitive (same for C4 against C3). Model peak 13,536 vs the
   recording's 13,299.
 
+- **The envelopes in motion (#72).**  demo.dmf's one instrument has a
+  one-step, held volume envelope and a one-wave, held waveform envelope, so
+  the loop branches are never entered; REVIEW-35's M05 (never loop) and M06
+  (never consult the waveform envelope) therefore passed the check above.
+  A second legal song — the same channel-0 notes with a four-step volume
+  envelope that loops to step 1 (`[31,20,10,0]`) and a three-waveform
+  envelope that walks 0,1,2 and loops to 0 — is traced frame by frame: each
+  frame's 32 wave steps must be the selected waveform's, and its last R4
+  write must be the envelope's level (`$9F` 31 at frame 6, then `$94` 20,
+  `$8A` 10, `$80` 0, and `$94` again at frame 10 after the loop).  The
+  expected sequence is transcribed from `HuTrack_parser.asm`
+  (`Channel.waveformEnv`, `Channel.volumeEnv`, `Process.envelopes`), not
+  from the port, and fixture self-checks refuse a fixture whose loop writes
+  the value a hold would have kept.  `node tests/music-mutation.js` re-runs
+  M05, M06 and M11 and requires each check to fail.
+
 Measured limitation, not hidden: **this is not sample-for-sample equality.**
 The engine writes inside the VBlank IRQ, so each write's cycle offset comes
 from the IRQ entry latency, the 7 kHz timer IRQ and the engine's instruction
@@ -225,6 +241,14 @@ was written.
   `song-volume`, `song-note`, `song-effect` (code > 1 byte; a waveform index
   the song lacks), `song-arp`, `song-instrument`, `song-name`; and for the
   assembler `song-bank`, `song-label`, `song-value`, `song-syntax`.
+- **The engine image is copied whole (#72).**  The comparison above is
+  against the one committed engine, whose banks `$02-$07` and `$0A-$0F` are
+  `0xff` filler, so a `buildSongRom()` that copied only fifteen banks stayed
+  byte-identical (REVIEW-35's M11).  The check now also drives
+  `buildSongRom()` with a synthetic 16-bank engine whose every bank,
+  including `$0F`, carries data, and requires the ROM's first sixteen banks
+  to equal it byte for byte — and its fixture self-checks refuse an engine
+  whose tail bank is filler.  No PCEAS and no Python needed.
 - **The assembler's own semantics**: labels resolve to bank-relative CPU
   addresses (`$4000 + offset`) and a forward `.dw` reference resolves.
 
@@ -288,7 +312,24 @@ Not proven here:
 - **The engine image is a committed copy of PCEAS's banks $00-$0F.**  It goes
   stale if `tools/hutrack.asm` or the vendored engine changes without
   `make -C tools engine`; `check-export-song.js` catches that when PCEAS 4.x
-  is present, and cannot when it is not (the check reports `skip`).
+  is present, and cannot when it is not (the check reports `skip`).  Its
+  bank `$0F` is `0xff` filler, so "the tail is copied" (#72) is proven
+  against a synthetic engine image, not against a ROM any song builds.
+- **The #72 envelope fixture is a song object, not a DMF file.**  It is built
+  from this reader's output for demo.dmf, so it proves the player's envelope
+  semantics; no DMF containing a looping envelope is ever played here
+  (hutrack2 has one, but the player refuses that song for its arpeggio and
+  effect columns).  Its expected writes are transcribed from the engine's
+  source: no Mednafen recording reaches a looping volume envelope or a
+  moving multi-waveform envelope at these values.
+- **The wave upload's last control write differs between the port and the
+  engine's source.**  The first-note assertion encodes the port's `$40|vol`
+  (DDA on, channel off); `HuTrack_parser.asm` `.copy.wave` line 1606
+  (`sty $804` after the DMA) writes `$80|delta`, i.e. channel on at the
+  previous level.  The two differ only for the cycles before `volumeEnv`
+  writes the frame's level, and no measured sample was found to change, but
+  it is not adjudicated here: #72's new assertions deliberately do not
+  assert that byte, so they stay valid if the sequence is corrected.
 - **Effect columns, arpeggio envelopes, DDA samples, SFX, LFO and the music
   fade** are refused by the player, not implemented. The engine supports
   them; the converter emits effect-column data (song 2 exercises it), but
