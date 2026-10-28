@@ -124,3 +124,11 @@ docs/MANUALS.md found two promises in SPEC.md the hardware set does not keep (GA
 #8 closes on Mednafen and ares agreeing pixel for pixel; no real-console photo ("it's ok in 2 emulators, I'm sure
 it will run on the PCE"). A real console is asked for once, when the scanline effects (#16) run, since per-line
 timing is where emulators and hardware most often differ.
+
+## 2026-10-28 — HuC is vendored, licence later (Dennis)
+
+Dennis: "just copy it inside, we'll fix licences later". The maintained HuC (pce-devel/huc, commit in
+`vendor/huc/VENDORED.md`) is now in `vendor/huc/`, unchanged, minus `pic/` (commercial game screenshots). This
+replaces the 2026-10-27 rule that PCEAS stays an external tool. PCEStudio is **private**; before it is ever made
+public the HuC copy needs a settled licence or must be removed with its history. #54 builds PCEAS from this copy;
+#31 weighs compiling toys through HuC's C compiler.
