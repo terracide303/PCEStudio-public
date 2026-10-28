@@ -186,3 +186,15 @@ hand-off, PCM samples and fades. Songs are made in Furnace and saved as DMF. The
 the same DMF that plays through `renderer/pce-psg.js` and must sound the same as HuTrack on the console (Mednafen
 recording, compared numerically). HuTrack's example songs are arrangements of commercial games' music and are **not**
 brought into this repo.
+
+## 2026-10-28 — HuVGM will be supported when it is released (Dennis, to turboxray)
+
+turboxray (author of HuTrack) asked on Discord that PCEStudio allow **HuVGM** for music and sound; Dennis said yes.
+HuVGM is not public yet: turboxray plans a first release with docs and specs, plus a custom Furnace build with a
+nicer VGM export (not required). Until then HuTrack stays the console player; when HuVGM is out, it becomes a
+second route for songs (Furnace → VGM → HuVGM), card #65.
+
+turboxray also described how he built shmup levels: a small **byte-interpreted script** language (VRAM events,
+enemy placement and patterns, palette fades, scroll speeds) running on top of the engine, as some old RPGs did.
+That is a third route for #31 next to compiling the IL: interpret IL bytecode in the ROM. It trades speed for size
+and simplicity, and suits level and event scripts more than per-line raster code.
