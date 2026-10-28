@@ -33,9 +33,9 @@ Progress tab is drawn from these tables.
 | Part | Status | How we know | Where |
 |---|---|---|---|
 | Sprites in the renderer | PROVEN | `node tests/check.js`: 11 sprite scenes diff 0; breaker's 24 mutants all detected | #12, #40 — `renderer/pce-sprites.js` |
-| Viewer loads sprites (SATB DMA) | BROKEN | in progress. Dennis's web-emulator test, 2026-10-28: vsprite1 matches sprite1 by eye; vsprite3 shows a white background where the renderer reference has a red right half (same in Mednafen, `tests/dumps/vsprite3`) | #14 |
+| Viewer loads sprites (SATB DMA) | PROVEN | `node tests/check-viewer.js`: 17 captures (viewer1-3, browser1-3, vsprite1-11) diff 0 against the renderer, VRAM/CRAM/SATB equal the scene dumps; vsprite3's missing red half (found by Dennis) fixed. Breaker from another seat running | #14 |
 | Sprite editor + SATB in export | UNTESTED | | #13 |
-| Scanline scroll and palette changes | UNTESTED | | #15, #16 |
+| Scanline scroll and palette changes | UNTESTED | in progress (DeepSeek trial of an Opus card) | #15, #16 |
 | Wide modes (256/336/512) | UNTESTED | | #27 |
 
 ## Phases 3–6
