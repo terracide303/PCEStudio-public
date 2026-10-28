@@ -21,8 +21,8 @@ Starting Mednafen 1.32.1
     Failed: Error opening file "/Users/dennisschauw/.mednafen/pgconfig/effect1.pce.cfg" for reading: No such file or directory
 
    ROM:       40KiB
-   ROM CRC32: 0x20456461
-   ROM MD5:   0x4c3dcd45265ee26d19ad6f20a0575069
+   ROM CRC32: 0x03f5a669
+   ROM MD5:   0xd0ff56178f5d89467e00deb063ae3d18
    PSG Revision: HuC6280
 
   Loading custom palette from "/Users/dennisschauw/.mednafen/palettes/pce.pal"...

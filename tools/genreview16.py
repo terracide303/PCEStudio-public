@@ -26,17 +26,27 @@ both words; and the two-word kind's hard-coded second CTA address (0x007,
 which raster7 wants) changed to 0x1F0 to match r11's table.  The
 exact-once assertions below refuse to run if that generated code moves.
 
-Usage (tools/genroms.py and tools/genviewer.py are not modified — r11 lives
-in this file so the #68 work does not touch a file another card is editing):
+#69 adds a second scene, r12: r11's table with the second CRAM word moved to
+CRAM[0x000] — the backdrop cell the line's first pixels use — so the write's
+line timing is visible in the frame, and with its values capped at 224 so the
+*scene* ROM's own (one-pixel-late) high-byte store is a 0-over-0 no-op.  That
+is the visible-second-word fixture #68 could not ship; r12_scene()'s docstring
+has the measurements.  Both scenes share the machinery here — the scene's op
+template from genroms.py's cram_dual kind, with exactly-once patches for the
+frame-counter add and the CTA addresses.
 
-    python3 -I tools/genreview16.py                write gen/raster11.asm
-                                                   and gen/raster11.raster.json
-    python3 -I tools/genreview16.py --build        also assemble
-                                                   gen/raster11.pce (pceas)
-    python3 -I tools/genreview16.py --viewer       also build gen/vraster11
-                                                   from tests/dumps/raster11
-                                                   (after that scene capture)
-    python3 -I tools/genreview16.py --all          both, in that order
+Usage (tools/genroms.py and tools/genviewer.py are not modified — r11/r12
+live in this file so the #68/#69 work does not touch a file another card is
+editing).  The scene name defaults to r11:
+
+    python3 -I tools/genreview16.py [r11|r12]       write gen/rasterN.asm
+                                                    and gen/rasterN.raster.json
+    python3 -I tools/genreview16.py r11 --build     also assemble
+                                                    gen/raster11.pce (pceas)
+    python3 -I tools/genreview16.py r12 --viewer    also build gen/vraster12
+                                                    from tests/dumps/raster12
+                                                    (after that scene capture)
+    python3 -I tools/genreview16.py r12 --all       both, in that order
 """
 
 import os
@@ -48,6 +58,42 @@ OUT = os.path.join(HERE, "gen")
 sys.path.insert(0, HERE)
 
 import genroms  # noqa: E402  (the #15 scene generator, imported as a module)
+
+
+def r12_scene():
+    """The #69 fixture: r11's picture and frame counter, with the second CRAM
+    word on a cell the frame SHOWS.
+
+    r11's second word goes to CRAM[0x1F0], which the background-only stripes
+    picture never displays, so a write that lands after the line's first
+    pixels began cannot be seen in the frame (#68's reason).  r12 puts the
+    second word on CRAM[0x000] — the backdrop cell that the line's first
+    pixels use — so the write's line timing IS the picture: a write that
+    misses the blank leaves the first pixels of every line on the previous
+    value.  The first word keeps the right half's colour 7 (CRAM[0x007]),
+    which is written earlier and was never in question.
+
+    The second word's values are capped at 224 so that value + counter
+    (0-31) never reaches bit 8: its high byte is always 0.  That matters
+    because the #15 *scene* ROM's own handler lands the second word's HIGH
+    byte about one pixel late (measured; the viewer's handler is the one
+    this card fixes), and a 0-over-0 high-byte store is invisible, while the
+    scene's low-byte store — the witness here — is in the blank.  The scene
+    ROM stays a diff-0 oracle and the viewer's late write shows as a whole
+    line's worth of wrong pixels (measured: 6,287 differing bytes with the
+    pre-#69 handler, 0 after).
+    """
+    entries = [{"line": s + 1,
+                "cram": [[0x007, genroms.raster_ramp(s)],
+                         [0x000,
+                          ((511 - genroms.raster_ramp(s)) * 224) // 511]]}
+               for s in range(232)]
+    return dict(
+        kind="cram_dual", mwr=0x00, bxr=0, byr=0, cr=0x84, dcr=genroms.DCR,
+        bg="stripes", tiles=[(0x040, 2)], entries=entries,
+        cram_ov=genroms.RASTER_HUES_CRAM,
+        frame_counter=True,
+    )
 
 
 def r11_scene():
@@ -128,6 +174,26 @@ WORD2_TO = ("        lda r_step2_lo, X\n"
             "        sta $0405")
 
 
+# r12 (#69): the two fields' CTA addresses are swapped — the second word goes
+# to CRAM[0x000], the cell the line's first pixels read, and the first to the
+# right half's colour 7.  Applied after the add patches; each FROM carries the
+# following value-load line so the two heads stay distinct.
+R12_ADDR1_FROM = ("        stz $0402               ; CTA = 0x000 (backdrop entry,\n"
+                  "        stz $0403               ; the left half's colour)\n"
+                  "        lda r_step_lo, X\n")
+R12_ADDR1_TO = ("        lda #$07                ; CTA = 0x007 (palette 0 colour 7,\n"
+                "        sta $0402               ; the right half's colour)\n"
+                "        stz $0403\n"
+                "        lda r_step_lo, X\n")
+R12_ADDR2_FROM = ("        lda #$07                ; CTA = 0x007 (palette 0 colour 7,\n"
+                  "        sta $0402               ; the right half's colour)\n"
+                  "        stz $0403\n"
+                  "        lda r_step2_lo, X\n")
+R12_ADDR2_TO = ("        stz $0402               ; CTA = 0x000 (the backdrop cell the\n"
+                "        stz $0403               ; line's first pixels use)\n"
+                "        lda r_step2_lo, X\n")
+
+
 def replace_once(text, old, new, what):
     n = text.count(old)
     if n != 1:
@@ -138,28 +204,41 @@ def replace_once(text, old, new, what):
     return text.replace(old, new)
 
 
-def write_files():
-    genroms.RASTER_SCENES["r11"] = r11_scene()
-    # r11 reuses the stripes picture (the BAT half at column 128, the
+SCENES = {"r11": r11_scene, "r12": r12_scene}
+
+
+def write_files(scene="r11"):
+    """Write gen/<scene>.asm and gen/<scene>.raster.json."""
+    genroms.RASTER_SCENES[scene] = SCENES[scene]()
+    # the scene reuses the stripes picture (the BAT half at column 128, the
     # transparent/solid tiles) the #43 scenes define; genroms keys that
     # picture on the scene name, so the name joins the set.
-    genroms.RASTER_STRIPES.add("r11")
-    asm = genroms.gen_raster_asm("r11")
+    genroms.RASTER_STRIPES.add(scene)
+    asm = genroms.gen_raster_asm(scene)
     asm = replace_once(asm, BUMP_FROM, BUMP_TO, "frame-counter bump")
     asm = replace_once(asm, WORD1_FROM, WORD1_TO, "first CRAM word add")
-    asm = replace_once(asm, WORD2_ADDR_FROM, WORD2_ADDR_TO,
-                       "second CRAM word address")
+    if scene == "r11":
+        asm = replace_once(asm, WORD2_ADDR_FROM, WORD2_ADDR_TO,
+                           "second CRAM word address")
+    elif scene == "r12":
+        asm = replace_once(asm, R12_ADDR2_FROM, R12_ADDR2_TO,
+                           "second CRAM word address (CRAM[0x000])")
+        asm = replace_once(asm, R12_ADDR1_FROM, R12_ADDR1_TO,
+                           "first CRAM word address (CRAM[0x007])")
+    else:
+        raise SystemExit(f"genreview16: unknown scene {scene!r}")
     asm = replace_once(asm, WORD2_FROM, WORD2_TO, "second CRAM word add")
+    name = raster_name(scene)
     os.makedirs(OUT, exist_ok=True)
-    with open(os.path.join(OUT, "raster11.asm"), "w") as f:
+    with open(os.path.join(OUT, f"{name}.asm"), "w") as f:
         f.write(asm)
-    table = genroms.raster_json("r11")
+    table = genroms.raster_json(scene)
     assert table["frameCounter"] is True
     assert all(len(e["cram"]) == 2 for e in table["entries"])
-    with open(os.path.join(OUT, "raster11.raster.json"), "w") as f:
-        import json
+    import json
+    with open(os.path.join(OUT, f"{name}.raster.json"), "w") as f:
         json.dump(table, f, indent=1)
-    print(f"wrote gen/raster11.asm and gen/raster11.raster.json "
+    print(f"wrote gen/{name}.asm and gen/{name}.raster.json "
           f"({len(table['entries'])} steps, frame counter, two CRAM words)")
 
 
@@ -168,28 +247,41 @@ def pceas(src, dst):
     subprocess.run([exe, "-raw", "-o", dst, src], cwd=HERE, check=True)
 
 
-def build_scene():
-    pceas("gen/raster11.asm", "gen/raster11.pce")
-    print("wrote gen/raster11.pce")
+def raster_name(scene):
+    """The scene ROM's file stem: scene r11 -> raster11 (the #15 naming)."""
+    return "raster" + scene[1:]
 
 
-def build_viewer():
+def build_scene(scene="r11"):
+    name = raster_name(scene)
+    pceas(f"gen/{name}.asm", f"gen/{name}.pce")
+    print(f"wrote gen/{name}.pce")
+
+
+def build_viewer(scene="r11"):
     import genviewer
-    genviewer.build("vraster11")
-    pceas("gen/vraster11.asm", "gen/vraster11.pce")
-    print("wrote gen/vraster11.pce")
+    genviewer.build(f"vraster{scene[1:]}")
+    pceas(f"gen/vraster{scene[1:]}.asm", f"gen/vraster{scene[1:]}.pce")
+    print(f"wrote gen/vraster{scene[1:]}.pce")
 
 
 def main():
-    args = set(sys.argv[1:])
+    argv = sys.argv[1:]
+    scene = "r11"
+    if argv and not argv[0].startswith("--"):
+        scene = argv.pop(0)
+        if scene not in SCENES:
+            print(f"unknown scene {scene!r} (r11 or r12)", file=sys.stderr)
+            return 2
+    args = set(argv)
     if args - {"--build", "--viewer", "--all"}:
         print(__doc__.split("Usage")[-1].strip(), file=sys.stderr)
         return 2
-    write_files()
+    write_files(scene)
     if "--build" in args or "--all" in args:
-        build_scene()
+        build_scene(scene)
     if "--viewer" in args or "--all" in args:
-        build_viewer()
+        build_viewer(scene)
     return 0
 
 

@@ -70,13 +70,28 @@ step     = $30          ; raster table: the current step — BaseRAM[0x30],
 frame    = $31          ; raster table: the frame counter (BaseRAM[0x31],
                         ; the same contract)
 
+; #69: the next step's write bytes, prepared by the step tail (and at boot
+; for step 0) in the idle time AFTER the interrupt's writes.  The handler
+; then only loads and stores them — the counter add, and the table index
+; arithmetic, are off the interrupt's critical path.  Eight bytes, because
+; the two CRAM words' addresses are as expensive to fetch as their values.
+na1_lo   = $32          ; first colour table word: the CTA address (9 bits)
+na1_hi   = $33
+nv1_lo   = $34          ; and the 9-bit colour value, frame counter added
+nv1_hi   = $35
+na2_lo   = $36          ; second colour table word
+na2_hi   = $37
+nv2_lo   = $38
+nv2_hi   = $39
+
 ; #16: the raster table's parallel per-step arrays in RAM.  Bank 1's copy
 ; at ROM offset $640 lands at $2800 (16 pages, copied below); the layout
 ; is fixed for every table — docs/ROM_LAYOUT.md.  Each array is its own
 ; 256-byte page and holds 240 steps, so the chain's lda array,X never
 ; crosses a page: every write byte costs 4 cycles.
-irq1     = $2020        ; the IRQ1 vector's target: a jmp patched at boot
-                        ; to the handler the table's flags select
+irq1     = $2020        ; the IRQ1 vector's target: holds jmp ($2240)
+irqvec   = $2240        ; and $2240/$2241 the handler prestep selects
+                        ; (BaseRAM, above the config copy at $2200-$223f)
 r_op     = $2804        ; bit 0 BXR, bit 1 BYR, bit 2 CR, bit 3 first
                         ; CRAM word, bit 4 second CRAM word
 r_chain_lo = $2900      ; RCR for the next step = 0x40 + its line
@@ -330,28 +345,24 @@ tblbyte:
         dex
         bne tblpage
 
-        ; The irq1 vector is the RAM cell $2020: patch the jmp there to
-        ; the handler the table's flag bit 0 selects (frame-counter tables
-        ; need the counter added to every CRAM value — the #15 scene r4).
-        lda #$4c
+        ; #69: the irq1 vector is the RAM cell $2020, which holds
+        ; `jmp ($2240)` — an indirect jump through the vector cell the step
+        ; tail fills with the handler the NEXT step needs.  Selecting the
+        ; step's handler per step (not per table) lets a colour-only step
+        ; take the straight-line stub below instead of the op-bit walk,
+        ; which is what puts its second colour write inside the blank.
+        lda #$6c                   ; jmp (abs)
         sta $2020
-        lda $2802                  ; pick the handler BEFORE loading its
-        and #$01                   ; address bytes — the and result lands
-        beq tblplain               ; in A, which sta $2021 stores
-        lda #low(irq1_frm)
-        ldx #high(irq1_frm)
-        bra tblpatch
-tblplain:
-        lda #low(irq1_plain)
-        ldx #high(irq1_plain)
-tblpatch:
-        sta $2021
-        stx $2022
+        lda #$40                   ; $2240 = the vector cell (above the
+        sta $2021                  ; config copy at $2200-$223f)
+        lda #$22
+        sta $2022
 
         stz <step                  ; step 0 and frame counter 0 — the same
         stz <frame                 ; BaseRAM cells the scene ROMs use
         lda $2803
         sta <nsteps                ; the wrap compare
+        jsr prestep                ; step 0's bytes + handler (frame 0)
         st0 #$06                   ; arm step 0: r_chain[0] = 0x40 + the
         lda r_chain_lo             ; first entry's line.  RCR = 0x40 fires
         sta $0002                  ; at the VDW entry, before the first
@@ -443,205 +454,273 @@ bat_words_hi:
         .db $04, $08, $10, $10, $08, $10, $20, $20
 
 ;
+;
 ; irq1 — the #16 RCR chain.  The HuC6280's IRQ1 vector (logical
 ; $fff8/$fff9, hardware manual §2.4.2 (1) p. H8-13) points at the RAM
-; cell $2020, which boot patched to a jmp into one of the two handlers
-; below.  The VDC raises IRQ1 when the RCR (register 6) matches the line
-; counter and CR bit 2 (RC) is set — VDC manual CR R05 p. H7-6, RCR R06
-; p. H7-6/7; the match fires 4 master cycles before the visible line
-; ends, and the next line's pixels read the colour table when that
-; line's display starts 92 master = ~123 CPU cycles later (Mednafen
-; vdc.cpp: HPHASE_HDW_FINAL IncRCR -> HPHASE_HDW line-buffer fill), so a
-; CRAM write has ~108 CPU cycles of budget from handler entry, a BXR
-; write ~80 and a BYR write ~78.  The write paths below stay inside it
-; (the worst case is a two-CRAM step, whose second write lands at ~109
-; with the 2-cycle op restores — inside the ~123 hard deadline).
+; cell $2020, which boot fills with `jmp ($2240)`: the indirect jump goes
+; through the vector cell the step tail fills with the handler the NEXT
+; step needs.  The VDC raises IRQ1 when the RCR (register 6) matches the
+; line counter and CR bit 2 (RC) is set — VDC manual CR R05 p. H7-6, RCR
+; R06 p. H7-6/7.
+;
+; #69 — the budget and the shape of this code.  The match fires 4 VDC
+; clocks before the visible line ends; the next line's pixels read the
+; colour table when its display starts 92 VDC clocks later, i.e. ~123
+; CPU cycles minus the interrupt sequence.  Counted with the HuC6280's
+; own opcode timings (Software Manual S8-17ff — every memory instruction
+; costs ONE cycle more than its 6502 number: LDA abs,X and STA abs 5,
+; LDA/STA zp 4, ADC zp 4, LSR A 2, branch 2/4, NOP 2), a colour-table
+; store that completes by ~100 CPU cycles from handler entry is in the
+; blank; Mednafen measured the boundary at ~100 on a fixture whose
+; second word paints the line's first pixel.
+;
+; The old pair of handlers walked the op byte before every field and did
+; the frame-counter add per word: irq1_frm's second store completed at
+; ~139 cycles and landed 24 px into the line, irq1_plain's at ~119
+; (14 px — invisible only because r7's second word paints the right
+; half).  The add and the indexing now happen in prestep, after the
+; interrupt's writes; a step whose only writes are colour words takes
+; one of the straight-line stubs below, whose second store completes at
+; ~72 cycles in the stub (~78 from the vector, counting jmp ($2240)'s 6).  The op walker stays for steps that mix a VDC register
+; with colour writes: a two-word mixed step cannot fit the blank at any
+; stride (it needs ~120 cycles) and no shipped table uses one — see
+; docs/RENDERER.md.
 ;
 ; The table: 16 parallel arrays at the fixed page-aligned addresses
 ; above, indexed by the step counter <step>.  Step n's record is
 ; r_op[n] (bit 0 BXR, bit 1 BYR, bit 2 CR, bit 3 first CRAM word,
 ; bit 4 second CRAM word), r_chain[n] (the RCR value arming the next
 ; step, 0x40 + its line), r_bxr[n], r_byr[n], r_cr[n], and r_a1/r_v1,
-; r_a2/r_v2 (the CRAM address/value words).  A step writes its fields by
-; shifting the opcode through C (bit order = write order above), bumps
-; the step, and re-arms RCR for the next; the last wraps to step 0.
+; r_a2/r_v2 (the CRAM address/value words).  The last step wraps to 0.
 ;
-; No A/X/Y saves: Y holds the chain's shifted opcode copy and the main
-; loop is `bra loop`, which touches nothing,
-; and the chain is the only interrupt source (see the cli note above),
-; so the pushed P is the only state RTI must restore and the chain
-; leaves it alone.  The IRQ1 line is level-sensed (hardware manual
-; H8-12/13): it stays high until the status read at the end of the chain
-; clears RR — the VDC status register auto-clears on read (VDC manual
-; SR R00 p. H7-4; the worked irq1 handler in PCEHeroTN "HuC62 Tech
-; Notes" pp. 8-13 reads SR the same way), and the chain cannot re-enter
-; while it runs: the next match is a full line away, a line is ~455 CPU
-; cycles and the chain runs ~150.
-;
-; The two handlers differ only in the CRAM value writes: irq1_frm adds
-; the frame counter <frame> to every value (the per-frame gradient), the
-; same 9-bit add the #15 scene r4 handler does.  Boot picks the handler
-; from the table's flag bit 0, so a table without the flag pays no
-; cycles for the add (r7's two CRAM words a step is the tight case).
-;
-irq1_plain:
-        ldx <step                  ; 3   the step (ZP $30 = BaseRAM[0x30],
-        lda r_op, X                ; 4   the scene ROMs' cell — raster-
-        lsr A                      ; 2   patch.py reads it).  The opcode
-        tay                        ; 2   is shifted through C (bit order =
-        bcc irq1p_nobxr            ; 2   write order below) with the
-        st0 #$07                   ; 6   shifted op kept in Y: the field
-        lda r_bxr_lo, X            ; 4   writes load bytes into A, so a
-        sta $0002                  ; 4   taken field restores the shifted
-        lda r_bxr_hi, X            ; 4   op from Y before the next bit
-        sta $0003                  ; 4   test.  BXR is valid from the next
-        tya                        ; 2   scanning line (R07 p. H7-7)
-irq1p_nobxr:
-        lsr A                      ; 2   bit 1 -> C: BYR.  Write order AR,
-        bcc irq1p_nobyr            ; 2   low, high (VDC manual p. H7-25)
-        st0 #$08                   ; 6
-        lda r_byr_lo, X            ; 4
-        sta $0002                  ; 4
-        lda r_byr_hi, X            ; 4
-        sta $0003                  ; 4   BYR takes effect the line after
-        tya                        ; 2   next (R08 p. H7-7: BYR+1)
-        lsr A                      ; 2
-irq1p_nobyr:
-        lsr A                      ; 2   bit 2 -> C: CR
-        bcc irq1p_nocr             ; 2
-        st0 #$05                   ; 6
-        lda r_cr, X                ; 4
-        sta $0002                  ; 4
-        st2 #$00                   ; 6
-        tya                        ; 2
-        lsr A                      ; 2
-        lsr A                      ; 2
-irq1p_nocr:
-        lsr A                      ; 2   bit 3 -> C: first CRAM word
-        bcc irq1p_nocram1          ; 2
-        lda r_a1_lo, X             ; 4
-        sta $0402                  ; 4   colour table address
-        lda r_a1_hi, X             ; 4
-        sta $0403                  ; 4
-        lda r_v1_lo, X             ; 4
-        sta $0404                  ; 4   colour word low byte
-        lda r_v1_hi, X             ; 4
-        sta $0405                  ; 4   high byte: the write lands and
-        tya                        ; 2   the CTA advances (CRW R01)
-        lsr A                      ; 2
-        lsr A                      ; 2
-        lsr A                      ; 2
-irq1p_nocram1:
-        lsr A                      ; 2   bit 4 -> C: second CRAM word
-        bcc irq1p_nocram2          ; 2
-        lda r_a2_lo, X             ; 4
-        sta $0402                  ; 4
-        lda r_a2_hi, X             ; 4
-        sta $0403                  ; 4
-        lda r_v2_lo, X             ; 4
-        sta $0404                  ; 4
-        lda r_v2_hi, X             ; 4
-        sta $0405                  ; 4
-irq1p_nocram2:
-        jmp irq1step               ; 4
+; No A/X/Y saves: the main loop is `bra loop` and touches nothing, and
+; the chain is the only interrupt source (see the cli note above), so
+; the pushed P is the only state RTI must restore.  The IRQ1 line is
+; level-sensed (hardware manual H8-12/13): it stays high until the
+; status read at the end of the chain clears RR — the VDC status
+; register auto-clears on read (VDC manual SR R00 p. H7-4; the worked
+; irq1 handler in PCEHeroTN "HuC62 Tech Notes" pp. 8-13 reads SR the
+; same way), and the chain cannot re-enter while it runs: the next match
+; is a full line away (455 CPU cycles) and the chain runs ~200.
 
-; The frame-counter variant: identical except the CRAM value writes add
-; the frame counter (clc/adc <frame>, carry into the high byte, 9 bits).
-irq1_frm:
-        ldx <step                  ; 3
-        lda r_op, X                ; 4
-        lsr A                      ; 2
-        tay                        ; 2   the shifted op, kept in Y (the
-        bcc irq1f_nobxr            ; 2   field writes clobber A; a taken
-        st0 #$07                   ; 6   field restores it before the
-        lda r_bxr_lo, X            ; 4   next bit test)
-        sta $0002                  ; 4
-        lda r_bxr_hi, X            ; 4
-        sta $0003                  ; 4
-        tya                        ; 2
-irq1f_nobxr:
-        lsr A                      ; 2
-        bcc irq1f_nobyr            ; 2
-        st0 #$08                   ; 6
-        lda r_byr_lo, X            ; 4
-        sta $0002                  ; 4
-        lda r_byr_hi, X            ; 4
-        sta $0003                  ; 4
-        tya                        ; 2
-        lsr A                      ; 2
-irq1f_nobyr:
-        lsr A                      ; 2
-        bcc irq1f_nocr             ; 2
-        st0 #$05                   ; 6
-        lda r_cr, X                ; 4
-        sta $0002                  ; 4
-        st2 #$00                   ; 6
-        tya                        ; 2
-        lsr A                      ; 2
-        lsr A                      ; 2
-irq1f_nocr:
-        lsr A                      ; 2
-        bcc irq1f_nocram1          ; 2
-        lda r_a1_lo, X             ; 4
-        sta $0402                  ; 4
-        lda r_a1_hi, X             ; 4
-        sta $0403                  ; 4
-        lda r_v1_lo, X             ; 4
-        clc                        ; 2
-        adc <frame                 ; 3
-        sta $0404                  ; 4
-        lda r_v1_hi, X             ; 4
+;
+; prestep — prepare the NEXT step's write bytes and handler, in the idle
+; time after the interrupt's writes (also called at boot for step 0).
+; The counter add is the same 9-bit add the #15 scene r4 chain does, and
+; the 8-bit CTA address copies keep the handler's loads out of the table
+; arrays' ,X indexing.  Clobbers A, X, Y.
+;
+prestep:
+        ldx <step                  ; 4
+        lda r_a1_lo, X             ; 5   first colour word: CTA address
+        sta <na1_lo                ; 4
+        lda r_a1_hi, X
+        sta <na1_hi
+        lda r_a2_lo, X             ; 5   second colour word: CTA address
+        sta <na2_lo
+        lda r_a2_hi, X
+        sta <na2_hi
+        lda $2802                  ; 5   table flags: bit 0 = counter mode
+        and #$01                   ; 2
+        beq prestep_plain          ; 2/4
+        lda r_v1_lo, X             ; 5   value = table value + frame, a
+        clc                        ; 2   9-bit add: carry into the high
+        adc <frame                 ; 4   bit, masked (the VCE keeps bit 0
+        sta <nv1_lo                ; 4   of the high byte — VCE WR c4/c5)
+        lda r_v1_hi, X             ; 5
         adc #$00                   ; 2
         and #$01                   ; 2
-        sta $0405                  ; 4
-        tya                        ; 2
-        lsr A                      ; 2
-        lsr A                      ; 2
-        lsr A                      ; 2
-irq1f_nocram1:
-        lsr A                      ; 2
-        bcc irq1f_nocram2          ; 2
-        lda r_a2_lo, X             ; 4
-        sta $0402                  ; 4
-        lda r_a2_hi, X             ; 4
-        sta $0403                  ; 4
-        lda r_v2_lo, X             ; 4
-        clc                        ; 2
-        adc <frame                 ; 3
-        sta $0404                  ; 4
-        lda r_v2_hi, X             ; 4
+        sta <nv1_hi                ; 4
+        lda r_v2_lo, X             ; 5   the second word gets the same
+        clc                        ; 2   per-frame add (REVIEW-16 B15)
+        adc <frame                 ; 4
+        sta <nv2_lo                ; 4
+        lda r_v2_hi, X             ; 5
         adc #$00                   ; 2
         and #$01                   ; 2
-        sta $0405                  ; 4
-irq1f_nocram2:
-        jmp irq1step               ; 4
+        sta <nv2_hi                ; 4
+        bra prestep_pick           ; 4
+prestep_plain:
+        lda r_v1_lo, X             ; 5   no counter: the table bytes as they
+        sta <nv1_lo                ; 4   are
+        lda r_v1_hi, X
+        sta <nv1_hi
+        lda r_v2_lo, X
+        sta <nv2_lo
+        lda r_v2_hi, X
+        sta <nv2_hi
+prestep_pick:
+        lda r_op, X                ; 5   colour-only shapes take a stub
+        and #$07                   ; 2   (bits 0-2 clear = no VDC register
+        bne prestep_gen            ; 2/4 write)
+        lda r_op, X                ; 5
+        and #$18                   ; 2
+        beq prestep_gen            ; 2/4 no colour word either: the walker
+        cmp #$08                   ; 2   bit 3 only -> first word at ~22-36
+        beq prestep_c1             ; 2/4
+        cmp #$10                   ; 2   bit 4 only
+        beq prestep_c2             ; 2/4
+        lda #low(irq1_c12)         ; 2   both words: the tight case
+        ldx #high(irq1_c12)
+        bra prestep_vec            ; 4
+prestep_c1:
+        lda #low(irq1_c1)
+        ldx #high(irq1_c1)
+        bra prestep_vec
+prestep_c2:
+        lda #low(irq1_c2)
+        ldx #high(irq1_c2)
+        bra prestep_vec
+prestep_gen:
+        lda #low(irq1_gen)
+        ldx #high(irq1_gen)
+prestep_vec:
+        sta irqvec                 ; 5   $2240/$2241: what jmp ($2240) uses
+        stx irqvec+1               ; 5
+        rts                        ; 7
 
-; The shared step tail (both handlers): bump the step (wrapping to 0),
-; bump the frame counter at the wrap when the table's flag bit 0 is set,
-; and re-arm RCR for the new step.
+;
+; The colour-only stubs.  Each is four lazy loads and four stores per
+; word: 36 cycles a word.  irq1_c12's last store — the one the line's
+; colour table reads — completes at ~72 cycles in the stub, ~78 from
+; handler entry with jmp ($2240), inside the ~100 the blank gives.
+;
+irq1_c1:                           ; op bit 3: the first colour word
+        lda <na1_lo                ; 4
+        sta $0402                  ; 5   CTA low
+        lda <na1_hi                ; 4
+        sta $0403                  ; 5   CTA high
+        lda <nv1_lo                ; 4
+        sta $0404                  ; 5   colour word low byte
+        lda <nv1_hi                ; 4
+        sta $0405                  ; 5   high byte: the write lands and
+        jmp irq1step               ; 4   the CTA advances (CRW R01)
+irq1_c2:                           ; op bit 4: the second colour word
+        lda <na2_lo
+        sta $0402
+        lda <na2_hi
+        sta $0403
+        lda <nv2_lo
+        sta $0404
+        lda <nv2_hi
+        sta $0405
+        jmp irq1step
+irq1_c12:                          ; both: completes at ~72 cycles
+        lda <na1_lo
+        sta $0402
+        lda <na1_hi
+        sta $0403
+        lda <nv1_lo
+        sta $0404
+        lda <nv1_hi
+        sta $0405
+        lda <na2_lo
+        sta $0402
+        lda <na2_hi
+        sta $0403
+        lda <nv2_lo
+        sta $0404
+        lda <nv2_hi
+        sta $0405
+        jmp irq1step
+
+;
+; irq1_gen — the #16 op walker, kept for steps that mix a VDC register
+; with colour writes.  The opcode is shifted through C (bit order = write
+; order) with the shifted copy kept in Y: a field's loads clobber A, so a
+; taken field restores the shifted op with tya.  The colour values come
+; from prestep (so there is no counter arithmetic here).  Over the
+; blank's budget for two colour words; no shipped table uses one.
+;
+irq1_gen:
+        ldx <step                  ; 4
+        lda r_op, X                ; 5
+        lsr A                      ; 2
+        tay                        ; 2
+        bcc gen_nobxr              ; 2/4
+        st0 #$07                   ; 6   BXR: valid from the next line
+        lda r_bxr_lo, X            ; 5
+        sta $0002                  ; 5
+        lda r_bxr_hi, X            ; 5
+        sta $0003                  ; 5
+        tya                        ; 2
+gen_nobxr:
+        lsr A
+        bcc gen_nobyr
+        st0 #$08                   ; 6   BYR: takes effect two lines on
+        lda r_byr_lo, X
+        sta $0002
+        lda r_byr_hi, X
+        sta $0003
+        tya
+        lsr A
+gen_nobyr:
+        lsr A
+        bcc gen_nocr
+        st0 #$05                   ; 6   CR
+        lda r_cr, X
+        sta $0002
+        st2 #$00                   ; 6
+        tya
+        lsr A
+        lsr A
+gen_nocr:
+        lsr A
+        bcc gen_nocram1
+        lda r_a1_lo, X             ; 5   first colour word
+        sta $0402
+        lda r_a1_hi, X
+        sta $0403
+        lda <nv1_lo
+        sta $0404
+        lda <nv1_hi
+        sta $0405
+        tya
+        lsr A
+        lsr A
+        lsr A
+gen_nocram1:
+        lsr A
+        bcc gen_nocram2
+        lda r_a2_lo, X             ; 5   second colour word
+        sta $0402
+        lda r_a2_hi, X
+        sta $0403
+        lda <nv2_lo
+        sta $0404
+        lda <nv2_hi
+        sta $0405
+gen_nocram2:
+        jmp irq1step
+
+;
+; The shared step tail: bump the step (wrapping to 0), bump the frame
+; counter at the wrap when the table's flag bit 0 is set, prepare the
+; next step's bytes and handler, and re-arm RCR for the new step.
+;
 irq1step:
-        inc <step                  ; 5
-        lda <step                  ; 3
-        cmp <nsteps                ; 3   the table's step count
-        bne irq1arm                ; 2
-        stz <step                  ; 3   wrap to step 0
-        lda $2802                  ; 4   table flags: bit 0 = frame mode —
+        inc <step                  ; 6
+        lda <step                  ; 4
+        cmp <nsteps                ; 4   the table's step count
+        bne irq1arm                ; 2/4
+        stz <step                  ; 4   wrap to step 0
+        lda $2802                  ; 5   table flags: bit 0 = frame mode —
         and #$01                   ; 2   the counter bumps at the wrap,
-        beq irq1arm                ; 2   before step 0's writes of the
-        inc <frame                 ; 5   next frame, so step 0 writes
-        lda <frame                 ; 3   grad+counter exactly like the
+        beq irq1arm                ; 2/4 before step 0's writes of the
+        inc <frame                 ; 6   next frame, so step 0 writes
+        lda <frame                 ; 4   grad+counter exactly like the
         and #$1f                   ; 2   scene r4 chain's bump at its
-        sta <frame                 ; 3   step-0 fire (raster-patch.py
-irq1arm:                               ; folds the saved counter back into
-        ldx <step                  ; 3   the table, so the bump's place is
-        st0 #$06                   ; 6   invisible in the evidence)
-        lda r_chain_lo, X          ; 4   RCR = 0x40 + the next entry's
-        sta $0002                  ; 4   line (the #15 convention: an
-        lda r_chain_hi, X          ; 4   entry for line L fires at the end
-        sta $0003                  ; 4   of line L-1 and its writes land
-        lda $0000                  ; 4   for line L).  The status read
-        rti                        ; 7   clears RR and drops the IRQ1
-                                   ;    line (level-sensed, H8-12/13)
+        sta <frame                 ; 4   step-0 fire (raster-patch.py
+irq1arm:                               ; folds the saved counter into the
+        jsr prestep                ; 6+7 table, so the bump's place is
+        ldx <step                  ; 4   invisible in the evidence)
+        st0 #$06                   ; 6   RCR = 0x40 + the next entry's
+        lda r_chain_lo, X          ; 5   line (the #15 convention: an
+        sta $0002                  ; 5   entry for line L fires at the end
+        lda r_chain_hi, X          ; 5   of line L-1 and its writes land
+        sta $0003                  ; 5   for line L).  The status read
+        lda $0000                  ; 5   clears RR and drops the IRQ1
+        rti                        ; 7   line (level-sensed, H8-12/13)
 
 irq2:
 timer:

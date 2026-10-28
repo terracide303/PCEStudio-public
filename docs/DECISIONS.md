@@ -161,6 +161,39 @@ step cell `< $30` and frame counter `< $31` keep the #15 scene ROMs' contract th
 back.
 
 
+## 2026-10-28 — the viewer's raster handler is dispatched per STEP, and its write bytes are prepared in the tail (#69)
+
+The #16 chain (above) dispatched plain vs frame-counter handlers once per
+table from a RAM patch.  #69 measured that a two-colour-word step could not
+land both writes in the blank either way: counted with the HuC6280's own
+opcode timings (Software Manual S8-17ff: memory instructions cost one cycle
+more than the 6502 numbers the #16 comments used), `irq1_frm`'s second store
+completed at ~139 CPU cycles and landed 24 pixels into the line — and
+`irq1_plain`'s at ~119, 14 pixels in, which no shipped fixture showed because
+`r7`'s second word paints the right half.  The alternatives:
+
+- **Share one counter add** (the card's first suggestion).  Rejected on
+  arithmetic: the add is 10 cycles a word and the step is ~30 cycles over;
+  removing it entirely still leaves the step late.
+- **Fewer writes** (skip the CTA high-byte store when it is 0).  Rejected:
+  it needs a new table flag and a second handler pair, and even then the
+  eight port stores plus eight loads are ~72 cycles — the budget, not a
+  margin.
+- **Chosen: prepare the next step's bytes after the interrupt's stores**
+  (`prestep`, in the idle ~250 cycles a line leaves) and dispatch per step
+  through the RAM vector `$2240`: a colour-only step runs a straight-line
+  stub whose second store completes at ~72 cycles (~78 with the vector's
+  jump), in the blank.  The op-bit
+  walker stays for steps that mix a VDC register with colour writes; such a
+  step needs ~120 cycles at any stride and cannot fit — a new card if the
+  editor ever offers one.
+
+Evidence: tests/dumps/raster12 + vraster12 (the second colour word paints the
+cell the line's first pixels use) diff 0 in check.js/check-viewer.js with the
+new handler, 6,287 differing bytes with the pre-#69 one; all eleven vraster
+frames re-captured on the new bank 0 (nine byte-identical, the two counter
+tables differing only by the frame-counter phase).
+
 ## 2026-10-28 — Music is made in a tracker: Furnace (Dennis)
 
 Dennis: "a tracker, use the best one". The pick is **Furnace** (github.com/tildearrow/furnace): free and open,

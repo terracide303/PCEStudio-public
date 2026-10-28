@@ -136,18 +136,29 @@ chain uses: step `< $30`, frame counter `< $31`, matching the #15 scene ROMs'
 contract in `tools/raster-patch.py`).
 
 The viewer runs the table only when config byte `0x09` = 1.  Boot then copies
-the image, patches the irq1 dispatch cell (RAM `$2020`, the vector at logical
-`$FFF8` points there) to the plain handler or the frame-counter handler per
-flags bit 0, zeroes the step and counter cells, arms step 0, writes the
-config CR **with RC (bit 2) ORed in**, and enables interrupts (`cli`).  The
-irq1 handler (no register saves — the main loop `bra`s and touches nothing):
-reads the step's op, writes BXR/BYR/CR/colour-table values per the op bits
-(VDC registers via the AR = `$0000` port, address `$0402/$0403` and data
-`$0404/$0405` for the VCE), then the shared tail advances the step (wrapping
-at _n_, bumping the frame counter per flags bit 0), arms the next step's RCR,
-reads the VDC status register (clearing the RR bit, VDC manual p. H7-4) and
-returns.  The timing is the card's whole risk and its proof: the handler's
-worst case is measured, not estimated — see `RENDERER.md`.
+the image, fills the irq1 dispatch cell (RAM `$2020`, the vector at logical
+`$FFF8` points there) with `jmp ($2240)` — an indirect jump through the
+handler vector at RAM `$2240` — zeroes the step and counter cells, prepares
+step 0's write bytes, arms step 0, writes the config CR **with RC (bit 2)
+ORed in**, and enables interrupts (`cli`).
+
+The irq1 handler is chosen **per step**, not per table (#69): the step tail
+(`prestep`) looks at the next step's op byte and fills `$2240` with one of
+the straight-line colour-only stubs (`c1`, `c2`, `c12` — a step whose only
+writes are colour-table words, 72 CPU cycles in the stub for two words) or with the
+op-bit walker (`gen`) for a step that also writes BXR/BYR/CR.  The same
+`prestep` prepares, in zero page, the next step's eight write bytes —
+`$32/$33` first CTA address, `$34/$35` its value, `$36..$39` the second
+word's — doing the frame-counter add there, after the interrupt's stores,
+instead of in it.  The handler (no register saves — the main loop `bra`s and
+touches nothing) then only loads and stores them (VDC registers via the AR =
+`$0000` port, VCE address `$0402/$0403` and data `$0404/$0405`); the shared
+tail advances the step (wrapping at _n_, bumping the frame counter per flags
+bit 0), calls `prestep` for the new step, arms its RCR, reads the VDC status
+register (clearing the RR bit, VDC manual p. H7-4) and returns.  The timing
+is the card's whole risk and its proof: the handler's worst case is measured,
+not estimated — see `RENDERER.md`; the deadline and its cycle count are in
+`tools/viewer.asm`'s irq1 comment.
 
 The editor's builder (`renderer/pce-rom.js`, `encodeRaster`) validates every
 field and refuses with the documented codes `raster-lines` (lines not
