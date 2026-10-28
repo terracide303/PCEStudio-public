@@ -39,7 +39,7 @@ Progress tab is drawn from these tables.
 | Effect editor (gradient, wobble, parallax) | PROVEN | `node tests/check-editor.js`: the three effects give the hand-computed raster table and the renderer previews it; refusals with codes. Export waits for #16. Breaker running | #17 |
 | Debug panels and follow a pixel | PROVEN | `node tests/check-panels.js`: 36592 checks and 1320 follow-a-pixel traces on eight dumps against an independent bytes-only computation. Breaker (REVIEW-26): 20 of 25 caught; the five misses — VCE RGB, SAT X/Y, 32-wide cells, row-0 `vdc` block, second-plane `tileWord` — are now caught by #56 (each re-run DETECTED). Not proven: the eight dumps carry no flipped sprite and no SPBG=0 sprite over an opaque background | #26, #56 |
 | Scanline effects in the renderer | PROVEN | `node tests/check.js`: raster1-5 (status bar, BXR wobble, BYR split, colour gradient, CR on/off) diff 0 against Mednafen, 47 pictures in all (46 when #15 closed; #13 added spainted). Not proven: VCE writes mid-line, real-hardware IRQ latency. DeepSeek did this Opus card. Breaker: 16 of 20 caught; #43 closed the 3 misses with raster6-10, structured pictures where each effect is visible | #15 — `docs/RENDERER.md` |
-| Scanline effects in the viewer (RCR) | UNTESTED | | #16 |
+| Scanline effects in the viewer (RCR) | PROVEN | Mednafen: `node tests/check.js` 68 scenes and `check-viewer.js` incl. vraster1-10 diff 0 against the renderer. Not yet: the ares re-capture (needs an unlocked screen) and one real-console run (Dennis) | #16 |
 | Wide modes (256/336/512) | UNTESTED | | #27 |
 
 ## Phases 3–6
@@ -49,6 +49,6 @@ Progress tab is drawn from these tables.
 | Toys as code (Lua, compiler, validator) | UNTESTED | | #30–#33 |
 | Sound chip (PSG) in the browser | PROVEN (against Mednafen) | `node tests/check-psg.js`: 11 Mednafen recordings (tone, chord, balance, volume, noise, all three LFO modes via wave3, DDA, 12-bit frequency, R7 on ch3, DDA exit) matched sample for sample. `node tests/psg-mutation.js`: all 15 of REVIEW-34's breaks DETECTED (M10 by check-wave.js/wave3), control NO-OP. Noise generator: Mednafen and MAME's c6280 use the same LFSR taps (two emulators); real console unmeasured | #34, #63 — `docs/PSG.md` |
 | Wave editor (32-step waves, 6 channels) | PROVEN | `node tests/check-wave.js`: 3 patches exported byte-equal to PCEAS and recorded in Mednafen, sample for sample | #62 |
-| Music (Furnace → HuTrack) | UNTESTED | the tracker half of #35 | #35 |
+| Music (Furnace → HuTrack) | PROVEN on the console side | `node tests/check-hutrack.js`: HuTrack (vendored, MIT) plays our own DMF test song in Mednafen; the melody and bass recovered from the audio. Browser player and export still to do | #35 |
 | AI link (MCP server, describe-it) | UNTESTED | | #36, #24 |
 | Photo import, data export, public release | UNTESTED | | #18–#20, #37 |
