@@ -155,7 +155,7 @@ function zcPitch(samples, from, len, rate, ch) {
   return crossings / 2 * rate / len;
 }
 
-function fftPeaks(samples, from, n, rate, count, ch) {
+function fftMag(samples, from, n, ch) {
   const re = new Float64Array(n);
   const im = new Float64Array(n);
   for (let i = 0; i < n; i++) {
@@ -185,19 +185,33 @@ function fftPeaks(samples, from, n, rate, count, ch) {
       }
     }
   }
-  let max = 0;
   const mag = new Float64Array(n / 2);
-  for (let i = 1; i < n / 2; i++) {
+  for (let i = 1; i < n / 2; i++)
     mag[i] = Math.sqrt(re[i] * re[i] + im[i] * im[i]);
-    if (mag[i] > max) max = mag[i];
-  }
+  return mag;
+}
+
+function fftPeaks(samples, from, n, rate, count, ch) {
+  const mag = fftMag(samples, from, n, ch);
+  let max = 0;
+  for (let i = 1; i < mag.length; i++) if (mag[i] > max) max = mag[i];
   const peaks = [];
-  for (let i = 2; i < n / 2 - 1; i++) {
+  for (let i = 2; i < mag.length - 1; i++) {
     if (mag[i] > max / 100 && mag[i] >= mag[i - 1] && mag[i] >= mag[i + 1])
       peaks.push({ hz: i * rate / n, mag: mag[i] });
   }
   peaks.sort((a, b) => b.mag - a.mag);
   return peaks.slice(0, count).map((p) => `${p.hz.toFixed(1)} Hz`);
+}
+
+/* the strongest FFT bin of a window: the honest measure of a tone whose
+ * pitch moves (zero crossings are fooled by the harmonics of a square and by
+ * the bass tail's ringing) */
+function dominantHz(samples, from, n, rate, ch) {
+  const mag = fftMag(samples, from, n, ch);
+  let best = 1;
+  for (let i = 2; i < mag.length; i++) if (mag[i] > mag[best]) best = i;
+  return best * rate / n;
 }
 
 /* ---- canonical JSON, so field order does not matter -------------------- */
@@ -314,14 +328,18 @@ function checkDump(dir) {
     console.log(`    RMS L ${rms(s, 22050, 22050, 0).toFixed(1)} R ` +
                 `${rms(s, 22050, 22050, 1).toFixed(1)} (six voices, ` +
                 `balance 0xFF/0xFF/0xF0/0x0F/0xFF/0xFF)`);
-  } else if (name === "wave2") {
-    const win = 4096, hop = 1024, pitches = [];
+  } else if (name === "wave2" || name === "wave3") {
+    const win = 8192, hop = 2048, pitches = [];
     for (let f = 0; f + win < L; f += hop) {
-      if (rms(s, f, win, 0) > 50) pitches.push(zcPitch(s, f, win, 44100, 0));
+      if (rms(s, f, win, 0) > 50) pitches.push(dominantHz(s, f, win, 44100, 0));
     }
-    console.log(`    pitch min ${Math.min(...pitches).toFixed(1)} max ` +
-                `${Math.max(...pitches).toFixed(1)} Hz (the LFCTL 1 sweep ` +
-                `#34's psg6 measures at 414..470); ${pitches.length} windows`);
+    const expect = name === "wave2"
+      ? "the LFCTL 1 sweep (~416..470 Hz)"
+      : "the LFCTL 3 worst case — F wraps through 4094/4095/0/1/17..494, " +
+        "so this is deliberately not a single sweep (the diff is the test)";
+    console.log(`    dominant FFT bin ${Math.min(...pitches).toFixed(1)}..` +
+                `${Math.max(...pitches).toFixed(1)} Hz over ${pitches.length} ` +
+                `windows (${expect})`);
   }
 }
 

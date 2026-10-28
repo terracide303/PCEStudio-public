@@ -29,14 +29,22 @@ const GEN = path.join(__dirname, "gen");
 const SOUNDS = {
   wave1: {
     what: "the six-voice chord: six wave shapes, the manual's scale-table " +
-          "frequencies (PB-12), AL and balance varied per channel, noise on " +
-          "channel 6 (NF 10) under the sine",
+          "frequencies (PB-12) at F=254/214/170/127/107 plus a bass at " +
+          "F=1151 (R3's high nibble in use), AL and balance varied per " +
+          "channel, noise on channel 6 (NF 10) under the sine",
     sound: wave.demoSound()
   },
   wave2: {
     what: "the LFO: ch1 square tone wobbled by ch2's saw carrier (LFCTL 1, " +
           "R8=255 -> 1.727 Hz), ch2 silent, the rest off",
     sound: wave.lfoSound()
+  },
+  wave3: {
+    what: "the model's worst LFO case: the wave2 patch with LFCTL 3 (x16 " +
+          "deviation, shift 4), so the 12-bit sum runs 4094, 4095, 0 " +
+          "(->4096), 1, 17 ... 494 — 27 Hz, the tiny-F fast path, then 6.6 " +
+          "kHz down to 226 Hz",
+    sound: wave.lfo3Sound()
   }
 };
 
