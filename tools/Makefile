@@ -7,10 +7,14 @@ PYTHON ?= python3
 
 SCENES := 1 2 3 4 5 6 7 8 8b 8c 9
 SPRITES := 1 2 3 4 5 6 7 8 9 10 11
-VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,$(SCENES)))
+# The viewer ROMs exist for the pictures that have a regions.json (scenes
+# 1-3, the #8/#9 samples; #39's scenes 4-9 are scene-ROM captures without
+# one, so no viewer ROM is built for them).
+VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,1 2 3))
 SPRITE_ROMS := $(addprefix gen/sprite,$(addsuffix .pce,$(SPRITES)))
+VSPRITES := $(addprefix gen/vsprite,$(addsuffix .pce,$(SPRITES)))
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS)
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES)
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -43,13 +47,23 @@ gen/viewer%.asm: genviewer.py ../tests/dumps/scene%/regions.json
 gen/viewer%.pce: gen/viewer%.asm viewer.asm
 	$(PCEAS) -raw -o $@ $<
 
+# #14: the viewer ROMs of the sprite scenes (tests/dumps/spriteN + the SAT
+# block).  Same route as the viewer ROMs above.
+gen/vsprite%.asm: genviewer.py ../tests/dumps/sprite%/regions.json
+	mkdir -p gen
+	$(PYTHON) -I genviewer.py vsprite$*
+
+gen/vsprite%.pce: gen/vsprite%.asm viewer.asm
+	$(PCEAS) -raw -o $@ $<
+
 # #9's constant code bank: the browser export copies bank 0 verbatim, so it
-# is extracted from the PCEAS build and committed.  Refuses if the three
-# viewer ROMs disagree about bank 0 (extract_bank0.py).
+# is extracted from the PCEAS build and committed.  Refuses if the viewer
+# ROMs (background and sprite scenes alike) disagree about bank 0
+# (extract_bank0.py).
 bank0: ../renderer/viewer-bank0.bin
 
-../renderer/viewer-bank0.bin: extract_bank0.py $(VIEWERS)
-	$(PYTHON) -I extract_bank0.py $@ $(VIEWERS)
+../renderer/viewer-bank0.bin: extract_bank0.py $(VIEWERS) $(VSPRITES)
+	$(PYTHON) -I extract_bank0.py $@ $(VIEWERS) $(VSPRITES)
 
 clean:
 	rm -f hello.pce hello.sym hello.lst gen/*.pce gen/*.sym gen/*.lst

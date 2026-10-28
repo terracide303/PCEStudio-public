@@ -270,7 +270,8 @@ function checkExport(data, romBytes, bank0) {
   const BANK = 8192;
   const batBytes = rom.batWords(data.regs.MWR) * 2;
 
-  /* bank 1: config block, then the 16 palettes at 0x40 */
+  /* bank 1: config block, the 512 colour-table entries at 0x40 and the
+   * SAT at 0x440 (card #14) */
   const cfg = romBytes.subarray(BANK, BANK + 64);
   const u16 = (b, o) => b[o] | (b[o + 1] << 8);
   if (cfg[0] !== 1) problems.push("config version is not 1");
@@ -284,9 +285,13 @@ function checkExport(data, romBytes, bank0) {
   if (u16(cfg, 0x0C) !== data.regions[0][1] * 16)
     problems.push("region word count differs");
   const paletteAt = BANK + 0x40;
-  if (!Buffer.from(romBytes.subarray(paletteAt, paletteAt + 512))
-        .equals(Buffer.from(data.cram.subarray(0, 512))))
+  if (!Buffer.from(romBytes.subarray(paletteAt, paletteAt + 1024))
+        .equals(Buffer.from(data.cram.subarray(0, 1024))))
     problems.push("the ROM's palettes are not the editor's CRAM");
+  const satAt = BANK + 0x440;
+  if (!Buffer.from(romBytes.subarray(satAt, satAt + 512))
+        .equals(Buffer.from(data.vram.subarray(0xFE00, 0xFE00 + 512))))
+    problems.push("the ROM's SAT is not the editor's VRAM words $7f00..");
 
   /* banks 2-3: the BAT */
   const batAt = 2 * BANK;
@@ -320,8 +325,8 @@ function checkCapture(pic, data) {
 
   if (!vram.equals(Buffer.from(data.vram)))
     problems.push("captured VRAM is not the editor's VRAM");
-  if (!cram.subarray(0, 512).equals(Buffer.from(data.cram.subarray(0, 512))))
-    problems.push("captured CRAM is not the editor's 16 palettes");
+  if (!cram.equals(Buffer.from(data.cram)))
+    problems.push("captured CRAM is not the editor's 512 colour-table entries");
   for (const r of ["MWR", "BXR", "BYR", "CR"])
     if (regs[r] !== data.regs[r])
       problems.push(`captured ${r}=${regs[r]}, the editor wrote ${data.regs[r]}`);

@@ -9,10 +9,12 @@
  *
  * For each sample scene the browser export module renderer/pce-rom.js — the
  * exact code renderer/index.html loads — builds a ROM from
- * tests/dumps/sceneN/{vram.bin,cram.bin,regs.json,regions.json} and the
+ * tests/dumps/<dump>/{vram.bin,cram.bin,regs.json,regions.json} and the
  * constant code bank renderer/viewer-bank0.bin.  That ROM must be byte-for-
- * byte equal to the PCEAS build of tools/gen/viewerN.asm
- * (tools/gen/viewerN.pce, made by `make -C tools`).
+ * byte equal to the PCEAS build of tools/gen/<name>.asm
+ * (tools/gen/<name>.pce, made by `make -C tools`).  #14 adds the sprite
+ * scenes (dump spriteN vs PCEAS vspriteN): the browser export must carry
+ * the SG regions and the SAT block exactly like the PCEAS path.
  *
  * It also loads renderer/pce-rom.js a second time through its browser-global
  * branch (a vm context with `self` and no `module`) and requires the same
@@ -43,8 +45,8 @@ const BANK0 = path.join(HERE, "..", "renderer", "viewer-bank0.bin");
 const PCE_ROM_SRC = fs.readFileSync(
   path.join(HERE, "..", "renderer", "pce-rom.js"), "utf8");
 
-function loadScene(scene) {
-  const dir = path.join(DUMP_ROOT, `scene${scene}`);
+function loadScene(dump) {
+  const dir = path.join(DUMP_ROOT, dump);
   return {
     bank0: new Uint8Array(fs.readFileSync(BANK0)),
     vram: new Uint8Array(fs.readFileSync(path.join(dir, "vram.bin"))),
@@ -89,18 +91,24 @@ function sha256(buf) {
 function writeRom(scene) {
   const out = path.join(GEN, `browser${scene}.pce`);
   fs.mkdirSync(GEN, { recursive: true });
-  fs.writeFileSync(out, rom.buildRom(loadScene(scene)));
+  fs.writeFileSync(out, rom.buildRom(loadScene(`scene${scene}`)));
   console.log(`wrote ${out}`);
 }
+
+/* The compared pairs: dump directory -> PCEAS build in tools/gen/.  #14
+ * adds the sprite scenes (vspriteN = the viewer ROM of spriteN). */
+const PAIRS = [1, 2, 3].map((n) => ({ dump: `scene${n}`, pceas: `viewer${n}.pce` }))
+  .concat(Array.from({ length: 11 }, (_, i) => i + 1)
+    .map((n) => ({ dump: `sprite${n}`, pceas: `vsprite${n}.pce` })));
 
 function checkScenes() {
   const browser = loadBrowserGlobal();
   let failed = 0;
 
-  for (const scene of [1, 2, 3]) {
-    const picture = loadScene(scene);
+  for (const pair of PAIRS) {
+    const picture = loadScene(pair.dump);
     const got = rom.buildRom(picture);
-    const pceasPath = path.join(GEN, `viewer${scene}.pce`);
+    const pceasPath = path.join(GEN, pair.pceas);
     if (!fs.existsSync(pceasPath)) {
       console.error(`missing ${pceasPath} — run make -C tools first`);
       return 2;
@@ -111,13 +119,13 @@ function checkScenes() {
     const globalGot = browser.buildRom(picture);
 
     const problems = [];
-    const p = compare(got, ref, `scene${scene}`);
+    const p = compare(got, ref, pair.dump);
     if (p) problems.push(p);
-    const g = compare(globalGot, got, `scene${scene} (browser-global branch)`);
+    const g = compare(globalGot, got, `${pair.dump} (browser-global branch)`);
     if (g) problems.push(g);
 
     if (problems.length === 0) {
-      console.log(`scene${scene}: OK — ${got.length} bytes, sha256 ` +
+      console.log(`${pair.dump}: OK — ${got.length} bytes, sha256 ` +
                   `${sha256(got).slice(0, 16)}…, byte-for-byte equal to ` +
                   `PCEAS (${path.relative(HERE, pceasPath)})`);
     } else {
@@ -127,7 +135,8 @@ function checkScenes() {
   }
 
   console.log(failed === 0
-    ? "PASS: the browser's .pce is byte-for-byte equal to PCEAS's on 3 scene(s)"
+    ? `PASS: the browser's .pce is byte-for-byte equal to PCEAS's on ` +
+      `${PAIRS.length} scene(s)`
     : `FAIL: ${failed} scene(s) differ`);
   return failed === 0 ? 0 : 1;
 }
