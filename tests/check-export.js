@@ -17,8 +17,12 @@
  * the SG regions and the SAT block exactly like the PCEAS path.  #46 adds
  * scene10, the 88 KiB picture (a 64x64 BAT + a full 32 KiB tile set + 160
  * sprite-pattern cells), requires it to be over the old 80 KiB cap, and
- * requires a request over the HuCard's 256-bank ceiling to be refused with
- * the code rom-too-big.
+ * requires a request over the HuCard's ceiling to be refused with the code
+ * rom-too-big.  #57 corrects that ceiling: a HuCard decodes banks $00-$7F
+ * = 128 banks = 1 MB, not the HuC6280's 2 MB physical space (sgxtech.txt
+ * "HuC6280 memory map"; pcetech.txt §3 "Memory map"; hes spec [MEMORY MAP]
+ * ROM 0x000000-0x0FFFFF; docs/MANUALS.md §15.1 GAP 4).  Exactly 1 MB is
+ * accepted by the size guard; 1 MB + 1 bank is refused.
  *
  * It also loads renderer/pce-rom.js a second time through its browser-global
  * branch (a vm context with `self` and no `module`) and requires the same
@@ -116,18 +120,54 @@ const PAIRS = [1, 2, 3].map((n) => ({ dump: `scene${n}`, pceas: `viewer${n}.pce`
     .map((n) => ({ dump: `sprite${n}`, pceas: `vsprite${n}.pce` })))
   .concat([{ dump: "scene10", pceas: "viewer10.pce" }]);
 
-/* #46: a ROM over the HuCard limit is refused with its own code.  The
- * picture model cannot reach 2 MB with a descriptor-legal region list (each
- * region is a slice of one 64 KiB VRAM; 13 descriptors are the config's
- * room), so the guard is exercised with 33 x 32,768-word regions = 264 tile
- * banks: 268 banks requested against the HuCard's 256.  The size is checked
- * before the descriptor-count cap, so the code is rom-too-big, not the
- * region-limit message. */
+/* #57: the HuCard decodes physical banks $00-$7F = 128 banks of 8 KiB =
+ * 1 MB (sgxtech.txt "HuC6280 memory map"; pcetech.txt §3 "Memory map";
+ * hes spec [MEMORY MAP] ROM 0x000000-0x0FFFFF; docs/MANUALS.md §15.1
+ * GAP 4).  The size guard runs before the descriptor cap, so the boundary
+ * is exercised with region lists that are legal per region but too many for
+ * the config's 13 descriptors:
+ *
+ *   exactly 128 banks (1 MB)  -> the size guard accepts it; the descriptor
+ *                                cap is the refusal that follows, which is
+ *                                what proves the guard passed at 1 MB
+ *   129 banks (1 MB + 1 bank) -> refused with rom-too-big, naming 128/1 MB
+ *
+ * A legal picture cannot reach 1 MB: 13 descriptors, each at most one
+ * 32768-word VRAM = 65,536 B, are at most 851,968 tile bytes = 104 tile
+ * banks, 108 with the code/config/BAT banks = 864 KiB.  The 1 MB figure is
+ * the hardware ceiling, not a size a single legal picture reaches; the max
+ * reachable picture is checked below so a change that made 1 MB legal would
+ * be seen rather than assumed. */
 function checkHuCardLimit() {
   const base = loadScene("scene10");
+
+  /* 15 x 2048 chars (15 x 65,536 B = 983,040 B = 120 banks) + 1024 chars
+   * (32,768 B = 4 banks) = 1,015,808 tile bytes = exactly 124 tile banks,
+   * so the ROM is exactly 128 banks = 1 MB. */
+  const exactly1MB = {
+    bank0: base.bank0, vram: base.vram, cram: base.cram, regs: base.regs,
+    regions: Array.from({ length: 15 }, () => [0, 2048]).concat([[0, 1024]])
+  };
+  let one = null;
+  try {
+    rom.buildRom(exactly1MB);
+  } catch (err) {
+    one = err;
+  }
+  if (!one)
+    return "a 128-bank (1 MB) request built — unexpected: its 16 descriptors " +
+           "are past the config's 13";
+  if (one.code === "rom-too-big")
+    return `a 128-bank (1 MB) request was refused as rom-too-big: ${one.message}`;
+  if (!/regions, the config block holds/.test(one.message))
+    return `a 128-bank request was refused by something other than the ` +
+           `descriptor cap: ${one.message}`;
+
+  /* one more bank: 15 x 2048 + 1025 chars = 1,015,840 tile bytes = 125 tile
+   * banks -> 129 ROM banks, 1 MB + 1 bank. */
   const over = {
     bank0: base.bank0, vram: base.vram, cram: base.cram, regs: base.regs,
-    regions: Array.from({ length: 33 }, () => [0, 2048])
+    regions: Array.from({ length: 15 }, () => [0, 2048]).concat([[0, 1025]])
   };
   let e = null;
   try {
@@ -135,14 +175,14 @@ function checkHuCardLimit() {
   } catch (err) {
     e = err;
   }
-  if (!e) return "a 268-bank request was built, not refused";
+  if (!e) return "a 129-bank (1 MB + 1 bank) request was built, not refused";
   if (e.code !== "rom-too-big")
-    return `a 268-bank request was refused with code ${JSON.stringify(e.code)}` +
+    return `a 129-bank request was refused with code ${JSON.stringify(e.code)}` +
            `, not rom-too-big: ${e.message}`;
-  if (!/256 banks/.test(e.message) || !/2 MB/.test(e.message))
+  if (!/128 banks/.test(e.message) || !/1 MB/.test(e.message))
     return `rom-too-big does not name the limit: ${e.message}`;
 
-  /* the same region count with small regions is a descriptor-count refusal,
+  /* the same over-count with small regions is still a descriptor refusal,
    * not a size refusal: the size guard did not swallow the layout check */
   const many = {
     bank0: base.bank0, vram: base.vram, cram: base.cram, regs: base.regs,
@@ -153,9 +193,29 @@ function checkHuCardLimit() {
     return "a 33-region request under the size limit was built";
   } catch (err2) {
     if (err2.code === "rom-too-big")
-      return "a 33-region request under 2 MB was refused as rom-too-big";
+      return "a 33-region request under 1 MB was refused as rom-too-big";
   }
-  console.log(`scene10: a 268-bank ROM is refused with code rom-too-big ` +
+
+  /* the largest picture the config can describe: 13 x 2048 chars = 13 x
+   * 65,536 B = 851,968 tile bytes = 104 tile banks, + 4 = 108 banks =
+   * 864 KiB.  It builds — the real reachable ceiling under the 1 MB guard. */
+  const maxLegal = {
+    bank0: base.bank0, vram: base.vram, cram: base.cram, regs: base.regs,
+    regions: Array.from({ length: 13 }, () => [0, 2048])
+  };
+  let built = null;
+  try {
+    built = rom.buildRom(maxLegal);
+  } catch (err3) {
+    return `the largest legal picture (13 x 2048 chars) was refused: ${err3.message}`;
+  }
+  if (built.length !== 108 * rom.BANK)
+    return `the largest legal picture built ${built.length} B, not 108 banks ` +
+           `(${108 * rom.BANK} B)`;
+
+  console.log(`scene10: exactly 1 MB (128 banks) is accepted by the size ` +
+              `guard (refused next by the 13-descriptor cap); a 129-bank ` +
+              `ROM is refused with code rom-too-big ` +
               `(${e.message.slice(0, 120)}…)`);
   return null;
 }

@@ -33,14 +33,20 @@
  * concatenated.  The bank count is 4 + ceil(tiles / 8 KiB),
  * which is also what PCEAS -raw emits for the generated viewer .asm.
  *
- * #46: the data banks are not capped at 80 KiB any more.  Banks 4..255 are
- * the picture's copy regions, mapped one at a time into the CPU's 8 KiB
- * window at $4000-$5fff by the viewer's MPR2 re-map loop, so the image can
- * grow to the HuCard limit — 256 banks of 8 KiB = 2 MB of physical address
- * space (HuC6280 hardware manual H8-7, H8-10/11; docs/MANUALS.md §5.1).
- * A request whose bank count would pass 256 is refused with the code
- * `rom-too-big`.  The config block holds 13 region descriptors (the room
- * before the palette at 0x40; docs/ROM_LAYOUT.md).
+ * #46 lifted the old 80 KiB cap.  Banks 4..127 are the picture's copy
+ * regions, mapped one at a time into the CPU's 8 KiB window at $4000-$5fff
+ * by the viewer's MPR2 re-map loop, so the image can grow to the HuCard
+ * limit — 128 banks of 8 KiB = 1 MB (#57).  The card decodes physical banks
+ * $00-$7F only: $80-$87 is optionally the CD unit's 64 KiB RAM, $F7
+ * optionally 2 KiB of backup RAM, $F8-$FB work RAM and $FF I/O (sgxtech.txt
+ * "HuC6280 memory map"; pcetech.txt §3 "Memory map" has $00-$7F : HuCard
+ * ROM, $80-$F7 : Unused; hes spec [MEMORY MAP] puts ROM at
+ * 0x000000-0x0FFFFF; docs/MANUALS.md §15.1 GAP 4).  The HuC6280's 2 MB /
+ * 256-block physical space (H8-7, H8-10/11; docs/MANUALS.md §5.1) is the
+ * CPU's address space, not the card's decode.  A request whose bank count
+ * would pass 128 is refused with the code `rom-too-big`.  The config block
+ * holds 13 region descriptors (the room before the palette at 0x40;
+ * docs/ROM_LAYOUT.md).
  *
  * Dual use: CommonJS module in Node (tests/check-export.js) and a browser
  * global (renderer/index.html) via a UMD-style wrapper, same as pce-bg.js.
@@ -77,12 +83,15 @@
    * would need a new config layout (docs/ROM_LAYOUT.md). */
   var MAX_REGIONS = 13;
   var MAX_BAT_BANKS = 2;         /* banks 2-3 (the VDC's largest BAT is 16 KiB) */
-  /* The HuCard limit: the HuC6280 maps 8 KiB physical blocks through eight
-   * MPRs and has 256 blocks of physical address space = 2 MB (docs/MANUALS.md
-   * §5.1, HuC6280 hardware manual H8-7 and H8-10/11).  The layout spends
-   * banks 0-3 on code/config/BAT, so banks 4..255 (252 tile banks) are the
-   * data.  A request past 256 banks is refused with `rom-too-big`. */
-  var MAX_ROM_BANKS = 256;
+  /* The HuCard limit: the card decodes physical banks $00-$7F only —
+   * 128 banks of 8 KiB = 1 MB (sgxtech.txt "HuC6280 memory map"; pcetech.txt
+   * §3 "Memory map"; hes spec [MEMORY MAP] ROM 0x000000-0x0FFFFF;
+   * docs/MANUALS.md §15.1 GAP 4).  The HuC6280's 2 MB / 256-block physical
+   * space (H8-7, H8-10/11) is the CPU's address space, not the card's
+   * decode — $80-$F7 are not card memory.  The layout spends banks 0-3 on
+   * code/config/BAT, so banks 4..127 (124 tile banks) are the data.  A
+   * request past 128 banks is refused with `rom-too-big`. */
+  var MAX_ROM_BANKS = 128;
   var MAX_TILE_BANKS = MAX_ROM_BANKS - 4;
 
   /* MWR bits 4-5: BAT width (0:32, 1:64, 2/3:128); bit 6: BAT height
@@ -219,10 +228,11 @@
     if (romBanks > MAX_ROM_BANKS) {
       refuse("rom-too-big",
              "the ROM would be " + romBanks + " banks of 8 KiB (" +
-             romBanks * BANK + " bytes); the HuC6280's physical address " +
-             "space is at most " + MAX_ROM_BANKS + " banks = 2 MB " +
-             "(HuC6280 hardware manual H8-7, H8-10/11; " +
-             "docs/MANUALS.md §5.1)");
+             romBanks * BANK + " bytes); a HuCard decodes at most " +
+             MAX_ROM_BANKS + " banks = 1 MB (physical banks $00-$7F; " +
+             "sgxtech.txt \"HuC6280 memory map\", pcetech.txt §3 " +
+             "\"Memory map\", hes spec [MEMORY MAP]; docs/MANUALS.md " +
+             "§15.1 GAP 4)");
     }
     need(regions.length <= MAX_REGIONS,
          regions.length + " regions, the config block holds " + MAX_REGIONS);
