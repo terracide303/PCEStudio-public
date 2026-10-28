@@ -12,18 +12,23 @@
  *
  * Part A's scope is the card's own: #30's palette-cycling toy (init + frame,
  * no raster), through IL -> C -> llvm-mos's PCE target, measured in Mednafen.
- * It therefore supports the IL the palette toy uses and REFUSES everything
- * else by code rather than guessing:
+ * Part C adds the two things the shell needs for `raster(line)`: the `reg`
+ * instruction (a VDC register write, so a per-line handler can scroll) and
+ * int globals (the frame number a raster callback reads), plus the raster
+ * hook itself as `toy_raster(line)`.  The runtime decides how the callback
+ * reaches the RCR interrupt (docs/IL.md §10); this file only emits the call.
+ * Everything else is still REFUSED by code rather than guessed:
  *
- *   cgen-op         an IL instruction part A has no C lowering for
- *   cgen-fixed      fixed-point arithmetic (the palette toy reads no fixed
- *                   value; its frame(t, f) uses f, not t)
+ *   cgen-op         an IL instruction this backend has no C lowering for
+ *   cgen-fixed      fixed-point arithmetic (part A/C toys read no fixed
+ *                   value; their frame(t, f) uses f, not t)
  *   cgen-cond       a branch whose condition the IL did not type as bool
- *   cgen-global     a global whose type part A cannot put in the C globals
+ *   cgen-global     a global whose type this backend cannot put in C
  *   cgen-arity      more than two parameters/arguments
- *   cgen-hook       no frame() hook, or no top-level chunk
- *   cgen-closure-loop  a closure created inside a loop (part A has one static
- *                   slot per closure site)
+ *   cgen-hook       no frame() hook, no top-level chunk, or a raster() hook
+ *                   that is not one int parameter
+ *   cgen-closure-loop  a closure created inside a loop (one static slot per
+ *                   closure site)
  *   cgen-key        a constant operand that is neither int nor bool
  *   cgen-target     a jump target that is not an instruction
  *
@@ -105,19 +110,59 @@
     }
 
     var maxUps = 0;
+    var maxParams = 0;
     var f, pc;
     for (f = 0; f < functions.length; f++) {
       var fn = functions[f];
-      if (fn.params.length > 2) {
+      if (fn.params.length > 4) {
         refuse("cgen-arity", fn.name + " takes " + fn.params.length +
-               " parameters; part A supports at most 2");
+               " parameters; this backend supports at most 4");
       }
       maxUps = Math.max(maxUps, fn.upvalues.length);
+      maxParams = Math.max(maxParams, fn.params.length);
+    }
+
+    /* The raster hook is the toy API's one int parameter.  Checked here so a
+     * backend never has to guess what the callback expects. */
+    var hookRaster = program.hooks.raster;
+    if (hookRaster != null) {
+      var rfn = functions[hookRaster];
+      if (!rfn || rfn.params.length !== 1 || rfn.params[0] !== "int") {
+        refuse("cgen-hook", "raster() must be a function of one int parameter");
+      }
+    }
+
+    /* Can a function value outlive the instruction that made it?  A closure
+     * is one static slot per site, so a site inside a loop is safe exactly
+     * when the value cannot be stored.  This backend refuses every store of
+     * a function value (tables and upvalue writes are cgen-op below), so the
+     * only escapes left are a returned function and a write to a
+     * function-typed global outside the chunk.  Check those first. */
+    var fnType = {};
+    for (var gf = 0; gf < (program.globals || []).length; gf++) {
+      fnType[program.globals[gf].name] = program.globals[gf].type;
+    }
+    var closureEscapes = false;
+    for (f = 0; f < functions.length; f++) {
+      var esc = functions[f].code;
+      for (pc = 0; pc < esc.length; pc++) {
+        var ei = esc[pc];
+        if (ei.t === "ret" && staticType(ei.src) === "fn") closureEscapes = true;
+        if (ei.t === "setglobal" && fnType[ei.name] === "fn" && f !== 0) {
+          closureEscapes = true;
+        }
+        if (ei.t === "setupval" && staticType(ei.src) === "fn") {
+          closureEscapes = true;
+        }
+        if (ei.t === "tset" && staticType(ei.value) === "fn") {
+          closureEscapes = true;
+        }
+      }
     }
 
     /* One static closure slot per closure instruction site.  A site inside a
-     * loop would recreate the closure, overwriting the earlier one; part A
-     * refuses that rather than pretending. */
+     * loop recreates the closure over the same slot; that is exact when the
+     * value cannot escape (above), and refused otherwise. */
     var closureSites = [];
     var closureAt = {};
     for (f = 0; f < functions.length; f++) {
@@ -132,11 +177,12 @@
       for (pc = 0; pc < code.length; pc++) {
         if (code[pc].t !== "closure") continue;
         for (var b = 0; b < backEdges.length; b++) {
-          if (pc >= backEdges[b][0] && pc <= backEdges[b][1]) {
+          if (pc >= backEdges[b][0] && pc <= backEdges[b][1] && closureEscapes) {
             refuse("cgen-closure-loop",
                    "function " + functions[f].name + ": a closure is created " +
-                   "inside a loop (IL line " + code[pc].line + "); part A " +
-                   "has one static slot per site");
+                   "inside a loop (IL line " + code[pc].line + ") and a " +
+                   "function value can be stored in this program; one static " +
+                   "slot per site is not enough");
           }
         }
         closureAt[f + ":" + pc] = closureSites.length;
@@ -145,9 +191,11 @@
       }
     }
 
-    /* Globals: the IL declares their types.  Part A carries function values;
-     * the surface names are instructions/constants, never values, except
-     * `vram`, which vset/vget ignore. */
+    /* Globals: the IL declares their types.  This backend carries function
+     * values and the int/bool scalars a toy keeps between frames (the greedy
+     * global `g_f` the raster toys use); the surface names are
+     * instructions/constants, never values, except `vram`, which vset/vget
+     * ignore. */
     var typeOf = {};
     var g;
     for (g = 0; g < (program.globals || []).length; g++) {
@@ -162,14 +210,18 @@
       }
       return globalIds[name];
     }
-    /* init and frame are always slots so toy_run can find them. */
+    /* The hooks are always slots so the runtime can find them. */
     globalId("init");
     globalId("frame");
+    if (hookRaster != null) globalId("raster");
     for (f = 0; f < functions.length; f++) {
       for (pc = 0; pc < functions[f].code.length; pc++) {
         var gi = functions[f].code[pc];
+        /* vram needs no slot: vset/vget carry no base operand and its
+         * getglobal lowers to a defined zero. */
         if ((gi.t === "getglobal" || gi.t === "setglobal") &&
-            typeOf[gi.name] === "fn") {
+            (typeOf[gi.name] === "fn" || typeOf[gi.name] === "int" ||
+             typeOf[gi.name] === "bool")) {
           globalId(gi.name);
         }
       }
@@ -178,13 +230,15 @@
     return {
       functions: functions,
       maxUps: maxUps,
+      maxParams: maxParams,
       closureAt: closureAt,
       closureCount: closureSites.length,
       typeOf: typeOf,
       globalIds: globalIds,
       globalNames: globalNames,
       hookInit: program.hooks.init != null,
-      hookFrame: program.hooks.frame
+      hookFrame: program.hooks.frame,
+      hookRaster: hookRaster
     };
   }
 
@@ -237,12 +291,19 @@
         case "move":
         case "getupval":
         case "jmp":
-        case "ret":
         case "pal":
         case "vset":
         case "forprep":
         case "fornext":
         case "closure":
+          break;
+        case "ret":
+          /* A returned function value would outlive its static closure slot
+           * (this backend has one per site).  No toy in the card returns a
+           * function; refusing is what keeps the slot scheme sound. */
+          if (staticType(ins.src) === "fn") {
+            refuse("cgen-op", where + ": returning a function value");
+          }
           break;
         case "getglobal":
         case "setglobal":
@@ -250,9 +311,23 @@
             refuse("cgen-global", where + ": global `" + ins.name +
                    "` has no declared type");
           }
-          if (a.typeOf[ins.name] !== "fn" && a.typeOf[ins.name] !== "vram") {
+          if (!/^(fn|vram|int|bool)$/.test(a.typeOf[ins.name])) {
             refuse("cgen-global", where + ": global `" + ins.name + "` is " +
-                   a.typeOf[ins.name] + "; part A carries only functions");
+                   a.typeOf[ins.name] + "; this backend carries fn/vram/" +
+                   "int/bool");
+          }
+          break;
+        case "reg":
+          /* The toy surface's register write, which part C needs for a
+           * per-line scroll.  Only the three the host allows, and only by
+           * the IL's constant-string name (the host refuses the rest). */
+          if (ins.name !== "BXR" && ins.name !== "BYR" && ins.name !== "CR") {
+            refuse("cgen-op", where + ": reg(\"" + ins.name + "\") is not a " +
+                   "toy register (BXR, BYR, CR)");
+          }
+          if (staticType(ins.value) !== "int") {
+            refuse("cgen-op", where + ": reg()'s value is " +
+                   staticType(ins.value) + ", not int");
           }
           break;
         case "arith":
@@ -283,7 +358,7 @@
           }
           break;
         case "call":
-          if (ins.args.length > 2) {
+          if (ins.args.length > 4) {
             refuse("cgen-arity", where + ": " + ins.args.length + " arguments");
           }
           break;
@@ -294,8 +369,9 @@
           }
           break;
         default:
-          refuse("cgen-op", where + ": not lowered by part A (the palette toy " +
-                 "uses init + frame, no raster, no sprites, no tables)");
+          refuse("cgen-op", where + ": not lowered by this backend (" +
+                 "init/frame/raster and reg/pal/vset only; no sprites, " +
+                 "tables, pads or fixed point)");
         }
         var t = (ins.t === "jmp" || ins.t === "br" || ins.t === "fornext")
                 ? ins.target : null;
@@ -316,6 +392,23 @@
     var i;
     function line(s) { out.push(s); }
 
+    /* Two argument slots unless some function of the toy takes more (the
+     * #29 examples' batfill takes four).  Keeping the two-slot signature for
+     * toys that never need it is what leaves part A's palette ROM
+     * byte-identical. */
+    var ARGS = a.maxParams > 2 ? ["a0", "a1", "a2", "a3"] : ["a0", "a1"];
+    var SIG = ARGS.map(function (n) { return "int32_t " + n; }).join(", ");
+    function argOf(ins, k) {
+      return ins.args[k] ? operand(ins.args[k]) : "0";
+    }
+    function callArgs(list) {
+      var out = [];
+      for (var k = 0; k < ARGS.length; k++) {
+        out.push(k < list.length ? list[k] : "0");
+      }
+      return out.join(", ");
+    }
+
     function emitFunction(fn, fid) {
       var labels = {};
       var pc;
@@ -326,9 +419,11 @@
         if (t != null) labels[t] = true;
       }
       line("static int32_t il_fn_" + fid +
-           "(struct il_closure *cl, int32_t a0, int32_t a1) {");
+           "(struct il_closure *cl, " + SIG + ") {");
       line("  int32_t r[" + Math.max(1, fn.registers) + "] = { 0 };");
-      line("  (void)cl; (void)a0; (void)a1;");
+      line("  (void)cl; " + ARGS.map(function (n) {
+        return "(void)" + n + ";";
+      }).join(" "));
       for (pc = 0; pc < fn.params.length; pc++) {
         line("  r[" + pc + "] = a" + pc + ";");
       }
@@ -446,9 +541,9 @@
         line("  goto L" + ins.target + ";");
         break;
       case "call": {
-        var call = "il_call(" + operand(ins.callee) + ", " +
-                   (ins.args[0] ? operand(ins.args[0]) : "0") + ", " +
-                   (ins.args[1] ? operand(ins.args[1]) : "0") + ")";
+        var call = "il_call(" + operand(ins.callee);
+        for (var ci = 0; ci < ARGS.length; ci++) call += ", " + argOf(ins, ci);
+        call += ")";
         line("  " + (d ? d + " = " : "(void)") + call + ";");
         break;
       }
@@ -475,6 +570,12 @@
       case "pal":
         line("  toy_pal(" + operand(ins.addr) + ", " + operand(ins.word) + ");");
         break;
+      case "reg": {
+        var regId = ins.name === "BXR" ? "TOY_REG_BXR"
+                  : ins.name === "BYR" ? "TOY_REG_BYR" : "TOY_REG_CR";
+        line("  toy_reg(" + regId + ", " + operand(ins.value) + ");");
+        break;
+      }
       case "vset":
         line("  toy_vram_set(" + operand(ins.addr) + ", " + operand(ins.word) + ");");
         break;
@@ -495,7 +596,8 @@
     line(" * Source " + (program.source || "@toy.lua") + "; hooks init=" +
          (program.hooks.init) + " frame=" + program.hooks.frame +
          " raster=" + (program.hooks.raster == null ? "none" : program.hooks.raster) + ".");
-    line(" * Part A of #31: the palette toy's IL only (docs/IL.md §9).");
+    line(" * #31 console backend: init/frame and, when the toy has one, the");
+    line(" * raster(line) hook (docs/IL.md §9-§10).");
     line(" */");
     line("#include <stdint.h>");
     line("#include \"toy_runtime.h\"");
@@ -526,22 +628,22 @@
     line("");
     for (i = 0; i < a.functions.length; i++) {
       line("static int32_t il_fn_" + i +
-           "(struct il_closure *cl, int32_t a0, int32_t a1)" +
+           "(struct il_closure *cl, " + SIG + ")" +
            " __attribute__((noinline));");
     }
-    line("static int32_t il_call(int32_t cv, int32_t a0, int32_t a1)" +
+    line("static int32_t il_call(int32_t cv, " + SIG + ")" +
          " __attribute__((noinline));");
     line("");
 
     /* ---- the dispatcher ----------------------------------------------- */
-    line("static int32_t il_call(int32_t cv, int32_t a0, int32_t a1) {");
+    line("static int32_t il_call(int32_t cv, " + SIG + ") {");
     line("  int16_t fid;");
     line("  if (cv < 0 || cv >= IL_NCLOSURES) return 0;");
     line("  fid = il_closures[cv].fid;");
     line("  switch (fid) {");
     for (i = 0; i < a.functions.length; i++) {
       line("  case " + i + ": return il_fn_" + i +
-           "(&il_closures[cv], a0, a1);");
+           "(&il_closures[cv], " + ARGS.join(", ") + ");");
     }
     line("  default: return 0;");
     line("  }");
@@ -593,18 +695,31 @@
     line("/* The runtime calls toy_boot() once, then toy_frame(f) each VBlank. */");
     line("void toy_boot(void) {");
     /* The chunk is function 0, not a closure value: call it directly. */
-    line("  (void)il_fn_0(&il_closures[0], 0, 0);");
+    line("  (void)il_fn_0(&il_closures[0], " + callArgs([]) + ");");
     if (a.hookInit) {
       line("  if (il_globals[" + a.globalIds["init"] + "] >= 0)");
-      line("    (void)il_call(il_globals[" + a.globalIds["init"] + "], 0, 0);");
+      line("    (void)il_call(il_globals[" + a.globalIds["init"] + "], " +
+           callArgs([]) + ");");
     }
     line("  toy_display_on();");
     line("}");
     line("");
     line("void toy_frame(int32_t f) {");
-    line("  (void)il_call(il_globals[" + a.globalIds["frame"] + "], 0, f);");
+    line("  (void)il_call(il_globals[" + a.globalIds["frame"] + "], " +
+         callArgs(["0", "f"]) + ");");
     line("}");
     line("");
+    /* The raster hook, if any: one call per display line, made by the
+     * runtime (which decides how it reaches the RCR interrupt, docs/IL.md
+     * §10).  A weaker symbol than the runtime's weak stub, so its presence
+     * is how main() knows the toy has a callback. */
+    if (a.hookRaster != null) {
+      line("void toy_raster(int32_t line) {");
+      line("  (void)il_call(il_globals[" + a.globalIds["raster"] + "], " +
+           callArgs(["line"]) + ");");
+      line("}");
+      line("");
+    }
 
     return out.join("\n") + "\n";
   }

@@ -206,7 +206,8 @@ What is left on #35: that cycle model (for sample equality), the export path
 page that plays a DMF, and sound in toys (#30). Both checkers were written by
 the builder — @review owes them a cold break (rule 2). `docs/HUTRACK.md`.
 
-**#31: the IL half and part A of the console half are done; the card is not.**
+**#31: the IL half, part A and part C of the console half are done; the card
+is not.**
 `docs/IL.md` defines PCEStudio's typed IL; `renderer/pce-il.js` lowers the #30
 Lua subset to it (through Fengari's own parser, not a second one) and a
 reference interpreter runs it over `renderer/pce-toyhost.js`, the host the Lua
@@ -224,12 +225,23 @@ Mednafen; the ROM rebuilds byte-identically, the last 8 of 149 recorded frames
 are diff 0 in order against the browser's frames 5..12 (exactly one
 alignment), vram/cram/sat are byte-equal at the aligned frame, and the TMA
 timer measures **7,417 cycles/frame** (~6.2% of a 60 Hz frame). Code: used
-.text 2,725 B + .rodata 10 B of the 8 KiB bank. NOT done: part B (HuC), part C
-(`raster()` on the console), part D (the measured llvm-mos vs HuC vs direct
-comparison), any toy but the palette one, sprites/pads, a browser page for the
-IL, strings/passwords/`note`, table reads; recursion and repeated closure
-sites are unguarded; rule 2 cold breaks are owed for both test files.
-`docs/IL.md` §9 has the measurements and the two llvm-mos findings.
+.text 2,725 B + .rodata 10 B of the 8 KiB bank. **Part C** adds `raster()` on
+the console: `toys/parallax.lua` through the same route, its 224 line
+callbacks built ahead into a per-line table and replayed by a hand-written RCR
+handler (the compiled callback measures **1,510 cycles a call**, more than ten
+times the ~123-cycle blank, so it is not the handler). The same test exits 0
+with 116 checks (A+C): **40 consecutive display frames are diff 0** against
+the browser's f135..f174, one every five captured frames (the collection is
+2.84 video frames, so a toy frame runs at ~12–15 Hz); vram/cram/sat byte-equal;
+the palette ROM still rebuilds byte-identically. Measured: frame() 1,204
+cycles, one raster call 1,510, one collection 338,757, flags 0.
+`toys/status-bar.lua` and #30's `TOY_RASTER` do **not** match yet (status-bar's
+bar is right but its playfield is four lines out; TOY_RASTER differs across
+the picture) and are recorded as not proven. NOT done: part B (HuC), part D
+(the measured llvm-mos vs HuC vs direct comparison), sprites/pads, a browser
+page for the IL, strings/passwords/`note`, table reads; recursion and repeated
+closure sites are unguarded; rule 2 cold breaks are owed for both test files.
+`docs/IL.md` §9 and §10 have the measurements and the findings.
 
 ## Next action
 

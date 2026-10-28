@@ -92,6 +92,12 @@ meta = json.load(open(build_json))
 ram = open(os.path.join(dumpdir, "ram.bin"), "rb").read()
 sum_ticks = struct.unpack_from("<I", ram, 0x100)[0]
 count = struct.unpack_from("<H", ram, 0x104)[0]
+# #31 part C adds the raster() measurements: every call is bracketed by the
+# same timer, and every 224-call collection is bracketed as a whole.
+raster_sum = struct.unpack_from("<I", ram, 0x108)[0]
+raster_count = struct.unpack_from("<H", ram, 0x10C)[0]
+collect_sum = struct.unpack_from("<I", ram, 0x110)[0]
+collect_count = struct.unpack_from("<H", ram, 0x114)[0]
 meas = {
     "count": count,
     "sum_ticks": sum_ticks,
@@ -101,6 +107,21 @@ meas = {
     # Mednafen's HuC6280 timer decrements once per 1024 CPU clocks
     # (src/pce/huc6280.cpp: timer_div = 1024).
     "cycles_per_frame": (sum_ticks / count * 1024) if count else None,
+    "raster_calls": raster_count,
+    "raster_sum_ticks": raster_sum,
+    "cycles_per_raster_call": (raster_sum / raster_count * 1024)
+                              if raster_count else None,
+    "raster_max_ticks": ram[0x10E],
+    "collections": collect_count,
+    # The whole-collection bracket is a 7-bit delta and wraps on a
+    # collection longer than 128 ticks; the per-call sum does not, so the
+    # comparable figure is the per-call ticks accumulated over the frames.
+    "collect_sum_ticks_7bit": collect_sum,
+    "cycles_per_collection": (raster_sum / collect_count * 1024)
+                             if collect_count else None,
+    # bit 0/1: a base colour/VRAM list overflowed; bit 2: a vset in a
+    # raster callback; bit 3: the main loop fell behind (part C only)
+    "flags": ram[0x10F],
 }
 frames = sorted(os.listdir(os.path.join(dumpdir, "frames")))
 meta["capture"] = {

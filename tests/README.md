@@ -1,6 +1,11 @@
 # The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #15, #38, #39, #40, #42, #48, #30)
 
 ```sh
+node tests/check-il.js          # #31: the three #30 toys through Lua -> IL -> the
+                                # reference interpreter, vs the Fengari run
+node tests/check-il-console.js  # #31 parts A and C: the palette toy and
+                                # parallax.lua through IL -> C -> llvm-mos ->
+                                # Mednafen, frames and state vs the browser
 node tests/check.js             # diff the renderer against Mednafen, all scenes
 node tests/check-review-fixes.js # #38: each review fix, and it fails before
 node tests/renderer-mutation.js # #6/#39: prove that diff test fails on a broken renderer
@@ -24,6 +29,9 @@ node tests/music-mutation.js    # #72: REVIEW-35's three MISSED breaks must now 
 node tests/check-toys.js        # #30: three Lua toys run live in Node for 40 frames,
                                 # every frame diff 0 against hand-built states through
                                 # the same model, plus the refusals by code
+node tests/check-examples.js    # #29: the five example toys in toys/ for 120 frames
+                                # through the Lua runtime AND the IL, budgets, effect
+                                # checks, and frame-60 PNGs in dumps/examples/
 ```
 
 The audio suites' models and limits are documented in `docs/PSG.md`,
@@ -34,6 +42,43 @@ The audio suites' models and limits are documented in `docs/PSG.md`,
 `check-hutrack.js` needs `pceas4` on `PATH` (or `PCEAS4=`) for the ROM
 rebuild; without it that one check prints SKIP and the recording checks still
 run.
+
+## `check-il-console.js` — #31 part A: the toy on the console
+
+`renderer/pce-cgen.js` emits C from the IL (never from the Lua, never from
+machine code); `tools/toyc/` is the console runtime; `tools/build-toyc.sh`
+compiles it with llvm-mos's PCE target (an external tool at
+`/Volumes/External II/pce-tools/llvm-mos`, overridable with `LLVM_MOS=`) into
+an 8 KiB HuCard ROM. `tools/capture-toy.sh` is the capture route: build, run
+in Mednafen with `-qtrecord`, SIGINT for the autosave, `mcs-extract.py --ram`
+for the state (`--ram` is part A's addition: the TMA timer measurement lives
+at BaseRAM `$2100`), and `movframes.py --all` for every recorded frame
+(SLSTART=3 puts captured row 0 at VCE line 17 = VDW line 0, so the crop is the
+toy's own 256×224 picture).
+
+`node tests/check-il-console.js` exits 0 with 116 checks. It asserts the
+emitter's refusal codes, rebuilds both ROMs and requires their committed
+`meta.json` sha256s (SKIP when llvm-mos is absent), compares the palette
+dump's last 8 frames with the browser runtime's frames 5..12 (exactly one
+alignment in 0..7; every frame diff 0), requires vram/cram/sat byte-equal and
+BXR/BYR/MWR equal at the aligned frame (CR differs only in bit 3, the
+VBlank-status enable), and reads the measured frame cost from `ram.bin`:
+7.243 timer ticks × 1024 = **7,417 cycles/frame** over 469 frames (`min` 7,
+`max` 8). Code size: 8,192 B ROM, used `.text` 2,725 B + `.rodata` 10 B, the
+toy's IL functions 2,014 B. Details, limits and the two llvm-mos findings are
+in `docs/IL.md` §9.
+
+Part C (`tests/dumps/toyparallax/`) runs `toys/parallax.lua`'s
+`raster(line)` through a per-line table replayed by a hand-written RCR
+handler: **40 consecutive display frames are diff 0** against the browser's
+f135..f174, one every five captured frames (the collection measures 2.84
+video frames, so the toy runs at ~12–15 Hz; the frames in between are the
+compute period's static picture and are not compared). The measured cost of
+one raster call, **1,510 cycles**, is why the compiled callback is not the
+interrupt handler. The capture also records the per-call and per-collection
+timer sums (`raster_calls`, `cycles_per_raster_call`,
+`cycles_per_collection`, `flags`) in `meta.json`. `status-bar.lua` and #30's
+`TOY_RASTER` are measured failures, documented in `docs/IL.md` §10.4.
 
 ## `check.js` — the diff (#5, #39, #12, #40, #15)
 
@@ -661,3 +706,31 @@ runtime lands the toy's writes where the model reads them, not that the model
 is the VDC/VCE. The page `renderer/toys.html` is not executed here (no
 browser), and `raster(line)` is 224 Lua calls, not an RCR ISR — pricing and
 compiling that are #32/#31.
+
+## `check-examples.js` — the example toys (#29)
+
+`toys/` holds five example toys — `parallax.lua`, `sky-gradient.lua`,
+`road.lua`, `status-bar.lua`, `palette-cycle.lua` — each a classic PC Engine
+effect with the trick explained in its comments (`docs/EXAMPLES.md`). The
+check runs each one for 120 frames through `renderer/pce-toys.js` and through
+`renderer/pce-il.js` and requires, for every frame: `vram`, `cram`, `sat` and
+the four registers byte-equal, the raster table identical (deep, including
+`base`/`baseCram`/`cramPrev`), pixels diff 0, and equal frame size.
+
+It also measures the budgets: every Lua frame inside the runtime's own 100 ms
+deadline (the worst wall time is printed), the IL inside its default
+5,000,000-instruction budget, and the model's own per-line SAT search
+(`pce-sprites.js`) reporting at most 16 strips per line with no OR/CC — the
+#50 budget, which these sprite-free toys meet with 0 strips.
+
+Then it checks the effect in the pixels rather than in the toy's words (the
+four parallax bars at their bands' BXR offsets, the sky's gradient and sun,
+the road wider and bent below the horizon, the status bar's 24 rows identical
+in frames 0 and 60 while the playfield moves, and the rotated palettes), and
+writes frame 60 of each to `dumps/examples/<name>.png`, reading it back pixel
+for pixel.
+
+**It does not prove hardware or a browser.** The pictures are our model's; no
+example has been exported to a `.pce` (that is #31's next half) or run in an
+emulator. The toys and this check were written by the same seat (rule 2: a cold
+break is owed).

@@ -1,0 +1,62 @@
+{
+ "capture": {
+  "frames": 537,
+  "last_frame": "frame0536.png",
+  "measure": {
+   "collect_sum_ticks_7bit": 20480,
+   "collections": 175,
+   "count": 176,
+   "cycles_per_collection": 338756.7542857143,
+   "cycles_per_frame": 1204.3636363636363,
+   "cycles_per_raster_call": 1509.6880920851584,
+   "flags": 0,
+   "max_ticks": 2,
+   "mean_ticks": 1.1761363636363635,
+   "min_ticks": 1,
+   "raster_calls": 39268,
+   "raster_max_ticks": 2,
+   "raster_sum_ticks": 57893,
+   "sum_ticks": 207
+  },
+  "slend": 234,
+  "slstart": 3
+ },
+ "cc": "clang version 24.0.0git (https://github.com/llvm-mos/llvm-mos a40207a371b60ff787ece46817d9c0f62eada719)",
+ "flags": "-Os -Itools/toyc",
+ "functions": {
+  "il_call": 575,
+  "il_fn_0": 206,
+  "il_fn_1": 706,
+  "il_fn_2": 340,
+  "il_fn_3": 1849,
+  "il_fn_4": 167,
+  "il_fn_5": 230,
+  "il_fn_6": 34,
+  "il_fn_7": 1009,
+  "toy_pal": 170,
+  "toy_vram_set": 88
+ },
+ "name": "toyparallax",
+ "rom": "tools/gen/toyparallax.pce",
+ "rom_bytes": 8192,
+ "rom_sha256": "cdf6dfaeb8f67eb35ba34fe35c95c2380d337a425652b0cdf5936cfe804b672e",
+ "section_sizes": {
+  ".bss": 3808,
+  ".data": 16,
+  ".early_start": 825,
+  ".noinit": 0,
+  ".rodata": 16,
+  ".text": 7325,
+  ".vector": 10,
+  ".zp": 24,
+  ".zp.bss": 200,
+  ".zp.data": 0
+ },
+ "sections": {
+  "bss": 4032,
+  "data": 16,
+  "text": 8176
+ },
+ "source": "toys/parallax.lua",
+ "source_sha256": "fdb3cfd11904c6601d73fb033969863af60262711ff20ba1fec4e4cacda7f52a"
+}
