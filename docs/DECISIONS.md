@@ -100,3 +100,11 @@ it. **ares is a cross-check, not the oracle**: the Hudson manuals and real hardw
 - **Not proven.** ares's DAC scale; that ares and the renderer are both right rather than wrong together; real
   hardware; the sprite scenes; and a cold break of the ares check by a second seat (our own one-pixel break is
   recorded in `ARES.md`).
+
+## 2026-10-28 — ppu.toys may be studied for Phases 3 and 5 (Dennis)
+
+The 2026-10-27 rule was "nothing of ppu.toys is used — no code, text or design". Dennis now allows a **study**:
+how ppu.toys builds its Lua toy runtime, its validator (frame time, budgets), its CLI and its agent link, written
+up as lessons for PCEStudio's Phases 3 and 5. Still **no code and no text copied** (it is Rust and SNES anyway);
+PCEStudio stays JavaScript in the browser, Python tools and PCEAS assembly. Where an idea is taken, the write-up
+credits ppu.toys (MIT, Liora Labs).
