@@ -1,4 +1,4 @@
-# The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #38, #39, #40)
+# The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #15, #38, #39, #40)
 
 ```sh
 node tests/check.js             # diff the renderer against Mednafen, all scenes
@@ -10,7 +10,7 @@ node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
 node tests/check-editor.js      # the editor's refusals, picture, export and capture
 ```
 
-## `check.js` — the diff (#5, #39, #12, #40)
+## `check.js` — the diff (#5, #39, #12, #40, #15)
 
 For each `dumps/sceneN/` or `dumps/spriteN/`, renders `mednafen.png`'s frame
 from `vram.bin`, `cram.bin` and `regs.json` — a dump with `sat.bin` (the
@@ -27,11 +27,24 @@ data — and `scene8`, `scene8b` and `scene8c` are the diff-0 proofs (#39).
 HuCard image blank (every VDC register 0), which is the emulator not running
 the image (#25), not a rendered frame. The skip list is explicit and named
 dumps only; an unnamed background-off dump whose capture is not the backdrop
-fails the run as a diff. The shipped count is **41 pictures** (scenes 1-9,
-5b, 8b, 8c, painted, viewer 1-3, browser 1-3, sprite 1-11, vsprite 1-11),
-us1 skipped. `dumps/vspriteN/` are #14's captures: the *viewer* ROMs of the
-sprite scenes (`tools/capture.sh N vsprite`), whose SATB DMA loads the same
-SAT the sprite scene ROMs write directly.
+fails the run as a diff. The shipped count is **46 pictures** (scenes 1-9,
+5b, 8b, 8c, painted, viewer 1-3, browser 1-3, sprite 1-11, vsprite 1-11,
+raster 1-5), us1 skipped. `dumps/vspriteN/` are #14's captures: the *viewer*
+ROMs of the sprite scenes (`tools/capture.sh N vsprite`), whose SATB DMA
+loads the same SAT the sprite scene ROMs write directly.
+A dump with `raster.json` (the raster scenes, #15) is verified against it
+**before** rendering — the table must describe what the ROM actually wrote:
+entries' lines strictly increasing (VDW lines; 240 allowed for r5's HBlank
+restore), each `rcr = 0x40 + line`, the saved BXR/BYR/CR equal the last
+entry of their kind with `line <= RCRCount`, the saved RCR equals the
+chain's next arm, and the saved colour table equals `baseCram` plus every
+entry's `cram` writes in line order.  For raster4, `cram`/`cramPrev` carry
+this frame's and the previous frame's values (patched in from the save's
+HuC6280 RAM by `tools/raster-patch.py`); `cramPrev` drives the renderer's
+rows before the entry — the saved table can only hold this frame's writes.  The renderer then renders
+the dump with the table as `opts.raster` (`pce-sprites.js` gates the sprite
+layer with each row's CR).  The scenes and their witnesses are in
+`docs/RENDERER.md`'s #15 sections.
 Sprite 9-11 are #40's scenes, which close the three gaps REVIEW-12 found in
 the sprite scenes (see below).
 
@@ -66,6 +79,24 @@ MSB-first is 0x0/0xF stripes, not solid colour 7 — the tile is now
 docstring said LSB-first; the captures (all 30 scenes diff 0) show the VDC
 decode is MSB-first, and the comment now says so.
 
+## The raster scenes (#15)
+
+`dumps/raster1-5` are #15's: ROMs (`RASTER_SCENES` in genroms.py) that
+chain per-scanline BXR/BYR/CR/VCE colour-table writes from the RCR line
+interrupt — a statusbar-style BYR band, a per-line BXR wobble, a two-step
+BYR split, a per-line colour-table gradient shifted by a frame counter,
+and a CR sequence that turns the sprite layer then the background off.
+`tools/capture.sh N raster` builds the ROM, captures it, writes `ram.bin`
+(the save's HuC6280 RAM — the chain's step/frame counters live in ZP,
+BaseRAM[0x30]/[0x31]) and copies the ROM's `raster.json`, which
+`tools/raster-patch.py` folds with the runtime state (the chain's step at
+the save, r4's frame counter) before `check.js` verifies the table against
+the save state and renders with it.  The per-scene witnesses and the
+manual citations (RCR R06, BXR/BYR R07/R08, CR R05, VCE 2.2.2) are in
+`docs/RENDERER.md`; the NOT-proven parts (sub-line VCE write dots, the
+emulator-specific IRQ path, real-hardware IRQ latency) are written down
+there too.
+
 ## `check-review-fixes.js` — the #38 fixes, and that they were needed
 
 The five small fixes from `docs/REVIEW.md` (finding 2: SCREEN code 3 BAT
@@ -95,16 +126,17 @@ ten breaks `docs/REVIEW.md` finding 1 showed the test could not see, each
 required to be DETECTED: the BAT width mask forced to 31, the widths table
 `[32,64,64,64]`, BAT height always 32, the SCREEN-code-3 row stride (the
 #38 break), the `ch >= 0x800` rule removed, BXR masked to 8 and to 9 bits,
-BYR masked to 8 bits, `vdwLine0` hard-wired to 1, CR ignored, and the green
-channel `&3`. Scenes 4-9 (8b, 8c) exist to make these visible — each is
-**not** periodic in the dimension the break cuts — and scene5b (crop
-shifted two lines, so its `vdwLine0` is 3) catches the vdw1 break, which is
-arithmetically invisible on the standard crop. One break is DETECTED on a
-synthetic dump instead: `ch800` — no real dump can carry VRAM data at
-words ≥ 0x800 because Mednafen's state holds 32768 words, so the script
-builds a 65536-word VRAM whose BAT reads tiles ≥ 0x800 (the reference PNG
-is the shipped renderer's own frame; scene9 is the capture that proves the
-*rule*, the script only proves the checker catches its removal).
+BYR masked to 8 bits, `vdwLine0` hard-wired to 1, the CR BB gate removed,
+and the green channel `&3`. Scenes 4-9 (8b, 8c) exist to make these
+visible — each is **not** periodic in the dimension the break cuts — and
+scene5b (crop shifted two lines, so its `vdwLine0` is 3) catches the vdw1
+break, which is arithmetically invisible on the standard crop. One break is
+DETECTED on a synthetic dump instead: `ch800` — no real dump can carry VRAM
+data at words ≥ 0x800 because Mednafen's state holds 32768 words, so the
+script builds a 65536-word VRAM whose BAT reads tiles ≥ 0x800 (the
+reference PNG is the shipped renderer's own frame; scene9 is the capture
+that proves the *rule*, the script only proves the checker catches its
+removal).
 
 It also tests itself, so a green run is not the only thing it can say:
 

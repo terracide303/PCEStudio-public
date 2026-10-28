@@ -7,14 +7,18 @@ PYTHON ?= python3
 
 SCENES := 1 2 3 4 5 6 7 8 8b 8c 9
 SPRITES := 1 2 3 4 5 6 7 8 9 10 11
+# #15's raster-scene ROMs (genroms.py's RASTER_SCENES): per-scanline BXR/
+# BYR/CR/VCE-colour-table writes chained off the RCR line interrupt.
+RASTERS := 1 2 3 4 5
 # The viewer ROMs exist for the pictures that have a regions.json (scenes
 # 1-3, the #8/#9 samples; #39's scenes 4-9 are scene-ROM captures without
 # one, so no viewer ROM is built for them).
 VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,1 2 3))
 SPRITE_ROMS := $(addprefix gen/sprite,$(addsuffix .pce,$(SPRITES)))
 VSPRITES := $(addprefix gen/vsprite,$(addsuffix .pce,$(SPRITES)))
+RASTER_ROMS := $(addprefix gen/raster,$(addsuffix .pce,$(RASTERS)))
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES)
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS)
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -34,6 +38,15 @@ gen/sprite%.asm: genroms.py
 	$(PYTHON) -I genroms.py
 
 gen/sprite%.pce: gen/sprite%.asm
+	$(PCEAS) -raw -o $@ $<
+
+# #15's raster-scene ROMs (genroms.py's RASTER_SCENES), same route.  The
+# generator also writes gen/rasterN.raster.json, the renderer's raster table.
+gen/raster%.asm: genroms.py
+	mkdir -p gen
+	$(PYTHON) -I genroms.py
+
+gen/raster%.pce: gen/raster%.asm
 	$(PCEAS) -raw -o $@ $<
 
 # The viewer ROMs are viewer.asm (bank 0, fixed) plus the picture data of

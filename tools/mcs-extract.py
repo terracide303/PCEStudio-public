@@ -7,6 +7,9 @@ clean exit; this script pulls out everything the renderer needs:
   <dumpdir>/vram.bin   VDC VRAM, 32768 x uint16 little-endian (65536 bytes)
   <dumpdir>/cram.bin   VCE colour table, 512 x uint16 LE (1024 bytes)
   <dumpdir>/sat.bin    VDC SATB, 256 x uint16 LE (512 bytes; #12 sprites)
+  <dumpdir>/ram.bin    HuC6280 RAM, 8192 bytes (with --raster: the #15
+                       raster ROMs' step/frame counters live in ZP at
+                       offset 0x2000)
   <dumpdir>/regs.json  named registers/counters, incl. the scanline
                        calibration values the renderer uses
 
@@ -94,11 +97,14 @@ def parse(path):
 
 
 def main():
-    if len(sys.argv) not in (3, 4):
-        print(f"usage: {sys.argv[0]} STATE.mcs OUTDIR [SLSTART]", file=sys.stderr)
+    args = [a for a in sys.argv[1:] if a != "--raster"]
+    raster = "--raster" in sys.argv[1:]
+    if len(args) not in (2, 3):
+        print(f"usage: {sys.argv[0]} STATE.mcs OUTDIR [SLSTART] [--raster]",
+              file=sys.stderr)
         return 2
-    state, outdir = sys.argv[1], sys.argv[2]
-    slstart = int(sys.argv[3]) if len(sys.argv) == 4 else None
+    state, outdir = args[0], args[1]
+    slstart = int(args[2]) if len(args) == 3 else None
     import os
     os.makedirs(outdir, exist_ok=True)
 
@@ -131,16 +137,29 @@ def main():
     vram = sections.get("VDC", {}).get("VRAM", b"")
     cram = sections.get("VCE", {}).get("color_table", b"")
     sat = sections.get("VDC", {}).get("SAT", b"")
+    ram = sections.get("MAIN", {}).get("BaseRAM", b"")
     with open(os.path.join(outdir, "vram.bin"), "wb") as f:
         f.write(vram)
     with open(os.path.join(outdir, "cram.bin"), "wb") as f:
         f.write(cram)
     with open(os.path.join(outdir, "sat.bin"), "wb") as f:
         f.write(sat)
+    if raster:
+        # #15: the HuC6280 RAM (8KB at $F80000, mirrored at $FFE000) — the
+        # raster ROMs' step and frame counters live in ZP (logical $2030/$2031,
+        # which MPR1 maps onto the RAM base: BaseRAM[0x30]/[0x31]);
+        # raster-patch.py reads them from here.
+        with open(os.path.join(outdir, "ram.bin"), "wb") as f:
+            f.write(ram)
     with open(os.path.join(outdir, "regs.json"), "w") as f:
         json.dump(regs, f, indent=1, sort_keys=True)
     print(f"wrote {outdir}/vram.bin ({len(vram)} B), cram.bin ({len(cram)} B), "
-          f"sat.bin ({len(sat)} B), regs.json")
+          f"sat.bin ({len(sat)} B)" +
+          (f", ram.bin ({len(ram)} B)" if raster else "") + ", regs.json")
+    if raster and len(ram) < 0x32:
+        print("ram.bin too short for the ZP counters (offsets 0x30/0x31)",
+              file=sys.stderr)
+        return 2
     # calibration diagnostics (see docs/RENDERER.md):
     if "RCRCount" in regs and "scanline" in regs:
         rcr = regs["RCRCount"]
@@ -153,11 +172,21 @@ def main():
         # RCRCount - 1 (the save happens before the latch of its own line's
         # HDS_PART2 increment).
         first = 14 + (slstart if slstart is not None else 4)
-        print(f"calibration: scanline={sl} RCRCount={rcr} BG_YMoo={moo} "
-              f"BYR={byr} -> vdw_line(save)={rcr} "
-              f"row0_vdw_line={rcr - (sl - first)} "
-              f"(firstScanline={first}) "
-              f"crosscheck BG_YMoo-BYR={moo - byr} (expect {rcr - 1})")
+        if raster:
+            # #15: the ROM writes BYR mid-frame, so BG_YMoo - BYR no longer
+            # equals RCRCount - 1; tests/check.js's raster checks (against
+            # raster.json) replace this cross-check.
+            print(f"calibration: scanline={sl} RCRCount={rcr} "
+                  f"-> vdw_line(save)={rcr} "
+                  f"row0_vdw_line={rcr - (sl - first)} "
+                  f"(firstScanline={first}) "
+                  f"(raster: BG_YMoo-BYR crosscheck skipped)")
+        else:
+            print(f"calibration: scanline={sl} RCRCount={rcr} BG_YMoo={moo} "
+                  f"BYR={byr} -> vdw_line(save)={rcr} "
+                  f"row0_vdw_line={rcr - (sl - first)} "
+                  f"(firstScanline={first}) "
+                  f"crosscheck BG_YMoo-BYR={moo - byr} (expect {rcr - 1})")
         # A state saved during the 14 pre-VDW blanking lines (scanline < 14)
         # straddles the BG_YOffset reset at VDW entry: the row arithmetic is
         # linear in scanline only if no reset lies between the save and
