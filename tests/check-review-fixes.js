@@ -314,10 +314,13 @@ const OLD_CHECK_SRC = preFixSource(CHECK_SRC,
  * tests/dumps/effect1 and tests/dumps/vraster1-10 (the fixed raster chain's
  * re-captures), so the count moved from 57 to 68; #48 added the four window
  * scenes (scene11-14: 224 lines, VDS-shifted, narrow HDW, short VDW) and the
- * count is 72; #49 adds the three VRAM-to-VRAM DMA ROMs (dma1-3) for 75 —
+ * count is 72; #49 adds the three VRAM-to-VRAM DMA ROMs (dma1-3) for 75;
+ * #68 adds raster11 and vraster11 for 77 —
  * but a count alone would let
  * one scene drop out while another silently took its place, so the set is
- * checked name by name.  us1 is the only dump that is not a picture. */
+ * checked name by name.  #68 adds raster11 (the frame counter + two CRAM
+ * words table, REVIEW-16 B15) and its viewer ROM vraster11.  us1 is the only
+ * dump that is not a picture. */
 const EXPECTED_SCENES = [
   /* scene ROMs, #5/#6/#15/#39/#43 */
   "scene1", "scene2", "scene3", "scene4", "scene5", "scene6", "scene7",
@@ -341,6 +344,8 @@ const EXPECTED_SCENES = [
   /* the viewer's raster ROMs and the editor's effect demo, #16 */
   "vraster1", "vraster2", "vraster3", "vraster4", "vraster5", "vraster6",
   "vraster7", "vraster8", "vraster9", "vraster10", "effect1",
+  /* #68: the frame counter + two CRAM words table (REVIEW-16 B15) */
+  "raster11", "vraster11",
 ];
 
 function outputProblems(stdout, status) {

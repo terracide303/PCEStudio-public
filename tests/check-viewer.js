@@ -49,7 +49,18 @@
  *     check-editor.js's checkEffectCapture holds it to the editor's state
  *     instead.
  *
- * Exit code 0 only if every viewer capture matches on all checks.
+ * #68 — the first-frame fixtures (tests/dumps/vtraceN/): a raster dump's
+ * image is the steady state, so REVIEW-16's B14 (the boot arm one line late)
+ * moves nothing in it.  A VDC write trace from reset does see it: the trace's
+ * first RCR matches are the first frame's arms.  checkTraceFixture below
+ * requires them to be the table's steps 0..3 in order, with RC set, and every
+ * steady-state arm to be a table arm.  vtrace2 is the pristine vraster2;
+ * vtrace2-b14 is the same ROM with B14 re-applied, committed as a control
+ * that the check must REJECT — a check that has never failed has not been
+ * tested.  tools/capture-review16.sh trace records both.
+ *
+ * Exit code 0 only if every viewer capture matches on all checks and every
+ * trace fixture lands in its expected class.
  */
 
 "use strict";
@@ -57,6 +68,7 @@
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
+const crypto = require("crypto");
 const bg = require("../renderer/pce-bg.js");
 const sprites = require("../renderer/pce-sprites.js");
 
@@ -266,6 +278,180 @@ function checkViewer(dir) {
   return 1;
 }
 
+/* ---- #68: the first frame, from a VDC trace from reset -------------------
+ *
+ * REVIEW-16's B14 (the boot arm one line late) changes only the first RCR
+ * match after boot: every later frame re-arms from the chain.  The image
+ * captures cannot see it — Mednafen's movie's first recorded frame is already
+ * steady (measured: the mutant's 524-frame movie has one frame hash) — so the
+ * instrument is a VDC write trace from reset (tools/capture-review16.sh
+ * trace; the instrumented Mednafen's `RCRIRQ` lines).  The trace's first
+ * matches are the first frame's RCR arms: the pristine ROM arms step 0 at
+ * 0x40 + entries[0].line, then steps 1..3 in table order; the B14 mutant's
+ * first arm is one line late (0x42 where the table says 0x41).
+ *
+ * A fixture is a directory tests/dumps/vtraceN/ with raster.json, meta.json,
+ * rcrirq-first.txt (the first 8 RCRIRQ lines) and rcrirq-last.txt (the last
+ * 4).  meta.expect is "match" (the pristine ROM) or "mismatch" (the B14
+ * control): the control is not a failure — it is committed to prove this
+ * check can say no, and the suite fails if the control ever passes.
+ *
+ * Result classes (all exit 1 except OK):
+ *   OK            match: the first four arms equal the table's steps 0..3 and
+ *                 every steady-state arm is a table arm; or mismatch: the
+ *                 control reports the first-frame deviation and nothing else.
+ *   MISSING       a fixture file is absent or unparseable.
+ *   TRUNCATED     fewer than 4 RCRIRQ lines (the chain did not run long
+ *                 enough — a capture failure, not a verdict).
+ *   DEVIATION     match: the first frame did not arm the table in order, or
+ *                 fired with RC clear, or a steady-state arm is not a table
+ *                 arm.  This is the B14 detection for a real capture.
+ *   RC-CLEAR      an RCRIRQ line fired with CR bit 2 (RC) clear.
+ *   PROVENANCE    match: tools/gen/vraster2.pce exists and its sha256 differs
+ *                 from the one the trace was recorded from — re-capture.
+ *                 (The mismatch control's ROM is a scratch mutant, so its
+ *                 sha is recorded but not compared.)
+ *   CONTROL-PASSED  mismatch: the check found no deviation, so it cannot see
+ *                 B14 and every "match" verdict above it is untrustworthy.
+ *   WRONG-REASON  mismatch: the control was rejected for a reason other than
+ *                 the first-frame arm (a broken fixture, not a witness).
+ */
+function parseRcrIrq(text) {
+  const out = [];
+  for (const line of text.split("\n")) {
+    const m = /^RCRIRQ RCRCount=(\d+) RCR=([0-9a-f]+) CR=([0-9a-f]+)$/
+      .exec(line);
+    if (m) out.push({ count: parseInt(m[1], 10), rcr: parseInt(m[2], 16),
+                      cr: parseInt(m[3], 16) });
+  }
+  return out;
+}
+
+function readFixtureFile(dir, name) {
+  const p = path.join(dir, name);
+  if (!fs.existsSync(p)) return null;
+  return fs.readFileSync(p, "utf8");
+}
+
+function firstFrameProblems(dir) {
+  const name = path.basename(dir);
+  const problems = [];      /* nothing to do with B14: a broken fixture */
+  const frameProblems = []; /* the first-frame arm class: B14's witness */
+  const rasterText = readFixtureFile(dir, "raster.json");
+  const metaText = readFixtureFile(dir, "meta.json");
+  const firstText = readFixtureFile(dir, "rcrirq-first.txt");
+  const lastText = readFixtureFile(dir, "rcrirq-last.txt");
+  for (const [what, text] of [["raster.json", rasterText],
+                              ["meta.json", metaText],
+                              ["rcrirq-first.txt", firstText],
+                              ["rcrirq-last.txt", lastText]]) {
+    if (text == null) problems.push(`${name}: missing ${what}`);
+  }
+  if (problems.length) return { problems, frameProblems, meta: null };
+
+  let raster, meta;
+  try {
+    raster = JSON.parse(rasterText);
+    meta = JSON.parse(metaText);
+  } catch (e) {
+    problems.push(`${name}: unparseable JSON (${e.message})`);
+    return { problems, frameProblems, meta: null };
+  }
+  const entries = raster.entries || [];
+  const first = parseRcrIrq(firstText);
+  const last = parseRcrIrq(lastText);
+  if (entries.length < 4) {
+    problems.push(`${name}: raster.json has ${entries.length} entries, ` +
+                  `need at least 4`);
+  }
+  if (first.length < 4) {
+    problems.push(`${name}: ${first.length} RCRIRQ line(s) in ` +
+                  `rcrirq-first.txt, need at least 4`);
+  }
+  if (last.length < 1) {
+    problems.push(`${name}: no RCRIRQ line in rcrirq-last.txt`);
+  }
+
+  /* the first frame: the boot arm fires step 0, and the table's first four
+   * steps fire in order — every arm value is 0x40 + the entry's line */
+  const steps = Math.min(4, entries.length, first.length);
+  for (let i = 0; i < steps; i++) {
+    const want = 0x40 + entries[i].line;
+    if (first[i].rcr !== want) {
+      frameProblems.push(`${name}: first-frame RCR match ${i} armed ` +
+        `RCR=0x${first[i].rcr.toString(16)}, the table's step ${i} ` +
+        `(line ${entries[i].line}) arms 0x${want.toString(16)}`);
+    }
+    if (!(first[i].cr & 0x04)) {
+      problems.push(`${name}: first-frame RCR match ${i} fired with CR=` +
+                    `0x${first[i].cr.toString(16)} (RC, bit 2, clear)`);
+    }
+  }
+  /* steady state: after the first frame the chain's arms are table arms */
+  const arms = new Set(entries.map((e) => 0x40 + e.line));
+  for (const l of last) {
+    if (!arms.has(l.rcr)) {
+      problems.push(`${name}: steady-state RCR match armed RCR=` +
+                    `0x${l.rcr.toString(16)}, not any table entry's arm`);
+    }
+  }
+
+  /* provenance: a "match" fixture must have been recorded from the ROM the
+   * tree builds now.  The control is a deliberate mutant built in scratch,
+   * so its hash is recorded but cannot be the tree's. */
+  if (meta.expect === "match") {
+    if (typeof meta.rom !== "string" ||
+        !/^[0-9a-f]{64}$/.test(meta.rom_sha256 || "")) {
+      problems.push(`${name}: meta.json has no rom/rom_sha256`);
+    } else {
+      const rom = path.join(__dirname, "..", meta.rom);
+      if (fs.existsSync(rom)) {
+        const now = crypto.createHash("sha256")
+          .update(fs.readFileSync(rom)).digest("hex");
+        if (now !== meta.rom_sha256) {
+          problems.push(`${name}: ${meta.rom} is sha256 ${now.slice(0, 12)}… ` +
+            `but the trace was recorded from ${meta.rom_sha256.slice(0, 12)}… — ` +
+            `re-run tools/capture-review16.sh trace`);
+        }
+      }
+    }
+  } else if (meta.expect === "mismatch") {
+    if (!meta.mutation) {
+      problems.push(`${name}: the control's meta.json records no mutation`);
+    }
+  } else {
+    problems.push(`${name}: meta.expect is ${JSON.stringify(meta.expect)}, ` +
+                  `expected "match" or "mismatch"`);
+  }
+  return { problems, frameProblems, meta };
+}
+
+function checkTraceFixture(dir) {
+  const name = path.basename(dir);
+  const r = firstFrameProblems(dir);
+  if (r.problems.length) {
+    r.problems.forEach((p) => console.log(p));
+    return 1;
+  }
+  if (r.meta.expect === "mismatch") {
+    if (r.frameProblems.length === 0) {
+      console.log(`${name}: CONTROL PASSED — the first-frame check did not ` +
+                  `see the recorded B14 deviation, so it cannot be trusted ` +
+                  `to catch B14 on a real capture`);
+      return 1;
+    }
+    console.log(`${name}: OK (control: ${r.frameProblems[0]})`);
+    return 0;
+  }
+  if (r.frameProblems.length) {
+    r.frameProblems.forEach((p) => console.log(p));
+    return 1;
+  }
+  console.log(`${name}: OK (first RCR match arms the table's step 0; the ` +
+              `first four matches are steps 0..3 in order)`);
+  return 0;
+}
+
 function main() {
   const dumps = path.join(__dirname, "dumps");
   if (!fs.existsSync(dumps)) {
@@ -287,11 +473,33 @@ function main() {
   }
   let failed = 0;
   for (const dir of dirs) failed += checkViewer(dir);
+  /* #68: the first-frame trace fixtures.  They are not pictures (no
+   * mednafen.png), so they are not in `dirs`; the control (vtrace2-b14) is
+   * part of the check: it must be REJECTED, or the match verdict means
+   * nothing.  The two fixtures are required by name — deleting one must
+   * fail the suite, not quietly shrink it. */
+  const TRACE_FIXTURES = ["vtrace2", "vtrace2-b14"];
+  for (const d of TRACE_FIXTURES) {
+    if (!fs.existsSync(path.join(dumps, d, "meta.json"))) {
+      console.log(`${d}: MISSING — the first-frame fixture is required ` +
+                  `(run tools/capture-review16.sh trace)`);
+      failed++;
+    }
+  }
+  const traceDirs = fs.readdirSync(dumps)
+    .filter((d) => /^vtrace[0-9]+(?:-b14)?$/.test(d) &&
+                   fs.existsSync(path.join(dumps, d, "meta.json")))
+    .sort().map((d) => path.join(dumps, d));
+  for (const dir of traceDirs) failed += checkTraceFixture(dir);
   console.log(failed === 0
     ? `PASS: viewer/browser/vsprite/bsprite/vraster/effect ROMs match the ` +
-      `renderer pixel for pixel on ${dirs.length} capture(s)`
+      `renderer pixel for pixel on ${dirs.length} capture(s)` +
+      (traceDirs.length
+        ? `, and ${traceDirs.length} first-frame trace fixture(s) check out ` +
+          `(the B14 control is rejected)`
+        : "")
     : `FAIL: ${failed} viewer/browser/vsprite/bsprite/vraster/effect ` +
-      `capture(s) differ`);
+      `capture(s) or trace fixture(s) differ`);
   return failed === 0 ? 0 : 1;
 }
 
