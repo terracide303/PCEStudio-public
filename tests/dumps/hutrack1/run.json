@@ -1,0 +1,33 @@
+{
+  "rom": {
+    "file": "tools/gen/hutrack/hutrack-demo.pce",
+    "bytes": 139264,
+    "sha256": "c683188f47c4e9123b9496ecf246b546d163a1038aacea42ef9ac8f7b257febc"
+  },
+  "wav": {
+    "file": "tests/dumps/hutrack1/mednafen.wav",
+    "bytes": 1235416,
+    "sha256": "59c6bc58db4b8d18970a3af5dd7c2d0676770da7fcde446c8df0a8c06ede1148",
+    "sample_rate": 44100,
+    "channels": 2,
+    "bits": 16,
+    "data_bytes": 1235372,
+    "frame_bytes": 4,
+    "frames": 308843,
+    "seconds": 7.003243
+  },
+  "log": {
+    "file": "tests/dumps/hutrack1/mednafen.log",
+    "bytes": 2524,
+    "sha256": "71346cf7252d9d52982e8aa8b80403e2c85343eeeb3ea3e9fe2b2b83ad18f505"
+  },
+  "capture": {
+    "emulator": "mednafen 1.32.1",
+    "module": "pce_fast",
+    "ocmultiplier": 1,
+    "sound_rate": 44100,
+    "record": "-soundrecord (core output verbatim)",
+    "exit": "SIGINT, whole frames only",
+    "settle_seconds": 8
+  }
+}

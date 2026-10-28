@@ -66,6 +66,26 @@ PCEAS 3.23 cannot assemble HuDK sources — they use `.define` and expect an
 `-I` include path, neither of which this PCEAS has. See
 [`ROM_LAYOUT.md`](ROM_LAYOUT.md) for what the viewer reads from where.
 
+### PCEAS 4.x for HuTrack (#35)
+
+HuTrack's engine does not assemble with 3.23 (dotted labels starting with a
+digit, and macro `.if` expressions over `<label`; see
+[`HUTRACK.md`](HUTRACK.md)). `vendor/huc` is HuC mainline and its
+`src/mkit/as` builds a 4.x PCEAS. Build it outside the repo, as with the 3.23
+tool:
+
+```sh
+T="/Volumes/External II/pce-tools"
+cp -R "/Volumes/External II/agent-workshop-demo/PCEStudio/vendor/huc" "$T/huc4-src"
+mkdir -p "$T/huc4-src/bin"      # the assembler Makefile copies its targets here
+make -C "$T/huc4-src/src/mkit/as" -j4
+ln -sf "$T/huc4-src/bin/pceas" "$HOME/.local/bin/pceas4"
+pceas4     # prints: PC Engine Assembler (, ) — this tree has no git date
+```
+
+`tools/build-hutrack.sh` and `tools/capture-hutrack.sh` take `PCEAS4`
+(default `pceas4`), so the space-free symlink is only a convenience.
+
 ## Building the hello ROM
 
 ```sh
