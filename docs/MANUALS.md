@@ -388,26 +388,30 @@ studio; the parts that matter to a future CD path are below.
 
 Checked against the manuals above, in the tree at the time of writing. The
 first two are wrong *comments/values*, the rest are unmodelled features.
+Line numbers move — another seat is editing `pce-bg.js` and `pce-sprites.js`
+for #26 while this is read — so the references name symbols, not lines.
 
-1. **"256x224" is wrong in three places; the ROM is 256×240.** `HDR` is
-   `$041F` (HDW=31 → 32 characters = 256 px) and `VDW` is `$00EF` (240 lines):
-   `tools/genroms.py:58-63` writes those values, `renderer/viewer.asm:141-150`
+1. **"256x224" is wrong in three places; the ROM is 256×240.** The `HDR`
+   constant is `$041F` (HDW=31 → 32 characters = 256 px) and `VDW` is `$00EF`
+   (240 lines): `tools/genroms.py` writes those values, and `renderer/viewer.asm`
    writes them too (its own comment there says "VDR: 240 display lines"), and
-   yet `renderer/pce-bg.js:5-6`, `tools/genroms.py:58` and
-   `renderer/viewer.asm:7` ("sets the VDC to 256x224") all say 224. The model
+   yet the header comments of `renderer/pce-bg.js`, `tools/genroms.py` and
+   `renderer/viewer.asm` ("sets the VDC to 256x224") all say 224. The model
    renders 232 of the 240 lines. Manual: H7-10 (VDW = N−1), H7-9 (HDW = N−1).
 2. **The VCE control value is written as `$04` and called "edge blur on"**
-   (`tools/viewer.asm:66-68`). The VCE manual's CR text (H6-3) documents only
-   DCC bits 1–0: `$04` therefore selects the ÷4 (256 px) clock with bit 2 set,
-   and **no manual page describes bit 2 as edge blur**. Per `VIDEO_MODES.md`
-   it is the 262/263-line select. The comment (and HuDK's) is unsupported.
-3. **`genroms.py` labels DCR bit 4 "sprite layer on"** (`tools/genroms.py:295`);
-   bit 4 is DSR, the SATB auto-repeat. Sprites are CR bit 6 (H7-11, H7-6).
-   `viewer.asm` has the same register right; only the comment is wrong.
+   (the `lda #$04` / `sta $0400` in `reset`, `renderer/viewer.asm`). The VCE
+   manual's CR text (H6-3) documents only DCC bits 1–0: `$04` therefore
+   selects the ÷4 (256 px) clock with bit 2 set, and **no manual page describes
+   bit 2 as edge blur**. Per `VIDEO_MODES.md` it is the 262/263-line select.
+   The comment (and HuDK's) is unsupported.
+3. **`genroms.py` labels DCR bit 4 "sprite layer on"** (the comment beside DCR
+   in `emit_vdc_regs`); bit 4 is DSR, the SATB auto-repeat. Sprites are CR
+   bit 6 (H7-11, H7-6). `viewer.asm` has the same register right; only the
+   comment is wrong.
 4. **The display window is not modelled at all.** The renderer never reads
-   HSR/HDR/VPR/VDR/VCR; it assumes a 32×30-character window, 232 visible rows,
-   and no border. A different window, a 224-line picture, or anything in the
-   border would render wrong and no test would catch it (`pce-bg.js:240-311`).
+   HSR/HDR/VPR/VDR/VCR; `renderIndices` assumes a 32×30-character window, 232
+   visible rows, and no border. A different window, a 224-line picture, or
+   anything in the border would render wrong and no test would catch it.
    → **GAP 1**.
 5. **MWR is half-modelled.** SCREEN is right (`batGeometry`, H7-9); VM, SM and
    CM are ignored, including the 4-clock mode's "4 of 256 colours" (H7-8/9).
@@ -421,15 +425,16 @@ first two are wrong *comments/values*, the rest are unmodelled features.
 8. **VRAM→VRAM DMA is absent.** DCR's DSR is modelled only as "load the SAT
    every VBlank" (#14); SOUR/DESR/LENR and SI/D/DI/D have no code and no card
    → **GAP 2**. The render model also assumes a static SAT within a frame.
-9. **The sprite budget is hard-coded to 16 strips**, which is what the tests
-   measured, but the manual's limit is "16 sprites" *plus* a search limit that
-   depends on HBlank and SM (H7-19): with the 4-clock SM or a narrow HBlank the
-   real limit is lower. Not modelled → tied to **GAP 9/GAP 1**.
+9. **The sprite budget is hard-coded to 16 strips** (`strips.length < 16` in
+   `collectStrips`), which is what the tests measured, but the manual's limit
+   is "16 sprites" *plus* a search limit that depends on HBlank and SM
+   (H7-19): with the 4-clock SM or a narrow HBlank the real limit is lower.
+   Not modelled → tied to **GAP 9/GAP 1**.
 10. **Status is not modelled.** CC/OR/DS/DV/VD never appear (H7-4); the model
     cannot report an overflow or a collision → **GAP 6**.
 11. **The output scale is Mednafen's, not the VCE's.** `cramEntry` uses
-    36 × n (`pce-bg.js:46-50`); the VCE manual's RGB-output section (H6-6) is
-    missing from the scan, so the manual cannot settle 36n vs 255/7 → **GAP 13**.
+    36 × n; the VCE manual's RGB-output section (H6-6) is missing from the
+    scan, so the manual cannot settle 36n vs 255/7 → **GAP 13**.
 12. **The border colour is only half used.** The renderer paints CRAM $100 for
     a background-off line (correct, H7-18 + Tech Notes p.1), but never paints
     it as the border around the window → **GAP 1**.
@@ -437,16 +442,17 @@ first two are wrong *comments/values*, the rest are unmodelled features.
     touches the timer, the pad port, the PSG or the IRQ vectors (they are `rti`
     stubs). That is correct for a static picture, but it means #30/#31 have no
     proven path yet → **GAP 3**, #34/#35.
-14. **The exporter's caps are its own.** `MAX_TILE_BANKS = 6`, `MAX_REGIONS = 8`,
-    `MAX_BAT_BANKS = 2` (`pce-rom.js:66-68`) = 80 KB images; the 8 KB MPR bank
-    scheme allows 2 MB (H8-10/11) → **GAP 4**.
+14. **The exporter's caps are its own.** `MAX_TILE_BANKS = 6`,
+    `MAX_REGIONS = 8`, `MAX_BAT_BANKS = 2` at the top of `pce-rom.js` = 80 KB
+    images; the 8 KB MPR bank scheme allows 2 MB (H8-10/11) → **GAP 4**.
 15. **Correct but worth recording (checked, no change needed):** the sprite
-    pattern is *code × 64 words* (`pce-sprites.js:121-129`) matching H7-21/24
-    and contradicting the tutorial's ">>5"; the 512-entry palette write wraps
-    the 9-bit CTA exactly as H6-3 says (`viewer.asm:87-110`); the VDC's colour-0
-    rule for the background (`pix===0 → 0x000`) is H7-18; sprite colour 0 is
-    treated as transparent, which is the Tech Notes' "clear" rule (p.1), not a
-    statement in the VDC manual.
+    pattern is *code × 64 words* (`base = s.cell * 64 + s.row` in
+    `pce-sprites.js`) matching H7-21/24 and contradicting the tutorial's
+    ">>5"; the 512-entry palette write wraps the 9-bit CTA exactly as H6-3
+    says (the palette loop in `viewer.asm`); the VDC's colour-0 rule for the
+    background (`pix === 0 → 0x000`) is H7-18; sprite colour 0 is treated as
+    transparent, which is the Tech Notes' "clear" rule (p.1), not a statement
+    in the VDC manual.
 
 ## 13. Where the text is garbled, and what the PDF settled
 
