@@ -88,6 +88,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ### Scanline effects (the line interrupt) !8
 - [x] #15 The renderer: a scroll and a palette change per scanline ~M — commit 1611c2d: node tests/check.js reports diff 0 on 46 pictures — the five new raster captures (raster1 statusbar BYR band, raster2 per-line BXR wobble, raster3 two-step BYR split, raster4 per-line CRAM gradient with frame counter, raster5 CR SB/BB sequence with sprites) plus all 41 existing; check.js verifies each raster.json against the save state before rendering (entry lines, chain re-arm, saved BXR/BYR/CR/colour table). genroms.py builds the five ROMs, all chaining their writes from the RCR line interrupt. The rules the renderer applies are cited in docs/RENDERER.md from the VDC manual (BXR/BYR R07/R08 p. H7-7, CR R05 p. H7-5/H7-6, SR RR p. H7-4, RCR R06 p. H7-6/H7-7) and VCE 2.2.2 p. H6-5; the parts no evidence covers — VCE write timing mid-line (no manual statement), the emulator-specific IRQ path (IRQ1 $fff8, status read at $0000), real-hardware IRQ latency — are written down as NOT proven. Suite green: renderer-mutation (10/10 breaks), check-review-fixes, check-viewer, check-export, check-editor, check-us-card @workshop #opus
 - [?] #16 The viewer: the raster table driven by the line interrupt (RCR) ~M @design #opus
+  - 2026-10-28 @workshop: Read first (PCEHeroTN docs, not yet used by PCEStudio): '/Volumes/External/MiniST_Project/PCEHeroTN/docs/datasheets/text/HuC6280 Hardware Manual - reset vector 1FFE, IRQ, timer, device map.txt' for the IRQ1 vector and how the VDC interrupt is acknowledged — #15 left 'IRQ1 $FFF8, status read at $0000' as emulator-specific; settle it from the manual and cite the page — and '/Volumes/External/MiniST_Project/PCEHeroTN/docs/datasheets/text/HuC62 Tech Notes - INIT ROUTINES, vsync, worked register sequences.txt' for Hudson's own RCR/vsync sequences.
 - [ ] #17 An effect editor: colour gradients, wobble, parallax bands ~M — renderer/editor.html + pce-editor.js gain an effect editor that writes #15's raster table: a colour gradient (one palette entry changed per line between two colours), a wobble (per-line BXR from a sine with amplitude/period/speed), and parallax bands (BXR per band of lines, each band its own speed). The preview is pce-bg.js/pce-sprites.js rendering the raster table, nothing drawn separately. Refusals with codes for what the hardware cannot do (a value out of register range, more raster entries on a line than the model supports, a line outside the display). Evidence: node tests/check-editor.js extended — each of the three effects built through the editor's calls gives the raster table you can compute by hand for small cases (assert the entries), the preview equals pce-bg.js rendering that table, and the refusals with their codes. Export to the viewer waits for #16 (the viewer runs the raster table); write that down, do not fake it. Runs beside #42 in the same tree: stage and commit ONLY your own files by name (never git add -A / commit -a); do not edit tools/genroms.py, tools/genviewer.py, tools/viewer.asm, tools/capture.sh, tests/check-viewer.js or tests/check-export.js. @workshop #ds-flash
 - [?] #29 Example toys for the classics: line-scroll parallax, a sky gradient, a pseudo-3D road, a fixed status bar, palette cycling ~M @design #ds-flash
 - [ ] #43 The raster test catches the breaker's #15 gaps, on pictures where the effect can be seen ~S — docs/REVIEW-15.md (ds-flash breaker, ddbe106): 20 breaks, 16 detected, 3 MISSED (M6 BXR frame-start latch from raster.base instead of the previous frame's last write; M16 vdwLine0 hard-wired to 1 — every raster dump has vdwLine0=1; M19 sprite pixels decoded through the flat CRAM — no capture has visible sprites under per-line colour writes), 1 NO-OP (M17, aliased by the BAT mask). And two effects cannot be seen: raster3's BYR split and raster4's colour gradient sit on random-tile noise. Close: new Mednafen captures built on structured tiles (bands/stripes, not noise) so the BYR split and a per-line colour gradient are visible to a person in tests/dumps/*/mednafen.png; one with BXR carried across a frame boundary (M6), one with vdwLine0 != 1 (M16), one with visible sprites under per-line colour writes (M19); re-run M6, M16, M19 against them and show DETECTED; M17 stays NO-OP with the reason. check.js and all suites stay green. Start after #42 (both use tools/genroms.py). @workshop #ds-pro !6
@@ -95,6 +96,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ### The model's panels !6
 - [?] #26 The VDC's registers per line, the VCE palettes, the VRAM map, the SATB, and "follow a pixel" ~M @design #ds-flash
 - [?] #27 Wide modes: 256, 336 and 512 px (the three dot clocks), in the renderer and the viewer ~M @design #opus
+  - 2026-10-28 @workshop: Read first: /Volumes/External/MiniST_Project/PCEHeroTN/docs/VIDEO_MODES.md (PCEHeroTN's measured video modes) and the VCE manual's dot-clock select ('/Volumes/External/MiniST_Project/PCEHeroTN/docs/datasheets/text/HuC6260 VCE Manual - 0400 physical 1FE400, dot clock select.txt').
 
 ## Phase 3 — Toys as code, compiled for the real thing
 
@@ -110,6 +112,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 
 ### The PSG !5
 - [?] #34 The PSG in the browser: 6 channels of 32-step 5-bit waves, noise, LFO, DDA samples; matches Mednafen by ear ~L @design #opus
+  - 2026-10-28 @workshop: Read first: '/Volumes/External/MiniST_Project/PCEHeroTN/docs/datasheets/text/HuC6280 PSG Manual - sound, FOR PHASE 1.6.txt'.
 - [?] #35 A wave and sound editor, and sound in toys and exported ROMs ~M @design #ds-flash
 
 ## Phase 5 — The AI link
@@ -138,5 +141,6 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ### Later
 - [?] #21 SuperGrafx: two background layers ~L
 - [?] #22 A CD-ROM image instead of a HuCard ~L
+  - 2026-10-28 @workshop: Read first: the three CD-ROM2 manuals in /Volumes/External/MiniST_Project/PCEHeroTN/docs/datasheets/text (BIOS, PSG driver, Software).
 - [?] #23 Animation: several pictures in one ROM ~M
 
