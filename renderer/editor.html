@@ -1,7 +1,9 @@
 <!doctype html>
 <!-- PCEStudio editor — tiles, palettes from the VCE's 512 colours, the
-     background map (card #10), sprite patterns and the SAT (card #13), and
-     the scanline effects (card #17).
+     background map (card #10), sprite patterns and the SAT (card #13), the
+     scanline effects (card #17), and the model's panels — the VDC registers
+     per line, the VCE's 32 palettes of 16, the VRAM map, the SAT and
+     follow-a-pixel (card #26).
      Serve the repo root and open renderer/editor.html:
          python3 -m http.server 8000
      Everything is kept in the shape the VDC holds it (renderer/pce-editor.js):
@@ -77,6 +79,23 @@
   #bandrows .sprow { margin-top: 0.2rem; }
   #rasterinfo { color: #8cf; font: 12px monospace; }
   .fx { color: #aaa; font: 12px monospace; }
+  #panelssec { flex-basis: 100%; }
+  #panelssec .row { align-items: flex-start; }
+  #regnow { color: #8cf; font: 12px monospace; white-space: pre-wrap;
+            margin-bottom: 0.3rem; }
+  #regtable, #sattable { font: 11px monospace; color: #bbb; max-height: 13rem;
+                         overflow: auto; white-space: pre; }
+  #vcetable { font: 11px monospace; }
+  .pal32 { display: flex; align-items: center; gap: 2px; margin-bottom: 1px; }
+  .pal32 .palnum { width: 1.5rem; color: #777; text-align: right; }
+  .psw { width: 11px; height: 11px; box-sizing: border-box; }
+  .psw.entry0 { border: 1px dashed #888; }
+  #vrammap, #vramzoom { width: 100%; height: 22px; image-rendering: pixelated;
+                        background: #000; display: block;
+                        margin-bottom: 0.25rem; }
+  #vramlegend { font: 11px monospace; color: #bbb; white-space: pre;
+                max-height: 9rem; overflow: auto; }
+  #followinfo { font: 12px monospace; color: #8cf; white-space: pre-wrap; }
 </style>
 </head>
 <body>
@@ -237,15 +256,69 @@
     <canvas id="preview" width="256" height="224"></canvas>
     <div id="stats"></div>
   </section>
+
+  <section id="panelssec">
+    <h2>The model's panels — the same state the preview draws</h2>
+    <p class="note">Every number below is read from the objects the renderer
+      is given — vram, cram, sat, regs and the #15 raster table — not from a
+      second copy of the picture. Click the preview to follow a pixel: the
+      layer that won, its BAT entry/tile or sprite, the colour index, and the
+      register values on that line.</p>
+    <div class="row">
+      <section>
+        <h2>VDC registers — all 20 (R00–R13)</h2>
+        <div id="regnow"></div>
+        <div id="regtable"></div>
+        <p class="note">The register file for the followed line. CR, RCR,
+          BXR and BYR change per scanline when the raster table writes them
+          (a <b>*</b> marks a line the table writes); the rest are the
+          picture's own values or the viewer ROM's fixed 256×224 constants
+          (HSR/HDR/VPR/VDR/VCR/DCR/DVSSR — tools/viewer.asm). A "—" is a
+          register a picture never sets.</p>
+      </section>
+      <section>
+        <h2>VCE — 512 colours as 32 palettes of 16</h2>
+        <div id="vcetable"></div>
+        <p class="note">Palettes 0–15 are the background BAT's 4-bit palette
+          field; palettes 16–31 are the sprite palettes at CRAM $100–$1FF.
+          Entry 0 of a background palette (dashed) is the shared backdrop.
+          Each swatch's tooltip carries its CRAM address and 9-bit word; the
+          table is the followed line's, so a raster gradient shows here.</p>
+      </section>
+      <section>
+        <h2>VRAM map — 32768 words</h2>
+        <canvas id="vrammap" width="512" height="22"></canvas>
+        <canvas id="vramzoom" width="512" height="22"></canvas>
+        <div id="vramlegend"></div>
+        <p class="note">Whole VRAM, then words 0–4095 expanded: the BAT, the
+          tile and sprite-pattern copy regions, the SAT at $7F00 and what is
+          free. The regions are toPicture()'s copy descriptors (or
+          regions.json for a dump), the patterns the cells the SAT names.</p>
+      </section>
+      <section>
+        <h2>SAT — 64 sprites</h2>
+        <div id="sattable"></div>
+        <p class="note">Every SAT entry: Y, X, pattern (word 2 &gt;&gt; 1),
+          palette, CGX/CGY size, flips and SPBG. Cells are the 64-word VRAM
+          cells the VDC reads for that sprite; empty entries are all-zero.</p>
+      </section>
+    </div>
+    <h2 style="margin-top:0.6rem">Follow a pixel</h2>
+    <div id="followinfo">Click the preview: which layer won, the BAT entry and
+      tile, or the sprite number, pattern and palette, and the register
+      values on that line.</div>
+  </section>
 </div>
 
 <script src="pce-bg.js"></script>
 <script src="pce-sprites.js"></script>
 <script src="pce-rom.js"></script>
 <script src="pce-editor.js"></script>
+<script src="pce-panels.js"></script>
 <script>
 "use strict";
 const ed = PCEStudio.editor;
+const pn = PCEStudio.panels;
 const $ = (id) => document.getElementById(id);
 const say = (t) => { $("msg").textContent = t || ""; };
 
@@ -258,6 +331,8 @@ let selSpritePattern = 0;   // the pattern on the pattern canvas
 let selSprite = 0;          // the SAT entry highlighted in the sprite list
 let paletteMode = "bg";     // which panel the 512-colour picker edits
 let selTile = ed.FIRST_CHAR;
+let followAt = null;        // {x, y} the follow-a-pixel panel describes
+let vceCells = null;        // the 32x16 swatches, built once then recoloured
 let mode = "select";
 let bank0 = null;
 let romUrl = null;
@@ -835,7 +910,235 @@ function drawPreview() {
     `${st.palettesUsed} palette(s) · ` +
     `${st.spritePatterns} sprite pattern(s) · ` +
     `${st.sprites}/${ed.MAX_SPRITES} sprite(s) · ROM ${banks * 8192} bytes`;
+
+  /* the followed pixel's marker, drawn on the model's own frame */
+  if (followAt) {
+    previewCtx.strokeStyle = "#fff";
+    previewCtx.lineWidth = 1;
+    previewCtx.strokeRect(followAt.x - 1.5, followAt.y - 1.5, 4, 4);
+  }
+
+  /* every edit path calls drawPreview(), so the panels follow the preview */
+  drawModelPanels();
 }
+
+/* ---- the model's panels (card #26) ------------------------------------ */
+
+/* The renderer's own options, built from the editor model: the panels are
+ * pce-panels.js reading THESE objects, so there is no second copy of the
+ * picture (the same toPicture()/toRaster() the preview draws). */
+function panelState() {
+  const data = ed.toPicture(pic);
+  const opts = {
+    vram: data.vram,
+    cram: data.cram,
+    sat: data.vram.slice(ed.SAT_ADDR * 2, ed.SAT_ADDR * 2 + 512),
+    regs: ed.viewRegs(pic),
+    width: ed.VIEW_W,
+    height: ed.VIEW_H,
+    regions: data.regions
+  };
+  let raster = null;
+  try { raster = ed.toRaster(pic, frameNo); } catch (e) { raster = null; }
+  if (raster) opts.raster = raster;
+  return pn.state(opts);
+}
+
+/* The line the panels describe: the followed pixel's, else the top line. */
+function panelLine(st) {
+  return followAt ? Math.max(0, Math.min(st.height - 1, followAt.y)) : 0;
+}
+
+function hexWord(v) {
+  return "$" + v.toString(16).toUpperCase().padStart(4, "0");
+}
+
+/* All 20 VDC registers for the line, then the per-scanline register table. */
+function drawRegisters(st) {
+  const row = panelLine(st);
+  const v = pn.lineValues(st, row);
+  $("regnow").textContent =
+    `VDW line ${v.line} · BXR ${v.BXR} · BYR ${v.BYR} · CR ` +
+    `$${v.CR.toString(16).toUpperCase().padStart(2, "0")} · ` +
+    `BG_YOffset ${v.BG_YOffset}`;
+  const regs = pn.vdcRegisters(st, row);
+  let out = " #  name     value   source\n";
+  for (const r of regs) {
+    out += `R${r.number.toString(16).toUpperCase().padStart(2, "0")}  ` +
+           `${r.name.padEnd(8)} ` +
+           `${(r.value == null ? "-" : hexWord(r.value)).padStart(7)}  ` +
+           `${r.source || "-"}\n`;
+  }
+  const lines = pn.registerLines(st);
+  out += "\nper scanline (* = the raster table writes this line)\n";
+  out += "  line  BXR  BYR  CR BG_YOffset   RCR\n";
+  for (const l of lines) {
+    out += `${l.entryAtLine ? "*" : " "}${String(l.line).padStart(5)} ` +
+           `${String(l.BXR).padStart(4)} ${String(l.BYR).padStart(4)} ` +
+           `$${l.CR.toString(16).toUpperCase().padStart(2, "0")} ` +
+           `${String(l.BG_YOffset).padStart(10)} ` +
+           `${l.rcr == null ? "-" : hexWord(l.rcr)}\n`;
+  }
+  $("regtable").textContent = out;
+}
+
+/* 32 palettes of 16; the swatches are built once and recoloured. */
+function drawVce(st) {
+  const vce = pn.vcePalettes(st, panelLine(st));
+  if (!vceCells) {
+    vceCells = [];
+    const host = $("vcetable");
+    for (let p = 0; p < 32; p++) {
+      const row = document.createElement("div");
+      row.className = "pal32";
+      const num = document.createElement("span");
+      num.className = "palnum";
+      num.textContent = String(p);
+      row.appendChild(num);
+      const cells = [];
+      for (let e = 0; e < 16; e++) {
+        const sw = document.createElement("span");
+        sw.className = "psw" + (e === 0 && p < 16 ? " entry0" : "");
+        row.appendChild(sw);
+        cells.push(sw);
+      }
+      host.appendChild(row);
+      vceCells.push(cells);
+    }
+  }
+  for (let p = 0; p < 32; p++) {
+    for (let e = 0; e < 16; e++) {
+      const c = vce.palettes[p][e];
+      const sw = vceCells[p][e];
+      sw.style.background = `rgb(${c.r},${c.g},${c.b})`;
+      sw.title =
+        `palette ${p} entry ${e} · CRAM $${c.index.toString(16).toUpperCase()}` +
+        ` · word $${c.word.toString(16).toUpperCase()}`;
+    }
+  }
+}
+
+const SEG_COLOURS = { BAT: "#3f8f6f", tiles: "#4f6fd0", SAT: "#b05090",
+                      free: "#1c1c1c" };
+function segColour(kind) {
+  if (kind.indexOf("sprite patterns") === 0) return "#c08040";
+  return SEG_COLOURS[kind] || "#666";
+}
+
+function paintMap(canvas, map, lo, hi) {
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, w, h);
+  const span = hi - lo;
+  for (const s of map.segments) {
+    const a = Math.max(s.start, lo), b = Math.min(s.start + s.words, hi);
+    if (b <= a) continue;
+    const x0 = Math.floor((a - lo) * w / span);
+    const x1 = Math.max(x0 + 1, Math.floor((b - lo) * w / span));
+    ctx.fillStyle = segColour(s.kind);
+    ctx.fillRect(x0, 0, x1 - x0, h);
+  }
+}
+
+function drawVram(st) {
+  const map = pn.vramMap(st);
+  paintMap($("vrammap"), map, 0, 32768);
+  paintMap($("vramzoom"), map, 0, 4096);
+  let out = "whole VRAM, then words 0–4095 expanded\n";
+  for (const s of map.segments) {
+    out += `${s.kind.padEnd(12).slice(0, 12)} ` +
+           `words ${String(s.start).padStart(5)}..` +
+           `${String(s.start + s.words - 1).padStart(5)}  (${s.words})\n`;
+  }
+  const free = map.free.reduce((a, b) => a + b.words, 0);
+  out += `free: ${free} of 32768 words\n`;
+  $("vramlegend").textContent = out;
+}
+
+function drawSat(st) {
+  const sat = pn.satTable(st);
+  let out = " #    Y    X  pattern pal size   flags cells\n";
+  for (const s of sat) {
+    if (s.empty) {
+      out += `${String(s.number).padStart(2)}   (empty)\n`;
+      continue;
+    }
+    const flags = (s.spbg ? "P" : "-") + (s.hflip ? "H" : "-") +
+                  (s.vflip ? "V" : "-") + (s.cgx ? "X" : "-");
+    out += `${String(s.number).padStart(2)} ${String(s.y).padStart(4)} ` +
+           `${String(s.x).padStart(4)} ${hexWord(s.pattern).padStart(6)} ` +
+           `${String(s.palette).padStart(3)}  ${s.width}x${s.height}  ` +
+           `${flags}   ${s.cells.join(",")}\n`;
+  }
+  $("sattable").textContent = out;
+}
+
+/* Click a screen pixel: the trace from pce-panels.js, which reads the same
+ * vram/cram/sat/regs the preview was drawn from. */
+function drawFollow(st) {
+  if (!followAt) {
+    $("followinfo").textContent =
+      "Click the preview: which layer won, the BAT entry and tile, or the " +
+      "sprite number, pattern and palette, and the register values on that " +
+      "line.";
+    return;
+  }
+  let t;
+  try { t = pn.followPixel(st, followAt.x, followAt.y); }
+  catch (e) { $("followinfo").textContent = e.message; return; }
+  let out = `pixel (${t.x},${t.y}) · VDW line ${t.line} · ` +
+            `winner: ${t.layer}\n`;
+  out += `colour index $${t.index.toString(16).toUpperCase()} · ` +
+         `CRAM word ${hexWord(t.colour.word)} · ` +
+         `rgb(${t.colour.r},${t.colour.g},${t.colour.b})\n`;
+  const bg = t.background || {};
+  if (bg.blanking) {
+    out += "background: blanking fill (CR bit 7, BB clear)\n";
+  } else {
+    out += `background: BAT word ${bg.batIndex} = ${hexWord(bg.batWord)} · ` +
+           `char ${hexWord(bg.char)} · palette ${bg.palette} · ` +
+           `tile row ${bg.tileRow} col ${bg.tileColumn} · ` +
+           `colour ${bg.colourNumber}` +
+           (bg.beyondVram ? " (char >= $800: the VDC drops that write)" : "") +
+           "\n";
+  }
+  if (t.sprite) {
+    const s = t.sprite;
+    out += `sprite ${s.number} · pattern ${hexWord(s.pattern)} · ` +
+           `palette ${s.palette} · colour ${s.colourNumber} · ` +
+           `cell ${s.cell} row ${s.cellRow} strip ${s.stripColumn} · ` +
+           `SPBG ${s.spbg ? 1 : 0}` +
+           (t.layer === "sprite" ? " (won)" : " (lost to the background)") +
+           "\n";
+  }
+  const r = t.registers;
+  out += `line registers: BXR ${r.BXR} · BYR ${r.BYR} · ` +
+         `CR $${r.CR.toString(16).toUpperCase()} · ` +
+         `BG_YOffset ${r.BG_YOffset} · MWR $${r.MWR.toString(16).toUpperCase()}` +
+         (r.RCR == null ? "" : ` · RCR ${hexWord(r.RCR)}`) + "\n";
+  $("followinfo").textContent = out;
+}
+
+function drawModelPanels() {
+  let st;
+  try { st = panelState(); }
+  catch (e) { say("panels: " + e.message); return; }
+  drawRegisters(st);
+  drawVce(st);
+  drawVram(st);
+  drawSat(st);
+  drawFollow(st);
+}
+
+$("preview").addEventListener("click", (ev) => {
+  const r = $("preview").getBoundingClientRect();
+  const x = Math.floor((ev.clientX - r.left) * ed.VIEW_W / r.width);
+  const y = Math.floor((ev.clientY - r.top) * ed.VIEW_H / r.height);
+  if (x < 0 || y < 0 || x >= ed.VIEW_W || y >= ed.VIEW_H) return;
+  followAt = { x: x, y: y };
+  drawPreview();   /* redraws the marker and the panels */
+});
 
 function redraw() {
   drawPalettes();
@@ -1058,6 +1361,12 @@ const params = new URLSearchParams(location.search);
 if (params.get("demo") === "1") { loadDemo(); report(); }
 if (params.get("sprites") === "1") { loadSpriteDemo(); report(); }
 if (params.get("effects") === "1") { loadEffectDemo(); report(); }
+if (params.get("panels") === "1") {
+  /* a fixed pixel for a headless read of the follow-a-pixel panel — the
+   * click handler above is the human path and is not synthesized */
+  followAt = { x: 168, y: 92 };
+  redraw();
+}
 if (params.get("rules") === "1") { checkRules(); }
 </script>
 </body>

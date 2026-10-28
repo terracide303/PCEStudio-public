@@ -63,11 +63,48 @@
   var CGY_HEIGHT = [16, 32, 64, 64];
   var CGY_MASK = [0x3FF, 0x3FF & ~2, 0x3FF & ~6, 0x3FF & ~6];
 
+  /* The VDC size of SAT entry i: CGX bit 8 doubles the width, CGY bits 12-13
+   * pick 16/32/64/64 tall (manual 2.4, p. H7-19..H7-24). */
+  function spriteSize(sat, i) {
+    var w3 = sat[i * 8 + 6] | (sat[i * 8 + 7] << 8);
+    var cgy = (w3 >> 12) & 3;
+    var cgx = (w3 >> 8) & 1;
+    return { width: cgx ? 32 : 16, height: CGY_HEIGHT[cgy],
+             cgy: cgy, cgx: cgx };
+  }
+
+  /* Every 64-word VRAM cell SAT entry i reads over the sprite's whole height:
+   * CGY blocks are cells 2 apart (PC2/PC3), CGX reads the half pair
+   * (PC1).  collectStrips computes the same cells per row; the #26 VRAM map
+   * needs them all at once. */
+  function spriteCells(sat, i) {
+    var w2 = sat[i * 8 + 4] | (sat[i * 8 + 5] << 8);
+    var w3 = sat[i * 8 + 6] | (sat[i * 8 + 7] << 8);
+    var cgy = (w3 >> 12) & 3;
+    var cgx = (w3 >> 8) & 1;
+    var p = (w2 >> 1) & 0x3FF;
+    var base = p & CGY_MASK[cgy];
+    var blocks = [0, 2, 4, 6].slice(0, [1, 2, 4, 4][cgy]);
+    var cells = [];
+    for (var b = 0; b < blocks.length; b++) {
+      if (cgx) {
+        var pair = (base + blocks[b]) & ~1;
+        cells.push(pair);
+        cells.push(pair | 1);
+      } else {
+        cells.push(base + blocks[b]);
+      }
+    }
+    return cells;
+  }
+
   /* One strip of the line's sprite list: everything DrawSprites needs to
    * paint 16 pixels.  Collected in SATB order; painted last-to-first so the
-   * lowest SAT index wins overlaps. */
-  function strip(cell, x, row, pal, spbg, hflip) {
-    return { cell: cell, x: x, row: row, pal: pal, spbg: spbg, hflip: hflip };
+   * lowest SAT index wins overlaps.  `number` is the SAT entry the strip came
+   * from (the #26 follow-a-pixel panel names the sprite). */
+  function strip(cell, x, row, pal, spbg, hflip, number) {
+    return { cell: cell, x: x, row: row, pal: pal, spbg: spbg, hflip: hflip,
+             number: number };
   }
 
   /* The strips on one display line, in SATB order, at most 16 (the VDC
@@ -102,20 +139,21 @@
         /* HFLIP swaps the halves (left strip shows the right half's cell)
          * and mirrors each strip's pixels (below). */
         strips.push(strip(hflip ? cell | 1 : cell, leftX, row, pal, spbg,
-                          hflip));
+                          hflip, i));
         if (strips.length < 16) {
           strips.push(strip(hflip ? cell : cell | 1, leftX + 16, row, pal,
-                            spbg, hflip));
+                            spbg, hflip, i));
         }
       } else {
-        strips.push(strip(cell, leftX, row, pal, spbg, hflip));
+        strips.push(strip(cell, leftX, row, pal, spbg, hflip, i));
       }
     }
     return strips;
   }
 
-  /* The sprite layer of one line: layer[x] = { index, spbg } of the winning
-   * (lowest SAT index) visible sprite pixel, or null.  Strips paint in
+  /* The sprite layer of one line: layer[x] = { index, spbg, number, cell,
+   * row, strip } of the winning (lowest SAT index) visible sprite pixel, or
+   * null.  The extra fields are the #26 panel's provenance.  Strips paint in
    * reverse SATB order so lower indices overwrite — the same result as the
    * VDC's first-16 collection plus last-drawn-wins order. */
   function paintLine(vram, strips) {
@@ -140,7 +178,9 @@
                 | (((w2 >> bit) & 1) << 2)
                 | (((w3 >> bit) & 1) << 3);
         if (pix) {
-          layer[tx] = { index: 0x100 | (s.pal << 4) | pix, spbg: s.spbg };
+          layer[tx] = { index: 0x100 | (s.pal << 4) | pix, spbg: s.spbg,
+                        number: s.number, cell: s.cell, row: s.row,
+                        strip: c, hflip: s.hflip };
         }
       }
     }
@@ -211,6 +251,8 @@
   return {
     collectStrips: collectStrips,
     paintLine: paintLine,
+    spriteSize: spriteSize,
+    spriteCells: spriteCells,
     renderIndices: renderIndices,
     renderFrame: renderFrame
   };
