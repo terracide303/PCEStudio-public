@@ -4234,5 +4234,5 @@
   }
  ],
  "frameCounter": true,
- "note": "#15 raster scene r4: 232 RCR-chained per-scanline writes, one step per VDW line \u2014 the values and the chain live in tools/genroms.py (gen_raster_asm); r4 frame counter at save: 25 (ZP <$31> = ram.bin[0x31]) \u2014 cram = this frame's value, cramPrev = the previous frame's; r4 frame counter at save: 25 (ZP <$31> = ram.bin[0x31]) \u2014 cram = this frame's value, cramPrev = the previous frame's, the viewer's wrap-bump deferred by one frame"
+ "note": "#15 raster scene r4: 232 RCR-chained per-scanline writes, one step per VDW line \u2014 the values and the chain live in tools/genroms.py (gen_raster_asm); frame counter at save: 25 (ZP <$31> = ram.bin[0x31]) \u2014 cram = this frame's value (counter 24), cramPrev = the previous frame's (23), the viewer's wrap-bump deferred by one frame"
 }

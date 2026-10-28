@@ -320,7 +320,9 @@ const OLD_CHECK_SRC = preFixSource(CHECK_SRC,
  * but a count alone would let
  * one scene drop out while another silently took its place, so the set is
  * checked name by name.  #68 adds raster11 (the frame counter + two CRAM
- * words table, REVIEW-16 B15) and its viewer ROM vraster11.  us1 is the only
+ * words table, REVIEW-16 B15) and its viewer ROM vraster11; #69 adds raster12
+ * and vraster12 (the same table with the second word on the cell the line's
+ * first pixels use — the visible-second-word fixture).  us1 is the only
  * dump that is not a picture. */
 const EXPECTED_SCENES = [
   /* scene ROMs, #5/#6/#15/#39/#43 */
@@ -347,6 +349,9 @@ const EXPECTED_SCENES = [
   "vraster7", "vraster8", "vraster9", "vraster10", "effect1",
   /* #68: the frame counter + two CRAM words table (REVIEW-16 B15) */
   "raster11", "vraster11",
+  /* #69: the visible second CRAM word (raster11's table, second word on the
+   * cell the line's first pixels use) */
+  "raster12", "vraster12",
   /* #27: the /3 and /2 dot clocks (336- and 512-dot display windows) */
   "wide336", "wide512",
 ];

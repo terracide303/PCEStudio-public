@@ -15,6 +15,13 @@
 #                                        Mednafen -> tests/dumps/raster11/
 #   tools/capture-review16.sh vraster11  the #16 viewer ROM of that table ->
 #                                        tests/dumps/vraster11/
+#   tools/capture-review16.sh raster12   #69's scene: r11's picture and frame
+#                                        counter, second CRAM word on the cell
+#                                        the line's first pixels use (the
+#                                        visible-second-word fixture) ->
+#                                        tests/dumps/raster12/
+#   tools/capture-review16.sh vraster12  the #16 viewer ROM of that table ->
+#                                        tests/dumps/vraster12/
 #   tools/capture-review16.sh trace      two VDC write traces from reset of
 #                                        vraster2: the pristine ROM, and the
 #                                        B14 mutant (the boot arm one line
@@ -174,6 +181,39 @@ mode_raster11() {
   capture_with_retries raster11 raster 11
 }
 
+# #69: the visible-second-word fixture.  Same picture, same frame counter, but
+# the second CRAM word writes the backdrop cell the line's first pixels use
+# (CRAM[0x000]), so the write's line timing is in the frame — the fixture #68
+# could not ship (tools/genreview16.py r12_scene's docstring).
+build_raster12() {
+  require python3
+  require "$PCEAS"
+  say "generate + assemble scene r12"
+  python3 -I "$TOOLS/genreview16.py" r12 --build
+  mkdir -p "$ROOT/tests/dumps/raster12"
+  cat > "$ROOT/tests/dumps/raster12/regions.json" <<'JSON'
+{
+  "comment": "Tile regions of the raster12 dump for docs/ROM_LAYOUT.md: [char0, 16-word chunk count] in descriptor order — raster11's stripes picture (the two solid tiles of genroms.py RASTER_SCENES['r7']), reused by tools/genreview16.py's r12, whose second CRAM word paints the cell the line's first pixels use. Read by tools/genviewer.py (card #16) and renderer/pce-rom.js; the SAT at VRAM 0x7f00 is NOT a region — it has its own fixed place in bank 1.",
+  "tile_regions": [[64, 2]]
+}
+JSON
+}
+
+mode_raster12() {
+  require "$MEDNAFEN"
+  build_raster12
+  capture_with_retries raster12 raster 12
+}
+
+mode_vraster12() {
+  require "$MEDNAFEN"
+  [ -f "$ROOT/tests/dumps/raster12/regions.json" ] ||
+    die "tests/dumps/raster12 is missing — run '$0 raster12' first"
+  say "build gen/vraster12.pce (tools/genviewer.py, table r12)"
+  python3 -I "$TOOLS/genreview16.py" r12 --viewer
+  capture_with_retries vraster12 vraster 12v
+}
+
 mode_vraster11() {
   require "$MEDNAFEN"
   [ -f "$ROOT/tests/dumps/raster11/regions.json" ] ||
@@ -316,7 +356,9 @@ mode_trace() {
 case "${1:-}" in
   raster11)  mode_raster11 ;;
   vraster11) mode_vraster11 ;;
+  raster12)  mode_raster12 ;;
+  vraster12) mode_vraster12 ;;
   trace)     mode_trace ;;
-  all)       mode_raster11; mode_vraster11; mode_trace ;;
-  *) echo "usage: $0 raster11|vraster11|trace|all" >&2; exit 2 ;;
+  all)       mode_raster11; mode_vraster11; mode_raster12; mode_vraster12; mode_trace ;;
+  *) echo "usage: $0 raster11|vraster11|raster12|vraster12|trace|all" >&2; exit 2 ;;
 esac

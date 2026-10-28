@@ -212,6 +212,30 @@ reference only.)  *Source: VDC
 manual, SR R00 p. H7-4 (RR, bit 2), CR R05 p. H7-5 (RC, bit 2), RCR R06
 p. H7-6..H7-7.*
 
+**The blank's budget for a colour-table write (#69).** The colour table is
+looked up per emitted pixel — Mednafen composites each pixel with the
+current palette cache and updates that cache at the VCE store (`vce.cpp`,
+`FixPCache`/`SyncSub`) — so a colour write that lands after line L's first
+pixel leaves the pixels before it on the previous value.  A cell displayed
+at the start of a line therefore witnesses the write's timing; one used
+further right does not.  The RCR match fires 4 VDC clocks before the
+visible line ends and the next line's first pixel follows 92 VDC clocks
+later (≈123 CPU cycles, `vdc.cpp` `HPHASE_HDW_FINAL`→`HPHASE_HDW`), minus
+the interrupt sequence.  Counted with the HuC6280's own timings
+(Software Manual S8-17ff: every memory instruction costs one cycle MORE
+than its 6502 number — `LDA/STA abs,X` and `STA abs` 5, `LDA/STA zp` 4,
+`ADC zp` 4, `LSR A` 2, branch 2/4), a colour store that completes within
+~100 CPU cycles of handler entry is in the blank.  Measured on
+`tests/dumps/raster12`/`vraster12` (the second word paints the cell the
+line's first pixels use): the pre-#69 `irq1_frm` completed its second
+store at ~139 cycles and landed 24 px into the line — and `irq1_plain` at
+~119, 14 px, which `r7` could not show because its second word paints the
+right half.  Since #69 the step tail prepares the next step's write bytes
+after the interrupt's stores, so a colour-only step runs one of the
+straight-line stubs and its second store completes at ~72 cycles in the
+stub (~78 from the vector), in the blank.  A step that mixes a VDC register with two colour writes needs
+~120 cycles at any stride and cannot fit; no shipped table has one.
+
 **Per-line write rules (the raster table's semantics).** The manual gives
 each mid-frame register write a validity line, and the renderer's `buildRows`
 applies the table's entries at exactly those lines (entry `line` fires in

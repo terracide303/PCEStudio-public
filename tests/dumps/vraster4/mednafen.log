@@ -21,8 +21,8 @@ Starting Mednafen 1.32.1
     Failed: Error opening file "/Users/dennisschauw/.mednafen/pgconfig/vraster4.pce.cfg" for reading: No such file or directory
 
    ROM:       40KiB
-   ROM CRC32: 0xe0c2e964
-   ROM MD5:   0xbb6b8abc313841157d57f82cbb1b6429
+   ROM CRC32: 0xc3722b6c
+   ROM MD5:   0x67c58bd42753f26b419a8f55ed923a43
    PSG Revision: HuC6280
 
   Loading custom palette from "/Users/dennisschauw/.mednafen/palettes/pce.pal"...
