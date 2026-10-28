@@ -117,7 +117,7 @@ most useful thing in this section.
 
 ### What cards #30, #31 and #24 should learn
 
-- **#30 (`init()`, `frame(t, f)`, `raster(line)`, `pad[1..5]`, `bram`).**
+- **#30 (`init()`, `frame(t, f)`, `raster(line)`, `pad[1..5]`, `password`).**
   - Copy the entry-point contract: `init()` once, `frame(t, f)` per frame, state persists
     across frames, a shared global scope, errors carry **file and line**.
   - Offer the per-line effect **twice**: a callback (`raster(line)`) for code, and a
@@ -126,8 +126,9 @@ most useful thing in this section.
     (below).
   - Keep input a flat, refreshed table and leave edge detection to the toy; document the
     mapping. `pad[1..5]` is the PCE's own shape, not ppu.toys' single `pad`.
-  - Put save data behind a typed, size-capped table with a named error — but scope the
-    medium first (below).
+  - Keep ppu.toys' save **contract** — a typed, size-capped value with a named error — but
+    not its medium: PCEStudio's saves are passwords (Dennis, 2026-10-28), so pack the state
+    into a short code, show it, accept it back and refuse a wrong one (see below).
 - **#31 (compile through PCEAS).** ppu.toys does not compile Lua in this repo; its skill
   defines the compilable subset up front: integer/fixed-point state, declared ranges, bounded
   loops, constant `dma()` placement, no strings or general tables at run time. **Define
@@ -158,12 +159,15 @@ most useful thing in this section.
   so a PCE validator that only counts sprites would miss the main risk.
 - **A save has no medium on a bare HuCard.** ppu.toys' `sram` is a cartridge battery. The
   PCE's 2 KB backup RAM is the CD unit's IFU-30, reached through BIOS calls; a bare HuCard has
-  none (`docs/MANUALS.md` GAP 5, §6 CD manual pp. 23–25). #30's `bram` must be scoped to
-  Tennokoe/CD or dropped — otherwise SPEC promises what the target cannot do.
-- **One pad is not five.** ppu.toys has `pad` (one controller, 12 buttons). The PCE has 5
-  pads through a multitap and 2- or 6-button layouts (`docs/SPEC.md`); the names and the
-  6-button mapping are different, and the 6-button protocol has no manual in our set
-  (`docs/MANUALS.md` GAP 10).
+  none (`docs/MANUALS.md` GAP 5, §6 CD manual pp. 23–25). Dennis has settled the PCE side:
+  **saves are passwords** (`docs/DECISIONS.md` 2026-10-28, `docs/SPEC.md`), so #30's `bram` is
+  gone — take the typed/capped/named-error contract and apply it to the password payload, not
+  to a save medium.
+- **One pad is not five, and the pad is 2-button.** ppu.toys has `pad` (one controller, 12
+  buttons). PCEStudio's pads are **I, II, Select, Run**, up to five through a multitap; the
+  6-button pad is left out because no manual here documents it (`docs/SPEC.md`,
+  `docs/DECISIONS.md` 2026-10-28, `docs/MANUALS.md` GAP 10). The ppu.toys button names
+  (`a/b/x/y/l/r`) do not map onto the PCE's I/II/Select/Run.
 - **The register vocabulary is the SNES's.** `bg[1..4]`, `m7.*`, 128 OAM entries, windows,
   colour math and mosaic have no PCE counterpart (`docs/SPEC.md` table: one BG layer, no
   Mode 7, no colour math/windows/mosaic). The PCE surface is one BAT + one SAT + `BXR/BYR/
@@ -556,9 +560,9 @@ compositor_corpus.rs}`, `crates/ppu-core/tests/fixtures/` (34 golden PNGs, 3 BIN
 1. **The three-layer split** — runtime *models*, validator *refuses*, compiler *enforces
    declared ranges*. Put it in SPEC/PLAN before #30 starts.
 2. **The toy surface** — `init` / `frame(t, f)` / a per-line callback **and** a precomputed
-   raster table / flat refreshed input / typed capped save; shared globals, errors with
-   file+line. Adapt the portable Lua helpers (`ramps.lua`, `controls_env.lua` shape) with
-   the MIT notice.
+   raster table / flat refreshed input / a typed, capped **password code** for saves; shared
+   globals, errors with file+line. Adapt the portable Lua helpers (`ramps.lua`,
+   `controls_env.lua` shape) with the MIT notice.
 3. **The validator loop** — whole performance, 60 fps grid, endpoint, per-line strip budget,
    named refusals, informational reports, `--allow-overflow`, seek/loop determinism, and the
    **cycle budget** ppu.toys never had.
