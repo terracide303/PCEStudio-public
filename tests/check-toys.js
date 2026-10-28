@@ -427,19 +427,44 @@ function frame(t, f) end`, { budgetMs: 250 });
 
 /* ---- refusals with codes --------------------------------------------- */
 
-function refusal(name, source, code, opts) {
+function refusal(name, source, code, opts, expect) {
   const rt = toys.create(source, opts || { budgetMs: 250 });
   try {
     rt.load();
     rt.frame(0);
     check(false, "refusal " + name + " was accepted (wanted " + code + ")");
   } catch (e) {
-    check(e instanceof toys.ToyError && e.code === code,
+    check(e instanceof toys.ToyError && e.code === code &&
+          (!expect || expect.test(e.message)),
           "refusal " + name + " code " + (e && e.code) + " (wanted " + code +
-          "): " + (e && e.message));
+          (expect ? " and " + expect : "") + "): " + (e && e.message));
   } finally {
     rt.dispose();
   }
+}
+
+/* A P1 code built here from arbitrary value bytes, with the check byte the
+ * runtime computes. Only a forged code can carry a number `pack` would have
+ * refused, so card #73's decoder edge needs one that is built by hand. The
+ * encoder mirrors the prelude's p_b32; the check byte mirrors pack's. */
+const P_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+function p1code(valueBytes) {
+  const bytes = valueBytes.slice();
+  let sum = 0;
+  for (const b of bytes) sum = (sum * 31 + b) % 256;
+  bytes.push(sum);
+  let acc = 0, bits = 0, out = "";
+  for (const b of bytes) {
+    acc = acc * 256 + b;
+    bits += 8;
+    while (bits >= 5) {
+      bits -= 5;
+      out += P_ALPHA[Math.floor(acc / Math.pow(2, bits)) % 32];
+    }
+    acc %= Math.pow(2, bits);
+  }
+  if (bits > 0) out += P_ALPHA[(acc * Math.pow(2, 5 - bits)) % 32];
+  return "P1" + out;
 }
 
 function checkRefusals() {
@@ -494,6 +519,47 @@ function frame(t, f)
   local x = nil
   return x + 1
 end`, "toy-error");
+
+  /* card #73: one past every documented maximum (docs/TOYS.md) refuses by
+   * code. The 2^30 edge is the one that used to hang: this VM's integers are
+   * 32-bit, so the pack zig-zag wrapped and p_int looped into toy-timeout. */
+  refusal("an integer past 2^30-1", `
+function init() password.pack(1073741824) end`, "password-value",
+          null, /-1073741824\.\.1073741823/);
+  refusal("an integer below -2^30", `
+function init() password.pack(-1073741825) end`, "password-value",
+          null, /-1073741824\.\.1073741823/);
+  refusal("the VM's own 32-bit maximum", `
+function init() password.pack(2147483647) end`, "password-value");
+  refusal("a float that spells a number past the cap", `
+function init() password.pack(2147483648.0) end`, "password-value");
+  refusal("a non-integer number", `
+function init() password.pack(1.5) end`, "password-value");
+  refusal("a string past 64 bytes", `
+function init() password.pack(string.rep("A", 65)) end`, "password-value");
+  refusal("a table past 32 entries", `
+function init()
+  local t = {}
+  for i = 1, 33 do t[i] = i end
+  password.pack(t)
+end`, "password-value");
+  refusal("tables nested 7 deep", `
+function init()
+  local d = 7
+  for i = 1, 7 do d = { d } end
+  password.pack(d)
+end`, "password-value");
+  refusal("a value past the code's 96 bytes", `
+function init()
+  password.pack({ string.rep("A", 60), string.rep("B", 60) })
+end`, "password-value");
+  /* forged codes, built with p1code: pack cannot make either */
+  refusal("a code whose number is past 2^31-1", `
+function init() password.unpack("${p1code([3, 128, 128, 128, 128, 8])}") end`,
+          "password-code", null, /past 2\^31-1/);
+  refusal("a code whose number has too many digits", `
+function init() password.unpack("${p1code([3, 128, 128, 128, 128, 129, 0])}") end`,
+          "password-code", null, /too long/);
 }
 
 /* ---- the sandbox and the password round trip ------------------------- */
@@ -544,6 +610,57 @@ end`, { budgetMs: 250 });
   again.load();
   check(again.log[0] === first, "a fresh VM packs the same code");
   again.dispose();
+
+  checkPasswordCaps();
+}
+
+/* ---- card #73: the round trip holds at every documented maximum -------- */
+
+/* docs/TOYS.md states the maxima; each is packed, unpacked and compared for
+ * equality at its edge. REVIEW-30's A7 miss (a 64-byte string) is the string
+ * row; the integer edges are the live bug the breaker found in the original
+ * (`pack(1073741824)` looped into toy-timeout). */
+function checkPasswordCaps() {
+  const rt = toys.create(`
+function init()
+  local ints = { 0, 1, 1073741823, -1073741824, -1073741823, 536870912 }
+  for i = 1, #ints do
+    local v = ints[i]
+    local back = password.unpack(password.pack(v))
+    print("int", v, tostring(back == v), math.type(back))
+  end
+  local s = string.rep("A", 64)
+  local bs = password.unpack(password.pack(s))
+  print("string", #bs, tostring(bs == s))
+  local t = {}
+  for i = 1, 32 do t[i] = i end
+  local bt = password.unpack(password.pack(t))
+  local ok = #bt == 32
+  for i = 1, 32 do ok = ok and bt[i] == i end
+  print("items", #bt, tostring(ok))
+  local deep = 7
+  for i = 1, 6 do deep = { deep } end
+  local d, depth = password.unpack(password.pack(deep)), 0
+  while type(d) == "table" do d, depth = d[1], depth + 1 end
+  print("depth", depth, tostring(d == 7))
+  local code = password.pack(-1073741824)
+  print("code", string.sub(code, 1, 2),
+        tostring(string.find(code, "^P1[A-Z2-7]+$") ~= nil))
+end`, { budgetMs: 500 });
+  rt.load();
+  const log = rt.log;
+  check(log.length === 10, "the cap toy printed ten lines: " + log.length);
+  eq("integer 0 round-trips", log[0], "int\t0\ttrue\tinteger");
+  eq("integer 1 round-trips", log[1], "int\t1\ttrue\tinteger");
+  eq("integer 2^30-1 round-trips", log[2], "int\t1073741823\ttrue\tinteger");
+  eq("integer -2^30 round-trips", log[3], "int\t-1073741824\ttrue\tinteger");
+  eq("integer -2^30+1 round-trips", log[4], "int\t-1073741823\ttrue\tinteger");
+  eq("integer 2^29 round-trips", log[5], "int\t536870912\ttrue\tinteger");
+  eq("a 64-byte string round-trips", log[6], "string\t64\ttrue");
+  eq("a 32-entry table round-trips", log[7], "items\t32\ttrue");
+  eq("a table 6 deep round-trips", log[8], "depth\t6\ttrue");
+  eq("the cap still packs to a P1 base32 code", log[9], "code\tP1\ttrue");
+  rt.dispose();
 }
 
 /* ---- the runtime asks the same model the tests ask ------------------- */

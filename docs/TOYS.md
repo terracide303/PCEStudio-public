@@ -188,10 +188,31 @@ how the runtime tells them apart (`callbackRaster` in the tests).
 Dennis, 2026-10-28: **saves are passwords**; a bare HuCard has no backup RAM
 (docs/DECISIONS.md). `password.pack(v)` turns a typed, capped value into a
 short code (`P1` + base32 + a check byte) and `password.unpack(code)` returns
-it. Types: nil, booleans, 32-bit integers, strings (≤ 64 bytes), and nested
-tables (depth ≤ 6, ≤ 32 entries, number or string keys), serialized
-deterministically (array part in order, other keys sorted by their encoding),
-≤ 96 bytes. Anything else is `password-value`; a mistyped or foreign code is
+it. Types: nil, booleans, integers, strings, and nested tables (number or
+string keys), serialized
+deterministically (array part in order, other keys sorted by their encoding).
+Each cap is a maximum the round trip holds to, and one past it is refused by
+`password-value` naming the edge — never truncated:
+
+| field | maximum | past it |
+|---|---|---|
+| an integer | −1,073,741,824 .. 1,073,741,823 (−2^30 .. 2^30−1) | `password-value` |
+| a non-integer number (`1.5`, `2^31` as a float) | none — not an integer | `password-value` |
+| a string | 64 bytes | `password-value` |
+| a table | 32 entries in all, nested at most 6 tables deep | `password-value` |
+| the code's value bytes | 96, before the check byte | `password-value` |
+
+**Why the integer cap is 2^30 and not the VM's full 32-bit range.** This
+Fengari build's integers are 32-bit — `docs/IL.md` §1 reads it from `lvm.js`,
+which computes `ADD` as `(a + b) | 0` — and the zig-zag encoding spends one
+bit on the sign. A magnitude of 2^30 doubles to 2^31 and wraps, so a cap of
+2^31−1 (what the card's first version documented) is not saveable at either
+end. Card #73: `password.pack(1073741824)` used to loop `p_int` until
+`toy-timeout`; it is now `password-value` naming the range. The decoder
+refuses a code whose number is past 2^31−1 for the same reason, so an
+editable code cannot decode to a value `pack` would have refused.
+
+Anything else is `password-value`; a mistyped or foreign code is
 `password-code`. The contract — named error, sized cap — is ppu.toys' `sram`
 contract applied to a code instead of a save medium.
 
