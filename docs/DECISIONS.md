@@ -262,3 +262,11 @@ write and preview wide pictures is a second, larger change on the same registers
   hardware**, so the model does not use it — a static picture's frame length does not enter the renderer — and
   every ROM keeps the bit set, as every earlier capture did, because #5's row calibration was taken on 263-line
   frames. Where the question belongs if it ever matters: a real-console or logic-analyser measurement.
+
+## 2026-10-28 — The studio looks as much as possible like ppu.toys (Dennis)
+
+Dennis: "look as much as possible to ppu toys". The studio page (#75) follows ppu.toys' Studio closely in
+layout, panels, workflow, keyboard shortcuts and how examples and docs sit beside the code, so someone who knows
+ppu.toys feels at home. What stays ours: the code, the CSS and every asset (the hosted Studio is not in the MIT
+repo, so its files are not ours to copy), the name and the PC Engine content. Its author has blessed the idea;
+Dennis may tell him the studio deliberately mirrors his layout.
