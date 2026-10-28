@@ -118,3 +118,9 @@ docs/MANUALS.md found two promises in SPEC.md the hardware set does not keep (GA
   back) instead of `bram`.
 - **6-button pad:** no manual here documents it, and Dennis notes it was used for Street Fighter II on the PC Engine
   and little else. Left out: pads are 2-button (I, II, Select, Run), up to five with the multitap.
+
+## 2026-10-28 — Two emulators are enough for a static picture (Dennis)
+
+#8 closes on Mednafen and ares agreeing pixel for pixel; no real-console photo ("it's ok in 2 emulators, I'm sure
+it will run on the PCE"). A real console is asked for once, when the scanline effects (#16) run, since per-line
+timing is where emulators and hardware most often differ.
