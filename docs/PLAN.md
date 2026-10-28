@@ -76,6 +76,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 - [?] #13 A sprite editor and the SATB in the export ~M @design #ds-flash
 - [ ] #14 The viewer loads the sprites (SATB DMA) ~S — viewer.asm loads a SATB and starts the VDC's SATB DMA each frame (DCR/SATB registers, Hudson VDC manual pages cited); the browser export carries it (docs/ROM_LAYOUT.md updated); for #12's sprite scenes the viewer's Mednafen frame equals the renderer's, diff 0 @workshop #ds-pro
 - [?] #28 Flicker multiplexing: more than 16 sprites on a line by rotating the sprite order each frame, with an example toy ~M @design #opus
+- [ ] #40 The sprite test catches the breaker's three misses ~S — three new Mednafen-captured sprite scenes close the gaps in docs/REVIEW-12.md: a 16x64 sprite (CGY=2), an SPBG=0 sprite over an opaque BG tile, and a line of 15 strips with a CGX sprite as the 16th; M2, M9 and M24 rerun and DETECTED; check.js diff 0 on all scenes. Kept on ds-pro, not escalated to opus: DECISIONS.md sends Claude escalations only after DeepSeek failed a card twice (until 2026-10-31) @test #ds-pro
 
 ### Scanline effects (the line interrupt) !8
 - [?] #15 The renderer: a scroll and a palette change per scanline ~M @design #opus
