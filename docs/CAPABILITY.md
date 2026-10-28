@@ -36,7 +36,7 @@ Progress tab is drawn from these tables.
 | Viewer loads sprites (SATB DMA) | PROVEN | `node tests/check-viewer.js`: 17 captures (viewer1-3, browser1-3, vsprite1-11) diff 0 against the renderer, VRAM/CRAM/SATB equal the scene dumps; vsprite3's missing red half (found by Dennis) fixed. Breaker: 16 of 19 caught; the gaps closed by #42 (A2 and the bank remap now caught) | #14, #42 |
 | Sprite editor + SATB in export | PROVEN | `node tests/check-editor.js`: 21/21 refusals, a sprite picture painted through the editor exported and captured in Mednafen (`tests/dumps/spainted`) diff 0 | #13 |
 | Effect editor (gradient, wobble, parallax) | PROVEN | `node tests/check-editor.js`: the three effects give the hand-computed raster table and the renderer previews it; refusals with codes. Export waits for #16. Breaker running | #17 |
-| Debug panels and follow a pixel | UNTESTED | in progress | #26 |
+| Debug panels and follow a pixel | PROVEN | `node tests/check-panels.js`: 30910 checks and 1320 follow-a-pixel traces on eight dumps against an independent bytes-only computation. Breaker running | #26 |
 | Scanline effects in the renderer | PROVEN | `node tests/check.js`: raster1-5 (status bar, BXR wobble, BYR split, colour gradient, CR on/off) diff 0 against Mednafen, 47 pictures in all (46 when #15 closed; #13 added spainted). Not proven: VCE writes mid-line, real-hardware IRQ latency. DeepSeek did this Opus card. Breaker: 16 of 20 caught, 3 missed, and two effects (BYR split, gradient) not visible on the test pictures → #43 | #15 — `docs/RENDERER.md` |
 | Scanline effects in the viewer (RCR) | UNTESTED | | #16 |
 | Wide modes (256/336/512) | UNTESTED | | #27 |
