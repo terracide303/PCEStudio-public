@@ -220,6 +220,33 @@ Refusals (each an `Error` with a machine-readable `code`):
 from the RCR line interrupt is **#16**; until it lands the effects are
 preview-only, and #17 says so rather than faking an export.
 
+## The model's panels (#26)
+
+`renderer/pce-panels.js` reads the objects the renderer is given — `vram`,
+`cram`, `sat`, `regs` and the #15 raster table — and the page draws five
+panels from it.  It is not a second copy of the picture: the per-line values
+come from `pce-bg.js`'s `buildRows`, the background pixel from the same
+`backgroundPixel` decode `renderIndices` uses, and the sprite layer from
+`pce-sprites.js`'s `collectStrips`/`paintLine`.  A panel cannot say something
+the preview does not draw.
+
+| panel | what it shows | where the rules are from |
+|---|---|---|
+| **VDC registers** | all 20 addresses R00–R13 (MAWR, MARR, VWR/VRR, R03, R04, CR, RCR, BXR, BYR, MWR, HSR, HDR, VPR, VDR, VCR, DCR, SOUR, DESR, LENR, DVSSR) for the followed line, each with its source (`line`, `state`, `viewer`, or `—`), then a per-scanline table of BXR/BYR/CR/BG_YOffset/RCR with a `*` where the raster table writes | register table, HuC6270 VDC manual p. H7-4; BXR/BYR R07/R08 p. H7-7, CR R05 p. H7-5; RCR R06 p. H7-6 and the #15 BYR+1/chain rules |
+| **VCE** | 512 colours as 32 palettes of 16, the followed line's colour table; palettes 0–15 are the BAT's palette field, 16–31 the sprite palettes at CRAM `$100–$1FF`; each swatch carries its CRAM address and 9-bit word | VCE 2.2.1 p. H6-4, 2.2.2 p. H6-5 (colour word G 8-6/R 5-3/B 2-0) |
+| **VRAM map** | whole 32768 words and words 0–4095 expanded; BAT (MWR geometry), the copy regions (`toPicture()`'s descriptors or `regions.json`), the sprite-pattern cells the SAT names, the SAT at `$7F00`, and the free words; every word is in exactly one segment | MWR SCREEN table p. H7-8/H7-9; DVSSR R13 p. H7-12; the pattern-cell rules in `pce-sprites.js` |
+| **SAT** | 64 rows: Y, X, pattern (word 2 >> 1), palette, CGX/CGY size, HFLIP/VFLIP/SPBG, the 64-word cells read, and whether the entry is empty | SAT/SATB 2.4 p. H7-19..H7-24 |
+| **follow a pixel** | click the preview: the winning layer (sprite / background / blanking), the 9-bit colour index, CRAM word and RGB; the BAT word, character, palette, tile row/column and colour number; or the sprite number, pattern, palette, colour number, cell and strip — plus the register values on that line | the same model; the layer rule is the VDC's BG colour-0 / SPBG priority (#12) |
+
+Two sources matter for honesty.  A Mednafen save state carries most register
+values; the editor's picture model carries only BXR/BYR/MWR/CR, so the viewer
+ROM's fixed 256×224 values (HSR `$0202`, HDR `$041F`, VPR `$0F02`, VDR
+`$00EF`, VCR `$000C`, DCR `$0010`, DVSSR `$7F00` — `tools/viewer.asm`'s HuDK
+`vdc_init_table` sequence) stand in and are labelled **viewer**.  MAWR/MARR/
+VWR/VRR/SOUR/DESR/LENR are not part of a picture and show `—`.  The page's
+`?panels=1` reads the panel at a fixed pixel (168, 92) for a headless dump of
+the DOM; the click handler is the human path.
+
 ## The export
 
 `renderer/pce-rom.js` builds each ROM from `toPicture()`; bank 0 is the
@@ -325,6 +352,30 @@ How that proof is built:
   palette, the backdrop entry, a wobble amplitude past 10 bits and a zero
   period each throw their documented code, and a legal setup afterwards still
   builds a table.
+- **the panels (#26)** — `node tests/check-panels.js` (written by @design,
+  flagged for @review cold) runs `renderer/pce-panels.js` on eight existing
+  dumps and compares every panel with an independent computation written in
+  the check from the raw bytes (no panel or renderer function is called to
+  produce the expected value): a 13×12 pixel grid plus pixels on every
+  non-empty SAT sprite per dump (1320 traces, 92 landing on a sprite and 41
+  on the blanking fill), each checking the layer, the 9-bit index and CRAM
+  word, the BAT word/character/palette/tile row/column/colour number or the
+  sprite number/pattern/palette/colour/cell/strip, and the line's
+  BXR/BYR/CR/BG_YOffset — with the panel's RGB also required to equal
+  `mednafen.png` at that pixel.  The VRAM map must equal `regions.json`'s
+  descriptor list where that file exists and partition all 32768 words
+  exactly once; the per-line register panel is checked against `raster.json`
+  entry by entry (values between writes, the entry's own line, rcr and RCR
+  chain arm); the VCE panel against each line's colour table; the SAT panel
+  against `sat.bin`.  Dumps: `scene1` (background), `sprite1` (sprites),
+  `raster1` (BYR), `raster4` (per-line colour), `raster5` (per-line CR and
+  blanking), `painted` (#10's picture), `scene4` (64-wide BAT) and `scene9`
+  (characters ≥ `$800`).  The editor's own demo and sprite pictures go
+  through the same file, and the browser-global branch gives the same
+  traces.  The check fails on each of five self-mutations tried (priority
+  rule, plane bit order, per-line BXR, region length, colour high bit);
+  those are the builder's own mutants, so a breaker still owes it a cold
+  pass.
 - **the export** — the ROM's bank-1 config (including every region
   descriptor), the 512 colour-table entries, the SAT, banks 2–3 (the BAT) and
   bank 4+ (the regions concatenated in descriptor order — tiles then patterns)
@@ -369,6 +420,17 @@ raster table beside it, and does not pretend the table is in the image.
 `?demo=1` still reports the #10 bytes unchanged (`sha256 486477d6…`), so #13
 and #17 did not move the background picture's ROM.
 
+`?panels=1` reads the #26 panels at a fixed pixel and reports it (measured
+2026-10-28, `?sprites=1&panels=1`):
+
+```
+followinfo: pixel (168,92) · VDW line 92 · winner: background
+            colour index $14 · CRAM word $0115 · rgb(72,144,180)
+            background: BAT word 373 = $1044 · char $0044 · palette 1 ·
+            tile row 4 col 0 · colour 4
+            line registers: BXR 0 · BYR 0 · CR $C0 · BG_YOffset 92 · MWR $0
+```
+
 `tests/dumps/painted/` and `tests/dumps/spainted/` hold the captures
 (`mednafen.png`, `vram.bin`, `cram.bin`, `sat.bin`, `regs.json`,
 `mednafen.log`), recorded 2026-10-28.
@@ -379,6 +441,8 @@ and #17 did not move the background picture's ROM.
   check calls, but its `mousedown`/`mousemove` wiring is read, not executed —
   no synthetic input is ever sent on this machine. The effect buttons are the
   same: `?effects=1` exercises the setters a button calls, not the click.
+  The #26 follow-a-pixel click is the same: `?panels=1` calls the panel at a
+  fixed pixel, it does not click the canvas.
 - **Not the download wiring.** `URL.createObjectURL` and the anchor click are
   read, not run by an automated check.
 - **Not the raster table in an exported ROM.** That is **#16**: the viewer

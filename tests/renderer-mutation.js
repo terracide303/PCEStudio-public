@@ -138,8 +138,10 @@ const MUTATIONS = [
   {
     id: "wmask31",
     what: "BAT column mask forced to 31 (every BAT 32 columns)",
-    from: "var batIdx = (((bgX + x) >> 3) & geom.wmask) | batY;",
-    to: "var batIdx = (((bgX + x) >> 3) & 31) | batY;",
+    /* #26 moved the per-pixel decode into pce-bg.js's backgroundPixel (so
+     * the panels read the same decode); the mask is still this one line. */
+    from: "(((bgX + x) >> 3) & geom.wmask) |",
+    to: "(((bgX + x) >> 3) & 31) |",
     expect: "detected",
   },
   {

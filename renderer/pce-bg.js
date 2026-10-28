@@ -129,8 +129,10 @@
    *     address.
    *
    * Returns null (the single-register path) when the dump has no raster
-   * table; otherwise per-row bxr/bgY/cr/rgb arrays.  Rows before the first
-   * entry of a kind use the frame-start values above, rows between the
+   * table; otherwise per-row bxr/byr/bgY/cr/rgb arrays (`byr` is the BYR
+   * register itself, which the #26 register panel shows; `bgY` is the
+   * effective row counter after the manual's +1 rule).  Rows before the
+   * first entry of a kind use the frame-start values above, rows between the
    * last entry and the save line keep the register value (which the
    * check.js raster checks verify against the saved registers).
    */
@@ -191,6 +193,7 @@
     }
 
     var bxr = new Int32Array(height);
+    var byr = new Int32Array(height);   /* the BYR register itself (#26) */
     var bgY = new Int32Array(height);
     var cr = new Int32Array(height);
     var rgb = new Array(height);
@@ -211,13 +214,61 @@
         }
       }
       bxr[r] = curBxr;
+      byr[r] = curByrV;
       /* +1 for a mid-frame write (the manual's BYR+1), not for the
        * frame-start latch (line 0 takes the register itself) */
       bgY[r] = (curByrV + (L - curByrN) + (curByrN === 0 ? 0 : 1)) & 0x1FF;
       cr[r] = curCr;
       rgb[r] = curRgb;
     }
-    return { bxr: bxr, bgY: bgY, cr: cr, rgb: rgb };
+    return { bxr: bxr, byr: byr, bgY: bgY, cr: cr, rgb: rgb };
+  }
+
+  /* One background pixel: the colour index renderIndices writes, plus the BAT
+   * entry and tile the index came from (card #26's follow-a-pixel panel).
+   * renderIndices and renderer/pce-panels.js both call this, so the panel
+   * cannot drift from the picture: there is one background decode.  `out` is
+   * optional and reused to keep the render loop allocation-free. */
+  function backgroundPixel(vram, geom, bgX, bgY, x, out) {
+    var p = out || {};
+    var col = (bgX + x) & 7;
+    var batIdx = (((bgX + x) >> 3) & geom.wmask) |
+                 (((bgY >> 3) & geom.hmask) << geom.shift);
+    var bat = vram[batIdx * 2] | (vram[batIdx * 2 + 1] << 8);
+    var ch = bat & 0xFFF;
+    var pal = (bat >> 12) & 0xF;
+    var row = bgY & 7;
+    var addr = ch * 16 + row;
+    var pix;
+    /* Characters >= 0x800 lie beyond the 32768-word VRAM: writes there are
+     * dropped (VRAM_Size in Mednafen's pce module) and the display reads the
+     * zero-filled tile cache, so the pixel colour is 0.  Measured on the
+     * hardware by tests/dumps/scene9 (#39): its odd BAT columns read 0xF00+
+     * and show CRAM[0x000] on every pixel. */
+    if (ch >= 0x800) {
+      pix = 0;
+    } else {
+      /* bit 7 of a plane byte is the leftmost pixel (FixTileCache
+       * reference): pixel at column c reads bit 7 - c. */
+      var bit = 7 - col;
+      var w0 = vram[addr * 2] | (vram[addr * 2 + 1] << 8);
+      var w1 = vram[(addr + 8) * 2] | (vram[(addr + 8) * 2 + 1] << 8);
+      pix = ((w0 >> bit) & 1)
+          | (((w0 >> (bit + 8)) & 1) << 1)
+          | (((w1 >> bit) & 1) << 2)
+          | (((w1 >> (bit + 8)) & 1) << 3);
+    }
+    p.index = pix === 0 ? 0x000 : (pal << 4) | pix;
+    p.batIndex = batIdx;
+    p.batWord = bat;
+    p.char = ch;
+    p.palette = pal;
+    p.tileRow = row;
+    p.tileColumn = col;
+    p.colourNumber = pix;
+    p.tileWord = addr;          /* the first plane; the second is addr + 8 */
+    p.beyondVram = ch >= 0x800;
+    return p;
   }
 
   /* One rendered frame of colour indexes (9-bit VCE colour-table entries,
@@ -251,6 +302,7 @@
     var byr = regs.BYR & 0x1FF;                 /* BYR is 9 bits */
     var vdwLine0 = regs.RCRCount - (regs.scanline - firstScanline);
     var idx = new Uint16Array(width * height);
+    var px = {};   /* one reusable provenance record for the per-pixel decode */
 
     /* CR bit 7 = BB (background blanking): when it is clear the VDC clears
      * the background and every pixel shows the blanking-period video data —
@@ -275,36 +327,10 @@
       /* 9-bit counters wrap; mask to stay inside the BAT mask arithmetic */
       var bgY = rows ? rows.bgY[r] : ((byr + vdwLine0 + r) & 0x1FF);
       var bgX = rows ? rows.bxr[r] : bxr;
-      var batY = ((bgY >> 3) & geom.hmask) << geom.shift;
-      var row = bgY & 7;
 
       for (var x = 0; x < width; x++) {
-        var col = (bgX + x) & 7;
-        var batIdx = (((bgX + x) >> 3) & geom.wmask) | batY;
-        var bat = vram[batIdx * 2] | (vram[batIdx * 2 + 1] << 8);
-        var ch = bat & 0xFFF;
-        var pal = (bat >> 12) & 0xF;
-        var addr = ch * 16 + row;
-        /* Characters >= 0x800 lie beyond the 32768-word VRAM: writes there
-         * are dropped (VRAM_Size in Mednafen's pce module) and the display
-         * reads the zero-filled tile cache, so the pixel colour is 0.
-         * Measured on the hardware by tests/dumps/scene9 (#39): its odd BAT
-         * columns read 0xF00+ and show CRAM[0x000] on every pixel. */
-        var pix;
-        if (ch >= 0x800) {
-          pix = 0;
-        } else {
-          /* bit 7 of a plane byte is the leftmost pixel (FixTileCache
-           * reference): pixel at column c reads bit 7 - c. */
-          var bit = 7 - col;
-          var w0 = vram[addr * 2] | (vram[addr * 2 + 1] << 8);
-          var w1 = vram[(addr + 8) * 2] | (vram[(addr + 8) * 2 + 1] << 8);
-          pix = ((w0 >> bit) & 1)
-              | (((w0 >> (bit + 8)) & 1) << 1)
-              | (((w1 >> bit) & 1) << 2)
-              | (((w1 >> (bit + 8)) & 1) << 3);
-        }
-        idx[r * width + x] = pix === 0 ? 0x000 : (pal << 4) | pix;
+        idx[r * width + x] =
+            backgroundPixel(vram, geom, bgX, bgY, x, px).index;
       }
     }
     return { width: width, height: height, indices: idx };
@@ -336,6 +362,7 @@
     decodeCramWords: decodeCramWords,
     batGeometry: batGeometry,
     buildRows: buildRows,
+    backgroundPixel: backgroundPixel,
     renderFrame: renderFrame,
     renderIndices: renderIndices
   };

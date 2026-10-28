@@ -293,6 +293,43 @@ BAT. This check (written by @design, flagged for @review) requires:
 
 Details and the headless page output: [`../docs/EDITOR.md`](../docs/EDITOR.md).
 
+## `check-panels.js` — the panels read the renderer's model (#26)
+
+`renderer/pce-panels.js` draws the editor's five panels — the 20 VDC
+registers per scanline, the VCE's 32 palettes of 16, the VRAM map, the SAT
+and follow-a-pixel — from the same `vram`/`cram`/`sat`/`regs`/raster objects
+the renderer is given. This check (written by @design, flagged for @review)
+runs it on eight dumps and compares every panel with an independent
+computation written here from the raw bytes; the expected value never comes
+from the panel's or renderer's functions.
+
+- **follow a pixel**: a 13×12 grid plus pixels on every non-empty SAT sprite
+  (1320 traces in all) — the layer, 9-bit index and CRAM word, the BAT
+  word/character/palette/tile row/column/colour number or the sprite
+  number/pattern/palette/colour/cell/strip, the line's BXR/BYR/CR/BG_YOffset,
+  and the RGB against `mednafen.png` at the same pixel. 92 traces land on a
+  sprite and 41 on the blanking fill.
+- **the VRAM map**: `copyRegions` equals `regions.json`'s descriptor list
+  where that file exists; the segments partition all 32768 words exactly
+  once; the BAT follows MWR and the SAT the dump's SATB; every SAT-named
+  pattern cell is in a sprite-pattern segment.
+- **the register panel**: `registerLines()` against `raster.json` entry by
+  entry — the values between writes, the entry on its own line, `rcr`, the
+  RCR chain arm, and the 20-register view's per-line CR/BXR/BYR.
+- **the VCE panel**: 32×16, against each line's colour table on the raster
+  dumps and the saved CRAM on the others.
+- **the SAT panel**: 64 rows equal to `sat.bin`'s words, with the CGX/CGY
+  size and cell count.
+- the editor's own demo and sprite pictures through the same file, and the
+  browser-global branch giving the same traces.
+
+Dumps: `scene1` (background), `sprite1` (sprites), `raster1`/`raster4`/
+`raster5` (BYR / per-line colour / per-line CR), `painted` (#10's picture),
+`scene4` (64-wide BAT) and `scene9` (characters ≥ `$800`). The check fails
+on five self-mutations tried (priority rule, plane bit order, per-line BXR,
+region length, colour high bit); those are the builder's own mutants, so a
+breaker still owes it a cold pass.
+
 ## What this does NOT prove
 
 **It does not prove the renderer is correct.** Eleven mutations on twelve
