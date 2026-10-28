@@ -24,7 +24,7 @@ Progress tab is drawn from these tables.
 | Viewer ROM in a third emulator (web) | NOT PROVEN | by eye only: Dennis ran `viewer1/2/3.pce` on emulationonline.com, 2026-10-28. Tile layout matches Mednafen on all three; viewer1 and viewer3 colours look the same, but viewer2 shows mint green and purple where Mednafen shows cyan (0,216,216) and blue (0,0,216). Settled by #41: ares shows viewer2's cyan/blue like Mednafen, so the web emulator mixes up colour channels | #8, #41 |
 | Viewer ROM on real hardware | NOT PROVEN | not run on a real console: Dennis closed #8 on two emulators (2026-10-28). First real-console check comes with #16 (scanline timing) | #8, #16 |
 | Browser `.pce` export | PROVEN | `node tests/check-export.js`: 3 scenes byte-equal to PCEAS | #9 — `renderer/pce-rom.js` |
-| ROMs past 80 KB (MPR banks) | PROVEN | `node tests/check-export.js`: 16 scenes byte-equal to PCEAS incl. a >80 KB picture; the limit is being corrected from 2 MB to the HuCard's 1 MB (#57) | #46, #57 |
+| ROMs past 80 KB (MPR banks) | PROVEN | `node tests/check-export.js`: 16 scenes byte-equal to PCEAS incl. a >80 KB picture; the cap is the HuCard's 1 MB (128 banks), not the CPU's 2 MB; exactly 1 MB passes the guard, 1 MB + 1 bank is refused `rom-too-big` (#57) | #46, #57 |
 | TurboGrafx (bit-reversed) export | NOT PROVEN | `node tests/check-us-card.js` passes; no TurboGrafx-16 here to run it on | #25 |
 | Editor (tiles, palettes, map) | PROVEN | `node tests/check-editor.js`: 12/12 background refusals (21/21 with #13's sprite refusals), painted picture diff 0 in Mednafen | #10 — `renderer/editor.html` |
 | Phase 1 read cold | PROVEN | `docs/REVIEW.md`, 12 findings, all fixed by #38/#39 | #11 |

@@ -10,13 +10,18 @@ are filled with `0xff`. The image is headerless (`pceas -raw`) and has
 `4 + max(1, ceil(tiles / 8 KiB))` banks.
 
 The bank count is not capped at 10 any more (card #46). The copy regions may
-span banks 4–255: the viewer streams them through one 8 KiB window and maps
-the next bank into it, so the image grows to the HuC6280's physical limit —
-256 blocks of 8 KiB = 2 MB (HuC6280 hardware manual H8-7 and H8-10/11,
-recorded in [`MANUALS.md`](MANUALS.md) §5.1). A request past that is refused
+span banks 4–127: the viewer streams them through one 8 KiB window and maps
+the next bank into it, so the image grows to the HuCard limit — 128 banks of
+8 KiB = 1 MB (card #57). A HuCard decodes physical banks `$00`–`$7F` only
+(sgxtech.txt "HuC6280 memory map"; pcetech.txt §3 "Memory map"; hes spec
+[MEMORY MAP] ROM `0x000000`–`0x0FFFFF`; [`MANUALS.md`](MANUALS.md) §15.1
+GAP 4); `$80`–`$F7` are not card memory, and the HuC6280's 2 MB / 256-block
+physical space (hardware manual H8-7 and H8-10/11, `MANUALS.md` §5.1) is the
+CPU's address space, not the card's. A request past 128 banks is refused
 with the code `rom-too-big` (see [`EXPORT.md`](EXPORT.md)). `tools/genviewer.py`
-stops at 128 banks (1 MB) because PCEAS 3.23's `.bank` index stops at `0x7F`;
-the browser builder goes to 2 MB.
+stops at the same 128 banks: PCEAS 3.23's `.bank` index stops at `0x7F`,
+which now coincides with the card's decode rather than being the tighter of
+the two.
 
 Two builders implement this contract and must agree byte for byte:
 `tools/genviewer.py` (writes the `.asm` banks PCEAS assembles) and
@@ -31,7 +36,7 @@ scenes.
 | 0    | viewer code and vectors (constant — the browser copies it verbatim) |
 | 1    | config block (64 B at `$4000`) + the 512 colour-table entries (`$4040`) + the SAT (`$4440`) |
 | 2–3  | the BAT: `width × height` words, starting at bank 2 offset 0 |
-| 4–255 | the copy regions: the tile regions (and for the sprite scenes the SG pattern block) concatenated in descriptor order |
+| 4–127 | the copy regions: the tile regions (and for the sprite scenes the SG pattern block) concatenated in descriptor order |
 
 `tools/genviewer.py` emits exactly the banks each picture needs (one
 `.incbin` per 8 KiB slice), so nothing ever spills past a bank boundary.
@@ -85,16 +90,18 @@ at that fixed address.
 from MWR (`(MWR >> 4) & 3` selects 32/64/128/128, bit 6 selects 32/64 rows),
 so the BAT is at most 128×64 = 16 KiB = banks 2 and 3.
 
-## Banks 4–255 — the copy regions
+## Banks 4–127 — the copy regions
 
 The regions, concatenated in descriptor order, starting at bank 4 offset 0.
 The viewer streams this from the MPR2 window (`$4000`–`$5fff`, bank register
 `MPR2` set by `TAM2`) and re-maps to the next bank every 8 KiB, so region
 boundaries need not line up with banks. The MPR scheme is the HuC6280's: eight
 8-bit mapping registers, each selecting one of 256 8 KiB physical blocks
-(hardware manual H8-7, H8-10/11). Banks 4–255 are available to the regions —
-up to 252 banks = 2,016 KiB of tiles, inside the 2 MB physical ceiling
-(banks 0–3 hold the code, config and BAT).
+(hardware manual H8-7, H8-10/11); the card, however, decodes only blocks
+`$00`–`$7F`. Banks 4–127 are available to the regions — up to 124 banks =
+992 KiB of tiles, inside the card's 1 MB (banks 0–3 hold the code, config
+and BAT). The 13-descriptor config caps a legal picture below that: the
+largest describable is 108 banks = 864 KiB (see `EXPORT.md`).
 
 A region is usually a tile region; for the #12 sprite scenes the list also
 carries the sprite generator (SG) pattern block — cell `$80` upward at VRAM
@@ -167,23 +174,25 @@ The bank scheme is the hardware's, not a cap the project chose. The HuC6280
 has eight mapping registers (MPR0–MPR7), each mapping one 8 KiB logical
 window onto one of 256 8 KiB physical blocks numbered `$00`–`$FF`
 (HuC6280 hardware manual H8-7, H8-10/11; [`MANUALS.md`](MANUALS.md) §5.1),
-so the physical address space is 2 MB. The viewer uses **MPR2** (`$4000`–
-`$5fff`) as its one data window: `TAM2` selects the bank and `copy_words`
-bumps the bank number and resets the pointer whenever it crosses `$6000`
-(`tools/viewer.asm`). That code was already bank-agnostic — the old 80 KiB
-limit lived only in the two builders:
+so the CPU's physical address space is 2 MB. **The HuCard does not decode
+all of it** (#57): it occupies blocks `$00`–`$7F` = 128 blocks = 1 MB
+(sgxtech.txt "HuC6280 memory map"; pcetech.txt §3 "Memory map"; hes spec
+[MEMORY MAP] ROM `0x000000`–`0x0FFFFF`; `MANUALS.md` §15.1 GAP 4). The
+viewer uses **MPR2** (`$4000`–`$5fff`) as its one data window: `TAM2`
+selects the bank and `copy_words` bumps the bank number and resets the
+pointer whenever it crosses `$6000` (`tools/viewer.asm`). That code was
+already bank-agnostic — the old 80 KiB limit lived only in the two builders:
 
 - `renderer/pce-rom.js` (`MAX_TILE_BANKS = 6`, `MAX_REGIONS = 8`) and
 - `tools/genviewer.py` (`assert len(tiles) <= 6 * BANK`, `MAX_REGIONS = 8`).
 
-Both now lift those caps: `pce-rom.js` takes banks 4–255 and 13 regions;
-`genviewer.py` takes 13 regions and as many banks as PCEAS can assemble
-(128). Past the 2 MB ceiling the browser builder refuses with the code
-`rom-too-big` rather than emitting a ROM the hardware cannot map.
-`tools/genviewer.py` stops earlier, at 128 banks (1 MB), because PCEAS
-3.23's `.bank` index itself stops at `0x7F`
-(`huc-src/src/mkit/as/main.c`, `bank_limit`), so there is no assembler
-reference above 1 MB — only the browser builder goes to 2 MB.
+Both now lift those caps: `pce-rom.js` takes banks 4–127 and 13 regions;
+`genviewer.py` takes 13 regions and 128 banks. Past the card's 128-bank
+ceiling the browser builder refuses with the code `rom-too-big` rather than
+emitting a ROM the hardware cannot map. `tools/genviewer.py` stops at the
+same 128 banks for its own reason — PCEAS 3.23's `.bank` index itself stops
+at `0x7F` (`huc-src/src/mkit/as/main.c`, `bank_limit`) — so here the
+assembler's limit and the card's decode happen to be the same number.
 
 The 88 KiB picture the card is proven on is `tests/dumps/scene10`
 (generated by `tests/make-big-scene.js`, made by both builders as

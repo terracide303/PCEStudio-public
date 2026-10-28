@@ -214,7 +214,7 @@ measured it.
 | Stack is always logical $2100–$21FF (256 bytes); zero page is $2000–$20FF | H8-3, H8-11 | #7, #8, #31 |
 | Physical map: F8 = 8 KB work RAM ($1F0000–$1F1FFF, zero page $1F0000, stack $1F0100 when MPR1=F8); F7 = save RAM; 00–F6 = HuCard ROM | H8-9 (table; F7's label is not printed there — the tutorial names it) | #7, #8; F7 usage → **GAP 5** |
 | Device map: VDC $1FE000 (logical $0000–$0003), VCE $1FE400 ($0400–$0407), PSG $1FE800 ($0800–$080F), timer $1FEC00 ($0C00/$0C01), I/O $1FF000 ($1000), IRQ regs $1FF400 ($1402/$1403) | H8-24 | #7, #8, #34 |
-| ROM capacity: 256 banks of 8 KB = 2 MB physical; our console's 64 KB VRAM and banked ROM are not the same limit | H8-10/11 | **GAP 4** |
+| Physical space: 256 blocks of 8 KB = 2 MB (the CPU's address space — the HuCard itself decodes only `$00`–`$7F` = 1 MB, §15.1 GAP 4 and #57) | H8-10/11 | **GAP 4** |
 
 ### 5.2 Interrupts
 
@@ -458,10 +458,11 @@ for #26 while this is read — so the references name symbols, not lines.
     proven path yet → **GAP 3**, #34/#35.
 14. **The exporter's caps were its own.** The 80 KB cap
     (`MAX_TILE_BANKS = 6`, `MAX_REGIONS = 8`, `MAX_BAT_BANKS = 2` in
-    `pce-rom.js`) is #46's work (closed e7c547c); it raises the cap to
-    `MAX_ROM_BANKS = 256` = 2 MB, citing H8-10/11. **pcetech §3 and the HES
-    map put the measured HuCard decode at `$00`–`$7F` = 1 MB** (§15.1 GAP 4),
-    so the new limit is disputed → **GAP 4**.
+    `pce-rom.js`) is #46's work (closed e7c547c); it raised the cap to
+    `MAX_ROM_BANKS = 256` = 2 MB, citing H8-10/11. **pcetech §3, sgxtech's
+    map and the HES map put the measured HuCard decode at `$00`–`$7F` =
+    1 MB** (§15.1 GAP 4); #57 applied that — `MAX_ROM_BANKS = 128` (1 MB),
+    with `genviewer.py`'s PCEAS-bank cap now coinciding at 128.
 15. **Correct but worth recording (checked, no change needed):** the sprite
     pattern is *code × 64 words* (`base = s.cell * 64 + s.row` in
     `pce-sprites.js`) matching H7-21/24 and contradicting the tutorial's
@@ -541,7 +542,7 @@ these notes; the section names below are the citation.
 | **1** window and border | pcetech §7 "Display details", §9 "Display parameter settings", §5.1 CR; sgxtech "Video Priority Controller" (SGX only) | Frame = **263 lines, fixed**, split 14 top blanking / 242 active display / 4 bottom / 3 sync. The VDC shows graphics only inside VDS+VSW … +VDW; the overscan colour is shown elsewhere. Overscan = colour 0 of sprite palette 0 (`$100`); the active-area backdrop = colour 0 of background palette 0 (`$000`). `$0A`/`$0B` may change on any line; `$0C`–`$0E` only outside the active display. The measured tables include the exact 256×240 row our viewer writes (HDS=2 HSW=2 HDE=4 HDW=`$1F`; VDS=`$0F` VSW=2 VDW=`$EF` VCR=`$0C`) and the standard 224 row (VDS=`$17` VDW=`$DF`). At the 5 MHz clock a line is "roughly 342 dots", so a 256-px window leaves a left/right border. Does **not** settle the BB=0/SB=1 fill (§15.3). | #48 |
 | **2** VRAM→VRAM copy | pcetech §5.4 "DMA" | LENR = words M−1 (`0` = 1, `$FFFF` = 64K; the note's "1 byte" is a typo) and the MSB write starts it. SOUR/DESR/LENR are counters and keep their post-transfer values; LENR ends `$FFFF`. IW does not change the DMA step (always +1). MAWR/MARR/read buffer/write latch are untouched. Both DMAs may run together; SAT-DMA-done is four lines after the display ends. **Contradicts H7-12 on an overrun**: the note says DMA is "halted (not aborted), and resumes", the manual says cancelled with no done status. | #49 |
 | **3** pads and timer | pcetech §4 "I/O port", §2.1 "Interrupts", §2.2 "Timer" | The 2-button protocol (SEL = directions, CLR low = enabled, inputs inverted, the exact D3–D0 table, a delay after SEL) and the Turbo Tap 5-pad serial counter with its reset quirk (`$01`/`$03`). `$1000`: D7 CD sense, D6 country, D5/D4 = 1. Timer: 7-bit, decremented at fMASTER/1024 = 6992 Hz independent of CSL/CSH; `$00` counts as 1 and `$7F` as 128; IRQ on the 0→`$7F` underflow, then immediate reload; a read returns the reloaded value; it keeps counting without an acknowledge; disabled returns the last counter; re-enabling reloads the latch; any write to `$1403` acknowledges. Does **not** settle the 6-button pad (GAP 10). | #45 |
-| **4** ROM over 80 KB | pcetech §3 "Memory map"; sgxtech "HuC6280 memory map"; hes spec [MEMORY MAP] | The measured decode is HuCard ROM `$00`–`$7F` (128 × 8 KB = **1 MB**), `$80`–`$F7` unused (`$FF`), F8–FB work RAM (SGX 32 KB; on a PC-Engine F9–FB mirror F8); a ROM under 1 MB may be mirrored. The HES map agrees: ROM `0x000000–0x0FFFFF`, RAM `0x1F0000–0x1F7FFF`. **This contradicts the 2 MB limit** in §5.1 and `renderer/pce-rom.js` `MAX_ROM_BANKS = 256`, the limit #46 closed on (e7c547c). | #46 |
+| **4** ROM over 80 KB | pcetech §3 "Memory map"; sgxtech "HuC6280 memory map"; hes spec [MEMORY MAP] | The measured decode is HuCard ROM `$00`–`$7F` (128 × 8 KB = **1 MB**), `$80`–`$F7` unused (`$FF`), F8–FB work RAM (SGX 32 KB; on a PC-Engine F9–FB mirror F8); a ROM under 1 MB may be mirrored. The HES map agrees: ROM `0x000000–0x0FFFFF`, RAM `0x1F0000–0x1F7FFF`. **This contradicts the 2 MB limit** in §5.1 and `renderer/pce-rom.js` `MAX_ROM_BANKS = 256`, the limit #46 closed on (e7c547c). #57 set it to 128 (1 MB). | #46, #57 |
 | **5** where a save lives | pcetech §8 "CD-ROM" → "Battery backed RAM (BRAM)" | 2 KB at physical `$1EE000`–`$1EE7FF` (the first 2 KB of page F7), locked at power-up (reads `$FF`, writes ignored), unlocked by bit 7 of `$1807`, locked by reading `$1803`; the System Card and Tennokoe Bank use it in low speed. A bare HuCard has no save RAM. | GAP 5 stays Dennis's SPEC decision |
 | **6** status lines | pcetech §5 (status flags), §5.3 "Sprites", §5.4 "DMA" | The bit map and the conditions: D6 BSY, D5 VD, D4 DV, D3 DS, D2 RR, D1 OR, D0 collision (the note calls it CR; Hudson calls it CC). D5–D0 clear on a status read. **A flag is set only if its interrupt-enable bit is set** — the refinement H7-4's table can be read without. VD is on the first line after the active display, even in blanking, and is forced at line 261 if the window overruns; DS is four lines after the display ends; OR is set when the line's 17th sprite entry appears, even off-screen; collision only inside the active display, opaque sprite #0 over another opaque sprite. | #50 |
 | **7** 262 or 263 lines | pcetech §7 "Display details", §6 "VCE", §5.1 `$06` RCR | **263 lines, fixed** — "cannot be changed by the vertical control registers". RCR's range is 263 lines, `$0040`–`$0146`, with the first active line counted as `$40`. VCE `$0400`: D2 = "blur edges", D1–D0 = dot clock, D7 = black-and-white, D6–D3 no effect. **There is no 262/263-line select.** This contradicts `docs/VIDEO_MODES.md` and the #27 note in `docs/PLAN.md`; it supports `tools/viewer.asm`'s "edge blur on" comment and makes `tools/genroms.py`'s "263-line mode" comment unsupported. One measured source against one RTL-derived doc. | #27's note |
@@ -570,7 +571,7 @@ these notes; the section names below are the citation.
 | 11. Output scale | **Not settled**: no analogue levels in either note → GAP 13. |
 | 12. Border half-used | §5.1/§6 split the overscan (`$100`) from the active-area backdrop (`$000`); the renderer's single `$100` fill for BB clear is §15.3 item 1. |
 | 13. No CPU hardware in the ROM | §4 and §2.2 give the pad and timer semantics; the HES spec gives an independent I/O map (VSYNC `$FFF8`, timer `$FFFA`) → #45. |
-| 14. Exporter caps | §3 says the measured card is 1 MB, not 2 MB → #46, §15.3 item 2. |
+| 14. Exporter caps | §3 says the measured card is 1 MB, not 2 MB → #46, #57, §15.3 item 2. |
 | 15. Correct, worth recording | Confirms ×64 cells and the SAT bit positions (YF 15, CGY 13–12, XF 11, CGX 8, SPBG 7, palette 3–0), softening the "figure is the only source" caveat. Adds the size-masking rule (CGX masks pattern bit 0, CGY=1 bit 1, CGY=2/3 bits 2 and 1), which `pce-sprites.js` already applies. Says only **512** sprite patterns are usable on 32K words; our model reads past the array and draws those cells transparent, while hardware shows mirrored/garbage data. |
 
 ### 15.3 Where they contradict our renderer, viewer or exporter
@@ -586,12 +587,14 @@ these notes; the section names below are the citation.
    right, every BB-off/SB-on picture is one palette entry wrong and every
    Mednafen-based check is blind to it. Only #8's real console can settle it.
    This is the most consequential contradiction found.
-2. **The HuCard ROM limit.** `renderer/pce-rom.js` `MAX_ROM_BANKS = 256` lets
+2. **The HuCard ROM limit.** `renderer/pce-rom.js` `MAX_ROM_BANKS = 256` let
    the exporter build 2 MB, citing `docs/MANUALS.md` and H8-10/11. pcetech §3,
    sgxtech's memory map and the HES map all put the card decode at `$00`–`$7F`
-   = 1 MB. #46 has just closed (e7c547c) on "up to the HuCard limit"; that
-   limit is disputed and should be 1 MB unless a 2 MB card is measured, so
-   #46's evidence needs revisiting.
+   = 1 MB. #46 had just closed (e7c547c) on "up to the HuCard limit"; that
+   limit was disputed, and **#57 resolved it: `MAX_ROM_BANKS = 128` (1 MB)**,
+   the card's decode, with the HuC6280's 2 MB / 256-block figure kept as the
+   CPU's address space only. A legal picture still tops out at 108 banks
+   (864 KiB) under the 13-descriptor config — a separate card.
 3. **263 lines and VCE `$0400`.** `tools/genroms.py` calls `$04` "263-line
    mode"; `tools/ares-frame.py`'s `BLOCK_H` comment says "262 visible lines +
    the VCE extra line (CR bit 2)"; `docs/PLAN.md`'s note on #27 tells it to

@@ -55,12 +55,13 @@ PALETTE_OFFSET = 0x40          # 512 words, LE (entries 0-511)
 SAT_OFFSET = 0x440             # 256 words, LE (64 SAT entries x 4) — #14
 SAT_ADDR = 0x7F00              # the SAT's VRAM word address (DVSSR)
 
-# PCEAS 3.23's own limit, not the hardware's: `.bank` refuses an index above
-# 0x7F (huc-src/src/mkit/as/main.c `bank_limit = 0x7F`), so this path can
-# assemble 128 x 8 KiB = 1 MB.  The HuC6280 itself maps 256 blocks of
-# physical address space = 2 MB (hardware manual H8-7, H8-10/11;
-# docs/MANUALS.md §5.1) — renderer/pce-rom.js builds up to that, with no
-# PCEAS reference above 1 MB.
+# 128 banks = 1 MB is the HuCard's decode ($00-$7F: sgxtech.txt "HuC6280
+# memory map"; pcetech.txt §3 "Memory map"; hes spec [MEMORY MAP] ROM
+# 0x000000-0x0FFFFF; docs/MANUALS.md §15.1 GAP 4) as well as PCEAS 3.23's
+# own limit — `.bank` refuses an index above 0x7F
+# (huc-src/src/mkit/as/main.c `bank_limit = 0x7F`).  The HuC6280's 2 MB /
+# 256-block physical space (hardware manual H8-7, H8-10/11) is the CPU's
+# address space, not the card's: no ROM above 1 MB can map on a HuCard.
 PCEAS_MAX_BANKS = 128
 
 
@@ -168,9 +169,10 @@ def build(spec):
     # past a bank boundary (pceas -raw would pad/truncate silently).  #46:
     # there is no 6-tile-bank cap any more — banks 4..127 are the regions,
     # streamed through the viewer's 8 KiB MPR2 window (viewer.asm
-    # copy_words re-maps the bank on every $6000 crossing), up to what
-    # PCEAS 3.23 itself can assemble.  Beyond that this path refuses; the
-    # browser builder (renderer/pce-rom.js) goes to the hardware's 2 MB.
+    # copy_words re-maps the bank on every $6000 crossing), up to 1 MB — the
+    # HuCard's decode and PCEAS 3.23's .bank limit agree at 128 banks.
+    # Beyond that this path refuses, and so does renderer/pce-rom.js: nothing
+    # above 1 MB can map on a HuCard.
     BANK = 8 * 1024
     assert len(bat) <= 2 * BANK, len(bat)
     bat_banks = (len(bat) + BANK - 1) // BANK
@@ -178,11 +180,11 @@ def build(spec):
     if 4 + tiles_banks > PCEAS_MAX_BANKS:
         raise ValueError(
             f"pceas-bank-limit: {4 + tiles_banks} banks of 8 KiB "
-            f"({(4 + tiles_banks) * BANK} bytes); PCEAS 3.23 assembles at "
-            f"most {PCEAS_MAX_BANKS} banks (1 MB) because its .bank index "
-            f"stops at 0x7F. The HuC6280's 2 MB physical limit "
-            f"(256 banks, docs/MANUALS.md §5.1) has no PCEAS reference: "
-            f"build that with renderer/pce-rom.js")
+            f"({(4 + tiles_banks) * BANK} bytes); a HuCard decodes at most "
+            f"{PCEAS_MAX_BANKS} banks (1 MB, physical banks $00-$7F; "
+            f"sgxtech.txt \"HuC6280 memory map\", pcetech.txt §3, "
+            f"hes spec [MEMORY MAP]); PCEAS 3.23's .bank index also stops "
+            f"at 0x7F")
     for i in range(bat_banks):
         with open(os.path.join(outdir, f"bat{i}.bin"), "wb") as f:
             f.write(bat[i * BANK:(i + 1) * BANK])
