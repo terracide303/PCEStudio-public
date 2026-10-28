@@ -100,6 +100,10 @@ Not proven here:
 
 - **The recording is Mednafen, not hardware.** No real PC Engine or MiSTer run
   of this ROM exists yet.
+- **Our DMF has not been opened in Furnace** (Furnace is not installed here).
+  It is written against the format the vendored reader consumes — legacy DMF
+  24, the shape Furnace exports — and the converter accepts it, but a Furnace
+  round-trip (open, save, reconvert) is still owed.
 - **Pitch is measured by narrowband power, not compared sample for sample.**
   The next step is a JS player driving `renderer/pce-psg.js`, which must match
   this same WAV numerically the way #34/#62 match theirs.
