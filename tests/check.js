@@ -8,20 +8,22 @@
  *
  * For every tests/dumps/<scene>/ directory it reads vram.bin (VDC VRAM from
  * the Mednafen save state), cram.bin (VCE colour table), regs.json (the
- * scanline calibration values) and mednafen.png (the recorded raw frame,
+ * scanline calibration values and the capture crop slstart/slend) and
+ * mednafen.png (the recorded raw frame,
  * 256x232 RGB, unfiltered — the last qtrecord frame, same source surface as
  * Mednafen's F9 shot), renders the frame with
  * renderer/pce-bg.js and requires pixel-for-pixel equality with the PNG
  * (diff 0).  Exit code 0 only if every picture matches.
  *
- * A dump whose CR has bit 7 clear is not a picture: the VDC background is
- * off, so whatever the frame contains says nothing about the renderer.
- * tests/dumps/us1 is exactly that — Mednafen shows the US HuCard image
- * blank (every VDC register 0), which is the emulator not running the image
- * (#25), not a rendered picture.  Such a dump is reported by name and NOT
- * counted.  The set is explicit below: a dump with the background off that
- * is not on that list fails the run, so a bad capture cannot hide as a
- * "not a picture".
+ * A dump whose CR has bit 7 clear is the background-off case, which the
+ * renderer now models (CR R05 bit 7 = BB, VDC manual p. H7-5): the frame is
+ * the backdrop everywhere, and tests/dumps/scene8 is the diff-0 proof of
+ * that.  tests/dumps/us1 stays on the skip list for its own reason — it is
+ * Mednafen showing the US HuCard image blank (every VDC register 0), which
+ * is the emulator not running the image (#25), not a picture that exercises
+ * the renderer.  The skip list is explicit below and a dump with the
+ * background off that is not on it is rendered like any other, so a bad
+ * capture cannot hide behind a blanket "not a picture" rule.
  */
 
 "use strict";
@@ -94,12 +96,12 @@ function decodePng(buf) {
   return { width, height, pixels: out };
 }
 
-/* Dumps that are not pictures, with the measured reason.  A dump whose CR has
- * bit 7 (background enable) clear is skipped only if it is named here. */
+/* Dumps that are skipped by name, with the measured reason.  A background-off
+ * dump not named here is rendered as the backdrop like any other frame. */
 const NOT_PICTURES = {
   us1: "Mednafen shows the US HuCard image blank: every VDC register 0 " +
        "(CR=0x00, no background), so it is the emulator not running the " +
-       "image (#25), not a rendered picture",
+       "image (#25), not a picture that exercises the renderer",
 };
 
 function checkScene(dir) {
@@ -109,20 +111,19 @@ function checkScene(dir) {
   const regs = JSON.parse(fs.readFileSync(path.join(dir, "regs.json"), "utf8"));
   const ref = decodePng(fs.readFileSync(path.join(dir, "mednafen.png")));
 
-  /* CR bit 7 = BB (background blanking): 0 clears the background, 1 displays
-   * it (VDC manual, CR R05, p. H7-5). */
-  if (!(regs.CR & 0x80)) {
-    if (!Object.prototype.hasOwnProperty.call(NOT_PICTURES, name)) {
-      console.log(`${name}: NOT A PICTURE (CR=0x${regs.CR.toString(16)}) and ` +
-                  `not on the documented skip list — FAIL`);
-      return { kind: "error" };
-    }
+  if (Object.prototype.hasOwnProperty.call(NOT_PICTURES, name)) {
     console.log(`${name}: not a picture, skipped (not counted): ` +
                 NOT_PICTURES[name]);
     return { kind: "not-picture" };
   }
 
-  const got = bg.renderFrame({ vram, cram, regs, width: 256, height: 232 });
+  /* The dump records the capture crop (capture.sh writes slstart/slend into
+   * regs.json); captured row 0 = VCE line 14 + slstart (14 lines of top
+   * blanking, DisplayRect.y in Mednafen's pce module).  Defaults to the
+   * original crop 4/235. */
+  const firstScanline = 14 + (regs.slstart != null ? regs.slstart : 4);
+  const got = bg.renderFrame({ vram, cram, regs, width: 256, height: 232,
+                               firstScanline });
 
   if (got.width !== ref.width || got.height !== ref.height) {
     console.log(`${name}: SIZE MISMATCH renderer ${got.width}x${got.height} ` +

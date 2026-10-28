@@ -5,7 +5,7 @@
 PCEAS ?= pceas
 PYTHON ?= python3
 
-SCENES := 1 2 3
+SCENES := 1 2 3 4 5 6 7 8 8b 8c 9
 VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,$(SCENES)))
 
 all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS)

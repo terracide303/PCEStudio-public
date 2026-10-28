@@ -39,7 +39,8 @@ i.e. **MSB = leftmost pixel** — and the pixel value is bit·CH0 + bit·CH1·2 
 bit·CH2·4 + bit·CH3·8.  Colour 0 of any BG palette is forced to CRAM entry
 0x000 (the backdrop).  Character codes ≥ 0x800 address beyond the
 32768-word VRAM; writes there are dropped and the display reads a zero tile
-(colour 0).  *Source: VDC manual, CG 2.3.3 p. H7-15 (where a
+(colour 0) — measured on the hardware by scene9 (see the test ROMs below).
+*Source: VDC manual, CG 2.3.3 p. H7-15 (where a
 character's 16 words live); the palette fixup and the ≥ 0x800 rule are
 Mednafen behaviour, not statements found in the manual text searched here —
 Mednafen `src/hw_video/huc6270/vdc.cpp` (FixTileCache: `tc[7-x] = bit x`,
@@ -71,13 +72,26 @@ channel order comes from Mednafen `src/pce/vce.cpp`
 manual's figure 2-2-1 is not transcribed in the text file, so the positions
 cannot be read from it.*
 
+**Background off (CR).** CR bit 7 = BB (background blanking): when it is
+clear the VDC clears the background and every pixel shows the
+blanking-period video data — SPBG = 1, VD7–VD0 = 0, i.e. the 9-bit colour
+index 0x100, CRAM[0x100] (sprite colour 0).  The renderer fills the frame
+with CRAM[0x100] and returns; scenes 8, 8b and 8c are the diff-0 proofs
+(a full picture in VRAM, BB clear; burst mode on or off, DCR set or clear:
+all 59392 pixels are CRAM[0x100] = 0x049 = 36,36,36 — so the burst and DCR
+hypotheses were tested and rejected).  *Source: VDC manual, CR R05 p. H7-5;
+2.3.6 blanking video data p. H7-18.*
+
 ## The test ROMs (`tools/genroms.py`)
 
-Three HuCard ROMs (assembled with PCEAS, 8 KiB, one ROM bank) that draw a
-static, deterministic picture and loop.  They share the canonical HuDK
-`vdc_init_table` 256×224 register values (HSR/HDR/VPR/VDW/VCR/DCR/SATB —
-*source: HuDK `include/vdc.s`, the working example `tools/hello.asm` uses the
-same values*), differ in MWR/BXR/BYR, and fill:
+Scenes 1–3 are #5's original torture pictures, and scenes 4–9 (with 8b, 8c
+and 5b) are #39's: each new scene is **not** periodic in the dimension a
+renderer break would cut, so the break shows as a diff (docs/REVIEW.md
+finding 1).  All are HuCard ROMs (assembled with PCEAS, 8 KiB, one ROM
+bank) that draw a static, deterministic picture and loop.  They share the
+canonical HuDK `vdc_init_table` 256×224 register values (HSR/HDR/VPR/VDW/
+VCR/DCR/SATB — *source: HuDK `include/vdc.s`, the working example
+`tools/hello.asm` uses the same values*), differ in MWR/BXR/BYR/CR, and fill:
 
 - **CRAM**: entry i = (i·7 mod 512) — a bijection mod 512 — OR'd with 0x100
   on three entries, then 0x000 and 0x100 replaced by the canaries below.  All
@@ -95,7 +109,21 @@ same values*), differ in MWR/BXR/BYR, and fill:
 - **BAT**: scene 1 = 32×32 (MWR=0x00, BXR=0, BYR=0); scene 2 = 64×32
   (MWR=0x10, BXR=100, BYR=53 — sub-tile scroll); scene 3 = 128×32
   (MWR=0x20, BXR=290, BYR=117 — BAT-wrap); scene 3's BAT is filled by a small
-  formula loop in the ROM so the data fits one bank.
+  formula loop in the ROM so the data fits one bank.  Scene 4 = 64×32 with
+  BXR=256 and tile codes from the upper half of the 64-wide BAT (the part a
+  32-wide BAT never reaches); scene 5 = 128×32 SCREEN code 3 (MWR=0x30,
+  BXR=1000) — the code whose row stride #38's break got wrong; scene 6 =
+  32×64 (MWR=0x50, BYR=400 — BAT wrap past row 31); scene 7 = 128×64 two
+  banks (MWR=0x70, BXR=1000 — a 16384-byte BAT; note the exporter's
+  two-bank *ROM* path in pce-rom.js/viewer.asm is a separate thing and is
+  still only exercised by the 32×32 viewer captures); scene 9 =
+  the ch ≥ 0x800 witness (even BAT columns read tiles 0x700+, odd columns
+  read 0xF00+ and show CRAM[0x000]: measured, the VDC drops writes past
+  word 32767 and the display reads colour 0); scenes 8/8b/8c = scene 1's
+  picture with BB clear (CR=0x00), testing the CR model above.  Each BAT
+  is filled by a small formula loop in the ROM so the data fits one bank,
+  and `tools/genroms.py`'s `bat_formula()` mirrors the loops for
+  verification (scene 4-9 BATs: 0 mismatches against the captures).
 
 ## The dumps (`tools/capture.sh`, `tools/mcs-extract.py`, `tools/movframes.py`)
 
@@ -150,6 +178,24 @@ values.  Cross-check: `BG_YMoo − BYR` must equal `RCRCount − 1` at save time
 (the save lands before its own line's HDS_PART2 increment) — printed by the
 extract.
 
+Two things follow from the arithmetic, and #39 measured them rather than
+assuming them:
+
+- On the standard crop, `vdwLine0 = RCRCount − (scanline − 18)` is
+  **identically 1** for every save made during VDW (RCRCount = scanline − 17
+  there).  So the standard captures cannot tell a derived calibration from
+  the constant 1 — exactly REVIEW.md finding 1's complaint.  The proof that
+  the formula generalizes is **scene5b**: captured with the crop shifted
+  two lines down (`SLSTART=6 SLEND=237`, recorded in regs.json as
+  `slstart`/`slend`), so its captured row 0 is VCE line 20 and its
+  `vdwLine0` is 3 — and it is still diff 0.  The renderer reads the crop
+  as `firstScanline = 14 + slstart`; hard-wiring `vdwLine0` to 1 shifts
+  scene5b two rows and `renderer-mutation.js` catches it there.
+- The save scanline cannot be chosen by timing the SIGINT: **measured 254
+  for SLEEP 8.5 s through 9.5 s** (the save instant is phase-locked in
+  Mednafen's main loop, sub-line jitter only).  Shifting the crop, not the
+  save time, is what produces a different `vdwLine0`.
+
 ## Running it
 
 ```sh
@@ -165,10 +211,15 @@ command line and a SIGINT.
 
 ## Known scope limits (deliberate)
 
-Background layer only (no sprites — CR=0x80 in the scenes; sprites are #6+).
+Background layer only (no sprites — CR=0x80 in the scenes except 8/8b/8c,
+which exist to test the background-off rule; sprites are #6+).
 256×224 mode only (5.37 MHz clock; the 7.16 MHz modes and 256×240 VDW come
 with the editor).  No RCR split.  The window/state colour path is validated
 end-to-end by the diff test, which is the card's definition of correct.
+One documented synthetic input: `renderer-mutation.js` builds a 65536-word
+VRAM to make the `ch ≥ 0x800` break detectable — no real dump can carry it,
+because Mednafen's state holds 32768 words (scene9 is the rule's own proof:
+the VDC itself reads colour 0 there).
 
 ## Test provenance note
 

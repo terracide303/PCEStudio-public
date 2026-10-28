@@ -9,18 +9,21 @@
  * reference for verification only — no emulator code is copied or linked.
  *
  * Input (see tools/mcs-extract.py for where the values come from):
- *   vram: Uint8Array, 131072 bytes = 65536 uint16 little-endian words
+ *   vram: Uint8Array, 65536 bytes = 32768 uint16 little-endian words
  *   cram: Uint8Array, 1024 bytes = 512 uint16 LE colour-table entries
  *         (bits 0-8 colour — G=6-8, R=3-5, B=0-2).  Bit 8 is the top bit of
  *         green, not a separate CG bit; bits above 8 are not exercised by any
  *         dump, so what the VCE does with them is not modelled here.
- *   regs: { BYR, BXR, MWR, BG_YOffset, scanline, ... }
+ *   regs: { BYR, BXR, MWR, CR, BG_YOffset, scanline, ... }
  *   firstScanline: VCE scanline of captured row 0 (18 for slstart=4:
  *     Mednafen DisplayRect.y = 14 + slstart, 14 lines of top blanking)
  *
- * Layer scope: background only (CR bit 7, no sprites).  Colour 0 of any BG
- * palette is fixed up to CRAM[0x000] (the backdrop entry), per the VDC
- * datasheet and Mednafen's FixPCache behaviour.
+ * Layer scope: background only (no sprites).  CR bit 7 (BB) is modelled: when
+ * it is clear the VDC clears the background and every pixel shows the
+ * blanking-period video data — SPBG = 1, VD7..VD0 = 0, i.e. the 9-bit colour
+ * index 0x100, CRAM[0x100] (2.3.6 p. H7-18).  Colour 0 of any BG palette in
+ * a displayed background is fixed up to CRAM[0x000] (the backdrop entry),
+ * per the VDC datasheet and Mednafen's FixPCache behaviour.
  *
  * Dual use: CommonJS module in Node (tests/check.js) and a browser global
  * (renderer/index.html) via a UMD-style wrapper.
@@ -81,6 +84,25 @@
     var height = opts.height || 232;
     var firstScanline = opts.firstScanline != null ? opts.firstScanline : 18;
     var rgb = decodeCram(cram);
+
+    /* CR bit 7 = BB (background blanking): when it is clear the VDC clears
+     * the background and every pixel shows the blanking-period video data —
+     * SPBG = 1, VD7..VD0 = 0, i.e. the 9-bit colour index 0x100, CRAM[0x100]
+     * (sprite colour 0).  VDC manual, CR R05 p. H7-5, 2.3.6 p. H7-18.
+     * Measured on tests/dumps/scene8, scene8b and scene8c (a full picture in
+     * VRAM, BB clear, burst mode or not, DCR set or clear): 59392/59392
+     * pixels are CRAM[0x100] = 0x049 = 36,36,36; us1's white frame is its
+     * CRAM[0x100] = 0x1FF, the same rule. */
+    if (!(regs.CR & 0x80)) {
+      var bgOff = new Uint8Array(width * height * 3);
+      for (var i = 0; i < bgOff.length; i += 3) {
+        bgOff[i] = rgb[0x100 * 3];
+        bgOff[i + 1] = rgb[0x100 * 3 + 1];
+        bgOff[i + 2] = rgb[0x100 * 3 + 2];
+      }
+      return { width: width, height: height, pixels: bgOff };
+    }
+
     var geom = batGeometry(regs.MWR);
     var bxr = regs.BXR & 0x3FF;                 /* BXR is 10 bits */
     var byr = regs.BYR & 0x1FF;                 /* BYR is 9 bits */
@@ -103,7 +125,9 @@
         var addr = ch * 16 + row;
         /* Characters >= 0x800 lie beyond the 32768-word VRAM: writes there
          * are dropped (VRAM_Size in Mednafen's pce module) and the display
-         * reads the zero-filled tile cache, so the pixel colour is 0. */
+         * reads the zero-filled tile cache, so the pixel colour is 0.
+         * Measured on the hardware by tests/dumps/scene9 (#39): its odd BAT
+         * columns read 0xF00+ and show CRAM[0x000] on every pixel. */
         var pix;
         if (ch >= 0x800) {
           pix = 0;
