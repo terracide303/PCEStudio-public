@@ -3,7 +3,11 @@
  *
  * Renders one 256x232 RGB frame from a VRAM dump, a colour-table dump and a
  * handful of register values, exactly as the HuC6270 VDC background layer and
- * the HuC6260 VCE colour decoder produce it in 256x224 mode.  This is
+ * the HuC6260 VCE colour decoder produce it in the display the ROM sets up:
+ * 256x240, not the 224 lines a standard TV shows (HDR = $041F, HDW = 31 ->
+ * 32 characters = 256 px, H7-9; VDW = $00EF, 240 display lines, H7-10).
+ * The 232 lines rendered here are the part of those 240 that the captured
+ * screen covers.  This is
  * PCEStudio's own model, written from the Hudson HuC6270/HuC6260 manuals
  * (facts and page references in docs/RENDERER.md); Mednafen was used as a
  * reference for verification only — no emulator code is copied or linked.

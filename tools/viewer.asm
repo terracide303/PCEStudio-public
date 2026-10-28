@@ -4,7 +4,9 @@
 ;; The viewer ROM: loads the 512-entry colour table into the VCE, tiles and
 ;; the BAT (and for the sprite scenes the SG patterns) into VRAM, the SAT
 ;; into VRAM $7f00 where the VDC's SATB DMA picks it up every frame, sets
-;; the VDC to 256x224 and shows the picture.  All picture data is read from
+;; the VDC to 256x240 (VDW = $00EF, 240 display lines, H7-10; HDR = $041F,
+;; 32 characters = 256 px, H7-9) and shows the picture.  All picture data is
+;; read from
 ;; fixed places in the ROM; the layout is documented in ../docs/ROM_LAYOUT.md
 ;; (bank 1: config + 512-entry palettes + the SAT + the #16 raster table,
 ;; banks 2-3: BAT, banks 4+: tiles, concatenated in descriptor order).
@@ -24,7 +26,7 @@
 ;; Adapted from HuDK (BlockoS/HuDK, MIT).  The parts taken from it:
 ;;   - the reset path (include/irq_reset.s _reset: sei/csh/cld, stack,
 ;;     tam0/tam1)
-;;   - the VDC 256x224 register values (include/vdc.s vdc_init_table)
+;;   - the VDC 256x240 register values (include/vdc.s vdc_init_table)
 ;;   - the VCE dot-clock value and palette write sequence (include/vce.s
 ;;     vce_init, vce_load_palette — via the VCE ports, own loop)
 ;;   - the ROM->VRAM copy pattern with bank remapping (include/vdc.s
@@ -104,7 +106,13 @@ reset:
         lda #$f8
         tam1                       ; work RAM at $2000-$3fff
 
-        ; VCE: 256 px dot clock, edge blur on (HuDK vce_init value)
+        ; VCE CR ($0400) = $04: D1-D0 = 11, the /4 dot clock (the 256-px
+        ; picture, H6-3); D2 is set too, and the sources disagree on what it
+        ; is.  The VCE manual documents D1-D0 only (H6-3).  docs/VIDEO_MODES.md
+        ; reads bit 2 as a 262/263-line select; Charles MacDonald's measured
+        ; hardware notes read it as "blur edges" (pcetech SS6; SS7 says the
+        ; frame is 263 lines fixed).  #27 settles which.  The value is
+        ; HuDK's vce_init value.
         lda #$04
         sta $0400
 
