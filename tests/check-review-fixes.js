@@ -255,7 +255,9 @@ const US1_REGS = JSON.parse(
 /* #39's CR model (CR bit 7 = BB, VDC manual p. H7-5; blanking-period video
  * data 0x100 per 2.3.6 p. H7-18) — removing it from the renderer reproduces
  * the pre-#39 behaviour: CR is ignored, a CR-off dump's picture is drawn
- * back, and check.js counts it diff 0. */
+ * back, and check.js counts it diff 0.  The block is the comment plus the
+ * per-row BB gate (#15 made CR per-line, so the gate is per row and the
+ * loop opening is re-added by the pre-fix line). */
 const CR_BLOCK = `    /* CR bit 7 = BB (background blanking): when it is clear the VDC clears
      * the background and every pixel shows the blanking-period video data —
      * SPBG = 1, VD7..VD0 = 0, i.e. the 9-bit colour index 0x100, CRAM[0x100]
@@ -263,15 +265,22 @@ const CR_BLOCK = `    /* CR bit 7 = BB (background blanking): when it is clear t
      * Measured on tests/dumps/scene8, scene8b and scene8c (a full picture in
      * VRAM, BB clear, burst mode or not, DCR set or clear): 59392/59392
      * pixels are CRAM[0x100] = 0x049 = 36,36,36; us1's white frame is its
-     * CRAM[0x100] = 0x1FF, the same rule. */
-    if (!(regs.CR & 0x80)) {
-      var off = new Uint16Array(width * height);
-      off.fill(0x100);
-      return { width: width, height: height, indices: off };
-    }
-
+     * CRAM[0x100] = 0x1FF, the same rule.  With a raster table CR is latched
+     * per line: each row is gated on its own CR (SB/BB become valid from the
+     * next horizontal display period), so the gate below runs per row for
+     * every dump — there is no separate whole-frame fill. */
+    for (var r = 0; r < height; r++) {
+      var crRow = rows ? rows.cr[r] : regs.CR;
+      if (!(crRow & 0x80)) {
+        /* BB clear on this line: the blanking fill, whole row */
+        for (var x = 0; x < width; x++) {
+          idx[r * width + x] = 0x100;
+        }
+        continue;
+      }
 `;
-const OLD_BG_NO_CR = preFixSource(BG_SRC, CR_BLOCK, "",
+const OLD_BG_NO_CR = preFixSource(BG_SRC, CR_BLOCK,
+  "    for (var r = 0; r < height; r++) {",
   (src) => !src.includes("CR bit 7 = BB"),
   "pce-bg pre-fix CR model");
 
@@ -309,11 +318,12 @@ function outputProblems(stdout, status) {
   const m = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)$/m
     .exec(stdout);
   if (!m) problems.push("no PASS summary line");
-  else if (Number(m[1]) !== 41)
-    problems.push(`PASS counts ${m[1]} scene(s), expected 41 ` +
+  else if (Number(m[1]) !== 46)
+    problems.push(`PASS counts ${m[1]} scene(s), expected 46 ` +
                   "(scenes 1-9 plus 5b, 8b, 8c, painted, viewer 1-3, " +
-                  "browser 1-3, sprite 1-11, vsprite 1-11 — sprite 9-11 " +
-                  "are #40's, vsprite 1-11 are #14's)");
+                  "browser 1-3, sprite 1-11, vsprite 1-11, raster 1-5 — " +
+                  "sprite 9-11 are #40's, vsprite 1-11 are #14's, " +
+                  "raster 1-5 are #15's)");
   if (!/^us1: not a picture, skipped/m.test(stdout))
     problems.push("us1 is not reported as skipped by name");
   return problems;
@@ -333,7 +343,7 @@ function outputProblems(stdout, status) {
     { encoding: "utf8", timeout: 120000 });
   const problems = outputProblems(run.stdout || "", run.status);
   if (problems.length === 0)
-    pass("check.js: 41 scene(s) diff 0, us1 skipped and not counted");
+    pass("check.js: 46 scene(s) diff 0, us1 skipped and not counted");
   else problems.forEach(fail);
 }
 
@@ -382,7 +392,7 @@ function outputProblems(stdout, status) {
   const stdout = run.stdout || "";
   if (run.status !== 0 && /^scene8: NOT A PICTURE .* FAIL$/m.test(stdout))
     pass("self-test: the pre-fix check.js rejects scene8 as 'NOT A PICTURE' " +
-         "— the new check.js passes it (41 scene(s) above)");
+         "— the new check.js passes it (46 scene(s) above)");
   else
     fail("self-test: the pre-fix check.js did not reject scene8 " +
          `(exit ${run.status})`);

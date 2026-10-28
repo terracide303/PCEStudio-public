@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""genroms.py — generate the PCEStudio test-scene ROMs (cards #5, #39, #12).
+"""genroms.py — generate the PCEStudio test-scene ROMs (cards #5, #39, #12, #15).
 
 Each scene is a HuCard ROM that initialises the VDC/VCE (the canonical HuDK
 256x224 init values, see docs/BUILD.md and hello.asm), fills the VCE colour
@@ -48,6 +48,8 @@ Every VRAM copy loop in the ROM reads one 256-byte table per page (the 6280's
 unique names.  All data lives in bank 0 ($e000-$ffff), reached through MPR7.
 """
 
+import json
+import math
 import os
 import sys
 
@@ -999,6 +1001,404 @@ def gen_sprite_asm(name):
     return "\n".join(out)
 
 
+# ---- raster scenes (#15) ---------------------------------------------------
+# Per-scanline CPU writes to BXR, BYR, CR and the VCE colour table, driven
+# from the RCR line interrupt (CR bit 2 = RC).  Each ROM arms a
+# self-chaining RCR interrupt at boot: the interrupt fires when the VDC's
+# line counter reaches RCR - 0x40, i.e. at the END of VDW line L-1, so the
+# step's writes land during the HBlank before line L and take effect on
+# line L (BXR/BYR "valid with the next scanning line", CR "from the next
+# horizontal display period").  Step counter <$30, entry tables indexed by
+# step; every step re-arms RCR to 0x40 + the next entry's line and the
+# last step wraps to step 0, so the chain runs every frame without the VD
+# interrupt.  raster_json() writes the same entries (plus the base
+# register and CRAM values) into tools/gen/rasterN.raster.json for the
+# renderer; tests/check.js checks both against the save state.
+#
+#   r1 "statusbar"  scene-1 picture; steps at VDW lines 160..232 write
+#                   BYR=0x1FF -> a 73-line band frozen at BAT row 0 that
+#                   does not scroll while the picture above scrolls.  The
+#                   frame-start latch (VDW line 0, RCRCount reset) takes
+#                   the BYR register — which keeps the previous frame's
+#                   last write — so lines 1..159 of every frame show
+#                   bgY = 0x1FF + L: the cross-frame register persistence
+#                   witness.
+#   r2 "wobble"     steps at lines 1..232 write BXR = wob[s]
+#                   (128+100*sin(2*pi*s/64)): per-line horizontal wobble
+#                   of the BAT columns.
+#   r3 "byr"        two mid-frame BYR writes (line 80 -> 0x30, line 160
+#                   -> 8): three bands, each shifted differently, and the
+#                   top band witnesses the frame-start value = the table's
+#                   LAST byr entry (8), not the base (0).
+#   r4 "palette"    steps at lines 1..232 write CRAM entry s = grad[s] +
+#                   frame ((s*13+0x40)&0x1FF plus a frame counter bumped
+#                   once per chain, ZP <$31>): the values shift by 1 every
+#                   frame, so at any row the entries past it still show the
+#                   previous frame's values — the picture proves the
+#                   per-line CRAM application (a renderer applying all
+#                   entries to all rows, or a line late, diffs).  CTA reset
+#                   per step; the gradient covers palettes 0..14 with many
+#                   green-top-bit (bit 8) values; the colour table persists
+#                   across frames (no reset).  raster-patch.py writes the
+#                   captured frame counter into the dump's raster.json.
+#   r5 "cr"         scene-1 picture + two sprites (SATB DMA); steps write
+#                   CR=0x84 at line 100 (SB off: the sprite's bottom rows
+#                   vanish), CR=0x44 at line 160 (BB off: blanking fill,
+#                   the SPBG=0 sprite still shows over it), CR=0xC4 at
+#                   line 240 (restore for the next frame — the table's
+#                   last entry is what the next frame's line 0 latches,
+#                   closing the loop).
+
+
+def raster_wobble(s):
+    """r2's BXR value for step s (s = 0..231)."""
+    return (128 + round(100 * math.sin(2 * math.pi * s / 64))) & 0x3FF
+
+
+def raster_grad(s):
+    """r4's CRAM value for entry s (s = 0..231): 232 distinct 9-bit
+    values, all with bit 6 set (0x40 <= v <= 0x1FF), many with the green
+    top bit (bit 8) set."""
+    return ((s * 13 + 0x40) & 0x1FF)
+
+
+def raster_entries(name):
+    if name == "r1":
+        return [{"line": L, "byr": 0x1FF} for L in range(160, 233)]
+    if name == "r2":
+        return [{"line": s + 1, "bxr": raster_wobble(s)} for s in range(232)]
+    if name == "r3":
+        return [{"line": 80, "byr": 0x30}, {"line": 160, "byr": 8}]
+    if name == "r4":
+        return [{"line": s + 1, "cram": [[s, raster_grad(s)]]}
+                for s in range(232)]
+    if name == "r5":
+        return [{"line": 100, "cr": 0x84}, {"line": 160, "cr": 0x44},
+                {"line": 240, "cr": 0xC4}]
+    raise AssertionError(name)
+
+
+RASTER_SCENES = {
+    "r1": dict(kind="byr_const", mwr=0x00, bxr=0, byr=0, cr=0x84, dcr=DCR,
+               tiles=[(0x040, 32), (0xF00, 16)], entries=raster_entries("r1")),
+    "r2": dict(kind="bxr_table", mwr=0x00, bxr=0, byr=0, cr=0x84, dcr=DCR,
+               tiles=[(0x040, 32), (0xF00, 16)], entries=raster_entries("r2")),
+    "r3": dict(kind="byr_table", mwr=0x00, bxr=0, byr=0, cr=0x84, dcr=DCR,
+               tiles=[(0x040, 32), (0xF00, 16)], entries=raster_entries("r3")),
+    "r4": dict(kind="cram_seq", mwr=0x00, bxr=0, byr=0, cr=0x84, dcr=DCR,
+               tiles=[(0x040, 32), (0xF00, 16)], entries=raster_entries("r4"),
+               frame_counter=True),
+    # r5: scene-1 picture + two sprites.  s0 (16x64, SPBG=1, SAT y=104:
+    # rows 40..103) shows in the top band and its bottom rows 100..103
+    # must vanish when CR=0x84 clears SB at line 100.  s1 (16x16, SPBG=0,
+    # SAT y=244: rows 180..195) sits in the CR=0x44 band: BB off, so every
+    # BG pixel is the blanking fill 0x100 (low nibble 0) and the SPBG=0
+    # sprite must still show over it.
+    "r5": dict(kind="cr_table", mwr=0x00, bxr=0, byr=0, cr=0xC4, dcr=DCR,
+               tiles=[(0x040, 32), (0xF00, 16)], entries=raster_entries("r5"),
+               sprites=_sprites((40, 104, 1, 1, 0, 3), (220, 244, 2, 0))),
+}
+
+
+def gen_raster_asm(name):
+    """Raster scenes: scene 1's picture, [the SATB sprites for r5,] and the
+    RCR-chained per-scanline writes in the irq2 handler."""
+    s = RASTER_SCENES[name]
+    entries = s["entries"]
+    n = len(entries)
+    cram = cr_words()
+    cram_lo = [w & 0xFF for w in cram]
+    cram_hi = [(w >> 8) & 1 for w in cram]
+
+    tile_bytes, regions = tile_region_bytes(1, s["tiles"])
+    bat_bytes = bat_bytes_full(1, 32, 32)
+
+    sprites = s.get("sprites")
+    if sprites:
+        pat0, nblocks, bases = pack_patterns(sprites)
+        assert pat0 == 0x80
+        sat_bytes = bytearray()
+        for w in sat_words(sprites, bases):
+            sat_bytes += bytes((w & 0xFF, (w >> 8) & 0xFF))
+    else:
+        nblocks = 0
+        sat_bytes = b""
+
+    # the chain table: chain[i] is the RCR value that fires entry i —
+    # the handler, having just fired entry i-1, arms chain[i] (its new
+    # step); the boot arms chain[0]
+    chain = [0x40 + entries[i]["line"] for i in range(n)]
+
+    # the step's write values (raster_json() emits the same values as the
+    # JSON entries — one source of truth, two consumers)
+    if s["kind"] in ("byr_const", "byr_table"):
+        step_lo = [e["byr"] & 0xFF for e in entries]
+        step_hi = [(e["byr"] >> 8) & 0xFF for e in entries]
+    elif s["kind"] == "bxr_table":
+        step_lo = [e["bxr"] & 0xFF for e in entries]
+        step_hi = [(e["bxr"] >> 8) & 0xFF for e in entries]
+    elif s["kind"] == "cr_table":
+        step_lo = [e["cr"] for e in entries]
+        step_hi = [0] * n
+    elif s["kind"] == "cram_seq":
+        step_lo = [e["cram"][0][1] & 0xFF for e in entries]
+        step_hi = [(e["cram"][0][1] >> 8) & 0xFF for e in entries]
+    else:
+        raise AssertionError(s["kind"])
+
+    out = []
+    out.append(f";; PCEStudio raster scene {name} — generated by "
+               "tools/genroms.py, do not edit")
+    out.append(f";; #15: {n} RCR-chained per-scanline writes (kind "
+               f"{s['kind']}), base CR=${s['cr']:02x} BXR={s['bxr']} "
+               f"BYR={s['byr']}")
+    out.append("        .code")
+    out.append("        .bank 0")
+    out.append("        .org $fff6")
+    out.append("        .dw irq2")
+    out.append("        .dw irq1")
+    out.append("        .dw timer")
+    out.append("        .dw nmi")
+    out.append("        .dw reset")
+    out.append("")
+    out.append("        .code")
+    out.append("        .bank 0")
+    out.append("        .org $e000")
+    out.append("")
+    out.append("reset:")
+    out.append("        sei")
+    out.append("        csh")
+    out.append("        cld")
+    out.append("        ldx #$ff")
+    out.append("        txs")
+    out.append("        lda #$ff")
+    out.append("        tam0")
+    out.append("        lda #$f8")
+    out.append("        tam1")
+    out.append("")
+    out.append("        ; VCE: 263-line mode, 5.37 MHz dot clock (256 px)")
+    out.append("        lda #$04")
+    out.append("        sta $0400")
+    out.append("")
+    out.append("        ; colour table: 512 entries (CTA autoincrements on high write)")
+    out.append("        stz $0402")
+    out.append("        stz $0403")
+    out.append("        clx")
+    out.append("cram0:")
+    out.append("        lda cram0_lo, X")
+    out.append("        sta $0404")
+    out.append("        lda cram0_hi, X")
+    out.append("        sta $0405")
+    out.append("        inx")
+    out.append("        bne cram0")
+    out.append("        clx")
+    out.append("cram1:")
+    out.append("        lda cram1_lo, X")
+    out.append("        sta $0404")
+    out.append("        lda cram1_hi, X")
+    out.append("        sta $0405")
+    out.append("        inx")
+    out.append("        bne cram1")
+    out.append("")
+    out.append("        ; VDC init (HuDK vdc_init_table values; CR is set")
+    out.append("        ; last, after the chain is armed)")
+    emit_vdc_regs(out, s)
+    out.append("")
+
+    out.append(f"        ; BAT: {len(bat_bytes) // 2} words at VRAM 0")
+    out.append("        st0 #$00")
+    out.append("        st1 #$00")
+    out.append("        st2 #$00")
+    out.append("        st0 #$02")
+    lo_pages, hi_pages = pages_of(bytes(bat_bytes))
+    emit_copy_loop(out, "bat_", lo_pages, hi_pages)
+    out.append("")
+
+    out.append(f"        ; tiles: {len(tile_bytes) // 2} words")
+    page_tables = []
+    remaining = bytes(tile_bytes)
+    for vbase, char0, count in regions:
+        words = count * 16
+        region = remaining[0:words * 2]
+        remaining = remaining[words * 2:]
+        lo_pages, hi_pages = pages_of(region)
+        out.append(f"        ; region at VRAM ${vbase:04x}")
+        out.append("        st0 #$00")
+        out.append(f"        st1 #${vbase & 0xff:02x}")
+        out.append(f"        st2 #${(vbase >> 8) & 0xff:02x}")
+        out.append("        st0 #$02")
+        label = f"tile{len(page_tables)}_"
+        emit_copy_loop(out, label, lo_pages, hi_pages)
+        out.append("")
+        for p in range(len(lo_pages)):
+            page_tables.append((label, p, lo_pages[p], hi_pages[p]))
+
+    if sprites:
+        out.append(f"        ; SG cells ${pat0:03x}..${pat0 + nblocks - 1:03x} "
+                   f"at VRAM ${pat0 * 64:04x} ({nblocks * 64} words)")
+        out.append("        st0 #$00")
+        out.append("        st1 #$00")
+        out.append("        st2 #$20")
+        out.append(SG_FORMULA_ASM % nblocks)
+        out.append("")
+        out.append("        ; SAT: 64 entries at VRAM 0x7F00 (DVSSR); the SATB")
+        out.append("        ; DMA (DCR bit 4) copies it into the SATB every VBlank")
+        out.append("        st0 #$00")
+        out.append("        st1 #$00")
+        out.append("        st2 #$7f")
+        out.append("        st0 #$02")
+        lo_pages, hi_pages = pages_of(bytes(sat_bytes))
+        emit_copy_loop(out, "sat_", lo_pages, hi_pages)
+        out.append("")
+
+    out.append("        ; arm the chain: step 0, RCR = 0x40 + entries[0].line")
+    out.append("        stz <$30")
+    if s.get("frame_counter"):
+        out.append("        stz <$31                ; frame counter (r4)")
+    out.append("        st0 #$06")
+    out.append(f"        st1 #${(0x40 + entries[0]['line']) & 0xff:02x}")
+    out.append(f"        st2 #${((0x40 + entries[0]['line']) >> 8) & 0xff:02x}")
+    out.append("")
+    out.append("        ; CR last: bit 2 (RC) enables the RCR interrupt")
+    out.append("        st0 #$05")
+    out.append(f"        st1 #${s['cr']:02x}")
+    out.append("        st2 #$00")
+    out.append("")
+    out.append("        ; interrupts on: the chain's RCR match (status RR) and")
+    out.append("        ; the VBlank flag (status VD) both drive IRQ2; the")
+    out.append("        ; handler checks RR and ignores everything else")
+    out.append("        cli")
+    out.append("")
+    out.append("loop:")
+    out.append("        bra loop")
+    out.append("")
+    out.append("        ; #15 raster chain.  The RCR interrupt fires when the")
+    out.append("        ; VDC's line counter reaches RCR - 0x40, i.e. at the END")
+    out.append("        ; of VDW line L-1, so the step's writes land during")
+    out.append("        ; the HBlank before line L and take effect on line L")
+    out.append("        ; (BXR/BYR valid with the next scanning line, CR from")
+    out.append("        ; the next horizontal display period).  Each step")
+    out.append("        ; re-arms RCR for the next entry; the last step wraps")
+    out.append("        ; to step 0.  <$30 = step; X = step in the handler")
+    out.append("        ; (the main loop never uses X, so it needs no save).")
+    out.append("        ; The handler lives on irq1: Mednafen's PCE core wires")
+    out.append("        ; the VDC's IRQ to the CPU's IRQ1 ($fff8) — vce.cpp")
+    out.append("        ; IRQChangeCheck -> IQIRQ1 (the HuC6280 manual lists")
+    out.append("        ; IRQ1/IRQ2 as plain external inputs, so the ROM")
+    out.append("        ; targets the emulator's wiring, noted in RENDERER.md).")
+    out.append("        ; The VBlank flag also drives this IRQ; the RR check")
+    out.append("        ; below ignores it (the status read clears both).")
+    out.append("irq1:")
+    out.append("        pha")
+    out.append("        lda $0000               ; status: Mednafen's VDC returns")
+    out.append("        and #$04                ; and clears it on this read (bit 2")
+    out.append("        beq irq1ret             ; = RR, the RCR match).  The manual's")
+    out.append("                                ; R00 + data-port read is the")
+    out.append("                                ; hardware way; the emulator's port")
+    out.append("                                ; is noted in docs/RENDERER.md")
+    out.append("        ldx <$30                ; step")
+    if s["kind"] == "cram_seq":
+        out.append("        bne irq1cram            ; step 0 = first step of a")
+        out.append("        inc <$31                ; frame: bump the frame counter —")
+        out.append("        lda <$31                ; the values shift by 1 per frame,")
+        out.append("        and #$1f                ; so the rows before an entry show")
+        out.append("        sta <$31                ; the previous frame's values")
+        out.append("irq1cram:")
+        out.append("        stx $0402               ; CTA = step s (the boot load's")
+        out.append("        stz $0403               ; autoincrement ran to 512; every")
+        out.append("        lda r_step_lo, X        ; step rewrites entry s)")
+        out.append("        clc")
+        out.append("        adc <$31                ; value = grad[s] + frame, 9-bit")
+        out.append("        sta $0404               ; add: carry into the high bit,")
+        out.append("        lda r_step_hi, X        ; masked")
+        out.append("        adc #$00")
+        out.append("        and #$01")
+        out.append("        sta $0405")
+    else:
+        out.append("        st0 #$" + {"byr_const": "08", "byr_table": "08",
+                                      "bxr_table": "07",
+                                      "cr_table": "05"}[s["kind"]])
+        out.append("        lda r_step_lo, X")
+        out.append("        sta $0002")
+        out.append("        lda r_step_hi, X")
+        out.append("        sta $0003")
+    out.append("        lda <$30")
+    out.append("        clc")
+    out.append("        adc #$01")
+    out.append(f"        cmp #{n}")
+    out.append("        bne irq1arm")
+    out.append("        lda #$00                ; wrap to step 0")
+    out.append("irq1arm:")
+    out.append("        sta <$30")
+    out.append("        tax")
+    out.append("        st0 #$06")
+    out.append("        lda r_chain_lo, X")
+    out.append("        sta $0002")
+    out.append("        lda r_chain_hi, X")
+    out.append("        sta $0003")
+    out.append("irq1ret:")
+    out.append("        pla")
+    out.append("        rti")
+    out.append("irq2:")
+    out.append("timer:")
+    out.append("nmi:")
+    out.append("        rti")
+    out.append("")
+    # ---- data tables
+    out += emit_byte_table("cram0_lo", bytes(cram_lo[0:256]))
+    out += emit_byte_table("cram0_hi", bytes(cram_hi[0:256]))
+    out += emit_byte_table("cram1_lo", bytes(cram_lo[256:512]))
+    out += emit_byte_table("cram1_hi", bytes(cram_hi[256:512]))
+    out.append("")
+    if sprites:
+        out += emit_byte_table("sgconst_lo",
+                               bytes([w & 0xFF for w in SG_PLANES]))
+        out += emit_byte_table("sgconst_hi",
+                               bytes([w >> 8 for w in SG_PLANES]))
+        out.append("")
+    lo_pages, hi_pages = pages_of(bytes(bat_bytes))
+    for p in range(len(lo_pages)):
+        out += emit_byte_table(f"bat_{p}_lo", lo_pages[p])
+        out += emit_byte_table(f"bat_{p}_hi", hi_pages[p])
+    out.append("")
+    if sprites:
+        lo_pages, hi_pages = pages_of(bytes(sat_bytes))
+        for p in range(len(lo_pages)):
+            out += emit_byte_table(f"sat_{p}_lo", lo_pages[p])
+            out += emit_byte_table(f"sat_{p}_hi", hi_pages[p])
+        out.append("")
+    for label, p, lo, hi in page_tables:
+        out += emit_byte_table(f"{label}{p}_lo", lo)
+        out += emit_byte_table(f"{label}{p}_hi", hi)
+    out.append("")
+    out += emit_byte_table("r_chain_lo", bytes([c & 0xFF for c in chain]))
+    out += emit_byte_table("r_chain_hi", bytes([c >> 8 for c in chain]))
+    out.append("")
+    out += emit_byte_table("r_step_lo", bytes(step_lo))
+    out += emit_byte_table("r_step_hi", bytes(step_hi))
+    out.append("")
+    return "\n".join(out)
+
+
+def raster_json(name):
+    """The renderer's #15 raster table for scene `name`: the base register
+    values and the colour table the boot load leaves (baseCram — the
+    values CRAM holds after boot and before the first entry of a frame),
+    plus the entries with the RCR value that armed them.  capture.sh
+    copies it into the dump as raster.json; tests/check.js checks it
+    against the save state and passes it to the renderer."""
+    s = RASTER_SCENES[name]
+    return {
+        "note": (f"#15 raster scene {name}: {len(s['entries'])} RCR-chained "
+                 "per-scanline writes, one step per VDW line — the values "
+                 "and the chain live in tools/genroms.py (gen_raster_asm)"),
+        "base": {"bxr": s["bxr"], "byr": s["byr"], "cr": s["cr"],
+                 "dcr": s["dcr"]},
+        "baseCram": cr_words(),
+        "entries": [dict(e, rcr=0x40 + e["line"]) for e in s["entries"]],
+    }
+
+
 def gen_asm(scene):
     s = SCENES[scene]
     cram = cr_words()
@@ -1152,6 +1552,15 @@ def main():
         with open(path, "w") as f:
             f.write(gen_sprite_asm(name))
         print(f"wrote {path}")
+    for name in RASTER_SCENES:
+        path = os.path.join(OUT, f"raster{name[1:]}.asm")
+        with open(path, "w") as f:
+            f.write(gen_raster_asm(name))
+        print(f"wrote {path}")
+        jpath = os.path.join(OUT, f"raster{name[1:]}.raster.json")
+        with open(jpath, "w") as f:
+            json.dump(raster_json(name), f, indent=1, sort_keys=True)
+        print(f"wrote {jpath}")
     # sanity: scene 3 BAT formula in ROM == formula in generator
     for x in range(128):
         for y in range(32):
@@ -1182,6 +1591,35 @@ def main():
                 assert len(set(rows)) == 16, (name, hex(cell))
         sat = sat_words(s["sprites"], bases)
         assert len(sat) == 256, name
+    # sanity: raster scenes' entries, chains and tables
+    for name, s in RASTER_SCENES.items():
+        entries = s["entries"]
+        lines = [e["line"] for e in entries]
+        assert lines == sorted(set(lines)), (name, "lines not strictly increasing")
+        # the RCR mechanism only fires on VDW lines; VDW = 0xEF gives lines
+        # 0..239, and r5's restore entry fires in the HBlank after the last
+        # display line (RCR = 0x40+240 -> line counter 240 at line 239's
+        # end), so 240 is allowed: no display row shows it, it leaves the
+        # register value the next frame's line 0 latches.  RCR is 10 bits.
+        assert all(0 <= L <= 240 for L in lines), name
+        assert all(0x40 + L <= 0x3FF for L in lines), name
+        # the write kinds the ROM's step code emits == the entries' kinds
+        kinds = set()
+        for e in entries:
+            kinds.update(k for k in ("bxr", "byr", "cr", "cram") if k in e)
+        want = {"byr_const": {"byr"}, "bxr_table": {"bxr"}, "byr_table": {"byr"},
+                "cram_seq": {"cram"}, "cr_table": {"cr"}}[s["kind"]]
+        assert kinds == want, (name, kinds, want)
+        for e in entries:
+            assert all(0 <= a < 512 and 0 <= v < 512
+                       for a, v in e.get("cram", [])), name
+        if "sprites" in s:
+            pat0, nblocks, bases = pack_patterns(s["sprites"])
+            assert pat0 == 0x80 and pat0 * 64 + nblocks * 64 <= 0x7F00, name
+        # the first entry must fire before the capture's first rendered row
+        # (the dump saves at VDW line 237 and the crop starts at VDW line 1,
+        # so every scene's first entry fires — but keep the invariant loud)
+        assert lines[0] <= 232, name
 
 
 if __name__ == "__main__":

@@ -38,6 +38,8 @@
  * Input: the pce-bg.js options plus
  *   sat: Uint8Array, 512 bytes = 256 uint16 LE SATB words (64 entries x 4)
  *        from tools/mcs-extract.py.
+ *   raster: optional #15 raster table (per-line CR gates the sprite layer
+ *        and per-line CRAM writes change the sprite colours — pce-bg.js).
  *
  * Dual use: CommonJS module in Node (tests/check.js) and a browser global
  * (renderer/index.html) via a UMD-style wrapper.
@@ -146,10 +148,17 @@
   }
 
   /* One rendered frame: the background's colour indexes with the sprite
-   * layer composed on top (then mapped through CRAM to RGB). */
+   * layer composed on top (then mapped through CRAM to RGB).  With a #15
+   * raster table, CR is latched per line: a line whose CR has bit 6 (SB)
+   * clear draws no sprites, and every line decodes through its own colour
+   * table. */
   function renderIndices(opts) {
-    var img = bg.renderIndices(opts);
-    if (!opts.sat || !(opts.regs.CR & 0x40)) {
+    var rows = bg.buildRows(opts);
+    var img = bg.renderIndices(opts, rows);
+    if (!opts.sat) {
+      return img;
+    }
+    if (!rows && !(opts.regs.CR & 0x40)) {
       return img;   /* SB clear: no sprites (CR R05, manual p. H7-5) */
     }
     var sat = opts.sat;
@@ -162,6 +171,9 @@
     var vdwLine0 = opts.regs.RCRCount - (opts.regs.scanline - firstScanline);
     var out = new Uint16Array(img.indices);
     for (var r = 0; r < height; r++) {
+      if (rows && !(rows.cr[r] & 0x40)) {
+        continue;    /* SB clear on this line: no sprites (CR is per-line) */
+      }
       var strips = collectStrips(sat, vdwLine0 + r);
       if (!strips.length) {
         continue;
@@ -179,14 +191,19 @@
   }
 
   function renderFrame(opts) {
+    var rows = bg.buildRows(opts);
     var img = renderIndices(opts);
-    var rgb = bg.decodeCram(opts.cram);
+    var flatRgb = bg.decodeCram(opts.cram);
     var px = new Uint8Array(img.width * img.height * 3);
-    for (var i = 0, o = 0; i < img.indices.length; i++, o += 3) {
-      var ci = img.indices[i];
-      px[o] = rgb[ci * 3];
-      px[o + 1] = rgb[ci * 3 + 1];
-      px[o + 2] = rgb[ci * 3 + 2];
+    for (var r = 0; r < img.height; r++) {
+      var rgb = rows ? rows.rgb[r] : flatRgb;
+      var o0 = r * img.width * 3;
+      for (var x = 0; x < img.width; x++) {
+        var ci = img.indices[r * img.width + x];
+        px[o0 + x * 3] = rgb[ci * 3];
+        px[o0 + x * 3 + 1] = rgb[ci * 3 + 1];
+        px[o0 + x * 3 + 2] = rgb[ci * 3 + 2];
+      }
     }
     return { width: img.width, height: img.height, pixels: px };
   }

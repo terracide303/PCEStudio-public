@@ -106,7 +106,9 @@ const DUMPS = path.join(TESTS, "dumps");
 const CHECK_SRC = fs.readFileSync(CHECK_PATH, "utf8");
 const RENDERER_SRC = fs.readFileSync(RENDERER_PATH, "utf8");
 
-/* The CR block is a multi-line mutation source (cr0 removes it whole). */
+/* The CR block is a multi-line mutation source (cr0 removes it whole — the
+ * comment, the per-row BB gate and the loop opening; cr0's `to` re-adds the
+ * loop opening so the mutant still parses). */
 const CR_BLOCK = `    /* CR bit 7 = BB (background blanking): when it is clear the VDC clears
      * the background and every pixel shows the blanking-period video data —
      * SPBG = 1, VD7..VD0 = 0, i.e. the 9-bit colour index 0x100, CRAM[0x100]
@@ -114,13 +116,19 @@ const CR_BLOCK = `    /* CR bit 7 = BB (background blanking): when it is clear t
      * Measured on tests/dumps/scene8, scene8b and scene8c (a full picture in
      * VRAM, BB clear, burst mode or not, DCR set or clear): 59392/59392
      * pixels are CRAM[0x100] = 0x049 = 36,36,36; us1's white frame is its
-     * CRAM[0x100] = 0x1FF, the same rule. */
-    if (!(regs.CR & 0x80)) {
-      var off = new Uint16Array(width * height);
-      off.fill(0x100);
-      return { width: width, height: height, indices: off };
-    }
-
+     * CRAM[0x100] = 0x1FF, the same rule.  With a raster table CR is latched
+     * per line: each row is gated on its own CR (SB/BB become valid from the
+     * next horizontal display period), so the gate below runs per row for
+     * every dump — there is no separate whole-frame fill. */
+    for (var r = 0; r < height; r++) {
+      var crRow = rows ? rows.cr[r] : regs.CR;
+      if (!(crRow & 0x80)) {
+        /* BB clear on this line: the blanking fill, whole row */
+        for (var x = 0; x < width; x++) {
+          idx[r * width + x] = 0x100;
+        }
+        continue;
+      }
 `;
 
 /* The ten breaks, in docs/REVIEW.md finding 1's order, with the result class
@@ -196,9 +204,9 @@ const MUTATIONS = [
   },
   {
     id: "cr0",
-    what: "CR ignored entirely (the picture drawn for a CR-off dump)",
+    what: "the CR BB gate removed (a CR-off picture drawn as a picture)",
     from: CR_BLOCK,
-    to: "",
+    to: "    for (var r = 0; r < height; r++) {",
     expect: "detected",
   },
   {

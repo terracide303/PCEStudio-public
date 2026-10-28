@@ -1,14 +1,17 @@
-# The renderer (#5 background, #12 sprites, #40 sprite-test gaps)
+# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster)
 
 `renderer/pce-bg.js` renders one 256×232 RGB frame from a VDC VRAM dump and a
 VCE colour-table dump, drawing exactly what the VDC background layer and the
 VCE colour decoder draw; `renderer/pce-sprites.js` composes the VDC's sprite
-layer (SATB) on top of the same colour-index buffer.  The close conditions
-are `node tests/check.js` reporting **diff 0** between the renderer's output
-and Mednafen's raw recorded frame (same source surface as its F9 screenshot,
-captured via `-qtrecord` because this Mac must not receive synthesized key
-events) for every dump in `tests/dumps/` — the three #5 dumps and, since
-#12/#40, the eleven sprite scenes (marked by `sat.bin`).
+layer (SATB) on top of the same colour-index buffer.  Since #15 both take a
+**raster table**: per scanline, any of BXR, BYR, CR (BG/sprites on/off) and
+VCE colour-table writes, applied at the line the hardware applies them.  The
+close conditions are `node tests/check.js` reporting **diff 0** between the
+renderer's output and Mednafen's raw recorded frame (same source surface as
+its F9 screenshot, captured via `-qtrecord` because this Mac must not receive
+synthesized key events) for every dump in `tests/dumps/` — the three #5
+dumps, the eleven #12/#40 sprite scenes (marked by `sat.bin`) and, since
+#15, the five raster scenes (marked by `raster.json`).
 
 Everything below is labelled by where it was read from.  PCEStudio's rule
 (DECISIONS.md): the model is written from the Hudson manuals; Mednafen and
@@ -133,7 +136,71 @@ priority order and the exact BG test are Mednafen DrawSprites behaviour
 colour 0) — the sprite scenes below are the diff-0 proof that this is what
 the VDC displays.*
 
-## The test ROMs (`tools/genroms.py`)
+**Raster split (RCR, #15).** The scanning line detection register (RCR R06)
+sets which line invokes the interrupt: "The interrupt will occur when the
+value of the internal scanning line counter matches the value set in the
+scanning line detection register" — the match sets status bit 2 (RR, "the
+scanning line counter has matched up to the setting of the scanning line
+detection register"), and the interrupt is enabled by CR bit 2 (RC,
+"Scanning Line Detect").  The counter "is set to '64' at the previous
+scanning line of start timing of display period and is incremented for each
+scan": the counter counts 64 at the line before the display period starts
+and one more per scan, so a match against `RCR = 0x40 + L` fires at the end
+of VDW line L−1 — the HBlank before line L, in time for the handler's writes
+to show on line L, the renderer's application line.  (The register's bit
+split — bits 0–7 CPU-written, bits 8–9 the register's own low two bits — is
+not transcribed in the manual text file; it is Mednafen's register model,
+reference only.)  *Source: VDC
+manual, SR R00 p. H7-4 (RR, bit 2), CR R05 p. H7-5 (RC, bit 2), RCR R06
+p. H7-6..H7-7.*
+
+**Per-line write rules (the raster table's semantics).** The manual gives
+each mid-frame register write a validity line, and the renderer's `buildRows`
+applies the table's entries at exactly those lines (entry `line` fires in
+the HBlank before VDW line `line`, so the row showing VDW line L carries the
+last entry with `line <= L`):
+
+- **BXR (R07)**: "If this register is updated, the screen will become valid
+  with the next scanning line" — a write before line L shows from line L.
+- **BYR (R08)**: "If the register is updated during display, the screen will
+  become valid with the next scanning line (BYR+1)" — a write before line L
+  starts the line counter at v + 1 on line L, so `bgY(L) = v + (L − line) +
+  1`.  The line-0 latch at VDW entry takes the **register itself** (no +1),
+  and the register keeps the previous frame's last write: with the last BYR
+  entry at (N, v), the frame's lines before the first entry start at
+  `bgY(L) = v + L`.
+- **CR (R05)**: "SB will become valid from the next horizontal display
+  period", "the BB will become valid from the next horizontal display
+  period" — per line, like BXR.  The register keeps the previous frame's
+  last write too, so the frame starts from the table's last CR entry.
+- **VCE colour table**: the CPU writes colour data in four steps (CTA
+  address low, CTA address high, data low, data high; the CTA
+  autoincrements after the high data write).  The manual gives **no
+  statement about when a colour-table write takes effect relative to the
+  scanline** — the rule the renderer applies, a write during HBlank shows on
+  the whole next line (and the table persists across frames), is this
+  project's model, checked against Mednafen only, and labelled as such
+  below under the scope limits.
+
+*Source: VDC manual, BXR R07 / BYR R08 p. H7-7, CR R05 p. H7-5..H7-6; VCE
+manual 2.2.2 p. H6-5 (the four-step write and the CTA autoincrement; no
+timing statement found — the absence is itself a noted limit).*
+
+**The interrupt path the ROMs ride (emulator specifics).** Two places where
+the test ROMs target Mednafen's wiring rather than a documented hardware
+fact, both noted because the manual says something different or nothing:
+
+- Mednafen's PCE core wires the VDC's interrupt to the HuC6280's **IRQ1
+  (vector $FFF8)** (`src/pce/vce.cpp` IRQChangeCheck → `IQIRQ1`); the
+  HuC6280 manual lists IRQ1/IRQ2 as plain external inputs and does not say
+  which one the VDC drives, so the ROMs' handler lives on irq1 — the
+  emulator's wiring, *Mednafen reference, not a manual fact*.
+- Mednafen's VDC returns and clears its status register on a read of
+  address **$0000** (the ROMs' `lda $0000`); the manual's hardware sequence
+  is reading SR via R00 + the data port.  *Mednafen reference; manual SR R00
+  p. H7-4.*
+
+
 
 Scenes 1–3 are #5's original torture pictures, and scenes 4–9 (with 8b, 8c
 and 5b) are #39's: each new scene is **not** periodic in the dimension a
@@ -221,6 +288,52 @@ of the model:
   SAT entry — its left half is the 16th strip (drawn), its right half the
   17th (dropped); REVIEW-12's M24 (the CGX guard gone) is DETECTED here
 
+Scenes raster1–5 are #15's (`RASTER_SCENES`): each ROM boots with a scene
+picture (scene 1's palette/BAT) and then chains **per-scanline writes from
+the RCR line interrupt** — the boot arms `RCR = 0x40 + line` of the first
+entry, each handler step writes its entry's BXR/BYR/CR/VCE colour-table
+value, bumps the step, and re-arms RCR for the next entry (the last wraps
+to the first; `<$30>` = step, ZP in RAM).  The chain runs every frame, so
+at any line the registers hold the previous frame's last write — the
+frame-start latch each scene's leading rows witness:
+
+- **raster1 "statusbar"** (byr_const): steps at VDW lines 160..232 write
+  BYR = 0x1FF each — a frozen band at the bottom (every row in it reads
+  the same bgY), and lines 1..159 show `bgY(L) = 0x1FF + L` — the
+  cross-frame persistence witness (a renderer that resets BYR per frame
+  shifts those rows).
+- **raster2 "wobble"** (bxr_table): steps at lines 1..232 write
+  BXR = wobble[step] — a per-line horizontal offset (the BXR-per-line rule;
+  a renderer applying BXR late or early shifts whole bands of rows).
+- **raster3 "byr"** (byr_table): steps at (80, BYR = 0x30) and (160,
+  BYR = 8) — the manual's BYR+1 per-line rule against the frame-start
+  latch: the top band (before line 80) witnesses the latch = the last
+  table entry, the middle band counts up from 0x30 + 1, the bottom from
+  8 + 1.
+- **raster4 "palette"** (cram_seq): steps at lines 1..232 write colour
+  table entry s = `grad[s] + frame` (`grad[s] = (s·13 + 0x40) & 0x1FF`,
+  a 9-bit gradient; `frame` is a counter bumped at step 0, `<$31>`).  The
+  values shift by 1 every frame, so at any row the entries past it still
+  hold the **previous frame's** values: a renderer applying all entries to
+  all rows (or one line late) diffs; the colour table persists across
+  frames (no reset).  `raster-patch.py` folds the captured frame counter
+  into the dump's `raster.json` as `cram` (this frame) / `cramPrev`
+  (previous frame) per entry.
+- **raster5 "cr"** (cr_table): scene 1's picture plus two sprites (SATB
+  DMA); steps at (100, CR = 0x84: SB off — the sprites vanish from the
+  bottom rows), (160, CR = 0x44: BB off — the background becomes the 0x100
+  fill), and (240, CR = 0xC4 restore — fires in the HBlank after the last
+  display line, so the save at line 237 catches the chain at step 2, its
+  steady state: the restore is never in a captured picture).
+
+`tools/genroms.py` emits each scene's table as `gen/rasterN.raster.json`
+(the renderer's input) and `check.js` verifies the table **against the
+save state** before rendering: entries' lines strictly increasing, each
+`rcr = 0x40 + line`, the saved BXR/BYR/CR equal the last entry of their
+kind with `line <= RCRCount`, the saved RCR equals the chain's next arm
+`0x40 + entries[(last+1) % n].line`, and the saved colour table equals
+`baseCram` plus every entry's writes in line order.
+
 ## The dumps (`tools/capture.sh`, `tools/mcs-extract.py`, `tools/movframes.py`)
 
 Hard rule for this machine: **no synthesized keyboard/mouse events** — the
@@ -266,6 +379,19 @@ other dump through `pce-bg.js` — and requires both to agree on the
 sprite-free dumps, so the sprite renderer cannot change a sprite-free
 picture.
 
+The raster dumps (`tools/capture.sh N raster`, `--raster`) additionally
+write `ram.bin` (the HuC6280's 8 KiB RAM from the save's `MAIN.BaseRAM`
+record — the ROMs' step/frame counters live in ZP at logical $2030/$2031,
+which MPR1 maps onto BaseRAM[0x30]/[0x31]) and copy the ROM's
+`raster.json`, which `raster-patch.py` folds with the runtime state: it
+asserts the chain is at the step the save line implies (every entry with
+`line <= RCRCount` has fired — r5's line-240 restore is after the save, so
+its chain sits at step 2, not wrapped) and, for raster4, rewrites the
+entries' `cram`/`cramPrev` with the captured frame counter's values.  The
+raster cross-check `BG_YMoo − BYR = RCRCount − 1` is skipped for these
+dumps (the ROM writes BYR mid-frame, so the identity no longer holds);
+`check.js`'s table-vs-state checks replace it.
+
 ### Scanline calibration (why the renderer doesn't guess the VDW offset)
 
 The state records the VDC's RCRCount (display lines since the VDW entry) and
@@ -304,6 +430,7 @@ assuming them:
 make -C tools                                  # build ROMs (needs pceas)
 bash tools/capture.sh 1                        # capture scene 1 (Mednafen on PATH)
 bash tools/capture.sh 1 sprite                 # capture sprite scene 1 (adds sat.bin)
+bash tools/capture.sh 1 raster                 # capture raster scene 1 (adds raster.json)
 node tests/check.js                            # diff renderer vs Mednafen, all scenes
 python3 -m http.server 8000                    # then open renderer/index.html
 ```
@@ -316,11 +443,31 @@ command line and a SIGINT.
 
 Background and sprites (sprite scenes 1–8 cover sizes 16×16..32×64, both
 flips, both SPBG priorities, the 16-strip line limit, clipping and
-sprite-on-background-off).  Not modelled: the 4-colour sprite mode (word 2
-bit 0), sprite 0 collision detection, and the SATB DMA's DCR repeat bit
-(the scenes' static SAT never changes).  256×224 mode only (5.37 MHz
-clock; the 7.16 MHz modes and 256×240 VDW come with the editor).  No RCR
-split.  The window/state colour path is validated end-to-end by the diff
+sprite-on-background-off), and per-scanline raster writes (raster scenes
+1–5: BXR, BYR, CR's SB/BB and VCE colour-table writes, applied at the
+line the manual makes them valid).  Not modelled: the 4-colour sprite mode
+(word 2 bit 0), sprite 0 collision detection, and the SATB DMA's DCR
+repeat bit (the scenes' static SAT never changes).  256×224 mode only
+(5.37 MHz clock; the 7.16 MHz modes and 256×240 VDW come with the
+editor).  Raster writes are modelled at **line boundaries only**, and the
+pieces the evidence does not cover are written down, not hidden:
+
+- A VCE colour-table write during a line's active display shows the new
+  colour mid-line (a "dot" from the write's exact pixel) — the manual
+  gives no timing statement (the VCE manual's 2.2.2 describes the
+  register and the four-step write, not when it takes effect), and no
+  scene here writes mid-line: every entry fires in the HBlank before its
+  line, where a write shows on the whole next line (the rule the renderer
+  applies; checked against Mednafen only, labelled above).
+- The ROMs' interrupt path is Mednafen's, not a documented hardware fact:
+  the VDC's IRQ is wired to the HuC6280's IRQ1 ($FFF8), and the status
+  register is read+cleared at address $0000 (the manual's SR read is R00
+  + the data port; the HuC6280 manual does not say which IRQ input the
+  VDC drives).  Both are labelled in the model section.
+- Real-hardware IRQ latency (how far into the HBlank the handler's writes
+  land on silicon) is not measured — only Mednafen's timing is
+  exercised here.
+  The window/state colour path is validated end-to-end by the diff
 test, which is the cards' definition of correct.  One documented synthetic
 input: `renderer-mutation.js` builds a 65536-word VRAM to make the
 `ch ≥ 0x800` break detectable — no real dump can carry it, because

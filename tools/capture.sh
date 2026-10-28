@@ -16,6 +16,10 @@
 #                                   # (gen/spriteN.pce; the dump gains sat.bin)
 #   tools/capture.sh 1..11 vsprite  # the #14 viewer ROMs of the sprite scenes
 #                                   # (gen/vspriteN.pce, SATB DMA in the viewer)
+#   tools/capture.sh 1..5 raster    # the #15 raster-scene ROMs
+#                                   # (gen/rasterN.pce, per-scanline BXR/BYR/
+#                                   # CR/VCE-colour-table writes; the dump
+#                                   # gains raster.json, the ROM's table)
 #
 # Scenes 4-9, 8b, 8c are #39's (docs/REVIEW.md finding 1: each is NOT
 # periodic in the dimension a renderer break would cut — see genroms.py).
@@ -50,11 +54,13 @@
 #   regs.json      registers + scanline calibration values
 #   mednafen.png   last recorded frame (256x232 RGB, raw, unfiltered)
 #   mednafen.log   the run's stdout
+#   sat.bin        the SATB (sprite modes; #12)
+#   raster.json    the raster table (raster mode; #15)
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SCENE="${1:?usage: capture.sh 1..9 [scene|viewer|browser|us|sprite] | capture.sh painted}"
+SCENE="${1:?usage: capture.sh 1..9 [scene|viewer|browser|us|sprite|vsprite|raster] | capture.sh painted}"
 if [ "$SCENE" = painted ]; then
   MODE=painted
 else
@@ -69,8 +75,9 @@ case "$MODE" in
   us) NAME="us${SCENE}" ;;
   sprite) NAME="sprite${SCENE}" ;;
   vsprite) NAME="vsprite${SCENE}" ;;
+  raster) NAME="raster${SCENE}" ;;
   painted) NAME="painted" ;;
-  *) echo "mode must be scene, viewer, browser, us, sprite, vsprite or painted" >&2; exit 2 ;;
+  *) echo "mode must be scene, viewer, browser, us, sprite, vsprite, raster or painted" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -133,8 +140,22 @@ run_once() {
   echo "movie: $MOV ($(stat -f%z "$MOV") bytes)"
 
   echo "== extract"
-  if ! python3 -I "$TOOLS/mcs-extract.py" "$new_mcs" "$DUMPDIR" "$SLSTART"; then
-    return 3
+  RASTER_ARG=""
+  if [ "$MODE" = raster ]; then RASTER_ARG="--raster"; fi
+  if ! python3 -I "$TOOLS/mcs-extract.py" "$new_mcs" "$DUMPDIR" "$SLSTART" $RASTER_ARG; then
+    # 3 = the state was saved during pre-VDW blanking (rerun); anything
+    # else is a hard failure
+    [ "$?" -eq 3 ] && return 3 || return 4
+  fi
+  if [ "$MODE" = raster ]; then
+    # the renderer's raster table: the ROM's per-scanline writes, written
+    # by genroms.py alongside the asm, then folded with the ROM's runtime
+    # state (r4's frame counter, from the save's HuC6280 RAM) and checked
+    # against the state by tests/check.js
+    cp "tools/gen/$NAME.raster.json" "$DUMPDIR/raster.json"
+    if ! python3 -I "$TOOLS/raster-patch.py" "$DUMPDIR" "$SCENE"; then
+      echo "raster-patch failed"; return 4
+    fi
   fi
   # Record the crop this dump was captured with: the renderer's vertical
   # calibration is firstScanline = 14 + slstart (captured row 0's VCE line).
