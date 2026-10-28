@@ -177,3 +177,12 @@ for the PC Engine. Answer: "Yes, absolutely. Let me know if there's anything I c
 code (entry above), the idea itself is used with the author's blessing; credit ppu.toys and its author in the
 README when PCEStudio is shown. Open questions worth asking him are kept in docs/PPU-TOYS.md, "Questions for the
 author".
+
+## 2026-10-28 — HuTrack plays the music on the console (Dennis)
+
+The ROM's music player is **HuTrack** (github.com/Turboxray/HuTrack, MIT, active 2026-10): a compact HuC6280 driver
+plus a Python converter for DefleMask DMF songs, with Furnace 0.6.8.3's DMF playback as its reference, SFX channel
+hand-off, PCM samples and fades. Songs are made in Furnace and saved as DMF. The browser side is ours: a JS reader of
+the same DMF that plays through `renderer/pce-psg.js` and must sound the same as HuTrack on the console (Mednafen
+recording, compared numerically). HuTrack's example songs are arrangements of commercial games' music and are **not**
+brought into this repo.
