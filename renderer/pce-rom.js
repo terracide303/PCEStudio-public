@@ -33,6 +33,15 @@
  * concatenated.  The bank count is 4 + ceil(tiles / 8 KiB),
  * which is also what PCEAS -raw emits for the generated viewer .asm.
  *
+ * #46: the data banks are not capped at 80 KiB any more.  Banks 4..255 are
+ * the picture's copy regions, mapped one at a time into the CPU's 8 KiB
+ * window at $4000-$5fff by the viewer's MPR2 re-map loop, so the image can
+ * grow to the HuCard limit — 256 banks of 8 KiB = 2 MB of physical address
+ * space (HuC6280 hardware manual H8-7, H8-10/11; docs/MANUALS.md §5.1).
+ * A request whose bank count would pass 256 is refused with the code
+ * `rom-too-big`.  The config block holds 13 region descriptors (the room
+ * before the palette at 0x40; docs/ROM_LAYOUT.md).
+ *
  * Dual use: CommonJS module in Node (tests/check-export.js) and a browser
  * global (renderer/index.html) via a UMD-style wrapper, same as pce-bg.js.
  *
@@ -63,9 +72,18 @@
   var CFG_RGNS = 8;
   var CFG_REG0 = 0x0A;
   var REG_SIZE = 4;
-  var MAX_REGIONS = 8;
-  var MAX_BAT_BANKS = 2;         /* banks 2-3 */
-  var MAX_TILE_BANKS = 6;        /* banks 4-9 */
+  /* 13 descriptors fit between CFG_REG0 and the palette at 0x40:
+   * (0x40 - 0x0A) / 4 = 13.  The count byte could hold 255; going past 13
+   * would need a new config layout (docs/ROM_LAYOUT.md). */
+  var MAX_REGIONS = 13;
+  var MAX_BAT_BANKS = 2;         /* banks 2-3 (the VDC's largest BAT is 16 KiB) */
+  /* The HuCard limit: the HuC6280 maps 8 KiB physical blocks through eight
+   * MPRs and has 256 blocks of physical address space = 2 MB (docs/MANUALS.md
+   * §5.1, HuC6280 hardware manual H8-7 and H8-10/11).  The layout spends
+   * banks 0-3 on code/config/BAT, so banks 4..255 (252 tile banks) are the
+   * data.  A request past 256 banks is refused with `rom-too-big`. */
+  var MAX_ROM_BANKS = 256;
+  var MAX_TILE_BANKS = MAX_ROM_BANKS - 4;
 
   /* MWR bits 4-5: BAT width (0:32, 1:64, 2/3:128); bit 6: BAT height
    * (0:32, 1:64).  Same order as viewer.asm's bat_words table. */
@@ -77,6 +95,14 @@
 
   function need(ok, message) {
     if (!ok) throw new Error("pce-rom: " + message);
+  }
+
+  /* A refusal a caller can tell apart without parsing the message (the same
+   * machine-readable `code` convention as renderer/pce-editor.js). */
+  function refuse(code, message) {
+    var e = new Error("pce-rom: " + code + ": " + message);
+    e.code = code;
+    throw e;
   }
 
   function byte(name, v, max) {
@@ -152,7 +178,7 @@
     var words = batWords(mwr);
 
     /* ---- filter and describe the tile regions exactly as genviewer.py does */
-    var regions = [], dests = [];
+    var regions = [];
     for (var r = 0; r < regionList.length; r++) {
       var char0 = regionList[r][0], count = regionList[r][1];
       need(typeof char0 === "number" && char0 === (char0 | 0) && char0 >= 0,
@@ -173,28 +199,42 @@
            " run past the 32768-word VRAM");
       regions.push([dest, count * 16]);
     }
-    need(regions.length <= MAX_REGIONS,
-         regions.length + " regions, the config block holds " + MAX_REGIONS);
-
     /* ---- the data blocks */
     var palette = cram.slice(0, 1024);
     var bat = vram.slice(0, words * 2);
     var sat = vram.slice(SAT_ADDR * 2, SAT_ADDR * 2 + 512);
+    var tileBytes = 0;
+    for (var b = 0; b < regions.length; b++) tileBytes += regions[b][1] * 2;
+
+    var batBanks = Math.ceil(bat.length / BANK);
+    var tileBanks = Math.max(1, Math.ceil(tileBytes / BANK));
+    need(batBanks <= MAX_BAT_BANKS,
+         "BAT needs " + batBanks + " banks, the layout gives " + MAX_BAT_BANKS);
+    /* The hardware ceiling, checked before the bytes are copied and before
+     * the descriptor-count cap: a request too big for a HuCard is refused
+     * with its own code whatever its region count (a picture within the
+     * descriptor limit cannot reach this — its regions are slices of one
+     * 64 KiB VRAM — but any request is refused rather than truncated). */
+    var romBanks = 4 + tileBanks;
+    if (romBanks > MAX_ROM_BANKS) {
+      refuse("rom-too-big",
+             "the ROM would be " + romBanks + " banks of 8 KiB (" +
+             romBanks * BANK + " bytes); the HuC6280's physical address " +
+             "space is at most " + MAX_ROM_BANKS + " banks = 2 MB " +
+             "(HuC6280 hardware manual H8-7, H8-10/11; " +
+             "docs/MANUALS.md §5.1)");
+    }
+    need(regions.length <= MAX_REGIONS,
+         regions.length + " regions, the config block holds " + MAX_REGIONS);
+
     var parts = [];
     for (var i = 0; i < regions.length; i++)
       parts.push(vram.slice(regions[i][0] * 2,
                             regions[i][0] * 2 + regions[i][1] * 2));
     var tiles = concat(parts);
 
-    var batBanks = Math.ceil(bat.length / BANK);
-    var tileBanks = Math.max(1, Math.ceil(tiles.length / BANK));
-    need(batBanks <= MAX_BAT_BANKS,
-         "BAT needs " + batBanks + " banks, the layout gives " + MAX_BAT_BANKS);
-    need(tileBanks <= MAX_TILE_BANKS,
-         "tiles need " + tileBanks + " banks, the layout gives " + MAX_TILE_BANKS);
-
     /* ---- banks: 0 code, 1 config+palettes, 2-3 BAT, 4+ tiles; gaps 0xff */
-    var rom = new Uint8Array((4 + tileBanks) * BANK);
+    var rom = new Uint8Array(romBanks * BANK);
     rom.fill(0xFF);
     rom.set(bank0, 0);
 
@@ -223,6 +263,9 @@
 
   return {
     BANK: BANK,
+    MAX_REGIONS: MAX_REGIONS,
+    MAX_ROM_BANKS: MAX_ROM_BANKS,
+    MAX_TILE_BANKS: MAX_TILE_BANKS,
     batWords: batWords,
     buildRom: buildRom,
     reverseBits: reverseBits

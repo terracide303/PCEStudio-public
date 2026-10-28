@@ -9,7 +9,7 @@
  * cold (same arrangement as tests/check.js for #5).
  *
  * For every tests/dumps/{viewer,browser,vsprite,bsprite}<N>/ directory with
- * a mednafen.png:
+ * a mednafen.png (#46 adds browser10, the 88 KiB picture — N is any number):
  *   - renders the frame for the matching scene (sceneN for viewer/browserN,
  *     spriteN for vsprite/bspriteN) with the renderer — pce-sprites.js when
  *     the scene has a sat.bin, else pce-bg.js — from
@@ -211,7 +211,7 @@ function main() {
     return 2;
   }
   const dirs = fs.readdirSync(dumps).filter((d) =>
-    /^(?:viewer|browser)[0-9]$|^(?:vsprite|bsprite)[0-9]+$/.test(d) &&
+    /^(?:viewer|browser)[0-9]+$|^(?:vsprite|bsprite)[0-9]+$/.test(d) &&
     fs.existsSync(path.join(dumps, d, "mednafen.png")) &&
     fs.existsSync(path.join(sceneDir(path.join(dumps, d)), "regs.json")))
     .sort().map((d) => path.join(dumps, d));

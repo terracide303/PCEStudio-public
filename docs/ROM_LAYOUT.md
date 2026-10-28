@@ -9,6 +9,15 @@ is a multiple of 8 KiB; gaps between banks and the padding of the last bank
 are filled with `0xff`. The image is headerless (`pceas -raw`) and has
 `4 + max(1, ceil(tiles / 8 KiB))` banks.
 
+The bank count is not capped at 10 any more (card #46). The copy regions may
+span banks 4–255: the viewer streams them through one 8 KiB window and maps
+the next bank into it, so the image grows to the HuC6280's physical limit —
+256 blocks of 8 KiB = 2 MB (HuC6280 hardware manual H8-7 and H8-10/11,
+recorded in [`MANUALS.md`](MANUALS.md) §5.1). A request past that is refused
+with the code `rom-too-big` (see [`EXPORT.md`](EXPORT.md)). `tools/genviewer.py`
+stops at 128 banks (1 MB) because PCEAS 3.23's `.bank` index stops at `0x7F`;
+the browser builder goes to 2 MB.
+
 Two builders implement this contract and must agree byte for byte:
 `tools/genviewer.py` (writes the `.asm` banks PCEAS assembles) and
 `renderer/pce-rom.js` (the browser export, #9). Their agreement on the sample
@@ -22,7 +31,7 @@ scenes.
 | 0    | viewer code and vectors (constant — the browser copies it verbatim) |
 | 1    | config block (64 B at `$4000`) + the 512 colour-table entries (`$4040`) + the SAT (`$4440`) |
 | 2–3  | the BAT: `width × height` words, starting at bank 2 offset 0 |
-| 4–9  | the copy regions: the tile regions (and for the sprite scenes the SG pattern block) concatenated in descriptor order |
+| 4–255 | the copy regions: the tile regions (and for the sprite scenes the SG pattern block) concatenated in descriptor order |
 
 `tools/genviewer.py` emits exactly the banks each picture needs (one
 `.incbin` per 8 KiB slice), so nothing ever spills past a bank boundary.
@@ -42,9 +51,9 @@ and `tools/extract_bank0.py` refuses to write the asset if they differ.
 | `0x04` | 2    | BYR (background Y scroll, 9 bits) |
 | `0x06` | 1    | MWR (bat width/height bits, as written to VDC register 9) |
 | `0x07` | 1    | CR (the final VDC control register value, bit 7 = background on) |
-| `0x08` | 1    | region count (0–8) |
+| `0x08` | 1    | region count (0–13) |
 | `0x09` | 1    | reserved (0) |
-| `0x0A` | 4×8  | region descriptors, one per tile region |
+| `0x0A` | 4×13 | region descriptors, one per tile region (13 is the room before the palette at `0x40`: `(0x40 - 0x0A) / 4`) |
 
 A region descriptor is two 16-bit words: the **VRAM destination word
 address** and the **word count** of the tile data.
@@ -76,12 +85,16 @@ at that fixed address.
 from MWR (`(MWR >> 4) & 3` selects 32/64/128/128, bit 6 selects 32/64 rows),
 so the BAT is at most 128×64 = 16 KiB = banks 2 and 3.
 
-## Banks 4–9 — the copy regions
+## Banks 4–255 — the copy regions
 
 The regions, concatenated in descriptor order, starting at bank 4 offset 0.
-The viewer streams this from the MPR2 window and re-maps to the next bank
-every 8 KiB, so region boundaries need not line up with banks.
-Up to 48 KiB (banks 4–9).
+The viewer streams this from the MPR2 window (`$4000`–`$5fff`, bank register
+`MPR2` set by `TAM2`) and re-maps to the next bank every 8 KiB, so region
+boundaries need not line up with banks. The MPR scheme is the HuC6280's: eight
+8-bit mapping registers, each selecting one of 256 8 KiB physical blocks
+(hardware manual H8-7, H8-10/11). Banks 4–255 are available to the regions —
+up to 252 banks = 2,016 KiB of tiles, inside the 2 MB physical ceiling
+(banks 0–3 hold the code, config and BAT).
 
 A region is usually a tile region; for the #12 sprite scenes the list also
 carries the sprite generator (SG) pattern block — cell `$80` upward at VRAM
@@ -130,7 +143,10 @@ from character `$40` (the first character after the 32×32 BAT at words
 `[[$40, tileCount]]` — **one** region for a picture without sprites, as #10
 made it. Its BAT is always 1024 words (banks 2 only) and its tiles start at
 VRAM word `$400`; the ROM is `4 + max(1, ceil(region bytes / 8 KiB))` banks,
-as the formula above. There are at most 1536 tiles (banks 4–9).
+as the formula above. The **editor** stops at 1536 tiles (the `tile-space`
+refusal in `renderer/pce-editor.js`); the exporter's layout no longer caps
+tiles at that point (card #46), so a picture from another source can use more
+banks.
 
 A picture with sprite patterns (#13) adds a **second** region: the patterns
 are packed into 64-word VRAM cells after the tiles (first cell
@@ -138,10 +154,45 @@ are packed into 64-word VRAM cells after the tiles (first cell
 descriptor is `[[firstCell·4, cells·4]]` — `char0 = firstCell·4`, `tileCount
 = cells·4`, so the region's word count is `cells·64`. The pattern region ends
 below the SAT at VRAM `$7F00` (the editor refuses a pattern that would reach
-it), and tiles plus patterns together must still fit banks 4–9. The SAT is
+it), and tiles plus patterns are the copy regions of banks 4 onward (the
+exporter takes them as far as the HuCard limit, #46; the editor's own
+`tile-space` check still measures against its 1536-tile budget). The SAT is
 not a region: it keeps its fixed place in bank 1 (above), and the config's CR
 bit 6 turns the sprite layer on. Both regions are copied in descriptor order
 before the SAT.
+
+## A ROM past 80 KiB (card #46)
+
+The bank scheme is the hardware's, not a cap the project chose. The HuC6280
+has eight mapping registers (MPR0–MPR7), each mapping one 8 KiB logical
+window onto one of 256 8 KiB physical blocks numbered `$00`–`$FF`
+(HuC6280 hardware manual H8-7, H8-10/11; [`MANUALS.md`](MANUALS.md) §5.1),
+so the physical address space is 2 MB. The viewer uses **MPR2** (`$4000`–
+`$5fff`) as its one data window: `TAM2` selects the bank and `copy_words`
+bumps the bank number and resets the pointer whenever it crosses `$6000`
+(`tools/viewer.asm`). That code was already bank-agnostic — the old 80 KiB
+limit lived only in the two builders:
+
+- `renderer/pce-rom.js` (`MAX_TILE_BANKS = 6`, `MAX_REGIONS = 8`) and
+- `tools/genviewer.py` (`assert len(tiles) <= 6 * BANK`, `MAX_REGIONS = 8`).
+
+Both now lift those caps: `pce-rom.js` takes banks 4–255 and 13 regions;
+`genviewer.py` takes 13 regions and as many banks as PCEAS can assemble
+(128). Past the 2 MB ceiling the browser builder refuses with the code
+`rom-too-big` rather than emitting a ROM the hardware cannot map.
+`tools/genviewer.py` stops earlier, at 128 banks (1 MB), because PCEAS
+3.23's `.bank` index itself stops at `0x7F`
+(`huc-src/src/mkit/as/main.c`, `bank_limit`), so there is no assembler
+reference above 1 MB — only the browser builder goes to 2 MB.
+
+The 88 KiB picture the card is proven on is `tests/dumps/scene10`
+(generated by `tests/make-big-scene.js`, made by both builders as
+`viewer10`): a 64x64 BAT (8 KiB), a full 32 KiB tile set (1024 tiles), and
+160 sprite-pattern cells (20 KiB) = 53,248 bytes of copy regions, 7 tile
+banks, `4 + 7 = 11` banks = 90,112 bytes. A 128x64 BAT cannot exceed the old
+cap — its 16 KiB BAT leaves only 48,640 bytes of regions in 64 KiB of VRAM,
+which is exactly the old 6 tile banks (80 KiB); the 64x64 BAT leaves room for
+the sprite patterns that push it over.
 
 ## What the viewer does not do
 

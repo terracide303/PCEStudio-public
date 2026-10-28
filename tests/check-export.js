@@ -14,7 +14,11 @@
  * byte equal to the PCEAS build of tools/gen/<name>.asm
  * (tools/gen/<name>.pce, made by `make -C tools`).  #14 adds the sprite
  * scenes (dump spriteN vs PCEAS vspriteN): the browser export must carry
- * the SG regions and the SAT block exactly like the PCEAS path.
+ * the SG regions and the SAT block exactly like the PCEAS path.  #46 adds
+ * scene10, the 88 KiB picture (a 64x64 BAT + a full 32 KiB tile set + 160
+ * sprite-pattern cells), requires it to be over the old 80 KiB cap, and
+ * requires a request over the HuCard's 256-bank ceiling to be refused with
+ * the code rom-too-big.
  *
  * It also loads renderer/pce-rom.js a second time through its browser-global
  * branch (a vm context with `self` and no `module`) and requires the same
@@ -93,7 +97,8 @@ function sha256(buf) {
 function writeRom(scene) {
   /* "1".."3" -> browserN.pce from sceneN; "spriteN" -> bspriteN.pce from
    * spriteN (#42: REVIEW-14's J-gap — the browser export of a sprite scene
-   * is captured and run, not only byte-compared). */
+   * is captured and run, not only byte-compared); "10" -> browser10.pce
+   * (#46: the >80 KB picture). */
   const sprite = scene.startsWith("sprite");
   const dump = sprite ? scene : `scene${scene}`;
   const out = path.join(GEN, `${sprite ? "bsprite" + scene.slice(6) : "browser" + scene}.pce`);
@@ -104,14 +109,66 @@ function writeRom(scene) {
 
 /* The compared pairs: dump directory -> PCEAS build in tools/gen/.  #14
  * adds the sprite scenes (vspriteN = the viewer ROM of spriteN); #42 adds
- * sprite12 (SAT entries 20-63 live). */
+ * sprite12 (SAT entries 20-63 live); #46 adds scene10, the 88 KiB picture
+ * (a 64x64 BAT + a full 32 KiB tile set + 160 sprite-pattern cells). */
 const PAIRS = [1, 2, 3].map((n) => ({ dump: `scene${n}`, pceas: `viewer${n}.pce` }))
   .concat(Array.from({ length: 12 }, (_, i) => i + 1)
-    .map((n) => ({ dump: `sprite${n}`, pceas: `vsprite${n}.pce` })));
+    .map((n) => ({ dump: `sprite${n}`, pceas: `vsprite${n}.pce` })))
+  .concat([{ dump: "scene10", pceas: "viewer10.pce" }]);
+
+/* #46: a ROM over the HuCard limit is refused with its own code.  The
+ * picture model cannot reach 2 MB with a descriptor-legal region list (each
+ * region is a slice of one 64 KiB VRAM; 13 descriptors are the config's
+ * room), so the guard is exercised with 33 x 32,768-word regions = 264 tile
+ * banks: 268 banks requested against the HuCard's 256.  The size is checked
+ * before the descriptor-count cap, so the code is rom-too-big, not the
+ * region-limit message. */
+function checkHuCardLimit() {
+  const base = loadScene("scene10");
+  const over = {
+    bank0: base.bank0, vram: base.vram, cram: base.cram, regs: base.regs,
+    regions: Array.from({ length: 33 }, () => [0, 2048])
+  };
+  let e = null;
+  try {
+    rom.buildRom(over);
+  } catch (err) {
+    e = err;
+  }
+  if (!e) return "a 268-bank request was built, not refused";
+  if (e.code !== "rom-too-big")
+    return `a 268-bank request was refused with code ${JSON.stringify(e.code)}` +
+           `, not rom-too-big: ${e.message}`;
+  if (!/256 banks/.test(e.message) || !/2 MB/.test(e.message))
+    return `rom-too-big does not name the limit: ${e.message}`;
+
+  /* the same region count with small regions is a descriptor-count refusal,
+   * not a size refusal: the size guard did not swallow the layout check */
+  const many = {
+    bank0: base.bank0, vram: base.vram, cram: base.cram, regs: base.regs,
+    regions: Array.from({ length: 33 }, () => [0, 16])
+  };
+  try {
+    rom.buildRom(many);
+    return "a 33-region request under the size limit was built";
+  } catch (err2) {
+    if (err2.code === "rom-too-big")
+      return "a 33-region request under 2 MB was refused as rom-too-big";
+  }
+  console.log(`scene10: a 268-bank ROM is refused with code rom-too-big ` +
+              `(${e.message.slice(0, 120)}…)`);
+  return null;
+}
 
 function checkScenes() {
   const browser = loadBrowserGlobal();
   let failed = 0;
+
+  const limitProblem = checkHuCardLimit();
+  if (limitProblem) {
+    console.log(`scene10: ${limitProblem}`);
+    failed++;
+  }
 
   for (const pair of PAIRS) {
     const picture = loadScene(pair.dump);
@@ -127,13 +184,20 @@ function checkScenes() {
     const globalGot = browser.buildRom(picture);
 
     const problems = [];
+    /* #46: the picture this card is about must actually be over the old
+     * 80 KiB / 10-bank cap, or it proves nothing about growing the ROM. */
+    if (pair.dump === "scene10" && got.length <= 80 * 1024)
+      problems.push(`${pair.dump}: ${got.length} bytes, not over the old ` +
+                    `80 KiB cap`);
     const p = compare(got, ref, pair.dump);
     if (p) problems.push(p);
     const g = compare(globalGot, got, `${pair.dump} (browser-global branch)`);
     if (g) problems.push(g);
 
     if (problems.length === 0) {
-      console.log(`${pair.dump}: OK — ${got.length} bytes, sha256 ` +
+      console.log(`${pair.dump}: OK — ${got.length} bytes` +
+                  (pair.dump === "scene10" ? " (> 80 KiB)" : "") +
+                  `, sha256 ` +
                   `${sha256(got).slice(0, 16)}…, byte-for-byte equal to ` +
                   `PCEAS (${path.relative(HERE, pceasPath)})`);
     } else {
@@ -157,15 +221,15 @@ function main() {
       [1, 2, 3].forEach(writeRom);
       return 0;
     }
-    if (!/^[123]$/.test(scene) && !/^sprite[0-9]+$/.test(scene)) {
-      console.error("usage: check-export.js --write [1|2|3|spriteN]");
+    if (!/^(?:[123]|10)$/.test(scene) && !/^sprite[0-9]+$/.test(scene)) {
+      console.error("usage: check-export.js --write [1|2|3|10|spriteN]");
       return 2;
     }
     writeRom(scene);
     return 0;
   }
   if (args.length !== 0) {
-    console.error("usage: check-export.js [--write [1|2|3|spriteN]]");
+    console.error("usage: check-export.js [--write [1|2|3|10|spriteN]]");
     return 2;
   }
   return checkScenes();

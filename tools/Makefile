@@ -13,8 +13,11 @@ RASTERS := 1 2 3 4 5
 # The viewer ROMs exist for the pictures that have a regions.json (scenes
 # 1-3, the #8/#9 samples, and scene 7 since #42 added its regions.json —
 # its 128x64 BAT crosses the 8 KiB MPR2 window, REVIEW-14 break I;
-# #39's other scenes 4-9 are scene-ROM captures without one).
-VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,1 2 3 7))
+# #39's other scenes 4-9 are scene-ROM captures without one).  Scene 10 is
+# #46's >80 KB picture: a 64x64 BAT plus a full 32 KiB tile set plus 160
+# sprite-pattern cells = 11 banks / 88 KiB, the first viewer whose copy
+# regions cross more than one MPR2 bank.
+VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,1 2 3 7 10))
 SPRITE_ROMS := $(addprefix gen/sprite,$(addsuffix .pce,$(SPRITES)))
 VSPRITES := $(addprefix gen/vsprite,$(addsuffix .pce,$(SPRITES)))
 RASTER_ROMS := $(addprefix gen/raster,$(addsuffix .pce,$(RASTERS)))
