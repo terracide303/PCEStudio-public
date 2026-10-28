@@ -34,18 +34,29 @@
  * What it checks, per dump:
  *   1. follow-a-pixel at >= 20 chosen pixels (a 13x12 grid plus pixels on
  *      every non-empty SAT sprite): the layer, the 9-bit colour index and
- *      word, the BAT entry/tile/palette/colour number or the sprite
- *      number/pattern/palette/colour number, the per-line registers, and the
- *      RGB vs the Mednafen frame.
+ *      word, the BAT entry/tile/palette/colour number/tileWord/beyondVram or
+ *      the sprite number/pattern/palette/colour number, the per-line
+ *      registers, the embedded 20-register vdc block against that row (and,
+ *      on a raster table, a row whose values differ from row 0 is required so
+ *      the check has teeth), and the RGB vs the Mednafen frame.
  *   2. the VRAM map: its copy regions equal regions.json's tile_regions where
  *      that file exists; its segments partition all 32768 words exactly once;
- *      the BAT size follows MWR and the SAT sits at the dump's DVSSR/SATB.
+ *      the BAT size follows MWR and the SAT sits at the dump's DVSSR/SATB;
+ *      the SAT's pattern cells (derived from its own words, not from the
+ *      panel's cell function) are in sprite-pattern segments and are exactly
+ *      the map's derived pattern cells.
  *   3. the per-line register panel vs raster.json (every entry appears on its
  *      line, the values between entries carry, the RCR chain arm matches).
  *   4. the VCE panel: 32 palettes of 16; per-line tables on the raster dumps,
- *      the flat CRAM table on the others.
- *   5. the SAT panel: 64 rows whose words are sat.bin's (or VRAM $7F00) and
- *      whose CGX/CGY cells follow the sprite size.
+ *      the flat CRAM table on the others; every entry's word, RGB and
+ *      index/palette/entry are decoded here from that word.
+ *   5. the SAT panel: 64 rows whose words are sat.bin's (or VRAM $7F00), with
+ *      Y/X/row0/leftX from the raw words and the CGX/CGY cells compared
+ *      element by element with the pattern number's cells.
+ *
+ * The five #56 additions close REVIEW-26's five misses (P06 VCE red/green,
+ * P07 SAT X/Y, P08 32-wide cells, P16 row-0 vdc block, P17 second-plane
+ * tileWord); each was re-run against a single-string break and fails.
  *
  * The dumps are a background scene (scene1), a sprite scene (sprite1), raster
  * scenes (raster1 BYR, raster4 per-line colour, raster5 per-line CR), the
@@ -314,6 +325,94 @@ function independentBackground(m, row, x) {
   };
 }
 
+/* The 64-word cells SAT entry i reads, from its raw words: the VDC masks the
+ * pattern code's low bits per CGY (2CGY/4CGY blocks are cells 2 apart) and
+ * CGX selects the even half pair (HuC6270 manual 2.4; the rule pce-sprites.js
+ * documents).  Written here from those words, not by calling spriteCells, so
+ * the SAT panel and VRAM map can be compared with the SAT's own pattern
+ * number (#56: the 32-wide halves named one cell too high). */
+function independentCellsOf(sat, i) {
+  const w2 = wordAt(sat, i * 4 + 2), w3 = wordAt(sat, i * 4 + 3);
+  const cgy = (w3 >> 12) & 3, cgx = (w3 >> 8) & 1;
+  const p = (w2 >> 1) & 0x3FF;
+  const base = p & CGY_MASK[cgy];
+  const blocks = [0, 2, 4, 6].slice(0, CGY_BLOCKS[cgy]);
+  const cells = [];
+  for (const b of blocks) {
+    if (cgx) {
+      const pair = (base + b) & ~1;
+      cells.push(pair, pair | 1);
+    } else {
+      cells.push(base + b);
+    }
+  }
+  return cells;
+}
+
+/* Every cell the non-empty SAT entries read, unique and sorted. */
+function independentAllCells(m) {
+  const seen = new Set();
+  for (let i = 0; i < 64; i++) {
+    if (!(wordAt(m.sat, i * 4) | wordAt(m.sat, i * 4 + 1) |
+          wordAt(m.sat, i * 4 + 2) | wordAt(m.sat, i * 4 + 3))) continue;
+    for (const c of independentCellsOf(m.sat, i)) seen.add(c);
+  }
+  return Array.from(seen).sort((a, b) => a - b);
+}
+
+/* The 20 VDC registers for one rendered row, from that row's own values and
+ * the documented state/viewer sources (pce-panels.js's header: R00-R13, the
+ * dump's regs.json otherwise the viewer ROM's fixed values, null where a
+ * register is not part of a picture).  Re-derived here so followPixel's
+ * embedded `vdc` block — which the test never read before #56 — is compared
+ * without calling vdcRegisters. */
+const VDC_ORDER = [
+  [0x00, "MAWR"], [0x01, "MARR"], [0x02, "VWR/VRR"], [0x03, "-"],
+  [0x04, "-"], [0x05, "CR"], [0x06, "RCR"], [0x07, "BXR"], [0x08, "BYR"],
+  [0x09, "MWR"], [0x0A, "HSR"], [0x0B, "HDR"], [0x0C, "VPR"], [0x0D, "VDR"],
+  [0x0E, "VCR"], [0x0F, "DCR"], [0x10, "SOUR"], [0x11, "DESR"],
+  [0x12, "LENR"], [0x13, "DVSSR"]
+];
+const VDC_STATE_KEYS = {
+  MAWR: ["MAWR"], MARR: ["MARR"], "VWR/VRR": ["VWR", "VRR"], CR: ["CR"],
+  RCR: ["RCR"], BXR: ["BXR"], BYR: ["BYR"], MWR: ["MWR"], HSR: ["HSR"],
+  HDR: ["HDR"], VPR: ["VPR", "VSR"], VDR: ["VDR", "VDW", "VDW_cache"],
+  VCR: ["VCR"], DCR: ["DCR"], SOUR: ["SOUR"], DESR: ["DESR"],
+  LENR: ["LENR"], DVSSR: ["DVSSR", "SATB"]
+};
+/* pce-panels.js's VIEWER_FIXED_REGS, keyed by register NAME because that is
+ * what vdcRegisters looks up (its SATB entry is keyed "SATB", so the DVSSR
+ * row does NOT fall back to it — mirrored here, not fixed). */
+const VDC_VIEWER = {
+  HSR: 0x0202, HDR: 0x041F, VPR: 0x0F02, VDR: 0x00EF,
+  VCR: 0x000C, DCR: 0x0010
+};
+
+function independentVdc(m, r) {
+  const row = m.rows[r];
+  const regs = m.regs || {};
+  const out = [];
+  for (const [number, name] of VDC_ORDER) {
+    let value = null, source = null;
+    if (name === "CR") { value = row.cr; source = "line"; }
+    else if (name === "RCR") { value = row.rcr; source = "line"; }
+    else if (name === "BXR") { value = row.bxr; source = "line"; }
+    else if (name === "BYR") { value = row.byr; source = "line"; }
+    else if (name === "-") { /* the address space has no register here */ }
+    else {
+      for (const k of VDC_STATE_KEYS[name] || []) {
+        if (regs[k] != null) { value = regs[k]; source = "state"; break; }
+      }
+      if (value == null && VDC_VIEWER[name] != null) {
+        value = VDC_VIEWER[name];
+        source = "viewer";
+      }
+    }
+    out.push({ number, name, value, source });
+  }
+  return out;
+}
+
 /* The sprite strips of one VDW line, in SAT order, at most 16 (the manual's
  * line limit).  Re-derived from the SAT words, not from collectStrips. */
 function independentStrips(m, vdwLine) {
@@ -459,6 +558,29 @@ function checkFollow(m, name, png, wantAtLeast) {
     ok(`${where} CR`, got.registers.CR, want.registers.CR);
     ok(`${where} BG_YOffset`, got.registers.BG_YOffset,
        want.registers.BG_YOffset);
+    /* #56 P16: the embedded 20-register block is this row's, not row 0's. */
+    const wantVdc = independentVdc(m, y);
+    const gotVdc = got.vdc || [];
+    checks++;
+    if (gotVdc.length !== wantVdc.length) {
+      fail(`${where} vdc: ${gotVdc.length} registers, expected ` +
+           `${wantVdc.length}`);
+    } else {
+      let bad = -1;
+      for (let k = 0; k < wantVdc.length; k++) {
+        const gv = gotVdc[k] || {}, wv = wantVdc[k];
+        if (gv.number !== wv.number || gv.name !== wv.name ||
+            gv.value !== wv.value || gv.source !== wv.source) {
+          bad = k;
+          break;
+        }
+      }
+      if (bad >= 0) {
+        const gv = gotVdc[bad], wv = wantVdc[bad];
+        fail(`${where} vdc[${bad}] ${gv.name} ${gv.value} (${gv.source}), ` +
+             `expected ${wv.name} ${wv.value} (${wv.source})`);
+      }
+    }
     if (!want.background.blanking) {
       const gb = got.background || {};
       ok(`${where} BAT word`, gb.batWord, want.background.batWord);
@@ -469,6 +591,12 @@ function checkFollow(m, name, png, wantAtLeast) {
          want.background.colourNumber);
       ok(`${where} tile row`, gb.tileRow, want.background.tileRow);
       ok(`${where} tile column`, gb.tileColumn, want.background.tileColumn);
+      /* #56 P17: tileWord is the FIRST plane (char*16 + row), and the
+       * beyond-VRAM flag follows the character number. */
+      ok(`${where} tile word`, gb.tileWord,
+         want.background.char * 16 + want.background.tileRow);
+      ok(`${where} beyond VRAM`, gb.beyondVram,
+         want.background.char >= 0x800);
     } else {
       ok(`${where} blanking`, got.background && got.background.blanking, true);
     }
@@ -493,6 +621,28 @@ function checkFollow(m, name, png, wantAtLeast) {
         fail(`${where} RGB: panel ${gotRgb.join(",")}, Mednafen ` +
              `${rgb.join(",")}`);
       }
+    }
+  }
+  /* #56 P16's teeth: a line whose values equal row 0's would pass even if the
+   * vdc block were hard-wired to row 0, so require a changed line to be
+   * covered, and on a raster table a changed RCR. */
+  if (m.opts.raster) {
+    const baseVdc = independentVdc(m, 0);
+    let changed = 0, rcrChanged = 0;
+    for (const [, y] of pixels) {
+      const v = independentVdc(m, y);
+      if (JSON.stringify(v) !== JSON.stringify(baseVdc)) changed++;
+      if (v[6].value !== baseVdc[6].value) rcrChanged++;
+    }
+    checks++;
+    if (!changed)
+      fail(`${name}: no chosen pixel is on a line whose registers differ ` +
+           `from row 0, so the per-row vdc check has no teeth`);
+    if (m.entries.length) {
+      checks++;
+      if (!rcrChanged)
+        fail(`${name}: no chosen pixel is on a line whose RCR differs from ` +
+             `row 0, so the per-row RCR check has no teeth`);
     }
   }
   return { pixels: pixels.length, layers, trace };
@@ -556,9 +706,11 @@ function checkVramMap(m, name, regionsJson) {
                   `no regions.json`);
   }
 
-  /* every non-empty SAT sprite's pattern cells are claimed by the map */
-  const cellMap = panels.patternCells(panels.state(m.opts));
-  const cells = Object.keys(cellMap).map(Number).sort((a, b) => a - b);
+  /* every non-empty SAT sprite's pattern cells are claimed by the map.  The
+   * cells come from the SAT words (#56 P08), NOT from panels.patternCells:
+   * the map's own derived patterns are built from spriteCells, so feeding
+   * that back in made this assertion agree with its own mistake. */
+  const cells = independentAllCells(m);
   for (const cell of cells) {
     const at = map.segments.find((s) =>
       cell * 64 >= s.start && cell * 64 + 64 <= s.start + s.words);
@@ -567,6 +719,13 @@ function checkVramMap(m, name, regionsJson) {
       problems.push(`SAT pattern cell ${cell} (words ` +
                     `${cell * 64}..${cell * 64 + 63}) is not in a ` +
                     `sprite-pattern segment (found ${at ? at.kind : "nothing"})`);
+  }
+  const mapCells = [];
+  for (const g of map.patterns || []) for (const c of g.cells) mapCells.push(c);
+  mapCells.sort((a, b) => a - b);
+  if (JSON.stringify(mapCells) !== JSON.stringify(cells)) {
+    problems.push(`map's derived pattern cells [${mapCells}], SAT words say ` +
+                  `[${cells}]`);
   }
 
   okv(`${name}: VRAM map partition, BAT/SAT, regions.json and SAT cells ` +
@@ -670,28 +829,51 @@ function checkVce(m, name) {
   const st = panels.state(m.opts);
   const problems = [];
   const rows = m.opts.raster ? [0, 50, 100, 199, 231] : [0];
+  let stop = false;
   for (const r of rows) {
     const want = m.rows[r];
+    if (!want) { problems.push(`no independent row ${r}`); break; }
     const got = panels.vcePalettes(st, r);
     if (got.palettes.length !== 32)
       problems.push(`${got.palettes.length} palettes, expected 32`);
-    for (let p = 0; p < 32; p++) {
-      if (got.palettes[p].length !== 16) {
-        problems.push(`palette ${p} has ${got.palettes[p].length} entries`);
+    for (let p = 0; p < 32 && !stop; p++) {
+      const entries = got.palettes[p] || [];
+      if (entries.length !== 16) {
+        problems.push(`palette ${p} has ${entries.length} entries`);
+        stop = true;
         break;
       }
       for (let e = 0; e < 16; e++) {
-        const g = got.palettes[p][e];
+        const g = entries[e];
         const w = want.words[p * 16 + e] & 0x1FF;
+        /* The VCE rule, written out (pce-bg.js's cramEntry): red is bits
+         * 3-5, green 6-8, blue 0-2, each *36.  #56 P06: the panel's r/g/b
+         * fields were never compared with the word they claim to decode. */
+        const wr = 36 * ((w >> 3) & 7), wg = 36 * ((w >> 6) & 7),
+              wb = 36 * (w & 7);
         if (g.word !== w) {
           problems.push(`row ${r} palette ${p} entry ${e}: word ` +
                         `${g.word}, expected ${w}`);
-          p = 99;
+          stop = true;
+          break;
+        }
+        if (g.r !== wr || g.g !== wg || g.b !== wb) {
+          problems.push(`row ${r} palette ${p} entry ${e}: RGB ` +
+                        `${g.r},${g.g},${g.b}, expected ${wr},${wg},${wb} ` +
+                        `(word ${w})`);
+          stop = true;
+          break;
+        }
+        if (g.index !== p * 16 + e || g.palette !== p || g.entry !== e) {
+          problems.push(`row ${r} palette ${p} entry ${e}: index/palette/` +
+                        `entry ${g.index}/${g.palette}/${g.entry}, expected ` +
+                        `${p * 16 + e}/${p}/${e}`);
+          stop = true;
           break;
         }
       }
     }
-    if (problems.length) break;
+    if (stop) break;
   }
   okv(`${name}: VCE panel 32x16 against ${m.opts.raster ? "the per-line " +
       "colour tables" : "the saved CRAM"}`, problems);
@@ -715,19 +897,34 @@ function checkSat(m, name) {
                       `${want[k]}`);
     }
     if (!got.empty) used++;
+    /* #56 P07: Y, X and their derived display coordinates are the fields the
+     * SAT panel exists to show; the raw words alone let X/Y swap. */
+    if (got.y !== (want[0] & 0x3FF))
+      problems.push(`entry ${i} Y ${got.y}, sat.bin ${want[0] & 0x3FF}`);
+    if (got.x !== (want[1] & 0x3FF))
+      problems.push(`entry ${i} X ${got.x}, sat.bin ${want[1] & 0x3FF}`);
+    if (got.row0 !== got.y - 64)
+      problems.push(`entry ${i} row0 ${got.row0}, Y-64 is ${got.y - 64}`);
+    if (got.leftX !== got.x - 32)
+      problems.push(`entry ${i} leftX ${got.leftX}, X-32 is ${got.x - 32}`);
     const cgy = (want[3] >> 12) & 3;
     const cgx = (want[3] >> 8) & 1;
     if (got.height !== CGY_HEIGHT[cgy])
       problems.push(`entry ${i} CGY ${cgy} height ${got.height}`);
     if (got.width !== (cgx ? 32 : 16))
       problems.push(`entry ${i} CGX ${cgx} width ${got.width}`);
-    const wantCells = CGY_BLOCKS[cgy] * (cgx ? 2 : 1);
+    /* #56 P08: the cells are the SAT pattern number's, compared element by
+     * element — the count alone lets the 32-wide halves shift by one. */
     if (got.empty) {
       if (got.cells.length)
         problems.push(`entry ${i} is empty but names cells`);
-    } else if (got.cells.length !== wantCells) {
-      problems.push(`entry ${i} ${got.cells.length} cells, expected ` +
-                    `${wantCells}`);
+    } else {
+      const wantCells = independentCellsOf(m.sat, i);
+      if (got.cells.length !== wantCells.length ||
+          got.cells.some((c, k) => c !== wantCells[k])) {
+        problems.push(`entry ${i} cells [${got.cells}], the SAT words name ` +
+                      `[${wantCells}]`);
+      }
     }
     if (got.palette !== (want[3] & 0xF) || got.spbg !== ((want[3] >> 7) & 1) ||
         got.hflip !== ((want[3] >> 11) & 1) ||
