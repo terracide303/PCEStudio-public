@@ -15,18 +15,22 @@
  *   cram:    Uint8Array, 1024 bytes = 512 uint16 LE colour-table entries
  *   regs:    { BXR, BYR, MWR, CR } — exactly the values the config block
  *            carries (docs/ROM_LAYOUT.md, bank 1)
- *   regions: [[char0, tileCount], ...] — the picture's tile regions in
+ *   regions: [[char0, tileCount], ...] — the picture's VRAM copy regions in
  *            descriptor order (tests/dumps/sceneN/regions.json for the
- *            sample scenes).  Regions whose VRAM destination word is 32768
+ *            sample scenes; for the #12 sprite scenes the list also carries
+ *            the SG pattern block at VRAM word 0x2000).  Regions whose VRAM
+ *            destination word is 32768
  *            or higher are dropped: the VDC drops those writes and the
  *            renderer model reads them as colour 0.  A region that starts
  *            below 32768 but ends past it throws (it cannot be described
  *            truthfully; docs/EXPORT.md).
  *
  * Output: Uint8Array, an 8 KiB-banked headerless HuCard image.  Banks are
- * filled with 0xff; bank 1 holds the 64-byte config at offset 0 and the 16
- * background palettes at offset 0x40; banks 2-3 hold the BAT; banks 4+ hold
- * the tile regions concatenated.  The bank count is 4 + ceil(tiles / 8 KiB),
+ * filled with 0xff; bank 1 holds the 64-byte config at offset 0, the 512
+ * colour-table entries (BG + sprite palettes) at offset 0x40 and the SAT at
+ * offset 0x440 (64 entries x 4 words from VRAM word 0x7F00 — the SATB DMA
+ * source, card #14); banks 2-3 hold the BAT; banks 4+ hold the copy regions
+ * concatenated.  The bank count is 4 + ceil(tiles / 8 KiB),
  * which is also what PCEAS -raw emits for the generated viewer .asm.
  *
  * Dual use: CommonJS module in Node (tests/check-export.js) and a browser
@@ -48,7 +52,9 @@
 
   var BANK = 8 * 1024;
   var CONFIG_SIZE = 64;          /* docs/ROM_LAYOUT.md, bank 1 */
-  var PALETTE_OFFSET = 0x40;
+  var PALETTE_OFFSET = 0x40;     /* 512 words: VCE entries 0-511 */
+  var SAT_OFFSET = 0x440;        /* 256 words: the SAT (card #14) */
+  var SAT_ADDR = 0x7F00;         /* the SAT's VRAM word address (DVSSR) */
   var CFG_VERSION = 0;
   var CFG_BXR = 2;
   var CFG_BYR = 4;
@@ -171,8 +177,9 @@
          regions.length + " regions, the config block holds " + MAX_REGIONS);
 
     /* ---- the data blocks */
-    var palette = cram.slice(0, 512);
+    var palette = cram.slice(0, 1024);
     var bat = vram.slice(0, words * 2);
+    var sat = vram.slice(SAT_ADDR * 2, SAT_ADDR * 2 + 512);
     var parts = [];
     for (var i = 0; i < regions.length; i++)
       parts.push(vram.slice(regions[i][0] * 2,
@@ -206,6 +213,7 @@
     }
     rom.set(cfg, bank1);
     rom.set(palette, bank1 + PALETTE_OFFSET);
+    rom.set(sat, bank1 + SAT_OFFSET);
 
     rom.set(bat, 2 * BANK);
     rom.set(tiles, 4 * BANK);

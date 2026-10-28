@@ -242,9 +242,17 @@ def bat_bytes_full(scene, w, h):
 
 def pages_of(word_bytes):
     """Split a bytes object of 16-bit words into (lo_pages, hi_pages), each a
-    list of 256-byte chunks (256 words per page)."""
+    list of 256-byte chunks (256 words per page); the last page is zero-padded
+    to a full 256 bytes.  emit_copy_loop always copies whole pages (its clx/
+    inx/bne loop runs 256 iterations), so without the padding a short region
+    copied the next table's ROM bytes into VRAM — the #14 viewer check found
+    sprite3/sprite10's stripes tiles (16-word regions) carrying 240 garbage
+    words each into VRAM $420-$50f, invisible to the renderer because the BAT
+    never names those characters."""
     lo = word_bytes[0::2]
     hi = word_bytes[1::2]
+    lo += b"\x00" * (-len(lo) % 256)
+    hi += b"\x00" * (-len(hi) % 256)
     return ([lo[i:i + 256] for i in range(0, len(lo), 256)],
             [hi[i:i + 256] for i in range(0, len(hi), 256)])
 

@@ -14,6 +14,8 @@
 #                                   # tests/check-editor.js --write)
 #   tools/capture.sh 1..8 sprite    # the #12 sprite-scene ROMs
 #                                   # (gen/spriteN.pce; the dump gains sat.bin)
+#   tools/capture.sh 1..11 vsprite  # the #14 viewer ROMs of the sprite scenes
+#                                   # (gen/vspriteN.pce, SATB DMA in the viewer)
 #
 # Scenes 4-9, 8b, 8c are #39's (docs/REVIEW.md finding 1: each is NOT
 # periodic in the dimension a renderer break would cut — see genroms.py).
@@ -66,8 +68,9 @@ case "$MODE" in
   browser) NAME="browser${SCENE}" ;;
   us) NAME="us${SCENE}" ;;
   sprite) NAME="sprite${SCENE}" ;;
+  vsprite) NAME="vsprite${SCENE}" ;;
   painted) NAME="painted" ;;
-  *) echo "mode must be scene, viewer, browser, us, sprite or painted" >&2; exit 2 ;;
+  *) echo "mode must be scene, viewer, browser, us, sprite, vsprite or painted" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"

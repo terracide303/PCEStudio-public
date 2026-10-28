@@ -1,26 +1,33 @@
 #!/usr/bin/env python3
-"""genviewer.py — build the picture-data banks for the #8 viewer ROM.
+"""genviewer.py — build the picture-data banks for the #8/#14 viewer ROM.
 
     python3 -I genviewer.py 1|2|3
+    python3 -I genviewer.py vsprite1..vsprite11
 
-Takes #5's sample data (tests/dumps/sceneN/{vram.bin,cram.bin,regs.json} —
-the same dumps the renderer diff test reads) and lays it out at the fixed
-places docs/ROM_LAYOUT.md defines, so `viewer.asm` finds it:
+Takes a picture's sample data (tests/dumps/sceneN or spriteN/
+{vram.bin,cram.bin,regs.json,regions.json} — the same dumps the renderer
+diff tests read) and lays it out at the fixed places docs/ROM_LAYOUT.md
+defines, so `viewer.asm` finds it:
 
-  gen/viewerN/config.bin   64-byte config block (BXR/BYR/MWR/CR + regions)
-  gen/viewerN/palette.bin  512 bytes = VCE entries 0-255 (16 BG palettes)
-  gen/viewerN/bat.bin      the BAT: 2 x (width x height) bytes from VRAM 0
-  gen/viewerN/tiles.bin    the tile regions, concatenated in descriptor order
-  gen/viewerN/viewerN.asm  includes viewer.asm + the data banks (.incbin)
+  gen/NAME/config.bin   64-byte config block (BXR/BYR/MWR/CR + regions)
+  gen/NAME/palette.bin  1024 bytes = VCE entries 0-511 (BG + sprite palettes)
+  gen/NAME/bat.bin      the BAT: 2 x (width x height) bytes from VRAM 0
+  gen/NAME/tiles.bin    the copy regions, concatenated in descriptor order
+                        (the tile regions; for the sprite scenes the region
+                        list also carries the SG pattern block at VRAM
+                        $2000)
+  gen/NAME/sat.bin      512 bytes = the SAT (64 entries x 4 words) from
+                        VRAM $7f00, the source of the SATB DMA (card #14)
+  gen/NAME/NAME.asm     includes viewer.asm + the data banks (.incbin)
 
-The tile regions come from tests/dumps/sceneN/regions.json — the same file
+The copy regions come from tests/dumps/<dir>/regions.json — the same file
 renderer/pce-rom.js reads for #9's browser export, so both builders lay out
-the same picture from the same description.  The data itself is read back out
-of the dump's vram.bin: the viewer shows the sample data, not a regenerated
-copy of it.
+the same picture from the same description.  The data itself is read back
+out of the dump's vram.bin: the viewer shows the sample data, not a
+regenerated copy of it.
 
-This script is tooling for #8's evidence; the viewer itself knows none of
-this — it follows the config block.
+This script is tooling for #8's and #14's evidence; the viewer itself knows
+none of this — it follows the config block.
 """
 
 import json
@@ -43,7 +50,9 @@ CFG_RGNS = 8
 CFG_REG0 = 0x0A
 REG_SIZE = 4
 MAX_REGIONS = 8
-PALETTE_OFFSET = 0x40          # 256 words, LE
+PALETTE_OFFSET = 0x40          # 512 words, LE (entries 0-511)
+SAT_OFFSET = 0x440             # 256 words, LE (64 SAT entries x 4) — #14
+SAT_ADDR = 0x7F00              # the SAT's VRAM word address (DVSSR)
 
 
 def bat_words(mwr):
@@ -63,9 +72,16 @@ def load_regions(dumpdir):
     return [(int(char0), int(count)) for char0, count in doc["tile_regions"]]
 
 
-def build(scene):
-    name = f"viewer{scene}"
-    dumpdir = os.path.join(HERE, "..", "tests", "dumps", f"scene{scene}")
+def build(spec):
+    """spec: '1'..'3' -> viewerN from tests/dumps/sceneN; 'vspriteN' ->
+    vspriteN from tests/dumps/spriteN (#14: the #12 sprite scenes)."""
+    if spec.startswith("vsprite"):
+        name = spec
+        dumpdir = os.path.join(HERE, "..", "tests", "dumps",
+                               f"sprite{spec[len('vsprite'):]}")
+    else:
+        name = f"viewer{spec}"
+        dumpdir = os.path.join(HERE, "..", "tests", "dumps", f"scene{spec}")
     with open(os.path.join(dumpdir, "regs.json")) as f:
         regs = json.load(f)
     with open(os.path.join(dumpdir, "vram.bin"), "rb") as f:
@@ -109,8 +125,9 @@ def build(scene):
         cfg[off:off + 2] = struct.pack("<H", dest)
         cfg[off + 2:off + 4] = struct.pack("<H", count)
 
-    # palette: VCE entries 0-255 (the 16 BG palettes the picture uses)
-    palette = cram[:512]
+    # palette: VCE entries 0-511 (the 16 BG palettes and the 16 sprite
+    # palettes the picture uses)
+    palette = cram[:1024]
 
     # BAT: words 0..words-1 of VRAM
     bat = vram[:words * 2]
@@ -119,6 +136,10 @@ def build(scene):
     tiles = bytearray()
     for dest, count in regions:
         tiles += vram[dest * 2:(dest + count) * 2]
+
+    # SAT: 64 entries x 4 words at VRAM $7f00 (DVSSR) — the SATB DMA source
+    # the viewer re-creates (card #14, docs/ROM_LAYOUT.md)
+    sat = vram[SAT_ADDR * 2:SAT_ADDR * 2 + 512]
 
     outdir = os.path.join(OUT, name)
     os.makedirs(outdir, exist_ok=True)
@@ -130,6 +151,8 @@ def build(scene):
         f.write(bat)
     with open(os.path.join(outdir, "tiles.bin"), "wb") as f:
         f.write(tiles)
+    with open(os.path.join(outdir, "sat.bin"), "wb") as f:
+        f.write(sat)
 
     # the asm: viewer.asm (bank 0) + the data banks at the fixed places.
     # BAT and tiles are split into 8 KiB banks so the .incbins never spill
@@ -154,6 +177,8 @@ def build(scene):
         .incbin "{rel}/config.bin"
         .org $4040
         .incbin "{rel}/palette.bin"
+        .org $4440
+        .incbin "{rel}/sat.bin"
 """]
     for i in range(bat_banks):
         banks.append(f"""\
@@ -170,25 +195,27 @@ def build(scene):
         .incbin "{rel}/tiles{i}.bin"
 """)
     asm = f"""\
-;; PCEStudio viewer {scene} — generated by tools/genviewer.py, do not edit.
-;; Data for #5's scene {scene} at the fixed places of docs/ROM_LAYOUT.md.
+;; PCEStudio viewer {name[6:]} — generated by tools/genviewer.py, do not edit.
+;; Data for {os.path.basename(dumpdir)} at the fixed places of docs/ROM_LAYOUT.md.
         .include "viewer.asm"
 """ + "".join(banks)
-    with open(os.path.join(OUT, f"viewer{scene}.asm"), "w") as f:
+    with open(os.path.join(OUT, f"{name}.asm"), "w") as f:
         f.write(asm)
-    print(f"wrote {rel}/{{config,palette,bat,tiles}}.bin and "
-          f"gen/viewer{scene}.asm "
+    print(f"wrote {rel}/{{config,palette,bat,tiles,sat}}.bin and "
+          f"gen/{name}.asm "
           f"(BXR={bxr}, BYR={byr}, MWR=${mwr:02x}, CR=${cr:02x}, "
-          f"BAT {words} words, {len(regions)} tile regions, "
-          f"tiles {len(tiles)} B)")
+          f"BAT {words} words, {len(regions)} copy regions, "
+          f"tiles {len(tiles)} B, SAT {len(sat)} B)")
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in "123":
-        print(f"usage: {sys.argv[0]} 1|2|3", file=sys.stderr)
+    valid = [str(i) for i in (1, 2, 3)] + [f"vsprite{i}" for i in range(1, 12)]
+    if len(sys.argv) != 2 or sys.argv[1] not in valid:
+        print(f"usage: {sys.argv[0]} 1|2|3|vsprite1..vsprite11",
+              file=sys.stderr)
         return 2
     os.makedirs(OUT, exist_ok=True)
-    build(int(sys.argv[1]))
+    build(sys.argv[1])
 
 
 if __name__ == "__main__":

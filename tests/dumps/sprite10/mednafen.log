@@ -21,8 +21,8 @@ Starting Mednafen 1.32.1
     Failed: Error opening file "/Users/dennisschauw/.mednafen/pgconfig/sprite10.pce.cfg" for reading: No such file or directory
 
    ROM:       8KiB
-   ROM CRC32: 0x310e40f1
-   ROM MD5:   0xc97dba19d512d8bea2478c26ed1372fc
+   ROM CRC32: 0x0954ecb6
+   ROM MD5:   0xe930bd9012937b2e5054a64ca7a9d311
    PSG Revision: HuC6280
 
   Loading custom palette from "/Users/dennisschauw/.mednafen/palettes/pce.pal"...

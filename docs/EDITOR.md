@@ -87,8 +87,8 @@ viewer (`renderer/viewer-bank0.bin`), so this is the #9 path unchanged.
 | | |
 |---|---|
 | ROM | 40960 bytes (5 banks: 1 tile bank) |
-| sha256 | `670001f5df1581e25e31bf9ac8d2c394566433f3205070571c15166118d48ee1` |
-| bank 1 | config (`BXR=0, BYR=0, MWR=$00, CR=$80`, one region `$400`, 2128 words) + the 16 palettes at `$4040` |
+| sha256 | `486477d617db851a…` (rebuilds when `viewer.asm` changes; measure with `node tests/check-editor.js --write`) |
+| bank 1 | config (`BXR=0, BYR=0, MWR=$00, CR=$80`, one region `$400`, 2128 words) + the 512 colour-table entries at `$4040` (the editor's sprite palettes are black) + a zero SAT at `$440` (#14) |
 | banks 2–3 | the 32×32 BAT (1024 words) |
 | banks 4+ | the 133 tiles |
 
@@ -105,7 +105,7 @@ to read cold):
 refusals: 12/12 refused with the documented code
 picture: 256x224 painted from scratch, 896 visible cells, 133 tiles ($40-$c4),
          6 palettes, validate 0 problems, model == renderer
-export: 40960 bytes, sha256 670001f5df1581e2… (#9's builder) — config,
+export: 40960 bytes, sha256 486477d617db851a… (#9's builder) — config,
         palettes, BAT and tiles are the editor's data
 browser-global branch: same 12/12 refusals, same 40960 bytes
 capture: tests/dumps/painted is the editor's VRAM/CRAM/regs and Mednafen's
@@ -142,7 +142,7 @@ python3 -m http.server 8123 --bind 127.0.0.1        # from the repo root
   --user-data-dir=/tmp/chrome-pce10 --virtual-time-budget=15000 --dump-dom \
   "http://127.0.0.1:8123/renderer/editor.html?demo=1&rules=1"
 # exportstatus: picture 256x224, 133 tiles, 6 palettes, 0 problem(s) ·
-#               ROM 40960 bytes, sha256 670001f5df1581e2…
+#               ROM 40960 bytes, sha256 486477d617db851a…
 # msg: rules: 3/3 refused — palette 16 (17th-palette);
 #      palette entry 16 (17th-colour); pixel colour 16 (17th-colour)
 ```

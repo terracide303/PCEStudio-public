@@ -1,0 +1,17 @@
+{
+  "comment": "VRAM copy regions of sprite8 for docs/ROM_LAYOUT.md: [char0, 16-word chunk count] in descriptor order. The tile regions (values are genroms.py SPRITE_SCENES) and the SG pattern block (cell $80, 16 cells = 1024 words at VRAM $2000). Read by tools/genviewer.py and renderer/pce-rom.js (#14); the SAT at VRAM $7f00 is NOT a region - it has its own fixed place in bank 1 (docs/ROM_LAYOUT.md).",
+  "tile_regions": [
+    [
+      64,
+      32
+    ],
+    [
+      3840,
+      16
+    ],
+    [
+      512,
+      64
+    ]
+  ]
+}

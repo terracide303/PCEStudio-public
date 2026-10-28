@@ -36,7 +36,7 @@ make -C tools          # assembles tools/gen/viewerN.pce
 make -C tools bank0    # writes renderer/viewer-bank0.bin
 ```
 
-`tools/extract_bank0.py` refuses unless the first 8 KiB of all three viewer
+`tools/extract_bank0.py` refuses unless the first 8 KiB of all 14 viewer
 ROMs are identical, so a change to `viewer.asm` cannot leave the asset stale
 or pick one build's copy by accident. If the asset were stale, the export
 test below fails on bank 0's bytes.
@@ -48,9 +48,9 @@ An 8 KiB-banked, headerless image (`pceas -raw` output; no 512-byte header):
 | bank | content |
 |------|---------|
 | 0 | `bank0`, verbatim |
-| 1 | 64-byte config at offset 0, 16 palettes at offset `0x40` |
+| 1 | 64-byte config at offset 0, the 512 colour-table entries at offset `0x40`, the SAT at offset `0x440` |
 | 2–3 | the BAT (`width × height` words) from VRAM word 0 |
-| 4+ | the tile regions, concatenated in descriptor order |
+| 4+ | the copy regions, concatenated in descriptor order |
 
 Everything not written is `0xff`, including a whole bank 3 when the BAT fits
 in bank 2 and the padding of the last bank. The image is
@@ -63,16 +63,28 @@ banks, wrong-sized dumps, a tile region that runs past the 32768-word VRAM).
 
 ```sh
 make -C tools
-node tests/check-export.js      # byte equality, all three scenes
+node tests/check-export.js      # byte equality, all 14 scenes
 ```
 
-Measured 2026-10-28 (PCEAS 3.23, the three sample scenes):
+Measured 2026-10-28 (PCEAS 3.23, the 14 sample scenes — #14 extended the
+sample set from the three #9 scenes to the 11 sprite scenes):
 
 | scene | bytes | sha256 (first 16) | equal to PCEAS |
 |-------|-------|-------------------|----------------|
-| 1 | 40960 | `92057e3479ca46d9` | yes |
-| 2 | 40960 | `57c62f2d9975c21a` | yes |
-| 3 | 40960 | `49dffff8dd49af81` | yes |
+| 1 | 40960 | `fad2111402cb0bf8` | yes |
+| 2 | 40960 | `295260bb15013016` | yes |
+| 3 | 40960 | `95ba93df3664f6d5` | yes |
+| sprite1 | 40960 | `43e0b6bb34f2e8ae` | yes |
+| sprite2 | 40960 | `7eb32d2a62256419` | yes |
+| sprite3 | 40960 | `4ee5ec50888f8a19` | yes |
+| sprite4 | 40960 | `190a6a948d787d82` | yes |
+| sprite5 | 40960 | `038cbd8ccf2175db` | yes |
+| sprite6 | 40960 | `aba7d442e0ab3be8` | yes |
+| sprite7 | 40960 | `5e9380bbb404f917` | yes |
+| sprite8 | 40960 | `31bb8ee1385427da` | yes |
+| sprite9 | 40960 | `106cb7a91e72e848` | yes |
+| sprite10 | 40960 | `c800a04526775d29` | yes |
+| sprite11 | 40960 | `5df566ef10a23625` | yes |
 
 `tests/check-export.js` also loads `renderer/pce-rom.js` through its
 browser-global branch (a `vm` context with `self` and no `module`) and
@@ -89,10 +101,10 @@ python3 -m http.server 8123 --bind 127.0.0.1   # from the repo root
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
   --user-data-dir=/tmp/chrome-pce --virtual-time-budget=10000 --dump-dom \
   "http://127.0.0.1:8123/renderer/index.html?scene=scene1"
-# → built 40960 bytes, sha256 92057e3479ca46d9… — byte-for-byte equal to the PCEAS build
+# → built 40960 bytes, sha256 fad2111402cb0bf8… — byte-for-byte equal to the PCEAS build
 ```
 
-The same output was measured for `scene2` and `scene3`.
+The same output was measured for `scene2`, `scene3` and the sprite scenes.
 
 For "it shows the picture in Mednafen", the browser's own bytes were run,
 not PCEAS's:
@@ -133,9 +145,9 @@ Measured 2026-10-28 (`node tests/check-us-card.js`, exit 0):
 
 | scene | bytes | US sha256 (first 16) | bytes differing from the .pce |
 |-------|-------|----------------------|-------------------------------|
-| 1 | 40960 | `b9a7524eb16830b8` | 3511 |
-| 2 | 40960 | `097fbd25e4847539` | 5546 |
-| 3 | 40960 | `8a3d67dbaf6c0e2c` | 10429 |
+| 1 | 40960 | `cc1c1b6fee963699` | 3935 |
+| 2 | 40960 | `3e386bf90082a5b4` | 5970 |
+| 3 | 40960 | `aa115f22e5123d20` | 10853 |
 
 The test checks every byte against an independent bit loop, checks that
 reversing back returns the .pce exactly, and requires the image to differ from
@@ -148,7 +160,7 @@ comparison can fail. The real page reports the same bytes itself:
 # served as in the #9 section above
 … --dump-dom "http://127.0.0.1:8123/renderer/index.html?scene=scene1&us=1"
 # → US HuCard: 40960 bytes, every byte the bit-reverse of the .pce
-#   (3511 bytes differ), sha256 b9a7524eb16830b8…
+#   (3935 bytes differ), sha256 cc1c1b6fee963699…
 ```
 
 ### What an emulator says — and what it cannot
@@ -176,7 +188,7 @@ it is a TurboGrafx-16 (or a flash cart), which is Dennis's, and the card stays
 - **Not the console.** Byte equality and Mednafen are not a HuCard on real
   hardware; the Tang Nano check belongs to #8's photo, and the TurboGrafx
   US image runs on nothing here — Mednafen shows it blank (above).
-- **Not every picture.** The three sample scenes cover 32/64/128-wide BATs,
-  one- and two-bank BATs, and 1–2 tile regions. A 64-row BAT, 8 regions, a
+- **Not every picture.** The 14 sample scenes cover 32/64/128-wide BATs,
+  one- and two-bank BATs, and 1–3 tile regions. A 64-row BAT, 8 regions, a
   full 6 tile banks, or a picture that trips a validation error is not
   exercised here.

@@ -1,10 +1,12 @@
 ;;
-;; PCEStudio — viewer.asm (card #8)
+;; PCEStudio — viewer.asm (cards #8, #14)
 ;;
-;; The viewer ROM: loads 16 palettes into the VCE, tiles and the BAT into
-;; VRAM, sets the VDC to 256x224 and shows the picture.  All picture data is
-;; read from fixed places in the ROM; the layout is documented in
-;; ../docs/ROM_LAYOUT.md (bank 1: config + palettes, banks 2-3: BAT,
+;; The viewer ROM: loads the 512-entry colour table into the VCE, tiles and
+;; the BAT (and for the sprite scenes the SG patterns) into VRAM, the SAT
+;; into VRAM $7f00 where the VDC's SATB DMA picks it up every frame, sets
+;; the VDC to 256x224 and shows the picture.  All picture data is read from
+;; fixed places in the ROM; the layout is documented in ../docs/ROM_LAYOUT.md
+;; (bank 1: config + 512-entry palettes + the SAT, banks 2-3: BAT,
 ;; banks 4+: tiles, concatenated in descriptor order).  Bank 0 is this code
 ;; and never changes — #9 glues picture data into the fixed places, so the
 ;; browser's .pce is this bank plus data banks.
@@ -82,14 +84,17 @@ cfgcopy:
         cpx #$40                   ; 64 bytes
         bne cfgcopy
 
-        ; ---- palettes: entries 0-255 (16 BG palettes) from ROM $4040
+        ; ---- palettes: entries 0-511 (16 BG + 16 sprite palettes) from
+        ; ROM $4040 (1024 bytes, bank 1).  Exactly 512 writes: the CTA is 9
+        ; bits, so entry 511's write wraps it to 0 and another write would
+        ; wipe palettes 0-15 again.
         stz $0402                  ; colour table index = 0 (autoincrements
         stz $0403                  ; after every $0405 write)
         lda #$40
         sta <src
         lda #$40
         sta <src+1
-        ldx #$02                   ; 2 pages x 256 bytes = 512 bytes = 256 words
+        ldx #$04                   ; 4 pages x 256 bytes = 1024 bytes = 512 words
 palpage:
         cly
 palentry:
@@ -103,17 +108,6 @@ palentry:
         inc <src+1                 ; next 256-byte page
         dex
         bne palpage
-
-        ; sprite palettes (entries 256-511): black.  The VCE border uses
-        ; colour 256; the picture uses no sprites.  One 256-entry loop only:
-        ; the CTA is 9 bits, so a 512-entry loop would wrap past 511 and wipe
-        ; palettes 0-15 again.
-        cly
-sprentry:
-        stz $0404
-        stz $0405
-        iny
-        bne sprentry
 
         ; ---- VDC registers (HuDK vdc_init_table values; BXR/BYR/MWR/CR come
         ; from the config block, copied to RAM at $2200)
@@ -156,10 +150,19 @@ sprentry:
         st2 #$00                   ; VCR
         st0 #$0f
         st1 #$10
-        st2 #$00                   ; DCR: SATB auto-repeat (sprites off)
+        st2 #$00                   ; DCR: bit 4 (DSR) = VRAM-SATB transfer
+                                   ; auto-repeat — the VDC re-DMAs the SAT
+                                   ; into the SATB at every VBlank (VDC
+                                   ; manual, DCR R0F p. H7-11).  The sprite
+                                   ; layer itself is CR bit 6 (below), so
+                                   ; this is harmless for sprite-free
+                                   ; pictures.
         st0 #$13
         st1 #$00
-        st2 #$7f                   ; SATB address
+        st2 #$7f                   ; DVSSR: the SAT sits at VRAM $7f00; the
+                                   ; 256-word transfer starts at the next
+                                   ; VBlank, triggered by this high-byte
+                                   ; write (DVSSR R13 p. H7-12)
 
         ; ---- BAT: words 0..(width*height-1) of VRAM, from bank 2
         lda $2206                  ; MWR -> word count (HuDK vdc.s bat_width/
@@ -230,7 +233,30 @@ cfg_ok:
         bne region_loop
 tiles_done:
 
-        ; ---- show it: CR from config (bit 7 = background on)
+        ; ---- SAT: 64 entries x 4 words from bank 1 offset $0440 to VRAM
+        ; word $7f00 (DVSSR above).  The CPU cannot write the SATB directly;
+        ; the SAT lives in VRAM and the DCR bit-4 DMA carries it into the
+        ; SATB at the start of every VBlank (VDC manual 2.4.2 SATB p. H7-20,
+        ; DVSSR R13 p. H7-12).  Sprites are still off (CR written below), so
+        ; the first displayed frame's SATB already holds this SAT.
+        lda #$01
+        sta <src_bank
+        tam2                       ; map bank 1 back into the window
+        lda #$40
+        sta <src
+        lda #$44
+        sta <src+1
+        stz <wcnt
+        lda #$01
+        sta <wcnt+1                ; 256 words
+        st0 #$00
+        st1 #$00
+        st2 #$7f                   ; MAWR = $7f00
+        st0 #$02
+        jsr copy_words
+
+        ; ---- show it: CR from config (bit 7 = background on, bit 6 =
+        ; sprites on)
         st0 #$05
         lda $2207
         sta $0002
@@ -240,34 +266,51 @@ loop:
         bra loop
 
 ;
-; copy_words — copy <wcnt words from ROM (bank <src_bank, window pointer
-; <src) to the VDC data port.  The pointer walks 256-byte pages; crossing
-; $5fff re-maps MPR2 to the next bank and resets the pointer to $4000
-; (HuDK's remap_data pattern).  Register 2 of the VDC must be selected and
-; MAWR set by the caller.  Clobbers A, X, Y.
+; copy_words — copy <wcnt words from ROM (bank <src_bank, 16-bit pointer
+; <src) to the VDC data port.  The pointer advances across calls: the tile
+; regions are concatenated in the ROM, so each copy must continue where the
+; last one left off (an earlier page-walk version kept the byte position in
+; Y, which each call reset — every region that did not end on a 256-byte
+; page was re-read from the page start, the #14 stripes-scene bug).
+; Crossing $5fff re-maps MPR2 to the next bank and resets the pointer to
+; $4000 (HuDK's remap_data pattern).  Register 2 of the VDC must be
+; selected and MAWR set by the caller.  Clobbers A, X, Y.
 ;
 copy_words:
         lda <wcnt
         ora <wcnt+1
         beq copy_done
-        cly
+        cly                        ; Y stays 0: <src> is the whole pointer
 copy_word:
-        lda [src], Y
-        sta $0002
-        iny
-        lda [src], Y
-        sta $0003
-        iny
-        bne copy_next
-        inc <src+1                 ; crossed a 256-byte page
         lda <src+1
         cmp #$60
-        bne copy_next
+        bne copy_read
         inc <src_bank              ; crossed the 8 KiB window: next bank
         lda <src_bank
         tam2
         lda #$40
         sta <src+1
+copy_read:
+        lda [src], Y
+        sta $0002
+        inc <src
+        bne copy_second
+        inc <src+1
+copy_second:
+        lda <src+1
+        cmp #$60
+        bne copy_high
+        inc <src_bank
+        lda <src_bank
+        tam2
+        lda #$40
+        sta <src+1
+copy_high:
+        lda [src], Y
+        sta $0003
+        inc <src
+        bne copy_next
+        inc <src+1
 copy_next:
         lda <wcnt
         bne copy_low

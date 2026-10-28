@@ -1,4 +1,4 @@
-# ROM layout of the viewer (cards #8 and #9)
+# ROM layout of the viewer (cards #8, #9 and #14)
 
 Where the viewer ROM puts its data, and where `viewer.asm` reads it from.
 This is the contract #9 (the browser .pce builder) glues into: bank 0 never
@@ -12,16 +12,17 @@ are filled with `0xff`. The image is headerless (`pceas -raw`) and has
 Two builders implement this contract and must agree byte for byte:
 `tools/genviewer.py` (writes the `.asm` banks PCEAS assembles) and
 `renderer/pce-rom.js` (the browser export, #9). Their agreement on the sample
-scenes is measured in [`EXPORT.md`](EXPORT.md).
+scenes is measured in [`EXPORT.md`](EXPORT.md); #14 extends it to the sprite
+scenes.
 
 ## Bank map
 
 | bank | content |
 |------|---------|
 | 0    | viewer code and vectors (constant — the browser copies it verbatim) |
-| 1    | config block (64 B at `$4000`) + the 16 palettes (`$4040`) |
+| 1    | config block (64 B at `$4000`) + the 512 colour-table entries (`$4040`) + the SAT (`$4440`) |
 | 2–3  | the BAT: `width × height` words, starting at bank 2 offset 0 |
-| 4–9  | the tiles: the tile regions concatenated in descriptor order |
+| 4–9  | the copy regions: the tile regions (and for the sprite scenes the SG pattern block) concatenated in descriptor order |
 
 `tools/genviewer.py` emits exactly the banks each picture needs (one
 `.incbin` per 8 KiB slice), so nothing ever spills past a bank boundary.
@@ -50,8 +51,24 @@ address** and the **word count** of the tile data.
 
 ## Bank 1 — palettes, offset `0x40` (`$4040`)
 
-256 words = VCE colour table entries 0–255, i.e. the 16 background palettes
-of 16 colours. Entry _n_ is the word at `0x40 + 2n`.
+512 words = VCE colour table entries 0–511: the 16 background palettes and
+the 16 sprite palettes of 16 colours. Entry _n_ is the word at
+`0x40 + 2n` (#14: was entries 0–255 before the viewer loaded sprites).
+
+## Bank 1 — the SAT, offset `0x440` (`$4440`)
+
+256 words = the sprite attribute table (SAT): 64 entries × 4 words (Y, X,
+pattern, attributes), copied to VRAM word address `$7f00` — the source
+address of the VDC's SATB DMA (register DVSSR R13). The CPU cannot write the
+SATB directly; the viewer loads the SAT into VRAM and the VDC's DCR bit 4
+(DSR) transfers those 256 words into the SATB at the start of every VBlank
+(VDC manual 2.4.2 SATB p. H7-20, DVSSR R13 p. H7-12, DCR R0F p. H7-11).
+Pictures without sprites carry a zero SAT here, which is loaded harmlessly
+(CR bit 6 keeps the sprite layer off).
+
+The SAT is picture data from VRAM word `$7f00` of the picture's own dump,
+exactly like the BAT and the tiles; both builders read it from `vram.bin`
+at that fixed address.
 
 ## Banks 2–3 — the BAT
 
@@ -59,18 +76,25 @@ of 16 colours. Entry _n_ is the word at `0x40 + 2n`.
 from MWR (`(MWR >> 4) & 3` selects 32/64/128/128, bit 6 selects 32/64 rows),
 so the BAT is at most 128×64 = 16 KiB = banks 2 and 3.
 
-## Banks 4–9 — the tiles
+## Banks 4–9 — the copy regions
 
-The tile regions, concatenated in descriptor order, starting at bank 4
-offset 0. The viewer streams this from the MPR2 window and re-maps to the
-next bank every 8 KiB, so region boundaries need not line up with banks.
+The regions, concatenated in descriptor order, starting at bank 4 offset 0.
+The viewer streams this from the MPR2 window and re-maps to the next bank
+every 8 KiB, so region boundaries need not line up with banks.
 Up to 48 KiB (banks 4–9).
 
+A region is usually a tile region; for the #12 sprite scenes the list also
+carries the sprite generator (SG) pattern block — cell `$80` upward at VRAM
+word `$2000`, `nblocks × 64` words where `nblocks` is the scene's pattern
+span (`pack_patterns` in `tools/genroms.py`). The SAT is **not** a region:
+it has its own fixed place in bank 1 (above), because the viewer's DVSSR
+register fixes its VRAM address at `$7f00` for every picture.
+
 The region list is picture data, read by both builders from
-`tests/dumps/sceneN/regions.json` (`tile_regions`: `[char0, tileCount]` pairs
-in descriptor order). `char0` is the first 16-bit VRAM character number;
-the descriptor's destination is `char0 * 16` words and its word count is
-`tileCount * 16`.
+`tests/dumps/sceneN/regions.json` (and `tests/dumps/spriteN/regions.json`)
+(`tile_regions`: `[char0, tileCount]` pairs in descriptor order). `char0` is
+the first 16-bit VRAM character number; the descriptor's destination is
+`char0 * 16` words and its word count is `tileCount * 16`.
 
 Regions whose destination is beyond the 64 KiB VRAM (dest ≥ 32768 words) are
 **not included** — writes beyond 32768 words are dropped on the hardware
@@ -80,13 +104,23 @@ the browser must not emit them either.
 ## How the viewer reads it
 
 - Reset sets MPR2 to bank 1, copies the 64-byte config block to RAM `$2200`
-  and loads the palettes from `$4040`.
+  and loads the 512 colour-table entries from `$4040`.
+- The VDC init writes DCR = `0x0010` (bit 4, DSR: the VRAM-SATB transfer
+  auto-repeats every VBlank) and DVSSR = `$7f00` (the SAT's VRAM address;
+  the high-byte write starts the first transfer at the next VBlank) —
+  VDC manual DCR R0F p. H7-11, DVSSR R13 p. H7-12.
 - From then on every config read (BXR/BYR/MWR/CR, region count,
   descriptors) comes from the RAM copy: MPR2 is re-mapped to the data banks
-  (2 for the BAT, 4 for the tiles), and the region loop must still see the
+  (2 for the BAT, 4 for the regions), and the region loop must still see the
   descriptors.
+- After the regions, MPR2 returns to bank 1 and the SAT (256 words from
+  `$4440`) is copied to VRAM `$7f00`. Sprites are still off, so the first
+  displayed frame's SATB already holds this SAT (2.4.2 SATB p. H7-20: the
+  CPU cannot write the SATB directly).
 - `copy_words` reads through the 8 KiB MPR2 window (`$4000`–`$5fff`) and
   re-maps to the next bank when the pointer crosses the window.
+- Finally CR from the config turns the layers on: bit 7 = background,
+  bit 6 = sprites.
 
 ## Pictures the editor makes (#10)
 
@@ -106,5 +140,5 @@ There are at most 1536 tiles (banks 4–9).
 - It does not check the version byte or the reserved bytes. The browser
   export (#9) writes version 1 and zero reserved bytes, but does not verify
   bytes in a ROM it did not build.
-- Tile regions must not overlap each other or the BAT in VRAM; the viewer
-  copies them in order without checking.
+- Copy regions must not overlap each other or the BAT or the SAT in VRAM;
+  the viewer copies them in order without checking.

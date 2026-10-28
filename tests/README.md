@@ -1,10 +1,10 @@
-# The renderer and export checks (#5, #6, #8, #9, #10, #12, #38, #39, #40)
+# The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #38, #39, #40)
 
 ```sh
 node tests/check.js             # diff the renderer against Mednafen, all scenes
 node tests/check-review-fixes.js # #38: each review fix, and it fails before
 node tests/renderer-mutation.js # #6/#39: prove that diff test fails on a broken renderer
-node tests/check-viewer.js      # viewer/browser ROM captures vs the renderer
+node tests/check-viewer.js      # viewer/browser/vsprite ROM captures vs the renderer
 node tests/check-export.js      # the browser's .pce vs the PCEAS build, byte for byte
 node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
 node tests/check-editor.js      # the editor's refusals, picture, export and capture
@@ -27,8 +27,11 @@ data — and `scene8`, `scene8b` and `scene8c` are the diff-0 proofs (#39).
 HuCard image blank (every VDC register 0), which is the emulator not running
 the image (#25), not a rendered frame. The skip list is explicit and named
 dumps only; an unnamed background-off dump whose capture is not the backdrop
-fails the run as a diff. The shipped count is **30 pictures** (scenes 1-9,
-5b, 8b, 8c, painted, viewer 1-3, browser 1-3, sprite 1-11), us1 skipped.
+fails the run as a diff. The shipped count is **41 pictures** (scenes 1-9,
+5b, 8b, 8c, painted, viewer 1-3, browser 1-3, sprite 1-11, vsprite 1-11),
+us1 skipped. `dumps/vspriteN/` are #14's captures: the *viewer* ROMs of the
+sprite scenes (`tools/capture.sh N vsprite`), whose SATB DMA loads the same
+SAT the sprite scene ROMs write directly.
 Sprite 9-11 are #40's scenes, which close the three gaps REVIEW-12 found in
 the sprite scenes (see below).
 
@@ -119,23 +122,51 @@ testing nothing), `UNEXPECTED` (exit 0 but not a clean pass), and
 Exit 0 only when the baseline is diff 0 on all scenes, all ten breaks are
 DETECTED, and both self-tests hold.
 
-## `check-viewer.js` — the ROM shows the picture (#8, #9)
+## `check-viewer.js` — the ROM shows the picture (#8, #9, #14)
 
-For each `dumps/viewerN/` and `dumps/browserN/` capture it renders the #5
-scene with `renderer/pce-bg.js` and requires the captured Mednafen frame to
-match it byte for byte, and the captured VRAM/CRAM/static VDC registers to
-match the scene dump. `viewerN` ROMs come from PCEAS (`capture.sh N viewer`);
-`browserN` ROMs come from `renderer/pce-rom.js` (`capture.sh N browser`), so
-#9's export is checked by running its own bytes. Details:
-[`../docs/EXPORT.md`](../docs/EXPORT.md).
+For each `dumps/viewerN/`, `dumps/browserN/` and `dumps/vspriteN/` capture it
+renders the matching scene — `sceneN` for the first two, `spriteN` for
+`vspriteN` — with the renderer (the sprites module when the scene has a
+`sat.bin`, else the background module) and requires the captured Mednafen
+frame to match it byte for byte, and the captured VRAM/CRAM/static VDC
+registers to match the scene dump — for the sprite scenes also the SATB
+mirror `sat.bin` and the `DCR`/`SATB` registers, the #14 evidence that the
+DCR bit-4 DMA carried the SAT. `viewerN` ROMs come from PCEAS
+(`capture.sh N viewer`); `browserN` ROMs come from `renderer/pce-rom.js`
+(`capture.sh N browser`), so #9's export is checked by running its own
+bytes; `vspriteN` ROMs are #14's *viewer* ROMs of the sprite scenes
+(`capture.sh N vsprite`), whose SATB DMA loads the same SAT the sprite
+scene ROMs write directly. Details: [`../docs/EXPORT.md`](../docs/EXPORT.md).
+
+Two bugs fell out of building the `vsprite` path (#14), both invisible to
+the frame checks and caught only by the VRAM byte equality:
+
+- **`viewer.asm`'s `copy_words` kept its ROM pointer's byte position in Y**
+  (the HuDK page-walk pattern) and reset Y with `cly` on every call, so a
+  copy whose word count is not a multiple of 128 (i.e. does not end on a
+  256-byte page) lost its advance and the next copy re-read from the page
+  start. The stripes scenes' 16-word tile regions (sprite3/sprite10) then
+  loaded char 64's tile into char 65 and the SG block from the tiles' page
+  start — the viewer showed white where the renderer has red. `copy_words`
+  now walks a true 16-bit pointer across calls, and the check's `vsprite3`
+  capture proves it (the old bank's capture failed byte 2080).
+- **`genroms.py`'s copy loops always write whole 256-word pages** (`clx`/
+  `inx`/`bne` reads 256 entries), so a region shorter than a page copied
+  the next table's ROM bytes into VRAM. The stripes scenes' 16-word
+  regions carried 240 garbage words each into VRAM `$420`–`$50f` —
+  invisible, because the BAT never names those characters, so #12's diff-0
+  never saw it. `pages_of` now zero-pads the last page of every table; the
+  two scene ROMs were rebuilt and sprite3/sprite10 re-captured (their
+  frames are unchanged).
 
 ## `check-export.js` — byte equality (#9)
 
 Builds each sample scene's ROM with `renderer/pce-rom.js` — the module
 `renderer/index.html` loads — and compares it byte for byte with the PCEAS
-build `tools/gen/viewerN.pce`. Also loads the module through its
+build `tools/gen/viewerN.pce` (for the sprite scenes `tools/gen/vspriteN.pce`,
+#14's sample-set extension). Also loads the module through its
 browser-global branch and requires the same bytes. Prints the first differing
-offset if any; exit 0 only if all three scenes match. `--write N` writes
+offset if any; exit 0 only if all 14 scenes match. `--write N` writes
 `tools/gen/browserN.pce`, which `capture.sh N browser` runs.
 
 ## `check-us-card.js` — the US image is the exact bit-reverse (#25)

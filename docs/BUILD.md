@@ -55,8 +55,9 @@ code itself. After `make -C tools`, extract it from the PCEAS build:
 make -C tools bank0   # writes renderer/viewer-bank0.bin (8 KiB, committed)
 ```
 
-`tools/extract_bank0.py` reads bank 0 from all three viewer ROMs and refuses
-unless they are identical. The export test fails if the asset is stale.
+`tools/extract_bank0.py` reads bank 0 from every viewer ROM (viewer1-3 and
+#14's vsprite1-11) and refuses unless they are identical. The export test
+fails if the asset is stale.
 
 PCEAS also looks for include files in `PCE_INCLUDE`. `tools/hello.asm` needs
 none, and neither does the #8 viewer: it is a **self-contained adaptation** of
@@ -82,12 +83,13 @@ pointing at a cleared tile, then the background is enabled.
 mednafen tools/hello.pce
 ```
 
-## The browser export and its checks (#9)
+## The browser export and its checks (#9, #14)
 
 ```sh
 node tests/check-export.js          # browser .pce == PCEAS .pce, all scenes
 tools/capture.sh 1 browser          # run the browser-built ROM in Mednafen
-node tests/check-viewer.js          # frame/state diff for viewer and browser ROMs
+tools/capture.sh 1..11 vsprite      # run the #14 sprite viewer ROMs (SATB DMA)
+node tests/check-viewer.js          # frame/state diff for viewer/browser/vsprite ROMs
 ```
 
 How the browser lays out the ROM, where its bank 0 comes from, and what the

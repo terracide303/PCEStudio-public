@@ -67,11 +67,12 @@ builders read). It copies the constant viewer bank
 `renderer/viewer-bank0.bin` (`make -C tools bank0`, extracted from the PCEAS
 builds and refused if they differ) and lays out the data banks at
 [`docs/ROM_LAYOUT.md`](docs/ROM_LAYOUT.md)'s fixed places.
-`node tests/check-export.js` exits 0: for scenes 1/2/3 the browser's ROM is
-**byte-for-byte equal** to the PCEAS ROM (40960 bytes, sha256
-`92057e34…`/`57c62f2d…`/`49dffff8…`), including through the module's
+`node tests/check-export.js` exits 0: for all 14 sample scenes the browser's
+ROM is **byte-for-byte equal** to the PCEAS ROM (scene1/2/3 sha256
+`fad21114…`/`295260bb…`/`95ba93df…`; full table in
+[`docs/EXPORT.md`](docs/EXPORT.md)), including through the module's
 browser-global branch; a one-byte change to the reference makes it fail. The
-real page in headless Chrome reports the same equality for all three scenes.
+real page in headless Chrome reports the same equality for scene1.
 `tools/capture.sh N browser` builds the ROM with `pce-rom.js`, runs it in
 Mednafen and harvests `tests/dumps/browserN/`; `node tests/check-viewer.js`
 reports `browser1/2/3: OK (frame diff 0, vram/cram/regs match sceneN)`.
@@ -87,15 +88,15 @@ start them.
 checkbox (`?us=1` for a headless run); `renderer/pce-rom.js`'s `reverseBits()`
 gives the US image, which is the .pce with every byte's bits reversed.
 `node tests/check-us-card.js` exits 0: scenes 1/2/3 are 40960 bytes, every byte
-the bit-reverse of the .pce (3,511/5,546/10,429 bytes differ; sha256
-`b9a7524e…`/`097fbd25…`/`8a3d67db…`), the comparison rejects the un-reversed
+the bit-reverse of the .pce (3,935/5,970/10,853 bytes differ; sha256
+`cc1c1b6f…`/`3e386bf9…`/`aa115f22…`), the comparison rejects the un-reversed
 and one-byte-error images, and the real page reports the same bytes headlessly.
 **Measured limit: Mednafen 1.32.1 shows the US image as a single-colour white
 frame** (`tests/dumps/us1/`, 59,392/59,392 pixels `(252,252,252)` vs 120
 colours for scene1) — and that matches its source: `src/pce/huc.cpp`'s
 `HuC_Load` copies the file unchanged and Mednafen has no US/region mode, so no
 emulator run can confirm the image. The card stays `[~]` for Dennis: run
-`tools/gen/us1.pce` (sha256 `b9a7524e…`, built by `node tests/check-us-card.js
+`tools/gen/us1.pce` (sha256 `cc1c1b6f…`, built by `node tests/check-us-card.js
 --write 1`) on a TurboGrafx-16 or its flash cart and photograph it into
 `docs/`. Details: [`docs/EXPORT.md`](docs/EXPORT.md).
 
@@ -109,7 +110,7 @@ colour outside the tile's palette, a character past the 32768-word VRAM.
 `node tests/check-editor.js` exits 0: 12/12 refusals with their codes; the
 demo picture (256×224, 896 cells, 133 tiles after dedupe, 6 palettes) is
 recomputed from the editor model and equals `pce-bg.js` drawing it; the ROM
-(40960 bytes, sha256 `670001f5…`) carries exactly the editor's config,
+(40960 bytes, sha256 `486477d6…`) carries exactly the editor's config,
 palettes, BAT and tiles; `tests/dumps/painted/` is that ROM's Mednafen capture
 — its VRAM/CRAM/regs are the editor's and its frame equals the editor's
 picture, diff 0 — and `node tests/check.js` reports 10 pictures diff 0.
@@ -119,9 +120,33 @@ real page headlessly reports the same bytes and `rules: 3/3 refused`. Details
 and limits: [`docs/EDITOR.md`](docs/EDITOR.md). The test was written by
 @design and is flagged for @review to read cold.
 
+**#14 is done.** The viewer loads the sprites. `tools/viewer.asm` copies the
+SAT (256 words) from bank 1 `$0440` to VRAM `$7f00`, sets DVSSR = `$7f00` and
+DCR bit 4 (DSR), so the VDC's SATB DMA re-loads the SAT into the SATB every
+VBlank (VDC manual DCR R0F p. H7-11, SATB 2.4.2 p. H7-20, DVSSR R13
+p. H7-12), and loads all 512 colour-table entries (sprite palettes come
+too). `tools/genviewer.py` emits `vspriteN` ROMs of #12's sprite scenes;
+`renderer/pce-rom.js` lays the SAT into bank 1, so the #9 browser export
+carries it as well ([`docs/ROM_LAYOUT.md`](docs/ROM_LAYOUT.md)). Proven:
+`node tests/check-viewer.js` exits 0 on **17 captures** (viewer1-3,
+browser1-3, vsprite1-11) — every viewer frame diff 0 against the renderer
+(#12's close condition now holds for the viewer too) and the captured
+VRAM/CRAM/DCR/SATB registers and the SATB mirror equal the scene dumps, so
+the DMA really carried the SAT. `node tests/check-export.js` exits 0 on all
+14 scenes; `check.js` still reports 41 pictures diff 0. Two #14 finds, both
+invisible to the frame checks and caught by VRAM byte equality: a
+`copy_words` page-position bug in `viewer.asm` (a copy not ending on a
+256-byte page was re-read from the page start) and a `genroms.py` table
+overrun (the stripes scenes' 16-word regions copied 240 garbage words into
+VRAM); both fixed, sprite3/sprite10 rebuilt and re-captured, details in
+[`tests/README.md`](tests/README.md). Tests written by @design — flagged for
+@review to read cold.
+
 ## Next action
 
 `../workshop/board.py next PCEStudio --who design`. #11 (@review) reads Phase
-1 cold, #5–#10. #8 stays parked until Dennis photographs `tools/gen/viewer1.pce`
-on the Tang Nano; #25 waits on Dennis's TurboGrafx photo of `tools/gen/us1.pce`.
+1 cold, #5–#10, and #14's viewer evidence. #8 stays parked until Dennis
+photographs `tools/gen/viewer1.pce` on the Tang Nano; #25 waits on Dennis's
+TurboGrafx photo of `tools/gen/us1.pce`. #13 ("A sprite editor and the SATB
+in the export") is still backlog.
 

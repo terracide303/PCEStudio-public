@@ -1,26 +1,32 @@
 #!/usr/bin/env node
 /*
  * tests/check-viewer.js — diff a viewer ROM's Mednafen frames against the
- * #5 renderer (card #8's closing measurement; also used for #9's
- * browser-built ROMs, tests/dumps/browserN/).
+ * renderer (card #8's closing measurement; #14 extends it to the sprite
+ * scenes; also used for #9's browser-built ROMs, tests/dumps/browserN/).
  *
  * NOTE: written by @design because the card's close condition needs a diff
  * script; per the workshop role split this is flagged for @review to read
  * cold (same arrangement as tests/check.js for #5).
  *
- * For every tests/dumps/{viewer,browser}<N>/ directory with a mednafen.png:
- *   - renders the frame for #5's scene N with renderer/pce-bg.js from
- *     tests/dumps/sceneN/{vram.bin,cram.bin,regs.json} — the renderer is the
- *     pixel reference (#5 proved it matches Mednafen's own scene ROMs) — and
+ * For every tests/dumps/{viewer,browser,vsprite}<N>/ directory with a
+ * mednafen.png:
+ *   - renders the frame for the matching scene (sceneN for viewer/browserN,
+ *     spriteN for vspriteN) with the renderer — pce-sprites.js when the
+ *     scene has a sat.bin, else pce-bg.js — from
+ *     tests/dumps/{scene,sprite}N/{vram.bin,cram.bin,regs.json,sat.bin} and
  *     requires the viewer's recorded frame to equal it byte for byte
- *     (diff 0);
+ *     (diff 0).  The renderer is the pixel reference (#5 and #12 proved it
+ *     matches Mednafen's own scene ROMs);
  *   - requires the viewer's captured state to contain what the viewer was
- *     told to load: vram.bin equal to the scene's (the tiles and the BAT
- *     landed), the first 512 bytes of cram.bin equal to the scene's (the 16
- *     palettes landed), and the static VDC registers (MWR/BXR/BYR/CR/VSR/VDR/
- *     HSR/HDR) equal to the scene's (256x224 mode, scroll from the config).
+ *     told to load: vram.bin equal to the scene's (the tiles, the BAT, the
+ *     SG patterns and the SAT all landed), the full 1024-byte cram.bin equal
+ *     to the scene's (all 512 colour-table entries landed), the SATB mirror
+ *     sat.bin equal to the scene's (the DCR bit-4 DMA carried the SAT — the
+ *     #14 evidence), and the static VDC registers (MWR/BXR/BYR/CR/VSR/VDR/
+ *     HSR/HDR/DCR/SATB) equal to the scene's (256x224 mode, scroll from the
+ *     config, SATB DMA source).
  *
- * Exit code 0 only if every viewer capture matches on all three checks.
+ * Exit code 0 only if every viewer capture matches on all checks.
  */
 
 "use strict";
@@ -29,6 +35,7 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const bg = require("../renderer/pce-bg.js");
+const sprites = require("../renderer/pce-sprites.js");
 
 /* ---- minimal PNG reader: 8-bit, non-interlaced, colour types 0/2/6 ---- */
 function decodePng(buf) {
@@ -116,12 +123,21 @@ function diffPixels(got, ref, name) {
          `${ref.width * ref.height * 3} bytes\n` + samples.map((s) => `  ${s}`).join("\n");
 }
 
-const VDC_REGS = ["MWR", "BXR", "BYR", "CR", "VSR", "VDR", "HSR", "HDR"];
+const VDC_REGS = ["MWR", "BXR", "BYR", "CR", "VSR", "VDR", "HSR", "HDR",
+                  "DCR", "SATB"];
+
+/* The matching scene dir for a viewer capture: viewerN/browserN -> sceneN,
+ * vspriteN -> spriteN (#14). */
+function sceneDir(dir) {
+  const name = path.basename(dir);
+  const scene = name.replace(/^vsprite/, "sprite")
+                    .replace(/^(?:viewer|browser)/, "scene");
+  return path.join(path.dirname(dir), scene);
+}
 
 function checkViewer(dir) {
   const name = path.basename(dir);
-  const scene = name.replace(/^(?:viewer|browser)/, "scene");
-  const scenedir = path.join(path.dirname(dir), scene);
+  const scenedir = sceneDir(dir);
   const problems = [];
 
   const svram = fs.readFileSync(path.join(scenedir, "vram.bin"));
@@ -130,34 +146,56 @@ function checkViewer(dir) {
   const vvram = fs.readFileSync(path.join(dir, "vram.bin"));
   const vcram = fs.readFileSync(path.join(dir, "cram.bin"));
   const vregs = JSON.parse(fs.readFileSync(path.join(dir, "regs.json"), "utf8"));
+  const ssatPath = path.join(scenedir, "sat.bin");
+  const vsatPath = path.join(dir, "sat.bin");
 
-  // 1. the frame: renderer on #5's dump vs the viewer's recorded frame
-  const got = bg.renderFrame({ vram: svram, cram: scram, regs: sregs,
-                               width: 256, height: 232 });
+  // 1. the frame: the renderer on the scene's dump vs the viewer's recorded
+  // frame.  The sprite scenes render through the sprites module (the
+  // sat.bin marks them), the same route tests/check.js uses; the sprites
+  // module equals the background renderer on a sprite-free picture.
+  const opts = { vram: svram, cram: scram, regs: sregs,
+                 width: 256, height: 232 };
+  if (fs.existsSync(ssatPath)) opts.sat = fs.readFileSync(ssatPath);
+  const got = fs.existsSync(ssatPath)
+    ? sprites.renderFrame(opts) : bg.renderFrame(opts);
   const ref = decodePng(fs.readFileSync(path.join(dir, "mednafen.png")));
   const p = diffPixels(got, ref, name);
   if (p) problems.push(p);
 
-  // 2. the state: the viewer really loaded the tiles + BAT and the palettes
+  // 2. the state: the viewer really loaded the tiles + BAT + SG patterns +
+  // the SAT, the palettes, and the SATB DMA carried the SAT
   if (!vvram.equals(svram)) {
     let first = 0;
     while (first < vvram.length && vvram[first] === svram[first]) first++;
-    problems.push(`${name}: vram differs from ${scene} at byte ${first} ` +
-                  `(tiles/BAT did not land)`);
+    problems.push(`${name}: vram differs from ${path.basename(scenedir)} ` +
+                  `at byte ${first} (copied data did not land)`);
   }
-  if (!vcram.subarray(0, 512).equals(scram.subarray(0, 512))) {
+  if (!vcram.equals(scram)) {
     let first = 0;
-    while (first < 512 && vcram[first] === scram[first]) first++;
-    problems.push(`${name}: cram differs from ${scene} at byte ${first} ` +
-                  `(the 16 palettes did not land)`);
+    while (first < vcram.length && vcram[first] === scram[first]) first++;
+    problems.push(`${name}: cram differs from ${path.basename(scenedir)} ` +
+                  `at byte ${first} (the 512 colour-table entries did not land)`);
   }
   for (const r of VDC_REGS) {
     if (vregs[r] !== sregs[r])
-      problems.push(`${name}: ${r}=${vregs[r]} but ${scene} has ${sregs[r]}`);
+      problems.push(`${name}: ${r}=${vregs[r]} but ` +
+                    `${path.basename(scenedir)} has ${sregs[r]}`);
+  }
+  if (fs.existsSync(ssatPath) && fs.existsSync(vsatPath)) {
+    const ssat = fs.readFileSync(ssatPath);
+    const vsat = fs.readFileSync(vsatPath);
+    if (!vsat.equals(ssat)) {
+      let first = 0;
+      while (first < vsat.length && vsat[first] === ssat[first]) first++;
+      problems.push(`${name}: sat.bin differs from ` +
+                    `${path.basename(scenedir)} at byte ${first} ` +
+                    `(the SATB DMA did not carry the SAT)`);
+    }
   }
 
   if (problems.length === 0) {
-    console.log(`${name}: OK (frame diff 0, vram/cram/regs match ${scene})`);
+    console.log(`${name}: OK (frame diff 0, vram/cram/sat/regs match ` +
+                `${path.basename(scenedir)})`);
     return 0;
   }
   problems.forEach((s) => console.log(s));
@@ -171,22 +209,22 @@ function main() {
     return 2;
   }
   const dirs = fs.readdirSync(dumps).filter((d) =>
-    /^(?:viewer|browser)[0-9]$/.test(d) &&
+    /^(?:viewer|browser)[0-9]$|^vsprite[0-9]+$/.test(d) &&
     fs.existsSync(path.join(dumps, d, "mednafen.png")) &&
-    fs.existsSync(path.join(dumps, "scene" + d.replace(/^(?:viewer|browser)/, ""),
-                            "regs.json")))
+    fs.existsSync(path.join(sceneDir(path.join(dumps, d)), "regs.json")))
     .sort().map((d) => path.join(dumps, d));
   if (dirs.length === 0) {
-    console.error("no viewer/browser dumps with a matching scene found — " +
-                  "run tools/capture.sh N viewer (or browser) first");
+    console.error("no viewer/browser/vsprite dumps with a matching scene " +
+                  "found — run tools/capture.sh N viewer (or browser, or " +
+                  "vsprite) first");
     return 2;
   }
   let failed = 0;
   for (const dir of dirs) failed += checkViewer(dir);
   console.log(failed === 0
-    ? `PASS: viewer/browser ROMs match the renderer pixel for pixel on ` +
-      `${dirs.length} capture(s)`
-    : `FAIL: ${failed} viewer/browser capture(s) differ`);
+    ? `PASS: viewer/browser/vsprite ROMs match the renderer pixel for ` +
+      `pixel on ${dirs.length} capture(s)`
+    : `FAIL: ${failed} viewer/browser/vsprite capture(s) differ`);
   return failed === 0 ? 0 : 1;
 }
 
