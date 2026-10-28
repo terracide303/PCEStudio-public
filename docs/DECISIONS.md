@@ -66,3 +66,13 @@ code plus MIT HuDK code. If that caveat becomes unacceptable, `cc65`/`ca65` (zli
 (`--cpu huc6280`) and is the clean fallback, at the cost of writing our own PCE bank/linker setup and dropping
 PCEAS's PCX directives.
 
+
+## 2026-10-28 — Hardware checks wait for Dennis; Opus cards get one DeepSeek trial (Dennis)
+
+- **Hardware.** Dennis has a real PC Engine with an AliExpress flash cart that runs both Japanese and US images, a
+  MiSTer, and the Tang Nano — no TurboGrafx-16. #25 is closed as *not proven on hardware*. #8's photo is parked for
+  him to do later ("keep this test for me for later"); any of the three machines may supply it, the real PC Engine
+  first. Until then a second emulator (ares) stands in as the extra check.
+- **Cards routed to #opus.** Claude stays scarce. Each Opus card is first tried on DeepSeek (ds-pro) with a small
+  budget. If DeepSeek fails it twice, the card is **parked**, not escalated to Claude — "there is no super hurry in
+  this project"; other cards go first.
