@@ -302,6 +302,25 @@ control ever passes**. Record with `tools/capture-review16.sh trace` (needs
 the instrumented Mednafen in `MEDNAFEN_TRACE`; it exits 2, NOT RUN, without
 it).
 
+#74 adds `vraster13`, the mixed-op fixture REVIEW-30's V1 no-op asked for:
+232 steps that alternate colour-only CRAM writes (`op` bit 3) and BYR-only
+writes (`op` bit 1), built by `tools/genreview16.py r13` so viewer.asm's
+per-step dispatch vector (`$2240`) has a witness. Every shipped table is
+homogeneous, so deleting the vector update changes nothing on any of them;
+on `vraster13` the first odd step is dispatched to the colour stub and the
+saved `BYR`/colour table and the frame disagree with the table (measured:
+`saved BYR=0 != table's 81`, `cram entry 0: table 1ff != state 0`, 100256
+differing pixels, while the other 34 captures and both trace fixtures stay
+green). The fixture is
+required by name and its table must still mix the two shapes: deleting it or
+homogenizing it fails the suite rather than quietly removing the evidence.
+Build the scene and viewer with `python3 -I tools/genreview16.py r13 --all`,
+then `tools/capture.sh 13 raster` and `tools/capture.sh 13 vraster` (the
+scene dump must exist before the viewer build). Not proven: any other pair
+of shapes (e.g. the second-word-only stub `prestep_c2`), the mixed
+register-plus-two-colour step #69 says cannot fit the blank, and hardware —
+the witness is Mednafen.
+
 The #42 extension is `docs/REVIEW-14.md`'s settling evidence, measured on
 these captures with the break re-applied to `tools/viewer.asm` and the
 check run against the mutant capture:
@@ -622,6 +641,19 @@ defined in `init()`), the refusals by code (`reg-forbidden`, `reg-range`,
 `pal-range`, `vram-range`, `sprite-range`, `raster-line`, `raster-line-full`,
 `password-value`, `password-code`, `toy-timeout`, `toy-error` with
 `toy.lua:<line>`), the sandbox doors, and the password round trip.
+
+#74 closes REVIEW-30's three misses. Every pad 1-5 is given a different
+button and the toy prints all eight fields of each pad on two frames with
+different button sets, so A6's `pad[n]` reading `pad[1]` (or any
+cross-wiring) changes a printed line. The password caps are the #73 round
+trips at every documented maximum — the 64-byte string is A7's measured miss.
+Each of the three toy loops and a dedicated counting toy assert the frames
+actually run (the host's frame index plus the toy's own `frame()` counter),
+and the summary banner is printed from the smallest measured count, not from
+`FRAMES`, so a loop shortened to 39 frames cannot leave a banner claiming 40.
+Re-run against the breaks (one at a time, in an isolated copy): A6 DETECTED
+(8 failures), A7 DETECTED (`a bad string length in the code` at 64 bytes),
+A12 DETECTED (6 failures, all reporting 39 frames).
 
 **It does not prove hardware or the browser.** The hand-built expectation and
 the runtime share the model, so a model bug cancels out; the check proves the
