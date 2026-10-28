@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- PCEStudio — the studio (card #75, first half: layout + run + panels).
+<!-- PCEStudio — the studio (card #75, first and second halves).
 
      One page shaped like ppu.toys' Studio: a code column on the left with the
      model's panel dock under it, and the live output column on the right with
@@ -8,12 +8,24 @@
      docs/STUDIO.md; the screenshots that evidence the likeness are under
      $TMPDIR, never in the repo.
 
-     Nothing here is ppu.toys' code or CSS: the layout is mirrored, the page
-     is ours. The toy itself is PCEStudio's own pipeline — renderer/pce-toys.js
+     CREDIT — ppu.toys, MIT, Copyright (c) 2026 Liora Labs. Dennis's
+     2026-10-28 decision allows taking the site's files with credit. The
+     design tokens (colours, fonts, radii), the toolbar/file-tab/dock-tab/
+     button/menu/settings rules and the docs page layout (hero, kicker,
+     search, chapter map, sticky TOC, chapter cards) in this file are adapted
+     from ppu.toys' served stylesheet
+         https://ppu.toys/assets/App-6Y57MjOu.css
+     and the docs page at https://ppu.toys/docs, fetched 2026-10-28. The
+     selectors are ours; no ppu.toys JavaScript is used. docs/STUDIO.md lists
+     every source file and what was taken from it.
+
+     The toy itself is PCEStudio's own pipeline — renderer/pce-toys.js
      (Fengari) or renderer/pce-il.js (the IL interpreter) over the one toy
      host (renderer/pce-toyhost.js), drawn by renderer/pce-sprites.js and
      renderer/pce-bg.js, the models diffed against Mednafen, and inspected by
-     the #26 panels (renderer/pce-panels.js).
+     the #26 panels (renderer/pce-panels.js). The Docs panel renders #61's
+     generated reference (renderer/pce-docs.js → renderer/docs.html) with
+     ppu.toys' docs layout adapted around it.
 
      Serve the repo root and open renderer/studio.html:
          python3 -m http.server 8000
@@ -21,6 +33,7 @@
        ?demo=<palette|raster|sprite>  load that example
        ?frame=N                       seek to frame N and pause (a screenshot)
        ?paused=1                      load without autoplay
+       ?docs=<chapter>                open the Docs panel at a chapter
        ?selftest=1&frames=40          run the example headlessly, write the
                                       result to <pre id="selftest"> and the title
      The evidence runner is tests/check-studio.js. -->
@@ -29,26 +42,45 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PCEStudio — studio</title>
+<!-- The font families and this Google Fonts URL are the ones ppu.toys uses
+     (adapted; see the credit block above). The fallbacks keep the page usable
+     offline. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Pixelify+Sans:wght@600&display=swap">
 <style>
   :root {
-    --bg: #0b0d11;
+    /* ppu.toys' design tokens, adapted (source URL in the credit block). */
+    --bg: #0b0d13;
     --bar: #10131b;
-    --pane: #12151b;
-    --pane2: #181b22;
+    --pane: #12151e;
+    --pane2: #10131b;
+    --raised: #202532;
+    --chipbg: #1d2129;
+    --hover: #171a21;
     --code: #0d0f14;
-    --line: #262a33;
-    --line2: #333846;
-    --text: #e7e6e2;
-    --muted: #8f95a0;
-    --dim: #69707d;
-    --accent: #e08a3c;
-    --accent-ink: #1a1007;
-    --ok: #6fd0a0;
-    --bad: #ff7b7b;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --sunken: #0b0d12;
+    --line: #2a3040;
+    --line2: #202532;
+    --text: #e7e9ef;
+    --text2: #c8ccd6;
+    --muted: #9aa1ae;
+    --dim: #858d9c;
+    --faint: #3f4654;
+    --accent: #ff9540;
+    --accent-ink: #15100a;
+    --cyan: #5fc9e8;
+    --green: #5ec97a;
+    --ok: #5ec97a;
+    --bad: #ff5d6a;
+    --scrollbar-thumb: #2c313c;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --display: "Pixelify Sans", "IBM Plex Mono", ui-monospace, monospace;
   }
   * { box-sizing: border-box; }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 5px; }
   html, body { height: 100%; }
   body {
     margin: 0;
@@ -62,58 +94,59 @@
   [hidden] { display: none !important; }
 
   /* ---------- top bar ---------- */
-  .app { height: 100vh; display: grid; grid-template-rows: 52px minmax(0, 1fr); }
+  .app { height: 100vh; display: grid; grid-template-rows: 50px minmax(0, 1fr); }
   .topbar {
-    display: flex; align-items: center; gap: 14px;
-    padding: 0 14px; background: var(--bar);
-    border-bottom: 1px solid var(--line2); min-width: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 10px; background: var(--bar);
+    border-bottom: 1px solid var(--line); min-width: 0;
   }
   .brand {
     display: flex; align-items: center; gap: 8px;
-    color: var(--text); text-decoration: none; font-weight: 600;
-    letter-spacing: 0.01em; white-space: nowrap;
+    color: var(--text); text-decoration: none; white-space: nowrap;
   }
   .brand-mark {
-    width: 18px; height: 18px; border-radius: 3px;
+    width: 24px; height: 24px; border-radius: 4px;
     background:
-      linear-gradient(90deg, #8f7ae6 0 50%, #6d55cf 50% 100%);
-    box-shadow: inset 0 0 0 1px #b3a4f2;
+      linear-gradient(90deg, #9a86ee 0 50%, #745ad6 50% 100%);
+    box-shadow: inset 0 0 0 1px #b9a3e8;
     position: relative;
   }
   .brand-mark::after {
-    content: ""; position: absolute; inset: 4px;
+    content: ""; position: absolute; inset: 5px;
     background:
-      linear-gradient(#0b0d11, #0b0d11) 0 0 / 4px 4px no-repeat,
-      linear-gradient(#0b0d11, #0b0d11) 6px 6px / 4px 4px no-repeat;
+      linear-gradient(var(--bg), var(--bg)) 0 0 / 4px 4px no-repeat,
+      linear-gradient(var(--bg), var(--bg)) 8px 8px / 4px 4px no-repeat;
   }
-  .brand-name { font-size: 15px; }
+  .brand-name { font: 600 17px/1 var(--display); letter-spacing: 0.01em; }
   .brand-dot { color: var(--accent); }
   .doc-head {
-    display: flex; align-items: baseline; gap: 10px; min-width: 0;
-    padding-left: 2px;
+    display: flex; align-items: baseline; gap: 7px; min-width: 0;
+    padding-left: 4px;
   }
   .doc-title {
-    font-weight: 600; white-space: nowrap; overflow: hidden;
-    text-overflow: ellipsis; max-width: 28vw;
+    font: 13px var(--sans); color: var(--muted); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 28vw;
   }
-  .saved { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .saved { color: var(--dim); font: 11px var(--sans); white-space: nowrap; }
   .top-actions {
-    margin-left: auto; display: flex; align-items: center; gap: 7px;
+    margin-left: auto; display: flex; align-items: center; gap: 8px;
     min-width: 0; flex-wrap: nowrap;
   }
   .btn {
-    background: var(--pane2); border: 1px solid var(--line2);
-    border-radius: 5px; padding: 5px 10px; color: var(--text);
-    white-space: nowrap; text-decoration: none; display: inline-flex;
-    align-items: center; gap: 6px; line-height: 1.2;
+    display: inline-flex; align-items: center; justify-content: center;
+    height: 30px; padding: 0 11px; gap: 6px; line-height: 1;
+    background: var(--pane); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--text2);
+    font: 400 13px var(--sans); white-space: nowrap; text-decoration: none;
+    cursor: pointer;
   }
-  .btn:hover { background: #20242d; border-color: #414859; }
+  .btn:hover { background: var(--hover); }
   .btn-accent {
-    background: var(--accent); border-color: var(--accent);
+    padding: 0 14px; border-color: transparent; background: var(--accent);
     color: var(--accent-ink); font-weight: 600;
   }
-  .btn-accent:hover { background: #efa052; border-color: #efa052; }
-  .btn-icon { padding: 5px 8px; }
+  .btn-accent:hover { background: color-mix(in srgb, var(--accent) 85%, #fff); }
+  .btn-icon { padding: 0 8px; }
   .account { color: var(--dim); font-size: 12px; white-space: nowrap; }
 
   /* ---------- the two columns ---------- */
@@ -123,40 +156,50 @@
   }
   .workspace {
     display: grid; grid-template-rows: minmax(220px, 44.3fr) minmax(0, 55.7fr);
-    min-height: 0; border-right: 1px solid var(--line2);
+    min-height: 0; border-right: 1px solid var(--line);
   }
 
   /* ---------- code column ---------- */
   .code-pane {
-    display: grid; grid-template-rows: 24px 30px minmax(0, 1fr);
+    display: grid; grid-template-rows: 30px 36px minmax(0, 1fr);
     min-height: 0; background: var(--code);
   }
   .code-tabs {
-    display: flex; align-items: stretch; gap: 2px; padding: 0 10px;
-    background: var(--bar); border-bottom: 1px solid var(--line);
+    display: flex; align-items: stretch; gap: 4px; padding: 0 10px;
+    background: var(--pane2); border-bottom: 1px solid var(--line2);
   }
   .ctab {
     background: transparent; border: 0; color: var(--dim);
-    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
-    padding: 0 7px; border-bottom: 2px solid transparent;
+    font: 500 11px var(--mono); letter-spacing: 0.1em;
+    padding: 0 12px;
   }
-  .ctab.is-on { color: var(--text); border-bottom-color: var(--accent); }
+  .ctab:hover { color: var(--text2); }
+  .ctab.is-on { color: var(--text); background: var(--code); }
   .file-bar {
-    display: flex; align-items: center; gap: 8px; padding: 0 10px;
-    background: #0f1218; border-bottom: 1px solid var(--line); min-width: 0;
+    display: flex; align-items: stretch; gap: 0; padding: 0;
+    background: var(--pane2); border-bottom: 1px solid var(--line2);
+    min-width: 0;
   }
-  .file-tabs { display: flex; gap: 2px; min-width: 0; }
+  .file-tabs { display: flex; min-width: 0; }
   .file-tab {
-    background: transparent; border: 1px solid transparent; border-radius: 4px;
-    color: var(--muted); padding: 2px 8px; font: 12px var(--mono);
+    display: flex; align-items: center; gap: 7px;
+    background: transparent; border: 0; border-bottom: 2px solid transparent;
+    color: var(--dim); padding: 0 15px; font: 12px var(--mono);
+    white-space: nowrap;
   }
-  .file-tab.is-on { background: #1a1e26; border-color: var(--line2); color: var(--text); }
-  .file-add { color: var(--dim); padding: 2px 7px; }
+  .file-tab:hover { color: var(--text2); }
+  .file-tab.is-on {
+    background: var(--code); color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  .file-add { color: var(--dim); padding: 0 10px; font: 14px var(--mono); }
+  .file-add:hover { color: var(--text); background: var(--hover); }
   .file-status {
     margin-left: auto; display: flex; align-items: center; gap: 6px;
-    color: var(--dim); font: 11px var(--mono); white-space: nowrap;
+    padding: 0 14px; color: var(--dim); font: 10px var(--mono);
+    white-space: nowrap;
   }
-  .file-status .dot { color: var(--line2); }
+  .file-status .dot { color: var(--faint); }
   .editor {
     display: grid; grid-template-columns: 46px minmax(0, 1fr);
     min-height: 0; background: var(--code);
@@ -165,13 +208,13 @@
   .editor.no-gutter .gutter { display: none; }
   .gutter {
     margin: 0; padding: 10px 8px 20px 0; overflow: hidden;
-    text-align: right; color: #4d5562; font: 12px/1.55 var(--mono);
-    background: #0b0e13; border-right: 1px solid #171b23;
+    text-align: right; color: var(--faint); font: 12px/1.55 var(--mono);
+    background: var(--code); border-right: 1px solid var(--line2);
     user-select: none;
   }
   #source {
     resize: none; border: 0; outline: 0; background: transparent;
-    color: #d9dde4; padding: 10px 14px 20px 10px;
+    color: var(--text2); padding: 10px 14px 20px 10px;
     font: 12px/1.55 var(--mono); tab-size: 2; white-space: pre;
     overflow: auto; min-width: 0;
   }
@@ -185,47 +228,53 @@
 
   /* ---------- the panel dock ---------- */
   .dock {
-    display: grid; grid-template-rows: 27px 28px minmax(0, 1fr);
-    min-height: 0; background: var(--pane); border-top: 1px solid var(--line2);
+    display: grid; grid-template-rows: 30px 28px minmax(0, 1fr);
+    min-height: 0; background: var(--pane); border-top: 1px solid var(--line);
   }
   .dock-tabs {
-    display: flex; align-items: stretch; gap: 12px; padding: 0 10px;
-    background: #141820; border-bottom: 1px solid var(--line);
+    display: flex; align-items: stretch; gap: 14px; padding: 0 10px;
+    background: var(--pane2); border-bottom: 1px solid var(--line);
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
   }
   .dock-tabs::-webkit-scrollbar { display: none; }
   .dtab {
-    background: transparent; border: 0; border-bottom: 2px solid transparent;
-    color: var(--dim); font-size: 11px; font-weight: 700;
-    letter-spacing: 0.06em; padding: 0 1px; white-space: nowrap;
+    background: transparent; border: 0;
+    color: var(--dim); font: 500 11px var(--mono); letter-spacing: 0.1em;
+    padding: 0 4px; white-space: nowrap;
   }
-  .dtab.is-on { color: var(--text); border-bottom-color: var(--accent); }
+  .dtab:hover { color: var(--text2); }
+  .dtab.is-on { color: var(--text); background: var(--pane); }
   .dock-head {
-    display: flex; align-items: baseline; gap: 10px; padding: 0 12px;
-    background: var(--pane); border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px; padding: 0 10px;
+    background: var(--pane2); border-bottom: 1px solid var(--line2);
     min-width: 0;
   }
   .dock-title {
-    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+    font: 500 11px var(--mono); letter-spacing: 0.1em;
     color: var(--text); white-space: nowrap;
   }
   .dock-gloss {
-    color: var(--muted); font-size: 12px; white-space: nowrap;
+    color: var(--muted); font: 12px var(--sans); white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; min-width: 0;
   }
-  .guide { margin-left: auto; color: var(--accent); font-size: 12px; text-decoration: none; }
-  .inspect { color: var(--muted); font: 11px var(--mono); white-space: nowrap; }
-  .dock-body { overflow: auto; padding: 9px 12px 18px; min-height: 0; }
+  .guide {
+    margin-left: auto; padding: 0; border: 0; background: none;
+    color: var(--cyan); font: 12px var(--sans); text-decoration: underline;
+    text-underline-offset: 3px; white-space: nowrap; cursor: pointer;
+  }
+  .guide:hover { color: var(--text); }
+  .inspect { color: var(--dim); font: 11px var(--mono); white-space: nowrap; }
+  .dock-body { overflow: auto; padding: 8px 10px 16px; min-height: 0; }
   .panel { min-height: 0; }
   .panel h3 {
     font-size: 11px; letter-spacing: 0.08em; color: var(--muted);
     margin: 0 0 6px; font-weight: 700;
   }
   .panel p { color: var(--muted); margin: 0.4rem 0; max-width: 52rem; }
-  .summary { font: 12px var(--mono); color: #cfd4dd; white-space: pre-wrap; }
-  .follow { font: 12px var(--mono); color: #9fd2ff; white-space: pre-wrap; margin-top: 8px; }
+  .summary { font: 12px var(--mono); color: var(--text2); white-space: pre-wrap; }
+  .follow { font: 12px var(--mono); color: var(--cyan); white-space: pre-wrap; margin-top: 8px; }
   .table {
-    margin: 0; color: #b9bec8; font: 11px/1.45 var(--mono);
+    margin: 0; color: var(--text2); font: 11px/1.45 var(--mono);
     white-space: pre; overflow: visible;
   }
   #vrammap { width: 100%; height: 44px; image-rendering: pixelated; display: block; }
@@ -242,40 +291,49 @@
   /* ---------- output column ---------- */
   .output-pane {
     display: grid;
-    grid-template-rows: 27px 30px minmax(0, 1fr) auto auto 27px minmax(0, 0.6fr);
+    grid-template-rows: 30px 40px minmax(0, 1fr) auto auto 28px minmax(0, 0.6fr);
     min-height: 0; background: var(--pane); position: relative;
   }
   .out-head {
-    display: flex; align-items: center; gap: 10px; padding: 0 12px;
-    background: #141820; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 10px; padding: 0 10px;
+    background: var(--pane2); border-bottom: 1px solid var(--line);
     min-width: 0;
   }
   .out-sub {
-    display: flex; align-items: center; gap: 10px; padding: 0 12px;
+    display: flex; align-items: center; gap: 10px; padding: 0 10px;
     background: var(--pane); border-bottom: 1px solid var(--line);
     min-width: 0;
   }
   .out-title {
-    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+    font: 500 11px var(--mono); letter-spacing: 0.1em;
     color: var(--muted); white-space: nowrap;
   }
   .out-tab {
     background: transparent; border: 0; color: var(--text);
-    font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    font: 500 11px var(--mono); letter-spacing: 0.1em;
     padding: 0 2px; white-space: nowrap;
   }
   .btn-mini {
-    background: var(--pane2); border: 1px solid var(--line2);
-    border-radius: 4px; color: var(--muted); padding: 1px 7px;
-    font-size: 11px;
+    background: var(--raised); border: 1px solid var(--line);
+    border-radius: 3px; color: var(--text); padding: 3px 9px;
+    font: 12px var(--sans);
   }
+  .btn-mini:hover { background: var(--hover); }
   .out-head .spacer, .transport .spacer { margin-left: auto; }
   .chip {
-    background: transparent; border: 1px solid var(--line2); border-radius: 4px;
-    color: var(--muted); padding: 1px 7px; font-size: 10px;
-    letter-spacing: 0.06em; font-weight: 600;
+    background: var(--raised); border: 1px solid var(--line); border-radius: 4px;
+    color: var(--dim); padding: 2px 7px;
+    font: 11px var(--mono); letter-spacing: 0.04em;
   }
-  .chip.is-on { color: var(--text); border-color: var(--accent); }
+  .chip:hover { color: var(--mid); }
+  .chip.is-on {
+    color: var(--cyan);
+    background: color-mix(in srgb, var(--cyan) 14%, transparent);
+    border-color: color-mix(in srgb, var(--cyan) 55%, transparent);
+  }
+  #btn-lua.is-on, #btn-cart.is-on {
+    color: var(--text); background: var(--raised); border-color: var(--line2);
+  }
   .res { color: var(--dim); font: 10px var(--mono); white-space: nowrap; }
   .canvas-wrap {
     position: relative; min-height: 0; background: #050608;
@@ -309,39 +367,46 @@
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); max-width: 80%;
   }
   .transport {
-    display: flex; align-items: center; gap: 6px; padding: 7px 12px;
-    border-top: 1px solid var(--line); background: #10141b;
+    display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    border-top: 1px solid var(--line); background: var(--pane2);
   }
   .tbtn {
-    background: var(--pane2); border: 1px solid var(--line2);
-    border-radius: 4px; color: var(--text); min-width: 28px;
-    padding: 2px 6px; font: 11px var(--mono);
+    width: 26px; height: 26px; display: grid; place-items: center;
+    background: var(--chipbg); border: 1px solid var(--line);
+    border-radius: 6px; color: var(--text2); padding: 0;
+    font: 11px var(--mono); cursor: pointer;
   }
-  #btn-play { color: var(--accent); }
-  .clock { color: var(--muted); font: 11px var(--mono); white-space: nowrap; margin-left: 4px; }
+  .tbtn:hover { background: var(--hover); }
+  #btn-play {
+    background: var(--accent); border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  #btn-play:hover { background: color-mix(in srgb, var(--accent) 85%, #fff); }
+  .clock { color: var(--dim); font: 11px var(--mono); white-space: nowrap; margin-left: 4px; }
   .scrub {
-    display: flex; align-items: center; gap: 10px; padding: 3px 12px 7px;
-    background: #10141b; border-top: 1px solid #191d25;
+    display: flex; align-items: center; gap: 10px; padding: 3px 10px 7px;
+    background: var(--pane2); border-top: 1px solid var(--line2);
   }
   #seek { flex: 1; min-width: 0; accent-color: var(--accent); height: 14px; }
   .length { color: var(--dim); font: 10px var(--mono); white-space: nowrap; }
   #length {
-    width: 3.7rem; background: #0c0f14; border: 1px solid var(--line2);
-    border-radius: 3px; color: var(--muted); font: 10px var(--mono);
+    width: 3.7rem; background: var(--sunken); border: 1px solid var(--line);
+    border-radius: 3px; color: var(--text2); font: 10px var(--mono);
     padding: 1px 3px;
   }
   .bottom-tabs {
-    display: flex; gap: 12px; align-items: stretch; padding: 0 12px;
-    background: #141820; border-top: 1px solid var(--line);
+    display: flex; gap: 12px; align-items: stretch; padding: 0 10px;
+    background: var(--pane2); border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
   }
   .btab {
     background: transparent; border: 0; border-bottom: 2px solid transparent;
-    color: var(--dim); font-size: 10px; font-weight: 700;
-    letter-spacing: 0.08em; padding: 4px 1px;
+    color: var(--dim); font: 500 11px var(--mono);
+    letter-spacing: 0.1em; padding: 4px 1px;
   }
+  .btab:hover { color: var(--text2); }
   .btab.is-on { color: var(--text); border-bottom-color: var(--accent); }
-  .bottom-body { overflow: auto; padding: 9px 12px 16px; min-height: 0; }
+  .bottom-body { overflow: auto; padding: 8px 10px 16px; min-height: 0; }
   .marker-list { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
   .marker {
     background: transparent; border: 0; color: #9fd2ff; text-align: left;
@@ -352,67 +417,104 @@
 
   /* ---------- popovers, modal, toast ---------- */
   .popover {
-    position: fixed; z-index: 20; background: #171b23;
-    border: 1px solid var(--line2); border-radius: 7px;
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
-    padding: 8px; min-width: 220px; max-height: 70vh; overflow: auto;
+    position: fixed; z-index: 20; background: var(--pane2);
+    border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+    padding: 6px; min-width: 170px; max-height: 70vh; overflow: auto;
   }
-  #panels-pop { top: 56px; right: 310px; }
-  #settings-pop { top: 56px; right: 226px; min-width: 260px; }
-  #open-pop { top: 56px; right: 24px; }
+  #panels-pop { top: 54px; right: 300px; min-width: 190px; }
+  #settings-pop { top: 54px; right: 218px; width: 280px; }
+  #open-pop { top: 54px; right: 24px; min-width: 250px; }
   .pop-head {
     display: flex; align-items: center; justify-content: space-between;
-    color: var(--dim); font-size: 10px; font-weight: 700;
-    letter-spacing: 0.09em; padding: 2px 4px 6px;
+    color: var(--dim); font: 9px var(--mono); letter-spacing: 0.13em;
+    padding: 6px 8px 3px;
   }
   .pop-close {
     background: transparent; border: 0; color: var(--dim);
-    font-size: 14px; line-height: 1; padding: 0 2px;
+    font-size: 14px; line-height: 1; padding: 0 2px; cursor: pointer;
   }
+  .pop-close:hover { color: var(--text); }
   .pop-item {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    background: transparent; border: 0; border-radius: 4px;
-    color: var(--text); text-align: left; padding: 5px 7px; font-size: 12px;
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    background: transparent; border: 0; border-radius: 5px;
+    color: var(--text2); text-align: left; padding: 6px 8px;
+    font: 12px var(--sans);
   }
-  .pop-item:hover { background: #222732; }
+  .pop-item:hover { background: var(--hover); }
   .pop-item .tick { width: 12px; color: var(--accent); font-size: 11px; }
   .pop-sep { height: 1px; background: var(--line); margin: 6px 2px; }
-  .pop-note { color: var(--dim); font-size: 11px; padding: 4px 7px; }
-  .seg { display: flex; gap: 4px; }
+  .pop-note { color: var(--dim); font: 11px var(--sans); padding: 4px 8px; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
   .seg button {
-    background: var(--pane2); border: 1px solid var(--line2);
-    border-radius: 4px; color: var(--muted); padding: 3px 9px; font-size: 11px;
+    background: transparent; border: 0; color: var(--dim);
+    padding: 3px 10px; font: 11px var(--sans);
   }
-  .seg button.is-on { color: var(--text); border-color: var(--accent); }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.is-on { background: var(--raised); color: var(--text); }
   .set-row {
     display: flex; align-items: center; justify-content: space-between;
-    gap: 12px; padding: 6px 7px;
+    gap: 10px; padding: 10px 12px;
+    border-bottom: 1px solid var(--line2);
   }
-  .set-label { color: var(--text); font-size: 12px; }
-  .set-hint { color: var(--dim); font-size: 10px; }
+  .set-row:last-child { border-bottom: 0; }
+  .set-label { color: var(--text); font: 12px var(--sans); display: flex; flex-direction: column; gap: 2px; }
+  .set-hint { color: var(--dim); font-size: 11px; }
   .modal {
     position: fixed; inset: 0; z-index: 30; background: rgba(3, 4, 6, 0.66);
     display: flex; align-items: center; justify-content: center;
   }
   .modal-card {
-    background: #171b23; border: 1px solid var(--line2); border-radius: 9px;
-    padding: 18px 20px; width: min(480px, 90vw);
+    background: var(--pane); border: 1px solid var(--line); border-radius: 8px;
+    padding: 18px 20px; width: min(500px, 90vw);
     box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
   }
-  .modal-card h2 { font-size: 15px; margin: 0 0 8px; }
+  .modal-card h2 { font: 600 16px var(--sans); margin: 0 0 8px; color: var(--text); }
+  .modal-card h2 .needs {
+    display: inline-block; margin-left: 8px; padding: 2px 6px;
+    border: 1px solid var(--bad); border-radius: 3px;
+    color: var(--bad); font: 10px var(--mono); letter-spacing: 0.08em;
+    vertical-align: 2px;
+  }
   .modal-card p { color: var(--muted); margin: 0 0 10px; }
+  .modal-card code { color: var(--text2); font-family: var(--mono); }
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
   .toast {
     position: fixed; z-index: 40; right: 16px; bottom: 16px;
-    background: #1b202a; border: 1px solid var(--line2); border-radius: 6px;
+    background: var(--pane); border: 1px solid var(--line); border-radius: 6px;
     color: var(--text); padding: 8px 12px; font: 12px var(--mono);
-    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5); max-width: 44rem;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4); max-width: 44rem;
   }
   .selftest {
     position: fixed; z-index: 50; left: 12px; bottom: 12px;
     background: #0d1a13; border: 1px solid #2f6b4d; border-radius: 5px;
     color: #8be2b1; padding: 6px 9px; font: 11px var(--mono); margin: 0;
   }
+  /* ---------- the docs panel (ppu.toys' docs page, docked) ---------- */
+  .docs-panel {
+    position: fixed; top: 50px; left: 0; right: 0; bottom: 0; z-index: 18;
+    display: grid; grid-template-rows: 52px minmax(0, 1fr);
+    background: var(--bg);
+  }
+  .docs-bar {
+    display: flex; align-items: center; gap: 12px; padding: 0 10px;
+    background: var(--pane2); border-bottom: 1px solid var(--line);
+    min-width: 0;
+  }
+  .docs-kicker {
+    color: var(--accent); font: 600 10px var(--mono);
+    letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap;
+  }
+  .docs-bar-title {
+    font: 600 17px var(--display); color: var(--text);
+    white-space: nowrap;
+  }
+  .docs-bar-note {
+    color: var(--dim); font: 11px var(--mono);
+    margin-left: auto; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .docs-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
   @media (max-width: 900px) {
     .studio { grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr 1fr; }
     .workspace { border-right: 0; border-bottom: 1px solid var(--line2); }
@@ -434,13 +536,14 @@
     <div class="top-actions">
       <button type="button" class="btn" id="btn-run">Run</button>
       <button type="button" class="btn" id="btn-check">Check</button>
-      <button type="button" class="btn btn-accent" id="btn-export">Export…</button>
+      <button type="button" class="btn btn-accent" id="btn-export"
+              title="Export .pce — needs #31 (the toy compiler)">Export…</button>
       <button type="button" class="btn" id="btn-panels" aria-haspopup="true"
               aria-expanded="false">Panels ▾</button>
       <button type="button" class="btn btn-icon" id="btn-settings"
               aria-label="Settings">⚙</button>
-      <a class="btn" id="link-docs" href="../docs/STUDIO.md"
-         target="_blank" rel="noopener">Docs</a>
+      <button type="button" class="btn" id="btn-docs"
+              title="The toy author's reference (#61)">Docs</button>
       <button type="button" class="btn" id="btn-save">Save file</button>
       <button type="button" class="btn" id="btn-open" aria-haspopup="true"
               aria-expanded="false">Open…</button>
@@ -491,7 +594,8 @@
         <div class="dock-head">
           <span class="dock-title" id="dock-title">SCREEN</span>
           <span class="dock-gloss" id="dock-gloss"></span>
-          <a class="guide" id="dock-guide" href="../docs/STUDIO.md#panels">Guide</a>
+          <button type="button" class="guide" id="dock-guide"
+                  title="Open the reference at this panel's chapter">Guide</button>
           <span class="inspect" id="inspect-line">line 0 · full frame</span>
         </div>
         <div class="dock-body" id="dock-body">
@@ -632,16 +736,32 @@
   <input type="file" id="file-input" accept=".lua,.txt" hidden>
 </div>
 
-<!-- Export (second half of the card) -->
+<!-- Docs: #61's generated reference, docked in the studio with ppu.toys'
+     docs layout adapted around it. -->
+<section class="docs-panel" id="docs-panel" aria-label="The toy author's reference" hidden>
+  <div class="docs-bar">
+    <span class="docs-kicker">DOCS</span>
+    <span class="docs-bar-title">The toy author's reference</span>
+    <span class="docs-bar-note">generated from the runtime's own tables (#61)</span>
+    <a class="btn" id="docs-standalone" href="docs.html" target="_blank"
+       rel="noopener">Open standalone</a>
+    <button type="button" class="btn btn-icon" id="docs-close"
+            aria-label="Close docs">×</button>
+  </div>
+  <iframe class="docs-frame" id="docs-frame"
+          title="PCEStudio — the toy author's reference"></iframe>
+</section>
+
+<!-- Export: a toy's .pce needs #31; the button says so instead of pretending. -->
 <div class="modal" id="export-modal" hidden>
   <div class="modal-card">
-    <h2>Export</h2>
-    <p>A toy becomes a HuCard through the compiler (#31): the IL half exists
-      and runs the same three examples, but there is no machine code or ROM
-      builder for a toy yet. Export wiring is the second half of this card.</p>
-    <p>The static picture path is already proven: the editor paints
-      VRAM/CRAM/registers and <b>Download .pce</b> builds the byte-exact ROM
-      (<code>docs/EXPORT.md</code>).</p>
+    <h2>Export .pce <span class="needs">NEEDS #31</span></h2>
+    <p>The toy compiler is card #31. Its IL half exists and runs the same
+      three examples, but there is no machine-code backend or toy ROM builder
+      yet, so this button cannot make a <code>.pce</code> from a toy.</p>
+    <p>The static picture path is already proven and separate: the editor
+      paints VRAM/CRAM/registers and <b>Download .pce</b> builds the
+      byte-exact ROM (<code>docs/EXPORT.md</code>).</p>
     <div class="modal-actions">
       <a class="btn" href="editor.html">Open the picture editor</a>
       <button type="button" class="btn btn-accent" id="export-close">Close</button>
@@ -659,6 +779,9 @@
 <script src="pce-toys.js"></script>
 <script src="pce-il.js"></script>
 <script src="pce-panels.js"></script>
+<script src="pce-editor.js"></script>
+<script src="pce-psg.js"></script>
+<script src="pce-docs.js"></script>
 <script>
 "use strict";
 /* -------------------------------------------------------------------------
@@ -787,6 +910,222 @@ const PAD_KEYS = {
   KeyI: "up", KeyK: "down", KeyJ: "left", KeyL: "right",
   KeyN: "i", KeyM: "ii", KeyO: "select", KeyP: "run"
 };
+
+/* A panel's Guide opens the #61 reference at the chapter that explains it.
+ * The chapter ids are docs.html's own section ids (pce-docs.js). */
+const DOCS_CHAPTER = {
+  screen: "registers", vram: "the-toy", palettes: "palettes",
+  sprites: "sprites", audio: "sound", scanlines: "raster",
+  registers: "registers", console: "budgets"
+};
+
+/* ---------------------------------------------------------------------
+ * The Docs panel. #61 generates the reference (renderer/pce-docs.js ->
+ * renderer/docs.html); the panel renders the same generator output, so the
+ * studio and the standalone page cannot disagree, and wraps it in ppu.toys'
+ * docs page layout (hero, kicker, search, chapter map, sticky TOC, chapter
+ * cards) adapted from the source listed in docs/STUDIO.md.
+ * ------------------------------------------------------------------ */
+const DOCS_FONT_LINK =
+  '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=' +
+  'IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700' +
+  '&family=Pixelify+Sans:wght@600&display=swap">';
+
+const DOCS_IFRAME_CSS = `
+  :root { --bg:#0b0d13; --panel:#12151e; --panel2:#10131b; --line:#2a3040;
+          --line2:#202532; --txt:#e7e9ef; --txt2:#c8ccd6; --mid:#9aa1ae;
+          --dim:#858d9c; --faint:#3f4654; --orange:#ff9540; --cyan:#5fc9e8;
+          --mono:"IBM Plex Mono",ui-monospace,monospace;
+          --display:"Pixelify Sans","IBM Plex Mono",monospace;
+          --sans:"IBM Plex Sans",system-ui,sans-serif; }
+  body { margin:0; background:var(--bg); color:var(--txt2);
+         font:14px/1.65 var(--sans); }
+  header { max-width:1180px; margin:0 auto; padding:2.6rem 2rem 1.4rem; }
+  header::before { content:"THE FIELD GUIDE"; display:block; margin-bottom:.8rem;
+    color:var(--orange); font:600 .72rem/1 var(--mono);
+    letter-spacing:.14em; text-transform:uppercase; }
+  header h1 { max-width:760px; margin:0 0 1rem; color:var(--txt);
+    font-family:var(--display); font-weight:600; font-size:clamp(2.4rem,5vw,4rem);
+    letter-spacing:-.04em; line-height:.98; }
+  header p { max-width:700px; margin:0; color:var(--mid); font-size:1.08rem; }
+  .docs-search { max-width:1180px; margin:0 auto 1.2rem; padding:0 2rem; }
+  .docs-search span { display:block; margin-bottom:.45rem; color:var(--txt2);
+    font:400 .72rem var(--mono); letter-spacing:.06em; text-transform:uppercase; }
+  .docs-search input { width:100%; max-width:560px; min-height:46px;
+    padding:.7rem .9rem; border:1px solid color-mix(in srgb,var(--orange) 48%,var(--line));
+    border-radius:6px; background:color-mix(in srgb,var(--orange) 6%,var(--panel));
+    color:var(--txt); font:.9rem var(--mono); }
+  .docs-search input::placeholder { color:var(--dim); opacity:1; }
+  .docs-search input:hover, .docs-search input:focus { border-color:var(--orange);
+    background:var(--panel); outline:none; }
+  .docs-result-count { max-width:1180px; margin:0 auto 1rem; padding:0 2rem;
+    min-height:1.2em; color:var(--dim); font: .72rem var(--mono); }
+  .docs-map { max-width:1180px; margin:0 auto 2.6rem; display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr)); border-top:1px solid var(--line);
+    border-left:1px solid var(--line); }
+  .docs-map a { position:relative; min-width:0; padding:1.15rem 1.25rem;
+    border-right:1px solid var(--line); border-bottom:1px solid var(--line);
+    color:var(--mid); text-decoration:none; }
+  .docs-map a:hover { background:var(--panel); color:var(--txt); }
+  .docs-map-number { position:absolute; top:1.2rem; right:1.2rem;
+    color:var(--faint); font:.7rem var(--mono); }
+  .docs-map strong { display:block; margin-bottom:.25rem; color:var(--txt);
+    font-family:var(--display); font-size:1.15rem; font-weight:600; }
+  .docs-map a > span:not(.docs-map-number) { display:block; padding-right:1.5rem;
+    font-size:.9rem; }
+  .layout { width:min(1180px,calc(100% - 4rem)); margin:0 auto; padding:0 0 4rem;
+    display:grid; grid-template-columns:190px minmax(0,760px);
+    justify-content:space-between; gap:clamp(2rem,5vw,5rem); align-items:start; }
+  nav { position:sticky; top:1.5rem; counter-reset:chapter; display:flex;
+    flex-direction:column; font-size:.84rem; }
+  nav a { display:flex; min-height:40px; align-items:center; gap:.65rem;
+    border-left:1px solid var(--line); padding:.35rem .75rem;
+    color:var(--dim); text-decoration:none; }
+  nav a::before { counter-increment:chapter;
+    content:counter(chapter,decimal-leading-zero); color:var(--faint);
+    font:.66rem var(--mono); }
+  nav a:hover { border-left-color:var(--orange); color:var(--txt); }
+  main { min-width:0; }
+  section { background:var(--panel); border:1px solid var(--line);
+    border-radius:6px; padding:1.4rem 1.6rem 1.5rem; margin:0 0 1.4rem;
+    scroll-margin-top:1.5rem; }
+  h2 { margin:0 0 1rem; color:var(--txt); font-family:var(--display);
+    font-size:clamp(1.7rem,3vw,2.4rem); font-weight:600; letter-spacing:-.03em;
+    line-height:1; }
+  h3 { margin:1.8rem 0 .55rem; color:var(--txt); font-size:1.05rem; }
+  h3::before { content:""; display:inline-block; width:.42rem; height:.42rem;
+    margin:0 .6rem .1rem 0; background:var(--orange); }
+  p { margin:.55rem 0; }
+  .src { color:var(--dim); font:11px var(--mono); font-weight:400; }
+  table { border-collapse:collapse; width:100%; margin:.7rem 0; font-size:.92rem; }
+  th, td { text-align:left; vertical-align:top; padding:.36rem .55rem;
+    border-bottom:1px solid var(--line); }
+  th { color:var(--orange); font:600 .78rem var(--mono);
+    text-transform:uppercase; letter-spacing:.06em; }
+  tr:last-child td { border-bottom:0; }
+  code { font-family:var(--mono); color:var(--txt); }
+  pre { background:var(--panel2); border:1px solid var(--line); border-radius:5px;
+    padding:.7rem .85rem; overflow:auto; font:12.5px/1.5 var(--mono); }
+  pre code { color:var(--txt2); }
+  footer { width:min(1180px,calc(100% - 4rem)); margin:0 auto; padding:0 0 2.5rem;
+    color:var(--dim); font-size:.85rem; }
+  @media (max-width:820px) {
+    .layout { grid-template-columns:1fr; }
+    nav { position:static; display:grid; grid-template-columns:repeat(2,1fr); }
+    .docs-map { grid-template-columns:1fr; }
+  }
+`;
+
+const DOCS_SEARCH_MARKUP =
+  '<div class="docs-search"><span>SEARCH THE GUIDE</span>' +
+  '<input id="docs-q" type="search" placeholder="Try registers, raster, passwords">' +
+  '</div><p class="docs-result-count" id="docs-count"></p>' +
+  '<div class="docs-map" id="docs-map"></div>';
+
+const DOCS_SCRIPT = `
+(function () {
+  var sections = Array.prototype.slice.call(document.querySelectorAll('main section'));
+  var nav = Array.prototype.slice.call(document.querySelectorAll('nav a'));
+  var map = document.getElementById('docs-map');
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function brief(s) {
+    var t = String(s || '').replace(/\\s+/g, ' ').trim();
+    var stop = t.search(/[.!?](\\s|$)/);
+    if (stop >= 0) t = t.slice(0, stop + 1);
+    if (t.length > 140) {
+      t = t.slice(0, 140);
+      t = t.slice(0, t.lastIndexOf(' ')) + '\u2026';
+    }
+    return t;
+  }
+  sections.forEach(function (s, i) {
+    var h = s.querySelector('h2');
+    var p = s.querySelector('p');
+    var a = document.createElement('a');
+    a.href = '#' + s.id;
+    a.innerHTML = '<span class="docs-map-number">' +
+      ('0' + (i + 1)).slice(-2) + '</span><strong>' +
+      esc(h ? h.textContent : s.id) + '</strong><span>' +
+      esc(brief(p ? p.textContent : '')) + '</span>';
+    map.appendChild(a);
+  });
+  var q = document.getElementById('docs-q');
+  var count = document.getElementById('docs-count');
+  if (!q) return;
+  q.addEventListener('input', function () {
+    var term = q.value.trim().toLowerCase();
+    var shown = 0;
+    sections.forEach(function (s, i) {
+      var hit = !term || s.textContent.toLowerCase().indexOf(term) >= 0;
+      s.hidden = !hit;
+      if (nav[i]) nav[i].hidden = !hit;
+      if (hit) shown++;
+    });
+    document.querySelectorAll('.docs-map a').forEach(function (a) {
+      a.hidden = !!term;
+    });
+    count.textContent = term
+      ? shown + (shown === 1 ? ' chapter matches' : ' chapters match')
+      : '';
+    var grid = document.getElementById('docs-map');
+    if (grid) grid.hidden = !!term;
+  });
+})();`;
+
+let docsTarget = "";
+
+function docsRawHtml() {
+  if (!PCEStudio.docs) return "";
+  return PCEStudio.docs.html(PCEStudio.docs.reference());
+}
+
+function docsPageHtml() {
+  const raw = docsRawHtml();
+  if (!raw) {
+    return '<!doctype html><html><body style="background:#0b0d13;color:#c8ccd6;' +
+      'font:14px system-ui;padding:2rem"><h1>The toy author' + "\u2019" + 's reference</h1>' +
+      '<p>The docs module did not load; open <a style="color:#ff9540" ' +
+      'href="docs.html">docs.html</a>.</p></body></html>';
+  }
+  return raw
+    .replace("</head>", DOCS_FONT_LINK + "<style>" + DOCS_IFRAME_CSS +
+             "</style></head>")
+    .replace("</header>", "</header>" + DOCS_SEARCH_MARKUP)
+    .replace("</body>", "<script>" + DOCS_SCRIPT + "<" + "/script></body>");
+}
+
+function scrollDocsTo(chapter) {
+  const frame = $("docs-frame");
+  if (!chapter || !frame) return;
+  try {
+    const doc = frame.contentDocument;
+    const el = doc && doc.getElementById(chapter);
+    if (el) el.scrollIntoView();
+  } catch (e) { /* the browser did not let us look inside; the nav still works */ }
+}
+
+function openDocs(chapter) {
+  docsTarget = chapter || "";
+  $("docs-panel").hidden = false;
+  $("docs-panel").dataset.chapter = docsTarget;
+  $("btn-docs").setAttribute("aria-expanded", "true");
+  scrollDocsTo(docsTarget);
+}
+
+function closeDocs() {
+  $("docs-panel").hidden = true;
+  $("btn-docs").setAttribute("aria-expanded", "false");
+}
+
+function toggleDocs() {
+  if ($("docs-panel").hidden) openDocs("");
+  else closeDocs();
+}
+
+function docsChapterFor(panelId) {
+  return DOCS_CHAPTER[panelId] || "the-toy";
+}
 
 const $ = (id) => document.getElementById(id);
 
@@ -1193,7 +1532,9 @@ function selectPanel(id) {
   const meta = PANELS.find((p) => p.id === id);
   $("dock-title").textContent = meta.label;
   $("dock-gloss").textContent = meta.gloss;
-  $("dock-guide").setAttribute("href", "../docs/STUDIO.md#panels");
+  const chapter = docsChapterFor(id);
+  $("dock-guide").dataset.chapter = chapter;
+  $("dock-guide").title = "Open the reference: " + meta.label + " → " + chapter;
   refreshPanels(true);
 }
 
@@ -1489,6 +1830,11 @@ function bind() {
   $("btn-settings").addEventListener("click", () => togglePop("settings-pop"));
   $("btn-save").addEventListener("click", saveFile);
   $("btn-open").addEventListener("click", () => togglePop("open-pop"));
+  $("btn-docs").addEventListener("click", toggleDocs);
+  $("btn-docs").setAttribute("aria-haspopup", "dialog");
+  $("docs-close").addEventListener("click", closeDocs);
+  $("dock-guide").addEventListener("click", () =>
+    openDocs(docsChapterFor(activePanel)));
 
   /* code pane */
   $("tab-code").addEventListener("click", () => selectCodeTab("code"));
@@ -1643,6 +1989,7 @@ function bind() {
       if (e.key === "Escape") {
         hidePop("panels-pop"); hidePop("settings-pop"); hidePop("open-pop");
         $("export-modal").hidden = true;
+        closeDocs();
       }
       return;
     }
@@ -1653,10 +2000,26 @@ function bind() {
   });
 }
 
+function buildDocs() {
+  const frame = $("docs-frame");
+  try {
+    const page = docsPageHtml();
+    if (page) frame.srcdoc = page;
+    else frame.src = "docs.html";
+  } catch (e) {
+    frame.src = "docs.html";
+  }
+  frame.addEventListener("load", () => {
+    if (docsTarget) scrollDocsTo(docsTarget);
+  });
+}
+
 function init() {
   buildDock();
   buildPanelsMenu();
   buildExamplesMenu();
+  buildDocs();
+  closeDocs();
   bind();
   selectPanel("screen");
   selectCodeTab("code");
@@ -1726,6 +2089,8 @@ function init() {
   if (at !== null) { seek(parseInt(at, 10) || 0); pause(); }
   else if (qs.get("paused")) pause();
   else play();
+  const docsParam = qs.get("docs");
+  if (docsParam) openDocs(docsParam === "1" ? "" : docsParam);
 }
 
 /* The tests read the page's own state through this object: no second copy of
@@ -1746,7 +2111,12 @@ PCEStudio.studio = {
   loadExample: loadExample,
   state: () => (runtime ? stateNow() : null),
   runtime: () => runtime,
-  markers: () => markers.slice()
+  markers: () => markers.slice(),
+  docsHtml: docsRawHtml,
+  docsPage: docsPageHtml,
+  docsChapter: () => $("docs-panel").dataset.chapter,
+  openDocs: openDocs,
+  closeDocs: closeDocs
 };
 
 init();
