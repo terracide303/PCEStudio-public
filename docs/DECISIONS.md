@@ -169,3 +169,11 @@ actively developed (last push 2026-10-27), supports the PC Engine's PSG includin
 program; PCEStudio reads the songs it saves (our own reader), plays them through `renderer/pce-psg.js` in the
 browser, and puts them in the exported ROM with a HuC6280 sound driver. Which driver (an existing one or our own)
 is #35's first question.
+
+## 2026-10-28 — ppu.toys' author is on board
+
+Dennis asked a.gilbert (ppu.toys) on Discord, 2026-10-28, whether he could use the idea to make something similar
+for the PC Engine. Answer: "Yes, absolutely. Let me know if there's anything I can do to help!" So besides the MIT
+code (entry above), the idea itself is used with the author's blessing; credit ppu.toys and its author in the
+README when PCEStudio is shown. Open questions worth asking him are kept in docs/PPU-TOYS.md, "Questions for the
+author".

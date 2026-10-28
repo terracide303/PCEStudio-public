@@ -582,3 +582,17 @@ kinds, the SNES recipes and prose, and the self-golden oracle.
 Ideas and, where noted, portable code from **ppu.toys** — MIT, Copyright (c) 2026 Liora Labs —
 studied at commit `0b07767`. Any adapted file keeps the MIT notice and names the source.
 Nothing was copied into this repository by this card.
+
+---
+
+## Questions for the author
+
+a.gilbert offered help (Discord, 2026-10-28). Only Dennis asks; these are the ones worth his time, most useful
+first:
+
+1. **The ROM compiler and export** are part of the hosted Studio, not the MIT repo. How does a toy's Lua become a
+   cartridge: an interpreter in ROM, or compiled to 65816 code? What broke first on real hardware? (Our #31 weighs
+   llvm-mos against HuC for the same step.)
+2. **The validator's frame-time check:** is it counted from the Lua (an estimate) or from the compiled code's cycles?
+3. **The agent link:** what the Studio's MCP server exposes, and what agents got wrong most often.
+4. Would he mind PCEStudio reusing the toy file format (the JSON envelope) so tools could read both?
