@@ -197,6 +197,54 @@
     return RCR_BASE + entries[(last + 1) % entries.length].line;
   }
 
+  /* ---- the VDC's status flags (card #50) ------------------------------- */
+
+  /* The status model for this state: pce-sprites.js's status() over the same
+   * vram/sat/regs/raster the picture is drawn from.  Kept on the state object
+   * so the per-line table, the summary and follow-a-pixel read one
+   * computation and none of them can disagree. */
+  function statusOf(st) {
+    if (!st.statusModel) {
+      st.statusModel = sprites.status({
+        vram: st.vram, cram: st.cram, sat: st.sat, regs: st.regs,
+        raster: st.raster || undefined, width: st.width, height: st.height,
+        firstScanline: st.firstScanline
+      });
+    }
+    return st.statusModel;
+  }
+
+  function flagLines(st, key) {
+    var model = statusOf(st), out = [];
+    for (var i = 0; i < model.lines.length; i++) {
+      if (model.lines[i][key]) out.push(model.lines[i].line);
+    }
+    return out;
+  }
+
+  /* The frame summary: the four conditions, the lines they occur on, and the
+   * bits the status register would hold (condition AND its CR enable — CC
+   * bit 0, OR bit 1, RR bit 2, VD bit 5; HuC6270 SR p. H7-4, CR p. H7-5). */
+  function status(st) {
+    var model = statusOf(st);
+    var f = model.frame;
+    var rrLines = [];
+    for (var line = 0; line < model.timing.rr.length; line++) {
+      if (model.timing.rr[line]) rrLines.push(line);
+    }
+    return {
+      vdw: f.vdw,
+      vblankLine: f.vblankLine,
+      OR: f.OR, CC: f.CC, RR: f.RR, VD: f.VD,
+      orBit: f.orBit, ccBit: f.ccBit, rrBit: f.rrBit, vdBit: f.vdBit,
+      sr: f.sr,
+      orLines: flagLines(st, "OR"),
+      ccLines: flagLines(st, "CC"),
+      rrLines: rrLines,
+      vdLines: f.VD ? [f.vblankLine] : []
+    };
+  }
+
   function entrySummary(e) {
     if (!e) return null;
     return {
@@ -215,6 +263,7 @@
    * entry is in force, whether one fires exactly there, and the chain arm. */
   function registerLines(st) {
     var out = [];
+    var status = statusOf(st).lines;
     var cursor = 0, applied = null;
     for (var row = 0; row < st.height; row++) {
       var v = lineValues(st, row);
@@ -223,6 +272,7 @@
         applied = st.entries[cursor++];
       }
       var atLine = applied != null && applied.line === v.line;
+      var sg = status[row] || {};
       out.push({
         row: row,
         line: v.line,
@@ -230,6 +280,14 @@
         BYR: v.BYR,
         CR: v.CR,
         BG_YOffset: v.BG_YOffset,
+        OR: !!sg.OR,
+        CC: !!sg.CC,
+        RR: !!sg.RR,
+        VD: !!sg.VD,
+        orBit: !!sg.orBit,
+        ccBit: !!sg.ccBit,
+        rrBit: !!sg.rrBit,
+        vdBit: !!sg.vdBit,
         entry: entrySummary(applied),
         entryAtLine: atLine,
         wrote: {
@@ -645,6 +703,7 @@
       },
       background: bgDetail,
       sprite: sprite,
+      status: statusOf(st).lines[y],
       registers: {
         row: y,
         line: v.line,
@@ -665,6 +724,7 @@
     VDC_REGISTERS: VDC_REGISTERS,
     VIEWER_FIXED_REGS: VIEWER_FIXED_REGS,
     state: state,
+    status: status,
     lineValues: lineValues,
     registerLines: registerLines,
     vdcRegisters: vdcRegisters,

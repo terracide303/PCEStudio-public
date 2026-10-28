@@ -8,6 +8,8 @@ node tests/check-viewer.js      # viewer/browser/vsprite ROM captures vs the ren
 node tests/check-export.js      # the browser's .pce vs the PCEAS build, byte for byte
 node tests/check-python-builder.js # #60: genviewer.py and pce-rom.js agree at 9/13/14 regions
 node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
+node tests/check-status.js      # #50: the VDC's OR/CC/RR/VD lines vs an independent
+                                # SAT/pattern computation and the saved status register
 node tests/check-editor.js      # the editor's refusals, picture, export and capture,
                                 # plus the effect edges and the page's Remove buttons (#52)
 node tests/check-psg.js         # the PSG model vs 11 Mednafen recordings, sample for sample (#34, #63)
@@ -431,6 +433,47 @@ on the editor's sprite picture) and no SPBG=0 sprite over an opaque
 background (P01b changes only the editor model); REVIEW-26's two
 dump-coverage additions (`sprite10`/`sprite3`, `sprite2`/`spainted`) are not
 part of this check yet.
+
+## `check-status.js` — the VDC's status lines and the sprite budget (#50)
+
+`renderer/pce-sprites.js` gains `lineStatus()`/`status()`: per VDW line, OR
+(a 17th strip was attempted — a CGX sprite spends two of the 16 strip slots),
+CC (sprite #0 and another sprite have an opaque pixel at the same display
+column, among the strips the line's budget keeps), RR (the RCR chain matched
+on that line) and VD (the first line after the display); the status-register
+bit is each condition AND its CR enable (CC 0, OC 1, RC 2, VC 3). This check
+(written by @design, flagged for @review) recomputes the OR/CC lines from
+`sat.bin` and the patterns in `vram.bin` at the raw-byte level, and RR/VD
+from `raster.json`/the saved registers, then compares every line and the
+frame's accumulated SR with the model, on all 70 dumps:
+
+- **the save state's status register**: the 49 dumps whose ROM never reads
+  SR (no raster table) must have `regs.json`'s `status` equal the model's
+  frame SR — 0 for every one, so the CR-enable gate is what is checked (the
+  conditions ARE true on sprite4/sprite11 and the register still reads 0);
+- **the raster dumps**: their irq1 handler reads `$0000` and clears bits
+  0-5, so the saved 0 is not comparable; the check requires the model to
+  report an RR match with RC enabled, and records that those 21 dumps are
+  read-cleared rather than register-compared;
+- **the scenes the card names**: `sprite4` (19 sprites on row 66) and
+  `sprite11` (15 strips + a 32-px CGX 16th) report OR **and** CC on VDW
+  lines 2..17; `spainted` (the editor's crowded line) reports OR on
+  200..215 and no CC. No captured scene has CR bits 0-3 set, so the check
+  runs `sprite4`'s own SAT/patterns through the model with CR = `$CF` and
+  requires SR = `$23` (CC+OR+VD) — a model calculation on the existing
+  capture, not a new capture;
+- **the editor's sprite budget**: a synthetic picture (sprite 0 overlapping
+  sprite 1, 17 strips on line 0) reports CC and OR; every line's flags equal
+  `sprites.status()` on the exported picture; with a gradient the budget's
+  RR lines are the table's 224 entries, its VD line 240 and its SR `$04`
+  equals the model's.
+
+Self-mutations tried: ungating the bits, turning the 17th strip off, dropping
+collisions and making RR a constant each make the check fail. A different
+seat's break of this check is still owed (RULES.md rule 2), and the model's
+sprite-0 CGX half rule (both halves treated as sprite #0; Mednafen only marks
+the left cache unit) is not exercised by any dump — neither is a real-console
+save state, since Mednafen is the only witness.
 
 ## What this does NOT prove
 

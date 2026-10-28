@@ -134,6 +134,17 @@ drop. `tests/check-editor.js` checks the budget line by line against
 `pce-sprites.js`'s `collectStrips`, so the number the page shows is the number
 the renderer draws.
 
+Since #50 each line also carries the VDC status conditions the same SAT search
+produces: **OR** (`overflow`) when the line asks for a 17th strip, and **CC**
+(`collision`) when sprite #0 and another kept sprite have an opaque pixel at
+the same display column. `spriteBudget` adds `orLines`/`ccLines`, and its
+`status` block carries the VD/RR events — VD at the first line after the
+240-line display and RR on an effect table's entry lines — plus the SR the
+exported picture would latch (only RR can, because its CR has RC; the
+editor's picture sets no OC/CC/VC enable). The page's budget line prints
+them, and `tests/check-status.js` holds every line to `pce-sprites.js`'s
+`status()` on the exported picture.
+
 ## The demo pictures, painted from scratch
 
 Both are painted **through the editor's own calls**, and nothing is read from

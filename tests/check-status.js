@@ -1,0 +1,627 @@
+#!/usr/bin/env node
+/*
+ * tests/check-status.js — the closing measurement of #50 (the VDC's status
+ * lines in the model and the sprite budget panel).
+ *
+ * NOTE: written by @design because the card's close condition needs a check;
+ * per the workshop role split it is flagged for @review to read cold (same
+ * arrangement as check.js, check-panels.js, check-editor.js).
+ *
+ * The card asks pce-sprites.js / pce-bg.js to compute the VDC status
+ * conditions from the same data they draw, and the panels and sprite budget
+ * to show them.  This file computes the OR/CC lines a second time, from the
+ * raw bytes, and compares them with the model:
+ *
+ *   - the SAT search from sat.bin: 64 entries, CGY height 16/32/64/64, the
+ *     CGY block mask (p&~2 / p&~6) and block select, VFLIP before the block
+ *     select, CGX's two strips (halves p&~1, p&~1+1, HFLIP swapping them),
+ *     HFLIP's pixel mirror, and the 16-strip line budget in SATB order;
+ *   - the sprite patterns from vram.bin: 64-word cells, planes SG0..SG3 at
+ *     +0/+16/+32/+48 words + row, bit 15 the leftmost strip pixel, pixel 0
+ *     transparent;
+ *   - OR = the line's on-line sprites ask for more than 16 strips (a 17th);
+ *   - CC = sprite #0 and another sprite among the kept strips have an
+ *     opaque pixel at the same display column;
+ *   - RR = the raster table's entry lines (the RCR chain matches on its own
+ *     line, 0x40 + line) or, without a table, the saved RCR's 0x40 + line;
+ *   - VD = VDW line (VDR & 0x1FF) + 1, the first line after the display;
+ *   - the status-register bits: each condition AND its CR interrupt enable
+ *     (CC bit 0, OC bit 1, RC bit 2, VC bit 3 — HuC6270 CR R05 p. H7-5..H7-6,
+ *     SR p. H7-4), with the CR each line carries (the raster table's writes,
+ *     else the saved register).
+ *
+ * Nothing in this file calls pce-sprites.js to compute an expected value: the
+ * expected OR/CC/RR lines and bits are rebuilt above and compared with
+ * sprites.status().
+ *
+ * The Mednafen save states record the VDC status register (regs.json's
+ * `status`, mcs-extract.py).  For every dump whose ROM never reads the
+ * register (no raster.json — the #15/#16 raster ROMs' irq1 handler reads
+ * $0000 and clears bits 0-5) the saved value must equal the model's
+ * accumulated frame SR.  For the raster dumps the saved 0 cannot be compared:
+ * the handler read and cleared it; the check records that and requires the
+ * model to have RR enabled and set, so the two facts (a match happened, a
+ * read cleared it) are consistent.
+ *
+ * The scenes where the flags show:
+ *   sprite4  — 19 sprites on row 66 and sprite 0 overlapping sprite 1:
+ *              OR and CC on VDW lines 2..17;
+ *   sprite11 — 15 strips plus a 32-px CGX 16th entry, sprite 0 overlapping:
+ *              OR and CC on lines 2..17;
+ *   spainted — the editor's crowded line: OR on lines 200..215, no CC.
+ * No captured scene has CR bits 0-3 (the interrupt enables) set, so no
+ * saved status register holds the bits; the check shows the gate by running
+ * sprite4's own SAT/patterns with CR = $CF: the model then reports SR = $23
+ * (CC+OR+VD).  That is a model calculation on the existing capture, not a new
+ * capture — labelled here and not claimed as hardware evidence.
+ *
+ * The editor's sprite budget (pce-editor.js's spriteLineBudget/spriteBudget)
+ * is held to the same model: a synthetic picture with sprite 0 overlapping
+ * sprite 1 and a 17-strip line must report CC and OR, and every line's flags
+ * must equal sprites.status() on the exported picture; with an effect table
+ * the budget's RR lines must be that table's entries and its SR $04 must
+ * equal the model's.
+ *
+ * Self-mutations (the builder's mutants; a different seat's break is still
+ * owed, RULES.md rule 2): ungating the register bits, turning the 17th strip
+ * off, dropping collision and making RR a constant each make this check fail.
+ *
+ *   node tests/check-status.js
+ */
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const sprites = require("../renderer/pce-sprites.js");
+const editor = require("../renderer/pce-editor.js");
+
+let checks = 0;
+let failures = 0;
+function fail(message) {
+  failures++;
+  console.log(`FAIL  ${message}`);
+}
+function ok(what, got, want) {
+  checks++;
+  if (got !== want) {
+    fail(`${what}: got ${JSON.stringify(got)}, expected ` +
+         `${JSON.stringify(want)}`);
+    return false;
+  }
+  return true;
+}
+function okv(what, problems) {
+  checks++;
+  if (problems.length) {
+    fail(`${what}:`);
+    problems.slice(0, 10).forEach((p) => console.log(`        ${p}`));
+    return false;
+  }
+  return true;
+}
+
+function wordAt(bytes, word) {
+  return bytes[word * 2] | (bytes[word * 2 + 1] << 8);
+}
+
+/* ---- dumps ------------------------------------------------------------- */
+
+function loadDump(name) {
+  const dir = path.join(__dirname, "dumps", name);
+  const regs = JSON.parse(fs.readFileSync(path.join(dir, "regs.json"), "utf8"));
+  const d = {
+    name,
+    dir,
+    regs,
+    vram: fs.readFileSync(path.join(dir, "vram.bin")),
+    cram: fs.readFileSync(path.join(dir, "cram.bin")),
+    sat: fs.existsSync(path.join(dir, "sat.bin"))
+      ? fs.readFileSync(path.join(dir, "sat.bin")) : null,
+    raster: fs.existsSync(path.join(dir, "raster.json"))
+      ? JSON.parse(fs.readFileSync(path.join(dir, "raster.json"), "utf8"))
+      : null
+  };
+  d.firstScanline = 14 + (regs.slstart != null ? regs.slstart : 4);
+  d.vdwLine0 = regs.RCRCount - (regs.scanline - d.firstScanline);
+  d.height = 232;
+  d.width = 256;
+  d.opts = {
+    vram: d.vram, cram: d.cram, sat: d.sat || undefined, regs,
+    raster: d.raster || undefined, firstScanline: d.firstScanline,
+    width: d.width, height: d.height
+  };
+  return d;
+}
+
+function dumpNames() {
+  const root = path.join(__dirname, "dumps");
+  return fs.readdirSync(root).filter((n) =>
+    fs.existsSync(path.join(root, n, "regs.json"))).sort();
+}
+
+/* ---- the independent status oracle (raw bytes only) -------------------- */
+
+const CGY_HEIGHT = [16, 32, 64, 64];
+const CGY_MASK = [0x3FF, 0x3FF & ~2, 0x3FF & ~6, 0x3FF & ~6];
+
+/* The opaque pixels a strip paints: a Uint8Array(256), 1 where the sprite
+ * has a non-zero pixel at that display column. */
+function stripMask(vram, cell, row, x, hflip) {
+  const mask = new Uint8Array(256);
+  const base = cell * 64 + row;
+  for (let c = 0; c < 16; c++) {
+    const dx = x + c;
+    if (dx < 0 || dx >= 256) continue;
+    const bit = hflip ? c : 15 - c;
+    const pix = ((wordAt(vram, base) >> bit) & 1)
+              | (((wordAt(vram, base + 16) >> bit) & 1) << 1)
+              | (((wordAt(vram, base + 32) >> bit) & 1) << 2)
+              | (((wordAt(vram, base + 48) >> bit) & 1) << 3);
+    if (pix) mask[dx] = 1;
+  }
+  return mask;
+}
+
+/* One VDW line's sprite conditions, recomputed from sat.bin and vram.bin. */
+function oracleSpriteLine(sat, vram, line) {
+  const strips = [];
+  let requested = 0, onLine = 0;
+  for (let i = 0; i < 64; i++) {
+    const y = wordAt(sat, i * 4) & 0x3FF;
+    const x = wordAt(sat, i * 4 + 1) & 0x3FF;
+    const w2 = wordAt(sat, i * 4 + 2);
+    const w3 = wordAt(sat, i * 4 + 3);
+    const cgy = (w3 >> 12) & 3;
+    const height = CGY_HEIGHT[cgy];
+    const row0 = y - 64;
+    if (line < row0 || line >= row0 + height) continue;
+    onLine++;
+    const cgx = (w3 >> 8) & 1;
+    requested += cgx ? 2 : 1;
+    let yoff = line - row0;
+    if (w3 & 0x8000) yoff = height - 1 - yoff;   /* VFLIP first */
+    const p = (w2 >> 1) & 0x3FF;
+    let cell = (p & CGY_MASK[cgy]) | ((yoff & 0x30) >> 3);
+    const row = yoff & 15;
+    const hflip = (w3 >> 11) & 1;
+    const leftX = x - 32;
+    if (cgx) {
+      cell &= ~1;
+      strips.push({ cell: hflip ? cell | 1 : cell, x: leftX, row, hflip,
+                    number: i });
+      strips.push({ cell: hflip ? cell : cell | 1, x: leftX + 16, row, hflip,
+                    number: i });
+    } else {
+      strips.push({ cell, x: leftX, row, hflip, number: i });
+    }
+  }
+  const kept = strips.slice(0, 16);
+  const own = new Uint8Array(256), other = new Uint8Array(256);
+  for (const s of kept) {
+    const mask = stripMask(vram, s.cell, s.row, s.x, s.hflip);
+    const target = s.number === 0 ? own : other;
+    for (let x = 0; x < 256; x++) if (mask[x]) target[x] = 1;
+  }
+  let collision = false;
+  for (let x = 0; x < 256 && !collision; x++) {
+    collision = !!(own[x] && other[x]);
+  }
+  return { strips: kept.length, requested, sprites: onLine,
+           overflow: requested > 16, collision };
+}
+
+/* The CR each rendered line carries, from the dump's own table (the same
+ * per-line rule pce-bg.js applies): a raster entry's CR from the first line
+ * it fires on, the frame-start latch = the table's last CR, else the saved
+ * register. */
+function crLines(dump) {
+  const out = new Array(dump.height);
+  const regs = dump.regs;
+  const entries = dump.raster && dump.raster.entries
+    ? dump.raster.entries.slice().sort((a, b) => a.line - b.line) : [];
+  let cur = (regs.CR || 0) & 0xFF;
+  if (entries.length) {
+    cur = dump.raster.base && dump.raster.base.cr != null
+      ? dump.raster.base.cr : cur;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].cr != null) { cur = entries[i].cr; break; }
+    }
+  }
+  let cursor = 0;
+  for (let row = 0; row < dump.height; row++) {
+    const line = dump.vdwLine0 + row;
+    while (cursor < entries.length && entries[cursor].line <= line) {
+      const e = entries[cursor++];
+      if (e.cr != null) cur = e.cr;
+    }
+    out[row] = cur;
+  }
+  return out;
+}
+
+/* The VDW lines the RCR chain matches, plus the first line of vertical
+ * blanking: the model's timing rule re-derived from the dump. */
+function oracleTiming(dump) {
+  const regs = dump.regs;
+  const vdr = regs.VDR != null ? regs.VDR
+            : regs.VDW_cache != null ? regs.VDW_cache : 0xEF;
+  const vdw = (vdr & 0x1FF) + 1;
+  const rr = new Set();
+  const entries = dump.raster && dump.raster.entries
+    ? dump.raster.entries.slice().sort((a, b) => a.line - b.line) : [];
+  if (entries.length) {
+    for (const e of entries) if (e.line >= 0 && e.line <= vdw) rr.add(e.line);
+  } else if (regs.RCR != null) {
+    const line = (regs.RCR & 0x3FF) - 0x40;
+    if (line >= 0 && line <= vdw) rr.add(line);
+  }
+  return { vdw, vblankLine: vdw, rr };
+}
+
+/* The status register the model should report for the whole frame. */
+function oracleFrame(dump, crs, timing) {
+  const sat = dump.sat;
+  let orBit = false, ccBit = false, rrBit = false, vdBit = false;
+  let OR = false, CC = false;
+  for (let row = 0; row < dump.height; row++) {
+    const line = dump.vdwLine0 + row;
+    const cr = crs[row];
+    let cond = null;
+    if (sat && ((cr & 0x40) || (cr & 0x03))) {
+      cond = oracleSpriteLine(sat, dump.vram, line);
+    }
+    if (cond && cond.overflow) { OR = true; orBit = orBit || !!(cr & 0x02); }
+    if (cond && cond.collision) { CC = true; ccBit = ccBit || !!(cr & 0x01); }
+  }
+  for (const line of timing.rr) {
+    const row = line - dump.vdwLine0;
+    const cr = row >= 0 && row < dump.height ? crs[row] : crs[dump.height - 1];
+    rrBit = rrBit || !!(cr & 0x04);
+  }
+  const vblankCr = crs[dump.height - 1];
+  vdBit = !!(vblankCr & 0x08);
+  const RR = timing.rr.size > 0;
+  return { vdw: timing.vdw, vblankLine: timing.vblankLine,
+           OR, CC, RR, VD: true,
+           orBit, ccBit, rrBit, vdBit,
+           sr: (ccBit ? 0x01 : 0) | (orBit ? 0x02 : 0) | (rrBit ? 0x04 : 0) |
+               (vdBit ? 0x20 : 0) };
+}
+
+/* ---- the model vs the oracle ------------------------------------------ */
+
+function compareDump(dump, model) {
+  const problems = [];
+  const crs = crLines(dump);
+  const timing = oracleTiming(dump);
+  if (model.lines.length !== dump.height) {
+    problems.push(`${model.lines.length} model lines, expected ${dump.height}`);
+    return problems;
+  }
+  for (let row = 0; row < dump.height; row++) {
+    const got = model.lines[row];
+    const line = dump.vdwLine0 + row;
+    if (got.line !== line) {
+      problems.push(`row ${row}: model line ${got.line}, expected ${line}`);
+      continue;
+    }
+    const cr = crs[row];
+    /* the VDC only searches sprites when the layer is on or an OC/CC
+     * interrupt is enabled (Mednafen: CR & 0x40 and drawing, or CR & 0x03) */
+    const detect = !!(cr & 0x40) || !!(cr & 0x03);
+    const cond = dump.sat && detect
+      ? oracleSpriteLine(dump.sat, dump.vram, line) : null;
+    const rr = timing.rr.has(line);
+    const vd = line === timing.vblankLine;
+    const want = {
+      OR: cond ? cond.overflow : false,
+      CC: cond ? cond.collision : false,
+      RR: rr, VD: vd,
+      orBit: !!(cond && cond.overflow && (cr & 0x02)),
+      ccBit: !!(cond && cond.collision && (cr & 0x01)),
+      rrBit: !!(rr && (cr & 0x04)),
+      vdBit: !!(vd && (cr & 0x08)),
+      sprites: cond ? cond.sprites : 0,
+      strips: cond ? cond.strips : 0,
+      requested: cond ? cond.requested : 0
+    };
+    for (const key of Object.keys(want)) {
+      if (got[key] !== want[key]) {
+        problems.push(`row ${row} (VDW line ${line}) ${key}: model ` +
+                      `${got[key]}, oracle ${want[key]}`);
+      }
+    }
+  }
+  const f = model.frame;
+  const wantF = oracleFrame(dump, crs, timing);
+  for (const key of Object.keys(wantF)) {
+    if (f[key] !== wantF[key]) {
+      problems.push(`frame ${key}: model ${JSON.stringify(f[key])}, ` +
+                    `oracle ${JSON.stringify(wantF[key])}`);
+    }
+  }
+  return problems;
+}
+
+/* The save state's status register.  The ROMs without a raster table never
+ * read it, so the model's accumulated frame SR is directly comparable; the
+ * raster ROMs' irq1 handler reads $0000 (and so clears it) on every
+ * interrupt, which is why their saved value is 0 (docs/RENDERER.md, #16). */
+function compareMednafen(dump, model, notes) {
+  const problems = [];
+  const saved = dump.regs.status;
+  if (saved == null) {
+    notes.push(`${dump.name}: no status in the save state, not compared`);
+    return problems;
+  }
+  if (!dump.raster) {
+    if (model.frame.sr !== saved) {
+      problems.push(`${dump.name}: saved VDC status $${saved.toString(16)}, ` +
+                    `the model's frame SR is $${model.frame.sr.toString(16)}`);
+    }
+    return problems;
+  }
+  /* the raster chain's handler reads and clears SR */
+  if (saved !== 0) {
+    problems.push(`${dump.name}: saved status is $${saved.toString(16)}, ` +
+                  "expected 0 — the irq1 handler reads SR and clears it on " +
+                  "every RCR interrupt");
+  }
+  if (!(model.frame.rrBit)) {
+    problems.push(`${dump.name}: RR is enabled and the table has matches, ` +
+                  "so the model must report an RR bit before the read; it " +
+                  "does not");
+  }
+  notes.push(`${dump.name}: saved status 0 — the handler read and cleared ` +
+             `it; model RC-enabled RR ${model.frame.rrBit ? "set" : "clear"} ` +
+             `(not a register comparison)`);
+  return problems;
+}
+
+/* ---- the explicit scenes ---------------------------------------------- */
+
+function linesWhere(model, key) {
+  return model.lines.filter((l) => l[key]).map((l) => l.line);
+}
+
+function checkScene(name, model, want) {
+  const problems = [];
+  const or = linesWhere(model, "OR");
+  const cc = linesWhere(model, "CC");
+  if (want.overflow) {
+    if (!or.length) problems.push("no line reports sprite overflow");
+    if (want.or0 != null &&
+        (or[0] !== want.or0 || or[or.length - 1] !== want.or1)) {
+      problems.push(`OR lines ${or[0]}..${or[or.length - 1]}, expected ` +
+                    `${want.or0}..${want.or1}`);
+    }
+  } else if (or.length) {
+    problems.push(`${or.length} unexpected overflow line(s)`);
+  }
+  if (want.collision) {
+    if (!cc.length) problems.push("no line reports a sprite-0 collision");
+    if (want.cc0 != null &&
+        (cc[0] !== want.cc0 || cc[cc.length - 1] !== want.cc1)) {
+      problems.push(`CC lines ${cc[0]}..${cc[cc.length - 1]}, expected ` +
+                    `${want.cc0}..${want.cc1}`);
+    }
+  } else if (cc.length) {
+    problems.push(`${cc.length} unexpected collision line(s)`);
+  }
+  okv(`${name}: the flags show (OR ${or.length} line(s), CC ` +
+      `${cc.length} line(s))`, problems);
+  return { or, cc };
+}
+
+/* ---- the editor's sprite budget --------------------------------------- */
+
+function checkEditorBudget() {
+  const pic = editor.newPicture();
+  const pat = editor.newSpritePattern(pic, 16, 16);
+  for (let y = 0; y < 16; y++)
+    for (let x = 0; x < 16; x++) editor.paintSpriteIndex(pic, pat, x, y, 1);
+  /* sprite 0 at x 0..15, sprite 1 at x 8..23: eight opaque columns overlap */
+  editor.addSprite(pic, { x: 0, y: 0, pattern: pat });
+  editor.addSprite(pic, { x: 8, y: 0, pattern: pat });
+  /* fifteen more 16-px sprites on line 0: 17 strips asked for, 16 kept */
+  for (let i = 0; i < 15; i++) {
+    editor.addSprite(pic, { x: 40 + 15 * i, y: 0, pattern: pat });
+  }
+  const budget = editor.spriteBudget(pic);
+  const problems = [];
+  if (!budget.lines[0].overflow)
+    problems.push("line 0 asks for 17 strips but the budget reports no " +
+                  "overflow");
+  if (!budget.lines[0].collision)
+    problems.push("sprite 0 overlaps sprite 1 but the budget reports no " +
+                  "collision");
+  if (budget.status.OR !== true || budget.status.CC !== true)
+    problems.push("the budget's status block does not carry OR/CC");
+  if (budget.status.vblankLine !== 240)
+    problems.push(`VD line ${budget.status.vblankLine}, expected 240`);
+  if (budget.status.RR.length)
+    problems.push("a picture with no effects reports RCR matches");
+  okv("editor budget: a 17-strip line and a sprite-0 hit are reported",
+      problems);
+
+  /* the editor budget and pce-sprites.js agree on every line of the picture
+   * the editor would export */
+  const data = editor.toPicture(pic);
+  const sat = data.vram.slice(editor.SAT_ADDR * 2, editor.SAT_ADDR * 2 + 512);
+  const model = sprites.status({
+    vram: data.vram, cram: data.cram, sat,
+    regs: editor.viewRegs(pic), width: editor.VIEW_W, height: editor.VIEW_H
+  });
+  const diffs = [];
+  for (let y = 0; y < editor.VIEW_H; y++) {
+    const b = budget.lines[y], m = model.lines[y];
+    if (b.overflow !== m.OR)
+      diffs.push(`line ${y}: budget OR ${b.overflow}, model ${m.OR}`);
+    if (b.collision !== m.CC)
+      diffs.push(`line ${y}: budget CC ${b.collision}, model ${m.CC}`);
+  }
+  okv("editor budget: every line's OR/CC equals pce-sprites.js on the " +
+      "exported picture", diffs);
+
+  /* VD/RR: with an effect table the budget's RR lines are the table's
+   * entries and its SR equals the model's (the exported CR has RC) */
+  editor.setGradient(pic, { from: 0, to: 511, line0: 0, line1: 223 });
+  const budget2 = editor.spriteBudget(pic);
+  const raster = editor.toRaster(pic, 0);
+  const entryLines = raster.entries.map((e) => e.line);
+  const model2 = sprites.status({
+    vram: data.vram, cram: data.cram, sat,
+    regs: editor.viewRegs(pic), raster,
+    width: editor.VIEW_W, height: editor.VIEW_H
+  });
+  const probs2 = [];
+  if (budget2.status.RR.length !== entryLines.length ||
+      budget2.status.RR.some((l, i) => l !== entryLines[i])) {
+    probs2.push(`budget RR lines ${budget2.status.RR.length}, the table has ` +
+                `${entryLines.length}`);
+  }
+  if (budget2.status.sr !== model2.frame.sr) {
+    probs2.push(`budget SR $${budget2.status.sr.toString(16)}, model SR ` +
+                `$${model2.frame.sr.toString(16)}`);
+  }
+  if (!model2.frame.RR) probs2.push("the model reports no RR match");
+  if (model2.frame.vblankLine !== 240)
+    probs2.push(`model VD line ${model2.frame.vblankLine}, expected 240`);
+  okv("editor budget: RR lines are the effect table's and SR matches the " +
+      "model", probs2);
+}
+
+/* ---- builder's mutants: the check must fail on them -------------------- */
+
+function copyModel(model) {
+  return {
+    lines: model.lines.map((l) => Object.assign({}, l)),
+    frame: Object.assign({}, model.frame),
+    timing: model.timing
+  };
+}
+
+function regrade(model) {
+  let orBit = false, ccBit = false, rrBit = false, vdBit = false;
+  for (const l of model.lines) {
+    orBit = orBit || l.orBit;
+    ccBit = ccBit || l.ccBit;
+    rrBit = rrBit || l.rrBit;
+  }
+  vdBit = model.frame.vdBit;
+  model.frame.orBit = orBit;
+  model.frame.ccBit = ccBit;
+  model.frame.rrBit = rrBit;
+  model.frame.vdBit = vdBit;
+  model.frame.sr = (ccBit ? 0x01 : 0) | (orBit ? 0x02 : 0) |
+                   (rrBit ? 0x04 : 0) | (vdBit ? 0x20 : 0);
+  return model;
+}
+
+const MUTANTS = [
+  { name: "ungated bits (every condition latches whatever CR says)",
+    apply(model) {
+      for (const l of model.lines) {
+        l.orBit = l.OR;
+        l.ccBit = l.CC;
+        l.rrBit = l.RR;
+      }
+      model.frame.vdBit = model.frame.VD;
+      return regrade(model);
+    } },
+  { name: "the 17th strip not an overflow",
+    apply(model) {
+      for (const l of model.lines) l.OR = l.orBit = false;
+      model.frame.OR = model.frame.orBit = false;
+      return regrade(model);
+    } },
+  { name: "collisions dropped",
+    apply(model) {
+      for (const l of model.lines) l.CC = l.ccBit = false;
+      model.frame.CC = model.frame.ccBit = false;
+      return regrade(model);
+    } },
+  { name: "RR a constant, ignoring the raster chain",
+    apply(model) {
+      for (const l of model.lines) l.RR = l.rrBit = false;
+      model.frame.RR = model.frame.rrBit = false;
+      return regrade(model);
+    } }
+];
+
+function runMutants(dumps, models) {
+  for (const mutant of MUTANTS) {
+    let caught = 0;
+    for (let i = 0; i < dumps.length; i++) {
+      const m = mutant.apply(copyModel(models[i]));
+      const problems = compareDump(dumps[i], m)
+        .concat(compareMednafen(dumps[i], m, []));
+      if (problems.length) caught++;
+    }
+    ok(`mutant "${mutant.name}" is caught`, caught > 0, true);
+  }
+}
+
+/* ---- main -------------------------------------------------------------- */
+
+function main() {
+  const names = dumpNames();
+  const dumps = names.map(loadDump);
+  const models = dumps.map((d) => sprites.status(d.opts));
+  const notes = [];
+  let comparable = 0, cleared = 0;
+
+  for (let i = 0; i < dumps.length; i++) {
+    const dump = dumps[i], model = models[i];
+    const problems = compareDump(dump, model);
+    if (!dump.raster && dump.regs.status != null) comparable++;
+    if (dump.raster && dump.regs.status != null) cleared++;
+    problems.push(...compareMednafen(dump, model, notes));
+    okv(`${dump.name}: the model's status lines and frame agree with the ` +
+        `independent computation`, problems);
+  }
+
+  /* the scenes the card names */
+  const byName = {};
+  dumps.forEach((d, i) => { byName[d.name] = models[i]; });
+  checkScene("sprite4", byName.sprite4,
+             { overflow: true, collision: true, or0: 2, or1: 17, cc0: 2,
+               cc1: 17 });
+  checkScene("sprite11", byName.sprite11,
+             { overflow: true, collision: true, or0: 2, or1: 17, cc0: 2,
+               cc1: 17 });
+  checkScene("spainted", byName.spainted,
+             { overflow: true, collision: false, or0: 200, or1: 215 });
+
+  /* the enable gate: sprite4's own capture with CR bits 0-3 on */
+  const s4 = dumps[names.indexOf("sprite4")];
+  const gated = sprites.status(Object.assign({}, s4.opts, {
+    regs: Object.assign({}, s4.regs, { CR: s4.regs.CR | 0x0F })
+  }));
+  ok("sprite4 with CR=$CF: CC+OR+VD latch into SR",
+     gated.frame.sr, 0x01 | 0x02 | 0x20);
+  ok("sprite4 with CR=$CF: the saved capture has no enables, so its " +
+     "status register stays 0", s4.regs.status, 0);
+
+  /* the budget panel's flags */
+  checkEditorBudget();
+
+  /* the check must fail on a changed model */
+  runMutants(dumps, models);
+
+  console.log(`status: ${dumps.length} dumps — ${comparable} save states ` +
+              `compared register-for-register, ${cleared} read-cleared ` +
+              `(raster chain)`);
+  notes.slice(0, 3).forEach((n) => console.log(`  ${n}`));
+  if (failures) {
+    console.log(`FAIL: ${failures} problem(s) in ${checks} checks`);
+    return 1;
+  }
+  console.log(`PASS: the VDC status lines are computed from the same SAT/` +
+              `patterns the renderer draws — ${checks} checks on ` +
+              `${dumps.length} dumps, including sprite4/sprite11 (OR+CC), ` +
+              `spainted (OR) and the editor budget`);
+  return 0;
+}
+
+process.exitCode = main();
