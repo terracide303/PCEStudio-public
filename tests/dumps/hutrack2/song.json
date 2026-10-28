@@ -1,0 +1,137 @@
+{
+  "dmf": {
+    "raw_bytes": 9647,
+    "raw_sha256": "91f5724527ef95e7e48ab4706c4582dc09007f921f4d05549a8dadcfe0c8f994",
+    "file_bytes": 409,
+    "file_sha256": "8d1c5e73c34c94cb42ac4bb598ef438c91ff9080ce835a97d664c5de56003c8c"
+  },
+  "octave_note": "DMF octave byte = sounding octave - 1 (measured)",
+  "rows": 32,
+  "orders": 3,
+  "speed": 4,
+  "channels": 6,
+  "columns": 2,
+  "melody": [
+    [
+      "C4",
+      "E4",
+      "G4",
+      "C5",
+      "B4",
+      "G4",
+      "E4",
+      "C4"
+    ],
+    [
+      "A3",
+      "C4",
+      "E4",
+      "A4",
+      "G4",
+      "E4",
+      "C4",
+      "A3"
+    ],
+    [
+      "C4",
+      "E4",
+      "G4",
+      "C5",
+      "B4",
+      "G4",
+      "E4",
+      "C4"
+    ]
+  ],
+  "bass": [
+    "C3",
+    "G3",
+    "C3"
+  ],
+  "instruments": [
+    {
+      "name": "lead",
+      "volumeEnv": [
+        31,
+        28,
+        20,
+        12
+      ],
+      "volumeEnvLoop": 2,
+      "arpeggioEnv": [
+        12,
+        12,
+        0
+      ],
+      "arpeggioMode": 0,
+      "arpeggioLoop": 1,
+      "wavetableEnv": [
+        0,
+        1
+      ],
+      "wavetableLoop": 0
+    },
+    {
+      "name": "bass",
+      "volumeEnv": [
+        31
+      ],
+      "wavetableEnv": [
+        1
+      ]
+    }
+  ],
+  "features": [
+    "two instruments and two waveforms",
+    "envelope loops",
+    "a relative arpeggio (signed dword, -12, &255)",
+    "two effect columns: 0x0F speed, 0x10 waveform",
+    "a bare-note row (mask 1, note +128)",
+    "a volume-only row (mask 8)",
+    "a note cut (compressed 224)",
+    "repeated orders 0 and 2 (dedup matrix [0, 1, 0])",
+    "a 30-row empty run plus a 2-row remainder"
+  ],
+  "includes": {
+    "demo2.header.inc": {
+      "bytes": 994,
+      "sha256": "f60a129469d6eb7af8f49d331f161c37aeb380a2a4cb83a1583a09028d598456"
+    },
+    "demo2.instrData.inc": {
+      "bytes": 1777,
+      "sha256": "382866fc1e3b0e993ad49e7afadb5e034dd4a98df7d38c561d275c7534a3f537"
+    },
+    "demo2.instrMatrix.inc": {
+      "bytes": 200,
+      "sha256": "815d22e5f9eadb3112eed964528d4557abbb76fd6daf9a24f90a5d45c75409cd"
+    },
+    "demo2.patternData.inc": {
+      "bytes": 4477,
+      "sha256": "d0269c38dd90918bb039db1e66e1e4c041d27253c42c90687a670bb2f45adc0a"
+    },
+    "demo2.patternMatrix.inc": {
+      "bytes": 765,
+      "sha256": "0042bf74e8357a6118ff961d975845d815e7dc92cd22491098a2b20da1feaeaa"
+    },
+    "demo2.pcmData.inc": {
+      "bytes": 82,
+      "sha256": "81790396784b508e5b50c27e7ee00686f3e4db8c3b67c8a4fdfba7b942e16aca"
+    },
+    "demo2.pcmMatrix.inc": {
+      "bytes": 207,
+      "sha256": "fc6898df534d4e766346950fdb2a6e1cdcdf08c91e100e99de40e434aea0469d"
+    },
+    "demo2.song.inc": {
+      "bytes": 341,
+      "sha256": "615fbc2a212087ce97dd2ae07e25a1c3d28675864e0be4d2093e6c13fd1fe3c1"
+    },
+    "demo2.wfData.inc": {
+      "bytes": 555,
+      "sha256": "0627e412ec259ae90891a71ecab69eae8da00ec5386378b01e4bdd4851484efa"
+    },
+    "demo2.wfMatrix.inc": {
+      "bytes": 192,
+      "sha256": "8f7343220a8dbff2997c83604867e0090fe9c5b422f678c795d18478e29780a3"
+    }
+  }
+}
