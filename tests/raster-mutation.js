@@ -328,6 +328,11 @@ function runCheck(bgSource, spritesSource, checkerSource) {
     fs.mkdirSync(path.join(tmp, "tests"));
     fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), bgSource);
     fs.writeFileSync(path.join(tmp, "renderer", "pce-sprites.js"), spritesSource);
+    /* #16 moved the raster-table check out of check.js into the shared
+     * tests/check-raster.js; check.js requires it from its own directory, so
+     * a copy without it throws on load and every run looks like a CRASH. */
+    fs.copyFileSync(path.join(TESTS, "check-raster.js"),
+                    path.join(tmp, "tests", "check-raster.js"));
     fs.writeFileSync(path.join(tmp, "tests", "check.js"), checkerSource);
     /* check.js resolves dumps from its own directory; symlink avoids copying
      * megabytes per mutant (fall back to a copy where symlinks are

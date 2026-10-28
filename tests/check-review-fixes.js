@@ -310,6 +310,32 @@ const OLD_CHECK_SRC = preFixSource(CHECK_SRC,
   (src) => src.includes("NOT A PICTURE (CR="),
   "check.js pre-fix CR-off rule");
 
+/* The scene set check.js must report diff 0, by name.  #16 (19a0852) added
+ * tests/dumps/effect1 and tests/dumps/vraster1-10 (the fixed raster chain's
+ * re-captures), so the count moved from 57 to 68 — but a count alone would let
+ * one scene drop out while another silently took its place, so the set is
+ * checked name by name.  us1 is the only dump that is not a picture. */
+const EXPECTED_SCENES = [
+  /* scene ROMs, #5/#6/#15/#39/#43 */
+  "scene1", "scene2", "scene3", "scene4", "scene5", "scene6", "scene7",
+  "scene8", "scene9", "scene5b", "scene8b", "scene8c",
+  /* sprite scenes, #12/#13/#14/#40/#42 */
+  "sprite1", "sprite2", "sprite3", "sprite4", "sprite5", "sprite6",
+  "sprite7", "sprite8", "sprite9", "sprite10", "sprite11", "sprite12",
+  "vsprite1", "vsprite2", "vsprite3", "vsprite4", "vsprite5", "vsprite6",
+  "vsprite7", "vsprite8", "vsprite9", "vsprite10", "vsprite11", "vsprite12",
+  "bsprite12", "painted", "spainted",
+  /* viewer/browser ROMs, #8/#14/#42/#46 */
+  "viewer1", "viewer2", "viewer3", "viewer7",
+  "browser1", "browser2", "browser3", "browser10",
+  /* raster scenes, #15/#43 */
+  "raster1", "raster2", "raster3", "raster4", "raster5", "raster6",
+  "raster7", "raster8", "raster9", "raster10",
+  /* the viewer's raster ROMs and the editor's effect demo, #16 */
+  "vraster1", "vraster2", "vraster3", "vraster4", "vraster5", "vraster6",
+  "vraster7", "vraster8", "vraster9", "vraster10", "effect1",
+];
+
 function outputProblems(stdout, status) {
   const problems = [];
   if (status !== 0) problems.push(`check.js exited ${status}`);
@@ -318,14 +344,22 @@ function outputProblems(stdout, status) {
   const m = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)$/m
     .exec(stdout);
   if (!m) problems.push("no PASS summary line");
-  else if (Number(m[1]) !== 57)
-    problems.push(`PASS counts ${m[1]} scene(s), expected 57 ` +
-                  "(scenes 1-9 plus 5b, 8b, 8c, painted, spainted, " +
-                  "viewer 1-3 and 7, browser 1-3, sprite 1-12, vsprite 1-12, " +
-                  "bsprite 12, raster 1-10 — spainted is #13's, sprite 9-11 " +
-                  "are #40's, vsprite 1-11 are #14's, raster 1-5 are #15's, " +
-                  "sprite 12/vsprite 12/bsprite 12/viewer 7 are #42's, " +
-                  "raster 6-10 are #43's, browser 10 is #46's)");
+  else if (Number(m[1]) !== EXPECTED_SCENES.length)
+    problems.push(`PASS counts ${m[1]} scene(s), expected ` +
+                  `${EXPECTED_SCENES.length}`);
+  /* ...and the summary's number is held to the names it stands for: a scene
+   * that stops reporting diff 0 must be named, even if another's count keeps
+   * the total steady. */
+  const reported = new Set();
+  for (const hit of stdout.matchAll(/^([A-Za-z0-9_]+): OK \(\d+x\d+, diff 0\)$/gm))
+    reported.add(hit[1]);
+  const missing = EXPECTED_SCENES.filter((n) => !reported.has(n));
+  const extra = [...reported].filter((n) => EXPECTED_SCENES.indexOf(n) < 0);
+  if (missing.length > 0)
+    problems.push("scene(s) that did not report diff 0: " + missing.join(", "));
+  if (extra.length > 0)
+    problems.push("scene(s) reported diff 0 that are not in the expected " +
+                  "set: " + extra.join(", "));
   if (!/^us1: not a picture, skipped/m.test(stdout))
     problems.push("us1 is not reported as skipped by name");
   return problems;
@@ -343,10 +377,27 @@ function outputProblems(stdout, status) {
 {
   const run = spawnSync(process.execPath, [path.join(__dirname, "check.js")],
     { encoding: "utf8", timeout: 120000 });
-  const problems = outputProblems(run.stdout || "", run.status);
+  const stdout = run.stdout || "";
+  const problems = outputProblems(stdout, run.status);
   if (problems.length === 0)
-    pass("check.js: 57 scene(s) diff 0, us1 skipped and not counted");
+    pass(`check.js: ${EXPECTED_SCENES.length} scene(s) diff 0 by name, ` +
+         "us1 skipped and not counted");
   else problems.forEach(fail);
+
+  /* Self-test of the name check itself: the same green output with one scene's
+   * OK line removed must be rejected AND name that scene.  Without this, a
+   * missing scene and a pass look identical whenever the count is unchanged. */
+  const dropped = "vraster4";
+  const prefix = `${dropped}: OK `;
+  const hadLine = stdout.split("\n").some((l) => l.startsWith(prefix));
+  const lines = stdout.split("\n").filter((l) => !l.startsWith(prefix));
+  const dropProblems = outputProblems(lines.join("\n"), run.status);
+  if (hadLine && dropProblems.some((p) => p.includes(dropped)))
+    pass(`self-test: dropping ${dropped}'s OK line is rejected and the scene ` +
+         "is named");
+  else
+    fail(`self-test: dropping ${dropped}'s OK line was not rejected by name ` +
+         `(run had the line: ${hadLine}, ${dropProblems.length} problem(s))`);
 }
 
 {
@@ -394,7 +445,7 @@ function outputProblems(stdout, status) {
   const stdout = run.stdout || "";
   if (run.status !== 0 && /^scene8: NOT A PICTURE .* FAIL$/m.test(stdout))
     pass("self-test: the pre-fix check.js rejects scene8 as 'NOT A PICTURE' " +
-         "— the new check.js passes it (57 scene(s) above)");
+         `— the new check.js passes it (${EXPECTED_SCENES.length} scene(s) above)`);
   else
     fail("self-test: the pre-fix check.js did not reject scene8 " +
          `(exit ${run.status})`);
@@ -405,9 +456,13 @@ function runCheckGuardDump(rendererSrc) {
   fs.mkdirSync(path.join(tmp, "renderer"));
   fs.mkdirSync(path.join(tmp, "tests"));
   fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), rendererSrc);
-  /* check.js also requires pce-sprites.js (#12) */
+  /* check.js also requires pce-sprites.js (#12) and, since #16, the shared
+   * tests/check-raster.js — the copy must carry both or check.js throws on
+   * load and this guard cannot tell a crash from a pass. */
   fs.copyFileSync(path.join(ROOT, "renderer", "pce-sprites.js"),
                   path.join(tmp, "renderer", "pce-sprites.js"));
+  fs.copyFileSync(path.join(__dirname, "check-raster.js"),
+                  path.join(tmp, "tests", "check-raster.js"));
   fs.writeFileSync(path.join(tmp, "tests", "check.js"), CHECK_SRC);
   const dumps = path.join(tmp, "tests", "dumps");
   fs.mkdirSync(dumps);
@@ -432,9 +487,12 @@ function runScene8With(rendererSrc, checkSrc) {
   fs.mkdirSync(path.join(tmp, "renderer"));
   fs.mkdirSync(path.join(tmp, "tests"));
   fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), rendererSrc);
-  /* check.js also requires pce-sprites.js (#12) */
+  /* check.js also requires pce-sprites.js (#12) and, since #16, the shared
+   * tests/check-raster.js (see runCheckGuardDump). */
   fs.copyFileSync(path.join(ROOT, "renderer", "pce-sprites.js"),
                   path.join(tmp, "renderer", "pce-sprites.js"));
+  fs.copyFileSync(path.join(__dirname, "check-raster.js"),
+                  path.join(tmp, "tests", "check-raster.js"));
   fs.writeFileSync(path.join(tmp, "tests", "check.js"), checkSrc);
   const dumps = path.join(tmp, "tests", "dumps");
   fs.mkdirSync(dumps);
