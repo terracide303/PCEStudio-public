@@ -13,6 +13,11 @@
  *      past its end throws, as docs/EXPORT.md says.
  *   5. docs/RENDERER.md: every Hudson-manual citation carries a page number.
  *
+ * Section 3 also carries #39's CR-model guards (the blanket CR-off rule
+ * replaced by rendering the backdrop, scene8 as the diff-0 proof): the
+ * pre-fix renderer and the pre-fix check.js are each reproduced and rejected
+ * by the same predicates.
+ *
  * The point is "failed before it".  Each check runs over the shipped code or
  * text AND over the pre-fix version of it — a source-string substitution that
  * reproduces exactly what the review measured, or the review's own quoted
@@ -153,7 +158,7 @@ function strideDump() {
   for (let r = 0; r < 8; r++) put(2 * 16 + r, 0xFF00); /* tile 2 -> colour 2 */
   return {
     vram, cram,
-    regs: { BYR: 0, BXR: 512, MWR: 0x30, RCRCount: 0, scanline: 18 },
+    regs: { BYR: 0, BXR: 512, MWR: 0x30, CR: 0x80, RCRCount: 0, scanline: 18 },
   };
 }
 
@@ -235,7 +240,10 @@ function docProblems(text) {
 }
 
 /* ====================================================================== *
- * 3. tests/check.js — us1 is not a diff-0 picture (review finding 4)
+ * 3. tests/check.js — us1 is not a diff-0 picture (review finding 4);
+ *    #39: a background-off dump is rendered as the backdrop, not skipped
+ *    by a blanket rule — scene8 is the diff-0 proof, and the guards below
+ *    fail a CR-off dump whose capture is NOT the backdrop
  * ====================================================================== */
 
 console.log("\n3. tests/check.js: us1 is not counted as a picture");
@@ -243,6 +251,59 @@ console.log("\n3. tests/check.js: us1 is not counted as a picture");
 const CHECK_SRC = read("tests/check.js");
 const US1_REGS = JSON.parse(
   fs.readFileSync(path.join(__dirname, "dumps", "us1", "regs.json"), "utf8"));
+
+/* #39's CR model (CR bit 7 = BB, VDC manual p. H7-5; blanking-period video
+ * data 0x100 per 2.3.6 p. H7-18) — removing it from the renderer reproduces
+ * the pre-#39 behaviour: CR is ignored, a CR-off dump's picture is drawn
+ * back, and check.js counts it diff 0. */
+const CR_BLOCK = `    /* CR bit 7 = BB (background blanking): when it is clear the VDC clears
+     * the background and every pixel shows the blanking-period video data —
+     * SPBG = 1, VD7..VD0 = 0, i.e. the 9-bit colour index 0x100, CRAM[0x100]
+     * (sprite colour 0).  VDC manual, CR R05 p. H7-5, 2.3.6 p. H7-18.
+     * Measured on tests/dumps/scene8, scene8b and scene8c (a full picture in
+     * VRAM, BB clear, burst mode or not, DCR set or clear): 59392/59392
+     * pixels are CRAM[0x100] = 0x049 = 36,36,36; us1's white frame is its
+     * CRAM[0x100] = 0x1FF, the same rule. */
+    if (!(regs.CR & 0x80)) {
+      var bgOff = new Uint8Array(width * height * 3);
+      for (var i = 0; i < bgOff.length; i += 3) {
+        bgOff[i] = rgb[0x100 * 3];
+        bgOff[i + 1] = rgb[0x100 * 3 + 1];
+        bgOff[i + 2] = rgb[0x100 * 3 + 2];
+      }
+      return { width: width, height: height, pixels: bgOff };
+    }
+
+`;
+const OLD_BG_NO_CR = preFixSource(BG_SRC, CR_BLOCK, "",
+  (src) => !src.includes("CR bit 7 = BB"),
+  "pce-bg pre-fix CR model");
+
+/* The pre-#39 check.js had a blanket CR-off rule: any background-off dump
+ * not on the skip list failed as "NOT A PICTURE".  With the CR model that
+ * wrongly rejects scene8, whose capture really is the backdrop. */
+const OLD_CHECK_SRC = preFixSource(CHECK_SRC,
+  `  if (Object.prototype.hasOwnProperty.call(NOT_PICTURES, name)) {
+    console.log(\`\${name}: not a picture, skipped (not counted): \` +
+                NOT_PICTURES[name]);
+    return { kind: "not-picture" };
+  }
+`,
+  `  /* CR bit 7 = BB (background blanking): 0 clears the background, 1 displays
+   * it (VDC manual, CR R05, p. H7-5). */
+  if (!(regs.CR & 0x80)) {
+    if (!Object.prototype.hasOwnProperty.call(NOT_PICTURES, name)) {
+      console.log(\`\${name}: NOT A PICTURE (CR=0x\${regs.CR.toString(16)}) and \` +
+                  \`not on the documented skip list — FAIL\`);
+      return { kind: "error" };
+    }
+    console.log(\`\${name}: not a picture, skipped (not counted): \` +
+                NOT_PICTURES[name]);
+    return { kind: "not-picture" };
+  }
+`,
+  (src) => src.includes("NOT A PICTURE (CR="),
+  "check.js pre-fix CR-off rule");
 
 function outputProblems(stdout, status) {
   const problems = [];
@@ -252,8 +313,10 @@ function outputProblems(stdout, status) {
   const m = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)$/m
     .exec(stdout);
   if (!m) problems.push("no PASS summary line");
-  else if (Number(m[1]) !== 10)
-    problems.push(`PASS counts ${m[1]} scene(s), expected 10`);
+  else if (Number(m[1]) !== 19)
+    problems.push(`PASS counts ${m[1]} scene(s), expected 19 ` +
+                  "(scenes 1-9 plus 5b, 8b, 8c, painted, viewer 1-3, " +
+                  "browser 1-3)");
   if (!/^us1: not a picture, skipped/m.test(stdout))
     problems.push("us1 is not reported as skipped by name");
   return problems;
@@ -273,7 +336,7 @@ function outputProblems(stdout, status) {
     { encoding: "utf8", timeout: 120000 });
   const problems = outputProblems(run.stdout || "", run.status);
   if (problems.length === 0)
-    pass("check.js: 10 scene(s) diff 0, us1 skipped and not counted");
+    pass("check.js: 19 scene(s) diff 0, us1 skipped and not counted");
   else problems.forEach(fail);
 }
 
@@ -288,23 +351,51 @@ function outputProblems(stdout, status) {
   else fail("self-test: the pre-fix output was not rejected");
 }
 
-/* The skip list must not become a hiding place: a dump with the background
- * off that is NOT named in check.js has to fail the run. */
+/* The skip list must not become a hiding place, and the backdrop render
+ * must not be a free pass either: a background-off dump whose capture is
+ * NOT the backdrop (scene1's PNG with CR forced to 0) has to fail the run
+ * as a diff.  The CR model is what makes that possible — with the pre-fix
+ * renderer, bgoff's picture is drawn back pixel-for-pixel and check.js
+ * passes it, which is the defect this guard catches. */
 {
-  const run = runCheckGuardDump();
+  const run = runCheckGuardDump(BG_SRC);
   const stdout = run.stdout || "";
-  if (run.status !== 0 && /^bgoff: NOT A PICTURE .* FAIL$/m.test(stdout))
-    pass("guard: an unlisted background-off dump fails check.js");
+  if (run.status !== 0 && /^bgoff: \d+ differing pixels/m.test(stdout))
+    pass("guard: a CR-off dump whose capture is not the backdrop fails " +
+         "check.js as a diff");
   else
-    fail("guard: an unlisted background-off dump did not fail check.js " +
+    fail("guard: the CR-off non-backdrop dump did not fail check.js as a " +
+         `diff (exit ${run.status})`);
+}
+
+{
+  const run = runCheckGuardDump(OLD_BG_NO_CR);
+  if (run.status === 0 && /^bgoff: OK/m.test(run.stdout || ""))
+    pass("self-test: the pre-fix renderer (CR ignored) passes the CR-off " +
+         "dump diff 0 — the guard above is what rejects it");
+  else
+    fail("self-test: the pre-fix renderer did not pass the CR-off dump " +
          `(exit ${run.status})`);
 }
 
-function runCheckGuardDump() {
+/* The pre-#39 check.js's blanket CR-off rule rejects scene8 — the exact
+ * regression the CR model removes (scene8's capture is the backdrop). */
+{
+  const run = runScene8With(BG_SRC, OLD_CHECK_SRC);
+  const stdout = run.stdout || "";
+  if (run.status !== 0 && /^scene8: NOT A PICTURE .* FAIL$/m.test(stdout))
+    pass("self-test: the pre-fix check.js rejects scene8 as 'NOT A PICTURE' " +
+         "— the new check.js passes it (19 scene(s) above)");
+  else
+    fail("self-test: the pre-fix check.js did not reject scene8 " +
+         `(exit ${run.status})`);
+}
+
+function runCheckGuardDump(rendererSrc) {
   const tmp = tmpdir("pce-check-guard-");
   fs.mkdirSync(path.join(tmp, "renderer"));
   fs.mkdirSync(path.join(tmp, "tests"));
-  fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), BG_SRC);
+  fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), rendererSrc);
   fs.writeFileSync(path.join(tmp, "tests", "check.js"), CHECK_SRC);
   const dumps = path.join(tmp, "tests", "dumps");
   fs.mkdirSync(dumps);
@@ -318,6 +409,25 @@ function runCheckGuardDump() {
     fs.readFileSync(path.join(scene1, "regs.json"), "utf8"));
   regs.CR = 0x00;
   fs.writeFileSync(path.join(bgoff, "regs.json"), JSON.stringify(regs));
+  return spawnSync(process.execPath, [path.join(tmp, "tests", "check.js")],
+    { encoding: "utf8", timeout: 120000 });
+}
+
+/* Run check.js (a source string) with a renderer (a source string) against
+ * the real scene8 dump — the CR-off picture whose capture is the backdrop. */
+function runScene8With(rendererSrc, checkSrc) {
+  const tmp = tmpdir("pce-check-scene8-");
+  fs.mkdirSync(path.join(tmp, "renderer"));
+  fs.mkdirSync(path.join(tmp, "tests"));
+  fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), rendererSrc);
+  fs.writeFileSync(path.join(tmp, "tests", "check.js"), checkSrc);
+  const dumps = path.join(tmp, "tests", "dumps");
+  fs.mkdirSync(dumps);
+  const scene8 = path.join(__dirname, "dumps", "scene8");
+  const dest = path.join(dumps, "scene8");
+  fs.mkdirSync(dest);
+  for (const f of ["vram.bin", "cram.bin", "mednafen.png", "regs.json"])
+    fs.copyFileSync(path.join(scene8, f), path.join(dest, f));
   return spawnSync(process.execPath, [path.join(tmp, "tests", "check.js")],
     { encoding: "utf8", timeout: 120000 });
 }
@@ -396,8 +506,8 @@ const WHOLLY_PAST = [[3840, 16]];           /* dest 61440: dropped */
 
 console.log("");
 if (failures.length === 0) {
-  console.log("PASS: all five #38 fixes hold, and each pre-fix version is " +
-              "rejected by the same check");
+  console.log("PASS: all five #38 fixes hold (each pre-fix version rejected " +
+              "by the same check), and #39's CR-model guards hold too");
   process.exitCode = 0;
 } else {
   console.log(`FAIL: ${failures.length} check(s) did not hold`);

@@ -1,27 +1,33 @@
-# The renderer and export checks (#5, #6, #8, #9, #10)
+# The renderer and export checks (#5, #6, #8, #9, #10, #38, #39)
 
 ```sh
 node tests/check.js             # diff the renderer against Mednafen, all scenes
 node tests/check-review-fixes.js # #38: each review fix, and it fails before
-node tests/renderer-mutation.js # prove that diff test fails on a broken renderer
+node tests/renderer-mutation.js # #6/#39: prove that diff test fails on a broken renderer
 node tests/check-viewer.js      # viewer/browser ROM captures vs the renderer
 node tests/check-export.js      # the browser's .pce vs the PCEAS build, byte for byte
 node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
 node tests/check-editor.js      # the editor's refusals, picture, export and capture
 ```
 
-## `check.js` — the diff (#5)
+## `check.js` — the diff (#5, #39)
 
 For each `dumps/sceneN/`, renders `mednafen.png`'s frame from `vram.bin`,
 `cram.bin` and `regs.json` with `renderer/pce-bg.js` and compares every RGB
 byte. Prints `diff 0` or the differing-byte count plus sample pixels. Exit 0
-only if every picture matches.
+only if every picture matches. `regs.json` carries the capture crop
+(`slstart`/`slend`); the renderer reads it as `firstScanline = 14 + slstart`.
 
-A dump whose CR has bit 7 clear (background off) is not a picture and is
-**not counted**: `dumps/us1` is Mednafen failing to run the US HuCard image
-(#25), not a rendered frame. The skip list is explicit and named dumps only;
-an unnamed background-off dump fails the run. So the shipped count is **10
-pictures**, not 11. This is #5's closing measurement.
+A dump whose CR has bit 7 clear (background off) is **rendered as the
+backdrop** — CRAM[0x100] on every pixel, the VDC's blanking-period video
+data — and `scene8`, `scene8b` and `scene8c` are the diff-0 proofs (#39).
+`dumps/us1` stays skipped by name, for its own reason: Mednafen shows the US
+HuCard image blank (every VDC register 0), which is the emulator not running
+the image (#25), not a rendered frame. The skip list is explicit and named
+dumps only; an unnamed background-off dump whose capture is not the backdrop
+fails the run as a diff. The shipped count is **19 pictures** (scenes 1-9,
+5b, 8b, 8c, painted, viewer 1-3, browser 1-3), us1 skipped. This is #5's
+closing measurement, extended by #39's captures.
 
 ## `check-review-fixes.js` — the #38 fixes, and that they were needed
 
@@ -35,16 +41,33 @@ it. Run the whole test against the commit before the fix and it reports 13
 failures; against the fix, 0. It is written by @design and flagged for
 @review to read cold.
 
-## `renderer-mutation.js` — the diff test can fail (#6)
+## `renderer-mutation.js` — the diff test can fail (#6, #39)
 
 `check.js` reporting `diff 0` is only worth what it costs to break it. This
-script runs the real `check.js` against two copies of `renderer/pce-bg.js`, each
-with one deliberate defect the card names — the BAT palette nibble ignored
-(every tile drawn with palette 0) and tile rows shifted by one — and requires
-`check.js` to exit 1 and report **exactly** the number of differing bytes the
-mutant actually produces, scene by scene. The unmodified renderer and the
-unmodified `check.js` are never touched; mutants are built in a throwaway
-directory from source-string substitutions.
+script runs the real `check.js` against a copy of `renderer/pce-bg.js` with
+one deliberate defect, and requires `check.js` to exit 1 and report
+**exactly** the number of differing bytes the mutant actually produces, scene
+by scene (and `diff 0` for the scenes it does not change). The unmodified
+renderer and the unmodified `check.js` are never touched; mutants are built
+in a throwaway directory from source-string substitutions. Ground truth is
+measured in this process by rendering the original and mutant side by side,
+so `check.js` is checked against that, not against its own opinion.
+
+#6 began with the two defects the card names. #39 extends the list to the
+ten breaks `docs/REVIEW.md` finding 1 showed the test could not see, each
+required to be DETECTED: the BAT width mask forced to 31, the widths table
+`[32,64,64,64]`, BAT height always 32, the SCREEN-code-3 row stride (the
+#38 break), the `ch >= 0x800` rule removed, BXR masked to 8 and to 9 bits,
+BYR masked to 8 bits, `vdwLine0` hard-wired to 1, CR ignored, and the green
+channel `&3`. Scenes 4-9 (8b, 8c) exist to make these visible — each is
+**not** periodic in the dimension the break cuts — and scene5b (crop
+shifted two lines, so its `vdwLine0` is 3) catches the vdw1 break, which is
+arithmetically invisible on the standard crop. One break is DETECTED on a
+synthetic dump instead: `ch800` — no real dump can carry VRAM data at
+words ≥ 0x800 because Mednafen's state holds 32768 words, so the script
+builds a 65536-word VRAM whose BAT reads tiles ≥ 0x800 (the reference PNG
+is the shipped renderer's own frame; scene9 is the capture that proves the
+*rule*, the script only proves the checker catches its removal).
 
 It also tests itself, so a green run is not the only thing it can say:
 
@@ -56,11 +79,11 @@ Distinct outcomes: `DETECTED`, `MISSED` (check exits 0 on a renderer that does
 differ), `CRASH` (non-zero exit without an accurate per-scene diff report),
 `NO-OP` (the mutation changed nothing, so the test would prove nothing), `NOT
 APPLIED` (the edited source line is gone — fails loudly rather than silently
-testing nothing), `UNEXPECTED` (exit 0 but not a clean three-scene pass), and
+testing nothing), `UNEXPECTED` (exit 0 but not a clean pass), and
 `INPUT-ERROR` (a dump could not be read or rendered).
 
-Exit 0 only when the baseline is diff 0 on all three scenes and both real
-mutations are `DETECTED`.
+Exit 0 only when the baseline is diff 0 on all scenes, all ten breaks are
+DETECTED, and both self-tests hold.
 
 ## `check-viewer.js` — the ROM shows the picture (#8, #9)
 
@@ -124,12 +147,15 @@ Details and the headless page output: [`../docs/EDITOR.md`](../docs/EDITOR.md).
 
 ## What this does NOT prove
 
-**It does not prove the renderer is correct.** Two mutations on three dumps do
-not enumerate the ways a VDC/VCE renderer can be wrong. Anything the scenes do
-not exercise can still be broken while `check.js` stays green: the 64-row BAT
-(MWR bit 6), the other dot clocks/widths (336/512), sprites, RCR split-screen,
-and any BAT/scroll combination unlike these three fixed dumps. A renderer bug
-that happens to reproduce the same pixels on these scenes escapes.
+**It does not prove the renderer is correct.** Eleven mutations on twelve
+dumps do not enumerate the ways a VDC/VCE renderer can be wrong. Anything
+the scenes do not exercise can still be broken while `check.js` stays
+green: sprites, RCR split-screen, the other dot clocks/widths (336/512),
+and any BAT/scroll combination unlike these fixed dumps. One break's
+*check* is synthetic-only (`ch800`, above) — the rule itself is proven by
+scene9, but a future renderer bug in it would be caught only by the
+synthetic dump. A renderer bug that happens to reproduce the same pixels
+on these scenes escapes.
 
 **It does not prove the reference is right.** `check.js` compares against
 `mednafen.png`. A mutation is only "caught" relative to that reference; if the

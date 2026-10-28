@@ -93,10 +93,11 @@ def parse(path):
 
 
 def main():
-    if len(sys.argv) != 3:
-        print(f"usage: {sys.argv[0]} STATE.mcs OUTDIR", file=sys.stderr)
+    if len(sys.argv) not in (3, 4):
+        print(f"usage: {sys.argv[0]} STATE.mcs OUTDIR [SLSTART]", file=sys.stderr)
         return 2
     state, outdir = sys.argv[1], sys.argv[2]
+    slstart = int(sys.argv[3]) if len(sys.argv) == 4 else None
     import os
     os.makedirs(outdir, exist_ok=True)
 
@@ -142,12 +143,15 @@ def main():
         byr = regs.get("BYR", 0)
         sl = regs["scanline"]
         # VDW line 0 = VCE line 17 (RCRCount = scanline - 17 at save); captured
-        # row 0 (scanline 18) is VDW line 1.  Cross-check: BG_YMoo - BYR must
-        # equal RCRCount - 1 (the save happens before the latch of its own
-        # line's HDS_PART2 increment).
+        # row 0 (VCE line 14 + slstart) is VDW line RCRCount - (scanline -
+        # (14 + slstart)).  Cross-check: BG_YMoo - BYR must equal
+        # RCRCount - 1 (the save happens before the latch of its own line's
+        # HDS_PART2 increment).
+        first = 14 + (slstart if slstart is not None else 4)
         print(f"calibration: scanline={sl} RCRCount={rcr} BG_YMoo={moo} "
               f"BYR={byr} -> vdw_line(save)={rcr} "
-              f"row0_vdw_line={rcr - (sl - 18)} "
+              f"row0_vdw_line={rcr - (sl - first)} "
+              f"(firstScanline={first}) "
               f"crosscheck BG_YMoo-BYR={moo - byr} (expect {rcr - 1})")
         # A state saved during the 14 pre-VDW blanking lines (scanline < 14)
         # straddles the BG_YOffset reset at VDW entry: the row arithmetic is
