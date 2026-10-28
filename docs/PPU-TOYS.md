@@ -608,3 +608,7 @@ For PCEStudio this means the pipeline is **Lua subset → our own intermediate l
 the IL is where the validator (#32) counts cycles per frame, sprites per line and memory, and where `raster()` is
 checked against the line budget; code generation then goes from the IL — either to C (or LLVM IR) for llvm-mos,
 or straight to HuC6280 code. The IL is the part to get right first; it is ours to design (his is not public).
+
+**a.gilbert (2026-10-28):** "If it works out, I'd love to hear about it! I just went all in on this approach and
+haven't considered many alternatives." → When #31 has measured its routes (IL → llvm-mos / HuC / direct HuC6280),
+send him the comparison (Dennis does the sending). Our numbers on alternatives he did not try are the useful part.
