@@ -45,8 +45,18 @@ WIDEROMS := gen/wide336.pce gen/wide512.pce gen/wide512b.pce
 # trace fixtures pin is unchanged), driven by sprite13's picture data and
 # the rotation rule genroms.py writes.
 FLICKER_ROM := gen/flicker.pce
+# #35's wave-editor reference ROMs (tools/wave*.js -> genwave.py -> PCEAS).
+# check-wave.js assembles nothing itself: it requires tools/gen/waveN.pce to
+# already be the PCEAS build of the asm it regenerates from the same sound,
+# and psg-mutation.js copies those ROMs into its scratch trees.
+WAVEROMS := $(addprefix gen/wave,$(addsuffix .pce,1 2 3))
+# The raster tables genroms.py writes beside the raster asm.  They are
+# targets of a pattern rule, so GNU make treats them as intermediates and
+# deletes them after the vraster ROMs have used them; check-export.js reads
+# them directly (loadRasterScene), so they stay in `all` and are kept.
+RASTER_TABLES := $(addprefix gen/raster,$(addsuffix .raster.json,$(RASTERS)))
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS) $(DMAROMS) $(WIDEROMS) $(FLICKER_ROM)
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS) $(DMAROMS) $(WIDEROMS) $(FLICKER_ROM) $(WAVEROMS) $(RASTER_TABLES)
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -141,6 +151,19 @@ gen/flicker.asm: genviewer.py ../tests/dumps/sprite13/regions.json gen/sprite13.
 	$(PYTHON) -I genviewer.py flicker
 
 gen/flicker.pce: gen/flicker.asm viewer.asm
+	$(PCEAS) -raw -o $@ $<
+
+# #35's wave-editor ROMs.  wavesounds.js writes all three sounds at once;
+# genwave.py writes each asm + trace from its sound.  The .pce is what
+# check-wave.js and psg-mutation.js need, so it is a goal in `all`.
+gen/wave%.sound.json: wavesounds.js ../renderer/pce-wave.js
+	mkdir -p gen
+	node wavesounds.js
+
+gen/wave%.asm: genwave.py gen/wave%.sound.json
+	$(PYTHON) -I genwave.py
+
+gen/wave%.pce: gen/wave%.asm
 	$(PCEAS) -raw -o $@ $<
 
 # #9's constant code bank: the browser export copies bank 0 verbatim, so it

@@ -61,7 +61,12 @@
  * deliberately broken copy; the normal run uses none of them.
  *
  * Exit 0 only if every check passes; 1 if any picture/geometry check fails;
- * 2 if evidence is missing (run tools/capture-ares.sh all).
+ * 2 if a ROM has SOME of its ares evidence but not all of it (a stale or
+ * half-written capture).  A ROM with NO ares capture at all — the usual case
+ * for a fresh clone on a machine without a screen — is reported as
+ * `SKIP: <rom> — ...` with the command that captures it, counted in the
+ * summary, and does not make the exit code 0 mean "every ROM was compared".
+ * tools/../tests/all.sh reports that line as a SKIP, not a PASS.
  *
  * What this does NOT prove:
  *   - that ares's 8-bit DAC levels are the right ones (the Hudson HuC6260
@@ -273,6 +278,7 @@ const ROMS = [
              process.env.ARES_ROMS.split(",").indexOf(r.name) >= 0);
 
 let missing = [];
+let skipped = [];
 let failures = 0;
 
 for (const rom of ROMS) {
@@ -281,15 +287,28 @@ for (const rom of ROMS) {
   const mdPath = path.join(DUMPS, rom.name, "mednafen.png");
   const sceneDir = rom.self ? path.join(DUMPS, rom.name)
                             : path.join(DUMPS, rom.scene);
+  const rasterPath = path.join(sceneDir, "raster.json");
+
+  /* The two artifacts the ares capture writes.  If NEITHER exists, ares was
+   * never run on this ROM (no screen on this machine is the common case):
+   * that is a SKIP with a reason, never a pass — the summary below counts the
+   * ROMs actually compared.  If one exists without the other, the capture is
+   * stale or half-written: that is a failure, not a skip. */
+  const hasFrame = fs.existsSync(framePath);
+  const hasBlock = fs.existsSync(blockPath);
+  if (!hasFrame && !hasBlock) {
+    skipped.push({ name: rom.name,
+                   need: `run tools/capture-ares.sh ${rom.name}` });
+    continue;
+  }
 
   const miss = [];
-  if (!fs.existsSync(framePath)) miss.push(framePath);
-  if (!fs.existsSync(blockPath)) miss.push(blockPath);
+  if (!hasFrame) miss.push(framePath);
+  if (!hasBlock) miss.push(blockPath);
   if (!fs.existsSync(mdPath)) miss.push(mdPath);
   if (!fs.existsSync(sceneDir)) miss.push(sceneDir);
-  if (rom.raster &&
-      !fs.existsSync(path.join(sceneDir, "raster.json")))
-    miss.push(`${sceneDir}/raster.json (run tools/capture.sh ${rom.name} ` +
+  if (rom.raster && !fs.existsSync(rasterPath))
+    miss.push(`${rasterPath} (run tools/capture.sh ${rom.name} ` +
               `in Mednafen first — ares needs the patched table)`);
   if (miss.length) { missing.push(...miss); continue; }
 
@@ -377,6 +396,15 @@ if (missing.length) {
   for (const m of missing) console.log(`  ${m}`);
   console.log("run tools/capture-ares.sh all");
   process.exit(2);
+}
+
+if (skipped.length) {
+  console.log(`check-ares: ${ROMS.length - skipped.length} ROM(s) checked ` +
+              `against ares frames, ${skipped.length} SKIPPED (no ares ` +
+              "capture on this machine) — a skip is not a pass:");
+  for (const s of skipped) console.log(`  SKIP: ${s.name} — no ares frame ` +
+                                       `or block; ${s.need} on a machine ` +
+                                       "with a screen");
 }
 
 console.log("");

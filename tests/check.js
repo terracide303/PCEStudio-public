@@ -26,14 +26,14 @@
  * that.  tests/dumps/us1 stays on the skip list for its own reason — it is
  * Mednafen showing the US HuCard image blank (every VDC register 0), which
  * is the emulator not running the image (#25), not a picture that exercises
- * the renderer.  tests/dumps/toypalette is the second entry (#81): #31 part
- * A's capture route records a 149-frame animation and saves its state when
- * Mednafen is interrupted, so the state is a frame of the animation rather
- * than the recorded last frame; those frames are check-il-console.js's
- * evidence, aligned against the browser run.  The skip list is explicit
- * below and a dump with the background off that is not on it is rendered
- * like any other, so a bad capture cannot hide behind a blanket "not a
- * picture" rule.
+ * the renderer.  tests/dumps/toypalette (#81) and tests/dumps/toyparallax
+ * (#83) are the two toy captures: #31's capture route records an animation
+ * and saves its state when Mednafen is interrupted, so the state is a frame
+ * of the animation rather than the recorded last frame; those frames are
+ * check-il-console.js's evidence, aligned against the browser run.  The skip
+ * list is explicit below and a dump with the background off that is not on
+ * it is rendered like any other, so a bad capture cannot hide behind a
+ * blanket "not a picture" rule.
  *
  * A dump with raster.json (the #15 raster scenes) is verified against it
  * first (checkRaster below: the table must describe what the ROM actually
@@ -244,6 +244,14 @@ const NOT_PICTURES = {
   toypalette: "an animated toy capture (#31 part A), judged frame by frame " +
        "against the browser run by tests/check-il-console.js: its saved state " +
        "is one frame of a 149-frame animation, not the still scene this " +
+       "check diffs against the recorded last frame",
+  /* #83: #31 part C's raster toy has the same capture route as toypalette —
+   * the save state is one frame of a 537-frame animation, not the recorded
+   * last frame.  Measured: 86,595 differing pixels of 178,176 bytes against
+   * its mednafen.png; check-il-console.js judges every recorded frame. */
+  toyparallax: "an animated toy capture (#31 part C), judged frame by frame " +
+       "against the browser run by tests/check-il-console.js: its saved state " +
+       "is one frame of a 537-frame animation, not the still scene this " +
        "check diffs against the recorded last frame",
 };
 
