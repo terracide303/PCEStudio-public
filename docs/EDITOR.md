@@ -441,8 +441,14 @@ followinfo: pixel (168,92) · VDW line 92 · winner: background
   check calls, but its `mousedown`/`mousemove` wiring is read, not executed —
   no synthetic input is ever sent on this machine. The effect buttons are the
   same: `?effects=1` exercises the setters a button calls, not the click.
-  The #26 follow-a-pixel click is the same: `?panels=1` calls the panel at a
-  fixed pixel, it does not click the canvas.
+  The one exception (#52) is the three Remove buttons: `check-editor.js`
+  executes `editor.html`'s own script in a stub DOM and dispatches
+  `#cleargrad` / `#clearwob` / `#clearbands`, because a handler wired to the
+  wrong `clear*` function passed every earlier check. That proves the wiring
+  and the state it leaves, not a real browser's click, layout or CSS, and
+  every other handler on the page is still unproven. The #26 follow-a-pixel
+  click is the same: `?panels=1` calls the panel at a fixed pixel, it does
+  not click the canvas.
 - **Not the download wiring.** `URL.createObjectURL` and the anchor click are
   read, not run by an automated check.
 - **Not the raster table in an exported ROM.** That is **#16**: the viewer

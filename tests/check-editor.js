@@ -6,6 +6,8 @@
  * NOTE: written by @design because the cards' close conditions need a diff
  * script; per the workshop role split this is flagged for @review to read
  * cold (same arrangement as tests/check.js, check-viewer.js, check-export.js).
+ * Items 12 and 13 were added by @test for #52 (the breaker's REVIEW-13-17
+ * gaps); the rest is the original @design check, unchanged.
  *
  * What it measures:
  *  1. The refusals.  Every call that would store something the VDC cannot
@@ -74,6 +76,22 @@
  *     The browser-global branch must give the same tables, previews and
  *     refusals.
  *
+ * Card #52 adds what REVIEW-13-17 found the check could not see:
+ * 12. The edges of those ranges (#52, breaks E4/E5/E6).  Two parallax bands
+ *     that share exactly one boundary line are refused with raster-line-full
+ *     (a VDW line carries one entry), and the ranges accepted normally do
+ *     not intersect.  The legal maxima BXR 1023 and BYR 511 are ACCEPTED and
+ *     reach the table's base (1024 / 512 are still refused).  Every table
+ *     the editor builds has strictly increasing entry lines — the order the
+ *     ROM's RCR chain arms them in — asserted on the array, not looked up by
+ *     line, including a table with all three effects at once.
+ * 13. The page's Remove buttons (#52, break H1).  renderer/editor.html is
+ *     EXECUTED in a stub DOM: its own inline script, its declared script
+ *     order, and each of #cleargrad / #clearwob / #clearbands clicked with
+ *     all three effects set.  Each must clear its own effect and leave the
+ *     other two, which is what a handler wired to the wrong clear* function
+ *     cannot do.
+ *
  *   node tests/check-editor.js                 # check both captures
  *   node tests/check-editor.js --write         # write tools/gen/painted.pce
  *   node tests/check-editor.js --write sprite  # write tools/gen/spainted.pce
@@ -84,9 +102,10 @@
  * Exit 0 only if everything above holds.
  *
  * What this does NOT prove: that the page's mouse handlers paint what a
- * person expects (they call the same functions the check does, but the
- * page's event wiring is read, not executed), that the download wiring runs,
- * or that the picture is one someone wanted.
+ * person expects (the three Remove buttons' click handlers are now executed,
+ * but no real browser is: layout, CSS and a real click are stubbed, and every
+ * other handler in the page is read, not executed), that the download wiring
+ * runs, or that the picture is one someone wanted.
  */
 
 "use strict";
@@ -113,6 +132,8 @@ const BG_SRC = fs.readFileSync(
   path.join(HERE, "..", "renderer", "pce-bg.js"), "utf8");
 const SPRITES_SRC = fs.readFileSync(
   path.join(HERE, "..", "renderer", "pce-sprites.js"), "utf8");
+const PAGE_DIR = path.join(HERE, "..", "renderer");
+const PAGE_FILE = path.join(PAGE_DIR, "editor.html");
 
 /* ---- minimal PNG reader (same as tests/check.js) ----------------------- */
 function decodePng(buf) {
@@ -729,6 +750,27 @@ function entryAt(table, line) {
   return null;
 }
 
+/* #52 / REVIEW-13-17 E6: #15's contract is entries whose lines strictly
+ * increase — the ROM writes them in array order from the RCR chain, so #16's
+ * viewer would arm the last line first if toRaster reversed them, even
+ * though pce-bg.js sorts defensively and hides it today.  Asserted on the
+ * array itself, not by looking entries up by line. */
+function checkOrder(table, label, first, last, P) {
+  if (!table) { P(label + ": toRaster returned null"); return; }
+  const e = table.entries;
+  if (!e.length) { P(label + ": the table has no entries"); return; }
+  for (let i = 1; i < e.length; i++)
+    if (!(e[i].line > e[i - 1].line))
+      P(label + ": entry " + i + " (line " + e[i].line + ") does not come " +
+        "after entry " + (i - 1) + " (line " + e[i - 1].line + "); the " +
+        "table's lines must strictly increase");
+  if (e[0].line !== first)
+    P(label + ": the first entry is line " + e[0].line + ", expected " + first);
+  if (e[e.length - 1].line !== last)
+    P(label + ": the last entry is line " + e[e.length - 1].line +
+      ", expected " + last);
+}
+
 /* 6a. the hand-computed tables: each effect built through the editor's own
  * calls, with the entries asserted against arithmetic done here (not by
  * calling the editor's helpers). */
@@ -747,6 +789,7 @@ function checkEffectTables(editor, label) {
     const t = editor.toRaster(p, 0);
     if (!t) P("gradient: toRaster returned null");
     else {
+      checkOrder(t, label + " gradient", 0, 7, P);
       if (!t.baseCram || t.baseCram.length !== 512)
         P("gradient: baseCram is not 512 words");
       else if (t.baseCram[1] !== 0)
@@ -788,6 +831,7 @@ function checkEffectTables(editor, label) {
     const want0 = [10, 12, 10, 8, 10, 12, 10, 8];
     if (!t0) P("wobble: toRaster returned null");
     else {
+      checkOrder(t0, label + " wobble frame 0", 0, 7, P);
       if (t0.entries.length !== 8)
         P("wobble: " + t0.entries.length + " entries, expected 8");
       if (t0.base.bxr !== 10)
@@ -804,11 +848,14 @@ function checkEffectTables(editor, label) {
     const t1 = editor.toRaster(p, 1);
     const want1 = [12, 10, 8, 10, 12, 10, 8, 10];
     if (!t1) P("wobble frame 1: toRaster returned null");
-    else for (let L = 0; L < 8; L++) {
-      const e = entryAt(t1, L);
-      if (!e || e.bxr !== want1[L])
-        P("wobble speed 1, frame 1, line " + L + ": bxr " + (e && e.bxr) +
-          ", expected " + want1[L]);
+    else {
+      checkOrder(t1, label + " wobble frame 1", 0, 7, P);
+      for (let L = 0; L < 8; L++) {
+        const e = entryAt(t1, L);
+        if (!e || e.bxr !== want1[L])
+          P("wobble speed 1, frame 1, line " + L + ": bxr " + (e && e.bxr) +
+            ", expected " + want1[L]);
+      }
     }
     /* a 10-bit register wraps: amplitude 8 with period 128 is +8 at line 32
      * and -8 = $3F8 (1016) at line 96 */
@@ -818,6 +865,7 @@ function checkEffectTables(editor, label) {
     const t2 = editor.toRaster(p, 0);
     if (!t2) P("wobble wrap: toRaster returned null");
     else {
+      checkOrder(t2, label + " wobble wrap", 0, 223, P);
       const a = entryAt(t2, 32), b = entryAt(t2, 96), c = entryAt(t2, 64);
       if (!a || a.bxr !== 8)
         P("wobble line 32: bxr " + (a && a.bxr) + ", expected 8");
@@ -832,13 +880,23 @@ function checkEffectTables(editor, label) {
    * on 112..223; at frame 5 that is BXR 10 and -5 = $3FB (1019). */
   {
     const p = editor.newPicture();
-    editor.setParallaxBands(p, [
+    const accepted = editor.setParallaxBands(p, [
       { line0: 0, line1: 111, speed: 2 },
       { line0: 112, line1: 223, speed: -1 }
     ]);
+    /* #52 E4: bands that are accepted must not claim any line twice — the
+     * inclusive ranges (the boundary line counts) must be disjoint. */
+    for (let i = 1; i < accepted.length; i++)
+      for (let j = 0; j < i; j++)
+        if (accepted[j].line0 <= accepted[i].line1 &&
+            accepted[i].line0 <= accepted[j].line1)
+          P("bands: accepted " + JSON.stringify(accepted[j]) + " and " +
+            JSON.stringify(accepted[i]) + " share a line, but a VDW line " +
+            "carries one raster entry");
     const t = editor.toRaster(p, 5);
     if (!t) P("bands: toRaster returned null");
     else {
+      checkOrder(t, label + " bands frame 5", 0, 223, P);
       if (t.entries.length !== 224)
         P("bands: " + t.entries.length + " entries, expected 224");
       const checks = [[0, 10], [111, 10], [112, 1019], [223, 1019]];
@@ -857,6 +915,47 @@ function checkEffectTables(editor, label) {
           P("bands frame 0 line " + L + ": bxr " + (e && e.bxr) +
             ", expected 0");
       }
+    }
+  }
+
+  /* #52 E6: all three effects at once still give ONE entry per line, in
+   * order — toRaster merges the wobble, the band and the gradient into a
+   * line's single entry rather than emitting one per effect. */
+  {
+    const p = editor.newPicture();
+    editor.setPaletteColour(p, 0, 1, 0);
+    editor.setGradient(p, { palette: 0, entry: 1, from: 0,
+      to: editor.colourWord(7, 7, 7), line0: 0, line1: 223 });
+    editor.setWobble(p, { amplitude: 2, period: 4, speed: 1,
+      line0: 0, line1: 223 });
+    editor.setParallaxBands(p, [
+      { line0: 0, line1: 111, speed: 2 },
+      { line0: 112, line1: 223, speed: -1 }
+    ]);
+    const t = editor.toRaster(p, 1);
+    checkOrder(t, label + " gradient + wobble + bands", 0, 223, P);
+    if (t && t.entries.length !== 224)
+      P("three effects together: " + t.entries.length + " entries, expected " +
+        "224 (one per line, not one per effect)");
+    const e = t && entryAt(t, 112);
+    if (!e)
+      P("three effects together: no entry at line 112");
+    else {
+      /* line 112 at frame 1: the second band's -1 px/frame = -1, and the
+       * wobble's sine at (112+1)/4 periods is exactly +2, so BXR 1 — one
+       * entry carrying both.  The cram word must be the gradient's own. */
+      if (e.bxr !== 1)
+        P("three effects together line 112: bxr " + e.bxr + ", expected 1 " +
+          "(band -1 + wobble 2)");
+      const g = editor.newPicture();
+      editor.setGradient(g, { palette: 0, entry: 1, from: 0,
+        to: editor.colourWord(7, 7, 7), line0: 0, line1: 223 });
+      const gt = editor.toRaster(g, 1);
+      const ge = gt && entryAt(gt, 112);
+      if (!e.cram || !ge || !ge.cram || e.cram[0][1] !== ge.cram[0][1])
+        P("three effects together line 112: cram " +
+          JSON.stringify(e.cram) + ", expected the gradient's " +
+          JSON.stringify(ge && ge.cram));
     }
   }
 
@@ -1008,6 +1107,17 @@ function checkEffectRefusals(editor, label) {
      () => editor.setParallaxBands(p, [
        { line0: 0, line1: 111, speed: 2 },
        { line0: 100, line1: 200, speed: -1 }]), "raster-line-full"],
+    /* #52 / REVIEW-13-17 E4: the boundary line counts.  Bands 0..111 and
+     * 111..223 both claim line 111, and toRaster can only emit one entry
+     * for it, so this is the overlap the `<` guard misses. */
+    ["two bands that share one boundary line (0..111 and 111..223)",
+     () => editor.setParallaxBands(p, [
+       { line0: 0, line1: 111, speed: 2 },
+       { line0: 111, line1: 223, speed: 1 }]), "raster-line-full"],
+    ["two bands that share a boundary line, listed in the other order",
+     () => editor.setParallaxBands(p, [
+       { line0: 111, line1: 223, speed: 1 },
+       { line0: 0, line1: 111, speed: 2 }]), "raster-line-full"],
     ["BXR 1024 (a 10-bit register)",
      () => editor.setScroll(p, { BXR: 1024 }), "register-range"],
     ["BYR 512 (a 9-bit register)",
@@ -1047,6 +1157,30 @@ function checkEffectRefusals(editor, label) {
   } catch (e) {
     problems.push(label + ": a legal effect setup was refused: " + e.message);
   }
+
+  /* #52 / REVIEW-13-17 E5: the legal maxima.  BXR is the VDC's 10-bit
+   * horizontal scroll (0..1023) and BYR its 9-bit vertical (0..511) — VDC
+   * manual R07/R08 p. H7-7 — so refusing 1023 or 511 loses the largest
+   * scroll a picture can have, and `>` -> `>=` in checkRegister does exactly
+   * that while still refusing 1024 / 512 (the cases above). */
+  {
+    const q = editor.newPicture();
+    editor.setPaletteColour(q, 0, 1, 0);
+    editor.setGradient(q, { palette: 0, entry: 1, from: 0, to: 1,
+      line0: 0, line1: 0 });
+    try {
+      editor.setScroll(q, { BXR: 1023, BYR: 511 });
+      const t = editor.toRaster(q, 0);
+      if (!t)
+        problems.push(label + ": BXR 1023 / BYR 511: toRaster returned null");
+      else if (t.base.bxr !== 1023 || t.base.byr !== 511)
+        problems.push(label + ": BXR 1023 / BYR 511 is a legal maximum but " +
+          "the table's base is bxr " + t.base.bxr + ", byr " + t.base.byr);
+    } catch (e) {
+      problems.push(label + ": BXR 1023 / BYR 511 is a legal maximum but " +
+        "was refused (" + e.code + ": " + e.message + ")");
+    }
+  }
   return { problems, count: cases.length };
 }
 
@@ -1063,6 +1197,181 @@ function loadBrowserGlobal() {
   if (!sandbox.PCEStudio || !sandbox.PCEStudio.editor)
     throw new Error("pce-editor.js did not install PCEStudio.editor");
   return sandbox.PCEStudio.editor;
+}
+
+/* ---- 7. the page's own wiring (#52 / REVIEW-13-17 H1) ------------------ */
+/* The suite used to load only pce-editor.js, so editor.html's handlers were
+ * never executed: a Remove button wired to the wrong clear* function passed
+ * every check.  This runs the page itself — its own inline script, the module
+ * scripts its tags name, in the order they name them — in a stub DOM (this
+ * project has no jsdom), then clicks each Remove button with all three
+ * effects set. */
+function pageParts() {
+  const html = fs.readFileSync(PAGE_FILE, "utf8");
+  const srcs = [];
+  const reSrc = /<script\s+src="([^"]+)"\s*><\/script>/g;
+  let m;
+  while ((m = reSrc.exec(html))) srcs.push(m[1]);
+  let inline = null;
+  const reInline = /<script>([\s\S]*?)<\/script>/g;
+  while ((m = reInline.exec(html))) inline = m[1];
+  return { srcs, inline };
+}
+
+/* A canvas context that records nothing and returns empty images: the page
+ * draws its preview and panels through these, and the check reads the
+ * editor's state, not the pixels. */
+function stubCanvasContext() {
+  const props = { fillStyle: "", strokeStyle: "", lineWidth: 1, font: "",
+    textAlign: "", imageSmoothingEnabled: false };
+  const noop = () => {};
+  return new Proxy({}, {
+    get(_, k) {
+      if (k in props) return props[k];
+      if (k === "createImageData" || k === "getImageData")
+        return (w, h) => ({ width: w, height: h,
+          data: new Uint8ClampedArray(w * h * 4) });
+      if (k === "measureText") return () => ({ width: 0 });
+      return noop;
+    },
+    set(_, k, v) { props[k] = v; return true; }
+  });
+}
+
+function stubElement(id) {
+  return {
+    id, children: [], listeners: {}, style: {}, dataset: {}, options: [],
+    className: "", title: "", textContent: "", innerHTML: "", value: "",
+    checked: false, disabled: false, width: 256, height: 224,
+    classList: { add() {}, remove() {}, toggle() {},
+                 contains() { return false; } },
+    addEventListener(type, fn) {
+      (this.listeners[type] = this.listeners[type] || []).push(fn);
+    },
+    removeEventListener() {},
+    appendChild(c) { this.children.push(c); return c; },
+    removeChild(c) {
+      const i = this.children.indexOf(c);
+      if (i >= 0) this.children.splice(i, 1);
+      return c;
+    },
+    insertBefore(c) { this.children.push(c); return c; },
+    remove() {}, click() {}, focus() {}, setAttribute() {},
+    getAttribute() { return null; },
+    getBoundingClientRect() { return { left: 0, top: 0, width: 8, height: 8 }; },
+    getContext() { return stubCanvasContext(); }
+  };
+}
+
+function runPage() {
+  const parts = pageParts();
+  if (!parts.inline)
+    throw new Error("editor.html has no inline script to execute");
+  if (!parts.srcs.length)
+    throw new Error("editor.html names no module scripts");
+  const elements = new Map();
+  const element = (id) => {
+    if (!elements.has(id)) elements.set(id, stubElement(id));
+    return elements.get(id);
+  };
+  const sandbox = {
+    console,
+    URLSearchParams,
+    location: { search: "" },
+    addEventListener() {},
+    removeEventListener() {},
+    document: {
+      getElementById: element,
+      createElement: (tag) => stubElement("created:" + tag),
+      querySelectorAll: () => [],
+      querySelector: () => null,
+      body: { appendChild() {}, removeChild() {} }
+    },
+    fetch: () => Promise.reject(new Error("fetch is not stubbed"))
+  };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  vm.createContext(sandbox);
+  for (const src of parts.srcs)
+    vm.runInContext(fs.readFileSync(path.join(PAGE_DIR, src), "utf8"), sandbox,
+      { filename: "renderer/" + src });
+  vm.runInContext(parts.inline, sandbox,
+    { filename: "renderer/editor.html <inline>" });
+  return { sandbox, element };
+}
+
+/* Every outcome is named: the page failing to run, a button with no single
+ * click handler, the setup not taking (which would make a pass meaningless),
+ * a handler that throws, and a handler that leaves the wrong state. */
+function checkPageWiring(label) {
+  const P = [];
+  let page;
+  try { page = runPage(); } catch (e) {
+    return [label + ": editor.html did not run (" + e.message + ")"];
+  }
+  const { sandbox, element } = page;
+  let picType;
+  try { picType = vm.runInContext("typeof pic", sandbox); } catch (e) {
+    picType = "unreadable (" + e.message + ")";
+  }
+  if (picType !== "object")
+    return [label + ": the page's script ran but its picture is " + picType +
+      " — the stub DOM is not driving the page, so nothing below was tested"];
+
+  /* all three effects set with values every setter accepts */
+  const SETUP = `ed.setGradient(pic, { palette: 0, entry: 1, from: 0,
+    to: 511, line0: 0, line1: 3 });
+  ed.setWobble(pic, { amplitude: 1, period: 4, speed: 0,
+    line0: 0, line1: 223 });
+  ed.setParallaxBands(pic, [{ line0: 0, line1: 111, speed: 2 },
+                            { line0: 112, line1: 223, speed: 1 }]);
+  "ok"`;
+  const state = () => JSON.parse(vm.runInContext(
+    "JSON.stringify({ gradient: !!pic.raster.gradient," +
+    " wobble: !!pic.raster.wobble, bands: pic.raster.bands.length })",
+    sandbox));
+  const ALL = { gradient: true, wobble: true, bands: 2 };
+
+  const cases = [
+    ["cleargrad", "the Remove button under the gradient", "gradient",
+      { gradient: false, wobble: true, bands: 2 }],
+    ["clearwob", "the Remove button under the wobble", "wobble",
+      { gradient: true, wobble: false, bands: 2 }],
+    ["clearbands", "the Remove button under the parallax bands", "bands",
+      { gradient: true, wobble: true, bands: 0 }]
+  ];
+  for (const [id, what, own, want] of cases) {
+    const clicks = element(id).listeners.click || [];
+    if (clicks.length !== 1) {
+      P.push(label + ": editor.html registers " + clicks.length +
+        " click handler(s) on #" + id + ", expected exactly 1");
+      continue;
+    }
+    try { vm.runInContext(SETUP, sandbox); } catch (e) {
+      P.push(label + ": #" + id + ": setting all three effects failed (" +
+        e.message + ")");
+      continue;
+    }
+    const before = state();
+    if (!before.gradient || !before.wobble || before.bands !== 2) {
+      P.push(label + ": #" + id + ": the setup left " + JSON.stringify(before) +
+        ", expected " + JSON.stringify(ALL) + " — the test would not have " +
+        "observed the button");
+      continue;
+    }
+    try { clicks[0](); } catch (e) {
+      P.push(label + ": #" + id + ": the click handler threw (" + e.message +
+        ")");
+      continue;
+    }
+    const after = state();
+    if (after.gradient !== want.gradient || after.wobble !== want.wobble ||
+        after.bands !== want.bands)
+      P.push(label + ": #" + id + " (" + what + ") left " +
+        JSON.stringify(after) + ", expected " + JSON.stringify(want) +
+        ": the handler does not clear " + own + " and only " + own);
+  }
+  return P;
 }
 
 /* ---- main -------------------------------------------------------------- */
@@ -1190,6 +1499,13 @@ function main() {
            `refusals, ${geffRef.count}/${geffRef.count} effect refusals, ` +
            `same effect tables and previews, same ${grom.length} and ` +
            `${gsrom.length} bytes`);
+
+  /* 7. the page's own Remove buttons (#52) */
+  const pageProblems = checkPageWiring("page");
+  if (pageProblems.length) pageProblems.forEach(fail);
+  else out(`page: renderer/editor.html executed in a stub DOM — ` +
+           `#cleargrad, #clearwob and #clearbands each clear their own ` +
+           `effect and leave the other two`);
 
   /* 4. the captures */
   const haveCapture = fs.existsSync(path.join(CAPTURE, "mednafen.png"));
