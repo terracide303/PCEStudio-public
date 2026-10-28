@@ -1,4 +1,4 @@
-# The renderer and export checks (#5, #6, #8, #9, #10, #38, #39)
+# The renderer and export checks (#5, #6, #8, #9, #10, #12, #38, #39, #40)
 
 ```sh
 node tests/check.js             # diff the renderer against Mednafen, all scenes
@@ -10,13 +10,15 @@ node tests/check-us-card.js     # the US HuCard image is the .pce bit-reversed
 node tests/check-editor.js      # the editor's refusals, picture, export and capture
 ```
 
-## `check.js` — the diff (#5, #39)
+## `check.js` — the diff (#5, #39, #12, #40)
 
-For each `dumps/sceneN/`, renders `mednafen.png`'s frame from `vram.bin`,
-`cram.bin` and `regs.json` with `renderer/pce-bg.js` and compares every RGB
-byte. Prints `diff 0` or the differing-byte count plus sample pixels. Exit 0
-only if every picture matches. `regs.json` carries the capture crop
-(`slstart`/`slend`); the renderer reads it as `firstScanline = 14 + slstart`.
+For each `dumps/sceneN/` or `dumps/spriteN/`, renders `mednafen.png`'s frame
+from `vram.bin`, `cram.bin` and `regs.json` — a dump with `sat.bin` (the
+sprite scenes, #12/#40) through `renderer/pce-sprites.js`, everything else
+through `renderer/pce-bg.js` — and compares every RGB byte. Prints `diff 0`
+or the differing-byte count plus sample pixels. Exit 0 only if every picture
+matches. `regs.json` carries the capture crop (`slstart`/`slend`); the
+renderer reads it as `firstScanline = 14 + slstart`.
 
 A dump whose CR has bit 7 clear (background off) is **rendered as the
 backdrop** — CRAM[0x100] on every pixel, the VDC's blanking-period video
@@ -25,9 +27,41 @@ data — and `scene8`, `scene8b` and `scene8c` are the diff-0 proofs (#39).
 HuCard image blank (every VDC register 0), which is the emulator not running
 the image (#25), not a rendered frame. The skip list is explicit and named
 dumps only; an unnamed background-off dump whose capture is not the backdrop
-fails the run as a diff. The shipped count is **19 pictures** (scenes 1-9,
-5b, 8b, 8c, painted, viewer 1-3, browser 1-3), us1 skipped. This is #5's
-closing measurement, extended by #39's captures.
+fails the run as a diff. The shipped count is **30 pictures** (scenes 1-9,
+5b, 8b, 8c, painted, viewer 1-3, browser 1-3, sprite 1-11), us1 skipped.
+Sprite 9-11 are #40's scenes, which close the three gaps REVIEW-12 found in
+the sprite scenes (see below).
+
+## The sprite scenes (#12, #40)
+
+`dumps/sprite1-8` are #12's, `sprite9-11` are #40's. The ROMs are generated
+by `tools/genroms.py` (`SPRITE_SCENES`): scene 1's picture, or the stripes
+background (transparent left of display column 128, solid colour 7 right),
+under SAT-driven sprites whose SG pattern cells all differ per row (the
+`sg_word()` rotate formula). The capture pipeline writes `sat.bin` (the
+SATB, 256 uint16 from the save state) and `check.js` renders such a dump
+through `pce-sprites.js`; every dump WITHOUT `sat.bin` must additionally
+render identically through the sprites module (a sprite scene's renderer
+must not change a sprite-free picture).
+
+The scene-by-scene coverage, and REVIEW-12's 24 breaks (M1-M24) with which
+scenes catch each: `docs/REVIEW-12.md` — its three misses are closed by
+`docs/REVIEW-12.md`'s #40 appendix: **sprite9** (a 16×64 sprite, CGY=2 —
+the one CGY code sprite1-8 never carried; M2 DETECTED), **sprite10** (an
+SPBG=0 sprite over an opaque background tile — colour 7, low nibble nonzero;
+M9 DETECTED), **sprite11** (a line of 15 strips with a CGX sprite as the
+16th SAT entry, its right half the dropped 17th strip; M24 DETECTED). All
+24 breaks now DETECTED.
+
+Two generator bugs that #40 found and fixed while building sprite10 (the
+check captures them, they were never renderer bugs): the stripes tiles were
+written at VRAM 0x0040/0x0041 — into the BAT — so the "solid right half"
+was colour 0 in every capture and the SAT area held the only sprite data
+(sprite3 was re-captured with the fix); and the tile data 0x7777 decoded
+MSB-first is 0x0/0xF stripes, not solid colour 7 — the tile is now
+0xFFFF/0x00FF per row, which decodes to solid 7. genroms.py's tile_word
+docstring said LSB-first; the captures (all 30 scenes diff 0) show the VDC
+decode is MSB-first, and the comment now says so.
 
 ## `check-review-fixes.js` — the #38 fixes, and that they were needed
 
@@ -150,8 +184,12 @@ Details and the headless page output: [`../docs/EDITOR.md`](../docs/EDITOR.md).
 **It does not prove the renderer is correct.** Eleven mutations on twelve
 dumps do not enumerate the ways a VDC/VCE renderer can be wrong. Anything
 the scenes do not exercise can still be broken while `check.js` stays
-green: sprites, RCR split-screen, the other dot clocks/widths (336/512),
-and any BAT/scroll combination unlike these fixed dumps. One break's
+green: RCR split-screen, the other dot clocks/widths (336/512),
+and any BAT/scroll combination unlike these fixed dumps. The sprite scenes
+exercise the SATB path, sizes, flips, priority, palettes, clipping and the
+16-strip limit (REVIEW-12's 24 breaks, all DETECTED), but only through the
+generator's formula patterns and these fixed SATs — sprite quirks the
+scenes do not pin can still break silently. One break's
 *check* is synthetic-only (`ch800`, above) — the rule itself is proven by
 scene9, but a future renderer bug in it would be caught only by the
 synthetic dump. A renderer bug that happens to reproduce the same pixels

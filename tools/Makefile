@@ -6,7 +6,7 @@ PCEAS ?= pceas
 PYTHON ?= python3
 
 SCENES := 1 2 3 4 5 6 7 8 8b 8c 9
-SPRITES := 1 2 3 4 5 6 7 8
+SPRITES := 1 2 3 4 5 6 7 8 9 10 11
 VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,$(SCENES)))
 SPRITE_ROMS := $(addprefix gen/sprite,$(addsuffix .pce,$(SPRITES)))
 
