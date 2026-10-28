@@ -355,6 +355,42 @@ def emit_byte_table(name, data):
     return out
 
 
+def vce_cr_lines(vcecr):
+    """The VCE control write at $0400, with the dot clock it selects (#27).
+
+    DCC bits 1-0 pick the dot clock.  The HuC6260 manual H6-3 gives two of
+    them ("00" = /4, 1.5 fsc = 5.37 MHz; "01" = /3, 2 fsc = 7.16 MHz); the
+    10.74 MHz /2 clock is not in the scanned text and comes from
+    MacDonald's measured notes (pcetech §6: D1 = 1 = 10 MHz), which both of
+    Mednafen's PCE cores implement (codes 10 and 11 are the same /2 clock).
+
+    D2 stays set in every ROM here.  Its meaning is NOT PROVEN on hardware:
+    Mednafen's VCE code makes it the 262/263-line select (263 with it set)
+    and MacDonald measured it as edge blur with the frame 263 lines fixed;
+    no source measured it against a console.  It is set because #5's
+    capture calibration (RCRCount/scanline, the 232-row crop) was taken on
+    frames with it set — docs/DECISIONS.md, 2026-10-28, card #27.
+    """
+    clock = 2 if (vcecr & 2) else (vcecr & 1)
+    clock_text = [
+        "DCC=00, /4 dot clock, 5.37 MHz, 256-dot display (H6-3)",
+        "DCC=01, /3 dot clock, 7.16 MHz, 336-dot display (H6-3; "
+        "HDS/HDW from pcetech §9)",
+        "DCC=10, /2 dot clock, 10.74 MHz, 512-dot display (pcetech §6; "
+        "HDS/HDW from pcetech §9)",
+    ][clock]
+    return [
+        f"        ; VCE CR $0400 = ${vcecr:02x}: {clock_text}",
+        "        ; D2 is NOT PROVEN on hardware: Mednafen's VCE code makes it the",
+        "        ; 262/263-line select (263 with it set); MacDonald measured it as",
+        "        ; edge blur with the frame 263 lines fixed.  It stays set because",
+        "        ; every capture's row calibration assumes the 263-line frame",
+        "        ; (docs/DECISIONS.md 2026-10-28, card #27).",
+        f"        lda #${vcecr:02x}",
+        "        sta $0400",
+    ]
+
+
 def emit_vdc_regs(out, s):
     # #48: a scene may override the display window registers; the canonical
     # HuDK 256x240 values are the default (H7-9/H7-10, VDW = N-1).
@@ -613,7 +649,55 @@ xcol7:
 bat7done:
 """
 
+BAT_FORMULA_W_ASM = """\
+        ; #27's wide-mode BAT at VRAM 0, 64x32 = 2048 words; entry = scene
+        ; 4's formula (see genroms.py): tile = 0x080 | ((x + 2y) & 0x3F),
+        ; palette = (x + 2y) & 0xF.  x + 2y <= 125 fits 8 bits.  A loop, not
+        ; a table, because 2048 words of tables (8 lo + 8 hi pages) plus the
+        ; 64 tiles would not fit bank 0 beside the SAT and the code.
+        ; NOTE: every zp operand is written <$xx — pceas emits bare $12 as a
+        ; 16-bit absolute address, which through MPR0=0xFF aliases the VDC
+        ; registers on the I/O page ($1FE012 & 3 = 2 = write_latch, etc.).
+        st0 #$00
+        st1 #$00
+        st2 #$00                ; MAWR = 0
+        st0 #$02
+        stz <$12                ; y = 0
+roww:
+        lda <$12
+        asl A
+        sta <$14                ; x + 2y (starts at 2y, +1 per x)
+        clx                     ; x = 0
+xcolw:
+        lda <$14
+        and #$0f                ; palette = (x + 2y) & 0xF
+        asl A
+        asl A
+        asl A
+        asl A
+        sta <$19                ; palette << 4 (tile high nibble is 0)
+        lda <$14
+        and #$3f
+        ora #$80                ; tile = 0x080 | ((x + 2y) & 0x3F)
+        sta <$17
+        lda <$17
+        sta $0002
+        lda <$19
+        sta $0003
+        inc <$14
+        inx
+        cpx #$40                ; 64 columns
+        bne xcolw
+        inc <$12
+        lda <$12
+        cmp #$20                ; 32 rows
+        beq batwdone
+        jmp roww
+batwdone:
+"""
+
 BAT_LOOPS = {"s3": BAT_FORMULA_ASM,
+             "w4": BAT_FORMULA_W_ASM,
              "s5": BAT_FORMULA5_ASM,
              "s6": BAT_FORMULA6_ASM,
              "s7": BAT_FORMULA7_ASM}
@@ -828,6 +912,49 @@ SPRITE_SCENES = {
                      sprites=_sprites(*[(32 + 14 * i, 66, i & 0xF)
                                         for i in range(15)]
                                       + [(242, 66, 15, 1, 1, 0)])),
+    # #27's wide-mode scenes: the middle and high VCE dot clocks, in a
+    # picture wide enough to show what the wider line does.  Registers are
+    # MacDonald's display table (pcetech §9), the only measured source for
+    # HDS/HDW at these clocks; the VCE CR sets DCC (D1-D0) with D2 as the
+    # other scenes set it (the bit #27 settles — see docs/DECISIONS.md).
+    #   wide336  VCE CR $05: DCC=01, 7.16 MHz, /3 -- the output is 341 dots
+    #            (Mednafen, horizontal overscan off) and the display is 336
+    #            dots: HDS=4, HDW=41 (word $29), so 42 characters.
+    #   wide512  VCE CR $06: DCC=10, 10.74 MHz, /2 -- 512 dots of display
+    #            fill the 512-dot output: HDS=11 (word $0B), HDW=63 ($3F).
+    # The picture is scene 4's 64-wide BAT (a formula loop in the ROM, see
+    # BAT_LOOPS' w4), non-periodic within 64 columns, so a renderer that
+    # clips the frame at 256, uses a 32-wide BAT mask or places the window
+    # with the /4 dot clock's alignment changes pixels.  Sprites sit at the
+    # right edge (one inside the window, one crossing it, one past it),
+    # where a 256-wide frame would lose them; wide512's second line has 18
+    # sprites, so 16 strips show and the rest are dropped at 512 dots wide
+    # exactly as at 256 — the buffer is per line, not per dot.
+    "wide336": dict(mwr=0x10, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                    vcecr=0x05, hsr=0x0402, hdr=0x0429,
+                    bat_w=64, bat_h=32, bat_loop="w4", pic=4,
+                    tiles=[(0x080, 64)],
+                    sprites=_sprites(
+                        (352, 66, 0),    # display col 320, ends at 335
+                        (362, 66, 1),    # col 330: six pixels inside
+                        (368, 66, 2),    # col 336: past the window, 3 border
+                                         # columns would show it if the
+                                         # window edge were ignored
+                        (152, 66, 3))),
+    "wide512": dict(mwr=0x10, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                    vcecr=0x06, hsr=0x0B02, hdr=0x043F,
+                    bat_w=64, bat_h=32, bat_loop="w4", pic=4,
+                    tiles=[(0x080, 64)],
+                    sprites=_sprites(
+                        (512, 66, 0),    # display col 480
+                        (528, 66, 1),    # col 496, ends at 511
+                        (537, 66, 2),    # col 505: seven pixels inside
+                        (140, 66, 3))
+                    # the 18-strip line at display row 116 (SAT Y = 180):
+                    # display columns 32 + 26 i (SAT X is that + 32), so
+                    # strips 0..15 show and the line's last two are dropped
+                    + _sprites(*[(64 + 26 * i, 180, i & 0xF)
+                                 for i in range(18)])),
     # sprite12 "sat2063" (#42): 64 sprites in an 8x8 grid, one per SAT entry,
     # so entries 20-63 are all live and entry 63 (bottom-right) is visible.
     # REVIEW-14's A2 (a viewer copying only the first 20 SAT entries) was
@@ -912,7 +1039,8 @@ def gen_sprite_asm(name):
     cram_lo = [w & 0xFF for w in cram]
     cram_hi = [(w >> 8) & 1 for w in cram]
 
-    if s["bg"] == "stripes":
+    pic = s.get("pic", 1)   # the background picture's scene (default scene 1)
+    if s.get("bg") == "stripes":
         # left half of the BAT reads an all-transparent tile (colour 0 ->
         # CRAM[0x000]), right half an all-colour-7 tile.  vbase is char*16
         # like tile_region_bytes' regions (#40: was 0x040/0x041 — the tile
@@ -930,9 +1058,10 @@ def gen_sprite_asm(name):
         for y in range(32):
             for x in range(32):
                 bat_bytes += bytes((0x040 if x < 16 else 0x041, 0x00))
-    else:  # scene 1's picture
-        tile_bytes, regions = tile_region_bytes(1, s["tiles"])
-        bat_bytes = bat_bytes_full(1, s["bat_w"], s["bat_h"])
+    else:  # scene 1's picture (or s["pic"]'s, for #27's wide scenes)
+        tile_bytes, regions = tile_region_bytes(pic, s["tiles"])
+        bat_bytes = (bytearray() if s.get("bat_loop")
+                     else bat_bytes_full(pic, s["bat_w"], s["bat_h"]))
 
     pat0, nblocks, bases = pack_patterns(s["sprites"])
     assert pat0 == 0x80, "SG loop assumes PAT0 = $80"
@@ -970,11 +1099,7 @@ def gen_sprite_asm(name):
     out.append("        lda #$f8")
     out.append("        tam1")
     out.append("")
-    out.append("        ; VCE CR $0400 = $04: /4 dot clock, 5.37 MHz = 256 px (H6-3);")
-    out.append("        ; D2 is set but not documented there: VIDEO_MODES.md says 262/263")
-    out.append("        ; lines, MacDonald (pcetech $06) says edge blur; #27 settles it.")
-    out.append("        lda #$04")
-    out.append("        sta $0400")
+    out += vce_cr_lines(s.get("vcecr", 0x04))
     out.append("")
     out.append("        ; colour table: 512 entries (CTA autoincrements on high write)")
     out.append("        stz $0402")
@@ -1002,14 +1127,18 @@ def gen_sprite_asm(name):
     emit_vdc_regs(out, s)
     out.append("")
 
-    out.append(f"        ; BAT: {len(bat_bytes) // 2} words at VRAM 0")
-    out.append("        st0 #$00")
-    out.append("        st1 #$00")
-    out.append("        st2 #$00")
-    out.append("        st0 #$02")
-    lo_pages, hi_pages = pages_of(bytes(bat_bytes))
-    emit_copy_loop(out, "bat_", lo_pages, hi_pages)
-    out.append("")
+    if s.get("bat_loop"):
+        out.append(BAT_LOOPS[s["bat_loop"]])
+        out.append("")
+    else:
+        out.append(f"        ; BAT: {len(bat_bytes) // 2} words at VRAM 0")
+        out.append("        st0 #$00")
+        out.append("        st1 #$00")
+        out.append("        st2 #$00")
+        out.append("        st0 #$02")
+        lo_pages, hi_pages = pages_of(bytes(bat_bytes))
+        emit_copy_loop(out, "bat_", lo_pages, hi_pages)
+        out.append("")
 
     # ---- tiles, one copy region per (char0, count)
     out.append(f"        ; tiles: {len(tile_bytes) // 2} words")
@@ -1077,11 +1206,12 @@ def gen_sprite_asm(name):
     out += emit_byte_table("sgconst_lo", bytes([w & 0xFF for w in SG_PLANES]))
     out += emit_byte_table("sgconst_hi", bytes([w >> 8 for w in SG_PLANES]))
     out.append("")
-    lo_pages, hi_pages = pages_of(bytes(bat_bytes))
-    for p in range(len(lo_pages)):
-        out += emit_byte_table(f"bat_{p}_lo", lo_pages[p])
-        out += emit_byte_table(f"bat_{p}_hi", hi_pages[p])
-    out.append("")
+    if not s.get("bat_loop"):   # a formula-loop BAT has no tables
+        lo_pages, hi_pages = pages_of(bytes(bat_bytes))
+        for p in range(len(lo_pages)):
+            out += emit_byte_table(f"bat_{p}_lo", lo_pages[p])
+            out += emit_byte_table(f"bat_{p}_hi", hi_pages[p])
+        out.append("")
     lo_pages, hi_pages = pages_of(bytes(sat_bytes))
     for p in range(len(lo_pages)):
         out += emit_byte_table(f"sat_{p}_lo", lo_pages[p])
@@ -1374,11 +1504,7 @@ def gen_raster_asm(name):
     out.append("        lda #$f8")
     out.append("        tam1")
     out.append("")
-    out.append("        ; VCE CR $0400 = $04: /4 dot clock, 5.37 MHz = 256 px (H6-3);")
-    out.append("        ; D2 is set but not documented there: VIDEO_MODES.md says 262/263")
-    out.append("        ; lines, MacDonald (pcetech $06) says edge blur; #27 settles it.")
-    out.append("        lda #$04")
-    out.append("        sta $0400")
+    out += vce_cr_lines(0x04)
     out.append("")
     out.append("        ; colour table: 512 entries (CTA autoincrements on high write)")
     out.append("        stz $0402")
@@ -1820,11 +1946,7 @@ def gen_asm(scene, dma=None):
     out.append("        lda #$f8")
     out.append("        tam1")
     out.append("")
-    out.append("        ; VCE CR $0400 = $04: /4 dot clock, 5.37 MHz = 256 px (H6-3);")
-    out.append("        ; D2 is set but not documented there: VIDEO_MODES.md says 262/263")
-    out.append("        ; lines, MacDonald (pcetech $06) says edge blur; #27 settles it.")
-    out.append("        lda #$04")
-    out.append("        sta $0400")
+    out += vce_cr_lines(0x04)
     out.append("")
     out.append("        ; colour table: 512 entries (CTA autoincrements on high write)")
     out.append("        stz $0402")
@@ -1962,6 +2084,15 @@ def main():
             else:
                 t = 0x100 | (((x * 7) & 0x1F) + y & 0x1F)
             assert bat_entry(3, x, y) == (((x + 3 * y) & 0xF) << 12) | t, (x, y)
+    # sanity: #27's wide BAT loop in the ROM == scene 4's formula in the
+    # generator.  Written as the loop computes it (palette from the high
+    # byte, tile = 0x080 | (x + 2y) & 0x3F in the low byte), so a change to
+    # either side of the ROM/generator pair trips this.
+    for x in range(64):
+        for y in range(32):
+            v = x + 2 * y
+            loop_word = ((((v & 0x0F) << 4) << 8) | 0x080 | (v & 0x3F))
+            assert bat_entry(4, x, y) == loop_word, (x, y, loop_word)
     # sanity: sprite scenes' SG regions and SATs
     for name, s in SPRITE_SCENES.items():
         pat0, nblocks, bases = pack_patterns(s["sprites"])

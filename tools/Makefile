@@ -29,8 +29,11 @@ VRASTERS := $(addprefix gen/vraster,$(addsuffix .pce,$(RASTERS)))
 # #49: the VRAM-to-VRAM DMA ROMs (genroms.py's DMA_SCENES), scene 4's picture
 # plus one block transfer; capture.sh 1..3 dma.
 DMAROMS := $(addprefix gen/dma,$(addsuffix .pce,1 2 3))
+# #27: the wide-mode ROMs (genroms.py's SPRITE_SCENES wide336/wide512) — the
+# /3 and /2 dot clocks with the 336- and 512-dot display windows.
+WIDEROMS := gen/wide336.pce gen/wide512.pce
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS) $(DMAROMS)
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS) $(DMAROMS) $(WIDEROMS)
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -68,6 +71,14 @@ gen/dma%.asm: genroms.py
 	$(PYTHON) -I genroms.py
 
 gen/dma%.pce: gen/dma%.asm
+	$(PCEAS) -raw -o $@ $<
+
+# #27's wide-mode ROMs (genroms.py's SPRITE_SCENES wide336/wide512).
+gen/wide%.asm: genroms.py
+	mkdir -p gen
+	$(PYTHON) -I genroms.py
+
+gen/wide%.pce: gen/wide%.asm
 	$(PCEAS) -raw -o $@ $<
 
 # The viewer ROMs are viewer.asm (bank 0, fixed) plus the picture data of

@@ -315,7 +315,8 @@ const OLD_CHECK_SRC = preFixSource(CHECK_SRC,
  * re-captures), so the count moved from 57 to 68; #48 added the four window
  * scenes (scene11-14: 224 lines, VDS-shifted, narrow HDW, short VDW) and the
  * count is 72; #49 adds the three VRAM-to-VRAM DMA ROMs (dma1-3) for 75;
- * #68 adds raster11 and vraster11 for 77 —
+ * #68 adds raster11 and vraster11 for 77; #27 adds the two wide-mode frames
+ * (wide336 at 341x232, wide512 at 512x232) for 79 —
  * but a count alone would let
  * one scene drop out while another silently took its place, so the set is
  * checked name by name.  #68 adds raster11 (the frame counter + two CRAM
@@ -346,6 +347,8 @@ const EXPECTED_SCENES = [
   "vraster7", "vraster8", "vraster9", "vraster10", "effect1",
   /* #68: the frame counter + two CRAM words table (REVIEW-16 B15) */
   "raster11", "vraster11",
+  /* #27: the /3 and /2 dot clocks (336- and 512-dot display windows) */
+  "wide336", "wide512",
 ];
 
 function outputProblems(stdout, status) {
