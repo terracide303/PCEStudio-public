@@ -51,12 +51,12 @@ Progress tab is drawn from these tables.
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Toys live in the browser (Lua via Fengari) | PROVEN | `node tests/check-toys.js`: 718 checks — 3 toys × 40 frames byte-equal to hand-built state and diff 0 through the model; refusals by code; ppu.toys' ramps.lua/kit.lua adapted with credit. Breaker running | #30 |
+| Toys live in the browser (Lua via Fengari) | PROVEN | `node tests/check-toys.js`: 718 checks — 3 toys × 40 frames byte-equal to hand-built state and diff 0 through the model; refusals by code; ppu.toys' ramps.lua/kit.lua adapted with credit. Breaker: 9 of 14 → #74; password cap bug → #73 | #30 |
 | The IL (Lua subset → our typed IL, reference interpreter) | PROVEN (against the Lua runtime) | `node tests/check-il.js`: 973 checks — the three #30 toys through Lua → IL → interpreter give byte-equal vram/cram/sat/regs, identical raster tables and diff-0 pixels to the Fengari run for 40 frames each; the hooks and instruction set asserted; 11 host refusals and 20 IL refusals by code. Not yet broken by another seat. No machine code | #31 — `renderer/pce-il.js`, `docs/IL.md` |
 | The compiler to the console (IL → HuC6280 via llvm-mos/HuC/direct) | UNTESTED | | #31, next half |
 | The checker (frame time, budgets) | UNTESTED | | #32, #33 |
 | Sound chip (PSG) in the browser | PROVEN (against Mednafen) | `node tests/check-psg.js`: 11 Mednafen recordings (tone, chord, balance, volume, noise, all three LFO modes via wave3, DDA, 12-bit frequency, R7 on ch3, DDA exit) matched sample for sample. `node tests/psg-mutation.js`: all 15 of REVIEW-34's breaks DETECTED (M10 by check-wave.js/wave3), control NO-OP. Noise generator: Mednafen and MAME's c6280 use the same LFSR taps (two emulators); real console unmeasured | #34, #63 — `docs/PSG.md` |
 | Wave editor (32-step waves, 6 channels) | PROVEN | `node tests/check-wave.js`: 3 patches exported byte-equal to PCEAS and recorded in Mednafen, sample for sample | #62 |
-| Music (Furnace → HuTrack) | PROVEN | console: `check-hutrack.js` (HuTrack plays our DMF in Mednafen); browser: `check-dmf.js` (same notes, not sample-exact); export: `check-export-song.js` (song + HuTrack byte-identical to PCEAS, 2 songs). Effects/DDA/SFX → #71 | #35 |
+| Music (Furnace → HuTrack) | PROVEN | console: `check-hutrack.js` (HuTrack plays our DMF in Mednafen); browser: `check-dmf.js` (same notes, not sample-exact); export: `check-export-song.js` (song + HuTrack byte-identical to PCEAS, 2 songs). Breaker: 10 of 13, the 3 misses closed by #72. Effects/DDA/SFX → #71 | #35 |
 | AI link (MCP server, describe-it) | UNTESTED | | #36, #24 |
 | Photo import, data export, public release | UNTESTED | | #18–#20, #37 |
