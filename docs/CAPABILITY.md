@@ -20,8 +20,8 @@ Progress tab is drawn from these tables.
 | Renderer test catches breaks | PROVEN | `node tests/renderer-mutation.js`: all 10 review breaks detected | #6, #39 |
 | PCEAS assembler | PROVEN | `make -C tools` builds `hello.pce` (sha256 9be7ead2…), red screen in Mednafen | #7 — `docs/BUILD.md` |
 | Viewer ROM in Mednafen | PROVEN | `node tests/check-viewer.js`: viewer1/2/3 frame diff 0 against the renderer | #8 — `tools/gen/viewer*.pce` |
-| Viewer ROM in a second emulator (ares) | UNTESTED | card #41 queued | #41 |
-| Viewer ROM in a third emulator (web) | NOT PROVEN | by eye only: Dennis ran `viewer1/2/3.pce` on emulationonline.com, 2026-10-28. Tile layout matches Mednafen on all three; viewer1 and viewer3 colours look the same, but viewer2 shows mint green and purple where Mednafen shows cyan (0,216,216) and blue (0,0,216). Undecided which is right; ares (#41) and the real PC Engine settle it | #8, #41 |
+| Viewer ROM in a second emulator (ares) | PROVEN | `node tests/check-ares.js`: viewer1/2/3 + painted, 0/59392 pixels differ from the renderer and Mednafen at the 3-bit colour (ares scales 8-bit levels slightly differently; manual page H6-6 missing). Not yet broken by another seat; sprite scenes not covered | #41 — `docs/ARES.md` |
+| Viewer ROM in a third emulator (web) | PROVEN | by eye only: Dennis ran `viewer1/2/3.pce` on emulationonline.com, 2026-10-28. Tile layout matches Mednafen on all three; viewer1 and viewer3 colours look the same, but viewer2 shows mint green and purple where Mednafen shows cyan (0,216,216) and blue (0,0,216). Settled by #41: ares shows viewer2's cyan/blue like Mednafen, so the web emulator mixes up colour channels | #8, #41 |
 | Viewer ROM on real hardware | WAITING | Dennis: real PC Engine + flash cart, MiSTer or Tang Nano; photo into `docs/` | #8 |
 | Browser `.pce` export | PROVEN | `node tests/check-export.js`: 3 scenes byte-equal to PCEAS | #9 — `renderer/pce-rom.js` |
 | TurboGrafx (bit-reversed) export | NOT PROVEN | `node tests/check-us-card.js` passes; no TurboGrafx-16 here to run it on | #25 |
