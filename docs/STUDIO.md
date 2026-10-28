@@ -1,4 +1,4 @@
-# The studio — ppu.toys' layout, mapped to the PC Engine (#75, both halves)
+# The studio — ppu.toys' layout and editor, mapped to the PC Engine (#75, #77)
 
 **Decision.** Dennis, 2026-10-28 (`docs/DECISIONS.md`): "look as much as possible to ppu toys". The studio
 page follows ppu.toys' Studio in layout, panels, workflow, keyboard shortcuts and how examples and docs sit
@@ -6,10 +6,12 @@ beside the code, so someone who knows ppu.toys feels at home. The same day he ad
 from their website if needed, they are fine with that" — so where adapting their CSS or page structure is
 quicker than rebuilding it, this page does, with the credit below.
 
-**Split, and where it ended.** The first half was layout + run + panels ([`renderer/studio.html`](
-../renderer/studio.html)). This second half adds #61's generated reference as the studio's Docs panel, adapts
-ppu.toys' stylesheet and docs layout, and wires the export button to its honest `needs #31` message. A toy
-`.pce` still waits for the compiler; the static-picture export was already proven in the editor.
+**Split, and where it ended.** #75 was layout + run + panels, then #61's generated reference as the studio's
+Docs panel and the honest `needs #31` export message. **#77 is the editor and the files**: CodeMirror with
+Lua highlighting and line numbers replaces the textarea, a toy is a file set beside `main.lua`, Save/Open
+use one versioned JSON envelope in ppu.toys' shape, autosave keeps the whole toy in the browser, Vim keys are
+opt-in in Settings, and every ppu.toys shortcut with a PCE meaning works. A toy `.pce` still waits for the
+compiler; the static-picture export was already proven in the editor.
 
 ---
 
@@ -36,6 +38,18 @@ does not wear their identity. The MIT notice stays with the adapted CSS:
 > page's. The written permission is Dennis's to keep (`docs/DECISIONS.md`, 2026-10-28).
 
 The files were fetched read-only on 2026-10-28; nothing from the site is vendored in the repo.
+
+**The editor is the one third-party library this page vendors (#77).** CodeMirror 5.65.16 — MIT,
+Copyright (C) 2017 Marijn Haverbeke and others — lives in [`vendor/codemirror/`](../vendor/codemirror/)
+with its `LICENSE` and a `README.md` naming the four files (`lib/codemirror.js`, `lib/codemirror.css`,
+`mode/lua/lua.js`, `keymap/vim.js`) and the npm package they came from. They are unmodified. The page
+loads them only when the document can host CodeMirror (`document.createRange` exists): the Node check's
+stub DOM keeps a textarea fallback, and the headless-browser run proves CodeMirror, its Lua mode, its line
+numbers and its Vim keymap. CodeMirror is not ppu.toys code and is not covered by their notice.
+
+**The toy file's shape** is adapted from ppu.toys' packed toy (`docs/PPU-TOYS.md` §3 — `{version, title,
+description, files: [{name, source}], sources}`); the version is ours (`pce.studio/1`) and the payloads are
+text files, not base64 image sources yet. Credit: ppu.toys, MIT, Copyright (c) 2026 Liora Labs.
 
 ---
 
@@ -78,7 +92,7 @@ pixel, not eyeballed at another scale.
 | column | ppu.toys | `studio.html` |
 |---|---|---|
 | left | purple chip mark, `ppu.toys` | our tile mark, `PCE·studio` in Pixelify Sans (links to `renderer/index.html`) |
-| title | `untitled toy` + `saved in this browser` | `palette-cycle.lua` + `saved in this browser` / `edited — Run to apply` |
+| title | `untitled toy` + `saved in this browser` | the active file (`main.lua`) + `saved in this browser` / `edited — Run to apply` / `restored from this browser` |
 | right | Export to ROM (orange), Raw output, Panels ▾, gear, Docs, Save file, Open…, Sign in to publish | Run, Check, Export… (orange), Panels ▾, gear, Docs, Save file, Open…, not signed in |
 
 Measured: both bars are 0…49 with a 1 px border at y=49. The orange primary action is the export in both;
@@ -92,8 +106,8 @@ The column splits at x=980 in both captures. The left workspace is two rows:
 | row | measured (ours / theirs) | contents |
 |---|---|---|
 | code tabs | 50…78 / 50…79 | `CODE` and `ASSETS`; active tab is the editor colour, like their dock tab |
-| file bar | 80…114 / 80…114 | one file tab `main.lua` (orange underline when active), `+`; right: `plain keys · Lua 5.3` (theirs: `vim off · Lua 5.4`) |
-| editor | 116…470 / 116…471 | line-number gutter + source; ours is a plain `<textarea>` with a synchronised gutter, theirs a CodeMirror editor with an active-line highlight |
+| file bar | 80…114 / 80…114 | one Lua file tab `main.lua` (orange underline when active), plus the asset's tab while one is being edited; `+`; right: `plain keys · Lua 5.3` or `vim on · Lua 5.3` (theirs: `vim off · Lua 5.4`) |
+| editor | 116…470 / 116…471 | **CodeMirror 5.65.16** with line numbers, Lua highlighting and the cursor line's highlight — the same editor and the same three visible features as theirs; the plain textarea remains only as the fallback for a DOM that cannot host CodeMirror |
 | dock tabs | 472…500 / 473…501 | the model panels (§3), mono 11 px with 0.1 em tracking |
 | dock head | 502…528 / 502…528 | panel title, one-line gloss, `Guide`, current line (`line 0 · full frame`) |
 | dock body | 530…1000 / 530…1000 | the active panel; ppu.toys has a tool row above the body, ours puts the controls in each panel |
@@ -199,14 +213,16 @@ The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel u
 
 | key / control | action |
 |---|---|
-| Space (output focused) | play / pause |
-| R (output focused) | restart from frame 0 and play |
-| Ctrl/Cmd + Enter | compile the source and run (same as `Run`) |
+| Space | play / pause (anywhere outside a text field — typing an R in the editor stays an R) |
+| R | restart from frame 0 and play (same rule) |
+| Ctrl/Cmd + Enter | compile the editor's text and run (same as `Run`) |
 | Ctrl/Cmd + . / , | step one frame forward / back (pauses, then seeks) |
-| Ctrl/Cmd + S | download `main.lua` (the browser also keeps the source in `localStorage`) |
-| Tab | insert two spaces in the editor |
+| Ctrl/Cmd + S | save the toy as one `.pce.json` envelope; the browser also keeps it in `localStorage` |
+| Tab | insert two spaces in the editor (CodeMirror's `Tab`, and the textarea fallback's) |
 | Escape | close the panels/settings/open popovers, the export dialog and the Docs panel |
 | IJKL, N/M, O, P (output focused) | 2-button pad 1: D-pad, I, II, Select, Run (the PCE pad; multitap pads 2–5 are in the runtime but not on the keyboard) |
+| Settings → Editor keys → Vim | CodeMirror's Vim keymap, off by default and remembered in the browser |
+| Settings → Line numbers | CodeMirror's gutter, on by default |
 | transport | play/pause, stop, −1, +1, frame slider, `Length` in frames |
 | `CRT` | scanline overlay on the canvas |
 | `SND` | says where sound is (#71); no invented control |
@@ -216,9 +232,9 @@ The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel u
 | `Docs` | open the #61 reference as the Docs panel (§4), at the active panel's chapter via `Guide` |
 | Docs search | filter the reference's chapters and chapter nav by text |
 
-Not implemented from the reference, deliberately: Vim keys (Settings says so rather than silently ignoring
-them), the poke undo/redo (our panels are read-only), and the SNES `hdma()` shortcut vocabulary (the PCE's
-per-line mechanism is `raster(line)` and the RCR interrupt).
+Every ppu.toys shortcut that has a PCE meaning is implemented. Deliberately not: the poke undo/redo
+(our panels are read-only, so there is no poke to undo; CodeMirror's own undo handles edits), and the SNES
+`hdma()` shortcut vocabulary (the PCE's per-line mechanism is `raster(line)` and the RCR interrupt).
 
 ---
 
@@ -255,12 +271,52 @@ Its `sram` save is cartridge SRAM; ours is a password (`password.pack`) because 
 
 ## 7. How a toy is edited
 
-`main.lua` is one textarea with a line-number gutter, Tab inserts two spaces, and the source is saved in
-`localStorage` on every edit (`saved in this browser`); `Save file` downloads it as `.lua`. `ASSETS` is
-present as a region and honestly empty: the toy surface writes its own tiles with `vram[]`/`pal()` and the
-PNG importer + `dma()` placement are later cards. `Open…` lists the three built-in examples and accepts a
-`.lua` file. There is no multi-file toy, no CodeMirror, and no Vim; those are visible differences in the
-file bar (`plain keys`) rather than hidden omissions.
+**The editor is CodeMirror** (#77), vendored at 5.65.16 with its MIT notice (`vendor/codemirror/`): Lua
+highlighting, line numbers (the `Line numbers` setting), the cursor line's highlight, and Tab/Shift-Tab
+indent by two spaces. The plain textarea in the markup is only the fallback for a document that cannot host
+CodeMirror; every code path reads the editor through `editorText()`/`setEditorText()`.
+
+**A toy is a file set, not one string.** `main.lua` is the Lua that runs. Beside it are the four asset files
+ppu.toys keeps beside its Lua:
+
+| file | shape | what it is |
+|---|---|---|
+| `tiles.json` | `{version, tiles: [{char, palette, pixels}]}` | 8×8 tiles, 4-bit colour numbers, keyed by VCHAR |
+| `palettes.json` | `{version, backdrop, background[][] , sprites[][]}` | the VCE's 32 palettes of 16 words |
+| `sprites.json` | `{version, sprites: [{x, y, pattern, palette, …}]}` | the SAT |
+| `waves.json` | `{version, channels: [{wave[32], freq, al, balance}]}` | the PSG's channels |
+
+The shapes follow `renderer/pce-editor.js`'s picture and `renderer/pce-wave.js`'s document. The importer
+that feeds them to a running toy is #24/#71; this card makes them first-class, editable files that are saved
+and autosaved with the toy. A toy still writes its own VRAM/CRAM with `vram[]`/`pal()` today, and the
+`ASSETS` tab says so rather than implying an importer exists. Clicking `Edit` in `ASSETS` opens that file in
+the editor; editing an asset never changes the Lua that Run compiles.
+
+**Save and Open are one JSON envelope**, in ppu.toys' packed-toy shape (`docs/PPU-TOYS.md` §3, credited):
+
+```json
+{ "version": "pce.studio/1", "title": "palette-cycle", "description": "…",
+  "files": [ { "name": "main.lua", "source": "…" },
+             { "name": "tiles.json", "source": "…" } ],
+  "sources": [] }
+```
+
+`Save file` / Ctrl+S downloads `<title>.pce.json`; `Open… → From file…` accepts that envelope, or a plain
+`.lua` (which opens as a toy with the default asset files). Reopening a saved toy is byte-identical: the
+envelope is written with a fixed key order and two-space indent, and `tests/check-studio.js` compares the
+text before and after. The ppu.toys guards are kept: a version check with a named error, flat safe file
+names (no `..`), duplicate-name refusal, `main.lua` required, and validation of the whole file before any
+state is replaced. `sources` is reserved for binary payloads (#24) and refused non-empty rather than
+silently dropped.
+
+**Autosave is the whole toy.** Every editor change writes the envelope under
+`localStorage["pcestudio.toy.v1"]` and the keys/line-numbers/CRT settings under
+`localStorage["pcestudio.settings.v1"]`; the top bar says `saved in this browser`, and a reload restores the
+files, the active file and the editor's text (`restored from this browser`). A legacy single-string
+`pcestudio.toy` is migrated to a five-file toy. Storage failing is a convenience lost, never a broken toy.
+
+**Vim keys are opt-in** in Settings (`Plain` is the default); choosing `Vim` sets CodeMirror's `keyMap` to
+`vim` and persists the choice. The file bar's status reads `plain keys` or `vim on`.
 
 ---
 
@@ -316,8 +372,8 @@ claims a file it cannot make.
 `node tests/check-studio.js` (written by `@design`; flagged for `@review` cold, rule 2):
 
 ```
-PASS  374 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
-      every button's handler executed (62 buttons) (… ms)
+PASS  438 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
+      every button's handler executed (88 buttons) (… ms)
 ```
 
 What it does, in order:
@@ -325,7 +381,8 @@ What it does, in order:
 1. Executes `renderer/studio.html`'s declared scripts (Fengari, the model, the toy host, the Lua and IL
    runtimes, the #26 panels, the editor/PSG/docs modules) and its inline script in a stub DOM (no jsdom;
    the `check-editor.js`/`check-toys.js` pattern), then asserts `PCEStudio.studio`, three examples, eight
-   panels, and that `pce-panels.js`/`pce-il.js`/`pce-toys.js`/`pce-docs.js` are the ones loaded.
+   panels, five toy files, and that `pce-panels.js`/`pce-il.js`/`pce-toys.js`/`pce-docs.js` are the ones
+   loaded.
 2. Asserts the page's three example sources are byte-equal to the strings `tests/check-il.js` defines
    (read from its source, so requiring the check cannot run its suite) — the same three toys
    `tests/check-toys.js` runs.
@@ -338,30 +395,56 @@ What it does, in order:
    on all 40, frame numbers and 256×224 dimensions intact; a second 40-frame run is byte-identical.
 5. Runs the same 40 frames through the page's Lua/IL switch for all three examples: state, raster table and
    pixels equal, so the IL path is exercised through the studio, not just imported.
-6. Clicks **every button** the page builds (62 at this revision: top bar, Docs/close/Guide, code tabs, dock
-   tabs, transport, layers/CRT/SND, markers, settings, open, export, and every dynamically built panel-menu
-   and example entry), asserts each has a click handler and none throws; then exercises the source box,
-   scrubber and length control, and shows `Check` uses the source box's edited text (not the example on
-   disk) and keeps that edit. The stub checks are named, so a page that stopped building a dock or menu
-   fails the count rather than passing vacuously.
-7. The stub is not a browser: layout, CSS, a real canvas and iframe rendering are stubbed. It proves
-   handlers, state and the docs pipeline, not appearance.
+6. Clicks **every button** the page builds (88 at this revision: top bar, Docs/close/Guide, code tabs, file
+   tabs, asset `Edit` buttons, dock tabs, transport, layers/CRT/SND, markers, settings, open, export, and
+   every dynamically built panel-menu and example entry), asserts each has a click handler and none throws;
+   then exercises the source box, scrubber and length control, and shows `Check` uses the source box's
+   edited text (not the example on disk) and keeps that edit. The stub checks are named, so a page that
+   stopped building a dock or menu fails the count rather than passing vacuously.
+7. **The editor and the files (#77).** Asserts the vendored CodeMirror files and MIT notice exist and the
+   page names them; a toy has `main.lua` plus `tiles/palettes/sprites/waves.json`; the editor's text is the
+   Lua that runs (an edit that changes a colour changes frame 2's pixels; editing `tiles.json` leaves the
+   running Lua untouched); Save produces one `pce.studio/1` envelope carrying every file, and reopening it
+   is byte-identical (`saved.text === envelopeText()` before and after), including the asset text; a second
+   page running on the same storage brings the edited editor text, running Lua and assets back (the reload
+   model for autosave); and `toy-file-version`, `-duplicate`, `-name`, `-main` and `-json` are the refusals
+   for a foreign version, a duplicate, `../evil.lua`, a missing `main.lua` and broken JSON. A plain `.lua`
+   opens as a five-file toy.
+8. **Every PCE shortcut of §5.** Space plays/pauses and is a character inside a text field (it must not
+   start the toy while typing); R restarts at frame 0 and plays; Ctrl+Enter runs the editor's text; Ctrl+.
+   and Ctrl+, step one frame; Ctrl+S saves the whole envelope; Escape closes the popovers; Tab inserts two
+   spaces in the fallback; IJKL/NMOP move the pad; Settings → Vim turns the Vim keymap on and persists it,
+   and Plain turns it off.
+9. The stub is not a browser: layout, CSS, a real canvas, iframe rendering and CodeMirror are stubbed. It
+   proves handlers, state and the docs pipeline, not appearance, and the textarea fallback is what it
+   exercises — the real CodeMirror is §11.2's job.
 
 ### 11.2 The real browser
 
-`node tests/check-studio.js --browser` loads the real page in headless Google Chrome twice:
+`node tests/check-studio.js --browser` loads the real page in headless Google Chrome three times:
 
 ```
 browser: PASS 40 frames · palette · frame 39 · 256x224 · pixels 172032 · digest f45fd1c2
 browser docs: docs-panel open, #61 reference + ppu.toys layout
-PASS  379 checks, … every button's handler executed (62 buttons), headless Chrome says PASS 40 (… ms)
+browser driver: 30 checks, 0 failed
+PASS  473 checks, … every button's handler executed (88 buttons), headless Chrome says PASS 40 (… ms)
 ```
 
-The first run is `?selftest=1&frames=40&example=palette`: the page runs 40 frames, and FNV-1a digest of
+The first run is `?selftest=1&frames=40&example=palette`: the page runs 40 frames, and an FNV-1a digest of
 frame 39's pixels and state must equal the digest computed here from check-toys' hand-built expected state —
 a diff-0 claim on the browser's final frame, not just "the page booted". The second is
 `?docs=sprites&paused=1`: the DOM must show the Docs panel open (no `hidden`), the docs iframe present, and
 the generated reference with ppu.toys' search and chapter map.
+
+The third is the **#77 driver**: a same-origin iframe served over HTTP from the check itself (no
+dependency, no synthetic OS input) loads `renderer/studio.html?paused=1` and drives the page's own
+`PCEStudio.studio` object. It asserts: CodeMirror is the editor, in Lua mode, with a gutter, line numbers, an
+active-line highlight and highlighted Lua keywords; the editor's text is the running Lua, and CodeMirror's
+DOM renders the edit; an asset edit leaves the running Lua alone; save/reopen is byte-identical; Settings →
+Vim sets CodeMirror's `keyMap` to `vim` and is written to `localStorage`; Space, Ctrl+., R, Ctrl+S and Tab
+(dispatched as real DOM events) do their §5 action; the pad keys work on the focused output; and a second
+iframe load with the same profile restores the edited main.lua and `tiles.json` from autosave
+(`restored from this browser`), with CodeMirror mounted again.
 
 ### 11.3 Screenshots
 
@@ -373,6 +456,18 @@ GUIDE` kicker, display-font hero, search box, numbered two-column chapter map an
 chapters being the PC Engine's. `side-by-side-toy.png` puts a running toy beside ours running the raster
 example. `ours-studio-docs-registers.png` shows the chapter view with the sticky TOC. Nothing from their
 page's files is included in the repo; the CSS is adapted into `studio.html` under the credit in §0.
+
+**#77's editor pair.** `side-by-side-studio-77.png` (3200×1034: theirs left, ours right) is
+`https://ppu.toys/studio` at 1600×1000 beside
+`renderer/studio.html?demo=palette&frame=30&paused=1` at the same size, both captured by headless Chrome's
+command line only. The rows land together: CODE/ASSETS at y=50, the file bar at y=80 with one `main.lua`
+tab and the status at the right (`vim off · Lua 5.4` vs `plain keys · Lua 5.3`), and the editor at y=116
+with the same three visible features — line numbers, Lua highlighting and the cursor line's highlight. The
+remaining differences are the deliberate ones: our file bar gains the active asset's tab while an asset is
+open, our status says `plain keys`/`vim on` because Vim is a setting, and our dock and output column are the
+PCE's (§3). `ours-studio-77-code.png` is the editor on `main.lua`; `ours-studio-77-assets.png`
+(`?tab=assets`) is the ASSETS list — `main.lua`, `tiles.json`, `palettes.json`, `sprites.json`,
+`waves.json` with kind and size, each with `Edit` — the file-set counterpart of their asset sources.
 
 ---
 
@@ -392,9 +487,23 @@ page's files is included in the repo; the CSS is adapted into `studio.html` unde
   are `#32`/`#61`.
 * **No toy export, compiler backend, audio, sequencer, asset import or agent link.** Those are #31, #71
   and #24. `SND`, `ASSETS`, `AUDIO`, the AGENT drawer and the `NEEDS #31` export dialog say so in the page.
+* **The asset files are carried and edited, not consumed.** `tiles/palettes/sprites/waves.json` are in the
+  toy and the envelope, with the shapes `pce-editor.js`/`pce-wave.js` use, but no importer reads them into a
+  running toy yet (#24/#71). The ASSETS tab says this.
+* **CodeMirror's Vim mode is selected, not exercised.** The browser run proves `keyMap === "vim"` is set
+  and persisted; it does not type `dd`/`ciw` and check the buffer. The plain editor and the Vim keymap are
+  both CodeMirror's own, whose tests are upstream's.
+* **The saved file's download is not re-read from disk by the test.** The envelope text is compared before
+  and after a reopen in both the stub and the browser, and the browser's `Ctrl+S` writes it to
+  `localStorage`; the `.pce.json` the browser downloads is not read back from the download directory.
+* **The textarea fallback is what the stub exercises.** CodeMirror is skipped where the DOM cannot host it;
+  the browser driver is the evidence for CodeMirror itself, so a change that breaks only CodeMirror still
+  fails the suite, but a change to the fallback alone is caught only in the stub.
 * **Panels are read-only.** ppu.toys' panels are editors with pokes and keyframes; ours reads the toy's own
   state. The panel code (#26) already exposes the values an editor would write through.
-* **Rule 2.** `tests/check-studio.js` was written by the seat that built the page. A cold break by another
-  seat is owed before this closes the card: break the layout, the example list, the frame flow, a panel, a
-  button, the docs wiring (remove a chapter, break the raw equality, make the docs button a no-op) and the
-  export message, and the check must catch each.
+* **Rule 2.** `tests/check-studio.js` was written by the seat that built the page and extended for #77 by
+  the same seat. A cold break by another seat is owed before this closes the card: break the layout, the
+  example list, the frame flow, a panel, a button, the docs wiring (remove a chapter, break the raw
+  equality, make the docs button a no-op), the export message, and for #77 the editor/files path — replace
+  CodeMirror with the textarea, stop loading the Lua mode/Vim keymap, drop an asset file from the envelope,
+  make Save write only `main.lua`, stop autosaving, break a shortcut, and the check must catch each.
