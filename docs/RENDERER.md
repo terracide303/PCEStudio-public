@@ -1,4 +1,4 @@
-# The renderer (#5 background, #12 sprites)
+# The renderer (#5 background, #12 sprites, #40 sprite-test gaps)
 
 `renderer/pce-bg.js` renders one 256×232 RGB frame from a VDC VRAM dump and a
 VCE colour-table dump, drawing exactly what the VDC background layer and the
@@ -8,7 +8,7 @@ are `node tests/check.js` reporting **diff 0** between the renderer's output
 and Mednafen's raw recorded frame (same source surface as its F9 screenshot,
 captured via `-qtrecord` because this Mac must not receive synthesized key
 events) for every dump in `tests/dumps/` — the three #5 dumps and, since
-#12, the eight sprite scenes (marked by `sat.bin`).
+#12/#40, the eleven sprite scenes (marked by `sat.bin`).
 
 Everything below is labelled by where it was read from.  PCEStudio's rule
 (DECISIONS.md): the model is written from the Hudson manuals; Mednafen and
@@ -176,26 +176,30 @@ VCR/DCR/SATB — *source: HuDK `include/vdc.s`, the working example
   and `tools/genroms.py`'s `bat_formula()` mirrors the loops for
   verification (scene 4-9 BATs: 0 mismatches against the captures).
 
-Scenes sprite1–8 are #12's: scene 1's picture (or the sprite3 stripes)
-under one or more sprites.  The SAT lives at VRAM 0x7F00 and the SATB DMA
+Scenes sprite1–8 are #12's, sprite9–11 are #40's (they close the three
+misses REVIEW-12 found — see its #40 appendix): scene 1's picture (or the
+stripes background) under one or more sprites.  The SAT lives at VRAM
+0x7F00 and the SATB DMA
 (DCR bit 4) loads it every VBlank; the SG cells are written by a formula
 loop in the ROM and `tools/genroms.py`'s `sg_word()` mirrors it —
 cell p, plane pl, row r = ROTL16(P_pl, (r + p) & 0xF) with P = 0x5555,
 0x3333, 0x0F0F, 0x00FF, and P_3's rotation period is exactly 16 so all 16
 rows of every cell differ (a renderer that reads the wrong row, block or
-cell shows different pixels).  All 8 captures verified against the
-mirrors: SAT 0/256 mismatches and SG 0 mismatches of 6400 words (the
-cells the VDC actually reads, per sprite).  The scenes each pin one part
+cell shows different pixels).  All 11 captures verified against the
+mirrors: SAT 0/2816 mismatches and SG 0 mismatches of the cells the VDC
+actually reads, per sprite (8256 words).  The scenes each pin one part
 of the model:
 
 - **sprite1**: all six sizes on one row, distinct palettes (a misread
   CGX/CGY, or a wrong cell, changes pixels)
 - **sprite2**: flips — normal / X / Y / XY, plus a 32-px X-flip (halves
   swapped) and a 16×32 Y-flip (blocks reversed)
-- **sprite3**: priority — BG transparent left of column 16, solid right;
-  SPBG=0 sprites show left and hide right, SPBG=1 shows everywhere, and a
-  hidden witness (SPBG=0, fully over the solid half) proves it; s3/s4
-  overlap and the lower SAT index wins
+- **sprite3**: priority — BG transparent left of display column 128, solid
+  colour 7 right; SPBG=0 sprites over the transparent half show (s0, s2)
+  and an SPBG=1 control shows too; s3/s4 overlap and the lower SAT index
+  wins.  #40 fixed the generator's stripes (tiles had been written into
+  the BAT, so the solid half was colour 0 in every earlier capture) and
+  re-captured it; the solid half's own cases are sprite10's
 - **sprite4**: 19 sprites at 13-px spacing on one row — 16 strips fit a
   line, SAT entries 16–18 must be dropped (SATB order) — and one sprite
   alone on its own line (the limit is per line, not per frame)
@@ -206,6 +210,16 @@ of the model:
 - **sprite8**: background off (CR=0x40: SB set, BB clear) — every BG pixel
   is the 0x100 fill, whose low nibble is 0, so SPBG=0 sprites show over it
   like over any BG colour 0
+- **sprite9** (#40): a 16×64 sprite with CGY=2 — the one CGY code no
+  earlier scene carried; REVIEW-12's M2 (CGY=2 decoded 32 tall) is
+  DETECTED here
+- **sprite10** (#40): an SPBG=0 sprite over an opaque BG tile (the solid
+  colour-7 half) must be hidden, an SPBG=1 sprite over the same half must
+  show, an SPBG=0 sprite over the colour-0 half must show; REVIEW-12's M9
+  (SPBG ignored) is DETECTED here
+- **sprite11** (#40): a line of 15 strips with a CGX sprite as the 16th
+  SAT entry — its left half is the 16th strip (drawn), its right half the
+  17th (dropped); REVIEW-12's M24 (the CGX guard gone) is DETECTED here
 
 ## The dumps (`tools/capture.sh`, `tools/mcs-extract.py`, `tools/movframes.py`)
 

@@ -88,8 +88,10 @@ def tile_word(scene, t, plane, row):
 
     plane 0/1 -> CH0/CH1 of VRAM word char*16+row (bits 0-7 / 8-15)
     plane 2/3 -> CH2/CH3 of VRAM word char*16+8+row
-    Bit 0 (LSB) of a plane byte is the leftmost pixel of the row (VDC decode
-    per Mednafen vdc.cpp FixTileCache: tc[x] = bit x).
+    Bit 7 (MSB) of a plane byte is the leftmost pixel of the row — the
+    renderer's decode (pce-bg.js: bit = 7 - col), diff-0 against Mednafen on
+    every scene.  (An earlier version of this comment said LSB/bit x, which
+    the captures contradict; #40, via sprite3's stripes.)
     """
     if scene == 2:
         # single-pixel checkerboard per plane: 0xAA / 0x55 by parity
@@ -529,7 +531,7 @@ BAT_LOOPS = {"s3": BAT_FORMULA_ASM,
              "s7": BAT_FORMULA7_ASM}
 
 
-# ---- sprite scenes (#12) ---------------------------------------------------
+# ---- sprite scenes (#12; sprite9-11 close REVIEW-12's three misses, #40) ----
 # Sprite model (VDC manual 2.4 p. H7-19..H7-24; Mednafen vdc.cpp and HuDK
 # sprites.inc as references — see docs/RENDERER.md): SAT word 0 = Y (bits
 # 0-9, 64 = display row 0), word 1 = X (bits 0-9, 32 = display column 0),
@@ -636,11 +638,15 @@ SPRITE_SCENES = {
                         (40, 66, 0), (72, 66, 1, 1, 0, 0, 1),
                         (104, 66, 2, 1, 0, 0, 0, 1), (136, 66, 3, 1, 0, 0, 1, 1),
                         (168, 66, 4, 1, 1, 0, 1), (200, 66, 5, 1, 0, 1, 0, 1))),
-    # sprite3 "priority": the BG is transparent (colour 0) left of column 16
-    # and solid colour 7 right of it.  SPBG=0 sprite over the transparent
-    # half shows, over the solid half it is hidden (s2 = hidden witness);
-    # SPBG=1 shows everywhere.  s3/s4 overlap on the boundary: s3 (SPBG=0,
-    # lower SAT index) wins the overlap pixels where both show.
+    # sprite3 "priority": the BG is transparent (colour 0) left of display
+    # column 128 and solid colour 7 right of it (#40 found that right half
+    # was colour 0 in every capture — the stripes tiles were written into
+    # the BAT — and fixed the addresses; sprite3 re-captured).  Every sprite
+    # here sits over the transparent half: SPBG=0 shows over colour 0 (s0,
+    # s2) and an SPBG=1 control shows too (s1).  s3/s4 overlap: s3 (SPBG=0,
+    # lower SAT index) wins the overlap pixels where both show.  The solid
+    # half's cases live in sprite10: an SPBG=0 sprite is hidden over colour
+    # 7 there, an SPBG=1 sprite shows over it.
     "sprite3": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
                     bat_w=32, bat_h=32, bat_tables=True, bg="stripes",
                     tiles=[],
@@ -695,6 +701,45 @@ SPRITE_SCENES = {
                     tiles=[(0x040, 32), (0xF00, 16)],
                     sprites=_sprites(
                         (40, 66, 0, 0), (72, 66, 1, 1), (104, 66, 2, 0, 0, 3))),
+    # sprite9 "cgy2": a 16x64 sprite with CGY=2 — the one CGY code no
+    # earlier scene carries (REVIEW-12: 0 of the 64 SAT entries across
+    # sprite1-8; CGY 0/1/3 have 56/4/6).  REVIEW-12's M2 (CGY_HEIGHT[2]
+    # 64 -> 32) passed for lack of it; under M2 this sprite draws 32 tall
+    # and rows 34..65 of it disappear into the background -> diff.
+    "sprite9": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                    bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                    tiles=[(0x040, 32), (0xF00, 16)],
+                    sprites=_sprites(
+                        (112, 66, 0, 1, 0, 2))),
+    # sprite10 "spbg0": an SPBG=0 sprite over an opaque BG tile.  The
+    # stripes background is colour 7 right of display column 128 (a
+    # nonzero low nibble), so s0 (SPBG=0, cols 128..143) must be HIDDEN by
+    # the background.  REVIEW-12's M9 (SPBG ignored: every opaque sprite
+    # pixel replaces the BG) passed because no scene had an SPBG=0 sprite
+    # over a nonzero-nibble BG pixel; under M9 s0 is drawn -> diff.  s1
+    # (SPBG=1 over the solid half) and s2 (SPBG=0 over colour 0, which
+    # must SHOW) keep the scene honest — M10 (SPBG=0 never draws) still
+    # fails here too.
+    "sprite10": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                     bat_w=32, bat_h=32, bat_tables=True, bg="stripes",
+                     tiles=[],
+                     sprites=_sprites(
+                         (160, 66, 0, 0), (184, 66, 1, 1), (104, 66, 2, 0))),
+    # sprite11 "cgx16": a line of 15 strips with a CGX sprite as the 16th
+    # SAT entry.  15 single-strip sprites fill the line's budget; the CGX
+    # sprite's left half is strip 16 (drawn), its right half strip 17
+    # (dropped) — REVIEW-12's M24 (the CGX guard pushed the right half
+    # anyway) passed because no scene reached a CGX entry with 15 strips
+    # already collected (max was 7).  Under M24 the right half appears at
+    # cols 226..241 -> diff.  Spacing 14 px: neighbours overlap 2 columns
+    # and the higher SAT index wins, so the scene also re-proves SATB
+    # priority on the same line as the limit.
+    "sprite11": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                     bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                     tiles=[(0x040, 32), (0xF00, 16)],
+                     sprites=_sprites(*[(32 + 14 * i, 66, i & 0xF)
+                                        for i in range(15)]
+                                      + [(242, 66, 15, 1, 1, 0)])),
 }
 
 SG_FORMULA_ASM = """\
@@ -768,9 +813,18 @@ def gen_sprite_asm(name):
 
     if s["bg"] == "stripes":
         # left half of the BAT reads an all-transparent tile (colour 0 ->
-        # CRAM[0x000]), right half an all-colour-7 tile
-        tile_bytes = bytearray(bytes(32)) + bytearray(bytes([0x77, 0x77]) * 16)
-        regions = [(0x040, 0x040, 1), (0x041, 0x041, 1)]
+        # CRAM[0x000]), right half an all-colour-7 tile.  vbase is char*16
+        # like tile_region_bytes' regions (#40: was 0x040/0x041 — the tile
+        # data landed in the BAT at words 0x0040/0x0050 and the real cells
+        # stayed zero, so both halves were colour 0 and the "solid right
+        # half" was never in any capture; sprite3 re-captured with the fix).
+        # A solid pixel value 7 decodes MSB-first (bit 7-col, like the
+        # renderer's FixTileCache reference): CH0..CH2 = 0xFF, CH3 = 0x00 —
+        # word (row) = 0xFFFF, word (row+8) = 0x00FF.  The old 0x7777 was
+        # nibble/LSB thinking and displayed as 0x0/0xF stripes, not colour 7.
+        tile_bytes = bytearray(bytes(32)) + bytearray(
+            bytes([0xFF, 0xFF]) * 8 + bytes([0xFF, 0x00]) * 8)
+        regions = [(0x400, 0x040, 1), (0x410, 0x041, 1)]
         bat_bytes = bytearray()
         for y in range(32):
             for x in range(32):

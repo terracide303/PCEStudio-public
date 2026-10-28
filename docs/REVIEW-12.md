@@ -154,3 +154,42 @@ Each is a single string replacement in `renderer/pce-sprites.js`:
 - **M24:** the CGX-branch guard `if (strips.length < 16) {` → `if (true) {`
   (there is one occurrence; the loop guard `for (... && strips.length < 16;
   i++)` is a different string).
+
+---
+
+## Closed by #40 (2026-10-28, @test) — the three misses are now caught
+
+The exact edits above, re-run with this driver against the same check.js in
+the same sandbox, now report **DETECTED**, and the diff regions are the
+designed witnesses:
+
+| break | scene that catches it | measured diff region (captured rows) |
+|---|---|---|
+| M2 | **sprite9** — one SAT entry, CGY=2, 16×64 at cols 80–95 | the sprite's rows 33–64 (its lower half) |
+| M9 | **sprite10** — SPBG=0 sprite over the stripes' solid colour-7 half | exactly the sprite's 16×16 footprint, cols 128–143 |
+| M24 | **sprite11** — 15 single-strip sprites on one line, then a CGX sprite as the 16th SAT entry | exactly the CGX right half, cols 226–241 |
+
+All 24 rows of the table above now DETECTED; `node tests/check.js` is diff 0
+on all 30 pictures (27 + the three new scenes).
+
+Two generator bugs surfaced while building sprite10 and were fixed there
+(sprite3 re-captured; these were never renderer bugs — the renderer and
+Mednafen agreed on every capture, they just agreed on a picture that was not
+what the generator's comments claimed):
+
+- the stripes tiles were written at VRAM words 0x0040/0x0041 — inside the
+  BAT — and the real cells 0x0400/0x0410 stayed zero, so the "solid colour-7
+  right half" was colour 0 in every earlier capture (which is also why the
+  miss-2 measurement above found zero SPBG=0-over-nonzero pixels: the solid
+  half did not exist in the data);
+- the tile bytes 0x77 decode MSB-first (bit 7−col) as 0x0/0xF stripes, not
+  solid colour 7 — the tile is now 0xFFFF/0x00FF per row, which decodes to
+  solid 7 (and genroms.py's old "LSB/bit x is the leftmost pixel" comment
+  was corrected; all 30 diff-0 captures show the VDC decode is MSB-first).
+
+What this still does not prove: the three scenes pin exactly the three
+narrow conditions above, against Mednafen 1.32.1 captures — not hardware,
+and not any other sprite condition the eleven scenes do not exercise. The
+sprite10 witness covers one opaque background tile (colour 7); other
+non-zero colour numbers are not separately tested (the rule tests the low
+nibble, and 7 exercises the same test as any other non-zero value).
