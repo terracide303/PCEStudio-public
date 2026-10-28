@@ -413,6 +413,12 @@ function firstFrameProblems(dir) {
             `but the trace was recorded from ${meta.rom_sha256.slice(0, 12)}… — ` +
             `re-run tools/capture-review16.sh trace`);
         }
+      } else {
+        /* not a failure — the fixture is committed evidence — but it must be
+         * visible that this run could not hold it to the tree's ROM */
+        console.log(`${name}: provenance not checked — ${meta.rom} is not ` +
+                    `built (run make -C tools) and the fixture's sha is ` +
+                    `${meta.rom_sha256.slice(0, 12)}…`);
       }
     }
   } else if (meta.expect === "mismatch") {
