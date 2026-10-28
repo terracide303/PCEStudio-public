@@ -162,6 +162,24 @@ adding more captures). The #10 background demo's
 ROM is unchanged (`486477d6…`). The test was written by @design and is flagged
 for @review cold. Details and limits: [`docs/EDITOR.md`](docs/EDITOR.md).
 
+**#35 step 1 is done, not the card.** HuTrack is vendored
+(`vendor/hutrack`, pinned `ac598f84`, MIT, 68 files in `MANIFEST.sha256`, no
+example songs) and its engine + converter play **our own DMF** on Mednafen:
+`tools/genhutrack.py` writes an 8-note DMF 24 (C4 E4 G4 C5 B4 G4 E4 C4 over
+C3/G3), the converter emits 10 includes (7,904 B, committed under
+`tests/dumps/hutrack1/`), and `tools/build-hutrack.sh` (PCEAS 4.x — 3.23
+cannot assemble the engine; build one from `vendor/huc`) makes a 139,264 B ROM
+(sha256 `c683188f…`). `tools/capture-hutrack.sh` records
+`tests/dumps/hutrack1/mednafen.wav` (308,843 frames = 7.003 s, RMS 4,971.2
+L/R); `node tests/check-hutrack.js` re-checks the vendor manifest and the
+committed fixtures, rebuilds the ROM byte-identically, and recovers the
+melody, the bass (`C3 G3 C3 G3`) and 0.8 s note onsets from the audio alone.
+Measured: DMF's octave byte is one below the sounding octave. What is left on
+#35: the JS DMF reader/player through `renderer/pce-psg.js` compared
+sample-for-sample with this WAV; the export path; DDA/SFX/effects; sound in
+toys (#30). The checker and fixture were written by the builder — @review owes
+them a cold break (rule 2). `docs/HUTRACK.md`.
+
 ## Next action
 
 `../workshop/board.py next PCEStudio --who design`. #11 (@review) reads Phase

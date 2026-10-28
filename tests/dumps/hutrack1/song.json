@@ -1,0 +1,71 @@
+{
+  "dmf": {
+    "raw_bytes": 18681,
+    "raw_sha256": "98637df15d3ee62618722ecbe6fdd6199346b472ce0a52092b63f0f4a87322b5",
+    "file_bytes": 317,
+    "file_sha256": "c45c7d300c632044f3b8914efb14d02dfaa28ca16002e96026e2a74fcaacce0b"
+  },
+  "rows": 64,
+  "orders": 4,
+  "speed": 6,
+  "channels": 6,
+  "melody": [
+    "C4",
+    "E4",
+    "G4",
+    "C5",
+    "B4",
+    "G4",
+    "E4",
+    "C4"
+  ],
+  "bass": [
+    "C3",
+    "G3",
+    "C3",
+    "G3"
+  ],
+  "octave_note": "DMF octave byte = sounding octave - 1 (measured)",
+  "includes": {
+    "demo.header.inc": {
+      "bytes": 988,
+      "sha256": "73ec26e2f6f596887df97dd78070150f1919d91a9647e8d73284dc24eb339dd3"
+    },
+    "demo.instrData.inc": {
+      "bytes": 874,
+      "sha256": "06c217f978f09bc47f29216f72a8c13d71f91d2d332bc11ef8a6d68362a49332"
+    },
+    "demo.instrMatrix.inc": {
+      "bytes": 154,
+      "sha256": "5ee77d86dc77fd17f15147e53cb1ed7de461549c110454bd40bc5d9bdb2edcdf"
+    },
+    "demo.patternData.inc": {
+      "bytes": 3986,
+      "sha256": "c39eae12b8ae91304a88c3009ab255fc7176e696bb5e698ca6466f64d3d2a3a4"
+    },
+    "demo.patternMatrix.inc": {
+      "bytes": 813,
+      "sha256": "20a21f84a46546770ac4662cdc79dfd7a4602034d9ebf9a0856dbae92bed25d4"
+    },
+    "demo.pcmData.inc": {
+      "bytes": 82,
+      "sha256": "81790396784b508e5b50c27e7ee00686f3e4db8c3b67c8a4fdfba7b942e16aca"
+    },
+    "demo.pcmMatrix.inc": {
+      "bytes": 207,
+      "sha256": "fc6898df534d4e766346950fdb2a6e1cdcdf08c91e100e99de40e434aea0469d"
+    },
+    "demo.song.inc": {
+      "bytes": 332,
+      "sha256": "b7fb0aa09b2b3f579c35f901f2b944ac7e55db4a507ae8c0ab64c448013ff943"
+    },
+    "demo.wfData.inc": {
+      "bytes": 318,
+      "sha256": "02f2bad43208b26771e7b8017a3a9ac6fe271c7973297605c1bcaf438800e828"
+    },
+    "demo.wfMatrix.inc": {
+      "bytes": 150,
+      "sha256": "d53f1d3b92b89a560c826dc82b5fb08a4829e97aaec5d74a603f6db67774bd8b"
+    }
+  }
+}

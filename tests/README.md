@@ -12,12 +12,17 @@ node tests/check-editor.js      # the editor's refusals, picture, export and cap
                                 # plus the effect edges and the page's Remove buttons (#52)
 node tests/check-psg.js         # the PSG model vs 11 Mednafen recordings, sample for sample (#34, #63)
 node tests/check-wave.js        # the wave editor's export vs PCEAS and Mednafen (#35, #62)
+node tests/check-hutrack.js     # #35: the vendored HuTrack ROM's recording carries the DMF's melody
 node tests/psg-mutation.js      # #63: REVIEW-34's 15 breaks must all be DETECTED
 ```
 
-The three audio suites are documented in `docs/PSG.md` and `docs/WAVE.md`;
+The audio suites' models and limits are documented in `docs/PSG.md`,
+`docs/WAVE.md` and (HuTrack, #35 step 1) `docs/HUTRACK.md`;
 `psg-mutation.js`'s result classes and blind spots are in its header and in
 `docs/PSG.md` § "REVIEW-34's four misses, and what #63 added".
+`check-hutrack.js` needs `pceas4` on `PATH` (or `PCEAS4=`) for the ROM
+rebuild; without it that one check prints SKIP and the recording checks still
+run.
 
 ## `check.js` — the diff (#5, #39, #12, #40, #15)
 
