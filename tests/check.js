@@ -13,7 +13,12 @@
  * 256x232 RGB, unfiltered — the last qtrecord frame, same source surface as
  * Mednafen's F9 shot), renders the frame with
  * renderer/pce-bg.js and requires pixel-for-pixel equality with the PNG
- * (diff 0).  Exit code 0 only if every picture matches.
+ * (diff 0).  A dump with sat.bin (the #12 sprite scenes) is rendered by
+ * renderer/pce-sprites.js instead — the same background with the sprite
+ * layer composed on top — and, as a regression net, every dump WITHOUT
+ * sat.bin must also render identically through the sprites module (a sprite
+ * scene's renderer must not change a sprite-free picture).  Exit code 0
+ * only if every picture matches.
  *
  * A dump whose CR has bit 7 clear is the background-off case, which the
  * renderer now models (CR R05 bit 7 = BB, VDC manual p. H7-5): the frame is
@@ -32,6 +37,7 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const bg = require("../renderer/pce-bg.js");
+const sprites = require("../renderer/pce-sprites.js");
 
 /* ---- minimal PNG reader: 8-bit, non-interlaced, colour types 0/2/6 ---- */
 function decodePng(buf) {
@@ -109,6 +115,8 @@ function checkScene(dir) {
   const vram = fs.readFileSync(path.join(dir, "vram.bin"));
   const cram = fs.readFileSync(path.join(dir, "cram.bin"));
   const regs = JSON.parse(fs.readFileSync(path.join(dir, "regs.json"), "utf8"));
+  const satPath = path.join(dir, "sat.bin");
+  const hasSat = fs.existsSync(satPath);
   const ref = decodePng(fs.readFileSync(path.join(dir, "mednafen.png")));
 
   if (Object.prototype.hasOwnProperty.call(NOT_PICTURES, name)) {
@@ -122,8 +130,14 @@ function checkScene(dir) {
    * blanking, DisplayRect.y in Mednafen's pce module).  Defaults to the
    * original crop 4/235. */
   const firstScanline = 14 + (regs.slstart != null ? regs.slstart : 4);
-  const got = bg.renderFrame({ vram, cram, regs, width: 256, height: 232,
-                               firstScanline });
+  const opts = { vram, cram, regs, width: 256, height: 232, firstScanline };
+  /* The #12 sprite scenes render through the sprites module (sat.bin marks
+   * them); everything else through the background renderer — and must also
+   * come out identical through the sprites module, since a sprite renderer
+   * that changes a sprite-free picture is broken. */
+  const got = hasSat
+    ? sprites.renderFrame(Object.assign({ sat: fs.readFileSync(satPath) }, opts))
+    : bg.renderFrame(opts);
 
   if (got.width !== ref.width || got.height !== ref.height) {
     console.log(`${name}: SIZE MISMATCH renderer ${got.width}x${got.height} ` +
@@ -142,6 +156,21 @@ function checkScene(dir) {
           `got=${got.pixels[o]},${got.pixels[o + 1]},${got.pixels[o + 2]} ` +
           `ref=${ref.pixels[o]},${ref.pixels[o + 1]},${ref.pixels[o + 2]}`);
       }
+    }
+  }
+  if (!hasSat) {
+    /* regression net: the sprites renderer must agree with the background
+     * renderer on every sprite-free dump (pce-sprites.js composes on top of
+     * the same indices; a sprite scene's model must not leak into them) */
+    const viaSprites = sprites.renderFrame(opts);
+    let same = viaSprites.pixels.length === got.pixels.length;
+    for (let i = 0; same && i < got.pixels.length; i++) {
+      same = viaSprites.pixels[i] === got.pixels[i];
+    }
+    if (!same) {
+      console.log(`${name}: sprites renderer disagrees with bg renderer ` +
+                  `on a sprite-free dump`);
+      return { kind: "error" };
     }
   }
   if (diffs === 0) {

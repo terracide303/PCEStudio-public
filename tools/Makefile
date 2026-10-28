@@ -6,9 +6,11 @@ PCEAS ?= pceas
 PYTHON ?= python3
 
 SCENES := 1 2 3 4 5 6 7 8 8b 8c 9
+SPRITES := 1 2 3 4 5 6 7 8
 VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,$(SCENES)))
+SPRITE_ROMS := $(addprefix gen/sprite,$(addsuffix .pce,$(SPRITES)))
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS)
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS)
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -20,6 +22,14 @@ gen/scene%.asm: genroms.py
 	$(PYTHON) -I genroms.py
 
 gen/scene%.pce: gen/scene%.asm
+	$(PCEAS) -raw -o $@ $<
+
+# #12's sprite-scene ROMs (genroms.py's SPRITE_SCENES), same route.
+gen/sprite%.asm: genroms.py
+	mkdir -p gen
+	$(PYTHON) -I genroms.py
+
+gen/sprite%.pce: gen/sprite%.asm
 	$(PCEAS) -raw -o $@ $<
 
 # The viewer ROMs are viewer.asm (bank 0, fixed) plus the picture data of

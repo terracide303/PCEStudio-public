@@ -18,8 +18,9 @@
  *   firstScanline: VCE scanline of captured row 0 (18 for slstart=4:
  *     Mednafen DisplayRect.y = 14 + slstart, 14 lines of top blanking)
  *
- * Layer scope: background only (no sprites).  CR bit 7 (BB) is modelled: when
- * it is clear the VDC clears the background and every pixel shows the
+ * Layer scope: background only; the sprite layer composes on top of the
+ * colour-index buffer via pce-sprites.js (#12).  CR bit 7 (BB) is modelled:
+ * when it is clear the VDC clears the background and every pixel shows the
  * blanking-period video data — SPBG = 1, VD7..VD0 = 0, i.e. the 9-bit colour
  * index 0x100, CRAM[0x100] (2.3.6 p. H7-18).  Colour 0 of any BG palette in
  * a displayed background is fixed up to CRAM[0x000] (the backdrop entry),
@@ -66,7 +67,12 @@
              wmask: w - 1, hmask: h - 1 };
   }
 
-  /* One rendered frame.
+  /* One rendered frame of colour indexes (9-bit VCE colour-table entries,
+   * value per pixel: 0x000 backdrop / 0x100 blanking / pal<<4|pixel).
+   * renderFrame maps these through CRAM to RGB; pce-sprites.js composes the
+   * sprite layer onto this same index buffer (the VDC's sprite/BG priority
+   * rule tests the BG pixel's low nibble — colour 0 — so the indexes, not
+   * the RGB, are the layer boundary).
    *
    * Vertical calibration, from the dump's own counters (nothing is fitted to
    * the picture): the VDC's VDW phase begins at VCE line 17 — one line before
@@ -78,7 +84,7 @@
    *   vdwLine = RCRCount - (scanline - firstScanline) + r.
    * A 1-line error here shifts the picture by one row and the diff test
    * fails loudly, so this is self-calibrating. */
-  function renderFrame(opts) {
+  function renderIndices(opts) {
     var vram = opts.vram, cram = opts.cram, regs = opts.regs;
     var width = opts.width || 256;
     var height = opts.height || 232;
@@ -94,20 +100,16 @@
      * pixels are CRAM[0x100] = 0x049 = 36,36,36; us1's white frame is its
      * CRAM[0x100] = 0x1FF, the same rule. */
     if (!(regs.CR & 0x80)) {
-      var bgOff = new Uint8Array(width * height * 3);
-      for (var i = 0; i < bgOff.length; i += 3) {
-        bgOff[i] = rgb[0x100 * 3];
-        bgOff[i + 1] = rgb[0x100 * 3 + 1];
-        bgOff[i + 2] = rgb[0x100 * 3 + 2];
-      }
-      return { width: width, height: height, pixels: bgOff };
+      var off = new Uint16Array(width * height);
+      off.fill(0x100);
+      return { width: width, height: height, indices: off };
     }
 
     var geom = batGeometry(regs.MWR);
     var bxr = regs.BXR & 0x3FF;                 /* BXR is 10 bits */
     var byr = regs.BYR & 0x1FF;                 /* BYR is 9 bits */
     var vdwLine0 = regs.RCRCount - (regs.scanline - firstScanline);
-    var px = new Uint8Array(width * height * 3);
+    var idx = new Uint16Array(width * height);
 
     for (var r = 0; r < height; r++) {
       /* 9-bit counters wrap; mask to stay inside the BAT mask arithmetic */
@@ -142,19 +144,29 @@
               | (((w1 >> bit) & 1) << 2)
               | (((w1 >> (bit + 8)) & 1) << 3);
         }
-        var ci = pix === 0 ? 0x000 : (pal << 4) | pix;
-        var o = (r * width + x) * 3;
-        px[o] = rgb[ci * 3];
-        px[o + 1] = rgb[ci * 3 + 1];
-        px[o + 2] = rgb[ci * 3 + 2];
+        idx[r * width + x] = pix === 0 ? 0x000 : (pal << 4) | pix;
       }
     }
-    return { width: width, height: height, pixels: px };
+    return { width: width, height: height, indices: idx };
+  }
+
+  function renderFrame(opts) {
+    var img = renderIndices(opts);
+    var rgb = decodeCram(opts.cram);
+    var px = new Uint8Array(img.width * img.height * 3);
+    for (var i = 0, o = 0; i < img.indices.length; i++, o += 3) {
+      var ci = img.indices[i];
+      px[o] = rgb[ci * 3];
+      px[o + 1] = rgb[ci * 3 + 1];
+      px[o + 2] = rgb[ci * 3 + 2];
+    }
+    return { width: img.width, height: img.height, pixels: px };
   }
 
   return {
     decodeCram: decodeCram,
     batGeometry: batGeometry,
-    renderFrame: renderFrame
+    renderFrame: renderFrame,
+    renderIndices: renderIndices
   };
 });

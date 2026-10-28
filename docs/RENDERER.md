@@ -1,12 +1,14 @@
-# The background renderer (#5)
+# The renderer (#5 background, #12 sprites)
 
 `renderer/pce-bg.js` renders one 256×232 RGB frame from a VDC VRAM dump and a
 VCE colour-table dump, drawing exactly what the VDC background layer and the
-VCE colour decoder draw.  The close condition for #5 is `node tests/check.js`
-reporting **diff 0** between the renderer's output and Mednafen's raw
-recorded frame (same source surface as its F9 screenshot, captured via
-`-qtrecord` because this Mac must not receive synthesized key events) for
-the three dumps in `tests/dumps/`.
+VCE colour decoder draw; `renderer/pce-sprites.js` composes the VDC's sprite
+layer (SATB) on top of the same colour-index buffer.  The close conditions
+are `node tests/check.js` reporting **diff 0** between the renderer's output
+and Mednafen's raw recorded frame (same source surface as its F9 screenshot,
+captured via `-qtrecord` because this Mac must not receive synthesized key
+events) for every dump in `tests/dumps/` — the three #5 dumps and, since
+#12, the eight sprite scenes (marked by `sat.bin`).
 
 Everything below is labelled by where it was read from.  PCEStudio's rule
 (DECISIONS.md): the model is written from the Hudson manuals; Mednafen and
@@ -82,6 +84,55 @@ all 59392 pixels are CRAM[0x100] = 0x049 = 36,36,36 — so the burst and DCR
 hypotheses were tested and rejected).  *Source: VDC manual, CR R05 p. H7-5;
 2.3.6 blanking video data p. H7-18.*
 
+**Sprites (SATB).** 64 SAT entries × 4 words, moved from VRAM into the
+SATB by the SATB DMA (DCR bit 4, source DVSSR — our scenes keep the SAT at
+VRAM 0x7F00).  Word 0 = Y (bits 0–9; value 64 = display row 0), word 1 = X
+(bits 0–9; value 32 = display column 0), word 2 = pattern code << 1 (bit 0
+= 4-colour mode, not exercised), word 3 = palette bits 0–3, SPBG bit 7,
+CGX bit 8, HFLIP bit 11, CGY bits 12–13, VFLIP bit 15.  *Source: VDC
+manual 2.4 p. H7-19..H7-24 (SAT word layout, sprite attributes).*
+
+**Sprite patterns.** The pattern code p (word 2 >> 1) addresses a **64-word
+VRAM cell at word p·64**: four 16-word planes SG0..SG3 at +0/+16/+32/+48 +
+row, word bit 15 = the strip's leftmost pixel.  The manual states SG0 must
+align at `XX000000` — six zero bits, a 64-word boundary (2.4 p. H7-21), and
+the three references agree on the scale: Mednafen reads `no·64`
+(`vdc.cpp` FetchSpriteData); MagicKit's `spr_pattern` stores `addr>>5` into
+word 2 whose bit 0 is the CG bit, so the cell is `addr>>6`
+(`huc-src/include/pce/sprites.inc`); the MiSTer core computes
+`PC(10:4)&TILE_N` with 64-word tiles (`source/mister/huc6270.vhd`).  (The
+first version of `pack_patterns` used 32-word units — the 16×16-px cell
+written at p·32 is read at p·64, so both Mednafen cores drew nothing.
+That is what the four sources above settle.)
+
+**Sprite sizes.** CGY 00/01/10/11 = 16/32/64/64 rows, CGX = 32 columns
+(two 16-px strips side by side).  The VDC masks the pattern code's low
+bits per size and adds the block/half select: 16×16 = cell p; 16×32 =
+cells p&~2, p&~2+2 (the manual's 2CGY: the two blocks are pattern codes
+with PC2 = pattern bit 1); 16×64 = p&~6 + {0,2,4,6} (4CGY: PC3,PC2);
+32-px wide = halves p&~1, p&~1+1 (CGX: PC1), HFLIP swapping the halves.
+The row counter starts at 0 inside every cell, so a tall sprite reads
+blocks 128 words apart with the skipped cell free.  VFLIP reverses the
+rows within each cell and the block order.  *Source: VDC manual CGX/CGY
+sections p. H7-22..H7-23 (the CGX example SAT, the 2CGY/4CGY PC3/PC2
+specification); Mednafen FetchSpriteData and the MiSTer SPR_TILE_N agree
+cell for cell.*
+
+**Sprite line budget and priority.** At most 16 strips (16-px sprite
+columns) per display line, taken in SATB order — sprites 17+ on the line
+are dropped entirely.  Where strips overlap, the lowest SAT index wins the
+pixel.  A visible sprite pixel (pixel 0 is transparent) replaces the
+background when SPBG = 1, or when the background pixel's colour number
+(the low nibble of its colour index) is 0 — so an SPBG=0 sprite still
+shows over the backdrop (0x000) and over the BB-off fill (0x100).  Sprite
+pixel p of palette n is colour index `0x100 | n<<4 | p`.  CR bit 6 = SB:
+0 clears the sprites.  *Source: VDC manual 2.4.3 p. H7-23 (the 16-sprite
+line limit), SPBG p. H7-20, CR R05 p. H7-5; the per-strip count, the
+priority order and the exact BG test are Mednafen DrawSprites behaviour
+(its target line buffer composes against `!(target[x] & 0x0F)`, i.e. BG
+colour 0) — the sprite scenes below are the diff-0 proof that this is what
+the VDC displays.*
+
 ## The test ROMs (`tools/genroms.py`)
 
 Scenes 1–3 are #5's original torture pictures, and scenes 4–9 (with 8b, 8c
@@ -125,6 +176,37 @@ VCR/DCR/SATB — *source: HuDK `include/vdc.s`, the working example
   and `tools/genroms.py`'s `bat_formula()` mirrors the loops for
   verification (scene 4-9 BATs: 0 mismatches against the captures).
 
+Scenes sprite1–8 are #12's: scene 1's picture (or the sprite3 stripes)
+under one or more sprites.  The SAT lives at VRAM 0x7F00 and the SATB DMA
+(DCR bit 4) loads it every VBlank; the SG cells are written by a formula
+loop in the ROM and `tools/genroms.py`'s `sg_word()` mirrors it —
+cell p, plane pl, row r = ROTL16(P_pl, (r + p) & 0xF) with P = 0x5555,
+0x3333, 0x0F0F, 0x00FF, and P_3's rotation period is exactly 16 so all 16
+rows of every cell differ (a renderer that reads the wrong row, block or
+cell shows different pixels).  All 8 captures verified against the
+mirrors: SAT 0/256 mismatches and SG 0 mismatches of 6400 words (the
+cells the VDC actually reads, per sprite).  The scenes each pin one part
+of the model:
+
+- **sprite1**: all six sizes on one row, distinct palettes (a misread
+  CGX/CGY, or a wrong cell, changes pixels)
+- **sprite2**: flips — normal / X / Y / XY, plus a 32-px X-flip (halves
+  swapped) and a 16×32 Y-flip (blocks reversed)
+- **sprite3**: priority — BG transparent left of column 16, solid right;
+  SPBG=0 sprites show left and hide right, SPBG=1 shows everywhere, and a
+  hidden witness (SPBG=0, fully over the solid half) proves it; s3/s4
+  overlap and the lower SAT index wins
+- **sprite4**: 19 sprites at 13-px spacing on one row — 16 strips fit a
+  line, SAT entries 16–18 must be dropped (SATB order) — and one sprite
+  alone on its own line (the limit is per line, not per frame)
+- **sprite5**: 16 sprites, one per sprite palette, 4×4 grid
+- **sprite6**: clip — sprites cut by the left/right/top/bottom edges and
+  one entirely above the picture (must not draw)
+- **sprite7**: CGY blocks — 16×64 straight, 16×64 Y-flipped, 16×32, 32×64
+- **sprite8**: background off (CR=0x40: SB set, BB clear) — every BG pixel
+  is the 0x100 fill, whose low nibble is 0, so SPBG=0 sprites show over it
+  like over any BG colour 0
+
 ## The dumps (`tools/capture.sh`, `tools/mcs-extract.py`, `tools/movframes.py`)
 
 Hard rule for this machine: **no synthesized keyboard/mouse events** — the
@@ -162,7 +244,13 @@ this Mac, no swap — the state header's total_len bit 31 is the BE flag).
 `mcs-extract.py` pulls from the `VDC` section (VRAM 65536×u16, SAT, BXR, BYR,
 MWR, RCRCount, BG_YOffset, BG_YMoo, BG_XOffset, the timing caches) and the
 `VCE` section (`color_table` 512×u16, VCECR, scanline, pixel_offset) into
-`tests/dumps/sceneN/{vram.bin, cram.bin, regs.json}`.
+`tests/dumps/sceneN/{vram.bin, cram.bin, regs.json}`; the sprite dumps also
+get `sat.bin` (the VDC's SATB array, 256×u16 — the SATB DMA has copied the
+VRAM SAT into it, and the capture's SAT matches `sat_words()` 0/256).
+`check.js` renders a dump with `sat.bin` through `pce-sprites.js` and every
+other dump through `pce-bg.js` — and requires both to agree on the
+sprite-free dumps, so the sprite renderer cannot change a sprite-free
+picture.
 
 ### Scanline calibration (why the renderer doesn't guess the VDW offset)
 
@@ -201,6 +289,7 @@ assuming them:
 ```sh
 make -C tools                                  # build ROMs (needs pceas)
 bash tools/capture.sh 1                        # capture scene 1 (Mednafen on PATH)
+bash tools/capture.sh 1 sprite                 # capture sprite scene 1 (adds sat.bin)
 node tests/check.js                            # diff renderer vs Mednafen, all scenes
 python3 -m http.server 8000                    # then open renderer/index.html
 ```
@@ -211,15 +300,18 @@ command line and a SIGINT.
 
 ## Known scope limits (deliberate)
 
-Background layer only (no sprites — CR=0x80 in the scenes except 8/8b/8c,
-which exist to test the background-off rule; sprites are #6+).
-256×224 mode only (5.37 MHz clock; the 7.16 MHz modes and 256×240 VDW come
-with the editor).  No RCR split.  The window/state colour path is validated
-end-to-end by the diff test, which is the card's definition of correct.
-One documented synthetic input: `renderer-mutation.js` builds a 65536-word
-VRAM to make the `ch ≥ 0x800` break detectable — no real dump can carry it,
-because Mednafen's state holds 32768 words (scene9 is the rule's own proof:
-the VDC itself reads colour 0 there).
+Background and sprites (sprite scenes 1–8 cover sizes 16×16..32×64, both
+flips, both SPBG priorities, the 16-strip line limit, clipping and
+sprite-on-background-off).  Not modelled: the 4-colour sprite mode (word 2
+bit 0), sprite 0 collision detection, and the SATB DMA's DCR repeat bit
+(the scenes' static SAT never changes).  256×224 mode only (5.37 MHz
+clock; the 7.16 MHz modes and 256×240 VDW come with the editor).  No RCR
+split.  The window/state colour path is validated end-to-end by the diff
+test, which is the cards' definition of correct.  One documented synthetic
+input: `renderer-mutation.js` builds a 65536-word VRAM to make the
+`ch ≥ 0x800` break detectable — no real dump can carry it, because
+Mednafen's state holds 32768 words (scene9 is the rule's own proof: the
+VDC itself reads colour 0 there).
 
 ## Test provenance note
 
