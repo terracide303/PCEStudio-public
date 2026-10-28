@@ -596,3 +596,8 @@ first:
 2. **The validator's frame-time check:** is it counted from the Lua (an estimate) or from the compiled code's cycles?
 3. **The agent link:** what the Studio's MCP server exposes, and what agents got wrong most often.
 4. Would he mind PCEStudio reusing the toy file format (the JSON envelope) so tools could read both?
+
+**Answer to 1 (a.gilbert, 2026-10-28):** "I have not open sourced the compiler yet. I have massive improvements
+coming out for it. There's a few tricks I'm doing to make this a reality and it's actually going to be the subject
+of my next video." So: no source to read now; #31 goes ahead with llvm-mos/HuC, and watches for his video and the
+compiler's release, to compare tricks once they are public.
