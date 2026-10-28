@@ -275,3 +275,12 @@ Dennis may tell him the studio deliberately mirrors his layout.
 the Studio's own files (layout, CSS, icons, UI code) may be taken and adapted where that is quicker than
 rebuilding them, with credit to ppu.toys / Liora Labs kept next to what is taken (a comment in the file and a line
 in the README). Their written OK is Dennis's to keep; the files taken are listed in docs/STUDIO.md.
+
+## 2026-10-28 — The studio copies ppu.toys' functions (Dennis)
+
+Dennis, after seeing the first studio: "looks good, try to copy all the functions from ppu where possible and add
+our own or change for our own where needed". Target: **feature parity with ppu.toys' Studio**, function by
+function from docs/STUDIO.md: what has a PC Engine counterpart is built (taken from their site where quicker,
+with credit), what the PC Engine lacks (Compose, Windows) is replaced by the PCE's own thing or marked "no
+counterpart" with the reason, and PCE-only functions are added (RCR scanlines, the VCE's 512 colours, the
+wide modes, the CONSOLE budget).
