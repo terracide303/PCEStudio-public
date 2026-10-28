@@ -312,13 +312,17 @@ const OLD_CHECK_SRC = preFixSource(CHECK_SRC,
 
 /* The scene set check.js must report diff 0, by name.  #16 (19a0852) added
  * tests/dumps/effect1 and tests/dumps/vraster1-10 (the fixed raster chain's
- * re-captures), so the count moved from 57 to 68 — but a count alone would let
+ * re-captures), so the count moved from 57 to 68; #48 added the four window
+ * scenes (scene11-14: 224 lines, VDS-shifted, narrow HDW, short VDW) and the
+ * count is 72 — but a count alone would let
  * one scene drop out while another silently took its place, so the set is
  * checked name by name.  us1 is the only dump that is not a picture. */
 const EXPECTED_SCENES = [
   /* scene ROMs, #5/#6/#15/#39/#43 */
   "scene1", "scene2", "scene3", "scene4", "scene5", "scene6", "scene7",
   "scene8", "scene9", "scene5b", "scene8b", "scene8c",
+  /* the display window and border, #48 */
+  "scene11", "scene12", "scene13", "scene14",
   /* sprite scenes, #12/#13/#14/#40/#42 */
   "sprite1", "sprite2", "sprite3", "sprite4", "sprite5", "sprite6",
   "sprite7", "sprite8", "sprite9", "sprite10", "sprite11", "sprite12",

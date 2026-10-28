@@ -107,6 +107,105 @@ function decodePng(buf) {
   return { width, height, pixels: out };
 }
 
+/* ---- the #48 display window and border -------------------------------- */
+/* A dump whose VDC window is smaller than the captured frame must show the
+ * border colour CRAM[0x100] (the blanking-period video data SPBG=1,
+ * VD7..VD0=0 — VDC manual 2.3.6 p. H7-18) on every pixel outside the window,
+ * and something else inside it.  This is the card's "including the border
+ * pixels" evidence, computed from the raw register bytes here rather than
+ * from pce-bg.js's window function, so the renderer cannot pass by agreeing
+ * with itself.
+ *
+ *   HDS = back porch-1, HDW = characters-1 (HSR/HDR, H7-9): the window is
+ *   (HDS+1)*8 .. (HDS+1)*8 + (HDW+1)*8 dots from the sync edge, clipped to
+ *   the 341-dot 5.37 MHz line.  The 24-dot output alignment is Mednafen's
+ *   (pce_fast correct_aspect=1, xs[1][0] = 24) — the manual settles the
+ *   fields and the 8-dot character cycle, not the absolute position.
+ *   VDW = display lines-1 (VDR, H7-10); the capture places VDW line 0 at
+ *   the row the save's RCRCount puts it (captured row r shows VDW line
+ *   RCRCount - (scanline - firstScanline) + r), so VDS/VSW enter through
+ *   RCRCount.  VCR (front porch) never moves the window inside a capture.
+ */
+const LINE_DOTS = 341;
+const H_ALIGN_DOTS = 24;
+function expectedWindow(regs, firstScanline) {
+  /* a dump without a window register carries the canonical HuDK 256x240
+   * values (the renderer's own fallback; the synthetic mutation dumps are
+   * the only such states) */
+  const hsr = regs.HSR != null ? regs.HSR : 0x0202;
+  const hdr = regs.HDR != null ? regs.HDR : 0x041F;
+  const vdr = regs.VDR != null ? regs.VDR : 0x00EF;
+  const hds = (hsr >> 8) & 0x7F;
+  const hdw = hdr & 0x7F;
+  let start = (hds + 1) * 8;
+  let end = start + (hdw + 1) * 8;
+  if (start > LINE_DOTS) start = LINE_DOTS;
+  if (end > LINE_DOTS) end = LINE_DOTS;
+  if (start === end) start = end - 8;
+  const vdwLine0 = (regs.RCRCount != null ? regs.RCRCount : 0) -
+                   ((regs.scanline != null ? regs.scanline : firstScanline) -
+                    firstScanline);
+  return { x0: start - H_ALIGN_DOTS, x1: end - H_ALIGN_DOTS,
+           y0: -vdwLine0, y1: (vdr & 0x1FF) - vdwLine0 + 1,
+           vds: ((regs.VSR != null ? regs.VSR : 0x0F02) >> 8) & 0xFF,
+           vdw: vdr & 0x1FF };
+}
+
+function checkWindow(name, regs, cram, ref, firstScanline, modelWindow) {
+  const problems = [];
+  const want = expectedWindow(regs, firstScanline);
+  const got = modelWindow;
+  if (got.x0 !== want.x0 || got.x1 !== want.x1 ||
+      got.y0 !== want.y0 || got.y1 !== want.y1) {
+    problems.push(`${name}: renderer window x[${got.x0},${got.x1}) ` +
+      `y[${got.y0},${got.y1}) != the registers' x[${want.x0},${want.x1}) ` +
+      `y[${want.y0},${want.y1})`);
+  }
+  const W = ref.width, H = ref.height;
+  const x0 = Math.min(W, Math.max(0, want.x0));
+  const x1 = Math.min(W, Math.max(0, want.x1));
+  const y0 = Math.min(H, Math.max(0, want.y0));
+  const y1 = Math.min(H, Math.max(0, want.y1));
+  if (x0 === 0 && y0 === 0 && x1 === W && y1 === H) {
+    return problems;   /* the window covers the frame: no border to witness */
+  }
+  const rgb = bg.decodeCram(cram);
+  const br = [rgb[0x100 * 3], rgb[0x100 * 3 + 1], rgb[0x100 * 3 + 2]];
+  let border = 0, bad = 0, inside = 0, insideBorder = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 3;
+      const isBorder = ref.pixels[o] === br[0] &&
+                       ref.pixels[o + 1] === br[1] &&
+                       ref.pixels[o + 2] === br[2];
+      if (x >= x0 && x < x1 && y >= y0 && y < y1) {
+        inside++;
+        if (isBorder) insideBorder++;
+      } else {
+        border++;
+        if (!isBorder) bad++;
+      }
+    }
+  }
+  if (bad > 0) {
+    problems.push(`${name}: ${bad} of ${border} pixels outside the window ` +
+      `are not CRAM[0x100] (${br.join(",")})`);
+  }
+  if (border === 0) {
+    problems.push(`${name}: the window leaves no border pixels to check`);
+  }
+  if (inside === 0 || insideBorder === inside) {
+    problems.push(`${name}: the window has no non-border picture pixels ` +
+      `(inside ${inside}, border-coloured ${insideBorder})`);
+  }
+  if (problems.length === 0) {
+    console.log(`${name}: window ${x1 - x0}x${y1 - y0} ` +
+      `(x ${x0}..${x1 - 1}, y ${y0}..${y1 - 1}), ${border} border pixel(s) ` +
+      `= CRAM[0x100]`);
+  }
+  return problems;
+}
+
 /* Dumps that are skipped by name, with the measured reason.  A background-off
  * dump not named here is rendered as the backdrop like any other frame. */
 const NOT_PICTURES = {
@@ -154,6 +253,14 @@ function checkScene(dir) {
   }
   const opts = { vram, cram, regs, width: 256, height: 232, firstScanline,
                  raster };
+  /* #48: the register-derived window rectangle, held to the captured
+   * border pixels. A frame the window covers completely has no border. */
+  const winProblems = checkWindow(name, regs, cram, ref, firstScanline,
+                                  bg.displayWindow(opts));
+  if (winProblems.length) {
+    winProblems.forEach((p) => console.log(p));
+    return { kind: "error" };
+  }
   /* The #12 sprite scenes render through the sprites module (sat.bin marks
    * them); everything else through the background renderer — and must also
    * come out identical through the sprites module, since a sprite renderer

@@ -7,7 +7,14 @@
  * 256x240, not the 224 lines a standard TV shows (HDR = $041F, HDW = 31 ->
  * 32 characters = 256 px, H7-9; VDW = $00EF, 240 display lines, H7-10).
  * The 232 lines rendered here are the part of those 240 that the captured
- * screen covers.  This is
+ * screen covers.  Since #48 the frame is the VDC's **display window**, not a
+ * fixed 32x30-character screen: HSR/HDR set where the display starts (HDS)
+ * and how wide it is (HDW), VPR/VDR set the first display line (VDS+VSW) and
+ * its height (VDW), and every pixel outside the window is the VCE's border
+ * colour, CRAM[0x100] — the same blanking-period video data (SPBG=1,
+ * VD7..VD0=0) the VDC puts out there (VDC manual 2.3.6 p. H7-18; the
+ * window fields are on p. H7-9/H7-10, the picture in Fig. 2-2-1 p. H7-13).
+ * This is
  * PCEStudio's own model, written from the Hudson HuC6270/HuC6260 manuals
  * (facts and page references in docs/RENDERER.md); Mednafen was used as a
  * reference for verification only — no emulator code is copied or linked.
@@ -93,6 +100,90 @@
     var shift = shifts[mode];
     return { width: w, height: h, shift: shift,
              wmask: w - 1, hmask: h - 1 };
+  }
+
+  /* The VDC's display window (card #48): the rectangle of the captured frame
+   * the VDC actually draws; every pixel outside it is CRAM[0x100].
+   *
+   * Horizontal, from HSR (R0A) and HDR (R0B) (VDC manual p. H7-9/H7-10):
+   *   - HDS is the back porch in character cycles (HDS = N-1 for a back porch
+   *     of N), so the display starts (HDS+1) character cycles after the
+   *     hsync rising edge; a character cycle is 8 dots.
+   *   - HDW is the display width in character cycles (HDW = N-1), so the
+   *     window is (HDW+1)*8 dots wide.
+   *   - HDE is the *front* porch — the interval from the end of the display
+   *     to the falling edge of hsync — so it moves the sync, not the display:
+   *     it is read (and a window ROM sets it) but does not move a pixel.
+   *   The absolute position inside Mednafen's 256-dot /4-clock output is the
+   *   emulator's alignment (pce_fast correct_aspect=1: xs[1][0] = 24, so a
+   *   canonical HDS=2 back porch puts the display at x=0); the manual settles
+   *   the meaning, the 8-dot character cycle and the width, not that offset.
+   *   Mednafen's own clipping of start/end to the 341-dot 5.37 MHz line is
+   *   modelled, because a window pushed far right would otherwise run past
+   *   the line.
+   *
+   * Vertical, from VPR (R0C)/VDR (R0D)/VCR (R0E) (p. H7-10/H7-11):
+   *   - VDS is the back porch in lines (VDS = N-2), VSW the sync width, so
+   *     the first display line is VDS+VSW; VDW is the display height in
+   *     lines (VDW = N-1); VCR is the front porch (N, not N-1).
+   *   - Which captured rows those are is calibrated from the save state's
+   *     own counters, exactly as the background row is (#5): captured row r
+   *     shows VDW line vdwLine0 + r, with
+   *     vdwLine0 = RCRCount - (scanline - firstScanline). The window is the
+   *     VDW+1 lines from the RCRCount entry (line 0), so VDS and VSW enter
+   *     through RCRCount rather than through a second, guessed offset. VCR
+   *     only changes where the next V-sync falls, so it never moves the
+   *     window inside one capture. A dump without the two counters (nothing
+   *     here) falls back to placing the display entry at
+   *     VDS+VSW - firstScanline.
+   *
+   * Returns the rectangle in captured-frame dots/rows as {x0, y0, x1, y1}
+   * with the far edges exclusive. x0/y0 may be negative and x1/y1 past the
+   * frame when the window leaves the captured area; callers intersect with
+   * the frame. */
+  var LINE_DOTS = 341;      /* Mednafen pce_fast ClockPixelWidths[0] */
+  var H_ALIGN_DOTS = 24;    /* pce_fast xs[1][0], correct_aspect = 1 */
+  function displayWindow(opts) {
+    var regs = opts.regs || {};
+    var firstScanline = opts.firstScanline != null ? opts.firstScanline : 18;
+    var hsr = regs.HSR != null ? regs.HSR : 0x0202;
+    var hdr = regs.HDR != null ? regs.HDR : 0x041F;
+    var vpr = regs.VSR != null ? regs.VSR
+            : regs.VPR != null ? regs.VPR : 0x0F02;
+    var vdr = regs.VDR != null ? regs.VDR : 0x00EF;
+    var vcr = regs.VCR != null ? regs.VCR : 0x000C;
+    /* The latched values are what the VDC used for this frame (HDS..HDE at
+     * HDS start, VDS..VCR at the vertical period boundary); the live
+     * register is only the fallback for a state that does not record them. */
+    var hds = regs.HDS_cache != null ? regs.HDS_cache : (hsr >> 8) & 0x7F;
+    var hdw = regs.HDW_cache != null ? regs.HDW_cache : hdr & 0x7F;
+    var vds = regs.VDS_cache != null ? regs.VDS_cache : (vpr >> 8) & 0xFF;
+    var vsw = regs.VSW_cache != null ? regs.VSW_cache : vpr & 0x1F;
+    var vdw = regs.VDW_cache != null ? regs.VDW_cache : vdr & 0x1FF;
+    var vcrReg = regs.VCR_cache != null ? regs.VCR_cache : vcr & 0xFF;
+
+    var start = (hds + 1) * 8;
+    var end = start + (hdw + 1) * 8;
+    if (start > LINE_DOTS) start = LINE_DOTS;
+    if (end > LINE_DOTS) end = LINE_DOTS;
+    if (start === end) start = end - 8;   /* Mednafen's off-screen HDS guard */
+    var x0 = start - H_ALIGN_DOTS;
+    var x1 = end - H_ALIGN_DOTS;
+
+    var vdwLine0;
+    if (regs.RCRCount != null && regs.scanline != null) {
+      vdwLine0 = regs.RCRCount - (regs.scanline - firstScanline);
+    } else {
+      vdwLine0 = firstScanline - (vds + vsw);
+    }
+    var y0 = -vdwLine0;
+    var y1 = vdw - vdwLine0 + 1;
+
+    return { x0: x0, y0: y0, x1: x1, y1: y1,
+             /* the register values, for the tests/panels that show them */
+             hds: hds, hdw: hdw, hde: regs.HDE_cache != null ? regs.HDE_cache
+                        : (hdr >> 8) & 0x7F,
+             vds: vds, vsw: vsw, vdw: vdw, vcr: vcrReg };
   }
 
   /* #15: the per-scanline values when opts.raster is present — a table of
@@ -305,6 +396,15 @@
     var bxr = regs.BXR & 0x3FF;                 /* BXR is 10 bits */
     var byr = regs.BYR & 0x1FF;                 /* BYR is 9 bits */
     var vdwLine0 = regs.RCRCount - (regs.scanline - firstScanline);
+    var win = displayWindow(opts);
+    /* the visible part of the window inside this frame (the window may start
+     * left of / above the captured area or run past its right/bottom edge) */
+    var wx0 = Math.min(width, Math.max(0, win.x0));
+    var wx1 = Math.min(width, Math.max(0, win.x1));
+    var wy0 = Math.min(height, Math.max(0, win.y0));
+    var wy1 = Math.min(height, Math.max(0, win.y1));
+    if (wx1 < wx0) wx1 = wx0;   /* an empty window is all border */
+    if (wy1 < wy0) wy1 = wy0;
     var idx = new Uint16Array(width * height);
     var px = {};   /* one reusable provenance record for the per-pixel decode */
 
@@ -328,13 +428,31 @@
         }
         continue;
       }
+      if (r < wy0 || r >= wy1) {
+        /* outside the vertical display window: the whole line is the
+         * border colour (CRAM[0x100] — the blanking-period video data) */
+        for (var x = 0; x < width; x++) {
+          idx[r * width + x] = 0x100;
+        }
+        continue;
+      }
       /* 9-bit counters wrap; mask to stay inside the BAT mask arithmetic */
       var bgY = rows ? rows.bgY[r] : ((byr + vdwLine0 + r) & 0x1FF);
       var bgX = rows ? rows.bxr[r] : bxr;
 
-      for (var x = 0; x < width; x++) {
+      /* left of the window: border */
+      for (var x = 0; x < wx0; x++) {
+        idx[r * width + x] = 0x100;
+      }
+      /* inside it: the background. The window's left edge is the display's
+       * first dot, so screen column x is background column x - win.x0. */
+      for (var x = wx0; x < wx1; x++) {
         idx[r * width + x] =
-            backgroundPixel(vram, geom, bgX, bgY, x, px).index;
+            backgroundPixel(vram, geom, bgX, bgY, x - win.x0, px).index;
+      }
+      /* right of the window: border */
+      for (var x = wx1; x < width; x++) {
+        idx[r * width + x] = 0x100;
       }
     }
     return { width: width, height: height, indices: idx };
@@ -365,6 +483,7 @@
     decodeCram: decodeCram,
     decodeCramWords: decodeCramWords,
     batGeometry: batGeometry,
+    displayWindow: displayWindow,
     buildRows: buildRows,
     backgroundPixel: backgroundPixel,
     renderFrame: renderFrame,
