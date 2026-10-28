@@ -33,7 +33,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
   Not a feature list. The single outcome that makes it worth doing, and the observation that would prove it.
 
 ### The rulebook grows, or none of this was worth setting up
-- [?] #4 The first retrospective has been run, and `../workshop/RULES.md` has more than one rule — the five questions in `../workshop/RETROSPECTIVE.md` answered, and whatever they produced landed in RULES.md, CATALOGUE.md, check.sh or skills/ @workshop
+- [x] #4 The first retrospective has been run, and `../workshop/RULES.md` has more than one rule — run 2026-10-28 after Phase 1 (software): six Log rows in RETROSPECTIVE.md, RULES.md rule 2 (e100744), read cold by @review and corrected (74fe217) @workshop
   **Left UNREFINED on purpose — you cannot reflect on a project that has not done anything yet.** Refine it when the first phase closes, or after any day that cost more than it should have. It is on the board from day one because a ritual nobody owns is the one that gets skipped in the week it would have mattered, and the rulebook growing is the only reason this method beats just working.
 
 ## Phase 1 — A picture on a real PC Engine (the whole chain, once)
