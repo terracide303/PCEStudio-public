@@ -8,11 +8,11 @@
  * script; per the workshop role split this is flagged for @review to read
  * cold (same arrangement as tests/check.js for #5).
  *
- * For every tests/dumps/{viewer,browser,vsprite}<N>/ directory with a
- * mednafen.png:
+ * For every tests/dumps/{viewer,browser,vsprite,bsprite}<N>/ directory with
+ * a mednafen.png:
  *   - renders the frame for the matching scene (sceneN for viewer/browserN,
- *     spriteN for vspriteN) with the renderer — pce-sprites.js when the
- *     scene has a sat.bin, else pce-bg.js — from
+ *     spriteN for vsprite/bspriteN) with the renderer — pce-sprites.js when
+ *     the scene has a sat.bin, else pce-bg.js — from
  *     tests/dumps/{scene,sprite}N/{vram.bin,cram.bin,regs.json,sat.bin} and
  *     requires the viewer's recorded frame to equal it byte for byte
  *     (diff 0).  The renderer is the pixel reference (#5 and #12 proved it
@@ -127,10 +127,12 @@ const VDC_REGS = ["MWR", "BXR", "BYR", "CR", "VSR", "VDR", "HSR", "HDR",
                   "DCR", "SATB"];
 
 /* The matching scene dir for a viewer capture: viewerN/browserN -> sceneN,
- * vspriteN -> spriteN (#14). */
+ * vspriteN -> spriteN (#14), bspriteN -> spriteN (#42: the browser export
+ * of a sprite scene, captured in Mednafen — REVIEW-14's J-gap). */
 function sceneDir(dir) {
   const name = path.basename(dir);
   const scene = name.replace(/^vsprite/, "sprite")
+                    .replace(/^bsprite/, "sprite")
                     .replace(/^(?:viewer|browser)/, "scene");
   return path.join(path.dirname(dir), scene);
 }
@@ -209,22 +211,22 @@ function main() {
     return 2;
   }
   const dirs = fs.readdirSync(dumps).filter((d) =>
-    /^(?:viewer|browser)[0-9]$|^vsprite[0-9]+$/.test(d) &&
+    /^(?:viewer|browser)[0-9]$|^(?:vsprite|bsprite)[0-9]+$/.test(d) &&
     fs.existsSync(path.join(dumps, d, "mednafen.png")) &&
     fs.existsSync(path.join(sceneDir(path.join(dumps, d)), "regs.json")))
     .sort().map((d) => path.join(dumps, d));
   if (dirs.length === 0) {
-    console.error("no viewer/browser/vsprite dumps with a matching scene " +
-                  "found — run tools/capture.sh N viewer (or browser, or " +
-                  "vsprite) first");
+    console.error("no viewer/browser/vsprite/bsprite dumps with a matching " +
+                  "scene found — run tools/capture.sh N viewer (or browser, " +
+                  "vsprite, or bsprite) first");
     return 2;
   }
   let failed = 0;
   for (const dir of dirs) failed += checkViewer(dir);
   console.log(failed === 0
-    ? `PASS: viewer/browser/vsprite ROMs match the renderer pixel for ` +
-      `pixel on ${dirs.length} capture(s)`
-    : `FAIL: ${failed} viewer/browser/vsprite capture(s) differ`);
+    ? `PASS: viewer/browser/vsprite/bsprite ROMs match the renderer pixel ` +
+      `for pixel on ${dirs.length} capture(s)`
+    : `FAIL: ${failed} viewer/browser/vsprite/bsprite capture(s) differ`);
   return failed === 0 ? 0 : 1;
 }
 

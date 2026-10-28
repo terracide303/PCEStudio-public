@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """genviewer.py — build the picture-data banks for the #8/#14 viewer ROM.
 
-    python3 -I genviewer.py 1|2|3
-    python3 -I genviewer.py vsprite1..vsprite11
+    python3 -I genviewer.py 1|2|3|7
+    python3 -I genviewer.py vsprite1..vsprite12
 
 Takes a picture's sample data (tests/dumps/sceneN or spriteN/
 {vram.bin,cram.bin,regs.json,regions.json} — the same dumps the renderer
@@ -209,9 +209,13 @@ def build(spec):
 
 
 def main():
-    valid = [str(i) for i in (1, 2, 3)] + [f"vsprite{i}" for i in range(1, 12)]
+    # 1|2|3 -> viewerN from sceneN; 7 -> viewer7 (#42: scene7's 128x64 BAT is
+    # 16384 bytes, the first picture whose BAT copy crosses the 8 KiB MPR2
+    # window); vsprite1..vsprite12 -> the viewer ROMs of the sprite scenes.
+    valid = [str(i) for i in (1, 2, 3, 7)] + \
+        [f"vsprite{i}" for i in range(1, 13)]
     if len(sys.argv) != 2 or sys.argv[1] not in valid:
-        print(f"usage: {sys.argv[0]} 1|2|3|vsprite1..vsprite11",
+        print(f"usage: {sys.argv[0]} 1|2|3|7|vsprite1..vsprite12",
               file=sys.stderr)
         return 2
     os.makedirs(OUT, exist_ok=True)

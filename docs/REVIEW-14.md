@@ -188,3 +188,82 @@ mismatch against PCEAS.
 - Every viewer-path break above (including the genviewer.py one) was
   reachable by a fresh command-line Mednafen capture; the pce-rom breaks
   needed no capture. None is marked UNREACHABLE.
+
+# #42 appendix — the two gaps and the scope gap, settled by @test
+
+Card #42 (seat @test, 2026-10-28) built the three captures the "Settles it"
+lines above ask for and re-ran the affected breaks. Same method as the
+review: one break at a time in `tools/viewer.asm`, `pceas -raw`, fresh
+Mednafen capture (SIGINT route, no keyboard/mouse events), the unmodified
+`tests/check-viewer.js` on the mutant capture, tree restored after each run.
+
+**The new captures** (all `tools/capture.sh`, attempt 1):
+
+| capture | what it is | the gap it closes |
+|---|---|---|
+| `dumps/sprite12` + `dumps/vsprite12` | 64 sprites in an 8×8 grid, **one per SAT entry** — entries 20–63 live, entry 63 (234,228) visible bottom-right; `sat.bin` has all 64 entries, `nblocks=64` | A2 |
+| `dumps/viewer7` | scene7's viewer: its 128×64 BAT is 16384 bytes, copied from bank 2 starting `$4000`, so the copy crosses `$6000` at BAT word 4096 and the remap branch runs | I |
+| `dumps/bsprite12` | `check-export.js --write sprite12` → the browser export of a sprite scene, run in Mednafen | J1–J3 |
+
+`vsprite12`'s tile stream is 9216 bytes (BG 1024 + SG 8192; the
+`[0xF00, 16]` region is skipped by design — dest word 61440 ≥ 32768, the
+beyond-VRAM reads are colour 0). The SG copy starts at `$4400` and crosses
+`$6000` at SG word 3584 = dest word 11776. The remap branch runs on both
+new ROMs. `check-export.js` now carries 15 pairs (scene 1-3, sprite 1-12).
+
+**The re-runs** (mutant capture vs the real check; `check-viewer.js` sees 20
+captures today):
+
+| break | scene | verdict | measured output |
+|---|---|---|---|
+| A2 (SAT 256→80 words, `viewer.asm:249-251`) | vsprite12 | **DETECTED** | exit 1; `27496 differing pixels of 178176`; `vram differs ... at byte 65184` (= word `$7F50`, entry 20); `sat.bin differs ... at byte 160` (entry 20) |
+| I (both `cmp #$60`→`cmp #$70`, `viewer.asm:286,301`) | viewer7 | **DETECTED** | exit 1; `vram differs ... at byte 8192` (word 4096, first word of the wrong BAT half); **frame diff 0** — the wrong half (rows 32–63) is off-screen at BXR=1000/BYR=0, so only the `vram` byte equality catches it, like K/S |
+| I | vsprite12 | **DETECTED** | exit 1; `4824 differing pixels` (sample px(0,169) renderer 252,72,0 vs viewer 216,72,36); `vram differs ... at byte 23552` (= word 11776, the computed crossing point — the measurement and the arithmetic agree) |
+| B (SAT 256→512 words, `viewer.asm:249-251`) | vsprite12 | **NO-OP** | exit 0; the capture is **byte-identical to pristine** (`vram.bin`/`sat.bin`/`cram.bin`/`mednafen.png` sha256-equal; `regs.json` differs only in the run-to-run `pixel_offset` calibration) |
+
+**What the I re-runs measured, precisely.** With the threshold mutated,
+`copy_words` walks past `$5FFF` without remapping and reads `$6000+`
+through MPR3 — which the viewer never maps, so it stays 0, the code bank.
+On `vsprite12` the last 16 SG cells (words 11776–12287, sprites 56–63, the
+bottom grid row) therefore hold boot-code bytes and 0xFF fill: measured
+words `d478 a2d8 9aff ffa9 0153 f8a9 0253 04a9 008d a904 5301 8204 …` =
+bank 0 bytes `78 d4 d8 a2 ff 9a a9 ff 53 01 a9 f8 53 02 a9 04 8d 00 04 a9
+01 53 04 82 …` (`sei/csh/cld/ldx/txs/…`), then `ffff` fill. The corrupted
+sprites change the frame, and the `vram` compare reports the first wrong
+byte. On `viewer7` the same read corrupts BAT words 4096–8191 (rows 32–63)
+with the code bank — invisible on screen, caught only by byte equality.
+
+**What B is a no-op to (re-verified, with citations).** The SATB DMA
+transfers exactly the fixed 256-word SATB from DVSSR every VBlank — VDC
+manual 2.4.2 SATB p. H7-20 and DVSSR R13 p. H7-12, already cited at
+`viewer.asm:238-240`. The CPU's extra 256 words land at MAWR `$8000+`,
+past the 32768-word VRAM, and are dropped — measured Mednafen behaviour,
+recorded in `docs/RENDERER.md`; no manual text searched here states the
+drop, and that is said there too. So B is invisible to *any* check of the
+capture, and DETECTED is not a verdict the test can honestly produce: the
+hardware discards the break.
+
+**J1–J3 end to end.** `bsprite12` runs the browser's sprite ROM in Mednafen:
+frame diff 0, `vram`/`cram`/`sat`/register equality — the browser SAT layout
+is now seen end to end, not only as a byte match against PCEAS.
+
+**What this does NOT settle.**
+
+- The **second remap site** — `viewer.asm:301`, the check between a word's
+  two bytes for a copy whose pointer crosses `$6000` mid-word — is still
+  unreachable: every region copy starts word-aligned at an even offset, so
+  site 1 (`:286`) always sees `src+1 = $60` at a word boundary first. No
+  witness exists for the straddling-word path.
+- The remap is proven for two crossing shapes (a 16384-byte BAT, a
+  9216-byte tile stream). A copy crossing twice, or crossing at a window
+  end mid-page, has no witness.
+- `viewer7`'s I detection is frame-diff 0; a future frame-only check
+  would miss it. The `vram` compare is load-bearing, as the review already
+  found for K and S.
+
+With this appendix the review's closing gaps are closed: A2 DETECTED,
+I DETECTED on two captures, B re-verified NO-OP by hardware, J1–J3 seen
+end to end. The original tables above stand as the record of what the
+breaker found on 2026-10-28's tree; counts in `tests/README.md` and
+`tests/check-review-fixes.js` now reflect the 51-picture / 20-capture /
+15-pair sample set.
