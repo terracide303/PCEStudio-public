@@ -1,0 +1,9 @@
+{
+ "expect": "mismatch",
+ "instrument": "Mednafen 1.32.1 + VDC write / RCRIRQ trace (MEDNAFEN_TRACE)",
+ "mutation": "boot arm r_chain[0] + 1 (REVIEW-16 B14)",
+ "note": "#68 / REVIEW-16 B14: a VDC write trace from reset, the only instrument that sees the first RCR match (the movie's first frame is already steady). expect='match' means the pristine table must be armed in its entry order; expect='mismatch' is the B14 control that the check must reject.",
+ "rcrirq_total": 5104,
+ "rom": "tools/gen/vraster2.pce",
+ "rom_sha256": "4f027f2c99b186ab809bcaa12a58ec1062df244db12f87b49c9cf6d085f2282b"
+}

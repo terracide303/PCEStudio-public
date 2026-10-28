@@ -204,3 +204,100 @@ not a runnable test; `check-viewer.js` is what exercises it. Four breaks
 (B1, B2, B3, B8) are also rejected earlier by `raster-patch.py` in the
 unmodified capture pipeline, so a breaker has to let that patch fail and
 continue before the test can judge them.
+
+## #68 appendix — the test now catches the gaps, measured
+
+Follow-up by @test (card #68), 2026-10-28. Nothing in the viewer was fixed;
+this is the test's side: two new captures, one new check, and the weak breaks
+re-run against captures chosen for a louder witness. Every verdict below was
+measured here; the tree is the #68 commit (the review's own 17-break run is
+untouched above).
+
+### What was added
+
+- **`raster11` / `vraster11` — frame counter + two CRAM words in one step.**
+  No shipped table had that combination, which is why B15 was unreachable.
+  `tools/genreview16.py` adds scene `r11` through `genroms.py`'s own
+  machinery (one source of truth for the picture, `baseCram` and the
+  per-line values) and builds `vraster11` through `genviewer.py`. The scene
+  ROM and the viewer ROM run the same table, so the renderer's diff-0
+  oracle and the handler under test are held to it independently.
+- **`vtrace2` / `vtrace2-b14` — the first frame.** An image capture cannot
+  see B14: the first recorded movie frame is already steady (the review
+  measured one frame hash in the mutant's whole movie). The instrument is a
+  VDC write trace from reset — the instrumented Mednafen 1.32.1 the review
+  used (`RCRIRQ RCRCount=… RCR=… CR=…` lines). `check-viewer.js`'s
+  `checkTraceFixture` requires the first four RCR matches to be the table's
+  steps 0..3 in order, with RC set, and every steady-state arm to be a table
+  arm. `vtrace2` is the pristine `vraster2`; `vtrace2-b14` is the same ROM
+  with B14 re-applied and is committed as a **control the check must
+  reject** — a check that has never failed has not been tested.
+  `tools/capture-review16.sh trace` records both.
+- **`tools/capture-review16.sh`** — the capture route, separate from
+  `capture.sh` because #68 must not edit the generator card #15 owns. No
+  synthetic input: Mednafen from the command line, SIGINT, the state read
+  with `mcs-extract.py`. Scratch (its HOME, save-state dir, movies, raw
+  traces) is under `$TMPDIR`; only the Mednafen process it started is
+  signalled. A save is accepted only after the table's last entry fired
+  (`RCRCount >= 233`); the one early-SIGINT response measured here (a
+  1-frame movie, `RCRCount` 195) is retried.
+- **`tools/raster-patch.py`** now folds every CRAM word of an entry (not just
+  r4's one) and folds the 5-bit counter modulo 32, so `r11`'s two words and a
+  save right after a 31→0 wrap are both handled.
+- **`tests/check-review-fixes.js`** expects `raster11`/`vraster11` by name
+  (77 pictures now).
+
+### The re-runs
+
+| # | capture | verdict | measured output |
+|---|---|---|---|
+| B4 | vraster2 | **NO-OP** (unchanged) | check-viewer exit 0; `vraster2: OK (frame diff 0, table matches…)`; `mednafen.png`, `cram.bin`, `vram.bin`, `ram.bin` sha256-identical to the pristine dump. Reason unchanged from *The no-op*: both bytes land before the line boundary and Mednafen latches them independently. **On the real-console list with #16** — see below. |
+| B9 | vraster3 (new witness) | **DETECTED, strongly** | exit 1; `saved BYR=48 != table's 8 (last byr entry 160)`, `saved RCR=224 != chain's next arm 144`, **49,938 differing bytes** from row 79. The capture pipeline also rejects it (`chain step at save is 1, expected 0`). REVIEW-16's vraster1 witness was 350 px; on vraster2 the same break is state-only (`saved RCR=296 != 65`, frame diff 0 — the late step-0 write lands below the 232-row crop), so the strong witness is vraster3's short table. |
+| B13 | effect1 | **DETECTED, frame-only** (unchanged) | exit 1; `raster.json matches the save state`; **74,748 differing bytes**. The state cannot catch it (the later entries overwrite the affected cells); the frame is the witness and it is loud (25k of 59k pixels). |
+| B14 | vtrace2-b14 | **DETECTED** (was MISSED) | control: `first-frame RCR match 0 armed RCR=0x42, the table's step 0 (line 1) arms 0x41`. The same trace substituted into the `expect=match` fixture makes `check-viewer.js` exit 1 with that line. Pristine `vtrace2`: `OK (first RCR match arms the table's step 0; the first four matches are steps 0..3 in order)`. |
+| B15 | vraster11 | **DETECTED** (was MISSED) | exit 1; **`cram entry 496: table 11 != state 0`** (entry 0x1F0, the second word's undisplayed cell). Frame diff 0 by design — see the timing note below. The state is the witness, and it is exact: 0x11 = base 0x02 + counter 15, against 0x00 with the add removed. |
+| B16 | vraster2 (new witness) | **DETECTED, strongly** | exit 1; `saved BXR=128 != table's 65 (last bxr entry 232)`, `saved RCR=66 != chain's next arm 65`, **101,874 differing bytes** from row 0. The pipeline also rejects it (`chain step at save is 1, expected 0`). REVIEW-16 had only the saved-RCR witness on effect1 (frame diff 0, the loss above the crop). |
+| B17 | vraster2 (new witness) | **DETECTED, strongly** | exit 1; `raster.json matches the save state`; **381 differing bytes** from row 0. REVIEW-16's effect1 witness was 5 px; vraster2's entry 0 is BXR 128 against a base 0, so the skipped write is a whole row. |
+
+**Counts: review 17 — 14 DETECTED, 2 MISSED, 1 NO-OP. Now 17 — 16 DETECTED,
+1 NO-OP.** B4 stays NO-OP with its reason; every break that moves a captured
+frame — and now the two that did not — is caught.
+
+### The timing measurement behind B15's off-screen second word
+
+The first `r11` design wrote the second word to CRAM[0x007], a displayed
+cell. The pristine viewer then differed from the renderer by **2 bytes at
+px(1,4)**, deterministically on two consecutive captures: a pixel whose
+colour index is 7 on VDW line 5 used the previous line's colour. The cause
+is the handler's budget: `irq1_frm` adds `clc / adc <frame> / adc #$00 /
+and #$01` to *each* word — ~18 CPU cycles over `irq1_plain`, whose two-word
+step `viewer.asm` puts at ~109 of a ~123-cycle deadline. The second write
+crosses the line start. So a visible two-word counter step is a real (small)
+viewer timing defect; it is **not** fixed here (@test reports, it does not
+fix), and it is why `r11`'s second word targets CRAM[0x1F0], which the
+background-only picture never displays: the per-frame add is still exercised
+and held to the saved table, while the frame is not exposed to the line
+timing. A viewer card that shortens the frame-counter path (or a capture
+that shows the late pixel on purpose) is still owed; until then, **a visible
+second CRAM word in a counter table is measured late by one pixel at
+column 1**.
+
+### What this still does not prove
+
+- **The trace instrument is not in the repo.** `vtrace2`/`vtrace2-b14` are
+  committed fixtures recorded with the patched Mednafen build at
+  `/Volumes/External II/pce-tools/mednafen` (1.32.1 plus a `vdctrace()` that
+  writes `RCRIRQ RCRCount=… RCR=… CR=…` at the RCR match and a `VDCWRITE`
+  line per VDC write). `capture-review16.sh trace` needs `MEDNAFEN_TRACE`
+  and exits 2 (NOT RUN) without it; the fixtures can be checked by any tree,
+  but re-recording them needs that build. The check holds the recorded
+  fixture to the current `tools/gen/vraster2.pce`'s sha256 when that ROM is
+  built, so a viewer change forces a re-capture instead of a stale pass.
+- **B15 is a saved-state verdict only.** A viewer that wrote the second word
+  with the right value but at the wrong time would pass this fixture; that
+  is the timing defect above, deliberately outside this capture.
+- **The frame witnesses are still Mednafen's.** Real hardware can differ in
+  exactly the line-timing edge this work measured; B4 is on the real-console
+  list with #16 for that reason, and so is the counter/two-word timing.
+- **The other 10 breaks were not re-run.** They were DETECTED in the review
+  and the checks that caught them are unchanged.

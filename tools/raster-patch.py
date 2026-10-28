@@ -3,14 +3,17 @@
 
 #15 evidence pipeline step, run by capture.sh after mcs-extract.py: the
 renderer's raster table (tools/gen/rasterN.raster.json, written by
-genroms.py at build time) describes the ROM's per-scanline writes, but r4's
-values depend on a runtime frame counter (ZP <$31>, bumped once per chain),
-which the save state carries in the HuC6280 RAM (ram.bin).  This script
-rewrites raster.json's r4 entries with the values the captured frame
-actually wrote (cram) and the previous frame's values (cramPrev) — the
-pair the renderer needs for the colour table's cross-frame persistence —
-and records the counter in the note.  For the other scenes it only asserts
-# that the chain is at the step the save line implies (ZP <$30> step
+genroms.py at build time) describes the ROM's per-scanline writes, but a
+table with the frame-counter flag has values that depend on a runtime
+counter (ZP <$31>, bumped once per chain), which the save state carries in
+the HuC6280 RAM (ram.bin).  This script rewrites such a table's entries
+with the values the captured frame actually wrote (cram) and the previous
+frame's values (cramPrev) — the pair the renderer needs for the colour
+table's cross-frame persistence — and records the counter in the note.
+Every CRAM word in a step gets the same per-frame add, so the fold is
+applied to every word of every entry (r4 writes one word, r11 two — the
+#68 / REVIEW-16 B15 combination).  For a table without the counter flag it
+only asserts that the chain is at the step the save line implies (ZP <$30> step
 # counter vs the entries fired so far: every entry whose line <= RCRCount
 # has fired, so a scene whose last entry fires after the save line — r5's
 # line 240 — sits at step 2, not wrapped; the capture is in steady state
@@ -22,19 +25,16 @@ and records the counter in the note.  For the other scenes it only asserts
 # table carries the previous frame's counter: capture.sh passes the scene
 # name with a "v" suffix for viewer captures and the fold below uses
 # counter-1 for them (the #15 r4 chain bumps at its step-0 fire, before
-# the frame's first write, so its table carries the counter itself).
+# the frame's first write, so its table carries the counter itself).  The
+# counter is a 5-bit value (`and #$1f`), so a save right after a 31 -> 0
+# wrap folds 31, not -1.
 
-usage: raster-patch.py DUMPDIR SCENE   (SCENE = 1..10 [v], or effect1)
+usage: raster-patch.py DUMPDIR SCENE   (SCENE = 1..11 [v], or effect1)
 """
 
 import json
 import os
 import sys
-
-
-def grad(s):
-    """r4's per-entry colour value, genroms.py's raster_grad."""
-    return ((s * 13 + 0x40) & 0x1FF)
 
 
 def main():
@@ -52,7 +52,7 @@ def main():
     # mcs-extract.py writes ram.bin from the save state's MAIN.BaseRAM record
     ram = open(os.path.join(dumpdir, "ram.bin"), "rb").read()
     step, counter = ram[0x30], ram[0x31]
-    if scene != "4":
+    if not raster.get("frameCounter"):
         # the save lands at VDW line 237 (RCRCount=237).  Entries whose line
         # is <= that have fired (each firing advances the step, wrapping at
         # n); r5's last entry fires at line 240 — after the save — so its
@@ -72,27 +72,34 @@ def main():
               f"{expected}), no patch needed")
         return 0
     if step != 0:
-        print(f"{jpath}: r4 chain not wrapped at save (step={step})",
-              file=sys.stderr)
+        print(f"{jpath}: frame-counter chain not wrapped at save "
+              f"(step={step})", file=sys.stderr)
         return 1
     if counter >= 32:
-        print(f"{jpath}: r4 frame counter {counter} out of range",
+        print(f"{jpath}: frame counter {counter} out of range",
               file=sys.stderr)
         return 1
+    # The frame the saved table was written with: the #15 scene chains bump
+    # the counter at their step-0 fire (before the frame's writes), the
+    # viewer bumps it at the wrap (after the last write) — so a viewer save's
+    # cell is one ahead of the table.  The add is a 5-bit value and the
+    # table's own entries are the base the ROM adds to, so every CRAM word
+    # (r4's one, r11's two) is folded the same way.
+    frame = (counter - (1 if viewer else 0)) & 0x1F
+    prev = (frame - 1) & 0x1F
     for e in raster["entries"]:
-        s, _ = e["cram"][0]
-        cur = (grad(s) + counter - (1 if viewer else 0)) & 0x1FF
-        prev = (grad(s) + counter - (2 if viewer else 1)) & 0x1FF
-        e["cram"] = [[s, cur]]
-        e["cramPrev"] = [[s, prev]]
-    raster["note"] += (f"; r4 frame counter at save: {counter} (ZP <$31> = "
-                       "ram.bin[0x31]) — cram = this frame's value, "
-                       "cramPrev = the previous frame's"
+        cram = e.get("cram") or []
+        e["cram"] = [[a, (v + frame) & 0x1FF] for (a, v) in cram]
+        e["cramPrev"] = [[a, (v + prev) & 0x1FF] for (a, v) in cram]
+    raster["note"] += (f"; frame counter at save: {counter} (ZP <$31> = "
+                       "ram.bin[0x31]) — cram = this frame's value "
+                       f"(counter {frame}), cramPrev = the previous frame's "
+                       f"({prev})"
                        + (", the viewer's wrap-bump deferred by one frame"
                           if viewer else ""))
     json.dump(raster, open(jpath, "w"), indent=1, sort_keys=True)
     print(f"patched {jpath}: frame counter {counter}"
-          + (f" (viewer fold: {counter - 1})" if viewer else ""))
+          + (f" (viewer fold: {frame})" if viewer else ""))
     return 0
 
 
