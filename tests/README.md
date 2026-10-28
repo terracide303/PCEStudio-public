@@ -1,4 +1,4 @@
-# The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #15, #38, #39, #40, #42)
+# The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #15, #38, #39, #40, #42, #48)
 
 ```sh
 node tests/check.js             # diff the renderer against Mednafen, all scenes
@@ -43,9 +43,14 @@ data — and `scene8`, `scene8b` and `scene8c` are the diff-0 proofs (#39).
 HuCard image blank (every VDC register 0), which is the emulator not running
 the image (#25), not a rendered frame. The skip list is explicit and named
 dumps only; an unnamed background-off dump whose capture is not the backdrop
-fails the run as a diff. The shipped count is **57 pictures** (scenes 1-9,
-5b, 8b, 8c, painted, spainted, viewer 1-3 and 7, browser 1-3, sprite 1-12,
-vsprite 1-12, bsprite 12, raster 1-10, browser 10), us1 skipped.
+fails the run as a diff. The shipped count is **72 pictures** (scenes 1-9,
+5b, 8b, 8c, the #48 window scenes 11-14, painted, spainted, viewer 1-3 and
+7, browser 1-3, sprite 1-12,
+vsprite 1-12, bsprite 12, raster 1-10, browser 10), us1 skipped.  A dump
+whose window is smaller than the captured frame must also show CRAM[0x100]
+on every border pixel and the picture inside (check.js's `checkWindow`,
+computed from the raw registers; scenes 11-14 print their window rectangle
+and border count).
 `dumps/vspriteN/` are
 #14's captures: the *viewer*
 ROMs of the sprite scenes (`tools/capture.sh N vsprite`), whose SATB DMA

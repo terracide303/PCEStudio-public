@@ -5,7 +5,7 @@
 PCEAS ?= pceas
 PYTHON ?= python3
 
-SCENES := 1 2 3 4 5 6 7 8 8b 8c 9
+SCENES := 1 2 3 4 5 6 7 8 8b 8c 9 11 12 13 14
 SPRITES := 1 2 3 4 5 6 7 8 9 10 11 12
 # #15's raster-scene ROMs (genroms.py's RASTER_SCENES): per-scanline BXR/
 # BYR/CR/VCE-colour-table writes chained off the RCR line interrupt.

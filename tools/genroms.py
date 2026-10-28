@@ -35,6 +35,17 @@ The scenes differ in what they exercise in the renderer:
   scene9 "ch800"   BAT reads real tiles at 0x700 and tiles at 0xF00+, beyond
                    the 32768-word VRAM (writes dropped, reads = colour 0)
 
+  #48's window scenes reuse scene 1's picture and change only the display
+  window registers; everything outside the window must be the border colour
+  CRAM[0x100] (VDC manual 2.3.6 p. H7-18):
+  scene11 "224"     VDS=23, VDW=223 — a 224-line picture, border top and
+                   bottom in the 232-row capture
+  scene12 "vds"     VDS=27 — the window shifted down by VDS (the back porch)
+  scene13 "narrow"  HDS=4, HDW=27 — a 224-dot window with a 16-px border on
+                   both sides (a window narrower than the 256-dot VCE raster)
+  scene14 "short"   VDW=199, VCR=44 — a short picture leaving border at the
+                   bottom (the rest of the 263-line frame is the front porch)
+
 Scenes 4-9 are #39's: each turns one of docs/REVIEW.md finding 1's renderer
 breaks into a visible picture change (see tests/renderer-mutation.js).
 Scenes 5/6/7 fill their BATs with small formula loops in the ROM (their BATs
@@ -140,7 +151,7 @@ def bat_entry(scene, x, y):
         pal = (x + 2 * y) & 0xF
     else:
         pal = (x + 2 * y) & 0xF if scene != 9 else (x + y) & 0xF
-    if scene in (1, 8, "8b"):
+    if scene in (1, 8, "8b", 11, 12, 13, 14):
         if x & 1:
             tile = 0xF00 | ((x * 3 + y * 5) & 0xF)
         else:
@@ -213,6 +224,42 @@ SCENES = {
     9: dict(mwr=0x00, bxr=0, byr=0, cr=0x80, dcr=DCR,
             bat_w=32, bat_h=32, bat_tables=True,
             tiles=[(0x700, 16), (0xF00, 16)]),
+    # #48: the display window and the border. Same picture as scene 1 (same
+    # BAT and tiles, no scroll), only HSR/HDR/VPR/VDR/VCR change, so the
+    # picture inside the window is one the other scenes already prove and
+    # every difference is the window edge or the CRAM[0x100] border:
+    #   11 "224"    VDS=23 (VPR high byte), VDW=223: 224 display lines. The
+    #               232-row crop starts at VCE line 18 and the window at line
+    #               25, so rows 0..6 are border, 7..230 the picture and 231
+    #               border again.
+    #   12 "vds"    VDS=27: the window starts 11 rows down (VDS is the back
+    #               porch in lines, VDS = N-2, H7-10).
+    #   13 "narrow" HDS=4, HDW=27: a 224-dot window 16 px in from the left
+    #               edge, so 16 border columns on each side (HDS = back
+    #               porch-1, HDW = characters-1, H7-9).
+    #   14 "short"  VDW=199 with VCR=44: 200 display lines. A shorter display
+    #               moves the rest into the vertical front porch (VCR is N,
+    #               not N-1, H7-10) so the 263-line frame stays whole: rows
+    #               0..198 are the picture, 199..231 the border.
+    # The renderer's vertical calibration is the save's RCRCount (card #5),
+    # so the border lands where the ROM's own VDS/VDW put it; the exact
+    # expected rows are asserted in tests/check.js.
+    11: dict(mwr=0x00, bxr=0, byr=0, cr=0x80, dcr=DCR,
+             bat_w=32, bat_h=32, bat_tables=True,
+             tiles=[(0x040, 32), (0xF00, 16)],
+             vpr=0x1702, vdw=0x00DF),
+    12: dict(mwr=0x00, bxr=0, byr=0, cr=0x80, dcr=DCR,
+             bat_w=32, bat_h=32, bat_tables=True,
+             tiles=[(0x040, 32), (0xF00, 16)],
+             vpr=0x1B02),
+    13: dict(mwr=0x00, bxr=0, byr=0, cr=0x80, dcr=DCR,
+             bat_w=32, bat_h=32, bat_tables=True,
+             tiles=[(0x040, 32), (0xF00, 16)],
+             hsr=0x0402, hdr=0x041B),
+    14: dict(mwr=0x00, bxr=0, byr=0, cr=0x80, dcr=DCR,
+             bat_w=32, bat_h=32, bat_tables=True,
+             tiles=[(0x040, 32), (0xF00, 16)],
+             vdw=0x00C7, vcr=0x002C),
 }
 
 # The formula loops' BAT entries (the ROM computes them; these are the
@@ -304,17 +351,19 @@ def emit_byte_table(name, data):
 
 
 def emit_vdc_regs(out, s):
+    # #48: a scene may override the display window registers; the canonical
+    # HuDK 256x240 values are the default (H7-9/H7-10, VDW = N-1).
     regs = [
         (0x05, 0x0000),          # CR: everything off (BG enabled later)
         (0x06, 0x0000),          # RCR
         (0x07, s["bxr"]),        # BXR
         (0x08, s["byr"]),        # BYR
         (0x09, s["mwr"]),        # MWR
-        (0x0A, HSR),
-        (0x0B, HDR),
-        (0x0C, VPR),
-        (0x0D, VDW),
-        (0x0E, VCR),
+        (0x0A, s.get("hsr", HSR)),
+        (0x0B, s.get("hdr", HDR)),
+        (0x0C, s.get("vpr", VPR)),
+        (0x0D, s.get("vdw", VDW)),
+        (0x0E, s.get("vcr", VCR)),
         (0x0F, s["dcr"]),        # DCR: bit 4 = DSR, SATB auto-repeat (H7-11);
                                  # sprites are CR bit 6 (H7-6)
         (0x13, SATB),

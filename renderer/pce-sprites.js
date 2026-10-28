@@ -422,8 +422,23 @@
      * VDW line vdwLine0 + r — the same calibration pce-bg.js derives from
      * the state's own counters (RCRCount = scanline - 17 at the save). */
     var vdwLine0 = opts.regs.RCRCount - (opts.regs.scanline - firstScanline);
+    /* #48: the VDC searches and draws sprites only inside its display
+     * window (Mednafen draws sprites under the same `display_counter` gate
+     * as the background; the outside is the $100 border). The SAT's X=32 is
+     * the window's first display column, so screen x shows display column
+     * x - win.x0. No capture exercises a sprite on a narrowed window yet —
+     * this is the model's placement, written down in docs/RENDERER.md as
+     * not proven. */
+    var win = bg.displayWindow(opts);
+    var wx0 = Math.min(width, Math.max(0, win.x0));
+    var wx1 = Math.min(width, Math.max(0, win.x1));
+    var wy0 = Math.min(height, Math.max(0, win.y0));
+    var wy1 = Math.min(height, Math.max(0, win.y1));
     var out = new Uint16Array(img.indices);
     for (var r = 0; r < height; r++) {
+      if (r < wy0 || r >= wy1) {
+        continue;    /* outside the vertical window: border, no sprites */
+      }
       if (rows && !(rows.cr[r] & 0x40)) {
         continue;    /* SB clear on this line: no sprites (CR is per-line) */
       }
@@ -433,8 +448,8 @@
       }
       var layer = paintLine(vram, strips);
       var o = r * width;
-      for (var x = 0; x < width; x++) {
-        var s = layer[x];
+      for (var x = wx0; x < wx1; x++) {
+        var s = layer[x - win.x0];
         if (s && (s.spbg || !(img.indices[o + x] & 0xF))) {
           out[o + x] = s.index;
         }

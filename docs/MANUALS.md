@@ -123,12 +123,12 @@ below is also a row in #26's "all 20 registers" panel.
 | 4-clock mode displays **4 of 256 colours**; sprites may not display correctly with an odd horizontal blanking period | H7-8 | **GAP 9** |
 | MWR SCREEN (bits 6–4): 32×32, 64×32, 128×32 (codes 2 and 3 alike), 32×64, 64×64, 128×64 (codes 6 and 7 alike); VBlank rule | H7-8/9 | #5, #38, #39 |
 | MWR CM (bit 7): selects CG0/CH0-1 or CG1/CH2-3 for 4-clock mode; next-scanning-line rule | H7-9 | **GAP 9** |
-| HSR (R0A): HSW bits 0–4 = width−1 (1–32); HDS bits 8–14 = back porch−1 | H7-9 | #5 (fixed $0202), #27 (width); window → **GAP 1** |
-| HDR (R0B): HDW bits 0–6 = chars−1; HDE bits 8–14 = end position−1; HSW=HDS=HDE=0 is invalid | H7-10 | #27 (width), **GAP 1** |
-| VPR (R0C): VSW bits 0–4 = width−1; **VDS bits 8–15 = back porch−2** | H7-10 | **GAP 1** |
-| VDR (R0D): VDW 9 bits = lines−1; valid from the start of the vertical display period | H7-10 | #5 (fixed $00EF = 240), **GAP 1** |
-| VCR (R0E): 8 bits = front porch **N, not N−1**; valid from the start of the vertical front porch | H7-11 | **GAP 1** |
-| Display screen is defined by HSW/HDS/HDW/HDE horizontally and VDS/VDW/VCR vertically (Fig. 2-2-1) | H7-10, H7-13 | **GAP 1** |
+| HSR (R0A): HSW bits 0–4 = width−1 (1–32); HDS bits 8–14 = back porch−1 | H7-9 | #5 (fixed $0202), #27 (width), #48 (window) |
+| HDR (R0B): HDW bits 0–6 = chars−1; HDE bits 8–14 = end position−1; HSW=HDS=HDE=0 is invalid | H7-10 | #27 (width), #48 (window) |
+| VPR (R0C): VSW bits 0–4 = width−1; **VDS bits 8–15 = back porch−2** | H7-10 | #48 |
+| VDR (R0D): VDW 9 bits = lines−1; valid from the start of the vertical display period | H7-10 | #5 (fixed $00EF = 240), #48 |
+| VCR (R0E): 8 bits = front porch **N, not N−1**; valid from the start of the vertical front porch | H7-11 | #48 |
+| Display screen is defined by HSW/HDS/HDW/HDE horizontally and VDS/VDW/VCR vertically (Fig. 2-2-1) | H7-10, H7-13 | #48 |
 | Scroll: vertical line by line through BYR, horizontal dot by dot through BXR | H7-13 | #15, #17, #29 |
 
 ### 3.4 Block transfer (DMA)
@@ -153,7 +153,7 @@ below is also a row in #26's "all 20 registers" panel.
 | Display fetches two CG words for 16 colours, one word for 4 colours | H7-16/17 | #5; 4-colour → **GAP 9** |
 | Video out: SPBG (VD8) = 0 for background, VD7–4 = CG COLOR, VD3–0 = CH3..CH0 | H7-18 | #5 |
 | **If VD3..VD0 = 0 then VD7..VD4 = 0**, whatever the CG COLOR — a background pixel of colour 0 always addresses palette 0, colour 0 (the backdrop) | H7-18 | #5 (the `pix === 0 → 0x000` rule), #38 finding 2 |
-| Blanking-period video data is SPBG=1, VD7..VD0=0 → colour address $100 | H7-18 | #5 (BB off), **GAP 1** (the border uses the same address) |
+| Blanking-period video data is SPBG=1, VD7..VD0=0 → colour address $100 | H7-18 | #5 (BB off), #48 (the border uses the same address) |
 
 ### 3.6 Sprites
 
@@ -296,8 +296,8 @@ check that the two sources are counting the same cycles.
 | Fact | Page | Card |
 |---|---|---|
 | 60 VSYNCs a second; ≈119,904 machine cycles per frame at 7.19 MHz; the main loop must be shorter than 1/60 s | 1–2 | #32 |
-| The border colour is **colour 0 of block 16** (the first sprite palette, CRAM address $100); colour 0 of all other 31 blocks is "clear" | 1–2 | #5 (the $100 fill), **GAP 1** (drawn as a border) |
-| HDW=$1F is the normal 32-character width; HDW=$1E makes the right 8 pixels border — the border is visible whenever the window is narrower than the VCE raster | 2 | **GAP 1** |
+| The border colour is **colour 0 of block 16** (the first sprite palette, CRAM address $100); colour 0 of all other 31 blocks is "clear" | 1–2 | #5 (the $100 fill), #48 (drawn as a border) |
+| HDW=$1F is the normal 32-character width; HDW=$1E makes the right 8 pixels border — the border is visible whenever the window is narrower than the VCE raster | 2 | #48 |
 | Colour word is `xxxx xxxG GGRR RBBB`; only bit 0 of the high byte is used | 2 | #5, #41 |
 | VCE at physical $1FE400, logical $0400 when MPR0=$FF | 2 | #7, #10 |
 | Raster interrupt: the line counter starts at **64** at the top of the sweep, so RCR = scan line + $40; **an RCR below 64 never fires**; RCR=0 disables it | 8–9 | #15, #16 |
@@ -339,9 +339,9 @@ stops, but it is a program's behaviour, not the chip's spec.
 | Fact | Card | Status |
 |---|---|---|
 | The VCE owns the raster: 2,730 clocks a line at 42.95 MHz (63.6 µs), **262 or 263 lines a frame (CR bit 2)**, no interlace | #27; frame length → **GAP 7** | CR bit 2 is **not in the VCE manual's text** — it is RTL-derived, and **pcetech §7/§6 contradicts it** (263 lines fixed; bit 2 = edge blur): see §15 |
-| The VDC only draws inside its window (HDS/HDW/HDE, VDS/VDW/VCR); outside it the VCE shows the border colour | **GAP 1** | consistent with H7-10/H7-13 and Tech Notes p.2 |
+| The VDC only draws inside its window (HDS/HDW/HDE, VDS/VDW/VCR); outside it the VCE shows the border colour | #48 (renderer) | consistent with H7-10/H7-13 and Tech Notes p.2 |
 | Dot clocks 5.37 / 7.16 / 10.74 MHz = 270 / 360 / 540 dots of active window; game content typically ~256, ~320–352, 512 | #27 | MHz values are not printed in the VCE text (only the ÷4/÷3 table, H6-3) |
-| 224 and 240 lines are both common | **GAP 1** | the studio currently picks 240 and crops 232 (see §12) |
+| 224 and 240 lines are both common | #48 (renderer) | the studio currently picks 240 and crops 232 (see §12) |
 | The VCE reloads the dot clock at the start of every line, so a mode can change mid-frame; two MiST/MiSTer cores detect this | #27 (and note for the raster table) | **not in the manual**; it is what the cores do |
 | PCEHeroTN's 10.74 MHz mode loses the last 28 dots (its line buffer is 512) | — | a PCEHeroTN RTL limit, not ours |
 
@@ -425,7 +425,12 @@ for #26 while this is read — so the references name symbols, not lines.
    HSR/HDR/VPR/VDR/VCR; `renderIndices` assumes a 32×30-character window, 232
    visible rows, and no border. A different window, a 224-line picture, or
    anything in the border would render wrong and no test would catch it.
-   → **GAP 1**.
+   → **GAP 1**.  **Fixed by #48**: `pce-bg.js` `displayWindow` reads
+   HDS/HDW (HSR/HDR) and VDW (VDR) with VDS/VSW through the save's RCRCount
+   calibration, draws CRAM[0x100] outside the window, and scenes 11-14 are
+   the Mednafen captures (224 lines, VDS shift, narrow HDW, short VDW);
+   `tests/check.js` also asserts every border pixel against the raw
+   registers.
 5. **MWR is half-modelled.** SCREEN is right (`batGeometry`, H7-9); VM, SM and
    CM are ignored, including the 4-clock mode's "4 of 256 colours" (H7-8/9).
    → **GAP 9**.
@@ -451,7 +456,10 @@ for #26 while this is read — so the references name symbols, not lines.
     9-bit digital word but no analogue levels either → **GAP 13**, §15.1.
 12. **The border colour is only half used.** The renderer paints CRAM $100 for
     a background-off line (correct, H7-18 + Tech Notes p.1), but never paints
-    it as the border around the window → **GAP 1**.
+    it as the border around the window → **GAP 1**.  **Fixed by #48**: every
+    pixel outside the display window is CRAM[0x100], decoded through the
+    row's own VCE table; the four window captures show 2048-8448 border
+    pixels each and none of that colour inside the window.
 13. **No CPU-side hardware at all in the exported ROM:** the viewer never
     touches the timer, the pad port, the PSG or the IRQ vectors (they are `rti`
     stubs). That is correct for a static picture, but it means #30/#31 have no
@@ -539,7 +547,7 @@ these notes; the section names below are the citation.
 
 | GAP | Note section | What it settles — and what it does not | Route |
 |---|---|---|---|
-| **1** window and border | pcetech §7 "Display details", §9 "Display parameter settings", §5.1 CR; sgxtech "Video Priority Controller" (SGX only) | Frame = **263 lines, fixed**, split 14 top blanking / 242 active display / 4 bottom / 3 sync. The VDC shows graphics only inside VDS+VSW … +VDW; the overscan colour is shown elsewhere. Overscan = colour 0 of sprite palette 0 (`$100`); the active-area backdrop = colour 0 of background palette 0 (`$000`). `$0A`/`$0B` may change on any line; `$0C`–`$0E` only outside the active display. The measured tables include the exact 256×240 row our viewer writes (HDS=2 HSW=2 HDE=4 HDW=`$1F`; VDS=`$0F` VSW=2 VDW=`$EF` VCR=`$0C`) and the standard 224 row (VDS=`$17` VDW=`$DF`). At the 5 MHz clock a line is "roughly 342 dots", so a 256-px window leaves a left/right border. Does **not** settle the BB=0/SB=1 fill (§15.3). | #48 |
+| **1** window and border | pcetech §7 "Display details", §9 "Display parameter settings", §5.1 CR; sgxtech "Video Priority Controller" (SGX only) | Frame = **263 lines, fixed**, split 14 top blanking / 242 active display / 4 bottom / 3 sync. The VDC shows graphics only inside VDS+VSW … +VDW; the overscan colour is shown elsewhere. Overscan = colour 0 of sprite palette 0 (`$100`); the active-area backdrop = colour 0 of background palette 0 (`$000`). `$0A`/`$0B` may change on any line; `$0C`–`$0E` only outside the active display. The measured tables include the exact 256×240 row our viewer writes (HDS=2 HSW=2 HDE=4 HDW=`$1F`; VDS=`$0F` VSW=2 VDW=`$EF` VCR=`$0C`) and the standard 224 row (VDS=`$17` VDW=`$DF`). At the 5 MHz clock a line is "roughly 342 dots", so a 256-px window leaves a left/right border. Does **not** settle the BB=0/SB=1 fill (§15.3). | #48 (renderer half; viewer/editor split to #67) |
 | **2** VRAM→VRAM copy | pcetech §5.4 "DMA" | LENR = words M−1 (`0` = 1, `$FFFF` = 64K; the note's "1 byte" is a typo) and the MSB write starts it. SOUR/DESR/LENR are counters and keep their post-transfer values; LENR ends `$FFFF`. IW does not change the DMA step (always +1). MAWR/MARR/read buffer/write latch are untouched. Both DMAs may run together; SAT-DMA-done is four lines after the display ends. **Contradicts H7-12 on an overrun**: the note says DMA is "halted (not aborted), and resumes", the manual says cancelled with no done status. | #49 |
 | **3** pads and timer | pcetech §4 "I/O port", §2.1 "Interrupts", §2.2 "Timer" | The 2-button protocol (SEL = directions, CLR low = enabled, inputs inverted, the exact D3–D0 table, a delay after SEL) and the Turbo Tap 5-pad serial counter with its reset quirk (`$01`/`$03`). `$1000`: D7 CD sense, D6 country, D5/D4 = 1. Timer: 7-bit, decremented at fMASTER/1024 = 6992 Hz independent of CSL/CSH; `$00` counts as 1 and `$7F` as 128; IRQ on the 0→`$7F` underflow, then immediate reload; a read returns the reloaded value; it keeps counting without an acknowledge; disabled returns the last counter; re-enabling reloads the latch; any write to `$1403` acknowledges. Does **not** settle the 6-button pad (GAP 10). | #45 |
 | **4** ROM over 80 KB | pcetech §3 "Memory map"; sgxtech "HuC6280 memory map"; hes spec [MEMORY MAP] | The measured decode is HuCard ROM `$00`–`$7F` (128 × 8 KB = **1 MB**), `$80`–`$F7` unused (`$FF`), F8–FB work RAM (SGX 32 KB; on a PC-Engine F9–FB mirror F8); a ROM under 1 MB may be mirrored. The HES map agrees: ROM `0x000000–0x0FFFFF`, RAM `0x1F0000–0x1F7FFF`. **This contradicts the 2 MB limit** in §5.1 and `renderer/pce-rom.js` `MAX_ROM_BANKS = 256`, the limit #46 closed on (e7c547c). #57 set it to 128 (1 MB). | #46, #57 |

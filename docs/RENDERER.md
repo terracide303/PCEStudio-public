@@ -1,17 +1,21 @@
-# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster, #16 the viewer's raster chain)
+# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster, #16 the viewer's raster chain, #48 display window)
 
 `renderer/pce-bg.js` renders one 256×232 RGB frame from a VDC VRAM dump and a
 VCE colour-table dump, drawing exactly what the VDC background layer and the
 VCE colour decoder draw; `renderer/pce-sprites.js` composes the VDC's sprite
 layer (SATB) on top of the same colour-index buffer.  Since #15 both take a
 **raster table**: per scanline, any of BXR, BYR, CR (BG/sprites on/off) and
-VCE colour-table writes, applied at the line the hardware applies them.  The
+VCE colour-table writes, applied at the line the hardware applies them.
+Since #48 the frame is the VDC's **display window** (HSR/HDR/VPR/VDR/VCR),
+not a fixed 32×30-character screen, and everything outside it is the border
+colour CRAM[0x100].  The
 close conditions are `node tests/check.js` reporting **diff 0** between the
 renderer's output and Mednafen's raw recorded frame (same source surface as
 its F9 screenshot, captured via `-qtrecord` because this Mac must not receive
 synthesized key events) for every dump in `tests/dumps/` — the three #5
-dumps, the eleven #12/#40 sprite scenes (marked by `sat.bin`) and, since
-#15, the ten raster scenes (marked by `raster.json`).  #16 adds the same
+dumps, the eleven #12/#40 sprite scenes (marked by `sat.bin`), the four #48
+window scenes and, since #15, the ten raster scenes (marked by
+`raster.json`).  #16 adds the same
 tables **run by the viewer ROM's own interrupt chain** (`tests/check-viewer.js`
 on `vraster1-10` and `effect1`, plus the #41 ares cross-check).
 
@@ -88,6 +92,55 @@ with CRAM[0x100] and returns; scenes 8, 8b and 8c are the diff-0 proofs
 all 59392 pixels are CRAM[0x100] = 0x049 = 36,36,36 — so the burst and DCR
 hypotheses were tested and rejected).  *Source: VDC manual, CR R05 p. H7-5;
 2.3.6 blanking video data p. H7-18.*
+
+**Display window and border (#48).** The VDC draws only inside its display
+window; everywhere else the VCE shows the border colour, CRAM[0x100] — the
+same blanking-period video data (SPBG=1, VD7..VD0=0) as the BB-off fill
+(2.3.6 p. H7-18).  Five registers set the window (p. H7-9..H7-11): HSR
+(HDS = back porch−1, HSW = sync width−1), HDR (HDW = characters−1, HDE =
+front porch−1), VPR (VDS = back porch−2, VSW), VDR (VDW = lines−1) and VCR
+(front porch **N, not N−1**).  The model:
+
+- **Horizontally** the display starts (HDS+1) character cycles after the
+  hsync rising edge and is (HDW+1)·8 dots wide; a character cycle is 8
+  dots.  HDE is the *front* porch — it moves the sync, not the display, so
+  it does not move a pixel (read and set by the window ROMs, but no pixel
+  depends on it).  A window narrower than the VCE's 256-dot /4-clock raster
+  leaves border at the right edge, and a larger HDS shifts it in from the
+  left as well, giving border on both sides.  The absolute alignment —
+  Mednafen gives its 256-dot output a canonical HDS=2 back porch at x=0
+  (`pce_fast` `correct_aspect=1`: `start − (128 + 8 + 24)`) — is the
+  emulator's, not a manual fact; the manual settles the fields, the 8-dot
+  character cycle and the width.  MacDonald's measured notes agree the
+  border exists and what colour it is (§15.1 GAP 1; `pcetech` §7 "Display
+  details": the frame is 263 lines fixed and a 5 MHz line is "roughly 342
+  dots", so a 256-px window leaves a left/right border; overscan = colour 0
+  of sprite palette 0, `$100`).
+- **Vertically** the model uses the same calibration as the background row
+  (the scanline section below): captured row r shows VDW line
+  `vdwLine0 + r`, and the display is the VDW+1 lines from line 0, so VDS
+  and VSW enter through the save's `RCRCount` rather than a second, guessed
+  offset.  VCR changes only where the next V-sync falls, so it never moves
+  the window inside one capture; a short-VDW scene moves the rest of the
+  263-line frame into it (scene14's VCR=44).
+- **The border decodes through the row's own colour table**, so a raster
+  write of CRAM[0x100] shows on the border from that line, exactly as the
+  background does.
+- **Sprites** are searched and drawn inside the window only (Mednafen draws
+  them under the same `display_counter` gate), with SAT X=32 the window's
+  first display column.  No capture has a sprite on a narrowed window yet —
+  that placement is the model's reading of the manual's "the screen's
+  top-left corner is at SAT coordinate (32,64)" (H7-21), **not measured**;
+  it is written down here as not proven.
+
+*Source: VDC manual HSR/HDR p. H7-9, VPR/VDR/VCR p. H7-10/H7-11, Fig. 2-2-1
+p. H7-13, blanking video data 2.3.6 p. H7-18; docs/MANUALS.md §15.1 GAP 1
+(`pcetech` §7/§9: the measured 256×240 row is exactly the canonical
+registers, the standard 224 row is VDS=`$17` VDW=`$DF`, the overscan is
+`$100`); Mednafen `pce_fast` `vdc.cpp` `CalcStartEnd`/`DrawOverscan` as the
+reference for the 256-dot output alignment and the border fill.  The
+window-check arithmetic also lives a second time in `tests/check.js`
+(`expectedWindow`), so the renderer cannot pass by agreeing with itself.*
 
 **Sprites (SATB).** 64 SAT entries × 4 words, moved from VRAM into the
 SATB by the SATB DMA (DCR bit 4, source DVSSR — our scenes keep the SAT at
@@ -285,6 +338,26 @@ VCR/DCR/SATB — *source: HuDK `include/vdc.s`, the working example
   is filled by a small formula loop in the ROM so the data fits one bank,
   and `tools/genroms.py`'s `bat_formula()` mirrors the loops for
   verification (scene 4-9 BATs: 0 mismatches against the captures).
+
+Scenes 11–14 are #48's **window scenes**.  Each is scene 1's picture (same
+BAT and tiles, BXR=BYR=0, CR=$80) with only the window registers changed, so
+the picture inside the window is one scenes 1/4-9 already prove and every
+difference is a window edge or a border pixel:
+
+| scene | registers | window in the capture | border (measured) |
+|---|---|---|---|
+| 11 "224" | VDS=23 (`$17`), VDW=223 (`$DF`) | 256×224 at rows 7..230 | 7 top rows + 1 bottom row = 2048 px |
+| 12 "vds" | VDS=27 (`$1B`), VDW=239 | 256×221 at rows 11..231 | 11 top rows = 2816 px |
+| 13 "narrow" | HDS=4, HDW=27 (`$1B`) | 224×232 at columns 16..239 | 16 columns each side = 7424 px |
+| 14 "short" | VDW=199 (`$C7`), VCR=44 | 256×199 at rows 0..198 | 33 bottom rows = 8448 px |
+
+Every border pixel in the Mednafen capture is CRAM[0x100] (RGB 36,36,36) and
+the colour never occurs inside any of the four windows, so the border is a
+real witness, not a whole-frame fill (`tests/check.js`'s `checkWindow`
+asserts both, from the raw registers, and prints the rectangle and count).
+The 224-line and VDS rows follow MacDonald's measured table (`$17`/`$DF` is
+the standard 224 row, §15.1 GAP 1); the short scene keeps the 263-line frame
+whole by moving the difference into VCR (the front porch, N not N−1).
 
 Scenes sprite1–8 are #12's, sprite9–11 are #40's (they close the three
 misses REVIEW-12 found — see its #40 appendix): scene 1's picture (or the
@@ -570,8 +643,12 @@ block-transfer bits are not (no DMA completion is modelled), and a CPU read
 of SR clearing bits 0-5 is only accounted for in the tests, not simulated.
 256×224 mode only
 (5.37 MHz clock; the 7.16 MHz modes and 256×240 VDW come with the
-editor).  Raster writes are modelled at **line boundaries only**, and the
-pieces the evidence does not cover are written down, not hidden:
+editor).  The display window since #48 is modelled from HSR/HDR/VPR/VDR/VCR
+and proven for the 5.37 MHz clock on four captures (scenes 11-14); the
+horizontal absolute alignment is Mednafen's 256-dot output geometry, and a
+sprite on a narrowed window is model-only (both labelled in the window
+section above).  Raster writes are modelled at **line boundaries only**, and
+the pieces the evidence does not cover are written down, not hidden:
 
 - A VCE colour-table write during a line's active display shows the new
   colour mid-line (a "dot" from the write's exact pixel) — the manual

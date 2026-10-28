@@ -3,7 +3,8 @@
 # card #5 (and #8) needs: the save state (VRAM + colour table dump) and an
 # exact frame of what Mednafen displayed.
 #
-#   tools/capture.sh 1..9          # the #5/#39 scene ROMs (gen/sceneN.pce)
+#   tools/capture.sh 1..9,11..14   # the #5/#39 scene ROMs (gen/sceneN.pce);
+#                                  # 11-14 are #48's display-window scenes
 #   tools/capture.sh 1|2|3 viewer   # the #8 viewer ROMs (gen/viewerN.pce)
 #   tools/capture.sh 1|2|3 browser  # the #9 browser-built ROMs
 #                                   # (gen/browserN.pce, from renderer/pce-rom.js)
