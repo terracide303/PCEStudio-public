@@ -1595,6 +1595,7 @@ def raster_json(name):
         "base": {"bxr": s["bxr"], "byr": s["byr"], "cr": s["cr"],
                  "dcr": s["dcr"]},
         "baseCram": scene_cram_words(name),
+        "frameCounter": s.get("frame_counter", False),
         "entries": [dict(e, rcr=0x40 + e["line"]) for e in s["entries"]],
     }
 

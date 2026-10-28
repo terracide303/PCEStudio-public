@@ -1681,5 +1681,6 @@
    "rcr": 296
   }
  ],
+ "frameCounter": false,
  "note": "#15 raster scene r9: 232 RCR-chained per-scanline writes, one step per VDW line \u2014 the values and the chain live in tools/genroms.py (gen_raster_asm)"
 }

@@ -716,7 +716,58 @@ should be revisited before that work is built. Their one direct hit on the
 code is the BB=0/SB=1 backdrop, where our renderer and Mednafen agree against
 the console note.
 
-## 16. What was not done
+## 16. The raster-interrupt chain's ground (card #16)
+
+The #16 viewer runs a #15 raster table from the RCR interrupt — one step per
+matched line, armed and executed inside the line's HBlank.  Everything this
+card's timing rests on, beyond the §3 rows above:
+
+**The worked handler (Tech Notes pp. 8–13).** Hudson's own irq1 example is
+the pattern the chain follows: `AR equ $0000, SR equ $0000, 7UP_LOW equ
+$0002, 7UP_HIGH equ $0003`; `pha/phx/phy`, `lda SR` (the status read clears
+the RR bit and the level-sensed IRQ1 — §5.2), then `bbs2`/`bbs5` to tell the
+raster interrupt from the VBlank.  The viewer's handler drops the register
+saves — its main loop is `bra loop` and touches nothing the handler uses, so
+P needs no preservation — and keeps the status read in the chain's tail,
+after the next step's RCR is armed.  The RCR counter is always set to 64 at
+the vertical sweep's start (§3), so RCR < 64 never fires: a table step for
+display line L arms `0x40 + L`, and RCR = 0 disables.  The status-line split
+on the same pages gives the mid-line register rules: BXR/BYR written during
+display take effect on the NEXT scanning line (BYR one line later than BXR —
+the BYR+1 rule, H7-7), CR bit 6 drops the sprite band.
+
+**The HBlank budget (Mednafen 1.32.1's phase machine, the timing oracle).**
+`src/hw_video/huc6270/vdc.cpp` (`/Volumes/External II/pce-tools/mednafen`),
+`IncRCR()` and `Run()`: the raster counter is compared against RCR **after**
+it is incremented at the end of each line (`RCRCount++`, match when
+`RCRCount == RCR - 0x40` and CR's RC bit is set — so RCR `0x40`, line 0,
+fires as the display window's first line starts), and the phase machine
+places that match 4 VDC master clocks before the HBlank ends.  At 4 VDC
+masters = 5.33 CPU cycles of HBlank left when the interrupt fires, the
+interrupt sequence costs 7 cycles (push PCH/PCL/P, fetch vector), and the
+line's display starts 122.7 CPU cycles after the match — the practical
+budgets from handler entry: the BYR latch ~78–81 cycles in, the BXR latch,
+the CR latch and the colour-table write window ~111–115 cycles in
+(HDS=2, HSW=2, HDW=31, HDE=4 — the viewer's HSR/HSR init `$0202`/`$041F`).
+A handler step must finish its writes inside these latches, not merely
+inside the line.  The viewer's worst step (every op bit set, and its eight
+value reads crossing packed-array page boundaries) is ~108 cycles — inside
+the ~111 budget by construction, with the headroom documented in
+[`DECISIONS.md`](DECISIONS.md) (§16's rejection of the record walker) and the
+array packing that keeps the reads cheap in [`ROM_LAYOUT.md`](ROM_LAYOUT.md).
+BXR/BYR/CR writes use the §3 register sequence (AR, low byte, high byte,
+H7-25); colour-table writes go through `$0402/$0403` (address) and
+`$0404/$0405` (data).
+
+**The frame-counter mode.** Tables whose values move every frame (r4's
+gradient) carry flags bit 0: the handler adds the zero-page frame counter to
+each colour-table value (masked to 9 bits) before writing, and the chain's
+tail bumps the counter each wrap.  The zero-page cells step `< $30` and
+counter `< $31` (BaseRAM `[0x30]`/`[0x31]` in the save state) are the #15
+scene ROMs' contract, which `tools/raster-patch.py` reads back to fold the
+runtime counter into the dump's table — the same cells the viewer uses.
+
+## 17. What was not done
 
 - No manual text was copied into this repo beyond the few quoted phrases.
 - The CD manuals are mapped to idea #22 only; no CD path is proposed for

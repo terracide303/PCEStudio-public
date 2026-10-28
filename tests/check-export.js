@@ -24,6 +24,13 @@
  * ROM 0x000000-0x0FFFFF; docs/MANUALS.md §15.1 GAP 4).  Exactly 1 MB is
  * accepted by the size guard; 1 MB + 1 bank is refused.
  *
+ * #16 adds the raster viewers (dump rasterN vs PCEAS vrasterN): the picture
+ * is loaded with the scene's raster table (tools/gen/rasterN.raster.json)
+ * and the table's base registers (BXR/BYR/CR, CR ORed with the RC bit) in
+ * place of the dump's save-time values, exactly like tools/genviewer.py
+ * builds the PCEAS side — the fixed-layout table image in bank 1 is part
+ * of the byte-for-byte agreement.
+ *
  * It also loads renderer/pce-rom.js a second time through its browser-global
  * branch (a vm context with `self` and no `module`) and requires the same
  * bytes, so the page's code path is not an untested copy.
@@ -65,6 +72,24 @@ function loadScene(dump) {
     regions: JSON.parse(
       fs.readFileSync(path.join(dir, "regions.json"), "utf8")).tile_regions,
   };
+}
+
+/* #16: a raster picture is the scene's table, not the dump's save-time
+ * registers: the base BXR/BYR/CR come from the table's base block (CR ORed
+ * with the RC interrupt enable) and the table itself rides along — the
+ * same substitution tools/genviewer.py makes on the PCEAS side, so the two
+ * builders stay byte-for-byte comparable. */
+function loadRasterScene(dump) {
+  const picture = loadScene(dump);
+  const table = JSON.parse(fs.readFileSync(
+    path.join(GEN, `raster${dump.slice("raster".length)}.raster.json`), "utf8"));
+  picture.regs = Object.assign({}, picture.regs, {
+    BXR: table.base.bxr,
+    BYR: table.base.byr,
+    CR: table.base.cr | 0x04
+  });
+  picture.raster = table;
+  return picture;
 }
 
 /* The page's branch: a global PCEStudio.rom, no CommonJS module object. */
@@ -114,11 +139,16 @@ function writeRom(scene) {
 /* The compared pairs: dump directory -> PCEAS build in tools/gen/.  #14
  * adds the sprite scenes (vspriteN = the viewer ROM of spriteN); #42 adds
  * sprite12 (SAT entries 20-63 live); #46 adds scene10, the 88 KiB picture
- * (a 64x64 BAT + a full 32 KiB tile set + 160 sprite-pattern cells). */
+ * (a 64x64 BAT + a full 32 KiB tile set + 160 sprite-pattern cells); #16
+ * adds the raster viewers (vrasterN = the viewer ROM of rasterN, loaded
+ * with the scene's table). */
 const PAIRS = [1, 2, 3].map((n) => ({ dump: `scene${n}`, pceas: `viewer${n}.pce` }))
   .concat(Array.from({ length: 12 }, (_, i) => i + 1)
     .map((n) => ({ dump: `sprite${n}`, pceas: `vsprite${n}.pce` })))
-  .concat([{ dump: "scene10", pceas: "viewer10.pce" }]);
+  .concat([{ dump: "scene10", pceas: "viewer10.pce" }])
+  .concat(Array.from({ length: 10 }, (_, i) => i + 1)
+    .map((n) => ({ dump: `raster${n}`, pceas: `vraster${n}.pce`,
+                   raster: true })));
 
 /* #57: the HuCard decodes physical banks $00-$7F = 128 banks of 8 KiB =
  * 1 MB (sgxtech.txt "HuC6280 memory map"; pcetech.txt §3 "Memory map";
@@ -231,7 +261,8 @@ function checkScenes() {
   }
 
   for (const pair of PAIRS) {
-    const picture = loadScene(pair.dump);
+    const picture = pair.raster ? loadRasterScene(pair.dump)
+                                : loadScene(pair.dump);
     const got = rom.buildRom(picture);
     const pceasPath = path.join(GEN, pair.pceas);
     if (!fs.existsSync(pceasPath)) {

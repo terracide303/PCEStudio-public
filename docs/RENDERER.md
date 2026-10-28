@@ -1,4 +1,4 @@
-# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster)
+# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster, #16 the viewer's raster chain)
 
 `renderer/pce-bg.js` renders one 256×232 RGB frame from a VDC VRAM dump and a
 VCE colour-table dump, drawing exactly what the VDC background layer and the
@@ -11,7 +11,9 @@ renderer's output and Mednafen's raw recorded frame (same source surface as
 its F9 screenshot, captured via `-qtrecord` because this Mac must not receive
 synthesized key events) for every dump in `tests/dumps/` — the three #5
 dumps, the eleven #12/#40 sprite scenes (marked by `sat.bin`) and, since
-#15, the ten raster scenes (marked by `raster.json`).
+#15, the ten raster scenes (marked by `raster.json`).  #16 adds the same
+tables **run by the viewer ROM's own interrupt chain** (`tests/check-viewer.js`
+on `vraster1-10` and `effect1`, plus the #41 ares cross-check).
 
 Everything below is labelled by where it was read from.  PCEStudio's rule
 (DECISIONS.md): the model is written from the Hudson manuals; Mednafen and
@@ -381,6 +383,31 @@ kind with `line <= RCRCount`, the saved RCR equals the chain's next arm
 `0x40 + entries[(last+1) % n].line`, and the saved colour table equals
 `baseCram` plus every entry's writes in line order.
 
+**#16 — the viewer runs the table.** The same tables, executed by the
+viewer ROM itself: `tools/viewer.asm` gains the RCR chain — the table
+image (fixed layout, bank 1 offset `$640`, see ROM_LAYOUT.md) copied to
+RAM `$2800`, the irq1 vector dispatched through RAM `$2020` to the plain
+or frame-counter handler, step 0 armed and RC set in the config CR at
+boot, and one step executed per matched line from the HBlank (the
+budgeting and the timing model are [`MANUALS.md`](MANUALS.md) §16).  The
+ten viewer captures `tests/dumps/vrasterN` (one per raster scene, built by
+`tools/genviewer.py` and the same bank-0 code) plus the editor's effect
+picture `tests/dumps/effect1` (built by `renderer/pce-rom.js` from
+`tests/check-editor.js --write effect` — the gradient + wobble + parallax
+bands table at frame 5) are held to the **same witnesses**: the shared
+`tests/check-raster.js` verifies the table against the viewer's own save
+state (the viewer really executed the scene's table), and the frame is the
+renderer on the dump's own state with its patched table — diff 0.  For
+`vrasterN` the picture data (VRAM, SAT, static registers) still equals the
+scene's; for `effect1` there is no scene — `check-editor.js` holds the
+capture to the editor's model instead (VRAM = the editor's, colour table =
+`baseCram` + the chain's writes in line order, saved BXR = the last bxr
+entry's value, CR = `$84`, BYR = 0).  `tools/capture-ares.sh` /
+`tests/check-ares.js` (#41) extend the second-emulator cross-check to
+`vraster1-3,5-10` and `effect1` — ares's RCR timing against Mednafen's;
+`vraster4` is out because its frame counter makes two runs differ by
+phase.
+
 ## The dumps (`tools/capture.sh`, `tools/mcs-extract.py`, `tools/movframes.py`)
 
 Hard rule for this machine: **no synthesized keyboard/mouse events** — the
@@ -478,6 +505,8 @@ make -C tools                                  # build ROMs (needs pceas)
 bash tools/capture.sh 1                        # capture scene 1 (Mednafen on PATH)
 bash tools/capture.sh 1 sprite                 # capture sprite scene 1 (adds sat.bin)
 bash tools/capture.sh 1 raster                 # capture raster scene 1 (adds raster.json)
+bash tools/capture.sh 1 vraster                # #16: capture the raster viewer
+bash tools/capture.sh effect                   # #16: the editor's effect picture
 node tests/check.js                            # diff renderer vs Mednafen, all scenes
 python3 -m http.server 8000                    # then open renderer/index.html
 ```

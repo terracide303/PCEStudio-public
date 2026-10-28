@@ -1,4 +1,4 @@
-# The editor (#10, #13, #17) — tiles, palettes, the map, sprites and the raster effects
+# The editor (#10, #13, #17, #16) — tiles, palettes, the map, sprites and the raster effects
 
 `renderer/editor.html` + `renderer/pce-editor.js`: paint 8×8 tiles, choose
 palette colours from the VCE's 512, paint the 32×32 background map — and
@@ -8,8 +8,9 @@ sprite budget. #17 adds the scanline effect editor: a colour gradient, a
 wobble and parallax bands, which compile to **#15's per-line raster table**.
 The preview is drawn by the VDC models (`renderer/pce-bg.js` +
 `renderer/pce-sprites.js`) rendering that table, nothing drawn separately.
-"Download .pce" builds the ROM with #9's builder (`renderer/pce-rom.js`) —
-the static picture only; the viewer runs the raster table in #16.
+"Download .pce" builds the ROM with #9's builder (`renderer/pce-rom.js`);
+since #16 an effect picture's table rides along and the viewer runs it on
+the console (the export section below).
 
 ```sh
 python3 -m http.server 8000            # from the repo root
@@ -32,7 +33,8 @@ illegal size, and the exported `.pce` carries the SAT into Mednafen with frame
 diff 0. **#17** — the three effects are built through the editor's calls and
 give the #15 raster table the checks compute by hand; the preview is
 `pce-bg.js`/`pce-sprites.js` rendering that table; the refusals carry their
-codes; the export to the viewer is explicitly left for #16. The evidence is at
+codes. **#16** closes the loop: the export carries the table and the viewer
+runs it (the export section below). The evidence is at
 the bottom.
 
 ## The model is the hardware's, not an editor format
@@ -214,11 +216,23 @@ Refusals (each an `Error` with a machine-readable `code`):
 | `wobble-range`, `parallax-range`, `frame-range` | a non-integer period/speed/frame, a period below 1, a negative frame | no such effect parameter/time |
 | `17th-palette`, `backdrop-entry`, `entry-range`, `17th-colour` | a gradient on palette 16, on colour 0 (the shared backdrop) or on a bad entry | the palette rules above |
 
-**The export does not carry the table yet.** `toPicture()` is unchanged, so
-"Download .pce" still writes the static picture (the demo's ROM stays
-`40960` bytes, sha256 `486477d6…`). The viewer that runs the raster table
-from the RCR line interrupt is **#16**; until it lands the effects are
-preview-only, and #17 says so rather than faking an export.
+**The export now carries the table (#16).** `renderer/pce-rom.js` takes an
+optional `raster` (the renderer-shaped object above plus a `frameCounter`
+flag, which the editor never sets — `toRaster` bakes the frame in) and
+exports it as the viewer's fixed-layout table image at bank 1 offset
+`$640` ([`ROM_LAYOUT.md`](ROM_LAYOUT.md)): config byte 9 = 1 flags it, the
+RC bit (0x04) is ORed into the config CR, the boot palettes are the table's
+`baseCram`, and the viewer's irq1 chain executes the entries line by line —
+so "Download .pce" of an effect picture shows the effect on the console,
+not the static picture.  `tests/check-editor.js --write effect` builds the
+demo (`tools/gen/effect1.pce` + its `raster.json`: the stripes picture with
+the full-screen gradient, the wobble and both bands at frame 5), holds the
+ROM's table image to the editor's table entry for entry, and — on the
+`tools/capture.sh effect` capture in `tests/dumps/effect1/` — holds the
+saved VRAM/CRAM/registers to the editor's model and Mednafen's frame to the
+renderer on the dump's own patched table (diff 0).  The picture without
+effects still exports exactly as before (same bytes as the #17 ROM:
+`40960` bytes, sha256 `486477d6…`).
 
 ## The model's panels (#26)
 

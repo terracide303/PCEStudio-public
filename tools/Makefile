@@ -22,8 +22,12 @@ VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,1 2 3 7 10))
 SPRITE_ROMS := $(addprefix gen/sprite,$(addsuffix .pce,$(SPRITES)))
 VSPRITES := $(addprefix gen/vsprite,$(addsuffix .pce,$(SPRITES)))
 RASTER_ROMS := $(addprefix gen/raster,$(addsuffix .pce,$(RASTERS)))
+# #16: the viewer ROMs of the #15 raster scenes — the same tables the scene
+# ROMs run, but as viewer data (bank 1's raster-table image) driven by
+# viewer.asm's own irq1 chain.
+VRASTERS := $(addprefix gen/vraster,$(addsuffix .pce,$(RASTERS)))
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS)
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS)
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -74,14 +78,30 @@ gen/vsprite%.asm: genviewer.py ../tests/dumps/sprite%/regions.json
 gen/vsprite%.pce: gen/vsprite%.asm viewer.asm
 	$(PCEAS) -raw -o $@ $<
 
+# #16: the viewer ROMs of the raster scenes.  The table image comes from the
+# scene's raster.json (tools/gen/rasterN.raster.json, written by genroms.py)
+# and the dump's regions.json; genviewer.py encodes the fixed-layout image
+# (gen/vrasterN/raster.bin) and copies the table to gen/vrasterN.raster.json
+# for capture.sh.
+gen/vraster%.asm: genviewer.py ../tests/dumps/raster%/regions.json gen/raster%.raster.json
+	mkdir -p gen
+	$(PYTHON) -I genviewer.py vraster$*
+
+gen/raster%.raster.json: genroms.py
+	mkdir -p gen
+	$(PYTHON) -I genroms.py
+
+gen/vraster%.pce: gen/vraster%.asm viewer.asm
+	$(PCEAS) -raw -o $@ $<
+
 # #9's constant code bank: the browser export copies bank 0 verbatim, so it
 # is extracted from the PCEAS build and committed.  Refuses if the viewer
-# ROMs (background and sprite scenes alike) disagree about bank 0
+# ROMs (background, sprite and raster scenes alike) disagree about bank 0
 # (extract_bank0.py).
 bank0: ../renderer/viewer-bank0.bin
 
-../renderer/viewer-bank0.bin: extract_bank0.py $(VIEWERS) $(VSPRITES)
-	$(PYTHON) -I extract_bank0.py $@ $(VIEWERS) $(VSPRITES)
+../renderer/viewer-bank0.bin: extract_bank0.py $(VIEWERS) $(VSPRITES) $(VRASTERS)
+	$(PYTHON) -I extract_bank0.py $@ $(VIEWERS) $(VSPRITES) $(VRASTERS)
 
 clean:
 	rm -f hello.pce hello.sym hello.lst gen/*.pce gen/*.sym gen/*.lst

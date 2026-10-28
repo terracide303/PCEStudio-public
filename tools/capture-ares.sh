@@ -8,10 +8,19 @@
 # CGWindowList query (tools/ares-window.swift) to find the window id, and the
 # capture is `screencapture -l <id>`.
 #
-#   tools/capture-ares.sh all                 # viewer1-3 + painted, then check
+#   tools/capture-ares.sh all                 # viewer1-3, painted, the #16
+#                                             # raster viewers vraster1-10 and
+#                                             # effect1, then check
 #   tools/capture-ares.sh viewer2             # one ROM
 #   CAPTURE_ONLY=1 tools/capture-ares.sh all  # capture, do not run the check
 #   SETTLE=10 tools/capture-ares.sh viewer1   # longer settle
+#
+# #16 (vrasterN/effect1): the raster viewers need tests/dumps/<name>/
+# raster.json, which tools/capture.sh writes when it runs the same ROM in
+# Mednafen — run that first (vraster4 stays out of the ares comparison:
+# its table depends on a runtime frame counter, so the two emulators'
+# runs legitimately differ by the counter's phase; see tests/check-ares.js).
+# ares's RCR timing vs Mednafen's is exactly what this cross-check probes.
 #
 # Writes:
 #   docs/ares-<name>.png            256x224 active area (the card's frame)
@@ -52,8 +61,9 @@ mkdir -p "$SCRATCH" "$DOCS"
 
 build_rom() {
   case "$1" in
-    viewer1|viewer2|viewer3) make -C tools "gen/$1.pce" >/dev/null ;;
-    painted)                 node tests/check-editor.js --write >/dev/null ;;
+    viewer*|vraster*) make -C tools "gen/$1.pce" >/dev/null ;;
+    painted)          node tests/check-editor.js --write >/dev/null ;;
+    effect1)          node tests/check-editor.js --write effect >/dev/null ;;
   esac
 }
 
@@ -183,9 +193,11 @@ run_one() {
 }
 
 case "${1:-}" in
-  all) NAMES="viewer1 viewer2 viewer3 painted" ;;
-  viewer1|viewer2|viewer3|painted) NAMES="$1" ;;
-  *) echo "usage: $0 all | viewer1 | viewer2 | viewer3 | painted" >&2; exit 2 ;;
+  all) NAMES="viewer1 viewer2 viewer3 painted \
+              vraster1 vraster2 vraster3 vraster5 vraster6 vraster7 \
+              vraster8 vraster9 vraster10 effect1" ;;
+  viewer*|vraster*|painted|effect1) NAMES="$1" ;;
+  *) echo "usage: $0 all | viewerN | painted | vrasterN | effect1" >&2; exit 2 ;;
 esac
 
 for name in $NAMES; do

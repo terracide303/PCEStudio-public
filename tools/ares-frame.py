@@ -174,11 +174,13 @@ def main():
 
     # The active area must not be one flat colour (a blank or failed capture
     # would otherwise pass every later comparison against a flat reference).
+    # Every pixel is sampled: the raster scenes' test pattern (16-dot bars,
+    # checker rows) can phase onto a sparse grid and false-positive as flat.
     colours = set()
-    for y in range(ACTIVE_Y * scale, ACTIVE_Y * scale + args.height * scale,
-                   4 * scale):
-        for x in range(active_x, active_x + active_w, 4 * scale):
-            o = ((y0 + y) * width + x0 + x) * 3
+    for y in range(ACTIVE_Y * scale, ACTIVE_Y * scale + args.height * scale):
+        row = ((y0 + y) * width + x0) * 3
+        for x in range(active_x, active_x + active_w):
+            o = row + x * 3
             colours.add(bytes(px[o:o + 3]))
             if len(colours) > 1:
                 break

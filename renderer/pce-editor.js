@@ -120,6 +120,11 @@
   var MAX_TILES = 1536;         /* ROM_LAYOUT.md banks 4-9 = 48 KiB */
   var CR_BG_ON = 0x80;          /* CR bit 7: background on */
   var CR_SPRITES_ON = 0x40;     /* CR bit 6: SB, sprite layer on */
+  var CR_RC = 0x04;             /* CR bit 2: RC, the VDC interrupt enable —
+                                 * the ROM's config ORs it in whenever a
+                                 * raster table is present (pce-rom.js), so
+                                 * the table's base records the register's
+                                 * final value, like the #15/#16 tables */
   var MWR_32x32 = 0x00;
 
   /* ---- sprites (card #13) ---------------------------------------------- */
@@ -874,7 +879,8 @@
     checkRegister("BXR", pic.scroll.BXR, BXR_MAX, 10);
     checkRegister("BYR", pic.scroll.BYR, BYR_MAX, 9);
     var base = { bxr: pic.scroll.BXR, byr: pic.scroll.BYR,
-                 cr: CR_BG_ON | (pic.sprites.length ? CR_SPRITES_ON : 0) };
+                 cr: CR_BG_ON | (pic.sprites.length ? CR_SPRITES_ON : 0) |
+                     CR_RC };
     var entries = [];
     for (var L = 0; L <= RASTER_LINE_MAX; L++) {
       var entry = { line: L, rcr: RCR_BASE + L };

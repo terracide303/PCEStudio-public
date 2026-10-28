@@ -31,11 +31,20 @@ Starting Mednafen 1.32.1
   Loading cheats from "/Users/dennisschauw/.mednafen/cheats/pce.cht"...
    Error opening file "/Users/dennisschauw/.mednafen/cheats/pce.cht" for reading: No such file or directory
 
+ Initializing sound...
+  Using "Dummy" audio driver with SexyAL's default device selection.
+   Format: 16 bits(signed, 2 bytes, little-endian)
+   Rate: 44100
+   Channels: 2
+   Buffer size: 1411 sample frames(31.995465 ms)
+   Latency: 1411 sample frames(31.995465 ms)
+
  Starting QuickTime recording to file "/Volumes/External II/scratch/raster10.mov":
   Video width: 1024
   Video height: 232
   Video codec: png
-  Sound: Disabled
+  Sound rate: 44100
+  Sound channels: 2
 
  Initializing video...
   Driver: Software SDL
@@ -44,6 +53,15 @@ Starting Mednafen 1.32.1
   Special Scaler: None
   Scanlines: Off
   Destination Rectangle: X=0, Y=0, W=288, H=232
+ OwlResampler.cpp debug info:
+  Phases: 77, Output rate: 44100.000000, 3125 77
+  Desired maximum rate error: 0.0000009000, Actual rate error: 0.0000000000
+  Initial number of coefficients per phase: 1157
+  Initial nominal cutoff frequency: 17640.000000
+  SIMD: NEON
+  Adjusted number of coefficients per phase: 1168
+  Adjusted nominal cutoff frequency: 17682.831958
+  Impulse response table memory usage: 360000 bytes
 
 Signal has been caught and dealt with: SIGINT
 How DARE you interrupt me!

@@ -1,0 +1,4 @@
+{
+  "comment": "Tile regions of the raster6 dump for docs/ROM_LAYOUT.md: [char0, 16-word chunk count] in descriptor order — the scene's tiles (values are genroms.py RASTER_SCENES['r6']['tiles']). Read by tools/genviewer.py (card #16) and renderer/pce-rom.js; the SAT at VRAM 0x7f00 is NOT a region — it has its own fixed place in bank 1.",
+  "tile_regions": [[64, 32]]
+}

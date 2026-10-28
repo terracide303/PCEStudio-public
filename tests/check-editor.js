@@ -92,12 +92,34 @@
  *     other two, which is what a handler wired to the wrong clear* function
  *     cannot do.
  *
+ * Card #16 adds the effect picture's journey through the viewer:
+ * 14. The effect export (the editor's builder with the raster table).  An
+ *     effect scene (the #17 stripes picture with the gradient, the wobble
+ *     and both parallax bands, all at frame 5) is exported through
+ *     renderer/pce-rom.js with raster = ed.toRaster(pic, 5).  The ROM must
+ *     carry: config byte 9 = 1 (the viewer's table flag), the RC bit (0x04)
+ *     ORed into the config CR, the boot palettes equal to the table's
+ *     baseCram, and the fixed-layout table image at bank 1 offset 0x640
+ *     whose 16 arrays decode back to the editor's table entry for entry
+ *     (op bits, chain = 0x40 + line, bxr/cram values, flags = 0 — the
+ *     editor bakes the frame in, no runtime counter).
+ * 15. The effect capture, tests/dumps/effect1/ (tools/capture.sh effect):
+ *     the captured VRAM is the editor's, the captured CRAM is baseCram
+ *     plus every entry's writes in line order, the saved registers hold the
+ *     chain's steady state (BXR = the last bxr entry's value, BYR = 0,
+ *     CR = 0x84), and Mednafen's frame equals the renderer drawing the
+ *     dump's own state with its patched raster.json — the chain's writes
+ *     landed per line exactly as the renderer models them (diff 0).
+ *
  *   node tests/check-editor.js                 # check both captures
  *   node tests/check-editor.js --write         # write tools/gen/painted.pce
  *   node tests/check-editor.js --write sprite  # write tools/gen/spainted.pce
+ *   node tests/check-editor.js --write effect  # write tools/gen/effect1.pce
+ *                                              # + tools/gen/effect1.raster.json
  *
  *   tools/capture.sh painted    # builds + captures the background picture
  *   tools/capture.sh spainted   # builds + captures the sprite scene
+ *   tools/capture.sh effect     # builds + captures the effect picture
  *
  * Exit 0 only if everything above holds.
  *
@@ -125,6 +147,7 @@ const GEN = path.join(HERE, "..", "tools", "gen");
 const BANK0 = path.join(HERE, "..", "renderer", "viewer-bank0.bin");
 const CAPTURE = path.join(HERE, "dumps", "painted");
 const SPRITE_CAPTURE = path.join(HERE, "dumps", "spainted");
+const EFFECT_CAPTURE = path.join(HERE, "dumps", "effect1");
 const SAT_BYTE = 0x7F00 * 2;   /* the SAT at VRAM word $7F00 */
 const EDITOR_SRC = fs.readFileSync(
   path.join(HERE, "..", "renderer", "pce-editor.js"), "utf8");
@@ -722,6 +745,174 @@ function checkCapture(pic, data, sprite, captureDir) {
   return problems;
 }
 
+/* ---- 5. the effect picture through the viewer (#16) --------------------- */
+/* The #17 stripes picture with all three scanline effects at once, at
+ * frame 5 (the bands' hand-checked frame: BXR 10 above line 111, 1019
+ * below): the editor's table is baked at build time, so the ROM's flags
+ * are 0 — no runtime frame counter. */
+function effectScene(editor) {
+  const p = effectSceneStripes(editor);
+  editor.setGradient(p, { palette: 0, entry: 1, from: 0,
+    to: editor.colourWord(7, 7, 7), line0: 0, line1: 223 });
+  editor.setWobble(p, { amplitude: 2, period: 4, speed: 1,
+    line0: 0, line1: 223 });
+  editor.setParallaxBands(p, [
+    { line0: 0, line1: 111, speed: 2 },
+    { line0: 112, line1: 223, speed: -1 }
+  ]);
+  return p;
+}
+
+/* The fixed-layout table image (docs/ROM_LAYOUT.md) at bank 1 offset
+ * 0x640, decoded back: the same 16 parallel arrays the viewer indexes,
+ * entry for entry.  Returns a list of problem strings. */
+function checkEffectExport(data, raster, romBytes, bank0) {
+  const problems = [];
+  const BANK = 8192;
+  const u16 = (b, o) => b[o] | (b[o + 1] << 8);
+
+  /* the config block: byte 9 flags the table, CR carries the RC bit */
+  const cfg = romBytes.subarray(BANK, BANK + 64);
+  if (cfg[9] !== 1)
+    problems.push("config byte 9 is not 1 (the viewer would skip the table)");
+  if ((cfg[7] & 0x04) !== 0x04)
+    problems.push("config CR lost the RC interrupt enable (bit 2)");
+  if ((cfg[7] & 0x80) !== 0x80)
+    problems.push("config CR lost the background-on bit");
+
+  /* the palettes are the table's baseCram — the boot colour table the
+   * viewer loads before the chain's first write */
+  const paletteAt = BANK + 0x40;
+  const wantPalette = Buffer.alloc(1024);
+  for (let i = 0; i < 512; i++) {
+    wantPalette[i * 2] = raster.baseCram[i] & 0xFF;
+    wantPalette[i * 2 + 1] = (raster.baseCram[i] >> 8) & 0xFF;
+  }
+  if (!Buffer.from(romBytes.subarray(paletteAt, paletteAt + 1024))
+        .equals(wantPalette))
+    problems.push("the ROM's palettes are not the table's baseCram");
+
+  /* the table image: header (size, flags, count) + the 16 arrays (op
+   * first, then 12 bytes of padding so r_chain_lo is page-aligned, then
+   * the rest packed 240 bytes apart — docs/ROM_LAYOUT.md) */
+  const img = romBytes.subarray(BANK + rom.RASTER_OFFSET,
+                                BANK + rom.RASTER_OFFSET + rom.RASTER_IMAGE);
+  if (u16(img, 0) !== rom.RASTER_IMAGE)
+    problems.push(`table image header size ${u16(img, 0)}, expected ` +
+                  rom.RASTER_IMAGE);
+  if (img[2] !== 0)
+    problems.push(`table flags $${img[2].toString(16)}, expected 0 (the ` +
+                  `editor bakes the frame in — no runtime counter)`);
+  if (img[3] !== raster.entries.length)
+    problems.push(`table step count ${img[3]}, expected ` +
+                  raster.entries.length);
+  const at = {};
+  at.op = 4;
+  let off = 4 + 252;   /* r_chain_lo is page-aligned at RAM $2900 */
+  for (const a of ["chain_lo", "chain_hi",
+                   "bxr_lo", "bxr_hi", "byr_lo", "byr_hi", "cr",
+                   "a1_lo", "a1_hi", "v1_lo", "v1_hi",
+                   "a2_lo", "a2_hi", "v2_lo", "v2_hi"]) {
+    at[a] = off;
+    off += 240;
+  }
+  for (let i = 0; i < raster.entries.length; i++) {
+    const e = raster.entries[i];
+    const get = (a) => img[at[a] + i];
+    let op = 0;
+    if (e.bxr !== undefined) op |= 0x01;
+    if (e.byr !== undefined) op |= 0x02;
+    if (e.cr !== undefined) op |= 0x04;
+    for (let w = 0; w < (e.cram || []).length; w++) op |= 0x08 << w;
+    if (get("op") !== op)
+      problems.push(`entry ${i} (line ${e.line}): op $${get("op").toString(16)}` +
+                    `, expected $${op.toString(16)}`);
+    if ((get("chain_lo") | (get("chain_hi") << 8)) !== 0x40 + e.line)
+      problems.push(`entry ${i}: chain ${get("chain_lo") | (get("chain_hi") << 8)}` +
+                    `, expected ${0x40 + e.line}`);
+    if (e.bxr !== undefined &&
+        (get("bxr_lo") | (get("bxr_hi") << 8)) !== e.bxr)
+      problems.push(`entry ${i}: bxr ${get("bxr_lo") | (get("bxr_hi") << 8)}` +
+                    `, expected ${e.bxr}`);
+    if (e.byr !== undefined &&
+        (get("byr_lo") | (get("byr_hi") << 8)) !== e.byr)
+      problems.push(`entry ${i}: byr ${get("byr_lo") | (get("byr_hi") << 8)}` +
+                    `, expected ${e.byr}`);
+    if (e.cr !== undefined && get("cr") !== e.cr)
+      problems.push(`entry ${i}: cr ${get("cr")}, expected ${e.cr}`);
+    for (let w = 0; w < (e.cram || []).length; w++) {
+      const [addr, value] = e.cram[w];
+      if ((get(`a${w + 1}_lo`) | (get(`a${w + 1}_hi`) << 8)) !== addr)
+        problems.push(`entry ${i}: cram ${w} address ` +
+                      `${get(`a${w + 1}_lo`) | (get(`a${w + 1}_hi`) << 8)}` +
+                      `, expected ${addr}`);
+      if ((get(`v${w + 1}_lo`) | (get(`v${w + 1}_hi`) << 8)) !== value)
+        problems.push(`entry ${i}: cram ${w} value ` +
+                      `${get(`v${w + 1}_lo`) | (get(`v${w + 1}_hi`) << 8)}` +
+                      `, expected ${value}`);
+    }
+  }
+  if (bank0.length !== BANK) problems.push("bank0 is not 8 KiB");
+  return problems;
+}
+
+/* The capture of the effect ROM (tests/dumps/effect1, tools/capture.sh
+ * effect): the editor's picture data landed, the chain wrote the table's
+ * values in line order, and the frame is the renderer on the dump's own
+ * patched table. */
+function checkEffectCapture(data, raster, captureDir) {
+  const problems = [];
+  const dir = captureDir || EFFECT_CAPTURE;
+  const vram = fs.readFileSync(path.join(dir, "vram.bin"));
+  const cram = fs.readFileSync(path.join(dir, "cram.bin"));
+  const regs = JSON.parse(fs.readFileSync(path.join(dir, "regs.json"), "utf8"));
+
+  if (!vram.equals(Buffer.from(data.vram)))
+    problems.push("captured VRAM is not the editor's VRAM");
+
+  /* the colour table: baseCram plus every entry's writes in line order
+   * (every entry fired before the save — the last line is 223) */
+  const words = raster.baseCram.slice();
+  for (const e of raster.entries)
+    for (const [a, v] of (e.cram || [])) words[a] = v;
+  for (let i = 0; i < 512; i++) {
+    const got = cram[i * 2] | (cram[i * 2 + 1] << 8);
+    if (words[i] !== got) {
+      problems.push(`captured CRAM[${i}] = $${got.toString(16)}, the table ` +
+                    `says $${words[i].toString(16)}`);
+      break;
+    }
+  }
+
+  /* the saved registers: the chain's steady state after the last entry
+   * (line 223) fired — BXR holds the last bxr write, BYR the base (never
+   * written), CR = 0x84 (background on + RC, no cr entries) */
+  const lastBxr = raster.entries[raster.entries.length - 1].bxr;
+  if (regs.BXR !== lastBxr)
+    problems.push(`saved BXR=${regs.BXR}, expected the last bxr entry ` +
+                  `${lastBxr}`);
+  if (regs.BYR !== 0) problems.push(`saved BYR=${regs.BYR}, expected 0`);
+  if (regs.CR !== 0x84) problems.push(`saved CR=$${regs.CR.toString(16)}, ` +
+                                      `expected $84`);
+
+  /* the frame: the renderer on the dump's OWN state (the patched
+   * raster.json) — the chain's per-line writes are the picture */
+  const rasterPath = path.join(dir, "raster.json");
+  if (!fs.existsSync(rasterPath)) {
+    problems.push("the capture has no raster.json");
+  } else {
+    const patched = JSON.parse(fs.readFileSync(rasterPath, "utf8"));
+    const firstScanline = 14 + (regs.slstart != null ? regs.slstart : 4);
+    const opts = { vram, cram, regs, width: 256, height: 232,
+                   firstScanline, raster: patched };
+    const drawn = bg.renderFrame(opts);
+    const png = decodePng(fs.readFileSync(path.join(dir, "mednafen.png")));
+    const p = diffPixels(drawn, png, "capture vs the patched table");
+    if (p) problems.push(p);
+  }
+  return problems;
+}
+
 /* ---- 6. the effect editor: #15's raster table (card #17) --------------- */
 /* A 256x224 picture of two tiles: colour number 1 (black) everywhere, and
  * colour number 2 (white) in every map column whose index is 4 mod 8 — eight
@@ -795,9 +986,9 @@ function checkEffectTables(editor, label) {
       else if (t.baseCram[1] !== 0)
         P("gradient: baseCram[1] = " + t.baseCram[1] + ", expected 0");
       if (!t.base || t.base.bxr !== 0 || t.base.byr !== 0 ||
-          t.base.cr !== 0x80)
+          t.base.cr !== 0x84)
         P("gradient: base is " + JSON.stringify(t.base) +
-          ", expected {bxr:0, byr:0, cr:$80}");
+          ", expected {bxr:0, byr:0, cr:$84} (the ROM's config ORs RC in)");
       if (t.entries.length !== 8)
         P("gradient: " + t.entries.length + " entries, expected 8");
       for (let L = 0; L < 8; L++) {
@@ -1379,7 +1570,8 @@ function main() {
   const argv = process.argv.slice(2);
   const write = argv.indexOf("--write") >= 0;
   const writeSprite = write && argv.indexOf("sprite") >= 0;
-  const writeBg = write && !writeSprite;
+  const writeEffect = write && argv.indexOf("effect") >= 0;
+  const writeBg = write && !writeSprite && !writeEffect;
   let failed = 0;
   const out = (s) => console.log(s);
   const fail = (s) => { out(s); failed++; };
@@ -1442,6 +1634,25 @@ function main() {
            `sha256 ${sha256(spriteRom).slice(0, 16)}… — config, sprite ` +
            `palettes, SAT, BAT and both copy regions are the editor's data`);
 
+  /* 14. the effect picture through the viewer (#16): the #17 effect scene
+   * (gradient + wobble + bands at frame 5) exported with its table */
+  const effectPic = effectScene(ed);
+  const effectData = ed.toPicture(effectPic);
+  const effectRaster = ed.toRaster(effectPic, 5);
+  const effectRom = rom.buildRom({
+    bank0, vram: effectData.vram, cram: effectData.cram,
+    regs: effectData.regs, regions: effectData.regions,
+    raster: effectRaster
+  });
+  const effectExportProblems =
+    checkEffectExport(effectData, effectRaster, effectRom, bank0);
+  if (effectExportProblems.length) effectExportProblems.forEach(fail);
+  else out(`effect export: ${effectRom.length} bytes, sha256 ` +
+           `${sha256(effectRom).slice(0, 16)}… — config byte 9 = 1, the RC ` +
+           `bit in the config CR, boot palettes = baseCram, and the table ` +
+           `image at bank 1 offset $640 decodes back to all ` +
+           `${effectRaster.entries.length} entries of the editor's table`);
+
   if (writeBg) {
     fs.mkdirSync(GEN, { recursive: true });
     const out2 = path.join(GEN, "painted.pce");
@@ -1455,6 +1666,15 @@ function main() {
     fs.writeFileSync(out2, spriteRom);
     out(`wrote ${path.relative(HERE, out2)} (${spriteRom.length} bytes) — ` +
         `run: tools/capture.sh spainted`);
+  }
+  if (writeEffect) {
+    fs.mkdirSync(GEN, { recursive: true });
+    const out2 = path.join(GEN, "effect1.pce");
+    fs.writeFileSync(out2, effectRom);
+    fs.writeFileSync(path.join(GEN, "effect1.raster.json"),
+                     JSON.stringify(effectRaster, null, 1));
+    out(`wrote ${path.relative(HERE, out2)} (${effectRom.length} bytes) and ` +
+        `gen/effect1.raster.json — run: tools/capture.sh effect`);
   }
 
   /* 6. the effect editor (#17) */
@@ -1490,15 +1710,23 @@ function main() {
   const geffRef = checkEffectRefusals(globalEditor, "browser");
   const geffPrev = checkEffectPreview(globalEditor, bg, sprites, "browser");
   const geffProblems = geff.concat(geffRef.problems, geffPrev);
+  const geffectPic = effectScene(globalEditor);
+  const geffectData = globalEditor.toPicture(geffectPic);
+  const geffectRom = rom.buildRom({
+    bank0, vram: geffectData.vram, cram: geffectData.cram,
+    regs: geffectData.regs, regions: geffectData.regions,
+    raster: globalEditor.toRaster(geffectPic, 5)
+  });
   const sameBytes = Buffer.from(grom).equals(Buffer.from(romBytes)) &&
-                    Buffer.from(gsrom).equals(Buffer.from(spriteRom));
+                    Buffer.from(gsrom).equals(Buffer.from(spriteRom)) &&
+                    Buffer.from(geffectRom).equals(Buffer.from(effectRom));
   if (gref.problems.length || !sameBytes || geffProblems.length)
     fail(`browser-global branch: ${gref.problems.concat(geffProblems).join("; ") ||
          "same refusals, different bytes"}`);
   else out(`browser-global branch: same ${gref.count}/${gref.count} ` +
            `refusals, ${geffRef.count}/${geffRef.count} effect refusals, ` +
-           `same effect tables and previews, same ${grom.length} and ` +
-           `${gsrom.length} bytes`);
+           `same effect tables and previews, same ${grom.length}, ` +
+           `${gsrom.length} and ${geffectRom.length} bytes`);
 
   /* 7. the page's own Remove buttons (#52) */
   const pageProblems = checkPageWiring("page");
@@ -1536,12 +1764,30 @@ function main() {
              `picture (diff 0)`);
   }
 
+  const haveEffectCapture =
+    fs.existsSync(path.join(EFFECT_CAPTURE, "mednafen.png"));
+  if (!haveEffectCapture) {
+    out(`effect capture: not present — run tools/capture.sh effect once ` +
+        `the ROM is written`);
+    if (!write) failed++;
+  } else {
+    const problems =
+      checkEffectCapture(effectData, effectRaster, EFFECT_CAPTURE);
+    if (problems.length) problems.forEach(fail);
+    else out(`effect capture: tests/dumps/effect1 is the editor's VRAM, ` +
+             `the colour table is baseCram + the chain's writes in line ` +
+             `order, the saved registers are the chain's steady state ` +
+             `(BXR = the last entry's, BYR = 0, CR = $84), and Mednafen's ` +
+             `frame equals the patched table (diff 0)`);
+  }
+
   out(failed === 0
-    ? (haveCapture && haveSpriteCapture
+    ? (haveCapture && haveSpriteCapture && haveEffectCapture
       ? "PASS: the editor paints tiles and sprites, writes #15's raster " +
         "table for the three scanline effects and previews it through " +
         "pce-bg.js/pce-sprites.js, refuses what the VDC cannot show, " +
-        "exports #9's ROM and Mednafen shows both pictures"
+        "exports #9's ROM — and the effect picture's table runs on the " +
+        "viewer, so Mednafen shows all three pictures"
       : "PASS: the editor paints tiles and sprites, writes #15's raster " +
         "table for the three scanline effects and previews it through " +
         "pce-bg.js/pce-sprites.js, refuses what the VDC cannot show and " +
