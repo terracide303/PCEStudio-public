@@ -2,7 +2,8 @@
 """genroms.py — generate the PCEStudio test-scene ROMs (cards #5, #39, #12, #15).
 
 Each scene is a HuCard ROM that initialises the VDC/VCE (the canonical HuDK
-256x224 init values, see docs/BUILD.md and hello.asm), fills the VCE colour
+256x240 init values — VDW = $00EF, 240 display lines, H7-10 — see
+docs/BUILD.md and hello.asm), fills the VCE colour
 table and VDC VRAM (tiles + BAT, and for the sprite scenes the SG patterns +
 SAT) with a deterministic picture, turns the background/sprites on and
 loops.  Mednafen runs the ROM; its save state is the "VRAM+palette dump" and
@@ -55,12 +56,12 @@ import sys
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gen")
 
-# Canonical HuDK VDC init for 256x224 (include/vdc.s vdc_init_table), with
+# Canonical HuDK VDC init for 256x240 (include/vdc.s vdc_init_table), with
 # BXR/BYR/MWR per scene.
 HSR = 0x0202   # HDS=2, HSW=2
-HDR = 0x041F   # HDW=31 (32 chars), HDE=4
+HDR = 0x041F   # HDW=31 (32 chars, 256 px), HDE=4 (H7-9)
 VPR = 0x0F02   # VSW=2, VDS=15
-VDW = 0x00EF   # 240 display lines
+VDW = 0x00EF   # 240 display lines, VDW = N-1 (H7-10)
 VCR = 0x000C
 DCR = 0x0010   # SATB auto-repeat (harmless, sprites disabled)
 SATB = 0x7F00
@@ -314,7 +315,8 @@ def emit_vdc_regs(out, s):
         (0x0C, VPR),
         (0x0D, VDW),
         (0x0E, VCR),
-        (0x0F, s["dcr"]),        # DCR: bit 4 = sprite layer on
+        (0x0F, s["dcr"]),        # DCR: bit 4 = DSR, SATB auto-repeat (H7-11);
+                                 # sprites are CR bit 6 (H7-6)
         (0x13, SATB),
     ]
     for reg, val in regs:
@@ -914,7 +916,9 @@ def gen_sprite_asm(name):
     out.append("        lda #$f8")
     out.append("        tam1")
     out.append("")
-    out.append("        ; VCE: 263-line mode, 5.37 MHz dot clock (256 px)")
+    out.append("        ; VCE CR $0400 = $04: /4 dot clock, 5.37 MHz = 256 px (H6-3);")
+    out.append("        ; D2 is set but not documented there: VIDEO_MODES.md says 262/263")
+    out.append("        ; lines, MacDonald (pcetech $06) says edge blur; #27 settles it.")
     out.append("        lda #$04")
     out.append("        sta $0400")
     out.append("")
@@ -1316,7 +1320,9 @@ def gen_raster_asm(name):
     out.append("        lda #$f8")
     out.append("        tam1")
     out.append("")
-    out.append("        ; VCE: 263-line mode, 5.37 MHz dot clock (256 px)")
+    out.append("        ; VCE CR $0400 = $04: /4 dot clock, 5.37 MHz = 256 px (H6-3);")
+    out.append("        ; D2 is set but not documented there: VIDEO_MODES.md says 262/263")
+    out.append("        ; lines, MacDonald (pcetech $06) says edge blur; #27 settles it.")
     out.append("        lda #$04")
     out.append("        sta $0400")
     out.append("")
@@ -1641,7 +1647,9 @@ def gen_asm(scene):
     out.append("        lda #$f8")
     out.append("        tam1")
     out.append("")
-    out.append("        ; VCE: 263-line mode, 5.37 MHz dot clock (256 px)")
+    out.append("        ; VCE CR $0400 = $04: /4 dot clock, 5.37 MHz = 256 px (H6-3);")
+    out.append("        ; D2 is set but not documented there: VIDEO_MODES.md says 262/263")
+    out.append("        ; lines, MacDonald (pcetech $06) says edge blur; #27 settles it.")
     out.append("        lda #$04")
     out.append("        sta $0400")
     out.append("")
