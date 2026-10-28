@@ -12,21 +12,26 @@ toy.lua --(Fengari's parser, the browser's own Lua)--> Lua 5.3 bytecode
         --(renderer/pce-cgen.js, parts A + C, §9/§10)  C -> llvm-mos -> .pce
 ```
 
-The IL is where the validator (#32) will count cycles per frame, sprites per
-line and memory, and where `raster()` is checked against the line budget. The
-first half delivered the IL, the lowering, and a reference interpreter that
-runs it over the same host and the same models as the browser runtime (`#30`).
-Part A of the console half (§9) delivered the first backend: the palette toy
-through the same IL → C → llvm-mos → a HuCard ROM → Mednafen. Part C (§10)
-adds `raster(line)` on the console: a compile-ahead table replayed by a
-hand-written RCR handler, with the compiled callback's measured cost saying
-why it is not the handler.
+The IL is where the validator (#32) counts cycles per frame, sprites per
+line and memory, and where `raster()` is checked against the line budget
+(`docs/VALIDATE.md`). The first half delivered the IL, the lowering, and a
+reference interpreter that runs it over the same host and the same models as
+the browser runtime (`#30`). Part A of the console half (§9) delivered the
+first backend: the palette toy through the same IL → C → llvm-mos → a HuCard
+ROM → Mednafen. Part C (§10) adds `raster(line)` on the console: a
+compile-ahead table replayed by a hand-written RCR handler, with the compiled
+callback's measured cost saying why it is not the handler.
 
 - `docs/IL.md` — this file: the instructions, the types, the lowering table,
   the refusals, and parts A and C of the backend.
 - `renderer/pce-il.js` — `compile(source)` → the IL program; `create(source)`
   → a runtime with `load()`, `frame(f)`, `setPad()`, the same shape as
-  `renderer/pce-toys.js`.
+  `renderer/pce-toys.js`. `runProgram(program, host, {onOp})` accepts an
+  observer called once per executed instruction (`(function id, instruction,
+  frame)`), which is #32's counting point and cannot change the IL's meaning.
+- `renderer/pce-validate.js` — #32's validator: cycles per frame and per
+  `raster()` call, sprites per line (#50), VRAM/ROM fit, the blank, ranges;
+  `docs/VALIDATE.md`.
 - `renderer/pce-toyhost.js` — the toy's hardware host, extracted so both front
   ends use one copy (the surface, the ranges, the raster table, the pads, the
   frame flow).
@@ -773,4 +778,4 @@ while the display runs).
   types so it can do that.
 - **The wall.** The interpreter is a JS reference, not a performance model:
   `toy-timeout` counts IL instructions, not console cycles. Pricing the IL is
-  #32.
+  #32 — `renderer/pce-validate.js` and `docs/VALIDATE.md`.
