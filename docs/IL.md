@@ -655,6 +655,15 @@ table:
   five video frames: **≈12–15 Hz**. The picture sequence is the browser's;
   only the rate differs.
 
+The replay handler's own cost, counted from the linked image with the
+HuC6280 opcode timings (`viewer.asm`'s rule: every memory instruction one
+cycle over its 6502 count; `st0` 6), is **64 cycles from handler entry to
+the BXR store's last byte** (saves 9, status and dispatch 20, the BXR path
+35) — ~71 from the RCR match including the interrupt sequence, inside the
+~123-cycle blank. A second register in the same entry adds 35 cycles (99
+total), and the two colour words go after the registers and are the case
+that does not fit; parallax uses one register and no colour in the chain.
+
 ### 10.3 What the evidence shows
 
 `node tests/check-il-console.js` exits 0 with **116 checks** (parts A and C):
