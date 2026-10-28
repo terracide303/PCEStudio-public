@@ -1,0 +1,1755 @@
+<!doctype html>
+<!-- PCEStudio — the studio (card #75, first half: layout + run + panels).
+
+     One page shaped like ppu.toys' Studio: a code column on the left with the
+     model's panel dock under it, and the live output column on the right with
+     its transport, scrubber, markers and agent place. The mapping region by
+     region, the controls and the differences are written down in
+     docs/STUDIO.md; the screenshots that evidence the likeness are under
+     $TMPDIR, never in the repo.
+
+     Nothing here is ppu.toys' code or CSS: the layout is mirrored, the page
+     is ours. The toy itself is PCEStudio's own pipeline — renderer/pce-toys.js
+     (Fengari) or renderer/pce-il.js (the IL interpreter) over the one toy
+     host (renderer/pce-toyhost.js), drawn by renderer/pce-sprites.js and
+     renderer/pce-bg.js, the models diffed against Mednafen, and inspected by
+     the #26 panels (renderer/pce-panels.js).
+
+     Serve the repo root and open renderer/studio.html:
+         python3 -m http.server 8000
+     Query params:
+       ?demo=<palette|raster|sprite>  load that example
+       ?frame=N                       seek to frame N and pause (a screenshot)
+       ?paused=1                      load without autoplay
+       ?selftest=1&frames=40          run the example headlessly, write the
+                                      result to <pre id="selftest"> and the title
+     The evidence runner is tests/check-studio.js. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCEStudio — studio</title>
+<style>
+  :root {
+    --bg: #0b0d11;
+    --bar: #10131b;
+    --pane: #12151b;
+    --pane2: #181b22;
+    --code: #0d0f14;
+    --line: #262a33;
+    --line2: #333846;
+    --text: #e7e6e2;
+    --muted: #8f95a0;
+    --dim: #69707d;
+    --accent: #e08a3c;
+    --accent-ink: #1a1007;
+    --ok: #6fd0a0;
+    --bad: #ff7b7b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.45 var(--sans);
+    overflow: hidden;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  [hidden] { display: none !important; }
+
+  /* ---------- top bar ---------- */
+  .app { height: 100vh; display: grid; grid-template-rows: 52px minmax(0, 1fr); }
+  .topbar {
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 14px; background: var(--bar);
+    border-bottom: 1px solid var(--line2); min-width: 0;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--text); text-decoration: none; font-weight: 600;
+    letter-spacing: 0.01em; white-space: nowrap;
+  }
+  .brand-mark {
+    width: 18px; height: 18px; border-radius: 3px;
+    background:
+      linear-gradient(90deg, #8f7ae6 0 50%, #6d55cf 50% 100%);
+    box-shadow: inset 0 0 0 1px #b3a4f2;
+    position: relative;
+  }
+  .brand-mark::after {
+    content: ""; position: absolute; inset: 4px;
+    background:
+      linear-gradient(#0b0d11, #0b0d11) 0 0 / 4px 4px no-repeat,
+      linear-gradient(#0b0d11, #0b0d11) 6px 6px / 4px 4px no-repeat;
+  }
+  .brand-name { font-size: 15px; }
+  .brand-dot { color: var(--accent); }
+  .doc-head {
+    display: flex; align-items: baseline; gap: 10px; min-width: 0;
+    padding-left: 2px;
+  }
+  .doc-title {
+    font-weight: 600; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; max-width: 28vw;
+  }
+  .saved { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .top-actions {
+    margin-left: auto; display: flex; align-items: center; gap: 7px;
+    min-width: 0; flex-wrap: nowrap;
+  }
+  .btn {
+    background: var(--pane2); border: 1px solid var(--line2);
+    border-radius: 5px; padding: 5px 10px; color: var(--text);
+    white-space: nowrap; text-decoration: none; display: inline-flex;
+    align-items: center; gap: 6px; line-height: 1.2;
+  }
+  .btn:hover { background: #20242d; border-color: #414859; }
+  .btn-accent {
+    background: var(--accent); border-color: var(--accent);
+    color: var(--accent-ink); font-weight: 600;
+  }
+  .btn-accent:hover { background: #efa052; border-color: #efa052; }
+  .btn-icon { padding: 5px 8px; }
+  .account { color: var(--dim); font-size: 12px; white-space: nowrap; }
+
+  /* ---------- the two columns ---------- */
+  .studio {
+    display: grid; grid-template-columns: minmax(0, 61.25fr) minmax(0, 38.75fr);
+    min-height: 0;
+  }
+  .workspace {
+    display: grid; grid-template-rows: minmax(220px, 44.3fr) minmax(0, 55.7fr);
+    min-height: 0; border-right: 1px solid var(--line2);
+  }
+
+  /* ---------- code column ---------- */
+  .code-pane {
+    display: grid; grid-template-rows: 24px 30px minmax(0, 1fr);
+    min-height: 0; background: var(--code);
+  }
+  .code-tabs {
+    display: flex; align-items: stretch; gap: 2px; padding: 0 10px;
+    background: var(--bar); border-bottom: 1px solid var(--line);
+  }
+  .ctab {
+    background: transparent; border: 0; color: var(--dim);
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+    padding: 0 7px; border-bottom: 2px solid transparent;
+  }
+  .ctab.is-on { color: var(--text); border-bottom-color: var(--accent); }
+  .file-bar {
+    display: flex; align-items: center; gap: 8px; padding: 0 10px;
+    background: #0f1218; border-bottom: 1px solid var(--line); min-width: 0;
+  }
+  .file-tabs { display: flex; gap: 2px; min-width: 0; }
+  .file-tab {
+    background: transparent; border: 1px solid transparent; border-radius: 4px;
+    color: var(--muted); padding: 2px 8px; font: 12px var(--mono);
+  }
+  .file-tab.is-on { background: #1a1e26; border-color: var(--line2); color: var(--text); }
+  .file-add { color: var(--dim); padding: 2px 7px; }
+  .file-status {
+    margin-left: auto; display: flex; align-items: center; gap: 6px;
+    color: var(--dim); font: 11px var(--mono); white-space: nowrap;
+  }
+  .file-status .dot { color: var(--line2); }
+  .editor {
+    display: grid; grid-template-columns: 46px minmax(0, 1fr);
+    min-height: 0; background: var(--code);
+  }
+  .editor.no-gutter { grid-template-columns: 0 minmax(0, 1fr); }
+  .editor.no-gutter .gutter { display: none; }
+  .gutter {
+    margin: 0; padding: 10px 8px 20px 0; overflow: hidden;
+    text-align: right; color: #4d5562; font: 12px/1.55 var(--mono);
+    background: #0b0e13; border-right: 1px solid #171b23;
+    user-select: none;
+  }
+  #source {
+    resize: none; border: 0; outline: 0; background: transparent;
+    color: #d9dde4; padding: 10px 14px 20px 10px;
+    font: 12px/1.55 var(--mono); tab-size: 2; white-space: pre;
+    overflow: auto; min-width: 0;
+  }
+  .assets { padding: 14px 18px; overflow: auto; }
+  .assets h2 {
+    font-size: 11px; letter-spacing: 0.1em; color: var(--muted);
+    margin: 0 0 10px; font-weight: 700;
+  }
+  .assets p { color: var(--muted); max-width: 46rem; }
+  .assets ul { color: var(--muted); font: 12px var(--mono); }
+
+  /* ---------- the panel dock ---------- */
+  .dock {
+    display: grid; grid-template-rows: 27px 28px minmax(0, 1fr);
+    min-height: 0; background: var(--pane); border-top: 1px solid var(--line2);
+  }
+  .dock-tabs {
+    display: flex; align-items: stretch; gap: 12px; padding: 0 10px;
+    background: #141820; border-bottom: 1px solid var(--line);
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  }
+  .dock-tabs::-webkit-scrollbar { display: none; }
+  .dtab {
+    background: transparent; border: 0; border-bottom: 2px solid transparent;
+    color: var(--dim); font-size: 11px; font-weight: 700;
+    letter-spacing: 0.06em; padding: 0 1px; white-space: nowrap;
+  }
+  .dtab.is-on { color: var(--text); border-bottom-color: var(--accent); }
+  .dock-head {
+    display: flex; align-items: baseline; gap: 10px; padding: 0 12px;
+    background: var(--pane); border-bottom: 1px solid var(--line);
+    min-width: 0;
+  }
+  .dock-title {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+    color: var(--text); white-space: nowrap;
+  }
+  .dock-gloss {
+    color: var(--muted); font-size: 12px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; min-width: 0;
+  }
+  .guide { margin-left: auto; color: var(--accent); font-size: 12px; text-decoration: none; }
+  .inspect { color: var(--muted); font: 11px var(--mono); white-space: nowrap; }
+  .dock-body { overflow: auto; padding: 9px 12px 18px; min-height: 0; }
+  .panel { min-height: 0; }
+  .panel h3 {
+    font-size: 11px; letter-spacing: 0.08em; color: var(--muted);
+    margin: 0 0 6px; font-weight: 700;
+  }
+  .panel p { color: var(--muted); margin: 0.4rem 0; max-width: 52rem; }
+  .summary { font: 12px var(--mono); color: #cfd4dd; white-space: pre-wrap; }
+  .follow { font: 12px var(--mono); color: #9fd2ff; white-space: pre-wrap; margin-top: 8px; }
+  .table {
+    margin: 0; color: #b9bec8; font: 11px/1.45 var(--mono);
+    white-space: pre; overflow: visible;
+  }
+  #vrammap { width: 100%; height: 44px; image-rendering: pixelated; display: block; }
+  .pal32 { display: flex; flex-direction: column; gap: 1px; }
+  .pal32 .prow { display: flex; align-items: center; gap: 2px; }
+  .pal32 .pnum {
+    width: 1.9rem; text-align: right; color: var(--dim);
+    font: 10px var(--mono);
+  }
+  .psw { width: 15px; height: 15px; box-sizing: border-box; }
+  .psw.entry0 { border: 1px dashed #89909c; }
+  .hint { color: var(--dim); font-size: 12px; }
+
+  /* ---------- output column ---------- */
+  .output-pane {
+    display: grid;
+    grid-template-rows: 27px 30px minmax(0, 1fr) auto auto 27px minmax(0, 0.6fr);
+    min-height: 0; background: var(--pane); position: relative;
+  }
+  .out-head {
+    display: flex; align-items: center; gap: 10px; padding: 0 12px;
+    background: #141820; border-bottom: 1px solid var(--line);
+    min-width: 0;
+  }
+  .out-sub {
+    display: flex; align-items: center; gap: 10px; padding: 0 12px;
+    background: var(--pane); border-bottom: 1px solid var(--line);
+    min-width: 0;
+  }
+  .out-title {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+    color: var(--muted); white-space: nowrap;
+  }
+  .out-tab {
+    background: transparent; border: 0; color: var(--text);
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    padding: 0 2px; white-space: nowrap;
+  }
+  .btn-mini {
+    background: var(--pane2); border: 1px solid var(--line2);
+    border-radius: 4px; color: var(--muted); padding: 1px 7px;
+    font-size: 11px;
+  }
+  .out-head .spacer, .transport .spacer { margin-left: auto; }
+  .chip {
+    background: transparent; border: 1px solid var(--line2); border-radius: 4px;
+    color: var(--muted); padding: 1px 7px; font-size: 10px;
+    letter-spacing: 0.06em; font-weight: 600;
+  }
+  .chip.is-on { color: var(--text); border-color: var(--accent); }
+  .res { color: var(--dim); font: 10px var(--mono); white-space: nowrap; }
+  .canvas-wrap {
+    position: relative; min-height: 0; background: #050608;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; padding: 10px;
+  }
+  #out {
+    width: 100%; height: 100%; object-fit: contain;
+    image-rendering: pixelated; outline: 0; background: #000;
+  }
+  .canvas-wrap.crt::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.22) 0px,
+      rgba(0, 0, 0, 0.22) 1px,
+      rgba(255, 255, 255, 0.03) 2px,
+      rgba(255, 255, 255, 0.03) 3px);
+    mix-blend-mode: multiply;
+  }
+  .error {
+    position: absolute; left: 10px; right: 10px; bottom: 10px;
+    background: #2a1114; border: 1px solid #6d2a30; border-radius: 5px;
+    color: #ffb3b3; padding: 7px 9px; font: 11px/1.4 var(--mono);
+    white-space: pre-wrap;
+  }
+  .layer-pop {
+    position: absolute; top: 8px; right: 8px; z-index: 4;
+    background: #171b23; border: 1px solid var(--line2); border-radius: 6px;
+    padding: 8px 10px; font: 11px/1.5 var(--mono); color: #c7ccd5;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); max-width: 80%;
+  }
+  .transport {
+    display: flex; align-items: center; gap: 6px; padding: 7px 12px;
+    border-top: 1px solid var(--line); background: #10141b;
+  }
+  .tbtn {
+    background: var(--pane2); border: 1px solid var(--line2);
+    border-radius: 4px; color: var(--text); min-width: 28px;
+    padding: 2px 6px; font: 11px var(--mono);
+  }
+  #btn-play { color: var(--accent); }
+  .clock { color: var(--muted); font: 11px var(--mono); white-space: nowrap; margin-left: 4px; }
+  .scrub {
+    display: flex; align-items: center; gap: 10px; padding: 3px 12px 7px;
+    background: #10141b; border-top: 1px solid #191d25;
+  }
+  #seek { flex: 1; min-width: 0; accent-color: var(--accent); height: 14px; }
+  .length { color: var(--dim); font: 10px var(--mono); white-space: nowrap; }
+  #length {
+    width: 3.7rem; background: #0c0f14; border: 1px solid var(--line2);
+    border-radius: 3px; color: var(--muted); font: 10px var(--mono);
+    padding: 1px 3px;
+  }
+  .bottom-tabs {
+    display: flex; gap: 12px; align-items: stretch; padding: 0 12px;
+    background: #141820; border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .btab {
+    background: transparent; border: 0; border-bottom: 2px solid transparent;
+    color: var(--dim); font-size: 10px; font-weight: 700;
+    letter-spacing: 0.08em; padding: 4px 1px;
+  }
+  .btab.is-on { color: var(--text); border-bottom-color: var(--accent); }
+  .bottom-body { overflow: auto; padding: 9px 12px 16px; min-height: 0; }
+  .marker-list { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
+  .marker {
+    background: transparent; border: 0; color: #9fd2ff; text-align: left;
+    font: 11px var(--mono); padding: 1px 0;
+  }
+  .marker:hover { color: #d5ecff; }
+  .agent-state { color: var(--bad); font: 11px var(--mono); letter-spacing: 0.06em; }
+
+  /* ---------- popovers, modal, toast ---------- */
+  .popover {
+    position: fixed; z-index: 20; background: #171b23;
+    border: 1px solid var(--line2); border-radius: 7px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+    padding: 8px; min-width: 220px; max-height: 70vh; overflow: auto;
+  }
+  #panels-pop { top: 56px; right: 310px; }
+  #settings-pop { top: 56px; right: 226px; min-width: 260px; }
+  #open-pop { top: 56px; right: 24px; }
+  .pop-head {
+    display: flex; align-items: center; justify-content: space-between;
+    color: var(--dim); font-size: 10px; font-weight: 700;
+    letter-spacing: 0.09em; padding: 2px 4px 6px;
+  }
+  .pop-close {
+    background: transparent; border: 0; color: var(--dim);
+    font-size: 14px; line-height: 1; padding: 0 2px;
+  }
+  .pop-item {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    background: transparent; border: 0; border-radius: 4px;
+    color: var(--text); text-align: left; padding: 5px 7px; font-size: 12px;
+  }
+  .pop-item:hover { background: #222732; }
+  .pop-item .tick { width: 12px; color: var(--accent); font-size: 11px; }
+  .pop-sep { height: 1px; background: var(--line); margin: 6px 2px; }
+  .pop-note { color: var(--dim); font-size: 11px; padding: 4px 7px; }
+  .seg { display: flex; gap: 4px; }
+  .seg button {
+    background: var(--pane2); border: 1px solid var(--line2);
+    border-radius: 4px; color: var(--muted); padding: 3px 9px; font-size: 11px;
+  }
+  .seg button.is-on { color: var(--text); border-color: var(--accent); }
+  .set-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 6px 7px;
+  }
+  .set-label { color: var(--text); font-size: 12px; }
+  .set-hint { color: var(--dim); font-size: 10px; }
+  .modal {
+    position: fixed; inset: 0; z-index: 30; background: rgba(3, 4, 6, 0.66);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .modal-card {
+    background: #171b23; border: 1px solid var(--line2); border-radius: 9px;
+    padding: 18px 20px; width: min(480px, 90vw);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+  }
+  .modal-card h2 { font-size: 15px; margin: 0 0 8px; }
+  .modal-card p { color: var(--muted); margin: 0 0 10px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  .toast {
+    position: fixed; z-index: 40; right: 16px; bottom: 16px;
+    background: #1b202a; border: 1px solid var(--line2); border-radius: 6px;
+    color: var(--text); padding: 8px 12px; font: 12px var(--mono);
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5); max-width: 44rem;
+  }
+  .selftest {
+    position: fixed; z-index: 50; left: 12px; bottom: 12px;
+    background: #0d1a13; border: 1px solid #2f6b4d; border-radius: 5px;
+    color: #8be2b1; padding: 6px 9px; font: 11px var(--mono); margin: 0;
+  }
+  @media (max-width: 900px) {
+    .studio { grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr 1fr; }
+    .workspace { border-right: 0; border-bottom: 1px solid var(--line2); }
+    .account, .doc-head .saved { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <a class="brand" href="index.html" title="PCEStudio home">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">PCE<span class="brand-dot">·</span>studio</span>
+    </a>
+    <div class="doc-head">
+      <span class="doc-title" id="doc-title">palette-cycle.lua</span>
+      <span class="saved" id="saved">saved in this browser</span>
+    </div>
+    <div class="top-actions">
+      <button type="button" class="btn" id="btn-run">Run</button>
+      <button type="button" class="btn" id="btn-check">Check</button>
+      <button type="button" class="btn btn-accent" id="btn-export">Export…</button>
+      <button type="button" class="btn" id="btn-panels" aria-haspopup="true"
+              aria-expanded="false">Panels ▾</button>
+      <button type="button" class="btn btn-icon" id="btn-settings"
+              aria-label="Settings">⚙</button>
+      <a class="btn" id="link-docs" href="../docs/STUDIO.md"
+         target="_blank" rel="noopener">Docs</a>
+      <button type="button" class="btn" id="btn-save">Save file</button>
+      <button type="button" class="btn" id="btn-open" aria-haspopup="true"
+              aria-expanded="false">Open…</button>
+      <span class="account" title="The agent link is card #24">not signed in</span>
+    </div>
+  </header>
+
+  <main class="studio">
+    <section class="workspace" id="workspace">
+      <div class="code-pane" id="code-pane">
+        <div class="code-tabs" role="tablist" aria-label="Workspace">
+          <button type="button" class="ctab is-on" id="tab-code" role="tab"
+                  aria-selected="true">CODE</button>
+          <button type="button" class="ctab" id="tab-assets" role="tab"
+                  aria-selected="false">ASSETS</button>
+        </div>
+        <div class="file-bar">
+          <div class="file-tabs">
+            <button type="button" class="file-tab is-on" id="file-main">main.lua</button>
+            <button type="button" class="file-tab file-add" id="btn-newfile"
+                    title="One Lua file per toy">+</button>
+          </div>
+          <div class="file-status">
+            <span id="keys-status">plain keys</span>
+            <span class="dot">·</span>
+            <span id="engine-status">Lua 5.3</span>
+          </div>
+        </div>
+        <div class="editor" id="editor-pane">
+          <pre class="gutter" id="gutter" aria-hidden="true">1</pre>
+          <textarea id="source" spellcheck="false" aria-label="Toy source"></textarea>
+        </div>
+        <div class="assets" id="assets-pane" hidden>
+          <h2>ASSETS</h2>
+          <p>No image sources in this card. A toy writes its own tiles into
+            VRAM with <code>vram[addr] = word</code> and its colours with
+            <code>pal(addr, word)</code>; the PNG importer and <code>dma()</code>
+            placement are cards #24/#71.</p>
+          <ul id="asset-list">
+            <li>main.lua — the toy's Lua source</li>
+          </ul>
+        </div>
+      </div>
+
+      <section class="dock" id="dock">
+        <div class="dock-tabs" id="dock-tabs" role="tablist"
+             aria-label="PCE panels"></div>
+        <div class="dock-head">
+          <span class="dock-title" id="dock-title">SCREEN</span>
+          <span class="dock-gloss" id="dock-gloss"></span>
+          <a class="guide" id="dock-guide" href="../docs/STUDIO.md#panels">Guide</a>
+          <span class="inspect" id="inspect-line">line 0 · full frame</span>
+        </div>
+        <div class="dock-body" id="dock-body">
+          <div class="panel" id="panel-screen" data-panel="screen">
+            <div class="summary" id="screen-summary"></div>
+            <div class="follow" id="follow-info">Click the output to follow a
+              pixel: the layer that won, its BAT entry or sprite, and the
+              register values on that line.</div>
+          </div>
+          <div class="panel" id="panel-vram" data-panel="vram" hidden>
+            <canvas id="vrammap" width="512" height="44"></canvas>
+            <p class="hint">Whole VRAM, 32768 words: the BAT, tile and sprite
+              pattern copy regions, the SAT at $7F00 and what is free.</p>
+            <pre class="table" id="vram-legend"></pre>
+          </div>
+          <div class="panel" id="panel-palettes" data-panel="palettes" hidden>
+            <div class="pal32" id="pal32"></div>
+            <p class="hint">Palettes 0–15 are the BAT's 4-bit palette field;
+              palettes 16–31 are the sprite palettes. Entry 0 of a background
+              palette (dashed) is the shared backdrop. Each swatch's tooltip
+              carries its CRAM address and 9-bit word.</p>
+          </div>
+          <div class="panel" id="panel-sprites" data-panel="sprites" hidden>
+            <pre class="table" id="sat-table"></pre>
+          </div>
+          <div class="panel" id="panel-audio" data-panel="audio" hidden>
+            <h3>THE PSG IS ITS OWN CARD</h3>
+            <p>The PC Engine's sound chip is modelled in
+              <code>renderer/pce-psg.js</code>, proven against the hardware
+              tests in <code>tests/check-psg.js</code>. Toys have no sound
+              surface yet: that is card #71. <code>note()</code> already
+              returns the PSG's 12-bit F word, so the vocabulary is in place.</p>
+          </div>
+          <div class="panel" id="panel-scanlines" data-panel="scanlines" hidden>
+            <pre class="table" id="scan-table"></pre>
+            <p class="hint">A PCE line is an RCR interrupt, not HDMA: one entry
+              per line, and the ISR must fit the blank. The compiler prices
+              this (#32); the browser calls raster(line) for all 224 lines.</p>
+          </div>
+          <div class="panel" id="panel-registers" data-panel="registers" hidden>
+            <pre class="table" id="reg-table"></pre>
+          </div>
+          <div class="panel" id="panel-console" data-panel="console" hidden>
+            <pre class="table" id="console-table"></pre>
+            <p class="hint">The PC Engine has no HDMA: per-line changes are the
+              RCR interrupt. The compiler half is #31; machine code and the
+              HuCard export are the second half of #75.</p>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="output-pane" id="output-pane">
+      <div class="out-head">
+        <span class="out-title">OUTPUT</span>
+      </div>
+      <div class="out-sub">
+        <button type="button" class="out-tab" id="tab-live">LIVE OUTPUT</button>
+        <button type="button" class="btn-mini" id="btn-layers">Layers</button>
+        <span class="spacer"></span>
+        <button type="button" class="chip" id="btn-crt" aria-pressed="false">CRT</button>
+        <button type="button" class="chip" id="btn-snd" aria-pressed="false">SND</button>
+        <span class="res">256×224</span>
+      </div>
+      <div class="canvas-wrap" id="canvas-wrap">
+        <canvas id="out" width="256" height="224" tabindex="0"
+                aria-label="Toy output. Click to follow a pixel."></canvas>
+        <div class="layer-pop" id="layer-pop" hidden></div>
+        <div class="error" id="error" hidden></div>
+      </div>
+      <div class="transport">
+        <button type="button" class="tbtn" id="btn-play" aria-label="Play">▶</button>
+        <button type="button" class="tbtn" id="btn-stop" aria-label="Stop">■</button>
+        <button type="button" class="tbtn" id="btn-prev" aria-label="Previous frame">−1</button>
+        <button type="button" class="tbtn" id="btn-next" aria-label="Next frame">+1</button>
+        <span class="clock" id="clock">t=0.00s · frame 0 · 0fps</span>
+        <span class="spacer"></span>
+        <button type="button" class="chip is-on" id="btn-lua">Lua</button>
+        <button type="button" class="chip" id="btn-cart">IL</button>
+      </div>
+      <div class="scrub">
+        <input type="range" id="seek" min="0" max="299" value="0"
+               aria-label="Frame">
+        <span class="length">Length
+          <input type="number" id="length" min="1" max="3600" value="300">frames</span>
+      </div>
+      <div class="bottom-tabs">
+        <button type="button" class="btab is-on" id="tab-markers">MARKERS</button>
+        <button type="button" class="btab" id="tab-agent">AGENT</button>
+      </div>
+      <div class="bottom-body" id="bottom-body">
+        <div class="panel" id="bottom-markers">
+          <button type="button" class="btn" id="btn-addmarker">Add marker at frame 0</button>
+          <div class="marker-list" id="marker-list"></div>
+        </div>
+        <div class="panel" id="bottom-agent" hidden>
+          <p class="agent-state">NOT CONNECTED</p>
+          <p>The agent link is card #24: a coding agent will drive this studio
+            over MCP — write the Lua, import art, screenshot and check while
+            you watch. Until then the studio is driven by hand, and this page
+            already exposes the same runtime the link will call.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Panels menu: built from PANELS at load, so every entry has a handler. -->
+<div class="popover" id="panels-pop" hidden></div>
+
+<!-- Settings -->
+<div class="popover" id="settings-pop" hidden>
+  <div class="pop-head"><span>SETTINGS</span>
+    <button type="button" class="pop-close" id="settings-close"
+            aria-label="Close settings">×</button></div>
+  <div class="set-row"><span class="set-label">Editor keys</span>
+    <span class="seg">
+      <button type="button" id="keys-plain" class="is-on">Plain</button>
+      <button type="button" id="keys-vim">Vim</button>
+    </span></div>
+  <div class="set-row"><span class="set-label">Line numbers
+    <span class="set-hint">the left gutter</span></span>
+    <button type="button" class="btn-mini" id="toggle-gutter">On</button></div>
+  <div class="set-row"><span class="set-label">CRT by default</span>
+    <button type="button" class="btn-mini" id="toggle-crt-default">Off</button></div>
+</div>
+
+<!-- Open -->
+<div class="popover" id="open-pop" hidden>
+  <div class="pop-head"><span>OPEN</span>
+    <button type="button" class="pop-close" id="open-close"
+            aria-label="Close open">×</button></div>
+  <div class="pop-note">Built-in examples (the three toys tests/check-il.js
+    runs)</div>
+  <div id="example-list"></div>
+  <div class="pop-sep"></div>
+  <button type="button" class="pop-item" id="open-file">From file…</button>
+  <input type="file" id="file-input" accept=".lua,.txt" hidden>
+</div>
+
+<!-- Export (second half of the card) -->
+<div class="modal" id="export-modal" hidden>
+  <div class="modal-card">
+    <h2>Export</h2>
+    <p>A toy becomes a HuCard through the compiler (#31): the IL half exists
+      and runs the same three examples, but there is no machine code or ROM
+      builder for a toy yet. Export wiring is the second half of this card.</p>
+    <p>The static picture path is already proven: the editor paints
+      VRAM/CRAM/registers and <b>Download .pce</b> builds the byte-exact ROM
+      (<code>docs/EXPORT.md</code>).</p>
+    <div class="modal-actions">
+      <a class="btn" href="editor.html">Open the picture editor</a>
+      <button type="button" class="btn btn-accent" id="export-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<pre class="selftest" id="selftest" hidden></pre>
+
+<script src="../vendor/fengari/fengari-web.js"></script>
+<script src="pce-bg.js"></script>
+<script src="pce-sprites.js"></script>
+<script src="pce-toyhost.js"></script>
+<script src="pce-toys.js"></script>
+<script src="pce-il.js"></script>
+<script src="pce-panels.js"></script>
+<script>
+"use strict";
+/* -------------------------------------------------------------------------
+ * The examples are the same three toys tests/check-il.js exports and
+ * tests/check-toys.js runs (the IL test keeps one copy; check-studio.js
+ * asserts these strings are still equal, so the page and the evidence cannot
+ * drift).
+ * ---------------------------------------------------------------------- */
+const SETUP = `
+local function puttile(char, fn)
+  for row = 0, 7 do
+    local w0, w1 = 0, 0
+    for col = 0, 7 do
+      local c = fn(col, row)
+      if c % 2 >= 1 then w0 = w0 | (1 << (7 - col)) end
+      if c >= 2 and (c % 4) >= 2 then w0 = w0 | (1 << (15 - col)) end
+      if c >= 4 and (c % 8) >= 4 then w1 = w1 | (1 << (7 - col)) end
+      if c >= 8 then w1 = w1 | (1 << (15 - col)) end
+    end
+    vram[char * 16 + row] = w0
+    vram[char * 16 + 8 + row] = w1
+  end
+end
+`;
+
+const TOY_PALETTE = SETUP + `
+function init()
+  for y = 0, 27 do
+    for x = 0, 31 do vram[y * 32 + x] = 0x0040 end
+  end
+  puttile(0x40, function(col, row)
+    if col == row then return 15 else return 1 end
+  end)
+end
+function frame(t, f)
+  for e = 1, 15 do
+    pal(e, rgb((e + f) % 8, f % 8, (e * 3 + f) % 8))
+  end
+end
+`;
+
+const TOY_RASTER = SETUP + `
+function init()
+  for y = 0, 27 do
+    for x = 0, 31 do vram[y * 32 + x] = 0x0040 end
+  end
+  puttile(0x40, function(col, row)
+    if col == row then return 15 else return 1 end
+  end)
+end
+function frame(t, f)
+  g_f = f
+  reg("BXR", (f * 2) % 1024)
+  reg("BYR", (f * 3) % 512)
+end
+function raster(line)
+  local band = line // 8
+  reg("BXR", (g_f * 2 + band * 3) % 1024)
+  if line % 8 == 0 then
+    pal(2 + (band % 14), rgb(g_f % 8, band % 8, (g_f + band) % 8))
+  end
+end
+`;
+
+const TOY_SPRITE = `
+function init()
+  -- one solid 16x16 sprite, colour 1, pattern code $100 (cell 256)
+  for row = 0, 15 do
+    vram[0x100 * 16 + row] = 0xFFFF
+    vram[0x100 * 16 + 8 + row] = 0
+  end
+  pal(0x101, rgb(7, 7, 0))
+  reg("CR", 0xC0)
+  sx, sy = 32, 64
+end
+function frame(t, f)
+  if pad[1].right then sx = sx + 1 end
+  if pad[1].left then sx = sx - 1 end
+  if pad[1].up then sy = sy - 1 end
+  if pad[1].down then sy = sy + 1 end
+  sprite(0, { x = sx, y = sy, pattern = 0x100, palette = 0 })
+end
+`;
+
+const EXAMPLES = [
+  { id: "palette", name: "palette-cycle.lua", title: "Palette cycling",
+    source: TOY_PALETTE },
+  { id: "raster", name: "raster-bands.lua", title: "Raster bands",
+    source: TOY_RASTER },
+  { id: "sprite", name: "sprite-pad.lua", title: "Sprite and pad",
+    source: TOY_SPRITE }
+];
+
+/* The panel strip, in ppu.toys' order and with the PCE's own answers.
+ * docs/STUDIO.md §3 maps each to its ppu.toys counterpart. */
+const PANELS = [
+  { id: "screen", label: "SCREEN",
+    gloss: "The tile layer: BAT size, scroll, and which layer won a pixel." },
+  { id: "vram", label: "VRAM",
+    gloss: "All 32768 words: the BAT, tiles, sprite patterns and the SAT." },
+  { id: "palettes", label: "PALETTES",
+    gloss: "The VCE's 512 colours as 32 palettes of 16 — the picture's only colours." },
+  { id: "sprites", label: "SPRITES",
+    gloss: "The 64-entry SAT: position, pattern, palette, size and flags." },
+  { id: "audio", label: "AUDIO",
+    gloss: "The PSG is its own card (#71); toys have no sound surface yet." },
+  { id: "scanlines", label: "SCANLINES",
+    gloss: "Per-line BXR/BYR/CR from the raster table — the RCR interrupt, not HDMA." },
+  { id: "registers", label: "REGISTERS",
+    gloss: "The VDC's R00–R13 for one line, with where each value came from." },
+  { id: "console", label: "CONSOLE",
+    gloss: "The PC Engine's frame budget and where the compiler stands (#31)." }
+];
+
+const WORKSPACE_ITEMS = [
+  { id: "editor", label: "Editor" },
+  { id: "assets", label: "Assets" },
+  { id: "output", label: "Output" },
+  { id: "markers", label: "Markers" },
+  { id: "agent", label: "Agent" }
+];
+
+/* ppu.toys' controller keys on its SNES pad, mapped to the PCE's 2-button
+ * pad: IJKL is the D-pad, N/M are I/II, O is Select, P is Run. */
+const PAD_KEYS = {
+  KeyI: "up", KeyK: "down", KeyJ: "left", KeyL: "right",
+  KeyN: "i", KeyM: "ii", KeyO: "select", KeyP: "run"
+};
+
+const $ = (id) => document.getElementById(id);
+
+/* ---- state ------------------------------------------------------------ */
+let current = { example: EXAMPLES[0], source: EXAMPLES[0].source, mode: "lua" };
+let runtime = null;
+let currentFrame = -1;        /* the frame on the canvas; -1 = nothing yet */
+let playing = false;
+let rafId = null;
+let lastTick = 0;
+let fps = 0;
+let fpsFrames = 0;
+let fpsStarted = 0;
+let lengthFrames = 300;
+let markers = [];
+let heldPad = {};
+let padLog = [];              /* frame -> pad object, so a seek replays it */
+let followAt = null;
+let panelState = null;
+let panelDirty = true;
+let activePanel = "screen";
+let visiblePanels = PANELS.map((p) => p.id);
+let lineNumbers = true;
+let crtDefault = false;
+let palCells = null;
+let toastTimer = null;
+
+/* ---- the canvas ------------------------------------------------------- */
+const canvas = $("out");
+const ctx = canvas.getContext("2d");
+const image = ctx.createImageData(canvas.width, canvas.height);
+
+/* The model gives RGB triples (renderer/pce-bg.js renderFrame); the canvas
+ * needs RGBA, so each pixel is copied into its four-byte slot. */
+function paint(frame) {
+  const rgb = frame.pixels;
+  const d = image.data;
+  for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
+    d[j] = rgb[i];
+    d[j + 1] = rgb[i + 1];
+    d[j + 2] = rgb[i + 2];
+    d[j + 3] = 255;
+  }
+  ctx.putImageData(image, 0, 0);
+}
+
+/* ---- messages --------------------------------------------------------- */
+function toast(message) {
+  const el = $("toast");
+  el.textContent = message;
+  el.hidden = false;
+  if (typeof setTimeout === "function") {
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
+  }
+}
+function showError(e) {
+  const el = $("error");
+  el.textContent = (e && e.code ? e.code + ": " : "") +
+                   (e && e.message ? e.message : String(e));
+  el.hidden = false;
+}
+function clearError() { $("error").hidden = true; $("error").textContent = ""; }
+function setSaved(text) { $("saved").textContent = text; }
+
+/* ---- the runtime ------------------------------------------------------ */
+function rebuild() {
+  if (runtime) {
+    try { runtime.dispose(); } catch (e) { /* already gone */ }
+    runtime = null;
+  }
+  const factory = current.mode === "il" ? PCEStudio.il : PCEStudio.toys;
+  if (!factory) throw new Error("the " + current.mode + " runtime did not load");
+  const rt = factory.create(current.source, { budgetMs: 120 });
+  rt.load();
+  runtime = rt;
+  currentFrame = -1;
+  panelState = null;
+}
+
+function runFrame(f) {
+  padLog[f] = padLog[f] || {};
+  runtime.setPad(1, padLog[f]);
+  const frame = runtime.frame(f);
+  paint(frame);
+  currentFrame = f;
+  panelState = null;
+  panelDirty = true;
+  return frame;
+}
+
+function seek(target) {
+  target = Math.max(0, Math.min(lengthFrames - 1, Math.round(target) || 0));
+  if (!runtime || (currentFrame >= 0 && target < currentFrame)) rebuild();
+  if (currentFrame < 0) runFrame(0);
+  while (currentFrame < target) runFrame(currentFrame + 1);
+  updateClock(runtime && runtime.last);
+  refreshPanels(true);
+  return currentFrame;
+}
+
+function stepForward() {
+  if (currentFrame >= lengthFrames - 1) { pause(); return; }
+  if (!runtime) rebuild();
+  padLog[currentFrame + 1] = Object.assign({}, heldPad);
+  const frame = runFrame(currentFrame + 1);
+  updateClock(frame);
+  if (currentFrame >= lengthFrames - 1) pause();
+  if (currentFrame % 6 === 0) refreshPanels();
+}
+
+function applySource() {
+  clearError();
+  pause();
+  padLog = [];
+  try { rebuild(); }
+  catch (e) {
+    runtime = null;
+    showError(e);
+    $("saved").textContent = "not running — " + (e.code || "error");
+    return false;
+  }
+  currentFrame = -1;
+  seek(0);
+  $("saved").textContent = "saved in this browser";
+  return true;
+}
+
+function setMode(mode) {
+  if (current.mode === mode) return;
+  current.mode = mode;
+  $("btn-lua").classList.toggle("is-on", mode === "lua");
+  $("btn-cart").classList.toggle("is-on", mode === "il");
+  $("engine-status").textContent = mode === "il" ? "IL (#31)" : "Lua 5.3";
+  applySource();
+  toast(mode === "il"
+    ? "IL interpreter: compiled from the same Lua, no machine code yet (#31)."
+    : "Lua: Fengari runs the toy in the browser.");
+}
+
+/* ---- transport -------------------------------------------------------- */
+function updateClock(frame) {
+  const f = frame && typeof frame.frame === "number" ? frame.frame : currentFrame;
+  const shown = Math.max(0, f);
+  $("clock").textContent = "t=" + (shown / 60).toFixed(2) + "s · frame " +
+    shown + " · " + Math.round(fps) + "fps";
+  $("seek").value = String(Math.max(0, Math.min(lengthFrames - 1, shown)));
+  $("btn-addmarker").textContent = "Add marker at frame " + shown;
+}
+
+function tick(now) {
+  rafId = null;
+  if (!playing) return;
+  if (!lastTick) lastTick = now;
+  const STEP = 1000 / 60;
+  if (now - lastTick >= STEP) {
+    const steps = Math.min(4, Math.floor((now - lastTick) / STEP));
+    lastTick += steps * STEP;
+    for (let i = 0; i < steps && playing; i++) stepForward();
+    if (!fpsStarted) { fpsStarted = now; fpsFrames = 0; }
+    fpsFrames += steps;
+    if (now - fpsStarted > 500) {
+      fps = fpsFrames * 1000 / (now - fpsStarted);
+      fpsStarted = now; fpsFrames = 0;
+    }
+  }
+  if (playing) rafId = requestAnimationFrame(tick);
+}
+
+function play() {
+  if (!runtime && !applySource()) return;
+  if (currentFrame >= lengthFrames - 1) seek(0);
+  playing = true;
+  lastTick = 0;
+  fpsStarted = 0;
+  $("btn-play").textContent = "⏸";
+  $("btn-play").setAttribute("aria-label", "Pause");
+  if (!rafId) rafId = requestAnimationFrame(tick);
+}
+function pause() {
+  playing = false;
+  $("btn-play").textContent = "▶";
+  $("btn-play").setAttribute("aria-label", "Play");
+  if (rafId && typeof cancelAnimationFrame === "function") cancelAnimationFrame(rafId);
+  rafId = null;
+}
+function stop() { pause(); seek(0); }
+
+/* ---- panels ----------------------------------------------------------- */
+function stateNow() {
+  if (!runtime) return null;
+  if (panelState) return panelState;
+  const opts = runtime.options();
+  if (runtime.lastRaster) opts.raster = runtime.lastRaster;
+  panelState = PCEStudio.panels.state(opts);
+  return panelState;
+}
+
+function panelLine(st) {
+  return followAt ? Math.max(0, Math.min(st.height - 1, followAt.y)) : 0;
+}
+
+function hex(v, width) {
+  return "$" + (v == null ? "-" : v.toString(16).toUpperCase().padStart(width, "0"));
+}
+
+function drawScreen(st) {
+  const line = panelLine(st);
+  const v = PCEStudio.panels.lineValues(st, line);
+  $("screen-summary").textContent =
+    "VDW line " + v.line + " · BXR " + v.BXR + " · BYR " + v.BYR +
+    " · CR " + hex(v.CR, 2) + " · BG_YOffset " + v.BG_YOffset + "\n" +
+    "BAT " + st.geom.width + "×" + st.geom.height + " (MWR " +
+    hex((st.regs.MWR || 0) & 0xFF, 2) + ") · " + st.width + "×" + st.height +
+    " · frame " + Math.max(0, currentFrame);
+  if (!followAt) {
+    $("follow-info").textContent =
+      "Click the output to follow a pixel: the layer that won, its BAT entry " +
+      "or sprite, and the register values on that line.";
+    return;
+  }
+  let t;
+  try { t = PCEStudio.panels.followPixel(st, followAt.x, followAt.y); }
+  catch (e) { $("follow-info").textContent = e.message; return; }
+  let out = "pixel (" + t.x + "," + t.y + ") · VDW line " + t.line +
+            " · winner: " + t.layer + "\n";
+  out += "colour index " + hex(t.index, 2) + " · CRAM word " +
+         hex(t.colour.word, 4) + " · rgb(" + t.colour.r + "," +
+         t.colour.g + "," + t.colour.b + ")\n";
+  const b = t.background || {};
+  if (b.blanking) out += "background: blanking fill (BB clear)\n";
+  else {
+    out += "BAT word " + b.batIndex + " = " + hex(b.batWord, 4) +
+           " · char " + hex(b.char, 3) + " · palette " + b.palette +
+           " · tile row " + b.tileRow + " col " + b.tileColumn +
+           " · colour " + b.colourNumber + "\n";
+  }
+  if (t.sprite) {
+    out += "sprite " + t.sprite.number + " · pattern " +
+           hex(t.sprite.pattern, 3) + " · palette " + t.sprite.palette +
+           " · colour " + t.sprite.colourNumber + " · cell " +
+           t.sprite.cell + "\n";
+  }
+  const r = t.registers;
+  out += "line registers: BXR " + r.BXR + " · BYR " + r.BYR + " · CR " +
+         hex(r.CR, 2) + " · MWR " + hex(r.MWR, 2);
+  $("follow-info").textContent = out;
+}
+
+function drawVram(st) {
+  const map = PCEStudio.panels.vramMap(st);
+  const c = $("vrammap").getContext("2d");
+  const w = $("vrammap").width || 512, h = $("vrammap").height || 44;
+  c.fillStyle = "#08090c"; c.fillRect(0, 0, w, h);
+  const colour = (kind) =>
+    kind.indexOf("sprite patterns") === 0 ? "#c08040" :
+    kind === "BAT" ? "#3f8f6f" :
+    kind === "tiles" ? "#4f6fd0" :
+    kind === "SAT" ? "#b05090" : "#3a3f49";
+  for (const seg of map.segments) {
+    const x0 = Math.floor(seg.start * w / 32768);
+    const x1 = Math.max(x0 + 1, Math.floor((seg.start + seg.words) * w / 32768));
+    c.fillStyle = colour(seg.kind);
+    c.fillRect(x0, 0, x1 - x0, h);
+  }
+  let out = "whole VRAM, 0..32767 words\n";
+  for (const seg of map.segments) {
+    out += seg.kind.padEnd(16).slice(0, 16) + " " +
+      String(seg.start).padStart(5) + ".." +
+      String(seg.start + seg.words - 1).padStart(5) + "  (" + seg.words + ")\n";
+  }
+  const free = map.free.reduce((a, b) => a + b.words, 0);
+  out += "free: " + free + " of 32768 words";
+  $("vram-legend").textContent = out;
+}
+
+function drawPalettes(st) {
+  const vce = PCEStudio.panels.vcePalettes(st, panelLine(st));
+  const host = $("pal32");
+  if (!palCells) {
+    palCells = [];
+    for (let p = 0; p < 32; p++) {
+      const row = document.createElement("div");
+      row.className = "prow";
+      const num = document.createElement("span");
+      num.className = "pnum";
+      num.textContent = String(p);
+      row.appendChild(num);
+      const cells = [];
+      for (let e = 0; e < 16; e++) {
+        const sw = document.createElement("span");
+        sw.className = "psw" + (e === 0 && p < 16 ? " entry0" : "");
+        row.appendChild(sw);
+        cells.push(sw);
+      }
+      host.appendChild(row);
+      palCells.push(cells);
+    }
+  }
+  for (let p = 0; p < 32; p++) {
+    for (let e = 0; e < 16; e++) {
+      const c = vce.palettes[p][e];
+      const sw = palCells[p][e];
+      sw.style.background = "rgb(" + c.r + "," + c.g + "," + c.b + ")";
+      sw.title = "palette " + p + " entry " + e + " · CRAM " +
+        hex(c.index, 3) + " · word " + hex(c.word, 3);
+    }
+  }
+}
+
+function drawSprites(st) {
+  const sat = PCEStudio.panels.satTable(st);
+  let out = " #    Y    X  pattern pal size   flags cells\n";
+  for (const s of sat) {
+    if (s.empty) { out += String(s.number).padStart(2) + "   (empty)\n"; continue; }
+    const flags = (s.spbg ? "P" : "-") + (s.hflip ? "H" : "-") +
+                  (s.vflip ? "V" : "-") + (s.cgx ? "X" : "-");
+    out += String(s.number).padStart(2) + " " + String(s.y).padStart(4) + " " +
+      String(s.x).padStart(4) + " " + hex(s.pattern, 3).padStart(6) + " " +
+      String(s.palette).padStart(3) + "  " + s.width + "x" + s.height +
+      "  " + flags + "   " + s.cells.join(",") + "\n";
+  }
+  $("sat-table").textContent = out;
+}
+
+function drawScanlines(st) {
+  const lines = PCEStudio.panels.registerLines(st);
+  let out = "  line  BXR  BYR  CR  entry RCR\n";
+  for (const l of lines) {
+    out += (l.entryAtLine ? "*" : " ") + String(l.line).padStart(5) + " " +
+      String(l.BXR).padStart(4) + " " + String(l.BYR).padStart(4) + " " +
+      hex(l.CR, 2).padStart(4) + "  " + (l.entryAtLine ? "yes " : "  . ") +
+      (l.rcr == null ? "  -  " : hex(l.rcr, 4)) + "\n";
+  }
+  $("scan-table").textContent = out;
+}
+
+function drawRegisters(st) {
+  const row = panelLine(st);
+  const v = PCEStudio.panels.lineValues(st, row);
+  const regs = PCEStudio.panels.vdcRegisters(st, row);
+  let out = "VDW line " + v.line + " · BXR " + v.BXR + " · BYR " + v.BYR +
+    " · CR " + hex(v.CR, 2) + "\n\n";
+  out += " #  name     value   source\n";
+  for (const r of regs) {
+    out += "R" + r.number.toString(16).toUpperCase().padStart(2, "0") + "  " +
+      r.name.padEnd(8) + " " +
+      (r.value == null ? "-" : hex(r.value, 4)).padStart(7) + "  " +
+      (r.source || "-") + "\n";
+  }
+  const s = PCEStudio.panels.status(st);
+  out += "\nstatus (VDC SR): OR " + s.orLines.length + " · CC " +
+    s.ccLines.length + " · RR " + s.rrLines.length + " · SR " +
+    hex(s.sr, 2);
+  $("reg-table").textContent = out;
+}
+
+function drawConsole(st) {
+  let count = 0;
+  for (const s of PCEStudio.panels.satTable(st)) if (!s.empty) count++;
+  const perFrame = 119904;
+  $("console-table").textContent =
+    "PC Engine frame: " + perFrame + " CPU cycles (7.16 MHz, 60 Hz)\n" +
+    "per-line trigger: RCR interrupt (no HDMA)\n" +
+    "sprite entries in the SAT: " + count + "\n" +
+    "runtime: " + (current.mode === "il" ? "IL interpreter (#31)" : "Fengari Lua 5.3") + "\n" +
+    "frames run this session: " + (runtime ? runtime.frameCount : 0) + "\n" +
+    "compiler: IL only — machine code is #31's next half\n" +
+    "export: second half of #75";
+}
+
+function refreshPanels(force) {
+  if (!force && !panelDirty) return;
+  panelDirty = false;
+  const st = stateNow();
+  if (!st) return;
+  $("inspect-line").textContent = "line " + panelLine(st) + " · full frame";
+  if (activePanel === "screen") drawScreen(st);
+  else if (activePanel === "vram") drawVram(st);
+  else if (activePanel === "palettes") drawPalettes(st);
+  else if (activePanel === "sprites") drawSprites(st);
+  else if (activePanel === "scanlines") drawScanlines(st);
+  else if (activePanel === "registers") drawRegisters(st);
+  else if (activePanel === "console") drawConsole(st);
+  $("layer-pop").textContent = layerText(st);
+}
+
+function layerText(st) {
+  let count = 0;
+  for (const s of PCEStudio.panels.satTable(st)) if (!s.empty) count++;
+  return "BG  background · BAT " + st.geom.width + "×" + st.geom.height +
+    " · BXR " + st.regs.BXR + " · BYR " + st.regs.BYR + "\n" +
+    "OBJ  " + count + " sprite" + (count === 1 ? "" : "s") + " in the SAT";
+}
+
+function selectPanel(id) {
+  if (visiblePanels.indexOf(id) < 0) return;
+  activePanel = id;
+  for (const p of PANELS) {
+    $("panel-" + p.id).hidden = p.id !== id;
+    const tab = $("dtab-" + p.id);
+    if (tab) tab.classList.toggle("is-on", p.id === id);
+  }
+  const meta = PANELS.find((p) => p.id === id);
+  $("dock-title").textContent = meta.label;
+  $("dock-gloss").textContent = meta.gloss;
+  $("dock-guide").setAttribute("href", "../docs/STUDIO.md#panels");
+  refreshPanels(true);
+}
+
+/* ---- the dock tabs and the Panels menu -------------------------------- */
+function buildDock() {
+  const host = $("dock-tabs");
+  for (const p of PANELS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "dtab" + (p.id === "screen" ? " is-on" : "");
+    b.id = "dtab-" + p.id;
+    b.textContent = p.label;
+    b.addEventListener("click", () => selectPanel(p.id));
+    host.appendChild(b);
+  }
+}
+
+function buildPanelsMenu() {
+  const host = $("panels-pop");
+  const head = document.createElement("div");
+  head.className = "pop-head";
+  const title = document.createElement("span");
+  title.textContent = "PANELS";
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "pop-close";
+  close.id = "panels-close";
+  close.setAttribute("aria-label", "Close panels");
+  close.textContent = "×";
+  close.addEventListener("click", () => hidePop("panels-pop"));
+  head.appendChild(title); head.appendChild(close);
+  host.appendChild(head);
+
+  const group = (label) => {
+    const d = document.createElement("div");
+    d.className = "pop-head";
+    d.textContent = label;
+    host.appendChild(d);
+  };
+  const item = (label, on, fn) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pop-item";
+    const tick = document.createElement("span");
+    tick.className = "tick";
+    tick.textContent = on ? "✓" : "";
+    const text = document.createElement("span");
+    text.textContent = label;
+    b.appendChild(tick); b.appendChild(text);
+    b.addEventListener("click", fn);
+    host.appendChild(b);
+    return b;
+  };
+  group("WORKSPACE");
+  for (const w of WORKSPACE_ITEMS) {
+    item(w.label, true, () => {
+      if (w.id === "editor") $("code-pane").hidden = !$("code-pane").hidden;
+      else if (w.id === "output") $("output-pane").hidden = !$("output-pane").hidden;
+      else if (w.id === "assets") selectCodeTab("assets");
+      else if (w.id === "markers") selectBottomTab("markers");
+      else if (w.id === "agent") selectBottomTab("agent");
+    });
+  }
+  group("THE CHIP");
+  for (const p of PANELS) {
+    const on = visiblePanels.indexOf(p.id) >= 0;
+    item(p.label, on, () => togglePanel(p.id));
+  }
+  const sep = document.createElement("div"); sep.className = "pop-sep";
+  host.appendChild(sep);
+  item("Reset to default", true, () => {
+    visiblePanels = PANELS.map((p) => p.id);
+    for (const p of PANELS) {
+      const tab = $("dtab-" + p.id);
+      if (tab) tab.hidden = false;
+    }
+    $("code-pane").hidden = false;
+    $("output-pane").hidden = false;
+    selectPanel("screen");
+    hidePop("panels-pop");
+  });
+}
+
+function togglePanel(id) {
+  const i = visiblePanels.indexOf(id);
+  const tab = $("dtab-" + id);
+  if (i >= 0) {
+    if (visiblePanels.length === 1) { toast("At least one panel stays open."); return; }
+    visiblePanels.splice(i, 1);
+    if (tab) tab.hidden = true;
+    if (activePanel === id) selectPanel(visiblePanels[0]);
+  } else {
+    visiblePanels.push(id);
+    if (tab) tab.hidden = false;
+  }
+}
+
+/* ---- code / assets tabs ---------------------------------------------- */
+function selectCodeTab(which) {
+  const code = which === "code";
+  $("tab-code").classList.toggle("is-on", code);
+  $("tab-assets").classList.toggle("is-on", !code);
+  $("tab-code").setAttribute("aria-selected", String(code));
+  $("tab-assets").setAttribute("aria-selected", String(!code));
+  $("editor-pane").hidden = !code;
+  $("assets-pane").hidden = code;
+}
+
+function selectBottomTab(which) {
+  const markersOn = which === "markers";
+  $("tab-markers").classList.toggle("is-on", markersOn);
+  $("tab-agent").classList.toggle("is-on", !markersOn);
+  $("bottom-markers").hidden = !markersOn;
+  $("bottom-agent").hidden = markersOn;
+}
+
+/* ---- markers ---------------------------------------------------------- */
+function drawMarkers() {
+  const host = $("marker-list");
+  while (host.firstChild) host.removeChild(host.firstChild);
+  for (const m of markers) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "marker";
+    b.textContent = "frame " + m;
+    b.addEventListener("click", () => { pause(); seek(m); });
+    host.appendChild(b);
+  }
+}
+function addMarker() {
+  const f = Math.max(0, currentFrame);
+  if (markers.indexOf(f) < 0) markers.push(f);
+  markers.sort((a, b) => a - b);
+  drawMarkers();
+  toast("Marker at frame " + f + ".");
+}
+
+/* ---- popovers --------------------------------------------------------- */
+function hidePop(id) { $(id).hidden = true; }
+function togglePop(id) {
+  const el = $(id);
+  const show = el.hidden;
+  for (const other of ["panels-pop", "settings-pop", "open-pop"]) {
+    if (other !== id) $(other).hidden = true;
+  }
+  el.hidden = !show;
+  if (id === "panels-pop") $("btn-panels").setAttribute("aria-expanded", String(show));
+  if (id === "open-pop") $("btn-open").setAttribute("aria-expanded", String(show));
+}
+
+/* ---- examples and files ---------------------------------------------- */
+function findExample(id) {
+  return EXAMPLES.find((e) => e.id === id) || null;
+}
+function loadExample(id, quiet) {
+  const ex = findExample(id);
+  if (!ex) return false;
+  current.example = ex;
+  current.source = ex.source;
+  $("source").value = ex.source;
+  $("doc-title").textContent = ex.name;
+  drawGutter();
+  if (!applySource()) return false;
+  if (!quiet) toast("Opened " + ex.name + ".");
+  return true;
+}
+
+function drawGutter() {
+  const lines = $("source").value.split("\n").length;
+  let out = "";
+  for (let i = 1; i <= lines; i++) out += i + "\n";
+  $("gutter").textContent = out;
+}
+
+function saveFile() {
+  const name = current.example ? current.example.name : "toy.lua";
+  const a = document.createElement("a");
+  a.download = name;
+  a.href = "data:text/plain;charset=utf-8," + encodeURIComponent(current.source);
+  a.click();
+  setSaved("saved " + name);
+  toast("Saved " + name + ".");
+}
+
+/* ---- checks ----------------------------------------------------------- */
+function framesEqual(a, b) {
+  if (!a || !b) return false;
+  if (a.pixels.length !== b.pixels.length) return false;
+  for (let i = 0; i < a.pixels.length; i++) if (a.pixels[i] !== b.pixels[i]) return false;
+  if (JSON.stringify(a.raster) !== JSON.stringify(b.raster)) return false;
+  const sa = a.state, sb = b.state;
+  for (const k of ["vram", "cram", "sat"]) {
+    if (sa[k].length !== sb[k].length) return false;
+    for (let i = 0; i < sa[k].length; i++) if (sa[k][i] !== sb[k][i]) return false;
+  }
+  return sa.regs.BXR === sb.regs.BXR && sa.regs.BYR === sb.regs.BYR &&
+         sa.regs.MWR === sb.regs.MWR && sa.regs.CR === sb.regs.CR;
+}
+
+/* Run `count` frames of one example — or of the source box when exampleId is
+ * null — through one runtime and return the frames, without the live clock.
+ * The evidence runner calls this, and the Check button uses it for Lua, a
+ * second Lua run (determinism) and the IL. */
+function runFrames(count, exampleId, mode) {
+  const ex = exampleId ? findExample(exampleId) : null;
+  if (exampleId && !ex) throw new Error("no example " + exampleId);
+  const source = ex ? ex.source : $("source").value;
+  const oldMode = current.mode;
+  if (ex) current.example = ex;
+  current.source = source;
+  current.mode = mode || "lua";
+  pause();
+  padLog = [];
+  try {
+    rebuild();
+    const out = [];
+    for (let f = 0; f < count; f++) out.push(runFrame(f));
+    return out;
+  } finally {
+    current.mode = oldMode;
+  }
+}
+
+function checkToy() {
+  const id = current.example ? current.example.id : "current source";
+  try {
+    const lua1 = runFrames(40, null, "lua");
+    const lua2 = runFrames(40, null, "lua");
+    let same = lua1.length === lua2.length;
+    for (let i = 0; same && i < lua1.length; i++) same = framesEqual(lua1[i], lua2[i]);
+    let message = same
+      ? "Check: 40 frames · Lua deterministic · no refusal"
+      : "Check: FAIL — two Lua runs differ";
+    let ilSame = null;
+    try {
+      const ilFrames = runFrames(40, null, "il");
+      ilSame = ilFrames.length === lua1.length;
+      for (let i = 0; ilSame && i < lua1.length; i++) ilSame = framesEqual(lua1[i], ilFrames[i]);
+      message += ilSame ? " · IL == Lua" : " · IL DIFFERS from Lua";
+    } catch (e) {
+      message += " · IL refused (" + (e.code || "error") + ")";
+    }
+    /* leave the page on the source box's toy, frame 0, Lua */
+    current.mode = "lua";
+    $("btn-lua").classList.add("is-on");
+    $("btn-cart").classList.remove("is-on");
+    $("engine-status").textContent = "Lua 5.3";
+    clearError();
+    applySource();
+    pause();
+    setSaved("checked 40 frames · " + id);
+    toast(message);
+    return { same, ilSame, message };
+  } catch (e) {
+    showError(e);
+    setSaved("check failed — " + (e.code || "error"));
+    return { same: false, ilSame: null, message: String(e.message || e) };
+  }
+}
+
+/* ---- init ------------------------------------------------------------- */
+function buildExamplesMenu() {
+  const host = $("example-list");
+  for (const ex of EXAMPLES) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pop-item";
+    b.textContent = ex.name + " — " + ex.title;
+    b.addEventListener("click", () => {
+      hidePop("open-pop");
+      loadExample(ex.id);
+    });
+    host.appendChild(b);
+  }
+}
+
+function bind() {
+  /* top bar */
+  $("btn-run").addEventListener("click", () => {
+    if (!applySource()) return;
+    play();
+    toast("Running " + (current.example ? current.example.name : "the toy") + ".");
+  });
+  $("btn-check").addEventListener("click", checkToy);
+  $("btn-export").addEventListener("click", () => {
+    $("export-modal").hidden = false;
+  });
+  $("btn-export").setAttribute("aria-haspopup", "dialog");
+  $("export-close").addEventListener("click", () => {
+    $("export-modal").hidden = true;
+  });
+  $("btn-panels").addEventListener("click", () => togglePop("panels-pop"));
+  $("btn-settings").addEventListener("click", () => togglePop("settings-pop"));
+  $("btn-save").addEventListener("click", saveFile);
+  $("btn-open").addEventListener("click", () => togglePop("open-pop"));
+
+  /* code pane */
+  $("tab-code").addEventListener("click", () => selectCodeTab("code"));
+  $("tab-assets").addEventListener("click", () => selectCodeTab("assets"));
+  $("file-main").addEventListener("click", () => selectCodeTab("code"));
+  $("btn-newfile").addEventListener("click", () =>
+    toast("One Lua file per toy in this card; assets are #24/#71."));
+  $("source").addEventListener("input", () => {
+    current.source = $("source").value;
+    drawGutter();
+    setSaved("edited — Run to apply");
+    if (typeof localStorage !== "undefined") {
+      try { localStorage.setItem("pcestudio.toy", current.source); } catch (e) {}
+    }
+  });
+  $("source").addEventListener("scroll", () => {
+    $("gutter").scrollTop = $("source").scrollTop;
+  });
+  $("source").addEventListener("keydown", (e) => {
+    if (e.key !== "Tab") return;
+    e.preventDefault();
+    const el = $("source");
+    const start = el.selectionStart || 0;
+    const end = el.selectionEnd || 0;
+    el.value = el.value.slice(0, start) + "  " + el.value.slice(end);
+    el.selectionStart = el.selectionEnd = start + 2;
+    current.source = el.value;
+    drawGutter();
+  });
+
+  /* output head and transport */
+  $("tab-live").addEventListener("click", () =>
+    toast("The canvas is the live output; the panels read the same state."));
+  $("btn-layers").addEventListener("click", () => {
+    const el = $("layer-pop");
+    el.hidden = !el.hidden;
+    if (!el.hidden) {
+      const st = stateNow();
+      el.textContent = st ? layerText(st) : "no frame yet";
+    }
+  });
+  $("btn-crt").addEventListener("click", () => {
+    const on = $("canvas-wrap").classList.toggle("crt");
+    $("btn-crt").classList.toggle("is-on", on);
+    $("btn-crt").setAttribute("aria-pressed", String(on));
+  });
+  $("btn-snd").addEventListener("click", () =>
+    toast("Sound is card #71: the PSG model exists, the toy surface does not."));
+  $("btn-play").addEventListener("click", () => {
+    if (playing) pause(); else play();
+  });
+  $("btn-stop").addEventListener("click", stop);
+  $("btn-prev").addEventListener("click", () => {
+    pause();
+    seek(Math.max(0, currentFrame - 1));
+  });
+  $("btn-next").addEventListener("click", () => {
+    pause();
+    seek(Math.min(lengthFrames - 1, currentFrame + 1));
+  });
+  $("btn-lua").addEventListener("click", () => setMode("lua"));
+  $("btn-cart").addEventListener("click", () => setMode("il"));
+  $("seek").addEventListener("input", () => {
+    pause();
+    seek(Number($("seek").value));
+  });
+  $("length").addEventListener("change", () => {
+    const n = Math.max(1, Math.min(3600, Number($("length").value) || 300));
+    lengthFrames = n;
+    $("length").value = String(n);
+    $("seek").max = String(n - 1);
+    if (currentFrame >= n) seek(n - 1);
+  });
+
+  /* markers / agent */
+  $("tab-markers").addEventListener("click", () => selectBottomTab("markers"));
+  $("tab-agent").addEventListener("click", () => selectBottomTab("agent"));
+  $("btn-addmarker").addEventListener("click", addMarker);
+
+  /* the canvas: follow a pixel, and the controller while it has focus */
+  canvas.addEventListener("click", (e) => {
+    const r = canvas.getBoundingClientRect();
+    const x = Math.floor((e.clientX - r.left) * canvas.width / (r.width || 1));
+    const y = Math.floor((e.clientY - r.top) * canvas.height / (r.height || 1));
+    followAt = { x: Math.max(0, Math.min(canvas.width - 1, x)),
+                 y: Math.max(0, Math.min(canvas.height - 1, y)) };
+    selectPanel("registers");
+    toast("Following pixel " + followAt.x + "," + followAt.y + ".");
+  });
+  canvas.addEventListener("keydown", (e) => {
+    if (PAD_KEYS[e.code]) {
+      heldPad[PAD_KEYS[e.code]] = true;
+      e.preventDefault();
+      return;
+    }
+    if (e.code === "Space") { if (playing) pause(); else play(); e.preventDefault(); }
+    else if (e.code === "KeyR") { stop(); play(); e.preventDefault(); }
+  });
+  canvas.addEventListener("keyup", (e) => {
+    if (PAD_KEYS[e.code]) {
+      delete heldPad[PAD_KEYS[e.code]];
+      e.preventDefault();
+    }
+  });
+
+  /* settings */
+  $("settings-close").addEventListener("click", () => hidePop("settings-pop"));
+  $("keys-plain").addEventListener("click", () => {
+    $("keys-plain").classList.add("is-on");
+    $("keys-vim").classList.remove("is-on");
+    $("keys-status").textContent = "plain keys";
+    toast("Plain editor keys.");
+  });
+  $("keys-vim").addEventListener("click", () =>
+    toast("Vim keys are not in this card; the editor is plain (ppu.toys has vim opt-in)."));
+  $("toggle-gutter").addEventListener("click", () => {
+    lineNumbers = !lineNumbers;
+    $("editor-pane").classList.toggle("no-gutter", !lineNumbers);
+    $("toggle-gutter").textContent = lineNumbers ? "On" : "Off";
+  });
+  $("toggle-crt-default").addEventListener("click", () => {
+    crtDefault = !crtDefault;
+    $("toggle-crt-default").textContent = crtDefault ? "On" : "Off";
+    $("canvas-wrap").classList.toggle("crt", crtDefault);
+    $("btn-crt").classList.toggle("is-on", crtDefault);
+  });
+
+  /* open */
+  $("open-close").addEventListener("click", () => hidePop("open-pop"));
+  $("open-file").addEventListener("click", () => $("file-input").click());
+  $("file-input").addEventListener("change", () => {
+    const file = $("file-input").files && $("file-input").files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      current.source = String(reader.result || "");
+      current.example = null;
+      $("source").value = current.source;
+      $("doc-title").textContent = file.name;
+      drawGutter();
+      applySource();
+      hidePop("open-pop");
+      toast("Opened " + file.name + ".");
+    };
+    reader.readAsText(file);
+  });
+
+  /* keyboard shortcuts outside the editor: ppu.toys' set, plus Run */
+  window.addEventListener("keydown", (e) => {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) {
+      if (e.key === "Escape") {
+        hidePop("panels-pop"); hidePop("settings-pop"); hidePop("open-pop");
+        $("export-modal").hidden = true;
+      }
+      return;
+    }
+    if (e.key === "Enter") { if (!applySource()) return; play(); e.preventDefault(); }
+    else if (e.key === ".") { pause(); seek(Math.min(lengthFrames - 1, currentFrame + 1)); e.preventDefault(); }
+    else if (e.key === ",") { pause(); seek(Math.max(0, currentFrame - 1)); e.preventDefault(); }
+    else if (e.key.toLowerCase() === "s") { saveFile(); e.preventDefault(); }
+  });
+}
+
+function init() {
+  buildDock();
+  buildPanelsMenu();
+  buildExamplesMenu();
+  bind();
+  selectPanel("screen");
+  selectCodeTab("code");
+  selectBottomTab("markers");
+
+  const qs = (typeof URLSearchParams === "function")
+    ? new URLSearchParams(location.search) : new URLSearchParams("");
+  const panelParam = qs.get("panel");
+  if (panelParam && PANELS.some((p) => p.id === panelParam)) selectPanel(panelParam);
+
+  let startExample = EXAMPLES[0];
+  const demo = qs.get("demo");
+  if (demo) startExample = findExample(demo) || startExample;
+  else {
+    try {
+      const saved = typeof localStorage !== "undefined"
+        ? localStorage.getItem("pcestudio.toy") : null;
+      if (saved) {
+        current.source = saved;
+        current.example = null;
+        $("doc-title").textContent = "saved toy";
+      }
+    } catch (e) { /* storage is a convenience, not a promise */ }
+  }
+  if (demo || !current.source) {
+    current.example = startExample;
+    current.source = startExample.source;
+    $("doc-title").textContent = startExample.name;
+  }
+  $("source").value = current.source;
+  drawGutter();
+  $("seek").max = String(lengthFrames - 1);
+
+  if (qs.get("selftest")) {
+    const n = Math.max(1, parseInt(qs.get("frames") || "40", 10) || 40);
+    const id = qs.get("example") || "palette";
+    let text;
+    try {
+      const frames = runFrames(n, id, qs.get("mode") || "lua");
+      const last = frames[frames.length - 1];
+      let h = 2166136261;
+      const feed = (arr) => { for (let i = 0; i < arr.length; i++) {
+        h ^= arr[i]; h = Math.imul(h, 16777619); } };
+      feed(last.pixels); feed(last.state.vram); feed(last.state.cram);
+      feed(last.state.sat);
+      h ^= last.state.regs.BXR; h = Math.imul(h, 16777619);
+      h ^= last.state.regs.BYR; h = Math.imul(h, 16777619);
+      h ^= last.state.regs.CR; h = Math.imul(h, 16777619);
+      text = "PASS " + frames.length + " frames · " + id + " · frame " +
+        last.frame + " · " + last.width + "x" + last.height + " · pixels " +
+        last.pixels.length + " · digest " + (h >>> 0).toString(16).padStart(8, "0");
+      if (document.title !== undefined) document.title = "PASS " + frames.length;
+    } catch (e) {
+      text = "FAIL " + (e.code ? e.code + ": " : "") + (e.message || e);
+      if (document.title !== undefined) document.title = "FAIL";
+    }
+    const el = $("selftest");
+    el.hidden = false;
+    el.textContent = text;
+    pause();
+    refreshPanels(true);
+    return;
+  }
+
+  if (!applySource()) return;
+  const at = qs.get("frame");
+  if (at !== null) { seek(parseInt(at, 10) || 0); pause(); }
+  else if (qs.get("paused")) pause();
+  else play();
+}
+
+/* The tests read the page's own state through this object: no second copy of
+ * a toy, and no test-only branch in the runtime. */
+PCEStudio.studio = {
+  examples: EXAMPLES,
+  panels: PANELS,
+  current: () => ({ id: current.example && current.example.id,
+                    name: current.example && current.example.name,
+                    mode: current.mode, frame: currentFrame,
+                    source: current.source }),
+  runFrames: runFrames,
+  check: checkToy,
+  seek: seek,
+  play: play,
+  pause: pause,
+  stop: stop,
+  loadExample: loadExample,
+  state: () => (runtime ? stateNow() : null),
+  runtime: () => runtime,
+  markers: () => markers.slice()
+};
+
+init();
+</script>
+</body>
+</html>
