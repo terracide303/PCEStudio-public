@@ -95,7 +95,7 @@ from the run's log.
 | A6 | `refreshPads` makes every `pad[n]` read `pad[1]` | **DETECTED** | exit 1, `FAIL 8 of 757 checks failed`; e.g. frame 0 pad 5 got pad 1's `right=true` where its own `i=true` was wanted |
 | A7 | `p_dec` rejects `len >= P_MAX_STRING`, so a 64-byte string does not unpack | **DETECTED** | exit 1, `FAIL 1 of 747 checks failed`; `the cap toy loaded and ran (got password-code: pce-toys-kit.lua:114: a bad string length in the code)` |
 | A12 | every frame loop runs `FRAMES - 1` frames (all five loops, including the counting toy) | **DETECTED** | exit 1, `FAIL 6 of 740 checks failed`; `the toy's last count is the frame count (got "39", want "40")`, and each toy's host count reports 39 |
-| V1 | `prestep_vec` no longer stores `$2240/$2241`; boot stores step 0's handler (`irq1_c1`) once | **DETECTED** | exit 1; `saved BYR=0 != table's 81 (last byr entry 232)`, `cram entry 0: table 1ff != state 0`, `vraster13: 100256 differing pixels of 178176 bytes` (e.g. `px(0,0) renderer=252,252,252 viewer=0,0,0`); the other 35 captures stay green — the reviewer's no-op on homogeneous tables is preserved |
+| V1 | `prestep_vec` no longer stores `$2240/$2241`; boot stores step 0's handler (`irq1_c1`) once | **DETECTED** | exit 1; `saved BYR=0 != table's 81 (last byr entry 232)`, `cram entry 0: table 1ff != state 0`, `vraster13: 100256 differing pixels of 178176 bytes` (e.g. `px(0,0) renderer=252,252,252 viewer=0,0,0`); the other 34 captures and both trace fixtures stay green — the reviewer's no-op on homogeneous tables is preserved |
 
 V1's mutant ROM really differs from the pristine one: sha256
 `8b5e29b4…` vs `4b17f6d9…`. The mutant capture is the ROM's own Mednafen
