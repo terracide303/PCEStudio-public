@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""genroms.py — generate the PCEStudio test-scene ROMs (cards #5 and #39).
+"""genroms.py — generate the PCEStudio test-scene ROMs (cards #5, #39, #12).
 
 Each scene is a HuCard ROM that initialises the VDC/VCE (the canonical HuDK
 256x224 init values, see docs/BUILD.md and hello.asm), fills the VCE colour
-table and VDC VRAM (tiles + BAT) with a deterministic picture, turns the
-background on and loops.  Mednafen runs the ROM; its save state is the
-"VRAM+palette dump" and its screenshot the pixel reference (see capture.sh
-and tests/).
+table and VDC VRAM (tiles + BAT, and for the sprite scenes the SG patterns +
+SAT) with a deterministic picture, turns the background/sprites on and
+loops.  Mednafen runs the ROM; its save state is the "VRAM+palette dump" and
+its screenshot the pixel reference (see capture.sh and tests/).
 
 The scenes differ in what they exercise in the renderer:
   scene1 "flat"    32x32 BAT, no scroll, tiles 0x040+/0xF00+ (12-bit tile
@@ -206,6 +206,36 @@ def bat_formula(scene, x, y):
     else:
         raise AssertionError(scene)
     return (pal << 12) | tile
+
+
+def tile_region_bytes(scene, tiles):
+    """VRAM word bytes for tile regions: per (char0, count) -> words
+    char*16+row for row 0..7 (CH0/CH1 = bits 0-7/8-15 of word char*16+row,
+    CH2/CH3 = word char*16+8+row).  Returns (bytes, [(vbase, char0, count)])."""
+    tile_bytes = bytearray()
+    regions = []
+    for char0, count in tiles:
+        vbase = char0 * 16
+        for t in range(count):
+            for row in range(8):
+                w = (tile_word(scene, char0 + t, 0, row)
+                     | tile_word(scene, char0 + t, 1, row))
+                tile_bytes += bytes((w & 0xFF, (w >> 8) & 0xFF))
+            for row in range(8):
+                w = (tile_word(scene, char0 + t, 2, row)
+                     | tile_word(scene, char0 + t, 3, row))
+                tile_bytes += bytes((w & 0xFF, (w >> 8) & 0xFF))
+        regions.append((vbase, char0, count))
+    return tile_bytes, regions
+
+
+def bat_bytes_full(scene, w, h):
+    out = bytearray()
+    for y in range(h):
+        for x in range(w):
+            v = bat_entry(scene, x, y)
+            out += bytes((v & 0xFF, (v >> 8) & 0xFF))
+    return out
 
 
 def pages_of(word_bytes):
@@ -499,6 +529,414 @@ BAT_LOOPS = {"s3": BAT_FORMULA_ASM,
              "s7": BAT_FORMULA7_ASM}
 
 
+# ---- sprite scenes (#12) ---------------------------------------------------
+# Sprite model (VDC manual 2.4 p. H7-19..H7-24; Mednafen vdc.cpp and HuDK
+# sprites.inc as references — see docs/RENDERER.md): SAT word 0 = Y (bits
+# 0-9, 64 = display row 0), word 1 = X (bits 0-9, 32 = display column 0),
+# word 2 = pattern << 1 (bit 0 = 4-colour mode, not used), word 3 = palette
+# bits 0-3, SPBG bit 7, CGX bit 8, HFLIP bit 11, CGY bits 12-13, VFLIP 15.
+# Sizes: CGY 00/01/10/11 -> 16/32/64/64 rows, CGX -> 32 columns (two 16-px
+# strips).  Pattern p (word 2 >> 1) addresses a 64-word VRAM cell at p*64:
+# SG0..SG3 planes at +0/+16/+32/+48 words + row.  The VDC masks p's low
+# bits per size and adds the block/half select: 16x16 = cell p; 16x32 =
+# cells p&~2, p&~2+2 (the manual's 2CGY: blocks are pattern codes with
+# PC2 = pattern bit 1); 16x64 = p&~6+{0,2,4,6} (4CGY: PC3,PC2); 32-px wide
+# = halves at p&~1, p&~1+1 (CGX: PC1), HFLIP swapping them.  Scale sources:
+# Mednafen vdc.cpp FetchSpriteData reads no*64; MagicKit spr_pattern stores
+# addr>>5 into word 2 whose bit 0 is the CG bit, so the cell is addr>>6 —
+# the MiSTer core's tile select (PC(10:4)&TILE_N, 64-word tiles) agrees.
+# The SAT lives at VRAM 0x7F00 (DVSSR) and DCR bit 4 = SATB DMA moves it
+# into the SATB at every VBlank.  At most 16 strips per display line, in
+# SATB order (lowest SAT index = highest priority): later sprites on the
+# line are dropped.  Pixel 0 is transparent; the sprite wins over a BG
+# pixel of colour 0, and SPBG=1 wins over any BG pixel.
+
+# SG pattern word (plane pl, row r) of pattern p: ROTL16(P_pl, (r + p) & 0xF).
+# Plane constants P_0..P_3.  P_3 = 0x00FF has rotation period exactly 16, so
+# all 16 rows of every pattern differ; the formula also keeps every word's
+# two bytes different from any other plane's, so flips/size mistakes change
+# pixels.  The ROM computes the same words with a rotate loop (SG_FORMULA_ASM
+# below); this is the generator's mirror for verification.
+SG_PLANES = [0x5555, 0x3333, 0x0F0F, 0x00FF]
+
+
+def sg_word(pat, plane, row):
+    n = (row + pat) & 0xF
+    w = SG_PLANES[plane]
+    return ((w << n) | (w >> (16 - n))) & 0xFFFF if n else w
+
+
+def _spr(x, y, pal=0, spbg=1, cgx=0, cgy=0, hflip=0, vflip=0):
+    """One SAT entry: x/y are SAT field values (display column/row + 32/64)."""
+    return dict(x=x, y=y, pal=pal, spbg=spbg, cgx=cgx, cgy=cgy,
+                hflip=hflip, vflip=vflip)
+
+
+def pack_patterns(sprites):
+    """Assign contiguous SG pattern bases from 0x80 (VRAM 0x2000+).  The SAT
+    pattern code addresses 64-word cells (cell p -> VRAM word p*64, planes
+    at +0/+16/+32/+48 + row); one sprite's SG data is one or more cells:
+    16x16 = 1 cell; 16x32 = cells p&~2, p&~2+2 (the odd cells of the span
+    are free but reserved — packing stays contiguous); 16x64 = p&~6 +
+    {0,2,4,6}; 32x16 = p&~1, p&~1+1; 32x32 = p&~3..p&~3+3; 32x64 =
+    p&~7..p&~7+7.  Returns (pat0, nblocks, [base per sprite])."""
+    cursor = 0x80
+    bases = []
+    blocks = []
+    for s in sprites:
+        h = [16, 32, 64, 64][s["cgy"]]
+        # cells the VDC reads, and the reserved span (CGX cells are
+        # consecutive; CGY-only blocks sit 2 apart, span 2*blocks)
+        if s["cgx"]:
+            size, align = {16: (2, 2), 32: (4, 4), 64: (8, 8)}[h]
+        else:
+            size, align = {16: (1, 1), 32: (4, 4), 64: (8, 8)}[h]
+        base = (cursor + align - 1) & ~(align - 1)
+        bases.append(base)
+        blocks += list(range(base, base + size))
+        cursor = max(blocks[-size:]) + 1
+    return 0x80, max(blocks) - 0x80 + 1, bases
+
+
+def sat_words(sprites, bases):
+    words = []
+    for s, pat in zip(sprites, bases):
+        w3 = ((s["pal"] & 0xF) | ((s["spbg"] & 1) << 7) | ((s["cgx"] & 1) << 8)
+              | ((s["hflip"] & 1) << 11) | ((s["cgy"] & 3) << 12)
+              | ((s["vflip"] & 1) << 15))
+        words += [s["y"] & 0x3FF, s["x"] & 0x3FF, (pat << 1) & 0x7FF, w3]
+    assert len(words) <= 256
+    words += [0] * (256 - len(words))
+    return words
+
+
+def _sprites(*args):
+    return [_spr(*a) for a in args]
+
+
+SPRITE_SCENES = {
+    # sprite1 "sizes": all six sizes on one row, distinct palettes.  Every
+    # sprite has a different pattern range, so a renderer that misreads CGX/
+    # CGY (e.g. draws a 16x16 from a 32x64's pattern, or the right CGY
+    # blocks) shows the wrong pixels everywhere.
+    "sprite1": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                    bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                    tiles=[(0x040, 32), (0xF00, 16)],
+                    sprites=_sprites(
+                        (40, 66, 0), (64, 66, 1, 1, 0, 1), (88, 66, 2, 1, 0, 3),
+                        (112, 66, 3, 1, 1), (152, 66, 4, 1, 1, 1),
+                        (192, 66, 5, 1, 1, 3))),
+    # sprite2 "flips": normal / X / Y / XY, then a 32-px X-flip (halves
+    # swapped) and a 16x32 Y-flip (blocks reversed).  Each sprite its own
+    # pattern so a wrong flip direction (or no flip) is visible per-sprite.
+    "sprite2": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                    bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                    tiles=[(0x040, 32), (0xF00, 16)],
+                    sprites=_sprites(
+                        (40, 66, 0), (72, 66, 1, 1, 0, 0, 1),
+                        (104, 66, 2, 1, 0, 0, 0, 1), (136, 66, 3, 1, 0, 0, 1, 1),
+                        (168, 66, 4, 1, 1, 0, 1), (200, 66, 5, 1, 0, 1, 0, 1))),
+    # sprite3 "priority": the BG is transparent (colour 0) left of column 16
+    # and solid colour 7 right of it.  SPBG=0 sprite over the transparent
+    # half shows, over the solid half it is hidden (s2 = hidden witness);
+    # SPBG=1 shows everywhere.  s3/s4 overlap on the boundary: s3 (SPBG=0,
+    # lower SAT index) wins the overlap pixels where both show.
+    "sprite3": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                    bat_w=32, bat_h=32, bat_tables=True, bg="stripes",
+                    tiles=[],
+                    sprites=_sprites(
+                        (56, 66, 0, 0), (72, 66, 1, 1), (88, 66, 2, 0),
+                        (56, 90, 3, 0), (56, 94, 4, 1))),
+    # sprite4 "17line": 19 sprites on row 66 — 16 strips fit a line, so the
+    # VDC shows SAT indices 0..15 and drops 16..18 (SATB order).  The last
+    # sprite sits on its own line and must still show: the limit is per
+    # line, not per frame.  Spacing 13 px < 16 px width, so neighbours
+    # overlap 3 columns and the higher SAT index must lose the overlap.
+    "sprite4": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                    bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                    tiles=[(0x040, 32), (0xF00, 16)],
+                    sprites=_sprites(*[(32 + 13 * i, 66, i & 0xF)
+                                       for i in range(19)]
+                                     + [(32, 150, 3)])),
+    # sprite5 "palettes": 16 sprites, one per sprite palette, 4x4 grid.
+    # Each palette's CRAM entries (0x100 + pal*16 + pixel) are distinct, so
+    # a wrong palette shift changes every pixel of that sprite.
+    "sprite5": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                    bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                    tiles=[(0x040, 32), (0xF00, 16)],
+                    sprites=_sprites(*[(32 + (i & 3) * 56, 66 + (i >> 2) * 40, i)
+                                       for i in range(16)])),
+    # sprite6 "clip": left/right/top/bottom clipping (s0..s3), a fully
+    # visible reference (s4) and one entirely above the picture (s5, must
+    # not draw).  Each clipped sprite keeps a distinctive slice visible.
+    "sprite6": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                    bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                    tiles=[(0x040, 32), (0xF00, 16)],
+                    sprites=_sprites(
+                        (24, 66, 0), (280, 66, 1), (40, 60, 2), (80, 290, 3),
+                        (100, 66, 4), (120, 30, 5))),
+    # sprite7 "cgy": 16x64 straight (blocks at p+0/+2/+4/+6 in order), the
+    # same Y-flipped (blocks reversed, rows reversed within each block),
+    # 16x32, and a 32x64 (8 consecutive patterns).  All four CGY code
+    # points, both directions.
+    "sprite7": dict(mwr=0x00, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                    bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                    tiles=[(0x040, 32), (0xF00, 16)],
+                    sprites=_sprites(
+                        (40, 66, 0, 1, 0, 3), (72, 66, 1, 1, 0, 3, 0, 1),
+                        (104, 66, 2, 1, 0, 1), (136, 66, 3, 1, 1, 3))),
+    # sprite8 "bgon": background off (CR=0x40: SB set, BB clear).  Every BG
+    # pixel is the blanking colour 0x100 — whose low nibble is 0, so an
+    # SPBG=0 sprite shows over it like over any BG colour 0 (s0, s2); an
+    # SPBG=1 sprite shows everywhere (s1).  A renderer that hides sprites
+    # when BB is clear, or hides SPBG=0 sprites on the blank fill, diffs.
+    "sprite8": dict(mwr=0x00, bxr=0, byr=0, cr=0x40, dcr=DCR,
+                    bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                    tiles=[(0x040, 32), (0xF00, 16)],
+                    sprites=_sprites(
+                        (40, 66, 0, 0), (72, 66, 1, 1), (104, 66, 2, 0, 0, 3))),
+}
+
+SG_FORMULA_ASM = """\
+        ; sprite generator (SG): 64 words per pattern cell, plane-major — the
+        ; VDC reads plane pl, row r of cell p at word p*64 + pl*16 + r
+        ; (SG0..SG3 = +0/+16/+32/+48), for the contiguous cells $80..
+        ; (pack_patterns in genroms.py).
+        ; word (plane, row) of cell p = ROTL16(P_plane, (row + p) & 0xF)
+        ; with P = 0x5555, 0x3333, 0x0F0F, 0x00FF — sg_word() in genroms.py
+        ; is the generator's mirror.  NOTE: every zp operand is written <$xx
+        ; (pceas emits bare $12 as a 16-bit absolute address aliasing the
+        ; VDC I/O page — see the scene-3 loop note).
+        st0 #$02                ; MAWR was set to $80*64 = $2000 before this
+        stz <$20                ; block counter (cell = $80 + counter)
+sgnext:
+        stz <$22                ; plane = 0
+sgplane:
+        lda <$22
+        tax
+        lda sgconst_lo, X
+        sta <$25
+        lda sgconst_hi, X
+        sta <$26                ; constant P_plane (kept: rotate consumes <$23)
+        stz <$21                ; row = 0
+sgrow:
+        lda <$25
+        sta <$23
+        lda <$26
+        sta <$24                ; word = P_plane
+        lda <$20
+        clc
+        adc <$21
+        and #$0f                ; n = (row + cell) & 0xF ($80 low nibble 0)
+        tax
+        beq sgstore
+sgrot:
+        asl <$23                ; 16-bit rotate left: lo <<= 1, carry -> hi
+        rol <$24                ; hi = hi<<1 | carry; carry = old bit 15
+        bcc sgrot1
+        inc <$23                ; old bit 15 -> lo bit 0
+sgrot1:
+        dex
+        bne sgrot
+sgstore:
+        lda <$23
+        sta $0002
+        lda <$24
+        sta $0003
+        inc <$21
+        lda <$21
+        cmp #16
+        bne sgrow
+        inc <$22
+        lda <$22
+        cmp #4
+        bne sgplane
+        inc <$20
+        lda <$20
+        cmp #%d
+        bne sgnext
+"""
+
+
+def gen_sprite_asm(name):
+    """Sprite scenes: scene 1's background (or the sprite3 stripes), the SG
+    patterns, the SAT at VRAM 0x7F00 and sprites on."""
+    s = SPRITE_SCENES[name]
+    cram = cr_words()
+    cram_lo = [w & 0xFF for w in cram]
+    cram_hi = [(w >> 8) & 1 for w in cram]
+
+    if s["bg"] == "stripes":
+        # left half of the BAT reads an all-transparent tile (colour 0 ->
+        # CRAM[0x000]), right half an all-colour-7 tile
+        tile_bytes = bytearray(bytes(32)) + bytearray(bytes([0x77, 0x77]) * 16)
+        regions = [(0x040, 0x040, 1), (0x041, 0x041, 1)]
+        bat_bytes = bytearray()
+        for y in range(32):
+            for x in range(32):
+                bat_bytes += bytes((0x040 if x < 16 else 0x041, 0x00))
+    else:  # scene 1's picture
+        tile_bytes, regions = tile_region_bytes(1, s["tiles"])
+        bat_bytes = bat_bytes_full(1, s["bat_w"], s["bat_h"])
+
+    pat0, nblocks, bases = pack_patterns(s["sprites"])
+    assert pat0 == 0x80, "SG loop assumes PAT0 = $80"
+    sat_bytes = bytearray()
+    for w in sat_words(s["sprites"], bases):
+        sat_bytes += bytes((w & 0xFF, (w >> 8) & 0xFF))
+
+    out = []
+    out.append(f";; PCEStudio sprite scene {name} — generated by "
+               "tools/genroms.py, do not edit")
+    out.append(f";; {s['bat_w']}x{s['bat_h']} BAT, CR=${s['cr']:02x}, "
+               f"{len(s['sprites'])} SAT entries, SG patterns "
+               f"${pat0:03x}..${pat0 + nblocks - 1:03x}")
+    out.append("        .code")
+    out.append("        .bank 0")
+    out.append("        .org $fff6")
+    out.append("        .dw irq2")
+    out.append("        .dw irq1")
+    out.append("        .dw timer")
+    out.append("        .dw nmi")
+    out.append("        .dw reset")
+    out.append("")
+    out.append("        .code")
+    out.append("        .bank 0")
+    out.append("        .org $e000")
+    out.append("")
+    out.append("reset:")
+    out.append("        sei")
+    out.append("        csh")
+    out.append("        cld")
+    out.append("        ldx #$ff")
+    out.append("        txs")
+    out.append("        lda #$ff")
+    out.append("        tam0")
+    out.append("        lda #$f8")
+    out.append("        tam1")
+    out.append("")
+    out.append("        ; VCE: 263-line mode, 5.37 MHz dot clock (256 px)")
+    out.append("        lda #$04")
+    out.append("        sta $0400")
+    out.append("")
+    out.append("        ; colour table: 512 entries (CTA autoincrements on high write)")
+    out.append("        stz $0402")
+    out.append("        stz $0403")
+    out.append("        clx")
+    out.append("cram0:")
+    out.append("        lda cram0_lo, X")
+    out.append("        sta $0404")
+    out.append("        lda cram0_hi, X")
+    out.append("        sta $0405")
+    out.append("        inx")
+    out.append("        bne cram0")
+    out.append("        clx")
+    out.append("cram1:")
+    out.append("        lda cram1_lo, X")
+    out.append("        sta $0404")
+    out.append("        lda cram1_hi, X")
+    out.append("        sta $0405")
+    out.append("        inx")
+    out.append("        bne cram1")
+    out.append("")
+    out.append("        ; VDC init (HuDK vdc_init_table values; DCR bit 4 =")
+    out.append("        ; SATB DMA — the SAT is written below and the SATB")
+    out.append("        ; follows it on the next VBlank)")
+    emit_vdc_regs(out, s)
+    out.append("")
+
+    out.append(f"        ; BAT: {len(bat_bytes) // 2} words at VRAM 0")
+    out.append("        st0 #$00")
+    out.append("        st1 #$00")
+    out.append("        st2 #$00")
+    out.append("        st0 #$02")
+    lo_pages, hi_pages = pages_of(bytes(bat_bytes))
+    emit_copy_loop(out, "bat_", lo_pages, hi_pages)
+    out.append("")
+
+    # ---- tiles, one copy region per (char0, count)
+    out.append(f"        ; tiles: {len(tile_bytes) // 2} words")
+    page_tables = []
+    remaining = bytes(tile_bytes)
+    for vbase, char0, count in regions:
+        words = count * 16
+        region = remaining[0:words * 2]
+        remaining = remaining[words * 2:]
+        lo_pages, hi_pages = pages_of(region)
+        out.append(f"        ; region at VRAM ${vbase:04x}")
+        out.append("        st0 #$00")
+        out.append(f"        st1 #${vbase & 0xff:02x}")
+        out.append(f"        st2 #${(vbase >> 8) & 0xff:02x}")
+        out.append("        st0 #$02")
+        label = f"tile{len(page_tables)}_"
+        emit_copy_loop(out, label, lo_pages, hi_pages)
+        out.append("")
+        for p in range(len(lo_pages)):
+            page_tables.append((label, p, lo_pages[p], hi_pages[p]))
+
+    # ---- SG patterns (formula loop, 64 words per cell)
+    out.append(f"        ; SG cells ${pat0:03x}..${pat0 + nblocks - 1:03x} "
+               f"at VRAM ${pat0 * 64:04x} ({nblocks * 64} words)")
+    out.append("        st0 #$00")
+    out.append("        st1 #$00")
+    out.append("        st2 #$20")
+    out.append(SG_FORMULA_ASM % nblocks)
+    out.append("")
+
+    # ---- SAT (64 entries x 4 words at VRAM 0x7F00)
+    out.append("        ; SAT: 64 entries at VRAM 0x7F00 (DVSSR); the SATB")
+    out.append("        ; DMA (DCR bit 4) copies it into the SATB every VBlank")
+    out.append("        st0 #$00")
+    out.append("        st1 #$00")
+    out.append("        st2 #$7f")
+    out.append("        st0 #$02")
+    lo_pages, hi_pages = pages_of(bytes(sat_bytes))
+    emit_copy_loop(out, "sat_", lo_pages, hi_pages)
+    out.append("")
+
+    out.append("        ; sprites on (CR bit 6 = SB); "
+               + ("background on (BB)" if s["cr"] & 0x80
+                  else "background off (BB clear): every BG pixel is the "
+                       "blanking colour CRAM[0x100]"))
+    out.append("        st0 #$05")
+    out.append(f"        st1 #${s['cr']:02x}")
+    out.append("        st2 #$00")
+    out.append("")
+    out.append("loop:")
+    out.append("        bra loop")
+    out.append("")
+    out.append("irq2:")
+    out.append("irq1:")
+    out.append("timer:")
+    out.append("nmi:")
+    out.append("        rti")
+    out.append("")
+    # ---- data tables
+    out += emit_byte_table("cram0_lo", bytes(cram_lo[0:256]))
+    out += emit_byte_table("cram0_hi", bytes(cram_hi[0:256]))
+    out += emit_byte_table("cram1_lo", bytes(cram_lo[256:512]))
+    out += emit_byte_table("cram1_hi", bytes(cram_hi[256:512]))
+    out.append("")
+    out += emit_byte_table("sgconst_lo", bytes([w & 0xFF for w in SG_PLANES]))
+    out += emit_byte_table("sgconst_hi", bytes([w >> 8 for w in SG_PLANES]))
+    out.append("")
+    lo_pages, hi_pages = pages_of(bytes(bat_bytes))
+    for p in range(len(lo_pages)):
+        out += emit_byte_table(f"bat_{p}_lo", lo_pages[p])
+        out += emit_byte_table(f"bat_{p}_hi", hi_pages[p])
+    out.append("")
+    lo_pages, hi_pages = pages_of(bytes(sat_bytes))
+    for p in range(len(lo_pages)):
+        out += emit_byte_table(f"sat_{p}_lo", lo_pages[p])
+        out += emit_byte_table(f"sat_{p}_hi", hi_pages[p])
+    out.append("")
+    for label, p, lo, hi in page_tables:
+        out += emit_byte_table(f"{label}{p}_lo", lo)
+        out += emit_byte_table(f"{label}{p}_hi", hi)
+    out.append("")
+    return "\n".join(out)
+
+
 def gen_asm(scene):
     s = SCENES[scene]
     cram = cr_words()
@@ -507,27 +945,11 @@ def gen_asm(scene):
 
     # tiles: per (char0, count) region -> VRAM words char*16+row for row 0..7
     # (CH0/CH1 = bits 0-7/8-15 of word char*16+row, CH2/CH3 = word char*16+8+row)
-    tile_bytes = bytearray()
-    regions = []
-    for char0, count in s["tiles"]:
-        vbase = char0 * 16
-        for t in range(count):
-            for row in range(8):
-                w = (tile_word(scene, char0 + t, 0, row)
-                     | tile_word(scene, char0 + t, 1, row))
-                tile_bytes += bytes((w & 0xFF, (w >> 8) & 0xFF))
-            for row in range(8):
-                w = (tile_word(scene, char0 + t, 2, row)
-                     | tile_word(scene, char0 + t, 3, row))
-                tile_bytes += bytes((w & 0xFF, (w >> 8) & 0xFF))
-        regions.append((vbase, char0, count))
+    tile_bytes, regions = tile_region_bytes(scene, s["tiles"])
 
     bat_bytes = bytearray()
     if s["bat_tables"]:
-        for y in range(s["bat_h"]):
-            for x in range(s["bat_w"]):
-                w = bat_entry(scene, x, y)
-                bat_bytes += bytes((w & 0xFF, (w >> 8) & 0xFF))
+        bat_bytes = bat_bytes_full(scene, s["bat_w"], s["bat_h"])
 
     out = []
     out.append(f";; PCEStudio scene {scene} — generated by tools/genroms.py, do not edit")
@@ -663,6 +1085,11 @@ def main():
         with open(path, "w") as f:
             f.write(gen_asm(scene))
         print(f"wrote {path}")
+    for name in SPRITE_SCENES:
+        path = os.path.join(OUT, f"{name}.asm")
+        with open(path, "w") as f:
+            f.write(gen_sprite_asm(name))
+        print(f"wrote {path}")
     # sanity: scene 3 BAT formula in ROM == formula in generator
     for x in range(128):
         for y in range(32):
@@ -671,6 +1098,28 @@ def main():
             else:
                 t = 0x100 | (((x * 7) & 0x1F) + y & 0x1F)
             assert bat_entry(3, x, y) == (((x + 3 * y) & 0xF) << 12) | t, (x, y)
+    # sanity: sprite scenes' SG regions and SATs
+    for name, s in SPRITE_SCENES.items():
+        pat0, nblocks, bases = pack_patterns(s["sprites"])
+        assert pat0 == 0x80 and pat0 * 64 + nblocks * 64 <= 0x7F00, name
+        for spr, b in zip(s["sprites"], bases):
+            h = [16, 32, 64, 64][spr["cgy"]]
+            # the cells this sprite's rows read (CGY blocks 2 apart, CGX
+            # halves consecutive — see the sprite-model comment above)
+            if spr["cgx"]:
+                cells = [b + 2 * k + hlf
+                         for k in range(h // 16) for hlf in (0, 1)]
+            else:
+                cells = [b + 2 * k for k in range(h // 16)]
+            for cell in cells:
+                # every cell's 16 rows give distinct 4-plane word tuples
+                # (P_3 = 0x00FF rotates with period exactly 16, so the tuple
+                # differs per row — the flip/size witnesses depend on it)
+                rows = [tuple(sg_word(cell, pl, r) for pl in range(4))
+                        for r in range(16)]
+                assert len(set(rows)) == 16, (name, hex(cell))
+        sat = sat_words(s["sprites"], bases)
+        assert len(sat) == 256, name
 
 
 if __name__ == "__main__":

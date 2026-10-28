@@ -116,13 +116,9 @@ const CR_BLOCK = `    /* CR bit 7 = BB (background blanking): when it is clear t
      * pixels are CRAM[0x100] = 0x049 = 36,36,36; us1's white frame is its
      * CRAM[0x100] = 0x1FF, the same rule. */
     if (!(regs.CR & 0x80)) {
-      var bgOff = new Uint8Array(width * height * 3);
-      for (var i = 0; i < bgOff.length; i += 3) {
-        bgOff[i] = rgb[0x100 * 3];
-        bgOff[i + 1] = rgb[0x100 * 3 + 1];
-        bgOff[i + 2] = rgb[0x100 * 3 + 2];
-      }
-      return { width: width, height: height, pixels: bgOff };
+      var off = new Uint16Array(width * height);
+      off.fill(0x100);
+      return { width: width, height: height, indices: off };
     }
 
 `;
@@ -320,6 +316,10 @@ function runCheck(rendererSource, checkerSource, dumpsDir) {
     fs.mkdirSync(path.join(tmp, "renderer"));
     fs.mkdirSync(path.join(tmp, "tests"));
     fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), rendererSource);
+    /* check.js also requires pce-sprites.js (#12); the sprite scenes are not
+     * in this harness's scene list, but the module must load. */
+    fs.copyFileSync(path.join(ROOT, "renderer", "pce-sprites.js"),
+                    path.join(tmp, "renderer", "pce-sprites.js"));
     fs.writeFileSync(path.join(tmp, "tests", "check.js"), checkerSource);
     /* check.js resolves dumps from its own directory; symlink avoids copying
      * megabytes per mutant (fall back to a copy where symlinks are

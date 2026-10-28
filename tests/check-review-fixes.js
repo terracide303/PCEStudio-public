@@ -265,13 +265,9 @@ const CR_BLOCK = `    /* CR bit 7 = BB (background blanking): when it is clear t
      * pixels are CRAM[0x100] = 0x049 = 36,36,36; us1's white frame is its
      * CRAM[0x100] = 0x1FF, the same rule. */
     if (!(regs.CR & 0x80)) {
-      var bgOff = new Uint8Array(width * height * 3);
-      for (var i = 0; i < bgOff.length; i += 3) {
-        bgOff[i] = rgb[0x100 * 3];
-        bgOff[i + 1] = rgb[0x100 * 3 + 1];
-        bgOff[i + 2] = rgb[0x100 * 3 + 2];
-      }
-      return { width: width, height: height, pixels: bgOff };
+      var off = new Uint16Array(width * height);
+      off.fill(0x100);
+      return { width: width, height: height, indices: off };
     }
 
 `;
@@ -313,10 +309,10 @@ function outputProblems(stdout, status) {
   const m = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)$/m
     .exec(stdout);
   if (!m) problems.push("no PASS summary line");
-  else if (Number(m[1]) !== 19)
-    problems.push(`PASS counts ${m[1]} scene(s), expected 19 ` +
+  else if (Number(m[1]) !== 27)
+    problems.push(`PASS counts ${m[1]} scene(s), expected 27 ` +
                   "(scenes 1-9 plus 5b, 8b, 8c, painted, viewer 1-3, " +
-                  "browser 1-3)");
+                  "browser 1-3, sprite 1-8)");
   if (!/^us1: not a picture, skipped/m.test(stdout))
     problems.push("us1 is not reported as skipped by name");
   return problems;
@@ -336,7 +332,7 @@ function outputProblems(stdout, status) {
     { encoding: "utf8", timeout: 120000 });
   const problems = outputProblems(run.stdout || "", run.status);
   if (problems.length === 0)
-    pass("check.js: 19 scene(s) diff 0, us1 skipped and not counted");
+    pass("check.js: 27 scene(s) diff 0, us1 skipped and not counted");
   else problems.forEach(fail);
 }
 
@@ -385,7 +381,7 @@ function outputProblems(stdout, status) {
   const stdout = run.stdout || "";
   if (run.status !== 0 && /^scene8: NOT A PICTURE .* FAIL$/m.test(stdout))
     pass("self-test: the pre-fix check.js rejects scene8 as 'NOT A PICTURE' " +
-         "— the new check.js passes it (19 scene(s) above)");
+         "— the new check.js passes it (27 scene(s) above)");
   else
     fail("self-test: the pre-fix check.js did not reject scene8 " +
          `(exit ${run.status})`);
@@ -396,6 +392,9 @@ function runCheckGuardDump(rendererSrc) {
   fs.mkdirSync(path.join(tmp, "renderer"));
   fs.mkdirSync(path.join(tmp, "tests"));
   fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), rendererSrc);
+  /* check.js also requires pce-sprites.js (#12) */
+  fs.copyFileSync(path.join(ROOT, "renderer", "pce-sprites.js"),
+                  path.join(tmp, "renderer", "pce-sprites.js"));
   fs.writeFileSync(path.join(tmp, "tests", "check.js"), CHECK_SRC);
   const dumps = path.join(tmp, "tests", "dumps");
   fs.mkdirSync(dumps);
@@ -420,6 +419,9 @@ function runScene8With(rendererSrc, checkSrc) {
   fs.mkdirSync(path.join(tmp, "renderer"));
   fs.mkdirSync(path.join(tmp, "tests"));
   fs.writeFileSync(path.join(tmp, "renderer", "pce-bg.js"), rendererSrc);
+  /* check.js also requires pce-sprites.js (#12) */
+  fs.copyFileSync(path.join(ROOT, "renderer", "pce-sprites.js"),
+                  path.join(tmp, "renderer", "pce-sprites.js"));
   fs.writeFileSync(path.join(tmp, "tests", "check.js"), checkSrc);
   const dumps = path.join(tmp, "tests", "dumps");
   fs.mkdirSync(dumps);

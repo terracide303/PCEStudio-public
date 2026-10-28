@@ -12,6 +12,8 @@
 #   tools/capture.sh painted        # the #10 editor's picture
 #                                   # (gen/painted.pce, built by
 #                                   # tests/check-editor.js --write)
+#   tools/capture.sh 1..8 sprite    # the #12 sprite-scene ROMs
+#                                   # (gen/spriteN.pce; the dump gains sat.bin)
 #
 # Scenes 4-9, 8b, 8c are #39's (docs/REVIEW.md finding 1: each is NOT
 # periodic in the dimension a renderer break would cut — see genroms.py).
@@ -50,7 +52,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SCENE="${1:?usage: capture.sh 1..9 [scene|viewer|browser|us] | capture.sh painted}"
+SCENE="${1:?usage: capture.sh 1..9 [scene|viewer|browser|us|sprite] | capture.sh painted}"
 if [ "$SCENE" = painted ]; then
   MODE=painted
 else
@@ -63,8 +65,9 @@ case "$MODE" in
   viewer) NAME="viewer${SCENE}" ;;
   browser) NAME="browser${SCENE}" ;;
   us) NAME="us${SCENE}" ;;
+  sprite) NAME="sprite${SCENE}" ;;
   painted) NAME="painted" ;;
-  *) echo "mode must be scene, viewer, browser, us or painted" >&2; exit 2 ;;
+  *) echo "mode must be scene, viewer, browser, us, sprite or painted" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"

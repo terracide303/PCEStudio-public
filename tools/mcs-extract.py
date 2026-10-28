@@ -6,6 +6,7 @@ clean exit; this script pulls out everything the renderer needs:
 
   <dumpdir>/vram.bin   VDC VRAM, 32768 x uint16 little-endian (65536 bytes)
   <dumpdir>/cram.bin   VCE colour table, 512 x uint16 LE (1024 bytes)
+  <dumpdir>/sat.bin    VDC SATB, 256 x uint16 LE (512 bytes; #12 sprites)
   <dumpdir>/regs.json  named registers/counters, incl. the scanline
                        calibration values the renderer uses
 
@@ -129,13 +130,17 @@ def main():
 
     vram = sections.get("VDC", {}).get("VRAM", b"")
     cram = sections.get("VCE", {}).get("color_table", b"")
+    sat = sections.get("VDC", {}).get("SAT", b"")
     with open(os.path.join(outdir, "vram.bin"), "wb") as f:
         f.write(vram)
     with open(os.path.join(outdir, "cram.bin"), "wb") as f:
         f.write(cram)
+    with open(os.path.join(outdir, "sat.bin"), "wb") as f:
+        f.write(sat)
     with open(os.path.join(outdir, "regs.json"), "w") as f:
         json.dump(regs, f, indent=1, sort_keys=True)
-    print(f"wrote {outdir}/vram.bin ({len(vram)} B), cram.bin ({len(cram)} B), regs.json")
+    print(f"wrote {outdir}/vram.bin ({len(vram)} B), cram.bin ({len(cram)} B), "
+          f"sat.bin ({len(sat)} B), regs.json")
     # calibration diagnostics (see docs/RENDERER.md):
     if "RCRCount" in regs and "scanline" in regs:
         rcr = regs["RCRCount"]
