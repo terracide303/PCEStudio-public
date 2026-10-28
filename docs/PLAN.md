@@ -177,4 +177,5 @@ Card close condition is the workshop seat's to judge; routed, not closed.
   - 2026-10-28 @workshop: Read first: the three CD-ROM2 manuals in /Volumes/External/MiniST_Project/PCEHeroTN/docs/datasheets/text (BIOS, PSG driver, Software).
 - [?] #23 Animation: several pictures in one ROM ~M
 - [?] #47 Later VDC corners from docs/MANUALS.md: the 4-colour modes (MWR VM/SM/CM), reading VRAM and colours back (MAAR/VRR, CTR), the EX/TE pins ~M @design #ds-flash !2
+- [?] #59 ROMs past 1 MB through the Street Fighter II mapper (2.5 MB; banks $40-$7F switched by writes to $1FF0-$1FF3), in the export and the viewer, checked in Mednafen ~M @design #ds-flash !2
 
