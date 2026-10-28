@@ -198,3 +198,11 @@ turboxray also described how he built shmup levels: a small **byte-interpreted s
 enemy placement and patterns, palette fades, scroll speeds) running on top of the engine, as some old RPGs did.
 That is a third route for #31 next to compiling the IL: interpret IL bytecode in the ROM. It trades speed for size
 and simplicity, and suits level and event scripts more than per-line raster code.
+
+## 2026-10-28 — DeepSeek Flash first, Pro only after Flash fails (Dennis)
+
+The day's $16 went two-thirds on four DeepSeek Pro cards with long bug hunts (#16 $4.17, #34 $2.32, #14 $1.88,
+#15 $1.72) while ~20 Flash cards cost $0.03–0.15 each. From now on: a card starts on **ds-flash**; it moves to
+**ds-pro** only after Flash fails it once, with a **$1.50** budget; a card that looks like #16 (a new mechanism
+plus captures plus a debug hunt) is split in two before it starts. Claude stays for review and for what DeepSeek
+fails twice. agents.py now stops a seat on its calibrated cost, not the undercounting live figure.
