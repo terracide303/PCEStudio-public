@@ -106,6 +106,7 @@ own two weeks after this project starts. How: `../workshop/RETROSPECTIVE.md`.
 ### The compiler and the validator !7
 - [?] #31 The toy compiles to HuC6280 code (through PCEAS) and runs the same in Mednafen as in the browser ~L @design #opus
 - [?] #32 The validator: frame time at 60 Hz, sprites per line, VRAM and ROM fit, VCE writes in the blank, value ranges; export refuses a toy that fails ~L @design #opus
+  - 2026-10-28 @workshop: Read first: '/Volumes/External/MiniST_Project/PCEHeroTN/docs/datasheets/text/HuC6280 Software Manual - INSTRUCTION SET, TAM TMA, opcode timings.txt' — the cycle counts the 60 Hz frame-time check needs.
 - [?] #33 Phase 3 read cold ~M @review #sonnet
 
 ## Phase 4 — Sound
