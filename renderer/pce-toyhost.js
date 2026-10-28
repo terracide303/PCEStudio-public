@@ -39,16 +39,42 @@
   var HEIGHT = 224;
   var VDW_LINES = HEIGHT;        /* VDW display lines 0..223 */
   var FIRST_SCANLINE = 18;       /* the editor's preview calibration */
+
+  /* The registers a toy may write, with their widths and manual pages — the
+   * toy author's reference (#61) generates its register table from this one
+   * list, so a range changed here changes the docs.  reg() and the docs read
+   * the same objects. */
+  var REGISTERS = [
+    { name: "BXR", max: 0x3FF, bits: 10, manual: "VDC H7-7",
+      what: "background horizontal scroll, in pixels (VDC R07)" },
+    { name: "BYR", max: 0x1FF, bits: 9, manual: "VDC H7-7",
+      what: "background vertical scroll, in lines (VDC R08)" },
+    { name: "CR", max: 0xFF, bits: 8, manual: "VDC H7-5",
+      what: "control: BB background on (bit 7), SB sprites on (bit 6), and the VDC interrupt enables (RC bit 2 is the line interrupt)" }
+  ];
   var CR_BG_ON = 0x80;           /* CR bit 7, BB: background on */
-  var BXR_MAX = 0x3FF;           /* VDC R07, 10 bits (manual H7-7) */
-  var BYR_MAX = 0x1FF;           /* VDC R08, 9 bits (manual H7-7) */
-  var CR_MAX = 0xFF;             /* VDC R05, 8 bits (manual H7-5) */
-  var ALLOWED_REGS = { BXR: BXR_MAX, BYR: BYR_MAX, CR: CR_MAX };
+  var BXR_MAX = REGISTERS[0].max;
+  var BYR_MAX = REGISTERS[1].max;
+  var CR_MAX = REGISTERS[2].max;
+  var ALLOWED_REGS = {};
+  for (var r = 0; r < REGISTERS.length; r++) ALLOWED_REGS[REGISTERS[r].name] = REGISTERS[r].max;
+
   var VRAM_WORDS = 32768;
   var CRAM_ENTRIES = 512;
+  var CRAM_WORD_MAX = 0x1FF;     /* a VCE colour: 9 bits, 3 per channel */
   var SAT_ENTRIES = 64;
+  var SAT_WORDS = 4;             /* Y, X, pattern<<1, attributes (manual 2.4) */
+  var SAT_FIELD_RANGES = {
+    x: [0, 1023],                /* SAT word 1; 32 is display column 0 */
+    y: [0, 1023],                /* SAT word 0; 64 is display row 0 */
+    pattern: [0, 0x3FF],         /* written << 1 into word 2 */
+    palette: [0, 15],
+    cgy: [0, 3]                  /* CGY bits 12-13 */
+  };
   var RASTER_WRITES_MAX = 64;    /* colour writes one line may carry */
+  var RCR_BASE = 0x40;           /* RCR R06 = 0x40 + VDW line (#15) */
   var LOG_MAX = 200;
+  var PAD_COUNT = 5;             /* one 2-button pad, up to five with a multitap */
   var PAD_FIELDS = ["up", "down", "left", "right", "i", "ii", "select", "run"];
 
   /* A refusal, with the code the tests assert. */
@@ -210,7 +236,7 @@
       pal: function (addr, word) {
         addr = intIn(addr, "a colour-table address", 0, CRAM_ENTRIES - 1,
                      "pal-range");
-        word = intIn(word, "a colour word", 0, 0x1FF, "pal-range");
+        word = intIn(word, "a colour word", 0, CRAM_WORD_MAX, "pal-range");
         state.cram[addr * 2] = word & 0xFF;
         state.cram[addr * 2 + 1] = (word >> 8) & 0xFF;
         if (rasterContext) {
@@ -243,12 +269,14 @@
 
       satGet: function (i, k) {
         i = intIn(i, "a SAT entry", 0, SAT_ENTRIES - 1, "sat-range");
-        k = intIn(k, "a SAT word (0..3)", 0, 3, "sat-range");
+        k = intIn(k, "a SAT word (0.." + (SAT_WORDS - 1) + ")", 0, SAT_WORDS - 1,
+                 "sat-range");
         return satWord(i, k);
       },
       sat: function (i, k, v) {
         i = intIn(i, "a SAT entry", 0, SAT_ENTRIES - 1, "sat-range");
-        k = intIn(k, "a SAT word (0..3)", 0, 3, "sat-range");
+        k = intIn(k, "a SAT word (0.." + (SAT_WORDS - 1) + ")", 0, SAT_WORDS - 1,
+                 "sat-range");
         v = intIn(v, "a SAT word", 0, 0xFFFF, "sat-range");
         setSatWord(i, k, v);
         return v;
@@ -265,14 +293,19 @@
         if (!spec || typeof spec !== "object") {
           refuse("sprite-range", "sprite(i, spec): spec must be a table");
         }
-        var x = intIn(spec.x != null ? spec.x : 0, "x", 0, 1023, "sprite-range");
-        var y = intIn(spec.y != null ? spec.y : 0, "y", 0, 1023, "sprite-range");
+        var x = intIn(spec.x != null ? spec.x : 0, "x",
+                    SAT_FIELD_RANGES.x[0], SAT_FIELD_RANGES.x[1], "sprite-range");
+        var y = intIn(spec.y != null ? spec.y : 0, "y",
+                    SAT_FIELD_RANGES.y[0], SAT_FIELD_RANGES.y[1], "sprite-range");
         var pattern = intIn(spec.pattern != null ? spec.pattern : 0,
-                            "pattern", 0, 0x3FF, "sprite-range");
+                            "pattern", SAT_FIELD_RANGES.pattern[0],
+                            SAT_FIELD_RANGES.pattern[1], "sprite-range");
         var palette = intIn(spec.palette != null ? spec.palette : 0,
-                            "palette", 0, 15, "sprite-range");
+                            "palette", SAT_FIELD_RANGES.palette[0],
+                            SAT_FIELD_RANGES.palette[1], "sprite-range");
         var cgy = intIn(spec.cgy != null ? spec.cgy : 0,
-                        "cgy", 0, 3, "sprite-range");
+                        "cgy", SAT_FIELD_RANGES.cgy[0],
+                        SAT_FIELD_RANGES.cgy[1], "sprite-range");
         var spbg = booleanOf(spec.spbg);
         var cgx = booleanOf(spec.cgx);
         var hflip = booleanOf(spec.hflip);
@@ -304,7 +337,7 @@
                  " already has a raster entry; the line interrupt fires once " +
                  "per line");
         }
-        var entry = { line: line, rcr: 0x40 + line };
+        var entry = { line: line, rcr: RCR_BASE + line };
         var has = false;
         if (spec.bxr != null) {
           entry.bxr = intIn(spec.bxr, "bxr", 0, BXR_MAX, "reg-range");
@@ -335,7 +368,7 @@
             }
             var addr = intIn(pair[0], "cram address", 0, CRAM_ENTRIES - 1,
                              "pal-range");
-            var word = intIn(pair[1], "cram word", 0, 0x1FF, "pal-range");
+            var word = intIn(pair[1], "cram word", 0, CRAM_WORD_MAX, "pal-range");
             writes.push([addr, word]);
           }
           if (writes.length) { entry.cram = writes; has = true; }
@@ -352,7 +385,7 @@
       /* ---- pads -------------------------------------------------------- */
 
       padValue: function (n, field) {
-        if (!(n >= 1 && n <= 5) || n !== (n | 0)) return undefined;
+        if (!(n >= 1 && n <= PAD_COUNT) || n !== (n | 0)) return undefined;
         var p = padState[n] || {};
         return !!p[field];
       },
@@ -360,7 +393,7 @@
       refreshPads: function () { /* the pads are read live by padValue */ },
 
       setPad: function (n, buttons) {
-        if (!(n >= 1 && n <= 5) || n !== (n | 0)) {
+        if (!(n >= 1 && n <= PAD_COUNT) || n !== (n | 0)) {
           refuse("pad-range", "pad number must be 1..5, got " + n);
         }
         padState[n] = buttons || {};
@@ -402,7 +435,7 @@
           if (Object.prototype.hasOwnProperty.call(ctx.regs, r)) any = true;
         }
         if (!any && !ctx.cram.length) return;
-        var entry = { line: line, rcr: 0x40 + line };
+        var entry = { line: line, rcr: RCR_BASE + line };
         if (ctx.regs.BXR != null) entry.bxr = ctx.regs.BXR;
         if (ctx.regs.BYR != null) entry.byr = ctx.regs.BYR;
         if (ctx.regs.CR != null) entry.cr = ctx.regs.CR;
@@ -468,6 +501,19 @@
     WIDTH: WIDTH,
     HEIGHT: HEIGHT,
     VDW_LINES: VDW_LINES,
+    /* the contract's own tables, for the toy author's reference (#61) */
+    REGISTERS: REGISTERS,
+    ALLOWED_REGS: ALLOWED_REGS,
+    CRAM_ENTRIES: CRAM_ENTRIES,
+    CRAM_WORD_MAX: CRAM_WORD_MAX,
+    VRAM_WORDS: VRAM_WORDS,
+    SAT_ENTRIES: SAT_ENTRIES,
+    SAT_WORDS: SAT_WORDS,
+    SAT_FIELD_RANGES: SAT_FIELD_RANGES,
+    RASTER_WRITES_MAX: RASTER_WRITES_MAX,
+    RCR_BASE: RCR_BASE,
+    LOG_MAX: LOG_MAX,
+    PAD_COUNT: PAD_COUNT,
     PAD_FIELDS: PAD_FIELDS,
     REFUSALS: {
       "reg-forbidden": "a register a toy may not touch",

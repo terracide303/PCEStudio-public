@@ -74,6 +74,22 @@
   var HOOK_COUNT = 10000;        /* Lua instructions between budget checks */
   var DEFAULT_BUDGET_MS = 100;
 
+  /* The password contract (card #73): the caps the prelude enforces and the
+   * toy author's reference (#61) publishes.  The prelude's `local P_...`
+   * lines are generated from this object and the refusals name its values,
+   * so a cap changed here changes the runtime's message and the docs. */
+  var PASSWORD = {
+    alphabet: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
+    prefix: "P1",
+    maxCodeLength: 200,          /* any longer is not a password at all */
+    maxDepth: 6,                 /* nested tables */
+    maxItems: 32,                /* table entries, array and keyed together */
+    maxString: 64,               /* bytes */
+    maxBytes: 96,                /* the value's bytes, before the check byte */
+    minInt: -1073741824,         /* -2^30: the zig-zag spends the sign bit */
+    maxInt: 1073741823          /* 2^30-1 */
+  };
+
   /* ---- refusals -------------------------------------------------------- */
 
   /* The host throws this class; the runtime must expose the same one, so a
@@ -241,12 +257,14 @@
     "-- otherwise) follows ppu.toys' sram rules, applied to a code instead of",
     "-- a save medium.",
     "password = {}",
-    "local P_ALPHA = \"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567\"",
-    "local P_MAX_DEPTH, P_MAX_ITEMS, P_MAX_STRING, P_MAX_BYTES = 6, 32, 64, 96",
+    "local P_ALPHA = \"" + PASSWORD.alphabet + "\"",
+    "local P_MAX_DEPTH, P_MAX_ITEMS, P_MAX_STRING, P_MAX_BYTES = " +
+      [PASSWORD.maxDepth, PASSWORD.maxItems, PASSWORD.maxString,
+       PASSWORD.maxBytes].join(", "),
     "-- This VM's integers are 32-bit (docs/IL.md: Fengari's lvm.js computes",
     "-- ADD as (a + b) | 0), and p_int's zig-zag doubles the magnitude, so a",
     "-- code holds -2^30..2^30-1 and nothing wider (docs/TOYS.md).",
-    "local P_MIN_INT, P_MAX_INT = -1073741824, 1073741823",
+    "local P_MIN_INT, P_MAX_INT = " + PASSWORD.minInt + ", " + PASSWORD.maxInt,
     "local function p_fail(code, msg) error(\"TOYCODE:\" .. code .. \": \" .. msg) end",
     "local function p_int(out, n)",
     "  local z = n < 0 and (2 * (-n - 1) + 1) or (n * 2)",
@@ -407,13 +425,13 @@
     "  local sum = 0",
     "  for i = 1, #out do sum = (sum * 31 + out[i]) % 256 end",
     "  out[#out + 1] = sum",
-    "  return \"P1\" .. p_b32(out)",
+    "  return \"" + PASSWORD.prefix + "\" .. p_b32(out)",
     "end",
     "function password.unpack(code)",
     "  if type(code) ~= \"string\" then p_fail(\"password-code\", \"a password is a string\") end",
-    "  if #code > 200 then p_fail(\"password-code\", \"the code is longer than any password\") end",
-    "  if string.sub(code, 1, 2) ~= \"P1\" then",
-    "    p_fail(\"password-code\", \"not a PCEStudio password (it does not start with P1)\")",
+    "  if #code > " + PASSWORD.maxCodeLength + " then p_fail(\"password-code\", \"the code is longer than any password\") end",
+    "  if string.sub(code, 1, " + PASSWORD.prefix.length + ") ~= \"" + PASSWORD.prefix + "\" then",
+    "    p_fail(\"password-code\", \"not a PCEStudio password (it does not start with " + PASSWORD.prefix + ")\")",
     "  end",
     "  local bytes = p_unb32(string.sub(code, 3))",
     "  if #bytes < 2 then p_fail(\"password-code\", \"the code is too short\") end",
@@ -906,6 +924,9 @@
     WIDTH: WIDTH,
     HEIGHT: HEIGHT,
     PAD_FIELDS: ["up", "down", "left", "right", "i", "ii", "select", "run"],
+    BUDGET_MS: DEFAULT_BUDGET_MS,
+    HOOK_COUNT: HOOK_COUNT,
+    PASSWORD: PASSWORD,
     /* the refusals this card names, for the reference (#61) to read */
     REFUSALS: {
       "reg-forbidden": "a register a toy may not touch",
@@ -918,6 +939,7 @@
       "raster-line-full": "a second raster entry on one line, or too many colour writes on it",
       "password-value": "a save value that cannot be packed",
       "password-code": "a password that is not one",
+      "no-vm": "the Lua VM (Fengari) is not loaded, so no toy can run",
       "toy-timeout": "a toy hook past the frame's Lua budget",
       "toy-error": "a Lua error inside the toy, naming file:line"
     }

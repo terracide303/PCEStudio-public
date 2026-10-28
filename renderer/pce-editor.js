@@ -1534,6 +1534,69 @@
     return pic;
   }
 
+  /* Every refusal this module can raise, with the meaning the header states.
+   * REFUSALS is what the toy author's reference (#61) lists; the codes are
+   * the same strings the refuse() calls use, and tests/check-docs.js checks
+   * that every code the source raises is listed.  The numbers in the
+   * meanings are this module's own constants, not copies. */
+  var REFUSAL_WIDTHS = SPRITE_SIZES.map(function (s) { return s.width; })
+    .filter(function (w, i, a) { return a.indexOf(w) === i; });
+  var REFUSAL_HEIGHTS = SPRITE_SIZES.map(function (s) { return s.height; })
+    .filter(function (h, i, a) { return a.indexOf(h) === i; });
+  var REFUSALS = {
+    "17th-colour": "a 17th colour in one tile: a tile shows " + ENTRIES +
+      " (the backdrop + " + (ENTRIES - 1) + " palette entries), a palette " +
+      "holds " + ENTRIES + ", a pixel is 4 bits",
+    "17th-palette": "a 17th background palette: the BAT's palette field is " +
+      "4 bits, so there are " + PALETTES,
+    "backdrop-entry": "writing colour 0 of a palette: it is the shared " +
+      "backdrop (CRAM $000), set with setBackdrop",
+    "colour-range": "a VCE colour word outside the 9-bit range 0.." +
+      (VCE_COLOURS - 1),
+    "colour-index": "a pixel colour number outside 0.." + (ENTRIES - 1),
+    "entry-range": "a palette entry outside 0.." + (ENTRIES - 1),
+    "map-range": "a map (BAT) column outside 0.." + (BAT_W - 1) +
+      " or row outside 0.." + (BAT_H - 1),
+    "not-in-palette": "painting a colour the tile's own palette does not hold",
+    "no-tile": "a character code with no tile behind it",
+    "palette-range": "a background palette outside 0.." + (PALETTES - 1),
+    "pixel-range": "a tile pixel coordinate outside 0.." + (TILE - 1),
+    "tile-space": "no room for another tile: the ROM layout gives " +
+      MAX_TILES + ", or the patterns would reach the SAT",
+    "vram-range": "a character code outside the " + (LAST_CHAR + 1) +
+      "-word VRAM",
+    "65th-sprite": "a " + (MAX_SPRITES + 1) + "th SAT entry: the SAT holds " +
+      MAX_SPRITES,
+    "sprite-pattern-vram": "a sprite pattern whose VRAM cells would reach " +
+      "the SAT at VRAM " + hex(SAT_ADDR),
+    "17th-sprite-palette": "a 17th sprite palette: the VDC has " +
+      SPRITE_PALETTES + " (CRAM $100-$1FF)",
+    "sprite-size": "a sprite size the VDC cannot draw: " +
+      REFUSAL_WIDTHS.join(" or ") + " wide, " + REFUSAL_HEIGHTS.join(", ") +
+      " tall",
+    "sprite-pattern-range": "a sprite pattern index that does not exist",
+    "sprite-pixel-range": "a sprite pattern pixel outside the pattern",
+    "sprite-range": "a sprite index, or an x/y placement outside the " +
+      VIEW_W + "x" + VIEW_H + " view",
+    "sprite-palette-range": "a sprite palette outside 0.." +
+      (SPRITE_PALETTES - 1),
+    "sprite-entry-range": "a sprite palette entry outside 0.." +
+      (SPRITE_ENTRIES - 1),
+    "sprite-flag-range": "a sprite flag (priority, hflip, vflip) that is " +
+      "not 0 or 1",
+    "register-range": "a VDC register value outside its width (BXR " +
+      "10 bits, BYR 9, a wobble amplitude past the BXR swing)",
+    "line-range": "a display line outside 0.." + RASTER_LINE_MAX +
+      ", or a range that runs backwards",
+    "raster-line-full": "two per-line effects on one line: a VDW line " +
+      "carries one raster entry (one RCR interrupt)",
+    "wobble-range": "a wobble period or speed that is not an integer in range",
+    "parallax-range": "a parallax band list or speed that is not valid",
+    "frame-range": "a raster frame number that is not a non-negative integer",
+    "no-renderer": "renderPreview called without pce-bg.js and " +
+      "pce-sprites.js loaded"
+  };
+
   return {
     VCE_COLOURS: VCE_COLOURS,
     PALETTES: PALETTES,
@@ -1558,6 +1621,8 @@
     RASTER_LINE_MAX: RASTER_LINE_MAX,
     BXR_MAX: BXR_MAX,
     BYR_MAX: BYR_MAX,
+    RCR_BASE: RCR_BASE,
+    REFUSALS: REFUSALS,
 
     colourWord: colourWord,
     colourChannels: colourChannels,
