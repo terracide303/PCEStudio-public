@@ -318,12 +318,12 @@ function outputProblems(stdout, status) {
   const m = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)$/m
     .exec(stdout);
   if (!m) problems.push("no PASS summary line");
-  else if (Number(m[1]) !== 46)
-    problems.push(`PASS counts ${m[1]} scene(s), expected 46 ` +
-                  "(scenes 1-9 plus 5b, 8b, 8c, painted, viewer 1-3, " +
-                  "browser 1-3, sprite 1-11, vsprite 1-11, raster 1-5 — " +
-                  "sprite 9-11 are #40's, vsprite 1-11 are #14's, " +
-                  "raster 1-5 are #15's)");
+  else if (Number(m[1]) !== 47)
+    problems.push(`PASS counts ${m[1]} scene(s), expected 47 ` +
+                  "(scenes 1-9 plus 5b, 8b, 8c, painted, spainted, " +
+                  "viewer 1-3, browser 1-3, sprite 1-11, vsprite 1-11, " +
+                  "raster 1-5 — spainted is #13's, sprite 9-11 are #40's, " +
+                  "vsprite 1-11 are #14's, raster 1-5 are #15's)");
   if (!/^us1: not a picture, skipped/m.test(stdout))
     problems.push("us1 is not reported as skipped by name");
   return problems;
@@ -343,7 +343,7 @@ function outputProblems(stdout, status) {
     { encoding: "utf8", timeout: 120000 });
   const problems = outputProblems(run.stdout || "", run.status);
   if (problems.length === 0)
-    pass("check.js: 46 scene(s) diff 0, us1 skipped and not counted");
+    pass("check.js: 47 scene(s) diff 0, us1 skipped and not counted");
   else problems.forEach(fail);
 }
 
@@ -392,7 +392,7 @@ function outputProblems(stdout, status) {
   const stdout = run.stdout || "";
   if (run.status !== 0 && /^scene8: NOT A PICTURE .* FAIL$/m.test(stdout))
     pass("self-test: the pre-fix check.js rejects scene8 as 'NOT A PICTURE' " +
-         "— the new check.js passes it (46 scene(s) above)");
+         "— the new check.js passes it (47 scene(s) above)");
   else
     fail("self-test: the pre-fix check.js did not reject scene8 " +
          `(exit ${run.status})`);

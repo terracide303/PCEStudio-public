@@ -51,6 +51,21 @@
   label { user-select: none; }
   .note { color: #888; font-size: 12px; max-width: 24rem; }
   #export[disabled] { opacity: 0.4; }
+  #sprpat { image-rendering: pixelated; cursor: crosshair; background: #000; }
+  #sprlist { font: 12px monospace; color: #aaa; max-height: 11rem;
+             overflow: auto; margin-top: 0.4rem; }
+  #sprlist .spr { cursor: pointer; white-space: pre; }
+  #sprlist .spr.sel { color: #fff; background: #262626; }
+  #sprlist .spr.dropped { color: #f88; }
+  #budget { color: #fd8; white-space: pre-wrap; font: 12px monospace;
+            margin-top: 0.4rem; }
+  #sprpatinfo { color: #aaa; font: 12px monospace; margin: 0.3rem 0; }
+  select, input[type=number] { background: #111; color: #ddd;
+                               border: 1px solid #444; border-radius: 3px;
+                               font: inherit; }
+  input[type=number] { width: 3.6rem; }
+  .sprow { display: flex; gap: 0.5rem; align-items: center;
+           flex-wrap: wrap; margin-top: 0.35rem; }
 </style>
 </head>
 <body>
@@ -60,6 +75,7 @@
 <div class="row" style="margin-bottom:0.6rem">
   <button id="new">New picture</button>
   <button id="demo">Load demo picture</button>
+  <button id="spritedemo">Load sprite demo</button>
   <button id="export" disabled>Download .pce</button>
   <button id="rules">Check the rules</button>
   <label><input type="checkbox" id="us"> TurboGrafx HuCard (US)</label>
@@ -103,6 +119,56 @@
   </section>
 
   <section>
+    <h2>Sprite palettes — 16 × 16, CRAM $100–$1FF</h2>
+    <div id="sprpalrows"></div>
+    <p class="note">Click a swatch, then a colour from the 512 above. A sprite
+      pixel of colour 0 is transparent; entry 0 is the transparent entry and
+      is never shown on a sprite (CRAM $100 is the background-off fill). A
+      17th colour in a sprite palette is refused.</p>
+  </section>
+
+  <section>
+    <h2>Sprite pattern</h2>
+    <canvas id="sprpat" width="16" height="16"></canvas>
+    <div id="sprpatinfo"></div>
+    <div class="sprow">
+      <select id="sprsize"></select>
+      <button id="newsprpat">New pattern</button>
+    </div>
+    <div class="sprow"><label>Editing:
+      <select id="sprpatlist"></select></label></div>
+    <p class="note">Paint with the selected sprite-palette colour number
+      (entry 0 is transparent). The sizes are the VDC's CGX/CGY: 16 or 32
+      wide, 16/32/64 tall; any other size is refused. Patterns are packed into
+      VRAM cells after the tiles; one that would reach the SAT at $7F00 is
+      refused.</p>
+  </section>
+
+  <section>
+    <h2>Sprites — up to 64 in the SAT</h2>
+    <div class="sprow">
+      X <input type="number" id="sprx" value="0" min="0" max="255">
+      Y <input type="number" id="spry" value="0" min="0" max="223">
+      pattern <select id="sprpatpick"></select>
+      palette <select id="sprpalpick"></select>
+    </div>
+    <div class="sprow">
+      <label><input type="checkbox" id="sprprio" checked> priority
+        (SPBG)</label>
+      <label><input type="checkbox" id="sprhflip"> H flip</label>
+      <label><input type="checkbox" id="sprvflip"> V flip</label>
+      <button id="addspr">Add sprite</button>
+      <button id="clearspr">Clear sprites</button>
+    </div>
+    <div id="sprlist"></div>
+    <div id="budget"></div>
+    <p class="note">The VDC collects 16 strips of 16 px (256 px) a line in SAT
+      order; sprites past that are dropped, and the budget shows the keeps and
+      drops exactly as the renderer draws them. Lower SAT index wins an
+      overlap; priority sets SPBG (shown over an opaque background).</p>
+  </section>
+
+  <section>
     <h2>Preview — the VDC model (256×224)</h2>
     <canvas id="preview" width="256" height="224"></canvas>
     <div id="stats"></div>
@@ -110,6 +176,7 @@
 </div>
 
 <script src="pce-bg.js"></script>
+<script src="pce-sprites.js"></script>
 <script src="pce-rom.js"></script>
 <script src="pce-editor.js"></script>
 <script>
@@ -119,8 +186,13 @@ const $ = (id) => document.getElementById(id);
 const say = (t) => { $("msg").textContent = t || ""; };
 
 let pic = ed.newPicture();
-let selPalette = 0;      // the swatch the picker edits
+let selPalette = 0;      // the background swatch the picker edits
 let selEntry = 1;        // the colour number the tile brush paints
+let selSpritePalette = 0;   // the sprite swatch the picker edits
+let selSpriteEntry = 1;     // the colour number the sprite brush paints
+let selSpritePattern = 0;   // the pattern on the pattern canvas
+let selSprite = 0;          // the SAT entry highlighted in the sprite list
+let paletteMode = "bg";     // which panel the 512-colour picker edits
 let selTile = ed.FIRST_CHAR;
 let mode = "select";
 let bank0 = null;
@@ -133,6 +205,9 @@ function css(colour) {
 }
 function entryColour(palette, entry) {
   return entry === 0 ? pic.backdrop : pic.palettes[palette][entry];
+}
+function spriteEntryColour(palette, entry) {
+  return pic.spritePalettes[palette][entry];
 }
 
 /* ---- palette panel ----------------------------------------------------- */
@@ -154,8 +229,40 @@ function drawPalettes() {
       sw.title = `palette ${p} colour ${e}` +
         (e === 0 ? " (shared backdrop)" : "");
       sw.addEventListener("mousedown", () => {
+        paletteMode = "bg";
         selPalette = p; selEntry = e;
         drawPalettes();
+        say("");
+      });
+      row.appendChild(sw);
+    }
+    host.appendChild(row);
+  }
+}
+
+function drawSpritePalettes() {
+  const host = $("sprpalrows");
+  host.textContent = "";
+  for (let p = 0; p < ed.SPRITE_PALETTES; p++) {
+    const row = document.createElement("div");
+    row.className = "palrow" +
+      (paletteMode === "sprite" && p === selSpritePalette ? " current" : "");
+    const n = document.createElement("span");
+    n.className = "palnum";
+    n.textContent = p;
+    row.appendChild(n);
+    for (let e = 0; e < ed.SPRITE_ENTRIES; e++) {
+      const sw = document.createElement("div");
+      sw.className = "sw" + (e === 0 ? " backdrop" : "") +
+        (paletteMode === "sprite" && p === selSpritePalette &&
+         e === selSpriteEntry ? " sel" : "");
+      sw.style.background = css(spriteEntryColour(p, e));
+      sw.title = `sprite palette ${p} colour ${e}` +
+        (e === 0 ? " (transparent on a sprite)" : "");
+      sw.addEventListener("mousedown", () => {
+        paletteMode = "sprite";
+        selSpritePalette = p; selSpriteEntry = e;
+        drawSpritePalettes(); drawSpritePattern();
         say("");
       });
       row.appendChild(sw);
@@ -176,7 +283,12 @@ function drawPicker() {
       cell.title = `$${colour.toString(16)} r${r} g${g} b${b}`;
       cell.addEventListener("mousedown", () => {
         try {
-          if (selEntry === 0) {
+          if (paletteMode === "sprite") {
+            ed.setSpritePaletteColour(pic, selSpritePalette, selSpriteEntry,
+                                      colour);
+            say(`sprite palette ${selSpritePalette} colour ${selSpriteEntry}` +
+                ` = $${colour.toString(16)}`);
+          } else if (selEntry === 0) {
             ed.setBackdrop(pic, colour);
             say(`backdrop = $${colour.toString(16)}`);
           } else {
@@ -306,31 +418,201 @@ window.addEventListener("mouseup", () => { mapPainting = false; });
 document.querySelectorAll("input[name=mode]").forEach((el) =>
   el.addEventListener("change", () => { mode = el.value; }));
 
+/* ---- sprite pattern ---------------------------------------------------- */
+const sprCtx = $("sprpat").getContext("2d");
+const SPRITE_SCALE = 5;
+
+function optionList(host, n, label) {
+  while (host.options.length > n) host.remove(host.options.length - 1);
+  while (host.options.length < n) {
+    const o = document.createElement("option");
+    o.value = host.options.length;
+    host.appendChild(o);
+  }
+  for (let i = 0; i < n; i++) {
+    const size = ed.spritePatternSize(pic, i);
+    host.options[i].textContent = `${i}: ${size.width}x${size.height}` +
+      (label ? label(i) : "");
+  }
+}
+
+function drawSpritePattern() {
+  const n = ed.spritePatternCount(pic);
+  optionList($("sprpatlist"), n);
+  optionList($("sprpatpick"), n);
+  const canvas = $("sprpat");
+  if (!n) {
+    selSpritePattern = -1;
+    canvas.width = 16; canvas.height = 16;
+    canvas.style.width = canvas.style.height = "80px";
+    sprCtx.fillStyle = "#000";
+    sprCtx.fillRect(0, 0, 16, 16);
+    $("sprpatinfo").textContent = "no sprite pattern yet — make one";
+    return;
+  }
+  if (selSpritePattern < 0 || selSpritePattern >= n) selSpritePattern = 0;
+  $("sprpatlist").value = String(selSpritePattern);
+  const size = ed.spritePatternSize(pic, selSpritePattern);
+  canvas.width = size.width; canvas.height = size.height;
+  canvas.style.width = (size.width * SPRITE_SCALE) + "px";
+  canvas.style.height = (size.height * SPRITE_SCALE) + "px";
+  const px = ed.spritePatternPixels(pic, selSpritePattern);
+  for (let y = 0; y < size.height; y++) {
+    for (let x = 0; x < size.width; x++) {
+      sprCtx.fillStyle =
+        css(spriteEntryColour(selSpritePalette, px[y * size.width + x]));
+      sprCtx.fillRect(x, y, 1, 1);
+    }
+  }
+  $("sprpatinfo").textContent =
+    `pattern ${selSpritePattern} · ${size.width}x${size.height} · ` +
+    `drawing with sprite palette ${selSpritePalette} colour ${selSpriteEntry}` +
+    ` (0 = transparent)`;
+}
+
+function spritePixelAt(ev) {
+  const c = $("sprpat");
+  const r = ev.target.getBoundingClientRect();
+  const size = ed.spritePatternSize(pic, selSpritePattern);
+  const x = Math.floor((ev.clientX - r.left) / r.width * size.width);
+  const y = Math.floor((ev.clientY - r.top) / r.height * size.height);
+  return { x: Math.max(0, Math.min(size.width - 1, x)),
+           y: Math.max(0, Math.min(size.height - 1, y)) };
+}
+
+let spritePainting = false;
+function spritePaintAt(ev) {
+  if (selSpritePattern < 0) return;
+  const p = spritePixelAt(ev);
+  try {
+    ed.paintSpriteIndex(pic, selSpritePattern, p.x, p.y, selSpriteEntry);
+    redraw();
+  } catch (e) { say(e.message); }
+}
+$("sprpat").addEventListener("mousedown", (ev) => {
+  spritePainting = true; spritePaintAt(ev); ev.preventDefault();
+});
+window.addEventListener("mousemove", (ev) => {
+  if (spritePainting && ev.target === $("sprpat")) spritePaintAt(ev);
+});
+window.addEventListener("mouseup", () => { spritePainting = false; });
+
+$("newsprpat").addEventListener("click", () => {
+  try {
+    const wh = $("sprsize").value.split("x").map(Number);
+    selSpritePattern = ed.newSpritePattern(pic, wh[0], wh[1]);
+    redraw();
+    say(`new sprite pattern ${selSpritePattern} (${wh[0]}x${wh[1]})`);
+  } catch (e) { say(e.message); }
+});
+$("sprpatlist").addEventListener("change", () => {
+  selSpritePattern = Number($("sprpatlist").value);
+  redraw();
+});
+
+/* ---- the sprite list and the per-line budget -------------------------- */
+function drawSpriteList() {
+  const host = $("sprlist");
+  host.textContent = "";
+  const budget = ed.spriteBudget(pic);
+  const dropped = {};
+  for (const line of budget.lines)
+    for (const en of line.entries)
+      if (en.dropped)
+        dropped[en.sprite] = (dropped[en.sprite] || 0) + en.dropped;
+  pic.sprites.forEach((s, i) => {
+    const size = ed.spritePatternSize(pic, s.pattern);
+    const div = document.createElement("div");
+    div.className = "spr" + (i === selSprite ? " sel" : "") +
+      (dropped[i] ? " dropped" : "");
+    div.textContent =
+      `${i}: (${s.x},${s.y}) ${size.width}x${size.height} ` +
+      `pattern ${s.pattern} palette ${s.palette}` +
+      (s.priority ? " SPBG1" : " SPBG0") +
+      (s.hflip ? " H" : "") + (s.vflip ? " V" : "") +
+      (dropped[i] ? `  — ${dropped[i]} strip(s) dropped` : "");
+    div.addEventListener("mousedown", () => {
+      selSprite = i;
+      $("sprx").value = s.x; $("spry").value = s.y;
+      $("sprpatpick").value = String(s.pattern);
+      $("sprpalpick").value = String(s.palette);
+      $("sprprio").checked = !!s.priority;
+      $("sprhflip").checked = !!s.hflip;
+      $("sprvflip").checked = !!s.vflip;
+      drawSpriteList();
+    });
+    host.appendChild(div);
+  });
+  const w = budget.worst;
+  $("budget").textContent =
+    `sprites ${budget.spriteCount}/${budget.maxSprites} · worst line ${w.line}: ` +
+    `${w.strips}/${budget.limitStrips} strips (${w.pixels}/` +
+    `${budget.limitPixels} px)` +
+    (w.dropped ? `, ${w.dropped} strip(s) dropped there` : "") +
+    (budget.droppedLines
+      ? ` · ${budget.droppedLines} line(s) drop strips` : " · nothing dropped");
+}
+
+$("addspr").addEventListener("click", () => {
+  try {
+    const i = ed.addSprite(pic, {
+      x: Number($("sprx").value), y: Number($("spry").value),
+      pattern: Number($("sprpatpick").value),
+      palette: Number($("sprpalpick").value),
+      priority: $("sprprio").checked ? 1 : 0,
+      hflip: $("sprhflip").checked ? 1 : 0,
+      vflip: $("sprvflip").checked ? 1 : 0
+    });
+    selSprite = i;
+    redraw();
+    say(`sprite ${i} placed in the SAT`);
+  } catch (e) { say(e.message); }
+});
+$("clearspr").addEventListener("click", () => {
+  ed.clearSprites(pic);
+  selSprite = 0;
+  redraw();
+  say("sprites cleared");
+});
+
 /* ---- preview + ROM ------------------------------------------------------ */
 const previewCtx = $("preview").getContext("2d");
 function drawPreview() {
-  const data = ed.toPicture(pic);
-  const frame = PCEStudio.bg.renderFrame({
+  let data;
+  try {
+    data = ed.toPicture(pic);
+  } catch (e) {
+    say(e.message);
+    return;
+  }
+  /* the sprite layer comes from the picture's own SAT at VRAM $7F00 */
+  const sat = data.vram.slice(ed.SAT_ADDR * 2, ed.SAT_ADDR * 2 + 512);
+  const frame = PCEStudio.sprites.renderFrame({
     vram: data.vram, cram: data.cram, regs: ed.viewRegs(pic),
-    width: ed.VIEW_W, height: ed.VIEW_H
+    sat: sat, width: ed.VIEW_W, height: ed.VIEW_H
   });
   const img = previewCtx.createImageData(ed.VIEW_W, ed.VIEW_H);
   img.data.set(frame.pixels);
   previewCtx.putImageData(img, 0, 0);
 
   const st = ed.stats(pic);
-  const banks = 4 + Math.max(1, Math.ceil(st.tiles * 32 / 8192));
+  const banks = 4 + Math.max(1, Math.ceil(st.regionBytes / 8192));
   $("stats").textContent =
     `${ed.VIEW_W}x${ed.VIEW_H} · ${st.tiles} tile(s) ` +
     `$${st.charsFirst.toString(16).toUpperCase()}–` +
     `$${st.charsLast.toString(16).toUpperCase()} · ` +
-    `${st.palettesUsed} palette(s) · ROM ${banks * 8192} bytes`;
+    `${st.palettesUsed} palette(s) · ` +
+    `${st.spritePatterns} sprite pattern(s) · ` +
+    `${st.sprites}/${ed.MAX_SPRITES} sprite(s) · ROM ${banks * 8192} bytes`;
 }
 
 function redraw() {
   drawPalettes();
+  drawSpritePalettes();
   drawTile();
   drawMap();
+  drawSpritePattern();
+  drawSpriteList();
   drawPreview();
 }
 
@@ -380,12 +662,33 @@ $("export").addEventListener("click", async () => {
 });
 
 /* ---- start ------------------------------------------------------------- */
+function resetSelection() {
+  selTile = ed.FIRST_CHAR;
+  selPalette = 0;
+  selEntry = 1;
+  selSpritePalette = 0;
+  selSpriteEntry = 1;
+  selSpritePattern = 0;
+  selSprite = 0;
+  paletteMode = "bg";
+}
+
 function loadDemo() {
   try {
     pic = ed.demoPicture();
-    selTile = ed.FIRST_CHAR;
-    selPalette = 0;
-    selEntry = 1;
+    resetSelection();
+    const problems = ed.validate(pic);
+    say(problems.length ? "invalid: " + problems.slice(0, 3).join("; ")
+                        : "");
+    redraw();
+    return pic;
+  } catch (e) { say(e.message); return null; }
+}
+
+function loadSpriteDemo() {
+  try {
+    pic = ed.spriteDemoPicture();
+    resetSelection();
     const problems = ed.validate(pic);
     say(problems.length ? "invalid: " + problems.slice(0, 3).join("; ")
                         : "");
@@ -395,11 +698,10 @@ function loadDemo() {
 }
 
 $("demo").addEventListener("click", () => { loadDemo(); report(); });
+$("spritedemo").addEventListener("click", () => { loadSpriteDemo(); report(); });
 $("new").addEventListener("click", () => {
   pic = ed.newPicture();
-  selTile = ed.FIRST_CHAR;
-  selPalette = 0;
-  selEntry = 1;
+  resetSelection();
   say("");
   redraw();
   report();
@@ -411,25 +713,53 @@ async function report() {
   try {
     const rom = await buildRom();
     const st = ed.stats(pic);
+    const budget = ed.spriteBudget(pic);
     $("exportstatus").textContent =
       `picture ${ed.VIEW_W}x${ed.VIEW_H}, ${st.tiles} tiles, ` +
-      `${st.palettesUsed} palettes, ${ed.validate(pic).length} problem(s) · ` +
+      `${st.palettesUsed} palettes, ${st.spritePatterns} sprite patterns, ` +
+      `${st.sprites} sprites (worst line ${budget.worst.line}: ` +
+      `${budget.worst.strips}/16 strips, ${budget.worst.dropped} dropped), ` +
+      `${ed.validate(pic).length} problem(s) · ` +
       `ROM ${rom.length} bytes, sha256 ${(await sha256(rom)).slice(0, 16)}…`;
     $("export").disabled = false;
   } catch (e) { $("exportstatus").textContent = "error: " + e.message; }
 }
 
-/* Two calls the VDC cannot show, made on the page's own picture: a 17th
- * palette and a 17th colour in a tile.  The editor must refuse both. */
+/* The calls the VDC cannot show, made on a picture of the editor's own: a
+ * 17th background palette, a 17th colour in a tile or palette, a 17th colour
+ * in a sprite palette, a 65th sprite, a sprite size the VDC cannot draw and a
+ * sprite pattern that would reach the SAT in VRAM.  The editor must refuse
+ * every one, each with its code.  The sprite calls run on scratch pictures so
+ * the page's own picture is not changed by checking. */
 function checkRules() {
   const refused = [], accepted = [];
   const attempt = (label, fn) => {
-    try { fn(); accepted.push(label); } catch (e) { refused.push(label + " (" + e.code + ")"); }
+    try { fn(); accepted.push(label); }
+    catch (e) { refused.push(label + " (" + e.code + ")"); }
   };
   attempt("palette 16", () => ed.setPaletteColour(pic, 16, 1, 0));
   attempt("palette entry 16", () => ed.setPaletteColour(pic, 0, 16, 0));
   attempt("pixel colour 16", () => ed.paintTileIndex(pic, selTile, 0, 0, 16));
-  const msg = `rules: ${refused.length}/3 refused — ${refused.join("; ")}` +
+
+  const scratch = ed.newPicture();
+  const pat = ed.newSpritePattern(scratch, 16, 16);
+  attempt("sprite size 16x48", () => ed.newSpritePattern(scratch, 16, 48));
+  attempt("sprite palette entry 16",
+          () => ed.setSpritePaletteColour(scratch, 0, 16, 0));
+  attempt("sprite pixel 16",
+          () => ed.paintSpriteIndex(scratch, pat, 0, 0, 16));
+  attempt("65th sprite", () => {
+    for (let i = 0; i < ed.MAX_SPRITES; i++)
+      ed.addSprite(scratch, { x: 0, y: 0, pattern: pat });
+    ed.addSprite(scratch, { x: 0, y: 0, pattern: pat });
+  });
+  const full = ed.newPicture();
+  attempt("sprite pattern past VRAM", () => {
+    for (;;) ed.newSpritePattern(full, 16, 64);
+  });
+
+  const msg = `rules: ${refused.length}/${refused.length + accepted.length} ` +
+              `refused — ${refused.join("; ")}` +
               (accepted.length ? ` — ACCEPTED: ${accepted.join("; ")}` : "");
   say(msg);
   return { refused, accepted };
@@ -437,10 +767,25 @@ function checkRules() {
 
 $("rules").addEventListener("click", () => { checkRules(); });
 
+/* the size list is the six CGX/CGY sizes the VDC draws */
+for (const s of ed.SPRITE_SIZES) {
+  const o = document.createElement("option");
+  o.value = `${s.width}x${s.height}`;
+  o.textContent = `${s.width}x${s.height}`;
+  $("sprsize").appendChild(o);
+}
+for (let p = 0; p < ed.SPRITE_PALETTES; p++) {
+  const o = document.createElement("option");
+  o.value = p;
+  o.textContent = p;
+  $("sprpalpick").appendChild(o);
+}
+
 drawPicker();
 redraw();
 const params = new URLSearchParams(location.search);
 if (params.get("demo") === "1") { loadDemo(); report(); }
+if (params.get("sprites") === "1") { loadSpriteDemo(); report(); }
 if (params.get("rules") === "1") { checkRules(); }
 </script>
 </body>

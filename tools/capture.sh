@@ -12,6 +12,9 @@
 #   tools/capture.sh painted        # the #10 editor's picture
 #                                   # (gen/painted.pce, built by
 #                                   # tests/check-editor.js --write)
+#   tools/capture.sh spainted       # the #13 editor's sprite scene
+#                                   # (gen/spainted.pce, built by
+#                                   # tests/check-editor.js --write sprite)
 #   tools/capture.sh 1..8 sprite    # the #12 sprite-scene ROMs
 #                                   # (gen/spriteN.pce; the dump gains sat.bin)
 #   tools/capture.sh 1..11 vsprite  # the #14 viewer ROMs of the sprite scenes
@@ -60,9 +63,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SCENE="${1:?usage: capture.sh 1..9 [scene|viewer|browser|us|sprite|vsprite|raster] | capture.sh painted}"
+SCENE="${1:?usage: capture.sh 1..9 [scene|viewer|browser|us|sprite|vsprite|raster] | capture.sh painted|spainted}"
 if [ "$SCENE" = painted ]; then
   MODE=painted
+elif [ "$SCENE" = spainted ]; then
+  MODE=spainted
 else
   MODE="${2:-scene}"
 fi
@@ -77,7 +82,8 @@ case "$MODE" in
   vsprite) NAME="vsprite${SCENE}" ;;
   raster) NAME="raster${SCENE}" ;;
   painted) NAME="painted" ;;
-  *) echo "mode must be scene, viewer, browser, us, sprite, vsprite, raster or painted" >&2; exit 2 ;;
+  spainted) NAME="spainted" ;;
+  *) echo "mode must be scene, viewer, browser, us, sprite, vsprite, raster, painted or spainted" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -96,6 +102,9 @@ elif [ "$MODE" = us ]; then
 elif [ "$MODE" = painted ]; then
   # #10: the editor's picture, exported by #9's builder
   node tests/check-editor.js --write
+elif [ "$MODE" = spainted ]; then
+  # #13: the editor's sprite scene, exported by #9's builder
+  node tests/check-editor.js --write sprite
 else
   make -C tools "gen/$NAME.pce"
 fi

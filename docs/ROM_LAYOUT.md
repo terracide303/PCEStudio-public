@@ -122,15 +122,26 @@ the browser must not emit them either.
 - Finally CR from the config turns the layers on: bit 7 = background,
   bit 6 = sprites.
 
-## Pictures the editor makes (#10)
+## Pictures the editor makes (#10, #13)
 
 `renderer/pce-editor.js` writes this layout directly: tiles are handed out
 from character `$40` (the first character after the 32×32 BAT at words
-0–`$3FF`), the map is the 32×32 BAT (MWR = 0), and there is **one** region —
-`[[$40, tileCount]]` — so the descriptors hold the whole tile set. Its BAT is
-always 1024 words (banks 2 only) and its tiles start at VRAM word `$400`; the
-ROM is `4 + max(1, ceil(tiles·32 / 8 KiB))` banks, as the formula above.
-There are at most 1536 tiles (banks 4–9).
+0–`$3FF`), the map is the 32×32 BAT (MWR = 0), and the region list is
+`[[$40, tileCount]]` — **one** region for a picture without sprites, as #10
+made it. Its BAT is always 1024 words (banks 2 only) and its tiles start at
+VRAM word `$400`; the ROM is `4 + max(1, ceil(region bytes / 8 KiB))` banks,
+as the formula above. There are at most 1536 tiles (banks 4–9).
+
+A picture with sprite patterns (#13) adds a **second** region: the patterns
+are packed into 64-word VRAM cells after the tiles (first cell
+`ceil(nextChar / 4)`, each at the alignment its CGX/CGY size needs) and the
+descriptor is `[[firstCell·4, cells·4]]` — `char0 = firstCell·4`, `tileCount
+= cells·4`, so the region's word count is `cells·64`. The pattern region ends
+below the SAT at VRAM `$7F00` (the editor refuses a pattern that would reach
+it), and tiles plus patterns together must still fit banks 4–9. The SAT is
+not a region: it keeps its fixed place in bank 1 (above), and the config's CR
+bit 6 turns the sprite layer on. Both regions are copied in descriptor order
+before the SAT.
 
 ## What the viewer does not do
 
