@@ -16,7 +16,7 @@ and records the counter in the note.  For the other scenes it only asserts
 # line 240 — sits at step 2, not wrapped; the capture is in steady state
 # either way).
 
-usage: raster-patch.py DUMPDIR SCENE   (SCENE = 1..5)
+usage: raster-patch.py DUMPDIR SCENE   (SCENE = 1..10)
 """
 
 import json

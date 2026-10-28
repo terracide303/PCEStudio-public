@@ -27,13 +27,15 @@ data — and `scene8`, `scene8b` and `scene8c` are the diff-0 proofs (#39).
 HuCard image blank (every VDC register 0), which is the emulator not running
 the image (#25), not a rendered frame. The skip list is explicit and named
 dumps only; an unnamed background-off dump whose capture is not the backdrop
-fails the run as a diff. The shipped count is **51 pictures** (scenes 1-9,
+fails the run as a diff. The shipped count is **57 pictures** (scenes 1-9,
 5b, 8b, 8c, painted, spainted, viewer 1-3 and 7, browser 1-3, sprite 1-12,
-vsprite 1-12, bsprite 12, raster 1-5), us1 skipped. `dumps/vspriteN/` are
+vsprite 1-12, bsprite 12, raster 1-10, browser 10), us1 skipped.
+`dumps/vspriteN/` are
 #14's captures: the *viewer*
 ROMs of the sprite scenes (`tools/capture.sh N vsprite`), whose SATB DMA
 loads the same SAT the sprite scene ROMs write directly.
-`sprite12`/`vsprite12`/`bsprite12`/`viewer7` are #42's (REVIEW-14, below).
+`sprite12`/`vsprite12`/`bsprite12`/`viewer7` are #42's (REVIEW-14, below);
+`raster6-10` are #43's (REVIEW-15, below), `browser10` is #46's.
 A dump with `raster.json` (the raster scenes, #15) is verified against it
 **before** rendering — the table must describe what the ROM actually wrote:
 entries' lines strictly increasing (VDW lines; 240 allowed for r5's HBlank
@@ -101,6 +103,31 @@ manual citations (RCR R06, BXR/BYR R07/R08, CR R05, VCE 2.2.2) are in
 `docs/RENDERER.md`; the NOT-proven parts (sub-line VCE write dots, the
 emulator-specific IRQ path, real-hardware IRQ latency) are written down
 there too.
+
+## The raster scenes (#15)
+
+`dumps/raster6-10` are #43's: REVIEW-15's own "capture that would catch it"
+suggestions, on pictures a person can read — the bands picture (BAT tile
+(x, y) = 0x040 + (x + 2y) & 31, each tile one solid hue of palette 0's
+seven bright colours) and #40's stripes picture (colour 0 left of display
+column 128, colour 7 right).  r6 is r3's BYR split on the bands (the seam
+is visible: captured row 79 changes 168 of 256 px); r7 ramps CRAM[0x000]
+up and CRAM[0x007] down every line — two full-screen staircases (232
+distinct values per column); r8 starts r2's wobble at line 50, so rows
+0..48 display the previous frame's last BXR write (45) — the M6 witness;
+r9 is r2's wobble captured SLSTART=6 SLEND=237 so vdwLine0 = 3 — the M16
+witness; r10 puts two solid sprites over the bands and ramps
+CRAM[0x101] every line, so the sprite bodies carry the gradient — the M19
+witness.  `tests/raster-mutation.js` re-runs REVIEW-15's M6/M16/M17/M19
+as source mutations of the current renderer (semantically equivalent
+edits of the breaker's — the reviewed tree was ddbe106, the renderer has
+moved since — each asserted exactly-once) and requires check.js to report
+the measured diffs: M6 DETECTED on raster8 (12544 px = 49 rows × 256,
+exactly the latch band), M16 DETECTED on raster9 (50032 px), M19 DETECTED
+on raster10 (1280 px, exactly the two sprite bodies), M17 still NO-OP
+(the 9-bit wrap is redundant: bgY is consumed only mod the BAT height and
+mod 8, and 512 ≡ 0 mod both).  The witnesses and the blind spots are in
+`docs/REVIEW-15.md`'s #43 appendix and `docs/RENDERER.md`.
 
 ## `check-review-fixes.js` — the #38 fixes, and that they were needed
 

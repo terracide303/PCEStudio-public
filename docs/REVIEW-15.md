@@ -132,12 +132,14 @@ early/late write moves only 102/222 px (M11/M10), 1–2 px on most rows.
   after the first captured row — e.g. start `raster2`'s chain at line 50 (or
   drop its lines 1–49). Rows 1–49 would then show BXR 0 instead of the
   previous frame's last value (65), shifting whole bands.
+  *(Caught by #43 — raster8, see the appendix.)*
 - **M16 — raster-path calibration is untested.** Every raster dump is on the
   standard crop (`vdwLine0 = 1`), so hard-wiring 1 is pixel-identical.
   (`scene5b` proves the *non-raster* formula with `SLSTART=6`; the raster
   dumps have no equivalent.) **Capture that would catch it:** a raster
   capture with `SLSTART=6`/`SLEND=237`, where `vdwLine0 = 3`; every entry
   would land two rows off.
+  *(Caught by #43 — raster9, see the appendix.)*
 - **M19 — sprite colours under raster CRAM writes are untested.** No capture
   has both visible sprites and per-line colour writes: `raster4` has the
   writes but an all-zero SAT, `raster5` has sprites but no `cram` entries in
@@ -145,6 +147,7 @@ early/late write moves only 102/222 px (M11/M10), 1–2 px on most rows.
   pixel-identical on every dump. **Capture that would catch it:** give
   `raster5` a colour-table step (e.g. at line 50, over sprite 0's rows), or
   put one sprite in `raster4`'s SAT.
+  *(Caught by #43 — raster10, see the appendix.)*
 
 ## Weak witnesses (detected, but nearly invisible)
 
@@ -171,6 +174,67 @@ early/late write moves only 102/222 px (M11/M10), 1–2 px on most rows.
   tile, so an unmasked offset ≥ 512 addresses the same tile/row as the
   masked one. The VDC's 9-bit counter makes the mask correct, but the
   subsequent masks already force the same result.
+  *(Confirmed by #43's re-run — still NO-OP, see the appendix.)*
+
+## #43 follow-up (2026-10-28) — the three misses now caught
+
+Card #43 built this review's own "capture that would catch it" suggestions
+as five new Mednafen captures on structured tiles (the effects are visible
+to a person, not buried in noise), and a permanent re-run suite,
+`tests/raster-mutation.js`, that mutates the current renderer with
+semantically equivalent edits (the reviewed tree was `ddbe106`; the renderer
+has moved since — each replacement is asserted exactly-once, so a refactor
+fails the harness loudly instead of silently).
+
+**The new captures** (`tests/dumps/raster6-10`, built by `tools/genroms.py`):
+
+| scene | picture | witness | measured in the capture |
+|---|---|---|---|
+| raster6 | diagonal seven-colour bands (each BAT tile a solid hue of palette 0) | the BYR split (r3's effect) | the seam: captured row 79 changes 168 of 256 px (the strongest row in the picture); bands 1 and 3 scroll alike, the middle band is offset |
+| raster7 | #40's stripes (colour 0 left of col 128, colour 7 right) | per-line CRAM writes to two large solid regions (M10/M11's weak witness) | 232 distinct RGB values down every column of both halves, ramping in opposite directions; every consecutive row differs |
+| raster8 | bands | M6 — BXR carried across a frame boundary | saved BXR = 45 = wobble(182); rows 0..48 (49 rows) show the carried 45-px scroll, every pixel differing from the base-0 render; from row 49 the wobble weaves (most consecutive rows differ in ~7/8 of their pixels) |
+| raster9 | bands, captured SLSTART=6 SLEND=237 | M16 — vdwLine0 = 3, not 1 | the weave starts at row 0; hard-wiring vdwLine0 to 1 moves 50032 of 59392 px (84%) |
+| raster10 | bands + two solid sprites (16×64, 16×16) over them | M19 — sprite pixels under per-line colour writes | the sprite bodies (1280 px) carry the per-line CRAM[0x101] ramp — 71 distinct values down the tall sprite, every row distinct — over a background of exactly 7 static hues |
+
+**The re-runs** (one break at a time, ground truth measured in-process by
+rendering every dump pristine vs mutated, then the real check.js run in a
+throwaway tree against the same dumps — the same protocol as this review,
+plus the changed-set assertion):
+
+| break | verdict now | measured |
+|---|---|---|
+| M6 | **DETECTED** | check.js exit 1; raster8 12544 px (49 rows × 256, the latch band) / 22540 differing bytes reported exactly; the other 56 dumps diff 0 |
+| M16 | **DETECTED** | check.js exit 1; raster9 50032 px / 84600 bytes reported exactly; the other 56 dumps diff 0 |
+| M19 | **DETECTED** | check.js exit 1; raster10 1280 px (exactly the two sprite bodies) / 3552 bytes reported exactly; the other 56 dumps diff 0 |
+| M17 | **NO-OP, confirmed** | 0 bytes everywhere; check.js is diff 0 on the mutant — the wrap is redundant, not a defect |
+
+The counts are the harness's per-pixel comparisons (not check.js's byte
+counter).  All three misses are now caught on the pictures this review said
+would catch them, with the changed set exactly the one scene named.
+
+**What this still does not prove (the blind spots of #43):**
+
+- **Cross-frame CRAM persistence (M12) still rests on raster4 alone.**
+  raster7's and raster10's tables are periodic (static ramp values, no frame
+  counter), so a renderer that resets the colour table per frame still
+  renders them identically.  raster4 remains the only dump that would catch
+  it.
+- **raster6 witnesses the BYR split, not the BYR frame-start latch.** Its
+  bands 1 and 3 scroll alike, so only the middle band's edges move; the
+  latch itself (M5) is still witnessed by raster1/raster3's leading rows.
+- **The re-run mutations are semantically equivalent edits of the current
+  renderer, not the breaker's literal strings** — the reviewed tree is
+  ddbe106 and #26 has refactored the background decode since.  The harness's
+  exactly-once assertions and its blind-checker self-tests (a gutted check.js
+  must be reported MISSED, an identical substitution NO-OP) keep the re-run
+  honest about itself, but the equivalence is this seat's judgment, not the
+  breaker's.
+- **The raster table's line calibration is still self-referential.**
+  `check.js` verifies `raster.json` against the save state with its own
+  arithmetic; M16's detection rests on raster9's shifted crop and the pinned
+  save scanline (254, for sleeps 8.5–9.5 s).
+- **Everything here is Mednafen, not hardware.** The first real-console
+  check is a separate card (#16); none of these captures run on a PCE.
 
 ## Note on the check's counter
 
@@ -191,6 +255,8 @@ review are the exact pixel counts.
 - Per rule 2 the card may not be closed over the three misses: M6, M16 and
   M19 are real breaks the shipped captures cannot express and should either
   get the captures named above or be written on the card as **not proven**.
+  *(The card was left open; #43 built the captures and re-ran the breaks —
+  see the appendix.)*
   M9 and the CRAM timing are DETECTED but rest on 60–222 pixels that no one
   can see; they are the next captures to strengthen.
 - The one NO-OP (M17) is a redundant mask, not a defect.

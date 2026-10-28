@@ -11,7 +11,7 @@ renderer's output and Mednafen's raw recorded frame (same source surface as
 its F9 screenshot, captured via `-qtrecord` because this Mac must not receive
 synthesized key events) for every dump in `tests/dumps/` — the three #5
 dumps, the eleven #12/#40 sprite scenes (marked by `sat.bin`) and, since
-#15, the five raster scenes (marked by `raster.json`).
+#15, the ten raster scenes (marked by `raster.json`).
 
 Everything below is labelled by where it was read from.  PCEStudio's rule
 (DECISIONS.md): the model is written from the Hudson manuals; Mednafen and
@@ -288,8 +288,10 @@ of the model:
   SAT entry — its left half is the 16th strip (drawn), its right half the
   17th (dropped); REVIEW-12's M24 (the CGX guard gone) is DETECTED here
 
-Scenes raster1–5 are #15's (`RASTER_SCENES`): each ROM boots with a scene
-picture (scene 1's palette/BAT) and then chains **per-scanline writes from
+Scenes raster1–5 are #15's and raster6–10 are #43's (REVIEW-15's misses and
+weak witnesses on structured tiles — `RASTER_SCENES`): each ROM boots with a
+scene picture (scene 1's palette/BAT for 1–5, #43's bands/stripes pictures
+for 6–10) and then chains **per-scanline writes from
 the RCR line interrupt** — the boot arms `RCR = 0x40 + line` of the first
 entry, each handler step writes its entry's BXR/BYR/CR/VCE colour-table
 value, bumps the step, and re-arms RCR for the next entry (the last wraps
@@ -325,6 +327,51 @@ frame-start latch each scene's leading rows witness:
   fill), and (240, CR = 0xC4 restore — fires in the HBlank after the last
   display line, so the save at line 237 catches the chain at step 2, its
   steady state: the restore is never in a captured picture).
+
+Scenes raster6–10 are #43's (REVIEW-15's misses and weak witnesses, on
+pictures a person can read).  r6/r8/r9/r10 share the **bands picture**:
+BAT tile (x, y) = 0x040 + (x + 2y) & 31, palette 0, each tile solid
+colour ((t − 0x040) % 7) + 1 of seven bright pairwise-distinct hues
+(REVIEW-15: r2/r3's noise changed statistically when scrolled, never
+visibly) — diagonal seven-colour stripes whose band edges move with any
+BYR/BXR change.  r7 is the #40 stripes picture (colour 0 left of display
+column 128, colour 7 right).  REVIEW-15's own "capture that would catch
+it" suggestions are exactly these scenes; `tests/raster-mutation.js`
+re-runs its M6/M16/M17/M19 as source mutations and requires check.js to
+report the measured diffs (the changed sets: raster8 / raster9 / raster10
+alone, M17 no-op):
+
+- **raster6 "bands byr"** (byr_table): r3's two-step BYR split on the
+  bands picture.  The band edges are visible: the middle band's stripes
+  jog at the seam (captured row 79 changes 168 of 256 px — the strongest
+  single row in the picture) and bands 1 and 3 scroll alike, so the split
+  is the one seam plus the middle band's offset.
+- **raster7 "stripes ramp"** (cram_dual): steps at lines 1..232 write
+  CRAM[0x000] = ramp (0 → 511) and CRAM[0x007] = 511 − ramp — the
+  review's "a colour that covers a large area each line", twice: two
+  full-screen staircases in opposite directions (232 distinct values down
+  every column; each consecutive row differs).  An early/late write now
+  changes a whole solid region per row.
+- **raster8 "wobble late"** (bxr_table): r2's wobble, but the chain
+  starts at line 50 — the first 49 captured rows (VDW lines 18..66)
+  display the previous frame's last write, wobble(182) = 45 (the saved
+  BXR is 45), not raster.base 0: the M6 witness (REVIEW-15's BXR
+  frame-start latch miss).  Every pixel of the latch band differs from
+  the base-0 render; from row 49 the wobble weaves the stripes (most
+  consecutive rows differ in ~7/8 of their pixels).
+- **raster9 "wobble shifted"** (bxr_table): r2's wobble captured with
+  SLSTART=6 SLEND=237, so vdwLine0 = 3 — the M16 witness (REVIEW-15's
+  calibration miss).  Hard-wiring vdwLine0 to 1 applies every table
+  entry two rows late; the weave starts at row 0, so the whole screen
+  differs (50032 px measured).
+- **raster10 "sprite ramp"** (cram_sprite): the bands picture plus two
+  solid-pattern sprites (16×64 at display cols 40..55 rows 40..103,
+  16×16 at cols 150..165 rows 40..55; SPBG=1, every visible pixel sprite
+  colour 1 → CRAM[0x101]); steps at lines 1..232 write CRAM[0x101] =
+  ramp — the M19 witness (REVIEW-15's sprite-colour miss).  The sprite
+  bodies carry the per-line gradient (every row distinct, 71 values down
+  the tall sprite) over a static seven-hue background; decoded flat, the
+  1280 sprite-body pixels lose it.
 
 `tools/genroms.py` emits each scene's table as `gen/rasterN.raster.json`
 (the renderer's input) and `check.js` verifies the table **against the
