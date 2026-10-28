@@ -115,7 +115,28 @@ bank0: ../renderer/viewer-bank0.bin
 ../renderer/viewer-bank0.bin: extract_bank0.py $(VIEWERS) $(VSPRITES) $(VRASTERS)
 	$(PYTHON) -I extract_bank0.py $@ $(VIEWERS) $(VSPRITES) $(VRASTERS)
 
+# #35's export: tools/hutrack.asm's banks $00-$0F (startup, MAIN, the HuTrack
+# engine and its tables) are the same in every music ROM, so the browser
+# export takes them as a committed asset, like the viewer's bank 0.  Both
+# songs are built and the extractor refuses if their engine banks disagree.
+# build-hutrack.sh needs PCEAS 4.x (PCEAS4 env or pceas4 on PATH); it cds to
+# the repo root itself, so its paths are repo-root-relative.
+MUSIC_ROMS := gen/hutrack/hutrack-demo.pce gen/hutrack/hutrack-demo2.pce
+
+engine: ../renderer/hutrack-engine.bin
+
+../renderer/hutrack-engine.bin: extract_engine.py $(MUSIC_ROMS)
+	$(PYTHON) -I extract_engine.py $@ $(MUSIC_ROMS)
+
+gen/hutrack/hutrack-demo.pce: hutrack.asm ../tests/dumps/hutrack1/song/demo.song.inc
+	SONG=tests/dumps/hutrack1/song BUILD=tools/gen/hutrack/build \
+	  ROM=tools/gen/hutrack/hutrack-demo.pce ./build-hutrack.sh
+
+gen/hutrack/hutrack-demo2.pce: hutrack.asm ../tests/dumps/hutrack2/song/demo2.song.inc
+	SONG=tests/dumps/hutrack2/song BUILD=tools/gen/hutrack/build2 \
+	  ROM=tools/gen/hutrack/hutrack-demo2.pce ./build-hutrack.sh
+
 clean:
 	rm -f hello.pce hello.sym hello.lst gen/*.pce gen/*.sym gen/*.lst
 
-.PHONY: all clean bank0
+.PHONY: all clean bank0 engine

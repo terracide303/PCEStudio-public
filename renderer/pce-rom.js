@@ -443,6 +443,42 @@
     return rom;
   }
 
+  /* ---- #35: a music ROM --------------------------------------------------
+   *
+   * tools/hutrack.asm is a fixed skeleton: banks $00-$0F hold the startup,
+   * MAIN, the HuTrack engine ($08) and its pitch tables ($09) — the same
+   * bytes for every song — and bank $10 holds the song the converter
+   * produced.  The export therefore takes the assembled song bank and the
+   * committed engine image (renderer/hutrack-engine.bin, extracted from the
+   * PCEAS build by tools/extract_engine.py) and lays them where PCEAS does.
+   * All 17 banks are emitted, unused ones 0xff, exactly like `pceas -raw`.
+   *
+   * The song is assembled from the converter's include files by
+   * renderer/pce-hutrack.js's assemble(); this function only places bytes.
+   * The result is byte-identical to PCEAS's build of tools/hutrack.asm with
+   * the same song (tests/check-export-song.js), which is how the placement
+   * is proven rather than asserted. */
+  var ENGINE_BANKS = 16;         /* $00-$0F: code, engine, tables */
+  var SONG_BANK = 16;            /* $10 */
+  var ROM_BANKS = ENGINE_BANKS + 1;
+
+  function buildSongRom(music) {
+    var engine = music && music.engine;
+    var song = music && music.song;
+    need(engine && engine.length === ENGINE_BANKS * BANK,
+         "engine must be the " + ENGINE_BANKS + "-bank HuTrack image (" +
+         ENGINE_BANKS * BANK + " bytes), got " +
+         (engine ? engine.length : engine));
+    need(song && song.length <= BANK,
+         "the assembled song must fit its 8 KiB bank, got " +
+         (song ? song.length : song) + " bytes");
+    var rom = new Uint8Array(ROM_BANKS * BANK);
+    rom.fill(0xFF);
+    rom.set(engine, 0);
+    rom.set(song, SONG_BANK * BANK);
+    return rom;
+  }
+
   return {
     BANK: BANK,
     MAX_REGIONS: MAX_REGIONS,
@@ -451,8 +487,12 @@
     RASTER_OFFSET: RASTER_OFFSET,
     RASTER_STEPS: RASTER_STEPS,
     RASTER_IMAGE: RASTER_IMAGE,
+    ENGINE_BANKS: ENGINE_BANKS,
+    SONG_BANK: SONG_BANK,
+    ROM_BANKS: ROM_BANKS,
     batWords: batWords,
     buildRom: buildRom,
+    buildSongRom: buildSongRom,
     encodeRaster: encodeRaster,
     reverseBits: reverseBits
   };

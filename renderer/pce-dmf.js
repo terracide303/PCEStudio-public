@@ -194,9 +194,16 @@
           r.u8();                       /* DMF row padding */
           var volume = r.u16();
           var effects = [];
+          /* Every slot, empty ones included: the HuTrack converter's
+           * compression keys its mask on a slot being present (bit 4) and on
+           * an empty slot's arg word (bit 5), so a consumer rebuilding its
+           * stream needs the slots in order, not just the non-empty ones
+           * (renderer/pce-hutrack.js). */
+          var fxSlots = [];
           for (var f = 0; f < fxCount; f++) {
             var code = r.u16();
             var arg = r.u16();
+            fxSlots.push({ code: code, arg: arg });
             if (code !== 0xffff) effects.push({ code: code, arg: arg });
           }
           var instrument = r.u16();
@@ -205,6 +212,7 @@
             octave: octave,
             volume: volume === 0xffff ? null : volume,
             effects: effects,
+            fxSlots: fxSlots,
             instrument: instrument === 0xffff ? null : instrument
           });
         }
@@ -283,7 +291,9 @@
     var orderCount = r.u8();
     if (orderCount < 1 || orderCount > 127)
       throw refuse("dmf-order", "order count " + orderCount);
-    if (version < 20) r.u8();               /* legacy arpeggio speed */
+    /* Legacy arpeggio speed: only in pre-20 modules, and the converter writes
+     * it (clamped to 1..) into the song header's attribute bytes. */
+    var arpSpeed = version < 20 ? r.u8() : 1;
 
     var orderMatrix = [];
     for (var ch = 0; ch < CHANNELS; ch++) {
@@ -335,6 +345,7 @@
       customHz: customHz,
       rowsPerPattern: rowsPerPattern,
       orderCount: orderCount,
+      legacyArpSpeed: Math.max(1, arpSpeed),
       orderMatrix: orderMatrix,
       instruments: instruments,
       wavetables: wavetables,

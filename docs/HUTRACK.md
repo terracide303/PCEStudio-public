@@ -6,10 +6,12 @@ page records what is proven with it so far: **HuTrack's engine, fed by
 HuTrack's own converter, builds a ROM that plays our own DMF in Mednafen, and
 the recording contains the notes the song was written with.**
 
-It is #35's first two steps: step 1 (the console side, below) and step 2
+It covers #35's first three steps: step 1 (the console side, below), step 2
 (the browser side: our own DMF reader plus a JS port of the engine's PSG
-writes, `renderer/pce-dmf.js` + `renderer/pce-song.js`). The export path,
-effects, DDA samples and sound in toys are still open (last section).
+writes, `renderer/pce-dmf.js` + `renderer/pce-song.js`) and step 3 (the
+export: a DMF song converted and assembled in the browser into the `.pce`,
+byte-identical to PCEAS's build — see "The export"). Effects, DDA samples and
+sound in toys are still open (last section).
 
 ## The chain
 
@@ -80,9 +82,18 @@ PCEAS4=pceas4 tools/capture-hutrack.sh     # rebuild + Mednafen recording
 node tests/check-hutrack.js                # vendor manifest, fixtures, ROM, WAV
 node tests/check-dmf.js                    # our DMF reader + the JS player vs
                                            # the same recording (no PCEAS needed)
+node tests/check-export-song.js            # the browser export path: the JS
+                                           # converter vs the Python converter's
+                                           # includes, and the JS ROM vs PCEAS
+# add HUTRACK_PYTHON=/path/to/venv/bin/python to the last line to re-run the
+# vendored converter and re-prove the fixtures instead of trusting them
 
-# only when changing the song (needs the Python audio stack):
-python3 tools/genhutrack.py
+make -C tools engine                       # refresh renderer/hutrack-engine.bin
+                                           # (after a tools/hutrack.asm change)
+
+# only when changing a song (needs the Python audio stack):
+python3 tools/genhutrack.py                # song 1 (tests/dumps/hutrack1)
+python3 tools/genhutrack.py --song 2       # song 2 (tests/dumps/hutrack2)
 ```
 
 ## Why PCEAS 4 and not the installed 3.23
@@ -144,6 +155,91 @@ The consequential measurement is the waveform correlation: 0.864 over the
 first 1.4 s at its best lag. The pitch and level measurements above are
 unaffected because they do not depend on that phase.
 
+## The export (step 3)
+
+The browser cannot run HuTrack's Python converter or PCEAS, so the export
+route replaces both:
+
+```
+DMF bytes ─ renderer/pce-dmf.js ──► one module object
+                                      │
+             renderer/pce-hutrack.js  │  convert()  → the 10 include files
+                                      │  assemble() → the 8 KiB song bank
+                                      ▼
+renderer/hutrack-engine.bin ──► renderer/pce-rom.js buildSongRom() → .pce
+      (banks $00-$0F, committed)
+```
+
+- **`renderer/pce-hutrack.js`** — `convert(module, options)` writes the same
+  ten `.inc` files HuTrack's `HuTrackExportPCE` writes, from the module
+  `pce-dmf.js` parsed.  It reproduces the pattern compression (the note+octave
+  byte, the field mask, `0xe1+n` empty-row runs, per-channel pattern
+  deduplication), the instrument/arpeggio/waveform include blocks and the
+  header.  `assemble(files, entry)` then assembles that small language —
+  labels at column 0, `.include`, `.page 2`, `.db`, `.dw`, `bank(label)` —
+  into the bank's bytes.  `.page 2` is ignored inside one bank and the
+  assembler refuses a song that outgrows it, which is the only case where
+  PCEAS would move a label.
+- **`renderer/hutrack-engine.bin`** — banks $00-$0F of `tools/hutrack.asm`'s
+  build: startup, MAIN, the HuTrack engine and its pitch tables.  They are
+  the same for every song, so they are extracted from the PCEAS ROM and
+  committed, exactly like `renderer/viewer-bank0.bin`.  `tools/extract_engine.py`
+  refuses if the two songs' engine banks disagree; `make -C tools engine`
+  regenerates it after any `tools/hutrack.asm` change.
+- **`renderer/pce-rom.js` `buildSongRom({ engine, song })`** — a separate
+  function beside the picture exporter: 17 banks, `0xff` fill, engine at
+  bank $00, the assembled song at bank $10, exactly where
+  `tools/hutrack.asm`'s `.bank $10, "Song"` / `.org $4000` puts it.
+
+### The second song
+
+`tools/genhutrack.py --song 2` writes `tests/dumps/hutrack2/demo2.dmf`, a
+32-row, three-order, two-effect-column song built to reach what song 1 never
+does: two instruments, two waveforms, envelope loops, a relative arpeggio
+(the signed-dword, `-12`, `&255` path), FX1 and FX2 together, a bare-note row
+(mask 1), a volume-only row (mask 8), a note cut (`0xe0`), a repeated order
+(the deduplication matrix is `[0, 1, 0]`; the converter's `Pattern.compare`
+path) and a 30-row empty run plus a two-row remainder (both `0xe1+n`
+boundaries).  Its includes were produced by the vendored Python converter
+(9,590 B, 10 files) and committed; the JS converter never saw them when it
+was written.
+
+### What `node tests/check-export-song.js` proves
+
+- **Same include bytes.** For both songs, all ten files from `convert()` are
+  byte-identical to the committed fixtures, whose sha256s `song.json`
+  records.  With `HUTRACK_PYTHON` pointing at a Python that has numpy and
+  resampy, the vendored converter is re-run into a temporary directory first,
+  so "the fixture is Python's output" is re-proven rather than trusted
+  (otherwise that check reports `skip`, not pass).
+- **Same ROM.** `build-hutrack.sh` rebuilds both songs with PCEAS 4.x into a
+  temporary tree; `buildSongRom()`'s output must equal the whole 139,264-byte
+  ROM, not just the song bank.  Song 1: 269 B of song bank, sha256
+  `c683188f47c4e912…` — the ROM `run.json` records, so the export's
+  "plays the same as hutrack1" is a bytes claim and `mednafen.wav` already
+  covers it.  Song 2: 381 B, sha256 `78b5281e14e46241…`.  The committed
+  engine image must equal both builds' banks $00-$0F
+  (`370dfd6a296ea767…`), so a stale asset fails the test instead of shipping.
+  Without PCEAS 4 the comparison reports `skip`, not pass.
+- **Refusals by code.** `song-pcm` (samples need numpy/resampy's resampler),
+  `song-volume`, `song-note`, `song-effect` (code > 1 byte; a waveform index
+  the song lacks), `song-arp`, `song-instrument`, `song-name`; and for the
+  assembler `song-bank`, `song-label`, `song-value`, `song-syntax`.
+- **The assembler's own semantics**: labels resolve to bank-relative CPU
+  addresses (`$4000 + offset`) and a forward `.dw` reference resolves.
+
+### Test sensitivity, measured (not rule-2 proof)
+
+The test was written by the same seat as the converter, so it proves nothing
+about itself until `@review` breaks it cold.  As a first measurement, eight
+single-line breaks were put into `pce-hutrack.js` one at a time: instrument
+and volume mask bits swapped; the empty-run base `0xe1`→`0xe0`; the
+`.pcmData` include dropped from `song.inc`; `.dw` emitted big-endian; the
+bare-note `+128` condition narrowed to `mask < 1`; deduplication disabled; a
+fake mask byte; the arpeggio's `-12` relative offset removed.  **All eight
+fail the test.**  Two of them — the `+128` condition and the `-12` offset —
+are caught only by song 2, which is why it exists.
+
 ## Proven, and not proven
 
 Proven here: our DMF imports through the converter; the generated assets
@@ -152,7 +248,10 @@ the recording's pitches, note order, bass and tempo are the song's; the ROM
 rebuilds byte-identically; the vendored files are the pinned upstream bytes.
 Step 2 also proves our own reader reads the same notes and waves, and the JS
 port of the engine produces the same PSG sequence and the recording's
-pitches and levels (measurements above).
+pitches and levels (measurements above).  Step 3 proves the browser can
+produce the console's ROM: our converter's includes match HuTrack's Python
+converter's byte for byte on two songs, and our assembly of them plus the
+committed engine banks is the same 139,264 bytes PCEAS emits.
 
 Not proven here:
 
@@ -167,14 +266,34 @@ Not proven here:
   stream); without them the two voices' relative phase is not the console's
   (waveform correlation 0.864 over 1.4 s). Pitch and level are right;
   waveform equality is not claimed.
-- **The browser path is not exercised.** `pce-dmf.js`'s inflation uses Node's
-  zlib in the test; the browser's `DecompressionStream` branch is written but
-  untested, and no page plays a song yet.
-- **No export path yet.** `renderer/pce-rom.js` still exports pictures; it
-  does not put a song + HuTrack in the .pce.
+- **The browser path is not exercised by a page.** `pce-dmf.js`'s inflation
+  uses Node's zlib in the tests; the browser's `DecompressionStream` branch is
+  written but untested.  `pce-hutrack.js`'s `convert()`/`assemble()` are
+  UMD modules like every other renderer file, but no page calls them yet:
+  there is no "export this DMF" button, and no browser preview of a song.
+- **The converter is proven on two songs, byte for byte**, not on arbitrary
+  DMFs.  It reproduces the converter's rules as read; a module using a path
+  neither song reaches (revision > 24 pattern names, 4 effect columns, `0xe5`
+  pre-20 pitch slides, samples) is refused or unproven.  PCM samples are
+  refused by name (`song-pcm`) because their conversion is a numpy/resampy
+  resample that was not ported.
+- **The converter passes effect columns through; the browser player still
+  refuses them** (`song-fx`).  So song 2 exports and would play its effects
+  on the console, while `pce-song.js` refuses to preview it.  That gap is
+  deliberate and named, not silent.
+- **Instrument names are written into a comment**, so `convert()` replaces
+  non-ASCII ones with spaces; the Python converter writes them as the file
+  encoding allows.  A byte-identical claim for a non-ASCII instrument name is
+  therefore not made.
+- **The engine image is a committed copy of PCEAS's banks $00-$0F.**  It goes
+  stale if `tools/hutrack.asm` or the vendored engine changes without
+  `make -C tools engine`; `check-export-song.js` catches that when PCEAS 4.x
+  is present, and cannot when it is not (the check reports `skip`).
 - **Effect columns, arpeggio envelopes, DDA samples, SFX, LFO and the music
   fade** are refused by the player, not implemented. The engine supports
-  them; this fixture does not exercise them.
+  them; the converter emits effect-column data (song 2 exercises it), but
+  song 2 is never recorded, so what those effects do to the audio is
+  unmeasured.
 - **The checkers were written by @design** — `check-hutrack.js` and
   `check-dmf.js` — the seat that wrote the fixture, the song, the reader and
   the player (workshop RULES.md rule 2). @review owes both a cold break.

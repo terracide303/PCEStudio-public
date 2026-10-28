@@ -223,5 +223,7 @@ MusicCodeEnd:
     .org $4000
 
 Song:
-    .include "song/demo.song.inc"
+    ; build-hutrack.sh writes this one line, pointing at whichever song
+    ; directory it was given (song 1's demo.song.inc, song 2's demo2.song.inc).
+    .include "song/song.inc"
 Song.end
