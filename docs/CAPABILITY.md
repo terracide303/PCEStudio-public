@@ -34,8 +34,9 @@ Progress tab is drawn from these tables.
 |---|---|---|---|
 | Sprites in the renderer | PROVEN | `node tests/check.js`: 11 sprite scenes diff 0; breaker's 24 mutants all detected | #12, #40 — `renderer/pce-sprites.js` |
 | Viewer loads sprites (SATB DMA) | PROVEN | `node tests/check-viewer.js`: 17 captures (viewer1-3, browser1-3, vsprite1-11) diff 0 against the renderer, VRAM/CRAM/SATB equal the scene dumps; vsprite3's missing red half (found by Dennis) fixed. Breaker from another seat running | #14 |
-| Sprite editor + SATB in export | PROVEN | `node tests/check-editor.js`: 21/21 refusals with codes (65th sprite, pattern past VRAM, 17th sprite-palette colour, illegal size), a sprite scene painted through the editor's calls equals pce-bg.js + pce-sprites.js, 16-strip budget line-by-line equal, and the exported ROM's Mednafen capture (`tests/dumps/spainted`) has frame diff 0 with VRAM/CRAM/SAT equal to the editor's | #13 — `renderer/editor.html`, `renderer/pce-editor.js` |
-| Scanline effects in the renderer | PROVEN | `node tests/check.js`: raster1-5 (status bar, BXR wobble, BYR split, colour gradient, CR on/off) diff 0 against Mednafen, 47 pictures in all (46 when #15 closed; #13 added spainted). Not proven: VCE writes mid-line, real-hardware IRQ latency. DeepSeek did this Opus card. Breaker running | #15 — `docs/RENDERER.md` |
+| Sprite editor + SATB in export | PROVEN | `node tests/check-editor.js`: 21/21 refusals, a sprite picture painted through the editor exported and captured in Mednafen (`tests/dumps/spainted`) diff 0 | #13 |
+| Effect editor (gradient, wobble, parallax) | UNTESTED | in progress | #17 |
+| Scanline effects in the renderer | PROVEN | `node tests/check.js`: raster1-5 (status bar, BXR wobble, BYR split, colour gradient, CR on/off) diff 0 against Mednafen, 47 pictures in all (46 when #15 closed; #13 added spainted). Not proven: VCE writes mid-line, real-hardware IRQ latency. DeepSeek did this Opus card. Breaker: 16 of 20 caught, 3 missed, and two effects (BYR split, gradient) not visible on the test pictures → #43 | #15 — `docs/RENDERER.md` |
 | Scanline effects in the viewer (RCR) | UNTESTED | | #16 |
 | Wide modes (256/336/512) | UNTESTED | | #27 |
 
