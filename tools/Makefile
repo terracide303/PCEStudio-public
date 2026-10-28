@@ -19,7 +19,13 @@ RASTERS := 1 2 3 4 5 6 7 8 9 10
 # sprite-pattern cells = 11 banks / 88 KiB, the first viewer whose copy
 # regions cross more than one MPR2 bank.
 VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,1 2 3 7 10))
-SPRITE_ROMS := $(addprefix gen/sprite,$(addsuffix .pce,$(SPRITES)))
+SPRITE_ROMS := $(addprefix gen/sprite,$(addsuffix .pce,$(SPRITES))) \
+               $(addprefix gen/sprite,$(addsuffix .pce,14 15 16 17))
+# #76's four status fixtures (sprite14-17) are deliberately NOT in SPRITES:
+# VSPRITES derives a viewer ROM per entry from tests/dumps/spriteN/
+# regions.json, and these scenes are status scenes captured direct — their
+# witness is the saved VDC status register, not a viewer copy of the
+# picture (tests/check-status.js compares it).
 VSPRITES := $(addprefix gen/vsprite,$(addsuffix .pce,$(SPRITES)))
 RASTER_ROMS := $(addprefix gen/raster,$(addsuffix .pce,$(RASTERS)))
 # #16: the viewer ROMs of the #15 raster scenes — the same tables the scene
@@ -27,11 +33,13 @@ RASTER_ROMS := $(addprefix gen/raster,$(addsuffix .pce,$(RASTERS)))
 # viewer.asm's own irq1 chain.
 VRASTERS := $(addprefix gen/vraster,$(addsuffix .pce,$(RASTERS)))
 # #49: the VRAM-to-VRAM DMA ROMs (genroms.py's DMA_SCENES), scene 4's picture
-# plus one block transfer; capture.sh 1..3 dma.
-DMAROMS := $(addprefix gen/dma,$(addsuffix .pce,1 2 3))
+# plus one block transfer; capture.sh 1..3 dma.  #76 adds dma4/dma5, the same
+# transfer with only SI/D and only DI/D set.
+DMAROMS := $(addprefix gen/dma,$(addsuffix .pce,1 2 3 4 5))
 # #27: the wide-mode ROMs (genroms.py's SPRITE_SCENES wide336/wide512) — the
-# /3 and /2 dot clocks with the 336- and 512-dot display windows.
-WIDEROMS := gen/wide336.pce gen/wide512.pce
+# /3 and /2 dot clocks with the 336- and 512-dot display windows.  #76 adds
+# wide512b: wide512 at VCE CR $07 (DCC=11, the folded /2 clock).
+WIDEROMS := gen/wide336.pce gen/wide512.pce gen/wide512b.pce
 # #28: the flicker viewer ROM — viewer.asm's flicker rotation (assembled
 # with FLICKER defined, so the shared bank 0 the browser export and the #68
 # trace fixtures pin is unchanged), driven by sprite13's picture data and
