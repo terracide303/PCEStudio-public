@@ -1,0 +1,10 @@
+{
+ "base": "scene4",
+ "base_vram": "tests/dumps/scene4/vram.bin",
+ "dcr": 20,
+ "desr": 2048,
+ "lenr": 255,
+ "note": "source decrements only (SI/D set): tiles 0x090-0x09F read from $9ff down into 0x080-0x08F at $800 up",
+ "sour": 2559,
+ "words": 256
+}

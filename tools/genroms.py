@@ -372,6 +372,7 @@ def vce_cr_lines(vcecr):
     frames with it set — docs/DECISIONS.md, 2026-10-28, card #27.
     """
     clock = 2 if (vcecr & 2) else (vcecr & 1)
+    dcc = vcecr & 3
     clock_text = [
         "DCC=00, /4 dot clock, 5.37 MHz, 256-dot display (H6-3)",
         "DCC=01, /3 dot clock, 7.16 MHz, 336-dot display (H6-3; "
@@ -379,6 +380,14 @@ def vce_cr_lines(vcecr):
         "DCC=10, /2 dot clock, 10.74 MHz, 512-dot display (pcetech §6; "
         "HDS/HDW from pcetech §9)",
     ][clock]
+    if dcc == 3:
+        # #76: the fourth code no ROM used before wide512b.  Mednafen keeps
+        # it as its own index (dot_clock = V & 3) with a ratio and output
+        # width identical to index 2, and the model folds it to the same /2
+        # clock; the ROM's comment must not claim DCC=10.
+        clock_text = ("DCC=11, the /2 dot clock (10.74 MHz, 512-dot display) "
+                      "— same clock as DCC=10 (Mednafen vce_ratios[3] = 2, "
+                      "w_cows[..][3] = 512; card #76)")
     return [
         f"        ; VCE CR $0400 = ${vcecr:02x}: {clock_text}",
         "        ; D2 is NOT PROVEN on hardware: Mednafen's VCE code makes it the",
@@ -740,10 +749,14 @@ def sg_word(pat, plane, row):
     return ((w << n) | (w >> (16 - n))) & 0xFFFF if n else w
 
 
-def _spr(x, y, pal=0, spbg=1, cgx=0, cgy=0, hflip=0, vflip=0):
-    """One SAT entry: x/y are SAT field values (display column/row + 32/64)."""
+def _spr(x, y, pal=0, spbg=1, cgx=0, cgy=0, hflip=0, vflip=0, pat=None):
+    """One SAT entry: x/y are SAT field values (display column/row + 32/64).
+
+    `pat` pins the pattern code to a cell the SG loop does not write (#76's
+    sprite16 uses an unwritten cell, which reads as all-zero words — every
+    pixel transparent).  None means pack_patterns assigns one."""
     return dict(x=x, y=y, pal=pal, spbg=spbg, cgx=cgx, cgy=cgy,
-                hflip=hflip, vflip=vflip)
+                hflip=hflip, vflip=vflip, pat=pat)
 
 
 def pack_patterns(sprites):
@@ -753,11 +766,17 @@ def pack_patterns(sprites):
     16x16 = 1 cell; 16x32 = cells p&~2, p&~2+2 (the odd cells of the span
     are free but reserved — packing stays contiguous); 16x64 = p&~6 +
     {0,2,4,6}; 32x16 = p&~1, p&~1+1; 32x32 = p&~3..p&~3+3; 32x64 =
-    p&~7..p&~7+7.  Returns (pat0, nblocks, [base per sprite])."""
+    p&~7..p&~7+7.  A sprite whose `pat` is pinned takes no cell from the
+    allocation.  Returns (pat0, nblocks, [base per sprite])."""
     cursor = 0x80
     bases = []
     blocks = []
+    pinned = []
     for s in sprites:
+        if s.get("pat") is not None:
+            bases.append(s["pat"])
+            pinned.append(s["pat"])
+            continue
         h = [16, 32, 64, 64][s["cgy"]]
         # cells the VDC reads, and the reserved span (CGX cells are
         # consecutive; CGY-only blocks sit 2 apart, span 2*blocks)
@@ -769,7 +788,15 @@ def pack_patterns(sprites):
         bases.append(base)
         blocks += list(range(base, base + size))
         cursor = max(blocks[-size:]) + 1
-    return 0x80, max(blocks) - 0x80 + 1, bases
+    nblocks = max(blocks) - 0x80 + 1 if blocks else 0
+    # a pinned cell must not land in the SG loop's own range (it would be
+    # overwritten) and must be a 64-word cell inside the console's VRAM
+    for pat in pinned:
+        assert not (0x80 <= pat < 0x80 + nblocks), \
+            f"pinned pattern cell ${pat:03x} is inside the SG range"
+        assert 0 <= pat and pat * 64 + 64 <= 0x8000, \
+            f"pinned pattern cell ${pat:03x} is outside VRAM"
+    return 0x80, nblocks, bases
 
 
 def sat_words(sprites, bases):
@@ -1009,6 +1036,25 @@ SPRITE_SCENES = {
                     # strips 0..15 show and the line's last two are dropped
                     + _sprites(*[(64 + 26 * i, 180, i & 0xF)
                                  for i in range(18)])),
+    # wide512b (#76): wide512's picture and registers with VCE CR $07 —
+    # DCC=11, the code no capture used (REVIEW-48-50 M16).  The /2 dot clock
+    # is selected by D1, and code 11 has always meant the same clock as 10:
+    # Mednafen keeps a fourth index (dot_clock = V & 3) whose ratio and
+    # 512-dot output width are identical to index 2 (pce/vce.cpp
+    # vce_ratios[4] = {4,3,2,2}, w_cows[..][3] = 512, x_offsets[..][3] =
+    # 8+96), and renderer/pce-bg.js folds 3 to the same /2 clock
+    # (`(cr & 2) ? 2 : (cr & 1)`).  So this capture must render exactly like
+    # wide512 — 512x232, diff 0 — and a model that treats the code as its
+    # own index (`cr & 3`) has no frame width for it.
+    "wide512b": dict(mwr=0x10, bxr=0, byr=0, cr=0xC0, dcr=DCR,
+                     vcecr=0x07, hsr=0x0B02, hdr=0x043F,
+                     bat_w=64, bat_h=32, bat_loop="w4", pic=4,
+                     tiles=[(0x080, 64)],
+                     sprites=_sprites(
+                         (512, 66, 0), (528, 66, 1), (537, 66, 2),
+                         (140, 66, 3))
+                     + _sprites(*[(64 + 26 * i, 180, i & 0xF)
+                                  for i in range(18)])),
     # sprite12 "sat2063" (#42): 64 sprites in an 8x8 grid, one per SAT entry,
     # so entries 20-63 are all live and entry 63 (bottom-right) is visible.
     # REVIEW-14's A2 (a viewer copying only the first 20 SAT entries) was
@@ -1045,6 +1091,62 @@ SPRITE_SCENES = {
                      flicker=dict(step=6, phases=4),
                      sprites=_sprites(*[(32 + 10 * i, 66, i & 0xF)
                                         for i in range(24)])),
+    # #76's status scenes: REVIEW-48-50's S09 (the OR boundary) and S10
+    # (transparency in CC).  Unlike sprite1-13 these set the interrupt
+    # enable, so Mednafen's own status register is the witness: CR bit 1
+    # (OC) in sprite14/15, CR bit 0 (CC) in sprite16/17.  Nothing reads SR,
+    # so the saved state keeps whatever the frame latched, and
+    # tests/check-status.js compares it with the model's frame SR.
+    #
+    # sprite14 "strip16": 16 16x16 sprites tile the line exactly (display
+    # columns 0..255, SAT X 32 + 16 i), so the line asks for exactly 16
+    # strips — the one request count no earlier fixture had.  The line's
+    # budget holds 16, so OR must stay clear; `requested >= 16` (REVIEW-48-50
+    # S09) would set it, and the saved status would read $02 instead of $00.
+    # Every SG pattern row has one transparent pixel per strip, so the
+    # picture also carries the background through 16 single columns.
+    "sprite14": dict(mwr=0x00, bxr=0, byr=0, cr=0xC2, dcr=DCR,
+                     bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                     tiles=[(0x040, 32), (0xF00, 16)],
+                     sprites=_sprites(*[(32 + 16 * i, 66, i & 0xF)
+                                        for i in range(16)])),
+    # sprite15 "strip17": sprite14 plus one more SAT entry on the same
+    # sprites' line, at the same place as SAT entry 15 (display columns
+    # 240..255).  It is the 17th strip: the VDC drops it and sets OR.  It
+    # overlaps only sprite 15, never sprite 0, so CC stays clear — the scene
+    # separates "17 overflows" from "sprite 0 collided" on one line.  The
+    # drawn picture is sprite14's (the 17th is dropped); the status register
+    # is what differs, which is the point of #50.
+    "sprite15": dict(mwr=0x00, bxr=0, byr=0, cr=0xC2, dcr=DCR,
+                     bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                     tiles=[(0x040, 32), (0xF00, 16)],
+                     sprites=_sprites(*[(32 + 16 * i, 66, i & 0xF)
+                                        for i in range(16)]
+                                      + [(32 + 16 * 15, 66, 3)])),
+    # sprite16 "transparent": REVIEW-48-50's S10.  Sprite #0 (SG cell $80)
+    # draws its usual row of 15 opaque pixels and one transparent one;
+    # sprite #1 covers the very same 16 columns but reads pattern cell $100,
+    # which nothing writes — all four planes zero, every pixel transparent.
+    # So another sprite covers sprite #0 without one opaque pixel over
+    # another: CC must stay clear, and with CC enabled the saved status is
+    # $00.  A model that marks every covered column opaque (S10) reports a
+    # collision and the saved status reads $01.  sprite17 is the opaque
+    # control: same positions, sprite #1 on the next SG cell ($81), and CC
+    # must be set.
+    "sprite16": dict(mwr=0x00, bxr=0, byr=0, cr=0xC1, dcr=DCR,
+                     bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                     tiles=[(0x040, 32), (0xF00, 16)],
+                     sprites=[_spr(96, 66, 0), _spr(96, 66, 1, pat=0x100)]),
+    # sprite17 "opaque": sprite16's geometry with an opaque sprite #1 (the
+    # next SG cell, $81 — allocated, so the loop really writes it).  The two
+    # SG cells' transparent columns are one apart ((row+pat) & 0xF), so at
+    # every column one of the two is opaque: CC must be set and the saved
+    # status $01.  Without this positive control a saved $00 for sprite16
+    # could mean "no collision" or "CC never works".
+    "sprite17": dict(mwr=0x00, bxr=0, byr=0, cr=0xC1, dcr=DCR,
+                     bat_w=32, bat_h=32, bat_tables=True, bg="scene1",
+                     tiles=[(0x040, 32), (0xF00, 16)],
+                     sprites=_sprites((96, 66, 0), (96, 66, 1))),
 }
 
 SG_FORMULA_ASM = """\
@@ -1892,6 +1994,18 @@ def raster_json(name):
 #         $940, which overlaps the source's tail.  The hardware reads and
 #         writes one word at a time, so the first 64 words repeat; a model
 #         that snapshots the source (memmove) gives a different VRAM.
+#   dma4  source decrements only (DCR $14, SI/D alone): the same word ranges
+#         as dma2 but read $9ff..$900 and written $800..$8ff, so the source
+#         walks backwards and the destination forwards.
+#   dma5  destination decrements only (DCR $18, DI/D alone): the mirror —
+#         source $800..$8ff read forwards, destination $9ff..$900 written
+#         backwards.
+#
+# dma4/dma5 are #76's: REVIEW-48-50's D06 exchanges the two direction bits,
+# and dma2 (the only decrementing capture before them) sets both, so an
+# exchange gives it the same two -1 steps and the same 32,768 words.  A
+# capture with one bit alone moves the other address the other way, so the
+# exchange no longer matches word for word.
 DMA_SCENES = {
     "1": dict(scene=4, sour=0x0800, desr=0x0900, lenr=0x00FF,
               dcr=0x0010 | 0x02,
@@ -1905,6 +2019,14 @@ DMA_SCENES = {
               dcr=0x0010,
               note="overlapping copy: 512 words from 0x900 written over the "
                    "source's own tail at 0x940"),
+    "4": dict(scene=4, sour=0x09FF, desr=0x0800, lenr=0x00FF,
+              dcr=0x0010 | 0x04,
+              note="source decrements only (SI/D set): tiles 0x090-0x09F "
+                   "read from $9ff down into 0x080-0x08F at $800 up"),
+    "5": dict(scene=4, sour=0x0800, desr=0x09FF, lenr=0x00FF,
+              dcr=0x0010 | 0x08,
+              note="destination decrements only (DI/D set): tiles "
+                   "0x080-0x08F read from $800 up into 0x09FF down"),
 }
 
 

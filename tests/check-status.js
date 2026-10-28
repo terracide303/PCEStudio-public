@@ -61,11 +61,21 @@
  *   sprite11 — 15 strips plus a 32-px CGX 16th entry, sprite 0 overlapping:
  *              OR and CC on lines 2..17;
  *   spainted — the editor's crowded line: OR on lines 200..215, no CC.
- * No captured scene has CR bits 0-3 (the interrupt enables) set, so no
- * saved status register holds the bits; the check shows the gate by running
- * sprite4's own SAT/patterns with CR = $CF: the model then reports SR = $23
- * (CC+OR+VD).  That is a model calculation on the existing capture, not a new
- * capture — labelled here and not claimed as hardware evidence.
+ * Until #76 no captured scene had CR bits 0-3 (the interrupt enables) set,
+ * so no saved status register held the bits; the check showed the gate by
+ * running sprite4's own SAT/patterns with CR = $CF (a model calculation, not
+ * hardware evidence).  #76's four scenes are the captured counterpart
+ * (REVIEW-48-50 S09/S10) and each pair enables its interrupt:
+ *   sprite14 — 16 sprites tile the line exactly: OR false, saved status $00;
+ *   sprite15 — sprite14 plus a 17th SAT entry on the line: OR on lines
+ *              2..17, saved $02;
+ *   sprite16 — a fully transparent sprite covers sprite 0: CC false, saved
+ *              $00 (the transparency rule's positive input);
+ *   sprite17 — the same geometry with an opaque sprite 1: CC on 2..17,
+ *              saved $01 (the positive control, so sprite16's $00 cannot
+ *              mean "CC never latches").
+ * Each fixture's premise (exactly 16/17 strips requested; a covered column
+ * opaque in one entry only / in both) is re-measured from sat.bin+vram.bin.
  *
  * The editor's sprite budget (pce-editor.js's spriteLineBudget/spriteBudget)
  * is held to the same model: a synthetic picture with sprite 0 overlapping
@@ -77,6 +87,8 @@
  * Self-mutations (the builder's mutants; a different seat's break is still
  * owed, RULES.md rule 2): ungating the register bits, turning the 17th strip
  * off, dropping collision and making RR a constant each make this check fail.
+ * REVIEW-48-50's S09 and S10 are re-run against this file by
+ * tests/vdc-mutation.js (#76), in a scratch tree.
  *
  *   node tests/check-status.js
  */
@@ -442,6 +454,98 @@ function checkScene(name, model, want) {
   return { or, cc };
 }
 
+/* ---- #76: the fixtures' premises, read from the raw bytes ---------------
+ *
+ * The four scenes #76 added are only evidence if the picture really is the
+ * input the break needs, so each premise is measured from sat.bin/vram.bin
+ * here rather than trusted from the generator:
+ *
+ *   sprite14  some line asks for exactly 16 strips and keeps all 16;
+ *   sprite15  some line asks for exactly 17 and keeps 16 — one more than
+ *             sprite14, and the two dumps' pictures are otherwise the same;
+ *   sprite16  SAT entry 1 covers entry 0's 16 columns and paints NOT ONE
+ *             opaque pixel (so a covered column with no opaque overlap
+ *             exists, while entry 0 has opaque pixels of its own);
+ *   sprite17  the same geometry with entry 1 opaque — the positive control
+ *             that shows the CC condition and its enable do work.
+ *
+ * The 16x16 decode here is the one stripMask already uses for the oracle;
+ * these scenes carry no CGY/CGX entries, and the check refuses them (rather
+ * than silently decoding wrong) if that stops being true. */
+function satEntry16(sat, i) {
+  const y = wordAt(sat, i * 4) & 0x3FF;
+  const x = (wordAt(sat, i * 4 + 1) & 0x3FF) - 32;
+  const w2 = wordAt(sat, i * 4 + 2);
+  const w3 = wordAt(sat, i * 4 + 3);
+  return {
+    row0: y - 64, cell: (w2 >> 1) & 0x3FF, x,
+    hflip: (w3 >> 11) & 1, cgy: (w3 >> 12) & 3, cgx: (w3 >> 8) & 1
+  };
+}
+
+function checkStripBoundaryPremise(name, dump) {
+  const problems = [];
+  const marks = [];
+  for (let line = 0; line < dump.height; line++) {
+    const L = dump.vdwLine0 + line;
+    const c = oracleSpriteLine(dump.sat, dump.vram, L);
+    marks.push({ line: L, requested: c.requested, kept: c.strips,
+                 overflow: c.overflow, collision: c.collision });
+  }
+  const want = name === "sprite14"
+    ? { requested: 16, kept: 16, overflow: false }
+    : { requested: 17, kept: 16, overflow: true };
+  const hit = marks.filter((m) => m.requested === want.requested &&
+                                  m.kept === want.kept);
+  if (!hit.length) {
+    problems.push(`no line asks for ${want.requested} strips and keeps ` +
+                  `${want.kept} (the scene does not exercise the boundary)`);
+  } else {
+    const bad = hit.filter((m) => m.overflow !== want.overflow);
+    if (bad.length) {
+      problems.push(`line ${bad[0].line}: ${want.requested} strips requested, ` +
+                    `overflow ${bad[0].overflow} in the raw-byte oracle`);
+    }
+  }
+  okv(`${name}: a line asks for exactly ${want.requested} strips ` +
+      `(overflow ${want.overflow} without the status enable)`, problems);
+}
+
+function checkOverlapPremise(name, dump) {
+  const problems = [];
+  const e0 = satEntry16(dump.sat, 0), e1 = satEntry16(dump.sat, 1);
+  if (e0.cgy || e0.cgx || e1.cgy || e1.cgx) {
+    problems.push("entry 0/1 are not 16x16; this premise only decodes those");
+    okv(`${name}: the transparent/opaque overlap premise`, problems);
+    return;
+  }
+  const line = e0.row0;   /* its first display line */
+  const m0 = stripMask(dump.vram, e0.cell, 0, e0.x, e0.hflip);
+  const m1 = stripMask(dump.vram, e1.cell, 0, e1.x, e1.hflip);
+  const opaque0 = m0.reduce((a, b) => a + b, 0);
+  const opaque1 = m1.reduce((a, b) => a + b, 0);
+  const both = m0.reduce((a, b, x) => a + (b && m1[x] ? 1 : 0), 0);
+  const covered = (e0.x === e1.x);
+  if (line !== e1.row0) problems.push("the two entries are not on one line");
+  if (!covered) problems.push(`entry 1 covers x ${e1.x}..${e1.x + 15}, entry 0 x ` +
+                              `${e0.x}..${e0.x + 15} — they do not overlap`);
+  if (opaque0 === 0) problems.push("entry 0 paints no opaque pixel at all");
+  if (name === "sprite16") {
+    if (opaque1 !== 0)
+      problems.push(`entry 1 paints ${opaque1} opaque pixel(s): the overlap ` +
+                    "is not transparent-only");
+    if (both !== 0)
+      problems.push(`${both} column(s) opaque in both entries — the capture ` +
+                    "does not test transparency");
+  } else {
+    if (opaque1 === 0) problems.push("entry 1 paints no opaque pixel");
+    if (both === 0) problems.push("no column is opaque in both entries — the " +
+                                  "positive control does not collide");
+  }
+  okv(`${name}: entry 1 covers entry 0's whole strip, ` +
+      `${opaque0}/${opaque1} opaque column(s), ${both} shared`, problems);
+}
+
 /* ---- the editor's sprite budget --------------------------------------- */
 
 function checkEditorBudget() {
@@ -622,6 +726,57 @@ function main() {
                cc1: 17 });
   checkScene("spainted", byName.spainted,
              { overflow: true, collision: false, or0: 200, or1: 215 });
+
+  /* #76: the four fixtures REVIEW-48-50's S09/S10 named.  sprite14/sprite15
+   * sit either side of the 16-strip budget and sprite16/sprite17 either
+   * side of an opaque overlap, and each pair's ROM enables the matching
+   * status interrupt, so the saved register (compared with the model above)
+   * carries the condition.  The premises are measured from the raw bytes
+   * first: a dump that stopped being the input the break needs must be a
+   * FAIL of its own, not a silent pass. */
+  for (const n of ["sprite14", "sprite15", "sprite16", "sprite17"]) {
+    if (!byName[n]) {
+      fail(`#76 fixture ${n} is missing from tests/dumps — run ` +
+           `tools/capture.sh ${n.replace("sprite", "")} sprite`);
+    }
+  }
+  if (byName.sprite14 && byName.sprite15) {
+    checkScene("sprite14", byName.sprite14,
+               { overflow: false, collision: false });
+    checkScene("sprite15", byName.sprite15,
+               { overflow: true, collision: false, or0: 2, or1: 17 });
+  }
+  if (byName.sprite16 && byName.sprite17) {
+    checkScene("sprite16", byName.sprite16,
+               { overflow: false, collision: false });
+    checkScene("sprite17", byName.sprite17,
+               { overflow: false, collision: true, cc0: 2, cc1: 17 });
+  }
+  const fixturePremises = {
+    sprite14: checkStripBoundaryPremise,
+    sprite15: checkStripBoundaryPremise,
+    sprite16: checkOverlapPremise,
+    sprite17: checkOverlapPremise
+  };
+  for (const n of Object.keys(fixturePremises)) {
+    const d = dumps[names.indexOf(n)];
+    if (d) fixturePremises[n](n, d);
+  }
+  /* the saved register, by name: the four fixtures' whole point is that
+   * Mednafen's own SR separates each pair. */
+  const savedStatus = (n) => (dumps[names.indexOf(n)] || { regs: {} }).regs.status;
+  if (dumps[names.indexOf("sprite14")])
+    ok("sprite14 (16 strips, OC enabled): the saved status has no OR",
+       savedStatus("sprite14"), 0x00);
+  if (dumps[names.indexOf("sprite15")])
+    ok("sprite15 (17 strips, OC enabled): the saved status is OR ($02)",
+       savedStatus("sprite15"), 0x02);
+  if (dumps[names.indexOf("sprite16")])
+    ok("sprite16 (transparent overlap, CC enabled): the saved status has " +
+       "no CC", savedStatus("sprite16"), 0x00);
+  if (dumps[names.indexOf("sprite17")])
+    ok("sprite17 (opaque overlap, CC enabled): the saved status is CC ($01)",
+       savedStatus("sprite17"), 0x01);
 
   /* the enable gate: sprite4's own capture with CR bits 0-3 on */
   const s4 = dumps[names.indexOf("sprite4")];

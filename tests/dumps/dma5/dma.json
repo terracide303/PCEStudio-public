@@ -1,0 +1,10 @@
+{
+ "base": "scene4",
+ "base_vram": "tests/dumps/scene4/vram.bin",
+ "dcr": 24,
+ "desr": 2559,
+ "lenr": 255,
+ "note": "destination decrements only (DI/D set): tiles 0x080-0x08F read from $800 up into 0x09FF down",
+ "sour": 2048,
+ "words": 256
+}

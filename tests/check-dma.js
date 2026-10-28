@@ -24,8 +24,8 @@
  *   3. requires SR bit 4 (DV, VRAM-to-VRAM done) to equal the model's
  *      `dvBit`, which is set only when DCR bit 1 (DVC) enables it — pcetech
  *      §5 "a status bit is set only when its enable bit is set".  dma1 sets
- *      DVC (captured status $10); dma2/dma3 do not (captured status 0), so
- *      the gate has a positive and a negative capture;
+ *      DVC (captured status $10); dma2/dma3/dma4/dma5 do not (captured
+ *      status 0), so the gate has a positive and a negative capture;
  *   4. for a transfer whose source and destination ranges overlap, computes
  *      the memmove-style result (read the whole source, then write it) and
  *      requires the capture to DIFFER from it — the hardware moves one word
@@ -35,6 +35,11 @@
  *      requires Mednafen's recorded frame byte for byte (diff 0).  check.js
  *      also renders every dmaN dump from its own captured VRAM, so the card's
  *      "frame diff 0 in check.js" is that suite's dmaN lines.
+ *
+ * The direction bits get one capture each way (#76): dma2 sets both, dma4
+ * only SI/D ($14) and dma5 only DI/D ($18), so exchanging the two decodes
+ * (REVIEW-48-50 D06) moves the other address the other way and fails items 1
+ * and 2.  tests/vdc-mutation.js re-runs that break.
  *
  * Exit code 0 only if every DMA capture matches on every check.
  */
