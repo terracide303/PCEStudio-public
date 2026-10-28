@@ -1,16 +1,23 @@
 <!doctype html>
-<!-- PCEStudio editor — tiles, palettes from the VCE's 512 colours, and the
-     background map (card #10).
+<!-- PCEStudio editor — tiles, palettes from the VCE's 512 colours, the
+     background map (card #10), sprite patterns and the SAT (card #13), and
+     the scanline effects (card #17).
      Serve the repo root and open renderer/editor.html:
          python3 -m http.server 8000
      Everything is kept in the shape the VDC holds it (renderer/pce-editor.js):
      16 background palettes of 16, 8x8 tiles of 4-bit colour numbers, the
-     32x32 BAT.  The preview is drawn by renderer/pce-bg.js, the same model
-     #5 proved pixel-for-pixel against Mednafen, so what you see is what the
-     VDC draws.  "Download .pce" builds the ROM with #9's builder
-     (renderer/pce-rom.js) and the constant viewer bank.
+     32x32 BAT.  The preview is drawn by renderer/pce-bg.js and
+     renderer/pce-sprites.js, the same models #5/#12 proved pixel-for-pixel
+     against Mednafen, so what you see is what the VDC draws.  The scanline
+     effects write #15's raster table and the preview renders that table.
+     "Download .pce" builds the ROM with #9's builder (renderer/pce-rom.js)
+     and the constant viewer bank — but it still exports the STATIC picture:
+     the viewer runs the raster table in #16, so effects are preview-only
+     until then (docs/EDITOR.md).
      ?demo=1 paints the demo picture on load (the headless check uses it);
-     a fresh page starts blank so a picture can be painted from scratch. -->
+     ?sprites=1 the sprite scene; ?effects=1 the demo plus all three effects;
+     ?rules=1 makes the refused calls.  A fresh page starts blank so a
+     picture can be painted from scratch. -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -66,11 +73,15 @@
   input[type=number] { width: 3.6rem; }
   .sprow { display: flex; gap: 0.5rem; align-items: center;
            flex-wrap: wrap; margin-top: 0.35rem; }
+  .sprow b { color: #ccc; }
+  #bandrows .sprow { margin-top: 0.2rem; }
+  #rasterinfo { color: #8cf; font: 12px monospace; }
+  .fx { color: #aaa; font: 12px monospace; }
 </style>
 </head>
 <body>
-<h1>PCEStudio editor — paint tiles, choose palettes from the 512 colours,
-    paint the map</h1>
+<h1>PCEStudio editor — tiles, palettes, the map, sprites and scanline
+    effects</h1>
 
 <div class="row" style="margin-bottom:0.6rem">
   <button id="new">New picture</button>
@@ -169,6 +180,59 @@
   </section>
 
   <section>
+    <h2>Scanline effects — the #15 raster table</h2>
+    <div class="sprow">
+      <b>Scroll</b>
+      BXR <input type="number" id="bxr" value="0" min="0" max="1023">
+      BYR <input type="number" id="byr" value="0" min="0" max="511">
+      <button id="setscroll">Set scroll</button>
+      <span class="fx">BXR is 10 bits, BYR 9 (VDC R07/R08)</span>
+    </div>
+    <div class="sprow">
+      <b>Gradient</b>
+      palette <select id="gpal"></select>
+      entry <select id="gent"></select>
+      from <select id="gfrom"></select>
+      to <select id="gto"></select>
+      lines <input type="number" id="gl0" value="0" min="0" max="223">
+      – <input type="number" id="gl1" value="223" min="0" max="223">
+      <button id="setgrad">Set gradient</button>
+      <button id="cleargrad">Remove</button>
+    </div>
+    <div class="sprow">
+      <b>Wobble</b>
+      amplitude <input type="number" id="wamp" value="40" min="0" max="1023">
+      period <input type="number" id="wper" value="64" min="1">
+      speed <input type="number" id="wspd" value="0">
+      lines <input type="number" id="wl0" value="0" min="0" max="223">
+      – <input type="number" id="wl1" value="223" min="0" max="223">
+      <button id="setwob">Set wobble</button>
+      <button id="clearwob">Remove</button>
+    </div>
+    <div class="sprow">
+      <b>Parallax bands</b>
+      <button id="addband">Add band</button>
+      <button id="setbands">Set bands</button>
+      <button id="clearbands">Remove</button>
+    </div>
+    <div id="bandrows"></div>
+    <div class="sprow">
+      frame <input type="number" id="frame" value="0" min="0">
+      <span id="rasterinfo"></span>
+    </div>
+    <p class="note">Each effect writes #15's raster table: the gradient one
+      palette entry per line between two VCE colours, the wobble BXR per line
+      from a sine (amplitude in pixels, period in lines, speed in lines per
+      frame), each band its own BXR speed in pixels per frame. The preview is
+      pce-bg.js/pce-sprites.js rendering that table — nothing is drawn
+      separately. One VDW line carries one entry, so overlapping bands are
+      refused; a line outside the 224-line display and a register value past
+      its width are refused too. <b>The .pce export still writes the static
+      picture</b>: the viewer runs the raster table in #16, so the effects
+      are preview-only until then.</p>
+  </section>
+
+  <section>
     <h2>Preview — the VDC model (256×224)</h2>
     <canvas id="preview" width="256" height="224"></canvas>
     <div id="stats"></div>
@@ -197,6 +261,11 @@ let selTile = ed.FIRST_CHAR;
 let mode = "select";
 let bank0 = null;
 let romUrl = null;
+let frameNo = 0;             // the raster table's frame (the effect editor's time)
+let bandDefs = [             // parallax bands, each its own speed (px/frame)
+  { line0: 0, line1: 111, speed: 2 },
+  { line0: 112, line1: 223, speed: -1 }
+];
 
 /* ---- colour helpers ---------------------------------------------------- */
 function css(colour) {
@@ -575,25 +644,187 @@ $("clearspr").addEventListener("click", () => {
   say("sprites cleared");
 });
 
+/* ---- scanline effects (card #17) --------------------------------------- */
+/* The controls build the three effects through the editor's own calls; each
+ * call refuses (and the page shows the code's message) what the VDC cannot
+ * do.  The preview above renders the table pce-editor.js returns. */
+
+function colourOption(value) {
+  const o = document.createElement("option");
+  o.value = String(value);
+  o.textContent = "$" + value.toString(16).toUpperCase().padStart(3, "0");
+  return o;
+}
+
+function drawBandRows() {
+  const host = $("bandrows");
+  host.textContent = "";
+  bandDefs.forEach((b, i) => {
+    const row = document.createElement("div");
+    row.className = "sprow";
+    const label = document.createElement("span");
+    label.className = "fx";
+    label.textContent = `band ${i}`;
+    row.appendChild(label);
+    const field = (key, min, max, step) => {
+      const span = document.createElement("span");
+      span.className = "fx";
+      span.textContent = key;
+      const input = document.createElement("input");
+      input.type = "number";
+      input.value = String(b[key]);
+      input.min = String(min);
+      input.max = String(max);
+      if (step) input.step = String(step);
+      input.addEventListener("input", () => { b[key] = Number(input.value); });
+      row.appendChild(span);
+      row.appendChild(input);
+    };
+    field("line0", 0, ed.RASTER_LINE_MAX);
+    field("line1", 0, ed.RASTER_LINE_MAX);
+    field("speed", -1023, 1023);
+    const del = document.createElement("button");
+    del.textContent = "remove";
+    del.addEventListener("click", () => {
+      bandDefs.splice(i, 1);
+      drawBandRows();
+    });
+    row.appendChild(del);
+    host.appendChild(row);
+  });
+}
+
+$("addband").addEventListener("click", () => {
+  const last = bandDefs.length ? bandDefs[bandDefs.length - 1].line1 : -1;
+  const line0 = Math.min(ed.RASTER_LINE_MAX, last + 1);
+  bandDefs.push({ line0: line0, line1: ed.RASTER_LINE_MAX, speed: 0 });
+  drawBandRows();
+  say(`band ${bandDefs.length - 1} added: lines ${line0}..` +
+      `${ed.RASTER_LINE_MAX}`);
+});
+$("setbands").addEventListener("click", () => {
+  try {
+    ed.setParallaxBands(pic, bandDefs);
+    say(`parallax: ${bandDefs.length} band(s) in the raster table`);
+    drawPreview();
+  } catch (e) { say(e.message); }
+});
+$("clearbands").addEventListener("click", () => {
+  ed.clearBands(pic);
+  say("parallax bands removed");
+  drawPreview();
+});
+
+$("setscroll").addEventListener("click", () => {
+  try {
+    ed.setScroll(pic, { BXR: Number($("bxr").value),
+                        BYR: Number($("byr").value) });
+    say(`scroll: BXR ${$("bxr").value}, BYR ${$("byr").value}`);
+    drawPreview();
+  } catch (e) { say(e.message); }
+});
+
+$("setgrad").addEventListener("click", () => {
+  try {
+    ed.setGradient(pic, {
+      palette: Number($("gpal").value),
+      entry: Number($("gent").value),
+      from: Number($("gfrom").value),
+      to: Number($("gto").value),
+      line0: Number($("gl0").value),
+      line1: Number($("gl1").value)
+    });
+    say(`gradient: palette ${$("gpal").value} entry ${$("gent").value}, ` +
+        `lines ${$("gl0").value}..${$("gl1").value}`);
+    drawPreview();
+  } catch (e) { say(e.message); }
+});
+$("cleargrad").addEventListener("click", () => {
+  ed.clearGradient(pic);
+  say("gradient removed");
+  drawPreview();
+});
+
+$("setwob").addEventListener("click", () => {
+  try {
+    ed.setWobble(pic, {
+      amplitude: Number($("wamp").value),
+      period: Number($("wper").value),
+      speed: Number($("wspd").value),
+      line0: Number($("wl0").value),
+      line1: Number($("wl1").value)
+    });
+    say(`wobble: amplitude ${$("wamp").value}, period ${$("wper").value}, ` +
+        `speed ${$("wspd").value}, lines ${$("wl0").value}..${$("wl1").value}`);
+    drawPreview();
+  } catch (e) { say(e.message); }
+});
+$("clearwob").addEventListener("click", () => {
+  ed.clearWobble(pic);
+  say("wobble removed");
+  drawPreview();
+});
+
+$("frame").addEventListener("input", () => {
+  frameNo = Math.max(0, Number($("frame").value) | 0);
+  drawPreview();
+});
+
+/* ?effects=1: the demo picture with all three effects, built through the
+ * editor's calls exactly as the buttons do — so a headless run exercises the
+ * page's own effect path (no input events). */
+function loadEffectDemo() {
+  pic = ed.demoPicture();
+  resetSelection();
+  try {
+    ed.setGradient(pic, { palette: 0, entry: 1, from: 0,
+      to: ed.colourWord(7, 7, 7), line0: 0, line1: 95 });
+    ed.setWobble(pic, { amplitude: 24, period: 96, speed: 1,
+      line0: 96, line1: 159 });
+    bandDefs = [{ line0: 0, line1: 95, speed: 1 },
+                { line0: 96, line1: 159, speed: 2 },
+                { line0: 160, line1: 223, speed: -1 }];
+    ed.setParallaxBands(pic, bandDefs);
+    frameNo = 0;
+    $("frame").value = "0";
+  } catch (e) { say(e.message); return null; }
+  drawBandRows();
+  redraw();
+  return pic;
+}
+
 /* ---- preview + ROM ------------------------------------------------------ */
 const previewCtx = $("preview").getContext("2d");
 function drawPreview() {
-  let data;
+  let frame;
   try {
-    data = ed.toPicture(pic);
+    /* pce-sprites.js composes the BG model (pce-bg.js) and, when the picture
+     * has a raster table, draws it: the editor has no renderer of its own */
+    frame = ed.renderPreview(pic, frameNo);
   } catch (e) {
     say(e.message);
     return;
   }
-  /* the sprite layer comes from the picture's own SAT at VRAM $7F00 */
-  const sat = data.vram.slice(ed.SAT_ADDR * 2, ed.SAT_ADDR * 2 + 512);
-  const frame = PCEStudio.sprites.renderFrame({
-    vram: data.vram, cram: data.cram, regs: ed.viewRegs(pic),
-    sat: sat, width: ed.VIEW_W, height: ed.VIEW_H
-  });
   const img = previewCtx.createImageData(ed.VIEW_W, ed.VIEW_H);
   img.data.set(frame.pixels);
   previewCtx.putImageData(img, 0, 0);
+
+  let raster = null;
+  try { raster = ed.toRaster(pic, frameNo); } catch (e) { say(e.message); }
+  if (raster) {
+    const first = raster.entries[0].line;
+    const last = raster.entries[raster.entries.length - 1].line;
+    let cram = 0, bxr = 0;
+    for (const e of raster.entries) {
+      if (e.cram) cram++;
+      if (e.bxr !== undefined) bxr++;
+    }
+    $("rasterinfo").textContent =
+      `${raster.entries.length} entries · lines ${first}–${last} · ` +
+      `${bxr} BXR · ${cram} colour write(s) · frame ${frameNo}`;
+  } else {
+    $("rasterinfo").textContent = "no effects";
+  }
 
   const st = ed.stats(pic);
   const banks = 4 + Math.max(1, Math.ceil(st.regionBytes / 8192));
@@ -671,6 +902,8 @@ function resetSelection() {
   selSpritePattern = 0;
   selSprite = 0;
   paletteMode = "bg";
+  frameNo = 0;
+  $("frame").value = "0";
 }
 
 function loadDemo() {
@@ -714,12 +947,17 @@ async function report() {
     const rom = await buildRom();
     const st = ed.stats(pic);
     const budget = ed.spriteBudget(pic);
+    let raster = null;
+    try { raster = ed.toRaster(pic, frameNo); } catch (e) { raster = null; }
+    const effects = raster
+      ? `, ${raster.entries.length} raster entries at frame ${frameNo}`
+      : "";
     $("exportstatus").textContent =
       `picture ${ed.VIEW_W}x${ed.VIEW_H}, ${st.tiles} tiles, ` +
       `${st.palettesUsed} palettes, ${st.spritePatterns} sprite patterns, ` +
       `${st.sprites} sprites (worst line ${budget.worst.line}: ` +
       `${budget.worst.strips}/16 strips, ${budget.worst.dropped} dropped), ` +
-      `${ed.validate(pic).length} problem(s) · ` +
+      `${ed.validate(pic).length} problem(s)${effects} · ` +
       `ROM ${rom.length} bytes, sha256 ${(await sha256(rom)).slice(0, 16)}…`;
     $("export").disabled = false;
   } catch (e) { $("exportstatus").textContent = "error: " + e.message; }
@@ -758,6 +996,18 @@ function checkRules() {
     for (;;) ed.newSpritePattern(full, 16, 64);
   });
 
+  /* the scanline effects (#17): a line outside the display, two bands on one
+   * line, a register value past its width and a VCE colour past 9 bits */
+  const fxp = ed.newPicture();
+  attempt("effect line 224", () => ed.setGradient(fxp, {
+    palette: 0, entry: 1, from: 0, to: 1, line0: 224, line1: 224 }));
+  attempt("two bands on one line", () => ed.setParallaxBands(fxp, [
+    { line0: 0, line1: 111, speed: 1 },
+    { line0: 100, line1: 200, speed: 1 }]));
+  attempt("BXR 1024", () => ed.setScroll(fxp, { BXR: 1024 }));
+  attempt("gradient colour 512", () => ed.setGradient(fxp, {
+    palette: 0, entry: 1, from: 512, to: 0 }));
+
   const msg = `rules: ${refused.length}/${refused.length + accepted.length} ` +
               `refused — ${refused.join("; ")}` +
               (accepted.length ? ` — ACCEPTED: ${accepted.join("; ")}` : "");
@@ -781,11 +1031,33 @@ for (let p = 0; p < ed.SPRITE_PALETTES; p++) {
   $("sprpalpick").appendChild(o);
 }
 
+/* the effect controls: 16 palettes, entries 1..15, and the 512 VCE colours */
+for (let p = 0; p < ed.PALETTES; p++) {
+  const o = document.createElement("option");
+  o.value = String(p);
+  o.textContent = String(p);
+  $("gpal").appendChild(o);
+}
+for (let e = 1; e < ed.ENTRIES; e++) {
+  const o = document.createElement("option");
+  o.value = String(e);
+  o.textContent = String(e);
+  $("gent").appendChild(o);
+}
+for (let c = 0; c < ed.VCE_COLOURS; c++) {
+  $("gfrom").appendChild(colourOption(c));
+  $("gto").appendChild(colourOption(c));
+}
+$("gfrom").value = "0";                 /* $000 dark */
+$("gto").value = String(ed.colourWord(7, 7, 7));   /* $1FF light */
+drawBandRows();
+
 drawPicker();
 redraw();
 const params = new URLSearchParams(location.search);
 if (params.get("demo") === "1") { loadDemo(); report(); }
 if (params.get("sprites") === "1") { loadSpriteDemo(); report(); }
+if (params.get("effects") === "1") { loadEffectDemo(); report(); }
 if (params.get("rules") === "1") { checkRules(); }
 </script>
 </body>

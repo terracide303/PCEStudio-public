@@ -1,18 +1,22 @@
-# The editor (#10, #13) — tiles, palettes, the map, sprites and the SAT
+# The editor (#10, #13, #17) — tiles, palettes, the map, sprites and the raster effects
 
 `renderer/editor.html` + `renderer/pce-editor.js`: paint 8×8 tiles, choose
 palette colours from the VCE's 512, paint the 32×32 background map — and
 (#13) paint sprite patterns at the VDC's real sizes, choose from the 16
 sprite palettes, place up to 64 sprites into the SAT, and watch the per-line
-sprite budget. The preview is drawn by the VDC models
-(`renderer/pce-bg.js` + `renderer/pce-sprites.js`), and "Download .pce" builds
-the ROM with #9's builder (`renderer/pce-rom.js`).
+sprite budget. #17 adds the scanline effect editor: a colour gradient, a
+wobble and parallax bands, which compile to **#15's per-line raster table**.
+The preview is drawn by the VDC models (`renderer/pce-bg.js` +
+`renderer/pce-sprites.js`) rendering that table, nothing drawn separately.
+"Download .pce" builds the ROM with #9's builder (`renderer/pce-rom.js`) —
+the static picture only; the viewer runs the raster table in #16.
 
 ```sh
 python3 -m http.server 8000            # from the repo root
 # then open http://127.0.0.1:8000/renderer/editor.html
 # ?demo=1    paints the background demo (#10)
 # ?sprites=1 paints the sprite scene (#13)
+# ?effects=1 the demo with all three scanline effects (#17)
 # ?rules=1   makes the refused calls and reports their codes
 node tests/check-editor.js             # both cards' checks against the captures
 node tests/check.js                    # renderer vs Mednafen, includes both dumps
@@ -25,7 +29,11 @@ editor paints sprite patterns at 16×16…32×64, chooses from the 16 sprite
 palettes, places up to 64 sprites into the SAT with a live per-line budget,
 refuses a 65th sprite / a pattern past VRAM / a 17th sprite-palette colour / an
 illegal size, and the exported `.pce` carries the SAT into Mednafen with frame
-diff 0. The evidence is at the bottom.
+diff 0. **#17** — the three effects are built through the editor's calls and
+give the #15 raster table the checks compute by hand; the preview is
+`pce-bg.js`/`pce-sprites.js` rendering that table; the refusals carry their
+codes; the export to the viewer is explicitly left for #16. The evidence is at
+the bottom.
 
 ## The model is the hardware's, not an editor format
 
@@ -56,10 +64,12 @@ a reference for verification — no emulator code here).
 `{BXR, BYR, MWR, CR}` and the copy regions: `[[$40, tileCount]]`, plus
 `[[firstPatternCell·4, cellCount·4]]` when the picture has sprite patterns.
 CR is `$80` (background on) for a picture without sprites and `$C0` (background
-+ sprites) for one with. The editor has no renderer of its own: the preview is
-`pce-sprites.js`'s frame of `toPicture()`'s data (`pce-bg.js` with an empty SAT
-is the same picture), so a change that would not survive the export cannot
-look right on screen.
++ sprites) for one with. The editor has no renderer of its own:
+`renderPreview()` is `pce-sprites.js`'s frame of `toPicture()`'s data
+(`pce-bg.js` with an empty SAT is the same picture), with `toRaster()`'s table
+when the picture has scanline effects. So a change that would not survive the
+export cannot look right on screen — except the #17 effects, which are
+explicitly preview-only until the viewer runs the table (#16).
 
 ### Sprite patterns and their VRAM cells
 
@@ -146,6 +156,70 @@ Both are painted **through the editor's own calls**, and nothing is read from
   16/16 sprite palettes, worst line 200 = 16/16 strips (256/256 px) with 5
   dropped, 16 lines dropping strips, `validate()` 0 problems.
 
+## The effect editor (#17) — the #15 raster table
+
+The three scanline effects in `renderer/editor.html` are authored through
+`renderer/pce-editor.js` and compile to the **#15 raster table** — the same
+object `pce-bg.js`/`pce-sprites.js` take as `opts.raster` (the format and the
+per-line rules are in [`RENDERER.md`](RENDERER.md)). Nothing is drawn
+separately: the page's preview is `editor.renderPreview(pic, frame)`, which is
+`pce-sprites.js` composing `pce-bg.js`'s frame over `toPicture()`'s data with
+`toRaster()`'s table.
+
+The picture keeps the effect parameters in `pic.raster`; `toRaster(pic, frame)`
+compiles them to one entry per VDW line that any effect covers:
+
+| call | effect | the table it writes |
+|---|---|---|
+| `setGradient({palette, entry, from, to, line0, line1})` | colour gradient | for each line L in the range: `cram = [[palette·16 + entry, mix(from, to, (L−line0)/(line1−line0))]]` — one palette entry changed per line between two VCE colours |
+| `setWobble({amplitude, period, speed, line0, line1})` | wobble | for each line L in the range: `bxr = (BXR + round(amplitude·sin(2π·(L−line0+speed·frame)/period))) & $3FF` |
+| `setParallaxBands([{line0, line1, speed}, …])` | parallax bands | every line of a band: `bxr = (BXR + speed·frame) & $3FF` — each band its own speed, in pixels per frame |
+
+`setScroll({BXR, BYR})` is the register value the effects are relative to.
+`toRaster` returns `{base: {bxr, byr, cr}, baseCram: [512 9-bit words],
+entries: [{line, rcr, bxr?, cram?}]}`; `rcr = $40 + line` is the RCR value
+#15's chain arms for that line. `baseCram` is the picture's own CRAM (the
+palettes `toPicture()` writes), and `base` is the scroll plus CR (`$80`
+background on, `$C0` with sprites). A wobble and the band it sits in are added
+into one BXR value — a wobbling band.
+
+Hand-computable small cases the check asserts entry by entry:
+
+- a gradient `$000 → $1FF` over lines 0..7 is **73 per line** — each channel
+  goes 0..7 over 7 steps, so line L is `(L<<6)|(L<<3)|L = 73L`:
+  `$000, $049, $092, $0DB, $124, $16D, $1B6, $1FF`;
+- a wobble of amplitude 2 px, period 4 lines, speed 0 at BXR 10 is
+  `10, 12, 10, 8, 10, 12, 10, 8`; with speed 1 the sine slides one line a
+  frame, so frame 1 is `12, 10, 8, 10, 12, 10, 8, 10`;
+- parallax bands of 2 px/frame on lines 0..111 and −1 px/frame on 112..223 are
+  BXR 10 and 1019 at frame 5 (the register is 10 bits: −5 = `$3FB`), and 0
+  for every line at frame 0.
+
+The computed BXR is masked to 10 bits exactly as the register is; the
+reference raster2 wobble is masked the same way (`tools/genroms.py`'s
+`raster_wobble`). The table's semantics are `pce-bg.js`'s #15 rules: an entry
+at line L fires in the HBlank before VDW line L; a line with no entry keeps
+the last written value; the VCE colour table persists across frames. So a
+gradient over lines 0..95 leaves entry 1 at its last written colour below line
+95, and a band's BXR holds past its last line until another entry writes BXR.
+
+Refusals (each an `Error` with a machine-readable `code`):
+
+| code | refused | why |
+|---|---|---|
+| `register-range` | BXR outside 0..1023, BYR outside 0..511, a wobble amplitude past a 10-bit swing | BXR is a 10-bit register, BYR 9 |
+| `line-range` | an effect line outside VDW 0..223, or a backwards range | the display is 224 lines; no such line shows |
+| `raster-line-full` | two parallax bands over the same line | one VDW line carries one raster entry (one BXR value); #15's RCR chain fires one interrupt per line |
+| `colour-range` | a gradient colour outside 0..511 | a VCE colour is 9 bits |
+| `wobble-range`, `parallax-range`, `frame-range` | a non-integer period/speed/frame, a period below 1, a negative frame | no such effect parameter/time |
+| `17th-palette`, `backdrop-entry`, `entry-range`, `17th-colour` | a gradient on palette 16, on colour 0 (the shared backdrop) or on a bad entry | the palette rules above |
+
+**The export does not carry the table yet.** `toPicture()` is unchanged, so
+"Download .pce" still writes the static picture (the demo's ROM stays
+`40960` bytes, sha256 `486477d6…`). The viewer that runs the raster table
+from the RCR line interrupt is **#16**; until it lands the effects are
+preview-only, and #17 says so rather than faking an export.
+
 ## The export
 
 `renderer/pce-rom.js` builds each ROM from `toPicture()`; bank 0 is the
@@ -183,7 +257,13 @@ export: 40960 bytes, sha256 486477d617db851a… (#9's builder) — config,
         palettes, BAT and tiles are the editor's data
 sprite export: 40960 bytes, sha256 9dc564c5df0de228… — config, sprite
         palettes, SAT, BAT and both copy regions are the editor's data
-browser-global branch: same 21/21 refusals, same 40960 and 40960 bytes
+effects: three #15 tables computed by hand — gradient $000->$1FF over 8
+        lines = 73 a line, wobble 2 px / 4 lines = 10,12,10,8… (speed 1,
+        frame 1 = 12,10,8,10…), bands 2 / -1 px a frame at frame 5 =
+        10 / 1019; each preview == pce-bg.js on that table (and != the
+        no-table frame); 14/14 effect refusals with their codes
+browser-global branch: same 21/21 refusals, 14/14 effect refusals, same
+        effect tables and previews, same 40960 and 40960 bytes
 capture: tests/dumps/painted is the editor's VRAM/CRAM/regs and Mednafen's
          frame equals the editor's picture (diff 0)
 sprite capture: tests/dumps/spainted is the editor's VRAM/CRAM/regs/SAT and
@@ -226,6 +306,25 @@ How that proof is built:
   code; a legal paint and a legal sprite add afterwards must still succeed (so
   the test cannot pass by refusing everything). The "past VRAM" case packs
   patterns until the refusal and checks the refused pattern was not stored.
+- **the effect tables (#17)** — each effect is built through the editor's
+  calls on a small picture and its table is compared with arithmetic done in
+  the check, not with the editor's helpers: the gradient's 73-per-line ramp,
+  the wobble's sine at frame 0 and frame 1, the bands' 10/1019 at frame 5,
+  plus `rcr = $40 + line`, `base` and `baseCram`. A picture with no effects
+  must return `null`.
+- **the effect preview (#17)** — for each effect the check draws the table
+  with `pce-bg.js` directly and requires `editor.renderPreview()` to be
+  byte-equal (and, for the sprite scene, `pce-sprites.js` composing the same
+  table), while the same picture without the table must differ — so the
+  preview is the renderer on the table, not a drawing of its own. Readable
+  witnesses: the gradient's first and last rows are its two colours, the
+  wobble moves a bar at a line with BXR 8, and the two bands show different
+  colours at the same column.
+- **the effect refusals (#17)** — a line outside 0..223, a backwards range,
+  two bands on one line, BXR 1024, BYR 512, a gradient colour 512, a 17th
+  palette, the backdrop entry, a wobble amplitude past 10 bits and a zero
+  period each throw their documented code, and a legal setup afterwards still
+  builds a table.
 - **the export** — the ROM's bank-1 config (including every region
   descriptor), the 512 colour-table entries, the SAT, banks 2–3 (the BAT) and
   bank 4+ (the regions concatenated in descriptor order — tiles then patterns)
@@ -240,27 +339,35 @@ How that proof is built:
   SATB to equal the editor's SAT (sprite scene), and Mednafen's recorded frame
   to equal the renderer drawing **the editor's picture** with the capture's own
   calibration — diff 0.
-- **the browser** — the real page, headless (command line only, no UI events):
+- **the browser** — the real page, headless (command line only, no UI events).
+  `?sprites=1&rules=1` still reports #13's bytes; `?effects=1` paints the demo
+  and builds all three effects through the same setters the buttons call:
 
 ```sh
 python3 -m http.server 8123 --bind 127.0.0.1        # from the repo root
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
-  --user-data-dir=/tmp/chrome-pce13 --virtual-time-budget=15000 --dump-dom \
-  "http://127.0.0.1:8123/renderer/editor.html?sprites=1&rules=1"
-# exportstatus: picture 256x224, 9 tiles, 2 palettes, 6 sprite patterns,
-#               36 sprites (worst line 200: 16/16 strips, 5 dropped),
-#               0 problem(s) · ROM 40960 bytes, sha256 9dc564c5df0de228…
-# budget: sprites 36/64 · worst line 200: 16/16 strips (256/256 px),
-#         5 strip(s) dropped there · 16 line(s) drop strips
-# msg: rules: 8/8 refused — palette 16 (17th-palette); palette entry 16
+  --user-data-dir=/tmp/chrome-pce17 --virtual-time-budget=15000 --dump-dom \
+  "http://127.0.0.1:8123/renderer/editor.html?effects=1&rules=1"
+# exportstatus: picture 256x224, 133 tiles, 6 palettes, 0 sprite patterns,
+#               0 sprites (worst line 0: 0/16 strips, 0 dropped),
+#               0 problem(s), 224 raster entries at frame 0 ·
+#               ROM 40960 bytes, sha256 486477d617db851a…
+# rasterinfo: 224 entries · lines 0–223 · 224 BXR · 96 colour write(s) ·
+#             frame 0
+# msg: rules: 12/12 refused — palette 16 (17th-palette); palette entry 16
 #      (17th-colour); pixel colour 16 (17th-colour); sprite size 16x48
 #      (sprite-size); sprite palette entry 16 (17th-colour); sprite pixel 16
 #      (17th-colour); 65th sprite (65th-sprite); sprite pattern past VRAM
-#      (sprite-pattern-vram)
+#      (sprite-pattern-vram); effect line 224 (line-range); two bands on one
+#      line (raster-line-full); BXR 1024 (register-range); gradient colour
+#      512 (colour-range)
 ```
 
+The ROM is still 40960 bytes with the same sha256: the page reports the
+raster table beside it, and does not pretend the table is in the image.
+
 `?demo=1` still reports the #10 bytes unchanged (`sha256 486477d6…`), so #13
-did not move the background picture's ROM.
+and #17 did not move the background picture's ROM.
 
 `tests/dumps/painted/` and `tests/dumps/spainted/` hold the captures
 (`mednafen.png`, `vram.bin`, `cram.bin`, `sat.bin`, `regs.json`,
@@ -270,12 +377,22 @@ did not move the background picture's ROM.
 
 - **Not the page's mouse handlers.** The page calls the same functions the
   check calls, but its `mousedown`/`mousemove` wiring is read, not executed —
-  no synthetic input is ever sent on this machine.
+  no synthetic input is ever sent on this machine. The effect buttons are the
+  same: `?effects=1` exercises the setters a button calls, not the click.
 - **Not the download wiring.** `URL.createObjectURL` and the anchor click are
   read, not run by an automated check.
+- **Not the raster table in an exported ROM.** That is **#16**: the viewer
+  does not yet run the table, so `toPicture()`/`pce-rom.js` write the static
+  picture and the page's effects are preview-only. Nothing here fakes the
+  export; the page's `exportstatus` reports the table beside the unchanged
+  ROM.
+- **Not effect playback.** The page's `frame` is a scrub position for the
+  wobble's phase and the bands' scroll; there is no 60 Hz loop, so a moving
+  effect has not been watched. The tables at several frames are checked by
+  arithmetic, not by eye.
 - **Not every picture.** One picture each; one BAT size (32×32), one scroll
-  (`BXR=BYR=0`), 32×32 mode only. The editor cannot edit the scroll, the BAT
-  size, or the 336/512-px modes yet.
+  (`BXR=BYR=0`), 32×32 mode only. `setScroll` can set BXR/BYR but the editor
+  cannot change the BAT size or the 336/512-px modes yet.
 - **Not sprite animation or flicker multiplexing.** The sprites are static;
   more than 16 strips a line is shown dropped, not multiplexed (#28).
 - **Not the exporter's 6-bank limit for extreme pictures.** Patterns and tiles
