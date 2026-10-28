@@ -19,27 +19,33 @@
  *     with the ones tests/check-il.js defines (read from its source, so
  *     requiring this file cannot run check-il's suite), the same three toys
  *     tests/check-toys.js runs, so the page and the evidence agree.
- *  3. Forty frames through the PAGE's own runFrames() equal check-toys'
+ *  3. The Docs panel is #61's reference, not a copy: its source is
+ *     byte-equal to renderer/docs.html, the injected page carries all ten
+ *     chapters plus ppu.toys' search/chapter map/kicker, the top-bar button
+ *     opens it, × closes it, Guide lands on the right chapter, ?docs=sprites
+ *     opens it on load, and the Export dialog names #31.
+ *  4. Forty frames through the PAGE's own runFrames() equal check-toys'
  *     hand-built expected state: vram, cram, sat, the four register values
  *     and the pixels (renderer/pce-sprites.js drawing that hand-built state)
  *     — diff 0 for every one of the 40 frames. A second run is byte-equal,
  *     so the studio's frame flow is deterministic.
- *  4. The IL half is reused, not merely linked: the same 40 frames through
+ *  5. The IL half is reused, not merely linked: the same 40 frames through
  *     renderer/pce-il.js equal the Lua frames (state, raster table, pixels)
  *     for all three examples. This is the studio's Lua/IL switch, the PCE
  *     counterpart of ppu.toys' Lua/Cart switch, exercised through the page.
- *  5. Every button in the page has a click handler and every handler is
+ *  6. Every button in the page has a click handler and every handler is
  *     executed with a synthetic event. The count is asserted (a page that
  *     silently stopped building its dock or menus fails here), each button
  *     must have at least one listener, and a handler that throws fails the
  *     run. Range/select controls that carry state (source, seek, length) are
  *     exercised too.
- *  6. --browser (optional): the real page is loaded in headless Google
+ *  7. --browser (optional): the real page is loaded in headless Google
  *     Chrome with ?selftest=1&frames=40; the DOM must say PASS 40 frames and
  *     its frame-39 digest must equal the one computed here from check-toys'
- *     hand-built expected state. This is the headless-browser evidence the
- *     card asks for; without the flag the suite still covers 1-5 in the stub
- *     DOM.
+ *     hand-built expected state. A second load with ?docs=sprites must show
+ *     the Docs panel open with the generated reference. This is the
+ *     headless-browser evidence the card asks for; without the flag the
+ *     suite still covers 1-6 in the stub DOM.
  *
  * Not measured here: layout and CSS (a screenshot is the evidence, under
  * $TMPDIR and described in docs/STUDIO.md), a real canvas's pixels (the stub
@@ -503,6 +509,88 @@ function checkBoot(page) {
   check(!!studio.state(), "a frame's model state is readable");
 }
 
+/* ---- 1b. the Docs panel and the export message ------------------------ */
+function clickOne(page, id) {
+  const el = page.dom.get(id);
+  const listeners = el.listeners.click || [];
+  check(listeners.length > 0, id + " has a click handler");
+  for (const fn of listeners) fn(page.dom.fakeEvent(el));
+  return el;
+}
+
+function checkDocs(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  check(!!S.docs && typeof S.docs.html === "function",
+        "pce-docs.js loaded: the Docs panel has #61's generator");
+  const docsFile = path.join(RENDERER, "docs.html");
+  const raw = fs.readFileSync(docsFile, "utf8");
+  const pageRaw = studio.docsHtml();
+  check(pageRaw === raw,
+        "the Docs panel's source is renderer/docs.html byte for byte (" +
+        pageRaw.length + " vs " + raw.length + " bytes)");
+  const injected = studio.docsPage();
+  const frame = page.dom.get("docs-frame");
+  check(typeof frame.srcdoc === "string" && frame.srcdoc === injected,
+        "the docs iframe carries the injected #61 page");
+  check(injected.indexOf("SEARCH THE GUIDE") >= 0,
+        "the docs panel has ppu.toys' docs search");
+  check(injected.indexOf('id="docs-map"') >= 0,
+        "the docs panel has ppu.toys' chapter map");
+  check(injected.indexOf('content:"THE FIELD GUIDE"') >= 0,
+        "the docs panel has ppu.toys' hero kicker");
+  const chapters = ["the-toy", "registers", "palettes", "sprites", "raster",
+                    "pads", "passwords", "sound", "budgets", "refusals"];
+  let found = 0;
+  for (const id of chapters) if (injected.indexOf('id="' + id + '"') >= 0) found++;
+  check(found === chapters.length,
+        "all " + chapters.length + " generated chapters are in the panel (got " +
+        found + ")");
+
+  /* closed at load, opened by the top-bar button, closed by its × */
+  check(page.dom.get("docs-panel").hidden === true,
+        "the Docs panel starts closed");
+  clickOne(page, "btn-docs");
+  check(page.dom.get("docs-panel").hidden === false,
+        "the top-bar Docs button opens the Docs panel");
+  clickOne(page, "docs-close");
+  check(page.dom.get("docs-panel").hidden === true,
+        "the Docs panel's close button closes it");
+
+  /* a panel's Guide opens the reference at that panel's chapter */
+  clickOne(page, "dock-guide");
+  check(page.dom.get("docs-panel").hidden === false,
+        "the Guide button opens the Docs panel");
+  check(studio.docsChapter() === "registers",
+        "SCREEN's Guide opens the registers chapter (got " +
+        JSON.stringify(studio.docsChapter()) + ")");
+  studio.closeDocs();
+  studio.openDocs("sprites");
+  check(studio.docsChapter() === "sprites" && page.dom.get("docs-panel").hidden === false,
+        "openDocs('sprites') lands on the sprites chapter");
+  studio.closeDocs();
+
+  /* the export button opens a message that names #31, and the message is in
+   * the page (the stub does not parse static HTML into textContent). */
+  clickOne(page, "btn-export");
+  check(page.dom.get("export-modal").hidden === false,
+        "Export opens its dialog");
+  const html = fs.readFileSync(PAGE, "utf8");
+  check(/NEEDS #31/.test(html) && /toy compiler is card #31/.test(html),
+        "the Export dialog says it needs #31");
+  clickOne(page, "export-close");
+  check(page.dom.get("export-modal").hidden === true,
+        "the Export dialog closes");
+
+  /* the same panel from a URL (this is how the screenshots open it) */
+  const q = runPage("?docs=sprites&paused=1");
+  check(q.dom.get("docs-panel").hidden === false,
+        "?docs=<chapter> opens the Docs panel on load");
+  check(q.sandbox.PCEStudio.studio.docsChapter() === "sprites",
+        "?docs=sprites lands on the sprites chapter");
+  q.sandbox.PCEStudio.studio.closeDocs();
+}
+
 /* ---- 2/3. 40 frames diff 0 against check-toys' expected state ---------- */
 function checkFortyFrames(page) {
   const studio = page.sandbox.PCEStudio.studio;
@@ -710,7 +798,37 @@ function checkBrowser() {
         "headless Chrome: frame 39's digest equals check-toys' expected " +
         "state (" + (digest ? digest[1] : "none") + " vs " + want + ")");
   if (text) console.log("      browser: " + text);
+
+  /* The Docs panel in the real browser: the page is the #61 reference with
+   * the ppu.toys docs layout, opened by ?docs=<chapter>. */
+  const docsProfile = profile + "-docs";
+  const docsUrl = pathToFileURL(PAGE).href + "?docs=sprites&paused=1";
+  let docsDom = "";
+  try {
+    docsDom = execFileSync(CHROME, [
+      "--headless=new", "--disable-gpu", "--no-sandbox",
+      "--user-data-dir=" + docsProfile,
+      "--virtual-time-budget=25000",
+      "--dump-dom", docsUrl
+    ], { encoding: "utf8", timeout: 120000,
+         stdio: ["ignore", "pipe", "ignore"] });
+  } catch (e) {
+    check(false, "headless Chrome ran the Docs panel (" + e.message + ")");
+  }
+  const docsTag = docsDom.match(/<section[^>]*id="docs-panel"[^>]*>/);
+  check(!!docsTag && !/\bhidden\b/.test(docsTag[0]),
+        "headless Chrome: ?docs opens the Docs panel (no hidden attribute)");
+  check(docsDom.indexOf('id="docs-frame"') >= 0,
+        "headless Chrome: the Docs panel carries the docs iframe");
+  check(docsDom.indexOf("SEARCH THE GUIDE") >= 0 &&
+        docsDom.indexOf("docs-map") >= 0 &&
+        docsDom.indexOf("The toy author") >= 0,
+        "headless Chrome: the docs iframe is the generated reference with " +
+        "ppu.toys' search and chapter map");
+  console.log("      browser docs: " + (docsTag ? "docs-panel open" : "no panel") +
+              ", #61 reference + ppu.toys layout");
   try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {}
+  try { fs.rmSync(docsProfile, { recursive: true, force: true }); } catch (e) {}
   return /^PASS 40 frames/.test(text) ? "pass" : "fail";
 }
 
@@ -725,6 +843,7 @@ function main() {
     process.exit(1);
   }
   checkBoot(page);
+  checkDocs(page);
   checkFortyFrames(page);
   checkIlSwitch(page);
   checkButtons(page);
