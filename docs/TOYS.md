@@ -200,13 +200,17 @@ Dennis's decision supersede it.
 
 ---
 
-## 3. One model
+## 3. One model, one host
 
 `runtime.frame(f)` returns `{frame, width, height, pixels, raster, state}` and
-`runtime.options()` returns the exact object handed to the model. Nothing in
-`renderer/pce-toys.js` draws: it writes the model's own input arrays
-(`state.vram` 65,536 B, `state.cram` 1,024 B, `state.sat` 512 B,
-`state.regs`) and calls
+`runtime.options()` returns the exact object handed to the model. The toy's
+own contract — the surface, its ranges, the SAT composition, the raster table
+and its `cramPrev` rule, the pads, the frame flow — lives in
+`renderer/pce-toyhost.js`, which this runtime and the IL interpreter
+(`renderer/pce-il.js`, #31) both use, so there is one copy of it. Nothing in
+`renderer/pce-toys.js` draws: it drives that host, which writes the model's
+own input arrays (`state.vram` 65,536 B, `state.cram` 1,024 B,
+`state.sat` 512 B, `state.regs`) and then calls
 
 ```js
 renderer/pce-sprites.js  renderFrame({vram, cram, sat, regs, width, height, raster?})
@@ -287,3 +291,9 @@ break by another seat is owed before this closes the card.
 - Sound in toys is #71; the PSG model is not reachable from a toy yet.
 - The refusal codes and ranges here are what the toy reference (#61) must
   generate from, so a test can show the docs and the model agree.
+- The console path has started: `renderer/pce-il.js` lowers this same subset to
+  PCEStudio's IL (`docs/IL.md`, #31) and a reference interpreter runs it over
+  the same host and models. `tests/check-il.js` shows the three toys here give
+  byte-equal state, the same raster table and diff-0 pixels through both the
+  Lua runtime and the IL. The IL refuses part of this surface for now (strings,
+  passwords, `note`), and no machine code exists yet.
