@@ -1,4 +1,4 @@
-# The IL — PCEStudio's intermediate language (#31, the IL half)
+# The IL — PCEStudio's intermediate language (#31)
 
 **One page per question, measured where it can be.** This document defines the
 IL a toy is lowered to, the types it carries, what each Lua construct becomes,
@@ -8,23 +8,31 @@ and what is refused. The pipeline is the one ppu.toys' author described
 ```
 toy.lua --(Fengari's parser, the browser's own Lua)--> Lua 5.3 bytecode
         --(renderer/pce-il.js, the lowerer)---------->  PCEStudio IL
-        --(#32: analysis; the next half: backends)-->  HuC6280 code
+        --(#32: analysis)--------------------------->  HuC6280 code
+        --(renderer/pce-cgen.js, part A, §9)------->  C -> llvm-mos -> .pce
 ```
 
 The IL is where the validator (#32) will count cycles per frame, sprites per
-line and memory, and where `raster()` is checked against the line budget. This
-half delivers the IL, the lowering, and a reference interpreter that runs it
-over the same host and the same models as the browser runtime (`#30`):
+line and memory, and where `raster()` is checked against the line budget. The
+first half delivered the IL, the lowering, and a reference interpreter that
+runs it over the same host and the same models as the browser runtime (`#30`).
+Part A of the console half (§9) delivers the first backend: the palette toy
+through the same IL → C → llvm-mos → a HuCard ROM → Mednafen.
 
 - `docs/IL.md` — this file: the instructions, the types, the lowering table,
-  the refusals.
+  the refusals, and part A's backend.
 - `renderer/pce-il.js` — `compile(source)` → the IL program; `create(source)`
   → a runtime with `load()`, `frame(f)`, `setPad()`, the same shape as
   `renderer/pce-toys.js`.
 - `renderer/pce-toyhost.js` — the toy's hardware host, extracted so both front
   ends use one copy (the surface, the ranges, the raster table, the pads, the
   frame flow).
-- `tests/check-il.js` — the evidence (section 8).
+- `renderer/pce-cgen.js` — part A's `emitC(program)` → C (refusals by code).
+- `tools/build-toyc.sh` — Lua toy → IL → C → `mos-pce-clang -Os` → `.pce`.
+- `tools/capture-toy.sh` — build, run in Mednafen, harvest the state and every
+  frame.
+- `tests/check-il.js` — the IL half's evidence (§8).
+- `tests/check-il-console.js` — part A's evidence (§9).
 
 ---
 
@@ -399,13 +407,194 @@ loop arithmetic, the call slots) and the *typer*, not only the toys.
 
 ---
 
-## 9. Not proven, and the next half
+## 9. Part A of the console half: IL → C → llvm-mos → Mednafen
 
-- **No machine code.** Nothing here generates HuC6280 code; the backends
-  (IL → C/LLVM for llvm-mos, IL → C for HuC, IL → direct HuC6280) and their
-  comparison are the card's next half. No backend choice is baked into the IL:
-  the types, the explicit surface instructions and the line info are the parts
-  a backend will read.
+The card's second half begins here, with the smallest end-to-end proof the
+route can have: **#30's palette-cycling toy** (the `TOY_PALETTE` of
+`tests/check-il.js`, committed as `tools/toys/palette.lua`) is lowered from
+the IL to C, compiled by **llvm-mos's PCE target**, run in Mednafen, and its
+frames and state are compared with the browser's own run of the same toy.
+Part A is deliberately one toy and one backend; the comparison of routes
+(llvm-mos vs HuC vs a direct HuC6280 generator), `raster()` on the console and
+the analysis of #32 are later parts.
+
+### The pieces
+
+| file | what it is |
+|---|---|
+| `renderer/pce-cgen.js` | the IL → C emitter. `emitC(program)` is pure data-in/C-out; it knows no HuC6280 opcode. Part A supports the palette toy's IL and **refuses** everything else by code (§9.4). |
+| `tools/toyc/toy_runtime.h/.c` | the console side: the VDC/VCE setup (viewer.asm's register values), VRAM/CRAM writes, the frame flow, and the timer measurement. |
+| `tools/toyc/emit.js` | `toy.lua` → `pce-il.js` → `pce-cgen.js` → C; an IL or C-gen refusal fails the build with its code. |
+| `tools/build-toyc.sh` | C → `mos-pce-clang -Os` → the 8 KiB HuCard ROM + a JSON report (sha256, section and function sizes). |
+| `tools/capture-toy.sh` | build, run in Mednafen exactly by `tools/capture.sh`'s command-line route, harvest `vram/cram/sat/ram/regs`, **every video frame**, and the measured frame cost into `tests/dumps/toypalette/`. |
+| `tests/check-il-console.js` | part A's evidence (§9.3). |
+
+### 9.1 What the C looks like
+
+Each IL function becomes a C function over an `int32_t` register file; the
+program's functions are numbered and dispatched by closure value:
+
+```c
+struct il_closure { int16_t fid; int32_t up[IL_NUPS]; };
+static int32_t il_fn_4(struct il_closure *cl, int32_t a0, int32_t a1);
+static int32_t il_call(int32_t cv, int32_t a0, int32_t a1);   /* switch (fid) */
+```
+
+- `const`/`move`/`cmp`/`br`/`jmp`/`forprep`/`fornext` lower to assignments,
+  comparisons and labels/gotos; the branch takes Lua's truthiness, the loops
+  are Lua's integer-loop arithmetic (§5).
+- `arith` keeps the IL's 32-bit wrapping in `uint32_t` arithmetic; `%` and
+  `//` call small helpers that implement Lua's floor semantics, and shifts
+  implement the IL's `n < 0 || n >= 32 → 0`.
+- `call` is `il_call(callee, args…)`; a closure is a static slot per
+  *closure instruction site*, with its captured values copied in when the
+  instruction runs. Upvalue **writes** are refused (no `setupval` in part A),
+  so copying is exact for these toys.
+- The toy surface is direct: `pal`/`vset` become `toy_pal()`/`toy_vram_set()`,
+  `rgb` becomes an inline function with the IL's `& 7` per channel, and
+  `getglobal`/`setglobal` of `init`/`frame` are slots in `il_globals`.
+- `fixed` is refused (a read of `frame`'s `t` is one of the refusals), which
+  is why the runtime passes `t = 0`: the palette toy provably never reads it.
+
+The runtime sets the VDC to viewer.asm's values — HSR `$0202`, HDR `$041F`,
+VPR `$0F02`, VDW `$00EF`, VCR `$000C`, MWR 0 — and the VCE to the ÷4 dot
+clock, zeroes VRAM (32768 words) and CRAM (512 entries) like
+`pce-toyhost.js`, then runs the chunk, `init()`, and one `frame(f)` per
+VBlank. The palette writes therefore land in VBlank, which is what the
+browser's frame does before it renders that frame.
+
+### 9.2 Cycles per frame, measured rather than estimated
+
+The runtime brackets `toy_frame(f)` with reads of the HuC6280's **TMA timer**
+(Mednafen's `huc6280.cpp` decrements it once per 1024 CPU clocks; the counter
+is enabled at boot) and accumulates the tick deltas in BaseRAM `$2100`. The
+save state carries the sum, count, min and max, so the capture reports the
+toy's own cost as Mednafen ran it:
+
+| quantity | measured |
+|---|---|
+| frames measured in the committed run | 469 |
+| timer ticks, sum / mean | 3397 / **7.243** (each tick = 1024 clocks) |
+| **cycles per frame** | **≈ 7,417** (min 7 ticks = 7,168, max 8 = 8,192) |
+| share of a 60 Hz frame | ≈ **6.2 %** of 119,318 clocks (7.15909 MHz / 60) |
+
+The measurement includes `toy_frame()`'s `il_call`, the 15 `rgb` + `toy_pal`
+writes and the loop; it excludes the VBlank wait. The timer read costs a few
+clocks inside the bracket. The quantisation is one tick; the mean is over 469
+frames whose VBlank phase shifts by ~0.5 tick per frame, so the reported mean
+is within a few tens of cycles, not ±1024.
+
+### 9.3 Code size, and the evidence the ROM runs the same toy
+
+The ROM is one 8 KiB fixed bank; llvm-mos's report for the committed build:
+
+| item | bytes |
+|---|---|
+| ROM image | 8,192 |
+| used `.text` / `.rodata` | 2,725 / 10 |
+| `.data` (globals) / `.bss` (closures) | 8 / 43 |
+| the toy's IL functions, total | 2,014 |
+| — `il_fn_1` (puttile) / `il_fn_2` (init) / `il_fn_4` (frame) | 1,019 / 258 / 373 |
+| — `il_fn_0` (chunk) / `il_fn_3` (the tile closure) / `il_call` | 97 / 37 / 230 |
+
+`node tests/check-il-console.js` exits 0 with **47 checks**:
+
+- the emitter is deterministic, emits `toy_boot`/`toy_frame`, lowers `pal`
+  and `vset` to the runtime calls, and carries no floating-point type; the
+  toy file is `tests/check-il.js`'s `TOY_PALETTE` byte for byte;
+- **eight construct refusals come back by code** — `cgen-op`, `cgen-fixed`
+  (twice), `cgen-hook`, `cgen-arity`, `cgen-closure-loop`, `cgen-global`,
+  `cgen-key`, `cgen-target` — with the IL's source line in the message;
+- the ROM rebuilds **byte-identically** to the committed dump
+  (`tools/gen/toypalette.pce`, sha256 `c6296524…`, 8,192 B; the same SHA is in
+  `tests/dumps/toypalette/meta.json`); without llvm-mos that one section
+  prints SKIP (the `check-hutrack`/PCEAS rule);
+- of the 149 recorded frames, the **last 8 are diff 0, in order, against the
+  browser's frames 5..12** (`renderer/pce-toys.js`, the Fengari runtime), and
+  exactly one alignment in 0..7 makes all eight match — the palette repeats
+  every eight frames, so the phase is pinned by the pixels;
+- the save's **vram, cram and sat are byte-equal** to the browser runtime's
+  state at the aligned frame (65536 / 1024 / 512 bytes), and BXR/BYR/MWR are
+  equal. CR is `$88` against the browser's `$80`: **bit 3 is the VBlank
+  status enable**, which the console needs because Mednafen's
+  `DoVBIRQTest` only sets the VBlank status bit when `CR & 0x08`. It does
+  not affect the picture; the check asserts it is the only difference.
+
+The frame flow is the browser's: the chunk, then `init()`, then one
+`frame(f)` per VBlank. The console's picture is the same 256×224 window:
+SLSTART=3 puts captured row 0 at VCE line 17, which is VDW line 0 for
+VPR `$0F02`, so the crop and the browser's `scanline = 18` model agree
+without a shift.
+
+### 9.4 What part A refuses, and what it does not prove
+
+`renderer/pce-cgen.js` refuses by code rather than guessing: `cgen-op` (any
+instruction outside the palette toy's set — `reg`, `sat`, `sprite`, `raster`,
+`print`, `vget`, tables, …), `cgen-fixed`, `cgen-cond`, `cgen-global`,
+`cgen-arity` (more than two parameters/arguments), `cgen-hook` (no `frame`),
+`cgen-closure-loop` (a closure created in a loop: part A has one static slot
+per site), `cgen-key`, and `cgen-target`.
+
+Not proven, written down:
+
+- **One toy, one backend.** Nothing here says the IL → C route handles the
+  other #30 toys (`raster()`, sprites, pads), the five example toys, or any
+  toy beyond the palette one. Parts B (HuC) and C (`raster()` on the console)
+  come next; part D is the measured comparison sent to ppu.toys' author.
+- **No comparison of routes yet.** llvm-mos is the first route, not the
+  chosen one; the note in `docs/PLAN.md` still requires measuring it against
+  vendor/huc and a direct generator on the same toy.
+- **Recursion is not guarded.** The dispatcher is a C call; a recursive toy
+  would recurse on the console. The palette toy has no recursion, and a
+  general backend must bound it.
+- **One static closure slot per site.** Correct when the site runs once (the
+  palette toy's chunk and `init`); a site executed repeatedly would reuse the
+  slot.
+- **t is always 0.** Any toy that reads `frame`'s fixed `t` is refused, so
+  the console's `t` is never the browser's Q16.16 value.
+- **No browser page** for the IL/console run; `renderer/toys.html` still runs
+  the Fengari path.
+- **Mednafen is the only witness.** No real console, no ares run of this ROM.
+- **Rule 2 is owed.** The test and the emitter were written by the same seat
+  that wrote the IL; a cold break by another session and model must try the
+  emitter's arithmetic, its loop lowering and its refusals before the card's
+  console half closes.
+
+### 9.5 Two llvm-mos facts this part paid for
+
+Both were found by measurement, and both are why the emitter's declarations
+carry unusual attributes:
+
+1. **A pointer to a `.zp.bss` object is materialised as its zero-page offset.**
+   llvm-mos's PCE target places small static arrays in `.zp.bss`
+   (`.zp` at $2020+); the console maps zero-page addressing to RAM
+   `$2000+offset`, so *direct* accesses work, but taking the object's address
+   produced `$0029`, not `$2029`. `il_call`'s `lda ($02),y` then read the
+   closure's `fid` from the I/O page and every hook call returned 0 (measured:
+   the ROM reached `toy_display_on` with CR `$88` and never wrote VRAM/CRAM).
+   The fix is a section attribute: the closure array is in `.bss` and the
+   globals in `.data`, at `$2208`/`$2200`, where pointers are real addresses.
+2. **LTO scalarised the `int32_t` globals array into two byte globals in
+   `.zp.bss`** and the generated store for `il_globals[1]` wrote the wrong
+   byte (measured: `stx $204a` with X = 1 where the frame closure index is 2).
+   The array is declared `volatile` and sectioned into `.data`; the rebuilt
+   image stores 2 correctly.
+
+Two console facts, not compiler bugs: a VRAM word must be written with **R02
+(VWR) selected** after setting MAWR (viewer.asm's `st0 #$02`); without it the
+data-port write lands back in MAWR. And the **VBlank status bit needs CR bit 3**
+(§9.3), which is why the state comparison masks that one bit.
+
+---
+
+## 10. Not proven, and the next half
+
+- **Only part A of the machine code exists.** The palette toy runs on the
+  console through IL → C → llvm-mos (§9); the other toys, `raster()`, sprites
+  and pads do not. The HuC route, a direct HuC6280 generator, and their
+  measured comparison are still the card's next part. No backend choice is
+  baked into the IL: the types, the explicit surface instructions and the
+  line info are the parts every backend reads.
 - **No browser page for the IL yet.** The interpreter runs in Node and in a
   browser via the same UMD pattern; `renderer/toys.html` still runs the
   Fengari path. Wiring a "compile to IL" run into the page is worth doing when

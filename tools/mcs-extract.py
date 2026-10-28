@@ -102,10 +102,11 @@ def parse(path):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if a != "--raster"]
+    args = [a for a in sys.argv[1:] if a not in ("--raster", "--ram")]
     raster = "--raster" in sys.argv[1:]
+    ram_out = raster or "--ram" in sys.argv[1:]
     if len(args) not in (2, 3):
-        print(f"usage: {sys.argv[0]} STATE.mcs OUTDIR [SLSTART] [--raster]",
+        print(f"usage: {sys.argv[0]} STATE.mcs OUTDIR [SLSTART] [--raster|--ram]",
               file=sys.stderr)
         return 2
     state, outdir = args[0], args[1]
@@ -149,18 +150,19 @@ def main():
         f.write(cram)
     with open(os.path.join(outdir, "sat.bin"), "wb") as f:
         f.write(sat)
-    if raster:
+    if ram_out:
         # #15: the HuC6280 RAM (8KB at $F80000, mirrored at $FFE000) — the
         # raster ROMs' step and frame counters live in ZP (logical $2030/$2031,
         # which MPR1 maps onto the RAM base: BaseRAM[0x30]/[0x31]);
-        # raster-patch.py reads them from here.
+        # raster-patch.py reads them from here.  #31 part A also asks for it
+        # with --ram: its timer measurement lives at BaseRAM $2100.
         with open(os.path.join(outdir, "ram.bin"), "wb") as f:
             f.write(ram)
     with open(os.path.join(outdir, "regs.json"), "w") as f:
         json.dump(regs, f, indent=1, sort_keys=True)
     print(f"wrote {outdir}/vram.bin ({len(vram)} B), cram.bin ({len(cram)} B), "
           f"sat.bin ({len(sat)} B)" +
-          (f", ram.bin ({len(ram)} B)" if raster else "") + ", regs.json")
+          (f", ram.bin ({len(ram)} B)" if ram_out else "") + ", regs.json")
     if raster and len(ram) < 0x32:
         print("ram.bin too short for the ZP counters (offsets 0x30/0x31)",
               file=sys.stderr)
