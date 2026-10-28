@@ -2,17 +2,23 @@
 /*
  * tests/check-ares.js — card #41's measurement: does ares (v148, the second
  * emulator) show the same picture as the renderer for the viewer ROMs and
- * the exported painted ROM?
+ * the exported painted ROM?  #16 extends it to the raster viewers
+ * (vrasterN) and the editor's effect picture (effect1): the frames ares
+ * shows for the ROMs whose picture is the irq1 chain's per-scanline writes
+ * must equal the renderer on the dump's own patched raster.json — ares's
+ * RCR timing against Mednafen's, second emulator against the model.
  *
  * Evidence it reads:
- *   docs/ares-{viewer1,viewer2,viewer3,painted}.png
+ *   docs/ares-{viewerN,vrasterN,painted,effect1}.png
  *       256x224 frames captured from ares by tools/capture-ares.sh
- *   tests/dumps/<viewerN|painted>/ares-block.png
+ *   tests/dumps/<name>/ares-block.png
  *       the full 294x263 picture ares presents (the capture script also
  *       writes it so the 232-line window can be checked against the renderer
  *       and Mednafen, not only the 224-line crop in docs/)
- *   tests/dumps/<sceneN|painted>/{vram,cram,regs,sat}.bin
- *       the renderer's input (sceneN for viewerN, as tests/check-viewer.js)
+ *   tests/dumps/<sceneN|painted|vrasterN|effect1>/{vram,cram,regs,sat}.bin
+ *       the renderer's input (sceneN for viewerN, as tests/check-viewer.js;
+ *       the dump itself for vrasterN/effect1 — the raster ROMs render from
+ *       their own state, whose raster.json holds the chain's table)
  *   tests/dumps/<viewerN|painted>/mednafen.png
  *       Mednafen's 256x232 frame for the same ROM
  *
@@ -29,6 +35,12 @@
  *      equals the renderer, and equals Mednafen's frame for the same ROM;
  *   5. it reports the ares-vs-Mednafen 8-bit difference, which is a DAC
  *      level scale, not a picture difference (see docs/ARES.md).
+ *
+ * vraster4 is not compared: its table's colour values depend on a runtime
+ * frame counter (ZP <$31>), so two runs — even on the same emulator —
+ * differ by the counter's phase.  Every other raster scene is frame-stable
+ * (the chain writes the same values every frame), so ares and Mednafen can
+ * be held to the same picture.
  *
  * COLOUR NORMALISATION.  ares's linear-RGB path decodes each 3-bit channel
  * with image::normalize(n, 3, 16) and presents 8-bit values round(255*n/7):
@@ -60,6 +72,8 @@
  *     error, and ares is a cross-check, not the oracle (docs/DECISIONS.md);
  *   - anything about real hardware (the real PC Engine check is still #8);
  *   - the sprite scenes or any ROM not named above;
+ *   - vraster4 (its table depends on a runtime frame counter, so the two
+ *     emulators' runs legitimately differ — see above);
  *   - that screencapture caught ares's raw framebuffer: this is a compositor
  *     capture of the window at 1:1 presentation settings, which the geometry
  *     checks pin down but do not replace ares writing the frame itself.
@@ -217,12 +231,19 @@ function checkBlockGeometry(block) {
   return problems;
 }
 
-/* Build the renderer frame for a ROM's dump directory. */
+/* Build the renderer frame for a ROM's dump directory.  A raster dump
+ * (#16) renders from its own state with its patched table — the same
+ * opts.raster + firstScanline substitution tests/check-viewer.js makes. */
 function renderFrame(dir, height) {
   const vram = fs.readFileSync(path.join(dir, "vram.bin"));
   const cram = fs.readFileSync(path.join(dir, "cram.bin"));
   const regs = JSON.parse(fs.readFileSync(path.join(dir, "regs.json"), "utf8"));
   const opts = { vram, cram, regs, width: 256, height };
+  const rasterPath = path.join(dir, "raster.json");
+  if (fs.existsSync(rasterPath)) {
+    opts.raster = JSON.parse(fs.readFileSync(rasterPath, "utf8"));
+    opts.firstScanline = 14 + (regs.slstart != null ? regs.slstart : 4);
+  }
   const sat = path.join(dir, "sat.bin");
   if (fs.existsSync(sat)) opts.sat = fs.readFileSync(sat);
   return fs.existsSync(sat) ? sprites.renderFrame(opts) : bg.renderFrame(opts);
@@ -234,12 +255,21 @@ function levels(img) {
   return [...set].sort((a, b) => a - b);
 }
 
+/* #16: the raster viewers.  vraster4 is out (runtime frame counter — the
+ * two emulators' runs legitimately differ by the counter's phase); the
+ * rest of the #15 scenes and the editor's effect picture are frame-stable
+ * and render from the dump's own state (self: true — no separate scene
+ * dir).  raster: true requires the dump's patched raster.json, which
+ * tools/capture.sh writes when it runs the same ROM in Mednafen. */
 const ROMS = [
   { name: "viewer1", scene: "scene1" },
   { name: "viewer2", scene: "scene2" },
   { name: "viewer3", scene: "scene3" },
   { name: "painted", scene: "painted" },
-].filter((r) => !process.env.ARES_ROMS ||
+].concat([1, 2, 3, 5, 6, 7, 8, 9, 10].map((n) =>
+  ({ name: `vraster${n}`, self: true, raster: true })))
+  .concat([{ name: "effect1", self: true, raster: true }])
+  .filter((r) => !process.env.ARES_ROMS ||
              process.env.ARES_ROMS.split(",").indexOf(r.name) >= 0);
 
 let missing = [];
@@ -249,13 +279,18 @@ for (const rom of ROMS) {
   const framePath = path.join(ARES_DIR, `ares-${rom.name}.png`);
   const blockPath = path.join(DUMPS, rom.name, "ares-block.png");
   const mdPath = path.join(DUMPS, rom.name, "mednafen.png");
-  const sceneDir = path.join(DUMPS, rom.scene);
+  const sceneDir = rom.self ? path.join(DUMPS, rom.name)
+                            : path.join(DUMPS, rom.scene);
 
   const miss = [];
   if (!fs.existsSync(framePath)) miss.push(framePath);
   if (!fs.existsSync(blockPath)) miss.push(blockPath);
   if (!fs.existsSync(mdPath)) miss.push(mdPath);
   if (!fs.existsSync(sceneDir)) miss.push(sceneDir);
+  if (rom.raster &&
+      !fs.existsSync(path.join(sceneDir, "raster.json")))
+    miss.push(`${sceneDir}/raster.json (run tools/capture.sh ${rom.name} ` +
+              `in Mednafen first — ares needs the patched table)`);
   if (miss.length) { missing.push(...miss); continue; }
 
   const frame = decodePng(fs.readFileSync(framePath));
@@ -348,5 +383,6 @@ console.log("");
 console.log("NOT proven: ares's 8-bit DAC levels (HuC6260 manual 2.4, p. H6-6, " +
             "is absent from the scanned manual); that ares and the renderer " +
             "are both right rather than wrong together; real hardware (#8); " +
-            "sprite scenes.");
+            "sprite scenes; vraster4 (a runtime frame counter makes runs " +
+            "differ by phase).");
 process.exit(failures ? 1 : 0);

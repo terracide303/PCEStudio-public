@@ -24,12 +24,25 @@
  *            renderer model reads them as colour 0.  A region that starts
  *            below 32768 but ends past it throws (it cannot be described
  *            truthfully; docs/EXPORT.md).
+ *   raster:  optional, #16 — the renderer-shaped raster table
+ *            (pce-editor.js toRaster: { base: {bxr,byr,cr}, baseCram:
+ *            [512 words], entries: [{line, rcr, bxr?, byr?, cr?, cram?}] }).
+ *            When present, the builder lays the fixed-layout table image
+ *            into bank 1 at offset 0x640 (docs/ROM_LAYOUT.md), sets config
+ *            byte 9, ORs the RC bit (0x04) into the config CR, and loads
+ *            the boot colour table from baseCram (the values CRAM holds
+ *            before the first entry of a frame — the renderer applies the
+ *            entries to it the same way).  The image is always 3856 bytes:
+ *            the 4-byte header (size lo/hi, flags bit 0 = frameCounter, the
+ *            step count) plus 16 parallel 240-byte arrays at the fixed
+ *            offsets — byte-identical to tools/genviewer.py's encoder.
  *
  * Output: Uint8Array, an 8 KiB-banked headerless HuCard image.  Banks are
  * filled with 0xff; bank 1 holds the 64-byte config at offset 0, the 512
- * colour-table entries (BG + sprite palettes) at offset 0x40 and the SAT at
+ * colour-table entries (BG + sprite palettes) at offset 0x40, the SAT at
  * offset 0x440 (64 entries x 4 words from VRAM word 0x7F00 — the SATB DMA
- * source, card #14); banks 2-3 hold the BAT; banks 4+ hold the copy regions
+ * source, card #14) and, for a #16 raster picture, the table image at
+ * offset 0x640; banks 2-3 hold the BAT; banks 4+ hold the copy regions
  * concatenated.  The bank count is 4 + ceil(tiles / 8 KiB),
  * which is also what PCEAS -raw emits for the generated viewer .asm.
  *
@@ -76,6 +89,7 @@
   var CFG_MWR = 6;
   var CFG_CR = 7;
   var CFG_RGNS = 8;
+  var CFG_RASTER = 9;            /* 1 = the #16 raster table is present */
   var CFG_REG0 = 0x0A;
   var REG_SIZE = 4;
   /* 13 descriptors fit between CFG_REG0 and the palette at 0x40:
@@ -162,6 +176,136 @@
     return out;
   }
 
+  /* ---- #16: the raster table image (docs/ROM_LAYOUT.md).
+   *
+   * The image is laid into bank 1 at RASTER_OFFSET and the viewer copies
+   * 16 pages from there to RAM $2800 — the arrays land at the fixed
+   * addresses tools/viewer.asm indexes (r_op $2804, r_chain_lo $2900,
+   * ...), so the image offset of every array is its RAM address minus
+   * $2800.  r_op sits right after the 4-byte header; r_chain_lo starts on
+   * a page boundary ($2900), so 12 bytes of padding separate the two —
+   * the image is 4 + 12 + 16 * 240 = 3856 bytes, not 3844.  Each array
+   * holds 240 bytes; the padding past the step count is zero.
+   * tools/genviewer.py's encoder produces the same bytes (the two
+   * builders' agreement on the sample pictures is measured in EXPORT.md).
+   *
+   * The arrays are packed 240 bytes apart, NOT page-aligned: only the
+   * chain arrays and r_op are read once a step outside the line budget;
+   * the write-value arrays cross a page for the higher steps and those
+   * reads cost 5 cycles — the handler's worst step (two CRAM writes at
+   * step 231, all eight reads crossing) still lands inside the ~111-cycle
+   * window (tools/viewer.asm, the irq1_plain cycle notes). */
+  var RASTER_OFFSET = 0x640;     /* bank 1 byte offset ($4640) */
+  var RASTER_STEPS = 240;        /* one entry per VDW line, at most */
+  var RASTER_IMAGE = 4 + 12 + 16 * RASTER_STEPS;   /* 3856, always */
+  var RASTER_ARRAYS = ["op", "chain_lo", "chain_hi",
+                       "bxr_lo", "bxr_hi", "byr_lo", "byr_hi", "cr",
+                       "a1_lo", "a1_hi", "v1_lo", "v1_hi",
+                       "a2_lo", "a2_hi", "v2_lo", "v2_hi"];
+
+  function encodeRaster(raster) {
+    var entries = raster.entries;
+    var n = entries.length;
+    if (n < 1 || n > RASTER_STEPS) {
+      refuse("raster-steps",
+             "a raster table holds 1.." + RASTER_STEPS + " entries, got " + n);
+    }
+    var arr = {};
+    for (var a = 0; a < RASTER_ARRAYS.length; a++)
+      arr[RASTER_ARRAYS[a]] = new Uint8Array(RASTER_STEPS);
+    var lastLine = -1;
+    for (var i = 0; i < n; i++) {
+      var e = entries[i] || {};
+      var line = e.line;
+      var rcr = e.rcr;
+      if (typeof line !== "number" || line !== (line | 0) ||
+          line < 0 || line > 240 || line <= lastLine) {
+        refuse("raster-lines",
+               "entry " + i + ": line must be an integer 0..240 strictly " +
+               "increasing per step, got " + JSON.stringify(e));
+      }
+      if (rcr !== 0x40 + line) {
+        refuse("raster-rcr",
+               "entry " + i + ": rcr must be 0x40 + line (" +
+               (0x40 + line) + "), got " + JSON.stringify(rcr));
+      }
+      lastLine = line;
+      var op = 0;
+      if (e.bxr !== undefined) {
+        op |= 0x01;
+        if (typeof e.bxr !== "number" || e.bxr !== (e.bxr | 0) ||
+            e.bxr < 0 || e.bxr > 0x3FF) {
+          refuse("raster-entry",
+                 "entry " + i + ": bxr must be 0..0x3ff, got " + e.bxr);
+        }
+        arr.bxr_lo[i] = e.bxr & 0xFF;
+        arr.bxr_hi[i] = (e.bxr >> 8) & 0xFF;
+      }
+      if (e.byr !== undefined) {
+        op |= 0x02;
+        if (typeof e.byr !== "number" || e.byr !== (e.byr | 0) ||
+            e.byr < 0 || e.byr > 0x1FF) {
+          refuse("raster-entry",
+                 "entry " + i + ": byr must be 0..0x1ff, got " + e.byr);
+        }
+        arr.byr_lo[i] = e.byr & 0xFF;
+        arr.byr_hi[i] = (e.byr >> 8) & 0xFF;
+      }
+      if (e.cr !== undefined) {
+        op |= 0x04;
+        if (typeof e.cr !== "number" || e.cr !== (e.cr | 0) ||
+            e.cr < 0 || e.cr > 0xFF) {
+          refuse("raster-entry",
+                 "entry " + i + ": cr must be 0..0xff, got " + e.cr);
+        }
+        arr.cr[i] = e.cr;
+      }
+      var cram = e.cram || [];
+      if (cram.length > 2) {
+        refuse("raster-cram-count",
+               "entry " + i + ": at most 2 CRAM words per step, got " +
+               cram.length);
+      }
+      for (var w = 0; w < cram.length; w++) {
+        var addr = cram[w][0], value = cram[w][1];
+        if (typeof addr !== "number" || addr !== (addr | 0) ||
+            addr < 0 || addr > 0x1FF ||
+            typeof value !== "number" || value !== (value | 0) ||
+            value < 0 || value > 0x1FF) {
+          refuse("raster-entry",
+                 "entry " + i + ": CRAM word " + w + " address and value " +
+                 "must be 0..0x1ff, got " + JSON.stringify(cram[w]));
+        }
+        op |= 0x08 << w;
+        arr["a" + (w + 1) + "_lo"][i] = addr & 0xFF;
+        arr["a" + (w + 1) + "_hi"][i] = (addr >> 8) & 0xFF;
+        arr["v" + (w + 1) + "_lo"][i] = value & 0xFF;
+        arr["v" + (w + 1) + "_hi"][i] = (value >> 8) & 0xFF;
+      }
+      /* r_chain[i] arms the NEXT step: the RCR value that fires entry i
+       * (the #15 convention — the boot arms chain[0], the tail re-arms
+       * after every step).  Entries may reach line 240, so the value is
+       * a full 16-bit word (the VDC's match window is wider than the
+       * visible field; the scene r5 ends at line 240). */
+      arr.chain_lo[i] = (0x40 + line) & 0xFF;
+      arr.chain_hi[i] = ((0x40 + line) >> 8) & 0xFF;
+      arr.op[i] = op;
+    }
+    var image = new Uint8Array(RASTER_IMAGE);
+    u16(image, 0, RASTER_IMAGE);
+    image[2] = raster.frameCounter ? 1 : 0;
+    image[3] = n;
+    var off = 4;
+    image.set(arr.op, off);
+    off += RASTER_STEPS + 12;      /* r_chain_lo is page-aligned ($2900) */
+    for (var a = 1; a < RASTER_ARRAYS.length; a++) {
+      image.set(arr[RASTER_ARRAYS[a]], off);
+      off += RASTER_STEPS;
+    }
+    need(off === RASTER_IMAGE, "raster image size");
+    return image;
+  }
+
   /* Build the ROM.  Throws (rather than emitting a silently different ROM)
    * on anything the fixed layout cannot hold. */
   function buildRom(picture) {
@@ -183,6 +327,24 @@
     byte("BYR", byr, 0xFFFF);    /* packed as a 16-bit word; the VDC uses 9 */
     byte("MWR", mwr, 0xFF);
     byte("CR", cr, 0xFF);
+
+    /* ---- #16: the raster table (optional).  The table owns the boot
+     * colour table (baseCram — what CRAM holds before the first entry of a
+     * frame, the same state the renderer applies entries to) and adds the
+     * RC interrupt enable to the config CR. */
+    var raster = picture.raster || null;
+    var rasterImage = null;
+    if (raster) {
+      var baseCram = raster.baseCram;
+      need(baseCram && baseCram.length === 512,
+           "raster.baseCram must be 512 colour-table words");
+      for (var w = 0; w < 512; w++) byte("baseCram[" + w + "]", baseCram[w],
+                                         0x1FF);
+      need(raster.entries && raster.entries.length,
+           "raster.entries must be a non-empty list");
+      rasterImage = encodeRaster(raster);
+      cr |= 0x04;                /* RC: the VDC interrupt enable (CR R05) */
+    }
 
     var words = batWords(mwr);
 
@@ -209,7 +371,15 @@
       regions.push([dest, count * 16]);
     }
     /* ---- the data blocks */
-    var palette = cram.slice(0, 1024);
+    var palette;
+    if (raster) {
+      /* the boot colour table is the table's baseCram, not picture.cram —
+       * the renderer applies the entries to baseCram the same way */
+      palette = new Uint8Array(1024);
+      for (var c = 0; c < 512; c++) u16(palette, c * 2, baseCram[c]);
+    } else {
+      palette = cram.slice(0, 1024);
+    }
     var bat = vram.slice(0, words * 2);
     var sat = vram.slice(SAT_ADDR * 2, SAT_ADDR * 2 + 512);
     var tileBytes = 0;
@@ -256,6 +426,7 @@
     cfg[CFG_MWR] = mwr;
     cfg[CFG_CR] = cr;
     cfg[CFG_RGNS] = regions.length;
+    cfg[CFG_RASTER] = raster ? 1 : 0;
     for (var d = 0; d < regions.length; d++) {
       var off = CFG_REG0 + d * REG_SIZE;
       u16(cfg, off, regions[d][0]);
@@ -264,6 +435,7 @@
     rom.set(cfg, bank1);
     rom.set(palette, bank1 + PALETTE_OFFSET);
     rom.set(sat, bank1 + SAT_OFFSET);
+    if (rasterImage) rom.set(rasterImage, bank1 + RASTER_OFFSET);
 
     rom.set(bat, 2 * BANK);
     rom.set(tiles, 4 * BANK);
@@ -276,8 +448,12 @@
     MAX_REGIONS: MAX_REGIONS,
     MAX_ROM_BANKS: MAX_ROM_BANKS,
     MAX_TILE_BANKS: MAX_TILE_BANKS,
+    RASTER_OFFSET: RASTER_OFFSET,
+    RASTER_STEPS: RASTER_STEPS,
+    RASTER_IMAGE: RASTER_IMAGE,
     batWords: batWords,
     buildRom: buildRom,
+    encodeRaster: encodeRaster,
     reverseBits: reverseBits
   };
 });

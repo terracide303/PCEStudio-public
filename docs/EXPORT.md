@@ -4,10 +4,14 @@
 the constant viewer code bank plus the data banks at the fixed places of
 [`ROM_LAYOUT.md`](ROM_LAYOUT.md). For the sample scenes its output is
 **byte-for-byte equal** to the ROM PCEAS assembles from
-`tools/gen/viewerN.asm`, and that ROM shows the picture in Mednafen.
+`tools/gen/viewerN.asm`, and that ROM shows the picture in Mednafen.  #16
+extends the agreement to the raster viewers: a picture with a `raster`
+table builds the same fixed-layout table image the PCEAS path
+(`tools/genviewer.py`, `vraster1-10`) encodes, byte for byte.
 
 The editor (#10) exports through this same builder: its picture is a
-`{vram, cram, regs, regions}` object, so nothing here changes for it — see
+`{vram, cram, regs, regions}` object (plus `raster` for the #17 effects),
+so nothing here changes for it — see
 [`EDITOR.md`](EDITOR.md).
 
 ## Inputs
@@ -16,9 +20,10 @@ The editor (#10) exports through this same builder: its picture is a
 |-------|------|---------------------|
 | `bank0` | 8192 B | `renderer/viewer-bank0.bin` — `viewer.asm`'s assembled bank, copied verbatim |
 | `vram` | 65536 B | a VDC VRAM dump (32768 words, little-endian) |
-| `cram` | 1024 B | a VCE colour-table dump (512 entries, little-endian) |
-| `regs` | — | `BXR`, `BYR`, `MWR`, `CR`, the values the config block carries |
+| `cram` | 1024 B | a VCE colour-table dump (512 entries, little-endian) — or `raster.baseCram` when a table is present (#16) |
+| `regs` | — | `BXR`, `BYR`, `MWR`, `CR`, the values the config block carries — with RC (0x04) ORed into CR when a table is present (#16) |
 | `regions` | — | `tests/dumps/sceneN/regions.json`: `[char0, tileCount]` pairs in descriptor order |
+| `raster` | — | optional (#16): the renderer-shaped table `{base, baseCram, entries}` plus `frameCounter`; encoded as the fixed 3856-byte image at bank 1 offset `0x640` ([`ROM_LAYOUT.md`](ROM_LAYOUT.md)) and flagged with config byte 9 = 1 |
 
 The regions are **picture data**, not build tooling: `tools/genviewer.py`
 reads the same `regions.json` for the PCEAS path, so there is one description
@@ -48,7 +53,7 @@ An 8 KiB-banked, headerless image (`pceas -raw` output; no 512-byte header):
 | bank | content |
 |------|---------|
 | 0 | `bank0`, verbatim |
-| 1 | 64-byte config at offset 0, the 512 colour-table entries at offset `0x40`, the SAT at offset `0x440` |
+| 1 | 64-byte config at offset 0, the 512 colour-table entries at offset `0x40`, the SAT at offset `0x440`, and — when config byte 9 = 1 — the 3856-byte raster table image at offset `0x640` (#16) |
 | 2–3 | the BAT (`width × height` words) from VRAM word 0 |
 | 4+ | the copy regions, concatenated in descriptor order |
 
@@ -101,6 +106,24 @@ scene10, the 88 KiB picture):
 | sprite11 | 40960 | `5df566ef10a23625` | yes |
 | sprite12 | 49152 | `3f69a09d68492a80` | yes |
 | scene10 | 90112 | `541fa274c93543dc` | yes |
+
+The #16 pairs (each loaded with its scene's table from
+`tools/gen/rasterN.raster.json`, exactly like `genviewer.py` builds the
+PCEAS side — base registers from the table's base block with RC ORed into
+CR, the table image part of the byte agreement), measured 2026-10-28:
+
+| dump | bytes | sha256 (first 16) | equal to PCEAS |
+|------|-------|-------------------|----------------|
+| raster1 | 40960 | `c3b0740e5a3cc019` | yes |
+| raster2 | 40960 | `b66767cbcb6aa47c` | yes |
+| raster3 | 40960 | `48321311342ecd0b` | yes |
+| raster4 | 40960 | `5d7b1849d0836472` | yes |
+| raster5 | 40960 | `f52a22820c9a2ee7` | yes |
+| raster6 | 40960 | `cb82530f5bf359e5` | yes |
+| raster7 | 40960 | `b0e49c0187dd29b3` | yes |
+| raster8 | 40960 | `16da7ed3d0fbd7b0` | yes |
+| raster9 | 40960 | `9faa0df934ded043` | yes |
+| raster10 | 40960 | `2e61d70cd60ed9f4` | yes |
 
 `tests/check-export.js` also loads `renderer/pce-rom.js` through its
 browser-global branch (a `vm` context with `self` and no `module`) and

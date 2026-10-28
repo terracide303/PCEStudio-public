@@ -1,4 +1,4 @@
-# ROM layout of the viewer (cards #8, #9 and #14)
+# ROM layout of the viewer (cards #8, #9, #14 and #16)
 
 Where the viewer ROM puts its data, and where `viewer.asm` reads it from.
 This is the contract #9 (the browser .pce builder) glues into: bank 0 never
@@ -34,7 +34,7 @@ scenes.
 | bank | content |
 |------|---------|
 | 0    | viewer code and vectors (constant — the browser copies it verbatim) |
-| 1    | config block (64 B at `$4000`) + the 512 colour-table entries (`$4040`) + the SAT (`$4440`) |
+| 1    | config block (64 B at `$4000`) + the 512 colour-table entries (`$4040`) + the SAT (`$4440`) + the raster table image (3856 B at `$4640`, #16 — only when config byte `0x09` = 1) |
 | 2–3  | the BAT: `width × height` words, starting at bank 2 offset 0 |
 | 4–127 | the copy regions: the tile regions (and for the sprite scenes the SG pattern block) concatenated in descriptor order |
 
@@ -55,9 +55,9 @@ and `tools/extract_bank0.py` refuses to write the asset if they differ.
 | `0x02` | 2    | BXR (background X scroll, 10 bits) |
 | `0x04` | 2    | BYR (background Y scroll, 9 bits) |
 | `0x06` | 1    | MWR (bat width/height bits, as written to VDC register 9) |
-| `0x07` | 1    | CR (the final VDC control register value, bit 7 = background on) |
+| `0x07` | 1    | CR (the final VDC control register value, bit 7 = background on; bit 2 = RC is ORed in when a raster table is present, #16) |
 | `0x08` | 1    | region count (0–13) |
-| `0x09` | 1    | reserved (0) |
+| `0x09` | 1    | raster-table flag (#16): 1 = the table image at bank 1 offset `0x640` is present and the viewer runs it; 0 = no table |
 | `0x0A` | 4×13 | region descriptors, one per tile region (13 is the room before the palette at `0x40`: `(0x40 - 0x0A) / 4`) |
 
 A region descriptor is two 16-bit words: the **VRAM destination word
@@ -83,6 +83,81 @@ Pictures without sprites carry a zero SAT here, which is loaded harmlessly
 The SAT is picture data from VRAM word `$7f00` of the picture's own dump,
 exactly like the BAT and the tiles; both builders read it from `vram.bin`
 at that fixed address.
+
+## Bank 1 — the raster table, offset `0x640` (`$4640`) (#16)
+
+The #15 scanline table — a chain of per-scanline VDC register and VCE colour
+table writes — as a fixed 3856-byte image (`RASTER_IMAGE` in
+`renderer/pce-rom.js`), present only when config byte `0x09` = 1.  The
+viewer copies the whole image to RAM `$2800` and runs it from the RCR (raster
+counter) interrupt: each step is armed as an RCR match, and the irq1 handler
+executes the step's writes on the line it targets.  The layout is the one
+proven by the #15 scene ROMs (`tools/genroms.py`, the r_step/r_chain pattern
+of `tools/viewer.asm`'s ancestors), flattened into 16 parallel arrays so the
+handler can index them with one X register — the record walker it replaces
+could not fit its per-byte work in the HBlank budget (see
+[`DECISIONS.md`](DECISIONS.md)).
+
+| offset | size | field |
+|--------|------|-------|
+| `0x00` | 2    | image size, always 3856 (`0x0F10`) |
+| `0x02` | 1    | flags: bit 0 = frame-counter mode — the handler adds ZP `<frame` to each colour-table value (masked to 9 bits) before writing, for tables whose values move every frame |
+| `0x03` | 1    | step count _n_ (1–240) |
+| `0x04` | 240  | `r_op`: one op byte per step — bit 0 = write BXR, 1 = BYR, 2 = CR, 3 = first colour-table write, 4 = second |
+| `0xF4` | 12   | padding — so the next array is page-aligned in RAM (below) |
+| `0x100` | 15×240 | the 15 write-value arrays, 240 bytes apart: `r_chain_lo`, `r_chain_hi`, `r_bxr_lo`, `r_bxr_hi`, `r_byr_lo`, `r_byr_hi`, `r_cr`, `r_a1_lo`, `r_a1_hi`, `r_v1_lo`, `r_v1_hi`, `r_a2_lo`, `r_a2_hi`, `r_v2_lo`, `r_v2_hi` |
+
+Each step's `r_chain` pair is the RCR match value the step arms itself with:
+`0x40 + line`.  The VDC's raster counter is set to 64 at the scan line
+before display start (VDC manual R06 p. H7-6/7), so an RCR below 64 never
+matches; `0x40 + line` makes line 0's entry fire as the display window
+starts.  Lines are strictly increasing and at most 240 — line 240 fires
+during the HBlank after the last display line (239), which is how #15's
+scenes restore the registers after the picture.  `r_bxr`/`r_byr`/`r_cr` hold
+the write value (10/9/8 bits), `r_aN` the colour-table entry number (9 bits,
+0–511), `r_vN` its 9-bit colour word.  A step writes at most two colour-table
+entries; each op bit 3/4 pairs with the matching `r_aN`/`r_vN` slot.  The
+values come from the VDC's own write order — the AR (address register), then
+low byte, then high byte (VDC manual p. H7-25).
+
+In RAM the image lives at `$2800`: the header, `r_op` at `$2804`, then the 15
+arrays packed 240 bytes apart starting with `r_chain_lo` at the page boundary
+`$2900` (the 12-byte pad in ROM puts it there).  The arrays are packed, not
+page-aligned: a page-aligned array costs 224 bytes of padding each and the
+image would not fit bank 1, while a packed pair costs the handler one extra
+cycle on the rare steps whose 8-byte value read crosses a page — the worst
+step still lands inside the ~111 CPU-cycle BXR budget that the RCR match's
+placement leaves before the BXR latch (Mednafen 1.32.1's phase machine is the
+timing oracle: `src/hw_video/huc6270/vdc.cpp`, `IncRCR` and `Run`; see
+[`MANUALS.md`](MANUALS.md) §16 and [`RENDERER.md`](RENDERER.md)).  The copy
+is 16 fixed pages, ROM `$4640`–`$563F` to RAM `$2800`–`$37FF` (end `$3800`,
+clear of the viewer's config copy at `$2200` and of the zero page cells the
+chain uses: step `< $30`, frame counter `< $31`, matching the #15 scene ROMs'
+contract in `tools/raster-patch.py`).
+
+The viewer runs the table only when config byte `0x09` = 1.  Boot then copies
+the image, patches the irq1 dispatch cell (RAM `$2020`, the vector at logical
+`$FFF8` points there) to the plain handler or the frame-counter handler per
+flags bit 0, zeroes the step and counter cells, arms step 0, writes the
+config CR **with RC (bit 2) ORed in**, and enables interrupts (`cli`).  The
+irq1 handler (no register saves — the main loop `bra`s and touches nothing):
+reads the step's op, writes BXR/BYR/CR/colour-table values per the op bits
+(VDC registers via the AR = `$0000` port, address `$0402/$0403` and data
+`$0404/$0405` for the VCE), then the shared tail advances the step (wrapping
+at _n_, bumping the frame counter per flags bit 0), arms the next step's RCR,
+reads the VDC status register (clearing the RR bit, VDC manual p. H7-4) and
+returns.  The timing is the card's whole risk and its proof: the handler's
+worst case is measured, not estimated — see `RENDERER.md`.
+
+The editor's builder (`renderer/pce-rom.js`, `encodeRaster`) validates every
+field and refuses with the documented codes `raster-lines` (lines not
+strictly increasing in 0–240), `raster-rcr` (an entry's `rcr` not
+`0x40 + line`), `raster-steps` (_n_ outside 1–240), `raster-cram-count`
+(more than two colour-table writes on one line) and `raster-entry` (a value
+past its register's width or the colour table past 9 bits); a picture with a
+table always exports with config byte `0x09` = 1 and RC in the config CR.
+`tools/genviewer.py`'s encoder is the PCEAS twin of this layout, and the two
+must agree byte for byte (measured in [`EXPORT.md`](EXPORT.md)).
 
 ## Banks 2–3 — the BAT
 
@@ -141,6 +216,13 @@ the browser must not emit them either.
   re-maps to the next bank when the pointer crosses the window.
 - Finally CR from the config turns the layers on: bit 7 = background,
   bit 6 = sprites.
+- #16, when config byte `0x09` = 1: the viewer copies the 16-page raster
+  table image to RAM `$2800`, patches the irq1 dispatch cell (RAM `$2020`,
+  the logical `$FFF8` vector points at it) to the plain or frame-counter
+  handler per flags bit 0, zeroes the step and frame-counter zero page
+  cells, arms step 0's RCR, and writes the config CR with RC (bit 2) ORed
+  in — then `cli`.  The RCR interrupt takes over from there: one step per
+  matched line, re-armed by the handler's tail.
 
 ## Pictures the editor makes (#10, #13)
 

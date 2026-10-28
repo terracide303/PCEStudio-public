@@ -28,6 +28,14 @@
 #                                   # (gen/rasterN.pce, per-scanline BXR/BYR/
 #                                   # CR/VCE-colour-table writes; the dump
 #                                   # gains raster.json, the ROM's table)
+#   tools/capture.sh 1..10 vraster  # #16: the viewer ROMs of the raster
+#                                   # scenes (gen/vrasterN.pce — the same
+#                                   # tables, run by viewer.asm's irq1 chain;
+#                                   # the dump gains raster.json)
+#   tools/capture.sh effect         # #16: the editor's effect picture
+#                                   # (gen/effect1.pce, built by
+#                                   # tests/check-editor.js --write effect;
+#                                   # the dump gains raster.json)
 #
 # Scenes 4-9, 8b, 8c are #39's (docs/REVIEW.md finding 1: each is NOT
 # periodic in the dimension a renderer break would cut — see genroms.py).
@@ -40,8 +48,8 @@
 # in regs.json and the renderer reads it as firstScanline = 14 + slstart.
 #
 # The modes differ only in the ROM that is built and run and in the dump
-# directory (tests/dumps/sceneN / viewerN / browserN / usN / painted); the
-# route below is the same for all of them.
+# directory (tests/dumps/sceneN / viewerN / browserN / usN / painted /
+# vrasterN / effect1); the route below is the same for all of them.
 #
 # Route (command line only — this Mac's user must never receive synthesized
 # keyboard/mouse events, so there is no F9 hotkey here):
@@ -68,11 +76,13 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SCENE="${1:?usage: capture.sh 1..9 [scene|viewer|browser|us|sprite|vsprite|raster] | capture.sh painted|spainted}"
+SCENE="${1:?usage: capture.sh 1..9 [scene|viewer|browser|us|sprite|vsprite|raster|vraster] | capture.sh painted|spainted|effect}"
 if [ "$SCENE" = painted ]; then
   MODE=painted
 elif [ "$SCENE" = spainted ]; then
   MODE=spainted
+elif [ "$SCENE" = effect ]; then
+  MODE=effect
 else
   MODE="${2:-scene}"
 fi
@@ -87,9 +97,11 @@ case "$MODE" in
   vsprite) NAME="vsprite${SCENE}" ;;
   bsprite) NAME="bsprite${SCENE}" ;;
   raster) NAME="raster${SCENE}" ;;
+  vraster) NAME="vraster${SCENE}" ;;
   painted) NAME="painted" ;;
   spainted) NAME="spainted" ;;
-  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, painted or spainted" >&2; exit 2 ;;
+  effect) NAME="effect1" ;;
+  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, painted, spainted or effect" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -115,6 +127,10 @@ elif [ "$MODE" = painted ]; then
 elif [ "$MODE" = spainted ]; then
   # #13: the editor's sprite scene, exported by #9's builder
   node tests/check-editor.js --write sprite
+elif [ "$MODE" = effect ]; then
+  # #16: the editor's effect picture (gradient + wobble + parallax bands at
+  # frame 5), exported through the viewer with its raster table
+  node tests/check-editor.js --write effect
 else
   make -C tools "gen/$NAME.pce"
 fi
@@ -160,19 +176,25 @@ run_once() {
 
   echo "== extract"
   RASTER_ARG=""
-  if [ "$MODE" = raster ]; then RASTER_ARG="--raster"; fi
+  if [ "$MODE" = raster ] || [ "$MODE" = vraster ] || [ "$MODE" = effect ]; then
+    RASTER_ARG="--raster"
+  fi
   if ! python3 -I "$TOOLS/mcs-extract.py" "$new_mcs" "$DUMPDIR" "$SLSTART" $RASTER_ARG; then
     # 3 = the state was saved during pre-VDW blanking (rerun); anything
     # else is a hard failure
     [ "$?" -eq 3 ] && return 3 || return 4
   fi
-  if [ "$MODE" = raster ]; then
+  if [ "$MODE" = raster ] || [ "$MODE" = vraster ] || [ "$MODE" = effect ]; then
     # the renderer's raster table: the ROM's per-scanline writes, written
-    # by genroms.py alongside the asm, then folded with the ROM's runtime
-    # state (r4's frame counter, from the save's HuC6280 RAM) and checked
-    # against the state by tests/check.js
+    # by genroms.py alongside the asm (the #15 scenes), copied through
+    # genviewer.py (the #16 viewers), or emitted by the editor's builder —
+    # then folded with the ROM's runtime state (r4's frame counter, from
+    # the save's HuC6280 RAM) and checked against the state by the tests
     cp "tools/gen/$NAME.raster.json" "$DUMPDIR/raster.json"
-    if ! python3 -I "$TOOLS/raster-patch.py" "$DUMPDIR" "$SCENE"; then
+    PATCH_SCENE="$SCENE"
+    if [ "$MODE" = vraster ]; then PATCH_SCENE="${SCENE}v"; fi
+    if [ "$MODE" = effect ]; then PATCH_SCENE="effect1"; fi
+    if ! python3 -I "$TOOLS/raster-patch.py" "$DUMPDIR" "$PATCH_SCENE"; then
       echo "raster-patch failed"; return 4
     fi
   fi

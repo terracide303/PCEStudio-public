@@ -19,8 +19,17 @@ each frame as a PNG, crops the 256-wide active area and writes:
   renderer's own frame and with Mednafen.
 
 `node tests/check-ares.js` renders the reference frame from each ROM's dump
-(`sceneN` for `viewerN`; `painted` for `painted`) and diffs it against the
-ares capture. Exit 0 only if every check passes.
+(`sceneN` for `viewerN`; `painted` for `painted`; the dump itself for the
+#16 raster viewers — they render from their own state with the patched
+`raster.json`) and diffs it against the ares capture. Exit 0 only if every
+check passes.  #16 extends the set to `vraster1-3,5-10` and `effect1` —
+the viewer ROMs whose picture is the irq1 chain's per-scanline writes, so
+ares's RCR timing is held to the renderer's line-by-line model (and, via
+the `mednafen.png` comparison, to Mednafen's).  `vraster4` is out: its
+table depends on a runtime frame counter, so two runs legitimately differ
+by the counter's phase.  The raster viewers need the dump's patched
+`raster.json`, which `tools/capture.sh` writes when it runs the same ROM in
+Mednafen — run that first.
 
 The ROMs were built in this working tree on 2026-10-28 (`make -C tools
 gen/viewerN.pce`, `node tests/check-editor.js --write`). `viewer.asm` /

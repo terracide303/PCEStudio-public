@@ -14,9 +14,17 @@ and records the counter in the note.  For the other scenes it only asserts
 # counter vs the entries fired so far: every entry whose line <= RCRCount
 # has fired, so a scene whose last entry fires after the save line — r5's
 # line 240 — sits at step 2, not wrapped; the capture is in steady state
-# either way).
+# either way).  #16's viewer runs the same chain from the same BaseRAM
+# cells (step [0x30], counter [0x31]), so the scene names cover the viewer
+# captures too; effect1 is the editor's table (no counter, every entry
+# fires before the save).  The viewer chain bumps the counter at the wrap
+# — after the last entry's writes — so a viewer capture's saved colour
+# table carries the previous frame's counter: capture.sh passes the scene
+# name with a "v" suffix for viewer captures and the fold below uses
+# counter-1 for them (the #15 r4 chain bumps at its step-0 fire, before
+# the frame's first write, so its table carries the counter itself).
 
-usage: raster-patch.py DUMPDIR SCENE   (SCENE = 1..10)
+usage: raster-patch.py DUMPDIR SCENE   (SCENE = 1..10 [v], or effect1)
 """
 
 import json
@@ -34,6 +42,9 @@ def main():
         print(f"usage: {sys.argv[0]} DUMPDIR SCENE", file=sys.stderr)
         return 2
     dumpdir, scene = sys.argv[1], sys.argv[2]
+    viewer = scene.endswith("v")
+    if viewer:
+        scene = scene[:-1]
     jpath = os.path.join(dumpdir, "raster.json")
     raster = json.load(open(jpath))
     # ZP logical $2030/$2031 maps onto the RAM base through MPR1 (the 8KB
@@ -70,15 +81,18 @@ def main():
         return 1
     for e in raster["entries"]:
         s, _ = e["cram"][0]
-        cur = (grad(s) + counter) & 0x1FF
-        prev = (grad(s) + counter - 1) & 0x1FF
+        cur = (grad(s) + counter - (1 if viewer else 0)) & 0x1FF
+        prev = (grad(s) + counter - (2 if viewer else 1)) & 0x1FF
         e["cram"] = [[s, cur]]
         e["cramPrev"] = [[s, prev]]
     raster["note"] += (f"; r4 frame counter at save: {counter} (ZP <$31> = "
                        "ram.bin[0x31]) — cram = this frame's value, "
-                       "cramPrev = the previous frame's")
+                       "cramPrev = the previous frame's"
+                       + (", the viewer's wrap-bump deferred by one frame"
+                          if viewer else ""))
     json.dump(raster, open(jpath, "w"), indent=1, sort_keys=True)
-    print(f"patched {jpath}: frame counter {counter}")
+    print(f"patched {jpath}: frame counter {counter}"
+          + (f" (viewer fold: {counter - 1})" if viewer else ""))
     return 0
 
 
