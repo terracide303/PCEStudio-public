@@ -76,3 +76,27 @@ PCEAS's PCX directives.
 - **Cards routed to #opus.** Claude stays scarce. Each Opus card is first tried on DeepSeek (ds-pro) with a small
   budget. If DeepSeek fails it twice, the card is **parked**, not escalated to Claude — "there is no super hurry in
   this project"; other cards go first.
+
+## 2026-10-28 — ares v148 is the second emulator, and it agrees with Mednafen and the renderer (card #41)
+
+Refines the 2026-10-27 "our own hardware model; open-source emulators are references" decision; it does not change
+it. **ares is a cross-check, not the oracle**: the Hudson manuals and real hardware still decide.
+
+- **Method.** ares v148 loaded `viewer1/2/3.pce` and `painted.pce` and each frame was captured without synthetic
+  input (`screencapture -l` of the ares window; the window id comes from a read-only CGWindowList query). Settings,
+  geometry and method: [`ARES.md`](ARES.md). Reproduce with `tools/capture-ares.sh all`; verify with
+  `node tests/check-ares.js`.
+- **Result.** All four frames are 0/59392 pixels different from the renderer (and from Mednafen) at the 3-bit colour
+  index, on the 232-line Mednafen window; the 256x224 card crop is 0/57344. So ares shows the same picture as
+  Mednafen and the model.
+- **The one raw difference is the 8-bit DAC scale.** ares: `round(255·n/7)` = 0, 36, 73, 109, 146, 182, 219, 255;
+  Mednafen and `pce-bg.js`: `36·n` = 0, 36, 72, 108, 144, 180, 216, 252. It is the same 3-bit colour. The HuC6260
+  manual fixes the colour word — 2.1.2 (3) CTW **p. H6-3** (G 8-6, R 5-3, B 2-0), Fig. 2-2-1 **p. H6-4**, 2.2.2
+  **p. H6-5** — but the RGB-output section 2.4 **p. H6-6** is missing from the scanned manual (7 pages, ending at
+  H6-5), so the manual does **not** settle the 8-bit scale. Real hardware (#8) or a scan of H6-6 does.
+- **viewer2 colours.** ares gives cyan `(0,219,219)` and blue `(0,0,219)` for the same 1664 + 1664 pixels where
+  Mednafen gives `(0,216,216)` / `(0,0,216)` — the same 3-bit `(0,6,6)` / `(0,0,6)`. The manual's G/R/B bit order
+  (p. H6-3) says Mednafen and ares are right, so the web emulator's mint green/purple is a channel-order error.
+- **Not proven.** ares's DAC scale; that ares and the renderer are both right rather than wrong together; real
+  hardware; the sprite scenes; and a cold break of the ares check by a second seat (our own one-pixel break is
+  recorded in `ARES.md`).
