@@ -591,10 +591,22 @@
 
   /* The strips one display line's sprites ask for: in SAT order, at most 16
    * strips are kept; a 32-px sprite is two strips, so its right half can be
-   * the first one dropped (the way pce-sprites.js draws it). */
+   * the first one dropped (the way pce-sprites.js draws it).
+   *
+   * The line's status conditions (card #50; HuC6270 SR p. H7-4) are the same
+   * SAT search: OR = a 17th strip was attempted (the line asked for more than
+   * 16), CC = sprite #0 and another sprite from the kept strips have an
+   * opaque pixel at the same display column.  The pattern pixels are read the
+   * way writeSpritePattern lays them down and pce-sprites.js draws them: for
+   * a CGX sprite HFLIP swaps the 16-px halves and mirrors each half's pixels.
+   * The bits the status register would hold are these conditions AND the CR
+   * enables, which a picture does not carry (the editor sets CR = $C0, no
+   * interrupt enables) — the budget shows the conditions, and pce-panels.js
+   * shows the gated bits for a state that has CR. */
   function spriteLineBudget(pic, line) {
     checkInt("line", line, 0, VIEW_H_LINES - 1, "line-range");
     var used = 0, dropped = 0, entries = [];
+    var own = new Uint8Array(VIEW_W), other = new Uint8Array(VIEW_W);
     for (var i = 0; i < pic.sprites.length; i++) {
       var s = pic.sprites[i];
       var pat = getSpritePattern(pic, s.pattern);
@@ -605,26 +617,72 @@
       dropped += strips - kept;
       entries.push({ sprite: i, strips: strips, kept: kept,
                      dropped: strips - kept });
+      var row = line - s.y;
+      var mask = i === 0 ? own : other;
+      for (var st = 0; st < kept; st++) {
+        /* source 16-px half: HFLIP swaps a CGX sprite's halves */
+        var half = pat.width === 32 && s.hflip ? 1 - st : st;
+        for (var c = 0; c < 16; c++) {
+          var px = s.x + st * STRIP_PX + c;
+          if (px < 0 || px >= VIEW_W) continue;
+          /* within a half HFLIP mirrors the pixel */
+          var sx = half * 16 + (s.hflip ? 15 - c : c);
+          if (pat.pixels[row * pat.width + sx]) mask[px] = 1;
+        }
+      }
+    }
+    var collision = false;
+    for (var x = 0; x < VIEW_W && !collision; x++) {
+      collision = !!(own[x] && other[x]);
     }
     return { line: line, strips: used, pixels: used * STRIP_PX,
              limitStrips: LINE_STRIPS, limitPixels: LINE_STRIPS * STRIP_PX,
-             dropped: dropped, entries: entries };
+             requested: used + dropped, dropped: dropped,
+             overflow: dropped > 0, collision: collision, entries: entries };
+  }
+
+  /* The RCR-match lines an effect table would set (card #50): each entry's
+   * handler fires on its own line (rcr = 0x40 + line, #15/#16), so RR's lines
+   * are the table's entry lines.  A picture with no effects has none. */
+  function rasterMatchLines(pic) {
+    var raster = null;
+    try { raster = toRaster(pic, 0); } catch (e) { return []; }
+    if (!raster) return [];
+    return raster.entries.map(function (e) { return e.line; });
   }
 
   /* Every display line's budget, plus the worst line and how many lines drop
-   * strips.  This is what the page shows live. */
+   * strips.  This is what the page shows live.  The status block counts the
+   * lines carrying each condition and carries the frame's VD/RR event: VD at
+   * the first line after the 240-line display, RR on the effect table's
+   * lines (both card #50; the sprites' conditions are per line, the events
+   * are the frame's). */
   function spriteBudget(pic) {
     var lines = [], worst = null, droppedLines = 0;
+    var orLines = [], ccLines = [];
     for (var y = 0; y < VIEW_H_LINES; y++) {
       var b = spriteLineBudget(pic, y);
       lines.push(b);
       if (b.dropped) droppedLines++;
+      if (b.overflow) orLines.push(y);
+      if (b.collision) ccLines.push(y);
       if (!worst || b.strips > worst.strips ||
           (b.strips === worst.strips && b.dropped > worst.dropped)) worst = b;
     }
+    var rr = rasterMatchLines(pic);
     return { lines: lines, worst: worst, droppedLines: droppedLines,
              limitStrips: LINE_STRIPS, limitPixels: LINE_STRIPS * STRIP_PX,
-             spriteCount: pic.sprites.length, maxSprites: MAX_SPRITES };
+             spriteCount: pic.sprites.length, maxSprites: MAX_SPRITES,
+             orLines: orLines, ccLines: ccLines,
+             status: {
+               /* the conditions above; the only bit a picture can latch is RR
+                * (its exported CR has RC when an effect table exists; OC/CC/VC
+                * are never set, pce-rom.js), so SR is $04 with effects, else 0 */
+               OR: orLines.length > 0, CC: ccLines.length > 0,
+               RR: rr, VD: true,
+               vblankLine: 240,        /* VDW $00EF + 1, H7-10 */
+               rrBit: rr.length > 0, sr: rr.length > 0 ? 0x04 : 0
+             } };
   }
 
   /* The 256 SAT words the editor would write to VRAM $7F00.  Entry i is

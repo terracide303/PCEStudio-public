@@ -188,6 +188,47 @@ last entry with `line <= L`):
 manual 2.2.2 p. H6-5 (the four-step write and the CTA autoincrement; no
 timing statement found — the absence is itself a noted limit).*
 
+**Status register (#50).** `pce-sprites.js`'s `status()` reports, per
+rendered VDW line and for the frame, the four picture conditions and the
+bits they latch into SR (`pce-panels.js`'s `status`/`registerLines` show
+them, and the editor's `spriteBudget` shows the conditions in its panel):
+
+- **OR (bit 1)** — the sprite-overflow condition: the on-line sprites ask
+  for more than 16 strips, so the 17th is attempted.  The manual's wording
+  is "more than 17 sprites"; a line holds 16 strips and a CGX sprite spends
+  two, the count #12/#40 measured, so the condition is a 17th *strip*.
+- **CC (bit 0)** — sprite #0 has a non-zero (opaque) pixel at a display
+  column where another sprite among the kept strips has one too.  Pixel 0
+  is transparent; sprites past the 16-strip budget are not drawn and cannot
+  collide.  A 32-px sprite #0 is one SAT entry and both its halves are
+  treated as sprite #0, which is the manual's reading; Mednafen marks only
+  the first cache unit, so a CGX sprite-0 hit on its right half is a
+  documented divergence no dump exercises.
+- **RR (bit 2)** — the scanning-line counter matched RCR at `0x40 + line`,
+  i.e. at the end of line-1 (the #15/#16 rule).  With a raster table the
+  chains re-arm RCR at each entry, so the matches are the table's entry
+  lines; without one the saved RCR is used.  A match on the VBlank line
+  (raster5's 240) counts for the frame.
+- **VD (bit 5)** — vertical blanking started: VDW line
+  `(VDR & 0x1FF) + 1` = 240 in this mode.  The per-line entry is set on
+  that line when the rendered window reaches it (the dumps' 232 rows are
+  VDW lines 1..232, so there it is reported at frame level with its line
+  number).
+
+Each bit is the condition AND the CR interrupt enable it belongs to (CC
+bit 0, OC bit 1, RC bit 2, VC bit 3), following SR H7-4's "if an interrupt
+enabled by the ... bits of CR ... occurs, the corresponding bit is set".
+No captured scene sets bits 0–3, so every save state's status reads 0 —
+the tests check that gate, and run sprite4's own data with CR = $CF to show
+CC+OR+VD latching.  DS and DV (the block-transfer done bits) are not
+modelled.  A CPU read clears bits 0–5 (H7-4); the model accumulates them and
+the tests account for the raster ROMs' handler reading `$0000`.
+*Source: VDC manual SR p. H7-4, CR R05 p. H7-5..H7-6, sprite limits 2.4.3
+p. H7-19; Mednafen `src/pce_fast/vdc.cpp` DrawSprites (the 16-unit
+collection, the `status |= VDCS_OR` inside the OC-enabled branch and
+`VDCS_CR` inside the sprite-0 branch) and its SR read clearing `& ~0x3F`
+are the reference, not copied.*
+
 **The interrupt path the ROMs ride (emulator specifics).** Two places where
 the test ROMs target Mednafen's wiring rather than a documented hardware
 fact, both noted because the manual says something different or nothing:
@@ -522,8 +563,12 @@ flips, both SPBG priorities, the 16-strip line limit, clipping and
 sprite-on-background-off), and per-scanline raster writes (raster scenes
 1–5: BXR, BYR, CR's SB/BB and VCE colour-table writes, applied at the
 line the manual makes them valid).  Not modelled: the 4-colour sprite mode
-(word 2 bit 0), sprite 0 collision detection, and the SATB DMA's DCR
-repeat bit (the scenes' static SAT never changes).  256×224 mode only
+(word 2 bit 0) and the SATB DMA's DCR repeat bit (the scenes' static SAT
+never changes).  Since #50 the status register's four picture conditions
+(OR, CC, RR, VD) are modelled from the same SAT/register data; the DS/DV
+block-transfer bits are not (no DMA completion is modelled), and a CPU read
+of SR clearing bits 0-5 is only accounted for in the tests, not simulated.
+256×224 mode only
 (5.37 MHz clock; the 7.16 MHz modes and 256×240 VDW come with the
 editor).  Raster writes are modelled at **line boundaries only**, and the
 pieces the evidence does not cover are written down, not hidden:

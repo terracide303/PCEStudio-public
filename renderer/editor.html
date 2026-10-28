@@ -688,13 +688,21 @@ function drawSpriteList() {
     host.appendChild(div);
   });
   const w = budget.worst;
+  const fs = budget.status;
+  const span = (a) => a.length === 0 ? "none"
+    : a.length === 1 ? `line ${a[0]}`
+    : `lines ${a[0]}..${a[a.length - 1]} (${a.length})`;
   $("budget").textContent =
     `sprites ${budget.spriteCount}/${budget.maxSprites} · worst line ${w.line}: ` +
     `${w.strips}/${budget.limitStrips} strips (${w.pixels}/` +
     `${budget.limitPixels} px)` +
     (w.dropped ? `, ${w.dropped} strip(s) dropped there` : "") +
     (budget.droppedLines
-      ? ` · ${budget.droppedLines} line(s) drop strips` : " · nothing dropped");
+      ? ` · ${budget.droppedLines} line(s) drop strips` : " · nothing dropped") +
+    `\nstatus (conditions; the picture's CR has no interrupt enables): ` +
+    `OR (17th strip) ${span(budget.orLines)} · ` +
+    `CC (sprite 0 hit) ${span(budget.ccLines)} · ` +
+    `RR (RCR match) ${span(fs.RR)} · VD at VDW line ${fs.vblankLine}`;
 }
 
 $("addspr").addEventListener("click", () => {
@@ -969,15 +977,27 @@ function drawRegisters(st) {
            `${(r.value == null ? "-" : hexWord(r.value)).padStart(7)}  ` +
            `${r.source || "-"}\n`;
   }
+  /* card #50: the status conditions and the bits they would latch */
+  const s = pn.status(st);
+  const span = (a) => a.length === 0 ? "none"
+    : a.length === 1 ? `line ${a[0]}`
+    : `lines ${a[0]}..${a[a.length - 1]} (${a.length})`;
+  $("regnow").textContent +=
+    `\nstatus (VDC SR, H7-4): OR ${span(s.orLines)} · CC ${span(s.ccLines)} · ` +
+    `RR ${span(s.rrLines)} · VD at VDW line ${s.vblankLine}` +
+    `\n  register bits with this line's CR (CC=${(s.ccBit ? 1 : 0)} ` +
+    `OR=${(s.orBit ? 1 : 0)} RR=${(s.rrBit ? 1 : 0)} VD=${(s.vdBit ? 1 : 0)}): ` +
+    `SR $${s.sr.toString(16).toUpperCase().padStart(2, "0")}`;
   const lines = pn.registerLines(st);
   out += "\nper scanline (* = the raster table writes this line)\n";
-  out += "  line  BXR  BYR  CR BG_YOffset   RCR\n";
+  out += "  line  BXR  BYR  CR BG_YOffset   RCR OR CC RR\n";
   for (const l of lines) {
     out += `${l.entryAtLine ? "*" : " "}${String(l.line).padStart(5)} ` +
            `${String(l.BXR).padStart(4)} ${String(l.BYR).padStart(4)} ` +
            `$${l.CR.toString(16).toUpperCase().padStart(2, "0")} ` +
            `${String(l.BG_YOffset).padStart(10)} ` +
-           `${l.rcr == null ? "-" : hexWord(l.rcr)}\n`;
+           `${(l.rcr == null ? "-" : hexWord(l.rcr)).padStart(5)}  ` +
+           `${l.OR ? "O" : "."}  ${l.CC ? "C" : "."}  ${l.RR ? "R" : "."}\n`;
   }
   $("regtable").textContent = out;
 }
