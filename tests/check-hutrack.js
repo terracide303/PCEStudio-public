@@ -157,10 +157,18 @@ function classify(m, rate, notes, untilSec, margin) {
 }
 
 /* ---- 0. the vendored engine/converter is unmodified ---- */
+/* Python writes __pycache__ the first time the converter's modules are
+ * imported, and a .pyc records the interpreter's magic and the source's
+ * mtime, so it is generated output, not an upstream byte.  #83: the cache is
+ * neither hashed nor counted as "unlisted" — the .py files it was built from
+ * are in the manifest and are what the check holds.  Anything else under
+ * vendor/hutrack must be listed. */
+const GENERATED = /(^|\/)__pycache__(\/|$)|\.pyc$/;
 function walk(dir, base, out) {
   for (const name of fs.readdirSync(dir)) {
     const p = path.join(dir, name);
     const rel = path.relative(base, p).split(path.sep).join("/");
+    if (GENERATED.test(rel)) continue;
     if (fs.statSync(p).isDirectory()) walk(p, base, out);
     else out.push(rel);
   }

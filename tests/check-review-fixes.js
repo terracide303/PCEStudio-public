@@ -323,9 +323,9 @@ const OLD_CHECK_SRC = preFixSource(CHECK_SRC,
  * checked name by name.  #68 adds raster11 (the frame counter + two CRAM
  * words table, REVIEW-16 B15) and its viewer ROM vraster11; #69 adds raster12
  * and vraster12 (the same table with the second word on the cell the line's
- * first pixels use — the visible-second-word fixture).  us1 and toypalette
- * (#81) are the dumps that are not counted as pictures; see check.js's
- * NOT_PICTURES. */
+ * first pixels use — the visible-second-word fixture).  us1, toypalette
+ * (#81) and toyparallax (#83) are the dumps that are not counted as
+ * pictures; see check.js's NOT_PICTURES. */
 const EXPECTED_SCENES = [
   /* scene ROMs, #5/#6/#15/#39/#43 */
   "scene1", "scene2", "scene3", "scene4", "scene5", "scene6", "scene7",
@@ -393,12 +393,13 @@ function outputProblems(stdout, status) {
                   "set: " + extra.join(", "));
   if (!/^us1: not a picture, skipped/m.test(stdout))
     problems.push("us1 is not reported as skipped by name");
-  /* #81: the toy capture is skipped by name WITH its reason — the reason has
-   * to send the reader to the check that does judge it. */
-  if (!/^toypalette: not a picture, skipped \(not counted\): .*check-il-console\.js/m
-      .test(stdout))
-    problems.push("toypalette is not reported as skipped by name with its " +
-                  "reason (check-il-console.js)");
+  /* #81/#83: the toy captures are skipped by name WITH their reason — the
+   * reason has to send the reader to the check that does judge them. */
+  for (const toy of ["toypalette", "toyparallax"])
+    if (!new RegExp(`^${toy}: not a picture, skipped \\(not counted\\): ` +
+                    ".*check-il-console\\.js", "m").test(stdout))
+      problems.push(`${toy} is not reported as skipped by name with its ` +
+                    "reason (check-il-console.js)");
   return problems;
 }
 

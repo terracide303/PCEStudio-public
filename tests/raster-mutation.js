@@ -191,14 +191,30 @@ const BLIND_CHECK_SRC = CHECK_SRC.replace(
   "if (false) {"
 );
 
-/* Every picture dump except the named not-pictures (us1, check.js's
- * NOT_PICTURES), plus #81's toypalette — an animated toy capture that
- * check.js skips by name and check-il-console.js judges.  Rendering all of
- * them is what turns "the mutation changed raster8" into "the mutation
- * changed exactly raster8". */
+/* Every picture dump except the ones check.js skips by name.  The names are
+ * read from check.js's own NOT_PICTURES in CHECK_SRC — the same source the
+ * throwaway trees run — so a toy capture added there (#81's toypalette, #83's
+ * toyparallax) cannot silently stay in this script's universe and make the
+ * baseline red for a reason that is not the renderer.  Rendering all the
+ * others is what turns "the mutation changed raster8" into "the mutation
+ * changed exactly raster8".  If the declaration cannot be read, this script
+ * refuses rather than guessing. */
+const NOT_PICTURES = (() => {
+  const body = /const NOT_PICTURES = \{([\s\S]*?)\n\};/.exec(CHECK_SRC);
+  if (!body) {
+    console.error("ERROR: check.js's NOT_PICTURES declaration not found");
+    process.exit(2);
+  }
+  return new Set([...body[1].matchAll(/^\s{2}([A-Za-z0-9_]+):/gm)]
+    .map((m) => m[1]));
+})();
+if (NOT_PICTURES.size === 0) {
+  console.error("ERROR: check.js's NOT_PICTURES parsed to no names");
+  process.exit(2);
+}
 const DUMP_NAMES = fs.readdirSync(DUMPS)
   .filter((d) => fs.existsSync(path.join(DUMPS, d, "mednafen.png")))
-  .filter((d) => d !== "us1" && d !== "toypalette")
+  .filter((d) => !NOT_PICTURES.has(d))
   .sort();
 
 /* If a source line is refactored these substitutions silently become

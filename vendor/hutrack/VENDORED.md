@@ -34,10 +34,13 @@ numerically.
 
 ## Changes
 
-None. `MANIFEST.sha256` records every vendored file's sha256; the PCEAS build
-was diffed against the upstream clone file by file, and
-`tests/check-hutrack.js` re-checks the manifest. To update: replace this
-folder from a newer commit, change the hash above, regenerate the manifest.
+None. `MANIFEST.sha256` records every vendored source file's sha256; the
+PCEAS build was diffed against the upstream clone file by file, and
+`tests/check-hutrack.js` re-checks the manifest. Python's `__pycache__/`
+(written when the converter's modules are first imported) is generated
+output and is deliberately not listed or counted — the `.py` sources it is
+built from are listed. To update: replace this folder from a newer commit,
+change the hash above, regenerate the manifest.
 
 ## Building
 

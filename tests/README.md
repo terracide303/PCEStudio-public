@@ -1,5 +1,22 @@
 # The renderer and export checks (#5, #6, #8, #9, #10, #12, #14, #15, #38, #39, #40, #42, #48, #30)
 
+## One command for a fresh clone (#83)
+
+```sh
+tests/all.sh
+```
+
+It runs `make -C tools` (every ROM the suites read — scenes, sprites, viewers,
+raster tables, wave-editor ROMs), then every `tests/check*.js` and
+`tests/*-mutation.js`, and prints PASS / SKIP / FAIL per suite.  Exit 0 only
+if no suite failed.  A suite that exits 0 but printed a `SKIP` line (check-ares
+without the ares captures, check-hutrack without PCEAS 4.x, check-il-console
+without llvm-mos) is reported as **SKIP, not PASS**: the skipped checks are
+printed and the suite is named in the summary.  Logs go under `$TMPDIR` and are
+kept with `KEEP=1`.
+
+The individual suites, and what each one needs:
+
 ```sh
 node tests/check-il.js          # #31: the three #30 toys through Lua -> IL -> the
                                 # reference interpreter, vs the Fengari run
