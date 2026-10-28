@@ -217,5 +217,5 @@ Card close condition is the workshop seat's to judge; routed, not closed.
 - [?] #66 A bytecode interpreter in the ROM for game logic and level scripts (turboxray's approach), measured against compiled code ~M @design #ds-pro !3
 
 ### Ideas
-- [?] #69 The viewer's frame-counter handler lands a two-CRAM-word step's second write one pixel late — Measured at #68: with r11's second word on a displayed CRAM cell, the pristine vraster11 differs from the renderer by 2 bytes at px(1,4), deterministic on two captures. irq1_frm's per-word 9-bit add costs ~18 CPU cycles over irq1_plain's ~109 of a ~123-cycle deadline. Fix options: share one counter add between the two words, or restructure the two-word path; then a visible-second-word fixture becomes possible. !1
+- [ ] #69 The viewer's frame-counter handler lands a two-CRAM-word step's second write one pixel late — Close: fix irq1_frm in tools/viewer.asm so a two-CRAM-word step lands both writes in the blank (share one counter add, or restructure), count the cycles against the ~123-cycle deadline from the HuC6280 opcode timings, then add the visible-second-word fixture #68 could not ship; vraster11 (and the new fixture) diff 0 in check-viewer.js and every suite green. Runs beside #27 (renderer): do not edit renderer/pce-bg.js or pce-sprites.js; stage and commit ONLY your own files by name. @workshop !1
 
