@@ -59,8 +59,17 @@
  * that the check must REJECT — a check that has never failed has not been
  * tested.  tools/capture-review16.sh trace records both.
  *
- * Exit code 0 only if every viewer capture matches on all checks and every
- * trace fixture lands in its expected class.
+ * #74 — the mixed-op fixture (tests/dumps/vraster13/): REVIEW-30's V1 showed
+ * that removing viewer.asm's per-step dispatch-vector update changes nothing
+ * on any shipped table, because every table is homogeneous.  vraster13
+ * alternates colour-only and BYR-only steps (tools/genreview16.py r13), so
+ * the same break makes a mis-dispatched handler write the wrong field.  The
+ * fixture is required by name at the bottom of main() and its table must
+ * still mix the two shapes; a missing or homogenized fixture fails the suite.
+ *
+ * Exit code 0 only if every viewer capture matches on all checks, the
+ * mixed-op fixture is present and mixed, and every trace fixture lands in its
+ * expected class.
  */
 
 "use strict";
@@ -479,6 +488,35 @@ function main() {
   }
   let failed = 0;
   for (const dir of dirs) failed += checkViewer(dir);
+  /* #74: the mixed-op fixture is required by name, because it is the only
+   * witness for viewer.asm's per-step dispatch (REVIEW-30's V1: a stale
+   * dispatch vector is invisible on every homogeneous shipped table).  A
+   * missing capture or a table that no longer MIXES the two step shapes
+   * fails the suite — otherwise deleting or homogenizing the fixture would
+   * quietly remove the dispatch evidence and the suite would still pass. */
+  const mixedDir = path.join(dumps, "vraster13");
+  if (!fs.existsSync(path.join(mixedDir, "mednafen.png"))) {
+    console.log("vraster13: MISSING — the #74 mixed-op dispatch fixture is " +
+                "required (tools/genreview16.py r13 --viewer; " +
+                "tools/capture.sh 13 vraster)");
+    failed++;
+  } else {
+    const mixed = JSON.parse(
+      fs.readFileSync(path.join(mixedDir, "raster.json"), "utf8"));
+    let colourOnly = 0, byrOnly = 0;
+    for (const e of mixed.entries || []) {
+      const regs = ["bxr", "byr", "cr"].filter((k) => e[k] != null).length;
+      const cram = e.cram && e.cram.length ? 1 : 0;
+      if (regs === 0 && cram === 1) colourOnly++;
+      if (regs === 1 && e.byr != null && cram === 0) byrOnly++;
+    }
+    if (!colourOnly || !byrOnly) {
+      console.log(`vraster13: the fixture does not MIX the step shapes ` +
+                  `(colour-only ${colourOnly}, BYR-only ${byrOnly}) — the ` +
+                  `#74 dispatch witness is gone`);
+      failed++;
+    }
+  }
   /* #68: the first-frame trace fixtures.  They are not pictures (no
    * mednafen.png), so they are not in `dirs`; the control (vtrace2-b14) is
    * part of the check: it must be REJECTED, or the match verdict means
