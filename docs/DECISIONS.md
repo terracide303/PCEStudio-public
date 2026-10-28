@@ -206,3 +206,26 @@ The day's $16 went two-thirds on four DeepSeek Pro cards with long bug hunts (#1
 **ds-pro** only after Flash fails it once, with a **$1.50** budget; a card that looks like #16 (a new mechanism
 plus captures plus a debug hunt) is split in two before it starts. Claude stays for review and for what DeepSeek
 fails twice. agents.py now stops a seat on its calibrated cost, not the undercounting live figure.
+
+## 2026-10-28 — the VCE's three dot clocks are modelled; `$0400` bit 2 is NOT PROVEN (card #27)
+
+The renderer now follows the VCE's dot clock for the frame's width. **Why the card split here:** the renderer half
+is a model question settled by the manuals and two captures; making the viewer, the browser export and the editor
+write and preview wide pictures is a second, larger change on the same registers, so it is **card #70**.
+
+- **Three clocks, not four.** HuC6260 manual 2.1.1 H6-3 gives CR "00" = /4 (5.37 MHz) and "01" = /3 (7.16 MHz).
+  The 10.74 MHz clock is **not in the scanned page**; MacDonald's measured notes (pcetech §6: D1 = 1 = 10 MHz)
+  give it, and both Mednafen cores implement exactly that (`pce/vce.cpp` ratios `{4,3,2,2}`; `pce_fast/vdc.cpp`
+  bit 1 forces 2) — codes 10 and 11 are the same clock.
+- **The frames are 256 / 341 / 512 dots**, with a line of 341 / 455 / 682 dots (Mednafen `ClockPixelWidths`; a
+  line is 2730 master clocks at 42.95 MHz). Mednafen records the VCE's active window with horizontal overscan
+  off (`pce.h_overscan` default 0, which `capture.sh` keeps), so a 336-dot display sits in a 341-dot frame with 2
+  dots of border left and 3 right. MacDonald's §9 table gives the matching registers: HDS 2/4/11, HDW $1F/$29/$3F.
+- **The sprite-per-line limit does not move with the clock**: 16 buffer entries, 32-px sprites take two (manual
+  2.4.3; pcetech's SAT-parsing paragraph). Wide mode buys dots, not sprites.
+- **`$0400` bit 2 — settled as NOT PROVEN.** Mednafen's VCE code implements it as the 262/263-line select
+  (263 lines with it set). MacDonald, measuring a console, saw **edge blur** and states the frame is **263 lines
+  fixed**; VIDEO_MODES.md (PCEHeroTN's RTL, not a measurement) says 262/263. **No source measured bit 2 on real
+  hardware**, so the model does not use it — a static picture's frame length does not enter the renderer — and
+  every ROM keeps the bit set, as every earlier capture did, because #5's row calibration was taken on 263-line
+  frames. Where the question belongs if it ever matters: a real-console or logic-analyser measurement.

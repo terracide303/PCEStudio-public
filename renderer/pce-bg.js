@@ -132,13 +132,14 @@
    *   - HDE is the *front* porch — the interval from the end of the display
    *     to the falling edge of hsync — so it moves the sync, not the display:
    *     it is read (and a window ROM sets it) but does not move a pixel.
-   *   The absolute position inside Mednafen's 256-dot /4-clock output is the
-   *   emulator's alignment (pce_fast correct_aspect=1: xs[1][0] = 24, so a
-   *   canonical HDS=2 back porch puts the display at x=0); the manual settles
-   *   the meaning, the 8-dot character cycle and the width, not that offset.
-   *   Mednafen's own clipping of start/end to the 341-dot 5.37 MHz line is
-   *   modelled, because a window pushed far right would otherwise run past
-   *   the line.
+   *   The absolute position inside Mednafen's output is the emulator's
+   *   alignment (pce_fast correct_aspect=1: xs[1] = {24, 38, 96} for the
+   *   three dot clocks, so a canonical HDS=2 back porch puts the display at
+   *   x=0 in the /4 mode); the manual settles the meaning, the 8-dot
+   *   character cycle and the width, not that offset.  Mednafen's own
+   *   clipping of start/end to the line (341 / 455 / 682 dots at the three
+   *   clocks, #27) is modelled, because a window pushed far right would
+   *   otherwise run past the line.
    *
    * Vertical, from VPR (R0C)/VDR (R0D)/VCR (R0E) (p. H7-10/H7-11):
    *   - VDS is the back porch in lines (VDS = N-2), VSW the sync width, so
@@ -159,8 +160,56 @@
    * with the far edges exclusive. x0/y0 may be negative and x1/y1 past the
    * frame when the window leaves the captured area; callers intersect with
    * the frame. */
-  var LINE_DOTS = 341;      /* Mednafen pce_fast ClockPixelWidths[0] */
-  var H_ALIGN_DOTS = 24;    /* pce_fast xs[1][0], correct_aspect = 1 */
+  /* #27: the VCE's dot clock (CR at $0400, DCC bits 1-0).
+   *
+   * The HuC6260 manual H6-3 gives the division of the oscillator: CR "00" =
+   * /4 (fck = 1.5 fsc = 5.37 MHz) and "01" = /3 (fck = 2 fsc = 7.16 MHz).
+   * The 10.74 MHz /2 clock ("10") is not in the scanned page: MacDonald's
+   * measured notes (pcetech §6) give D1 = 1 = 10 MHz, and Mednafen's two PCE
+   * cores implement exactly that (pce/vce.cpp SetVCECR: dot_clock = V & 3
+   * with ratios {4,3,2,2}; pce_fast/vdc.cpp: dot_clock = V & 1, bit 1
+   * forces 2) — so codes 10 and 11 are the same /2 clock.
+   *
+   * A line is 2730 master clocks at 42.95 MHz (63.6 us, VIDEO_MODES.md; the
+   * VCE manual does not print the line length), so the same line holds
+   * 341 / 455 / 682 dots at the three clocks (Mednafen ClockPixelWidths).
+   * Mednafen only outputs the VCE's active window: 256 / 341 / 512 dots with
+   * horizontal overscan off (pce vce.cpp w_cows[0], pce_fast ws[1]; that is
+   * how every capture is taken — tools/capture.sh does not set
+   * pce.h_overscan, whose default is 0).  The VDC's own display width is
+   * (HDW+1)*8 dots, which MacDonald's display table sets to 256, 336 and
+   * 512 for the three clocks (§9, HDS/HDW per width); the 336-dot display
+   * sits in the 341-dot output with 2 dots of border on the left and 3 on
+   * the right.
+   *
+   * The last row is Mednafen's display alignment inside the output
+   * (xs[1] = {24, 38, 96}, correct_aspect = 1 / the full core's x_offsets
+   * minus its fixed 8): screen x = (HDS+1)*8 - hAlign.  The manual settles
+   * the fields and the 8-dot character, not that offset. */
+  var DOT_CLOCK = {
+    frameWidth: [256, 341, 512],   /* the captured frame, dots */
+    lineDots:   [341, 455, 682],   /* the whole line, dots (ClockPixelWidths) */
+    hAlign:     [24, 38, 96]       /* Mednafen xs[1], correct_aspect = 1 */
+  };
+
+  /* VCE CR DCC -> 0 (5.37 MHz), 1 (7.16 MHz) or 2 (10.74 MHz).  A dump
+   * from before #27 (or a caller with no VCE register) is the /4 clock the
+   * canonical HuDK init writes, which is every picture captured so far. */
+  function dotClock(regs) {
+    var cr = regs && regs.VCECR != null ? regs.VCECR : 0;
+    return (cr & 2) ? 2 : (cr & 1);
+  }
+
+  /* The width of the captured frame for the picture's dot clock: the
+   * opt-in width a caller passes (the editor's preview, tests) or, by
+   * default, what Mednafen would output — which is what the diff test
+   * compares against. */
+  function frameWidth(opts) {
+    if (opts.width) return opts.width;
+    var dc = opts.dotClock != null ? opts.dotClock : dotClock(opts.regs);
+    return DOT_CLOCK.frameWidth[dc];
+  }
+
   function displayWindow(opts) {
     var regs = opts.regs || {};
     var firstScanline = opts.firstScanline != null ? opts.firstScanline : 18;
@@ -180,13 +229,19 @@
     var vdw = regs.VDW_cache != null ? regs.VDW_cache : vdr & 0x1FF;
     var vcrReg = regs.VCR_cache != null ? regs.VCR_cache : vcr & 0xFF;
 
+    /* #27: the line length and the output alignment follow the dot clock
+     * (see DOT_CLOCK); the window's position and width are in dots of that
+     * clock, so (HDS+1)*8 and (HDW+1)*8 need no conversion. */
+    var dc = opts.dotClock != null ? opts.dotClock : dotClock(regs);
+    var lineDots = DOT_CLOCK.lineDots[dc];
+    var hAlign = DOT_CLOCK.hAlign[dc];
     var start = (hds + 1) * 8;
     var end = start + (hdw + 1) * 8;
-    if (start > LINE_DOTS) start = LINE_DOTS;
-    if (end > LINE_DOTS) end = LINE_DOTS;
+    if (start > lineDots) start = lineDots;
+    if (end > lineDots) end = lineDots;
     if (start === end) start = end - 8;   /* Mednafen's off-screen HDS guard */
-    var x0 = start - H_ALIGN_DOTS;
-    var x1 = end - H_ALIGN_DOTS;
+    var x0 = start - hAlign;
+    var x1 = end - hAlign;
 
     var vdwLine0;
     if (regs.RCRCount != null && regs.scanline != null) {
@@ -403,7 +458,9 @@
    * fails loudly, so this is self-calibrating. */
   function renderIndices(opts, rows) {
     var vram = opts.vram, cram = opts.cram, regs = opts.regs;
-    var width = opts.width || 256;
+    /* #27: the frame is as wide as the picture's dot clock makes it
+     * (256 / 341 / 512), unless the caller fixes a width. */
+    var width = frameWidth(opts);
     var height = opts.height || 232;
     var firstScanline = opts.firstScanline != null ? opts.firstScanline : 18;
     if (rows === undefined) {
@@ -508,6 +565,9 @@
     decodeCram: decodeCram,
     decodeCramWords: decodeCramWords,
     batGeometry: batGeometry,
+    dotClock: dotClock,
+    frameWidth: frameWidth,
+    DOT_CLOCK: DOT_CLOCK,
     displayWindow: displayWindow,
     buildRows: buildRows,
     backgroundPixel: backgroundPixel,

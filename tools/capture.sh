@@ -40,6 +40,14 @@
 #                                   # (gen/effect1.pce, built by
 #                                   # tests/check-editor.js --write effect;
 #                                   # the dump gains raster.json)
+#   tools/capture.sh 336|512 wide   # #27: the wide-mode ROMs
+#                                   # (gen/wide336.pce, gen/wide512.pce — the
+#                                   # /3 and /2 dot clocks).  The capture is
+#                                   # de-scaled to Mednafen's real output width
+#                                   # for the picture's dot clock: 341 dots at
+#                                   # /3, 512 at /2 (256 at /4, the other
+#                                   # modes), read from the state's VCECR, not
+#                                   # from the scene name.
 #
 # Scenes 4-9, 8b, 8c are #39's (docs/REVIEW.md finding 1: each is NOT
 # periodic in the dimension a renderer break would cut — see genroms.py).
@@ -103,10 +111,11 @@ case "$MODE" in
   raster) NAME="raster${SCENE}" ;;
   vraster) NAME="vraster${SCENE}" ;;
   dma)    NAME="dma${SCENE}" ;;
+  wide)   NAME="wide${SCENE}" ;;
   painted) NAME="painted" ;;
   spainted) NAME="spainted" ;;
   effect) NAME="effect1" ;;
-  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, painted, spainted or effect" >&2; exit 2 ;;
+  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, wide, painted, spainted or effect" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -215,7 +224,22 @@ regs["slstart"] = int(sys.argv[2])
 regs["slend"] = int(sys.argv[3])
 json.dump(regs, open(sys.argv[1], "w"), indent=1, sort_keys=True)
 PYEOF
-  python3 -I "$TOOLS/movframes.py" "$MOV" "$DUMPDIR/mednafen.png" 256 232 4
+  # #27: the frame's width is the VCE dot clock's.  With pce.h_overscan 0
+  # (mednafen's default; this script does not set it) the core outputs 256
+  # dots at /4, 341 at /3 and 512 at /2, and QTRecord's DecodeLine scales
+  # each source pixel by lcm_width/src_width = 1024/width, so the de-scale
+  # step is that same integer.  Read from the saved VCE CR, so the crop
+  # follows the picture rather than the scene's name.
+  CROP=$(python3 -I - "$DUMPDIR/regs.json" <<'PYEOF'
+import json, sys
+cr = json.load(open(sys.argv[1])).get("VCECR", 0)
+width = (256, 341, 512)[2 if cr & 2 else (cr & 1)]
+print(width, 1024 // width)
+PYEOF
+)
+  read -r CROPW CROPSTEP <<< "$CROP"
+  python3 -I "$TOOLS/movframes.py" "$MOV" "$DUMPDIR/mednafen.png" \
+    "$CROPW" 232 "$CROPSTEP"
   cp "$LOGDIR/mdfn-$NAME.log" "$DUMPDIR/mednafen.log"
   if [ "$MODE" = dma ]; then
     # #49: the transfer descriptor the ROM was generated from, kept beside the

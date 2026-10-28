@@ -126,8 +126,13 @@ function decodePng(buf) {
  *   RCRCount - (scanline - firstScanline) + r), so VDS/VSW enter through
  *   RCRCount.  VCR (front porch) never moves the window inside a capture.
  */
-const LINE_DOTS = 341;
-const H_ALIGN_DOTS = 24;
+/* #27: the dot clock's line and alignment, written here from the VCE CR
+ * byte (DCC bits 1-0) rather than read from pce-bg.js's table, so the
+ * renderer cannot pass by agreeing with itself.  Line dots: a 2730-master-
+ * clock line (Mednafen ClockPixelWidths {341,455,682}); alignment: Mednafen
+ * xs[1] = {24,38,96} (correct_aspect, the way capture.sh records). */
+const LINE_DOTS_BY_CLOCK = [341, 455, 682];
+const H_ALIGN_BY_CLOCK = [24, 38, 96];
 function expectedWindow(regs, firstScanline) {
   /* a dump without a window register carries the canonical HuDK 256x240
    * values (the renderer's own fallback; the synthetic mutation dumps are
@@ -137,15 +142,19 @@ function expectedWindow(regs, firstScanline) {
   const vdr = regs.VDR != null ? regs.VDR : 0x00EF;
   const hds = (hsr >> 8) & 0x7F;
   const hdw = hdr & 0x7F;
+  const vcecr = regs.VCECR != null ? regs.VCECR : 0;
+  const clock = (vcecr & 2) ? 2 : (vcecr & 1);
+  const lineDots = LINE_DOTS_BY_CLOCK[clock];
+  const hAlign = H_ALIGN_BY_CLOCK[clock];
   let start = (hds + 1) * 8;
   let end = start + (hdw + 1) * 8;
-  if (start > LINE_DOTS) start = LINE_DOTS;
-  if (end > LINE_DOTS) end = LINE_DOTS;
+  if (start > lineDots) start = lineDots;
+  if (end > lineDots) end = lineDots;
   if (start === end) start = end - 8;
   const vdwLine0 = (regs.RCRCount != null ? regs.RCRCount : 0) -
                    ((regs.scanline != null ? regs.scanline : firstScanline) -
                     firstScanline);
-  return { x0: start - H_ALIGN_DOTS, x1: end - H_ALIGN_DOTS,
+  return { x0: start - hAlign, x1: end - hAlign,
            y0: -vdwLine0, y1: (vdr & 0x1FF) - vdwLine0 + 1,
            vds: ((regs.VSR != null ? regs.VSR : 0x0F02) >> 8) & 0xFF,
            vdw: vdr & 0x1FF };
@@ -251,8 +260,9 @@ function checkScene(dir) {
       return { kind: "error" };
     }
   }
-  const opts = { vram, cram, regs, width: 256, height: 232, firstScanline,
-                 raster };
+  /* the width is not passed: it must follow the picture's dot clock
+   * (pce-bg.js frameWidth), which is what the captured PNG's width is */
+  const opts = { vram, cram, regs, height: 232, firstScanline, raster };
   /* #48: the register-derived window rectangle, held to the captured
    * border pixels. A frame the window covers completely has no border. */
   const winProblems = checkWindow(name, regs, cram, ref, firstScanline,

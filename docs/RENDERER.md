@@ -1,4 +1,4 @@
-# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster, #16 the viewer's raster chain, #48 display window, #49 VRAM-to-VRAM DMA)
+# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster, #16 the viewer's raster chain, #48 display window, #49 VRAM-to-VRAM DMA, #27 the three dot clocks)
 
 `renderer/pce-bg.js` renders one 256×232 RGB frame from a VDC VRAM dump and a
 VCE colour-table dump, drawing exactly what the VDC background layer and the
@@ -20,7 +20,7 @@ tables **run by the viewer ROM's own interrupt chain** (`tests/check-viewer.js`
 on `vraster1-10` and `effect1`, plus the #41 ares cross-check).
 #49 adds `renderer/pce-vram.js`, the VRAM model and the VDC's VRAM-to-VRAM
 DMA (`tests/check-dma.js`; its three ROM captures `dma1-3` are also in
-`check.js`, which is now 75 pictures).
+`check.js`, which is now 79 pictures with #27's two wide-mode frames).
 
 Everything below is labelled by where it was read from.  PCEStudio's rule
 (DECISIONS.md): the model is written from the Hudson manuals; Mednafen and
@@ -606,6 +606,78 @@ model mirrors reads there and drops writes, per MANUALS.md §15.3 item 6,
 but no claim is tested).  Picture-configured DMA in the viewer/editor is the
 split card (#49's split rule), not part of this work.
 
+### #27 — the three dot clocks (256, 336 and 512 dots)
+
+The VCE's control register `$0400` DCC bits 1-0 pick the pixel clock, and
+the frame's width follows only from them: the VDC's window registers are in
+dots of whichever clock is selected, so a 336- or 512-dot display is the
+same HSR/HDR mechanism at another clock.
+
+| DCC | clock | dot clock | line | frame Mednafen records | display (HDS/HDW, pcetech §9) |
+|---|---|---|---|---|---|
+| 00 | /4 | 5.37 MHz | 341 dots | 256 | HDS=2, HDW=$1F → 256 |
+| 01 | /3 | 7.16 MHz | 455 dots | 341 | HDS=4, HDW=$29 → 336 |
+| 10 (or 11) | /2 | 10.74 MHz | 682 dots | 512 | HDS=11 ($0B), HDW=$3F → 512 |
+
+- **The two clocks the manual prints.**  HuC6260 manual 2.1.1, H6-3: CR
+  "00" divides by 4 (fck = 1.5 fsc = 5.37 MHz) and "01" by 3 (fck = 2 fsc =
+  7.16 MHz).  The manual's page is a figure with only DCC described.
+- **The third clock is not in that text.**  MacDonald's *measured* notes
+  (pcetech §6) give it — D1 = 1 = 10 MHz — and both Mednafen PCE cores
+  implement exactly that: `src/pce/vce.cpp` `SetVCECR` takes `dot_clock =
+  V & 3` with ratios `{4,3,2,2}` (codes 10 and 11 are the same /2 clock),
+  and `src/pce_fast/vdc.cpp` takes `dot_clock = V & 1`, with bit 1
+  forcing 2.  So there are three clocks, not four.
+- **Line and frame width.**  A line is the same 2730 master clocks at 42.95
+  MHz, so it holds 341 / 455 / 682 dots (Mednafen `ClockPixelWidths`), and
+  the VCE shows a fixed active window of 256 / 341 / 512 dots with
+  horizontal overscan off (`pce` `vce.cpp` `w_cows[0]`; `pce_fast` `ws[1]`;
+  `pce.h_overscan` defaults to 0 and `capture.sh` does not change it).  The
+  336-dot display therefore sits in the 341-dot output with 2 dots of border
+  on the left and 3 on the right, and the 512-dot display fills its output.
+  The renderer's frame is that output: `DOT_CLOCK.frameWidth`.
+- **Position.**  `screen x = (HDS+1)*8 - hAlign` with hAlign = 24 / 38 / 96
+  (`pce_fast` `xs[1]` with correct_aspect=1; the `pce` core's `x_offsets`
+  minus its fixed 8).  `displayWindow` reads both from the picture's dot
+  clock; the clipping of `start`/`end` to the line uses that clock's
+  `lineDots`, not always 341.
+- **The sprite layer does not widen.**  The SAT search buffer is **16
+  entries at every clock** (manual 2.4.3; pcetech: the VDC parses the SAT
+  until 64 entries are seen, all 16 buffer entries are used or HBlank ends,
+  and a 32-px sprite takes two entries).  `pce-sprites.js` keeps the
+  16-strip limit and clips strips at the frame's width
+  (`paintLine(vram, strips, width)`), not at 256; `wide512`'s second sprite
+  line has 18 sprites and shows 16 — the same rule as `sprite4` at 256.
+- **`$0400` bit 2 is NOT PROVEN.**  Mednafen's VCE code makes it the
+  262/263-line select (`pce` `vce.cpp` `SetVCECR`: `lc263 = V & 0x04`,
+  `vblank_counter` 358995 / 357630; `pce_fast` `vdc.cpp` `frame_counter %
+  ((vce.CR & 0x04) ? 263 : 262)`, i.e. **263 lines with it set**).
+  MacDonald measured it as **edge blur, with the frame 263 lines fixed**.
+  VIDEO_MODES.md (PCEHeroTN's RTL) says 262/263 too.  No source measured bit
+  2 against a console, so the hardware's meaning is unproven; the model does
+  not use it (frame length plays no part in a static picture) and every ROM
+  here keeps it set, as every earlier capture did.  The settlement and its
+  routes: docs/DECISIONS.md, 2026-10-28, and MANUALS.md §15.3 GAP 7.
+- **Not modelled:** a dot clock changed mid-frame (VIDEO_MODES.md says the
+  VCE reloads it every line and real games do it; no capture exercises it),
+  Mednafen's Asuka 120%/Addams Family `CalcStartEnd` semi-hacks (specific
+  register combinations none of our scenes use), and horizontal overscan
+  (`pce.h_overscan` 1, frames 280/373/560 wide).
+
+**Evidence.** `tools/genroms.py` builds `gen/wide336.pce` and
+`gen/wide512.pce` (`SPRITE_SCENES`): a 64-wide BAT filled by a formula loop,
+plus sprites at the right edge of the window — one wholly inside, one
+crossing the edge, one past it — and, in `wide512`, an 18-sprite line.
+`tools/capture.sh 336|512 wide` records them and de-scales the frame to the
+width the saved VCE CR asks for (341 with 3 columns per source pixel, 512
+with 2; Mednafen's `lcm_width` is 1024 in every mode, so QTRecord's
+`xscale_factor` is `1024/width`).  `tests/check.js` renders both at
+341×232 and 512×232 and reports **diff 0**; the same run keeps diff 0 on
+all 77 earlier pictures.  The *builder's* mutants — width hardwired to
+256, one line length, one alignment, the sprite clip at 256, DCC read as
+bit 0 only — each turn check.js red on these dumps; a cold break by a
+different seat is still owed (RULES.md rule 2).
+
 ## The dumps (`tools/capture.sh`, `tools/mcs-extract.py`, `tools/movframes.py`)
 
 Hard rule for this machine: **no synthesized keyboard/mouse events** — the
@@ -725,13 +797,17 @@ never changes).  Since #50 the status register's four picture conditions
 (OR, CC, RR, VD) are modelled from the same SAT/register data; the DS/DV
 block-transfer bits are not (no DMA completion is modelled), and a CPU read
 of SR clearing bits 0-5 is only accounted for in the tests, not simulated.
-256×224 mode only
-(5.37 MHz clock; the 7.16 MHz modes and 256×240 VDW come with the
-editor).  The display window since #48 is modelled from HSR/HDR/VPR/VDR/VCR
-and proven for the 5.37 MHz clock on four captures (scenes 11-14); the
-horizontal absolute alignment is Mednafen's 256-dot output geometry, and a
+**All three dot clocks since
+#27** (5.37 / 7.16 / 10.74 MHz → 256 / 341 / 512-dot frames), on two
+captures (`wide336`, `wide512`) plus every earlier 5.37 MHz picture.  The
+display window since #48 is modelled from HSR/HDR/VPR/VDR/VCR and proven on
+four 5.37 MHz captures (scenes 11-14) and the two wide ones; the horizontal
+absolute alignment is Mednafen's output geometry per clock (`xs[1]`), and a
 sprite on a narrowed window is model-only (both labelled in the window
-section above).  Raster writes are modelled at **line boundaries only**, and
+section above).  The **viewer and the editor still do one width only** —
+`viewer.asm`, `genviewer.py`, `pce-rom.js` and the editor's picture model
+write the 256-dot registers and a 256-px preview; a picture wider than 256
+runs in the renderer and not yet on a console (card #70).  Raster writes are modelled at **line boundaries only**, and
 the pieces the evidence does not cover are written down, not hidden:
 
 - A VCE colour-table write during a line's active display shows the new

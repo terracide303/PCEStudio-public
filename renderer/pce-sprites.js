@@ -2,11 +2,21 @@
  * pce-sprites.js — PCEStudio VDC sprite renderer (card #12).
  *
  * Composes the HuC6270 VDC's sprite layer (SATB) over the background renderer
- * (pce-bg.js), exactly as the VDC draws it in 256x224 mode: 64 SAT entries,
- * sizes 16x16 to 32x64 via CGX/CGY, X/Y flips, 16 sprite palettes (VCE
- * colour-table entries 0x100+), SPBG priority against the background, and at
- * most 16 strips (16-px sprite columns) per display line in SATB order — the
- * rest of the line's sprites are dropped.  This is PCEStudio's own model,
+ * (pce-bg.js), exactly as the VDC draws it: 64 SAT entries, sizes 16x16 to
+ * 32x64 via CGX/CGY, X/Y flips, 16 sprite palettes (VCE colour-table entries
+ * 0x100+), SPBG priority against the background, and at most 16 strips
+ * (16-px sprite columns) per display line in SATB order — the rest of the
+ * line's sprites are dropped.  The 16-entry buffer is the SAT search limit
+ * and does not move with the dot clock (manual 2.4.3; MacDonald's notes:
+ * the VDC parses the SAT until 64 entries are seen, all 16 buffer entries
+ * are used, or HBlank ends, and a 32-px sprite takes two entries) — a wide
+ * mode gets more dots per line, not more sprites.  The HBlank-end stop is
+ * the one search limit not modelled: it needs a sprite count and per-entry
+ * fetch timing no capture here resolves, and no scene comes near it (the
+ * worst is 18 strips, which the 16-entry buffer stops first).
+ * The frame's width is the
+ * dot clock's (#27, pce-bg.js DOT_CLOCK: 256 / 341 / 512 dots).
+ * This is PCEStudio's own model,
  * written from the Hudson HuC6270 manual (2.4, p. H7-19..H7-24) with Mednafen
  * and the MiSTer core as references for verification only; the facts and page
  * references are in docs/RENDERER.md.
@@ -193,15 +203,21 @@
    * row, strip } of the winning (lowest SAT index) visible sprite pixel, or
    * null.  The extra fields are the #26 panel's provenance.  Strips paint in
    * reverse SATB order so lower indices overwrite — the same result as the
-   * VDC's first-16 collection plus last-drawn-wins order. */
-  function paintLine(vram, strips) {
-    var layer = new Array(256).fill(null);
+   * VDC's first-16 collection plus last-drawn-wins order.
+   *
+   * `width` is the frame's dot width (#27: 256 / 341 / 512 by dot clock).
+   * The VDC has no per-line screen limit of its own — a sprite's X is a
+   * display column and the layers are clipped at the display window, not at
+   * 256 — so the only right edge here is the captured frame's. */
+  function paintLine(vram, strips, width) {
+    if (width == null) width = 256;
+    var layer = new Array(width).fill(null);
     for (var i = strips.length - 1; i >= 0; i--) {
       var s = strips[i];
       var words = stripWords(vram, s);
       for (var c = 0; c < 16; c++) {
         var tx = s.x + c;
-        if (tx < 0 || tx >= 256) {
+        if (tx < 0 || tx >= width) {
           continue;
         }
         var pix = stripPixel(words, s.hflip, c);
@@ -284,21 +300,22 @@
    * is set only when the matching CR interrupt enable is on (CC bit 0, OC
    * bit 1 — CR R05 p. H7-5..H7-6).  status() below applies that gate and
    * reports both. */
-  function lineStatus(vram, sat, vdwLine) {
+  function lineStatus(vram, sat, vdwLine, width) {
+    if (width == null) width = 256;
     var c = collectLine(sat, vdwLine);
-    var own = new Uint8Array(256), other = new Uint8Array(256);
+    var own = new Uint8Array(width), other = new Uint8Array(width);
     for (var i = 0; i < c.strips.length; i++) {
       var s = c.strips[i];
       var words = stripWords(vram, s);
       var mask = s.number === 0 ? own : other;
       for (var x = 0; x < 16; x++) {
         var dx = s.x + x;
-        if (dx < 0 || dx >= 256) continue;
+        if (dx < 0 || dx >= width) continue;
         if (stripPixel(words, s.hflip, x)) mask[dx] = 1;
       }
     }
     var collision = false;
-    for (var px = 0; px < 256 && !collision; px++) {
+    for (var px = 0; px < width && !collision; px++) {
       collision = !!(own[px] && other[px]);
     }
     return {
@@ -330,7 +347,7 @@
    * window does not render (raster5's line 240). */
   function status(opts) {
     var regs = opts.regs || {};
-    var width = opts.width || 256;
+    var width = bg.frameWidth(opts);   /* #27: 256 / 341 / 512 by dot clock */
     var height = opts.height || 232;
     var firstScanline = opts.firstScanline != null ? opts.firstScanline : 18;
     var rows = bg.buildRows(opts);
@@ -352,7 +369,8 @@
        * with the layer off and no enable nothing is drawn and no condition
        * can arise. */
       var detect = !!(cr & 0x40) || !!(cr & 0x03);
-      var cond = opts.sat && detect ? lineStatus(opts.vram, opts.sat, L) : null;
+      var cond = opts.sat && detect
+        ? lineStatus(opts.vram, opts.sat, L, width) : null;
       var rr = L >= 0 && L < timing.rr.length ? !!timing.rr[L] : false;
       var vd = L === timing.vblankLine;
       var st = {
@@ -448,7 +466,7 @@
       if (!strips.length) {
         continue;
       }
-      var layer = paintLine(vram, strips);
+      var layer = paintLine(vram, strips, width);
       var o = r * width;
       for (var x = wx0; x < wx1; x++) {
         var s = layer[x - win.x0];

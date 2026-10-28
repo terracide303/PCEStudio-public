@@ -84,7 +84,11 @@ def write_png(path, width, height, pixels):
 
 
 BLOCK_W = 294          # ares's presented VDC-dot width (1176 / 4)
-BLOCK_H = 263          # 262 visible lines + the VCE extra line (CR bit 2)
+BLOCK_H = 263          # 263 lines: the frame MacDonald measured as fixed
+                       # (pcetech §7).  Mednafen also shows 263 — but only
+                       # because $0400 bit 2 is set, which its VCE code
+                       # treats as the 262/263-line select; that bit's real
+                       # meaning is NOT PROVEN (card #27, docs/DECISIONS.md).
 ACTIVE_X = 24          # first active column in the 294-dot grid
 ACTIVE_W = 256         # VDC HDW=31 -> 32 characters
 ACTIVE_Y = 21          # first line of the renderer's Mednafen window

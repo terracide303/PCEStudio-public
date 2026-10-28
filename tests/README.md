@@ -46,12 +46,19 @@ data — and `scene8`, `scene8b` and `scene8c` are the diff-0 proofs (#39).
 HuCard image blank (every VDC register 0), which is the emulator not running
 the image (#25), not a rendered frame. The skip list is explicit and named
 dumps only; an unnamed background-off dump whose capture is not the backdrop
-fails the run as a diff. The shipped count is **77 pictures** (scenes 1-9,
+fails the run as a diff. The shipped count is **79 pictures** (scenes 1-9,
 5b, 8b, 8c, the #48 window scenes 11-14, painted, spainted, viewer 1-3 and
 7, browser 1-3, sprite 1-12,
 vsprite 1-12, bsprite 12, raster 1-11, browser 10, and #49's dma1-3), us1
 skipped.  `raster11`/`vraster11` are #68's (the frame counter + two CRAM
-words table REVIEW-16 could not reach).  A dump
+words table REVIEW-16 could not reach).  `wide336` and `wide512` are #27's:
+the /3 and /2 VCE dot clocks (`tools/capture.sh 336 wide` /
+`capture.sh 512 wide`), captured at Mednafen's real output width for the
+picture's clock — 341x232 (the 336-dot display, 2 border dots left and 3
+right) and 512x232 — because the capture de-scales by 1024/width, the
+factor QTRecord used to fill its 1024-wide surface.  `check.js` takes the
+frame's width from the saved VCE CR (`regs.VCECR`), not from a constant.
+A dump
 whose window is smaller than the captured frame must also show CRAM[0x100]
 on every border pixel and the picture inside (check.js's `checkWindow`,
 computed from the raw registers; scenes 11-14 print their window rectangle
