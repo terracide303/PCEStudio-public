@@ -1,0 +1,10 @@
+{
+ "base": "scene4",
+ "base_vram": "tests/dumps/scene4/vram.bin",
+ "dcr": 28,
+ "desr": 2303,
+ "lenr": 255,
+ "note": "decrementing copy: tiles 0x090-0x09F read backwards into 0x080-0x08F (SI/D and DI/D set)",
+ "sour": 2559,
+ "words": 256
+}

@@ -1,0 +1,10 @@
+{
+ "base": "scene4",
+ "base_vram": "tests/dumps/scene4/vram.bin",
+ "dcr": 18,
+ "desr": 2304,
+ "lenr": 255,
+ "note": "forward copy of tiles 0x080-0x08F onto 0x090-0x09F; DVC set (the VRAM-to-VRAM done interrupt)",
+ "sour": 2048,
+ "words": 256
+}

@@ -162,6 +162,26 @@ adding more captures). The #10 background demo's
 ROM is unchanged (`486477d6…`). The test was written by @design and is flagged
 for @review cold. Details and limits: [`docs/EDITOR.md`](docs/EDITOR.md).
 
+**#49 is done.** `renderer/pce-vram.js` models the VDC's VRAM-to-VRAM DMA —
+SOUR/DESR/LENR and DCR's SI/D, DI/D and the DVC→DV gate (VDC manual R0F/R10/
+R11/R12 p. H7-11/12; the counters, LENR ending `$FFFF` and the always-+1 step
+from MacDonald, docs/MANUALS.md §15.1 GAP 2).  `pce-bg.js` takes
+`opts.dma = {sour, desr, lenr, dcr}` and draws the post-transfer frame.
+`tools/genroms.py` builds three ROMs from scene 4 — a forward copy of tiles, a
+decrementing copy (SI/D and DI/D set) and a copy that overlaps its source —
+and `tools/capture.sh 1..3 dma` records `tests/dumps/dma1-3` (with the
+descriptor `dma.json`, and SOUR/DESR/LENR now in `regs.json`).  Proven:
+`node tests/check-dma.js` exits 0 — our model's VRAM equals each capture
+**word for word** (32768/32768), the captured post-transfer SOUR/DESR/LENR
+and the DVC-gated DV bit equal the model (dma1 SR `$10`, dma2/3 `$00`), and
+the frame rendered from the *pre-transfer* VRAM + descriptor is diff 0; the
+overlap capture also differs from a memmove copy on 448 words.
+`node tests/check.js` reports 75 pictures (dma1-3 included).  NOT proven: the
+overrun rule (H7-12 says cancelled, MacDonald says resumed; the ROMs finish
+in burst mode so no capture depends on it), the upper 32K words, real
+hardware (Mednafen only); picture-configured DMA in the viewer/editor is the
+split card.  Check written by @design — flagged for @review cold.
+
 **#35 step 2 is done, not the card.** `renderer/pce-dmf.js` is our own DMF
 reader and `renderer/pce-song.js` is a JS port of the parts of HuTrack's
 engine a plain DMF song uses (the two Reset rounds, the VBlank tick, the

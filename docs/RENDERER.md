@@ -1,4 +1,4 @@
-# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster, #16 the viewer's raster chain, #48 display window)
+# The renderer (#5 background, #12 sprites, #40 sprite-test gaps, #15 raster, #16 the viewer's raster chain, #48 display window, #49 VRAM-to-VRAM DMA)
 
 `renderer/pce-bg.js` renders one 256×232 RGB frame from a VDC VRAM dump and a
 VCE colour-table dump, drawing exactly what the VDC background layer and the
@@ -18,6 +18,9 @@ window scenes and, since #15, the ten raster scenes (marked by
 `raster.json`).  #16 adds the same
 tables **run by the viewer ROM's own interrupt chain** (`tests/check-viewer.js`
 on `vraster1-10` and `effect1`, plus the #41 ares cross-check).
+#49 adds `renderer/pce-vram.js`, the VRAM model and the VDC's VRAM-to-VRAM
+DMA (`tests/check-dma.js`; its three ROM captures `dma1-3` are also in
+`check.js`, which is now 75 pictures).
 
 Everything below is labelled by where it was read from.  PCEStudio's rule
 (DECISIONS.md): the model is written from the Hudson manuals; Mednafen and
@@ -521,6 +524,87 @@ entry's value, CR = `$84`, BYR = 0).  `tools/capture-ares.sh` /
 `vraster1-3,5-10` and `effect1` — ares's RCR timing against Mednafen's;
 `vraster4` is out because its frame counter makes two runs differ by
 phase.
+
+### #49 — VRAM-to-VRAM DMA (SOUR/DESR/LENR, DCR)
+
+`renderer/pce-vram.js` is the renderer's VRAM model: the 32K-word store the
+rest of the renderer reads, plus the VDC's block copy.  `pce-bg.js` takes a
+pre-transfer VRAM plus `opts.dma = { sour, desr, lenr, dcr }` and draws the
+post-transfer frame; `tests/check-dma.js` also applies the model itself and
+compares its VRAM with the capture.
+
+**Registers and what the model does** (*HuC6270 VDC manual*: DCR R0F and
+SOUR/DESR p. H7-11, LENR R12 p. H7-12 — LENA on p. H7-2, the manual's own
+inconsistency, MANUALS.md §8.  MacDonald's measured notes, MANUALS.md §15.1
+GAP 2 / pcetech §5.4, settle the rest):
+
+- **LENR = words − 1**, up to 64K (0 → 1, `$FFFF` → 65536); the transfer
+  starts on the **high-byte write**.
+- **DCR bit 2 SI/D**: set = the source address decrements; **bit 3 DI/D**:
+  set = the destination decrements.  Either, both or neither may be set.
+- The transfer reads a word and writes it **before reading the next**, in
+  address order.  This is the whole difference on an overlapping copy: the
+  hardware replicates the first words it wrote, where a memmove would not.
+  `dma3`'s capture is the witness (its VRAM differs from a snapshot copy on
+  448 words).
+- SOUR/DESR/LENR are **counters that keep their post-transfer values**;
+  LENR ends `$FFFF`, not 0.  CR's IW field does not change the step (always
+  1); MAWR, MAAR, the read buffer and the write latch are untouched by the
+  transfer.  Both DMA channels may run together (the SAT channel is #14).
+- **DCR bit 1 DVC** enables the VRAM-to-VRAM **done interrupt**, and SR bit 4
+  **DV** is set on completion only when it is enabled — pcetech §5: "a status
+  bit is set only when its enable bit is set" (the same gate #50 uses for
+  CC/OR/RR/VD).  **Bit 0 DSC** is the SATB-done enable and **bit 4 DSR** the
+  SATB auto-repeat; both belong to the other channel and are decoded but not
+  executed here.  The model's `dvBit` is `DVC` set on a completed transfer.
+
+**Timing.** A VRAM-to-VRAM transfer runs only outside the active display —
+VBlank or burst mode (p. H7-12, H7-4).  The model applies a started transfer
+in the free time that follows its LENR write and is complete for the frame
+it is given.  A transfer too large to finish before the display starts is
+the one point the sources contradict: **H7-12 says it is cancelled with no
+done status; pcetech §5.4 says it is halted and resumed.**  The model applies
+a started transfer to completion (the measured note's rule, and what
+Mednafen does), and **no capture here depends on that choice**: each ROM
+starts its transfer with CR = 0 (burst mode, where VRAM is always free),
+waits ~10k CPU cycles (well past the longest transfer's ~2.3 lines), and
+only then turns the background on.  The overrun rule is therefore recorded,
+not claimed as hardware-proven.
+
+**The three ROMs** (`tools/genroms.py`'s `DMA_SCENES`, assembled from scene 4
+— a 64×32 BAT whose 64 tiles 0x080..0x0BF = VRAM words `$800..$BFF` are all
+inside the 32K words and all on screen; scene 1 could not serve because its
+odd-column tiles at 0xF00 are *beyond* VRAM on purpose, scene9's witness):
+
+- **dma1 "forward"** — tiles 0x080..0x08F copied onto 0x090..0x09F,
+  SOUR `$800` → DESR `$900`, LENR `$00FF` (256 words), both incrementing,
+  DVC set.  Ends SOUR `$900`, DESR `$A00`, LENR `$FFFF`, SR `$10` (DV).
+- **dma2 "decrementing"** — tiles 0x090..0x09F read from `$9FF` down and
+  written from `$8FF` down onto 0x080..0x08F (SI/D and DI/D both set), so
+  each tile's 16 words land reversed.  Ends SOUR `$8FF`, DESR `$7FF`, LENR
+  `$FFFF`; DVC clear, SR `$00`.
+- **dma3 "overlapping"** — 512 words from `$900` written to `$940`, over the
+  source's own tail; the first 64 words repeat.  Ends SOUR `$B00`, DESR
+  `$B40`; DVC clear.
+
+**Evidence.** `tools/capture.sh 1..3 dma` records `tests/dumps/dmaN/`
+(VRAM, CRAM, registers, frame; `dma.json` is the descriptor the ROM was
+generated from).  `node tests/check-dma.js` exits 0: for all three, our
+model's VRAM equals Mednafen's capture **word for word** (32768/32768), the
+captured SOUR/DESR/LENR equal the model's post-transfer counters, the
+captured DCR equals the descriptor, DV equals the model's DVC-gated flag
+(set only on dma1), and the frame rendered from **scene 4's pre-transfer
+VRAM + the descriptor** equals the recorded frame (diff 0).  `check.js` also
+renders every `dmaN` dump from its own captured VRAM, so its count is **75
+pictures** (72 + dma1-3).  `check-status.js` gained the DV term for the
+dumps whose DCR enables it (0 for all others).
+
+**Not proven:** Mednafen is the only witness (no real-console run); the
+overrun rule is recorded, not tested; DSC/DS (the SATB channel) is not
+exercised by these ROMs; and no capture crosses the 32K-word boundary (the
+model mirrors reads there and drops writes, per MANUALS.md §15.3 item 6,
+but no claim is tested).  Picture-configured DMA in the viewer/editor is the
+split card (#49's split rule), not part of this work.
 
 ## The dumps (`tools/capture.sh`, `tools/mcs-extract.py`, `tools/movframes.py`)
 

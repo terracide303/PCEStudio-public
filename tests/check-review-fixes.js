@@ -314,7 +314,8 @@ const OLD_CHECK_SRC = preFixSource(CHECK_SRC,
  * tests/dumps/effect1 and tests/dumps/vraster1-10 (the fixed raster chain's
  * re-captures), so the count moved from 57 to 68; #48 added the four window
  * scenes (scene11-14: 224 lines, VDS-shifted, narrow HDW, short VDW) and the
- * count is 72 — but a count alone would let
+ * count is 72; #49 adds the three VRAM-to-VRAM DMA ROMs (dma1-3) for 75 —
+ * but a count alone would let
  * one scene drop out while another silently took its place, so the set is
  * checked name by name.  us1 is the only dump that is not a picture. */
 const EXPECTED_SCENES = [
@@ -323,6 +324,8 @@ const EXPECTED_SCENES = [
   "scene8", "scene9", "scene5b", "scene8b", "scene8c",
   /* the display window and border, #48 */
   "scene11", "scene12", "scene13", "scene14",
+  /* the VRAM-to-VRAM DMA ROMs, #49 */
+  "dma1", "dma2", "dma3",
   /* sprite scenes, #12/#13/#14/#40/#42 */
   "sprite1", "sprite2", "sprite3", "sprite4", "sprite5", "sprite6",
   "sprite7", "sprite8", "sprite9", "sprite10", "sprite11", "sprite12",
