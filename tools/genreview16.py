@@ -35,11 +35,20 @@ has the measurements.  Both scenes share the machinery here — the scene's op
 template from genroms.py's cram_dual kind, with exactly-once patches for the
 frame-counter add and the CTA addresses.
 
-Usage (tools/genroms.py and tools/genviewer.py are not modified — r11/r12
-live in this file so the #68/#69 work does not touch a file another card is
+#74 adds r13, the MIXED-op fixture REVIEW-30's V1 no-op asked for: 232 steps
+that alternate a colour-only CRAM write and a BYR write.  Every shipped
+raster table is homogeneous, so viewer.asm's per-step dispatch vector
+($2240) always selects the handler the boot call selected and a stale vector
+cannot be seen.  On r13 the identical dispatch code makes a wrong handler
+write CRAM where BYR belongs (or the reverse), changing both the frame and
+the save state — r13_scene() has the table and the exactly-once handler
+patch.  The viewer half is genviewer.py's ordinary vraster13 build.
+
+Usage (tools/genroms.py and tools/genviewer.py are not modified — r11/r12/r13
+live in this file so the #68/#69/#74 work does not touch a file another card is
 editing).  The scene name defaults to r11:
 
-    python3 -I tools/genreview16.py [r11|r12]       write gen/rasterN.asm
+    python3 -I tools/genreview16.py [r11|r12|r13]   write gen/rasterN.asm
                                                     and gen/rasterN.raster.json
     python3 -I tools/genreview16.py r11 --build     also assemble
                                                     gen/raster11.pce (pceas)
@@ -94,6 +103,72 @@ def r12_scene():
         cram_ov=genroms.RASTER_HUES_CRAM,
         frame_counter=True,
     )
+
+
+def r13_scene():
+    """The #74 fixture: a table whose steps alternate the two handler SHAPES.
+
+    REVIEW-30's V1 removed prestep's stores to the dispatch vector ($2240/
+    $2241) and the screenshot suite still passed: every shipped table has one
+    `r_op` byte for every step, so the handler chosen at boot equals the one
+    prestep would choose forever.  r13 mixes them — even steps are
+    colour-only (op bit 3, CRAM[0x001], a band hue the picture shows), odd
+    steps are BYR-only (op bit 1, a vertical shift the bands picture shows) —
+    so a stale vector makes the first odd step write CRAM instead of BYR.
+    Both the frame and the saved registers then disagree with the table.
+
+    The table rides on genroms.py's byr_table machinery: `r_step_lo/hi` hold
+    each step's ONE write value (the CRAM word on even steps, the BYR value on
+    odd ones), which is why the scene dict gives even entries a `byr` key as
+    well — that key is only the array's source.  r13_json() below is the
+    authoritative table and does not carry it.  The generated handler's
+    register branch (st0 #$08; the two value stores) is replaced by the
+    alternating handler below, asserted to occur exactly once.
+
+    BYR values step by 14 each odd line ((s*7) & 0x1FF), so consecutive odd
+    lines differ by a visibly non-zero row shift on the diagonal bands
+    picture; the last odd step (231) leaves BYR = 81, which the save state
+    must hold.  The last colour step (230) writes CRAM[1] = ramp(230).
+    """
+    entries = []
+    for s in range(232):
+        if s % 2 == 0:
+            v = genroms.raster_ramp(s)
+            entries.append({"line": s + 1, "cram": [[0x001, v]], "byr": v})
+        else:
+            entries.append({"line": s + 1, "byr": (s * 7) & 0x1FF})
+    return dict(
+        kind="byr_table", mwr=0x00, bxr=0, byr=0, cr=0x84, dcr=genroms.DCR,
+        bg="bands", tiles=[(0x040, 32)], entries=entries,
+        cram_ov=genroms.RASTER_HUES_CRAM,
+    )
+
+
+def r13_json():
+    """The mixed table's raster.json (the renderer's and capture's authority).
+
+    Even steps carry `cram` at CRAM[0x001]; odd steps carry `byr`.  The scene
+    dict's extra `byr` on even steps exists only to feed gen_raster_asm's
+    byr_table step arrays and is deliberately absent here.
+    """
+    entries = []
+    for s in range(232):
+        e = {"line": s + 1, "rcr": 0x40 + s + 1}
+        if s % 2 == 0:
+            e["cram"] = [[0x001, genroms.raster_ramp(s)]]
+        else:
+            e["byr"] = (s * 7) & 0x1FF
+        entries.append(e)
+    return {
+        "note": ("#74 mixed-op raster fixture r13: even steps colour-only "
+                 "(CRAM[0x001]), odd steps BYR-only, one step per VDW line "
+                 "— every shipped table is homogeneous, this one witnesses "
+                 "the viewer's per-step dispatch (REVIEW-30 V1)"),
+        "base": {"bxr": 0, "byr": 0, "cr": 0x84, "dcr": genroms.DCR},
+        "baseCram": genroms.scene_cram_words("r13"),
+        "frameCounter": False,
+        "entries": entries,
+    }
 
 
 def r11_scene():
@@ -193,6 +268,39 @@ R12_ADDR2_TO = ("        stz $0402               ; CTA = 0x000 (the backdrop cel
                 "        stz $0403               ; line's first pixels use)\n"
                 "        lda r_step2_lo, X\n")
 
+# r13 (#74): the byr_table handler's single register write becomes a per-step
+# shape: even step = colour-only write to CRAM[0x001], odd step = BYR.  The
+# exact generated lines are genroms.gen_raster_asm's byr_table branch (its
+# `else` for the register kinds); the tail after them (the step bump and RCR
+# re-arm) is untouched.  Both branches consume the same r_step_lo/hi value.
+# The viewer (tools/viewer.asm) dispatches the SAME op shapes to its own
+# stubs, which is what the capture witnesses.
+R13_HANDLER_FROM = ("        ldx <$30                ; step\n"
+                    "        st0 #$08\n"
+                    "        lda r_step_lo, X\n"
+                    "        sta $0002\n"
+                    "        lda r_step_hi, X\n"
+                    "        sta $0003\n")
+R13_HANDLER_TO = ("        ldx <$30                ; step (#74: the steps alternate\n"
+                  "        txa                     ; two shapes, so a stale viewer dispatch\n"
+                  "        and #$01                ; vector cannot write the right one)\n"
+                  "        bne irq1r13byr\n"
+                  "        lda #$01                ; CTA = 0x001 (palette 0 colour 1,\n"
+                  "        sta $0402               ; a band hue the picture shows)\n"
+                  "        stz $0403\n"
+                  "        lda r_step_lo, X\n"
+                  "        sta $0404\n"
+                  "        lda r_step_hi, X\n"
+                  "        sta $0405\n"
+                  "        bra irq1r13done\n"
+                  "irq1r13byr:\n"
+                  "        st0 #$08                ; BYR: the bands picture shifts\n"
+                  "        lda r_step_lo, X\n"
+                  "        sta $0002\n"
+                  "        lda r_step_hi, X\n"
+                  "        sta $0003\n"
+                  "irq1r13done:\n")
+
 
 def replace_once(text, old, new, what):
     n = text.count(old)
@@ -204,17 +312,36 @@ def replace_once(text, old, new, what):
     return text.replace(old, new)
 
 
-SCENES = {"r11": r11_scene, "r12": r12_scene}
+SCENES = {"r11": r11_scene, "r12": r12_scene, "r13": r13_scene}
 
 
 def write_files(scene="r11"):
     """Write gen/<scene>.asm and gen/<scene>.raster.json."""
     genroms.RASTER_SCENES[scene] = SCENES[scene]()
-    # the scene reuses the stripes picture (the BAT half at column 128, the
-    # transparent/solid tiles) the #43 scenes define; genroms keys that
-    # picture on the scene name, so the name joins the set.
-    genroms.RASTER_STRIPES.add(scene)
+    # the scene reuses a #43 picture: r11/r12 the stripes (a transparent half
+    # and a solid colour-7 half), r13 the bands (diagonal solid-colour tiles,
+    # which show a BYR shift); genroms keys that picture on the scene name,
+    # so the name joins the set.
+    if scene == "r13":
+        genroms.RASTER_BANDS.add(scene)
+    else:
+        genroms.RASTER_STRIPES.add(scene)
     asm = genroms.gen_raster_asm(scene)
+    if scene == "r13":
+        asm = replace_once(asm, R13_HANDLER_FROM, R13_HANDLER_TO,
+                           "mixed-op handler (#74)")
+        name = raster_name(scene)
+        os.makedirs(OUT, exist_ok=True)
+        with open(os.path.join(OUT, f"{name}.asm"), "w") as f:
+            f.write(asm)
+        table = r13_json()
+        assert table["frameCounter"] is False
+        import json
+        with open(os.path.join(OUT, f"{name}.raster.json"), "w") as f:
+            json.dump(table, f, indent=1, sort_keys=True)
+        print(f"wrote gen/{name}.asm and gen/{name}.raster.json "
+              f"({len(table['entries'])} steps, colour-only and BYR alternating)")
+        return
     asm = replace_once(asm, BUMP_FROM, BUMP_TO, "frame-counter bump")
     asm = replace_once(asm, WORD1_FROM, WORD1_TO, "first CRAM word add")
     if scene == "r11":
@@ -271,7 +398,7 @@ def main():
     if argv and not argv[0].startswith("--"):
         scene = argv.pop(0)
         if scene not in SCENES:
-            print(f"unknown scene {scene!r} (r11 or r12)", file=sys.stderr)
+            print(f"unknown scene {scene!r} (r11, r12 or r13)", file=sys.stderr)
             return 2
     args = set(argv)
     if args - {"--build", "--viewer", "--all"}:

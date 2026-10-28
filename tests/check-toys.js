@@ -13,6 +13,12 @@
  * may not touch, too many raster entries on a line — the password helpers,
  * the sandbox doors, and a timeout.
  *
+ * #74 (REVIEW-30's three misses): the pads are checked DISTINCT on all five
+ * (A6), the password round trip is checked at every cap (#73's checks, A7),
+ * and every toy's frame loop is checked against a count the loop cannot
+ * fake — the host's frame index and a toy-side counter (A12) — with the
+ * summary banner derived from that measured count, not from FRAMES.
+ *
  * The expected states are built here, in JavaScript, from each toy's written
  * specification (below), NOT by reading the runtime's own state: the runtime
  * has to land the toy's writes in the model's input arrays, and then the
@@ -38,6 +44,10 @@ const FIRST_SCANLINE = 18;
 
 let checks = 0;
 let failures = [];
+/* #74: the fewest frames any toy was actually seen to run.  The summary
+ * banner prints this, not FRAMES, so a loop that stops early cannot leave a
+ * banner claiming frames it never ran (REVIEW-30's A12). */
+let framesRun = Infinity;
 
 function check(ok, name) {
   checks++;
@@ -87,6 +97,20 @@ function samePixels(name, got, want) {
   const d = diffCount(got, want);
   check(d.n === 0, name + " diff " + d.n +
         (d.n ? " (first byte " + d.first + ")" : ""));
+}
+
+/* #74 (REVIEW-30 A12): a loop shortened from 40 to 39 frames only shrinks
+ * the per-frame checks, so nothing the suite printed used to notice.  The
+ * host records the frame index it was last given (rt.frameCount), which the
+ * checker's own loop cannot make up without actually running the frame;
+ * assert it against FRAMES and remember the smallest count seen for the
+ * banner. */
+function recordFrames(name, rt) {
+  const n = rt.frameCount + 1;
+  check(n === FRAMES, name + " ran all " + FRAMES + " frames " +
+        "(the host recorded " + n + ")");
+  framesRun = Math.min(framesRun, n);
+  return n;
 }
 
 /* The model's input, the one shape every check uses. */
@@ -266,6 +290,7 @@ function checkPaletteToy() {
     check(got.raster === null, "palette f" + f + " has no raster table");
     samePixels("palette f" + f + " pixels", got.pixels, want);
   }
+  recordFrames("the palette toy", rt);
   rt.dispose();
 }
 
@@ -319,6 +344,7 @@ function checkRasterToy() {
           "raster f" + f + " has one entry per VDW line");
     prevLine = nextPrev;
   }
+  recordFrames("the raster toy", rt);
   rt.dispose();
 }
 
@@ -378,6 +404,82 @@ function checkSpriteToy() {
     eq("sprite f" + f + " regs", got.state.regs, state.regs);
     samePixels("sprite f" + f + " pixels", got.pixels, want);
   }
+  recordFrames("the sprite toy", rt);
+  rt.dispose();
+}
+
+/* ---- #74: the five pads are five different pads ---------------------- */
+
+/* REVIEW-30's A6: refreshPads could make every pad[n] read pad[1] and the
+ * suite stayed green, because only pad 1 was ever driven or read.  Pad n is
+ * given a button no other pad has and the toy prints all eight fields of
+ * every pad, so a mirror (or any cross-wiring) changes a printed line.  Two
+ * frames with different button sets also prove the refresh runs per frame,
+ * not once at load. */
+const PAD_FIELDS = ["up", "down", "left", "right", "i", "ii", "select", "run"];
+
+function padLine(f, n, buttons) {
+  return [f, n].concat(PAD_FIELDS.map((k) => buttons[k] ? "true" : "false"))
+                .join("\t");
+}
+
+function checkPadDistinct() {
+  const rt = toys.create(`
+function frame(t, f)
+  if f == 0 or f == 1 then
+    for n = 1, 5 do
+      local p = pad[n]
+      print(f, n, p.up, p.down, p.left, p.right, p.i, p.ii,
+            p.select, p.run)
+    end
+  end
+end`, { budgetMs: 250 });
+  rt.load();
+
+  const first = [{ right: true }, { down: true }, { left: true },
+                 { up: true }, { i: true }];
+  for (let n = 1; n <= 5; n++) rt.setPad(n, first[n - 1]);
+  rt.frame(0);
+  const second = [{ up: true }, { right: true }, { up: true, i: true },
+                  {}, { run: true }];
+  for (let n = 1; n <= 5; n++) rt.setPad(n, second[n - 1]);
+  rt.frame(1);
+
+  check(rt.log.length === 10,
+        "the pad toy printed every pad on both frames: " + rt.log.length +
+        " lines");
+  for (let n = 1; n <= 5; n++) {
+    eq("frame 0 pad " + n + " is its own state", rt.log[n - 1],
+       padLine(0, n, first[n - 1]));
+    eq("frame 1 pad " + n + " is its own state", rt.log[5 + n - 1],
+       padLine(1, n, second[n - 1]));
+  }
+  rt.dispose();
+}
+
+/* ---- #74: a frame counter the loop cannot fake ----------------------- */
+
+/* REVIEW-30's A12: shortening the checker's loop to 39 frames still passed
+ * and the banner still said 40, because the banner was built from the
+ * FRAMES constant.  This toy counts its own frame() calls and prints the
+ * count each frame; the assertion is the toy's count, and the host's frame
+ * index is checked with it (recordFrames), so neither the banner nor the
+ * suite can claim frames the loop did not run. */
+function checkFrameCounter() {
+  const rt = toys.create(`
+count = 0
+function frame(t, f)
+  count = count + 1
+  print(count)
+end`, { budgetMs: 250 });
+  rt.load();
+  for (let f = 0; f < FRAMES; f++) rt.frame(f);
+  const n = rt.log.length;
+  check(n === FRAMES, "the toy was called " + FRAMES + " times " +
+        "(its own counter printed " + n + ")");
+  eq("the toy's last count is the frame count", rt.log[n - 1],
+     String(FRAMES));
+  recordFrames("the counted toy", rt);
   rt.dispose();
 }
 
@@ -647,7 +749,17 @@ function init()
   print("code", string.sub(code, 1, 2),
         tostring(string.find(code, "^P1[A-Z2-7]+$") ~= nil))
 end`, { budgetMs: 500 });
-  rt.load();
+  /* A cap the runtime cannot unpack fails inside load(); report it as this
+   * check's FAIL with the refusal code, not as an uncaught exception that
+   * could equally be a broken checker (REVIEW-30 A7 is exactly this). */
+  try {
+    rt.load();
+  } catch (e) {
+    check(false, "the cap toy loaded and ran (got " +
+          (e && e.code ? e.code + ": " + e.message : String(e)) + ")");
+    rt.dispose();
+    return;
+  }
   const log = rt.log;
   check(log.length === 10, "the cap toy printed ten lines: " + log.length);
   eq("integer 0 round-trips", log[0], "int\t0\ttrue\tinteger");
@@ -797,6 +909,8 @@ function main() {
   checkPaletteToy();
   checkRasterToy();
   checkSpriteToy();
+  checkPadDistinct();
+  checkFrameCounter();
   checkRasterForms();
   checkRefusals();
   checkSandbox();
@@ -810,7 +924,7 @@ function main() {
                 " checks failed (" + ms + " ms)");
     process.exit(1);
   }
-  console.log("PASS  " + checks + " checks, 3 toys x " + FRAMES +
+  console.log("PASS  " + checks + " checks, 3 toys x " + framesRun +
               " frames diff 0, every refusal by code (" + ms + " ms)");
 }
 
