@@ -34,8 +34,9 @@ Progress tab is drawn from these tables.
 |---|---|---|---|
 | Sprites in the renderer | PROVEN | `node tests/check.js`: 11 sprite scenes diff 0; breaker's 24 mutants all detected | #12, #40 — `renderer/pce-sprites.js` |
 | Viewer loads sprites (SATB DMA) | PROVEN | `node tests/check-viewer.js`: 17 captures (viewer1-3, browser1-3, vsprite1-11) diff 0 against the renderer, VRAM/CRAM/SATB equal the scene dumps; vsprite3's missing red half (found by Dennis) fixed. Breaker from another seat running | #14 |
-| Sprite editor + SATB in export | UNTESTED | | #13 |
-| Scanline scroll and palette changes | UNTESTED | in progress (DeepSeek trial of an Opus card) | #15, #16 |
+| Sprite editor + SATB in export | UNTESTED | in progress | #13 |
+| Scanline effects in the renderer | PROVEN | `node tests/check.js`: raster1-5 (status bar, BXR wobble, BYR split, colour gradient, CR on/off) diff 0 against Mednafen, 46 pictures in all. Not proven: VCE writes mid-line, real-hardware IRQ latency. DeepSeek did this Opus card. Breaker running | #15 — `docs/RENDERER.md` |
+| Scanline effects in the viewer (RCR) | UNTESTED | | #16 |
 | Wide modes (256/336/512) | UNTESTED | | #27 |
 
 ## Phases 3–6
