@@ -58,6 +58,39 @@
   var FACTOR = Math.floor(SAMPLE_RATE / CLOCK * 4294967296 + 0.5);
   var ACCURACY = 32;
   var TWO32 = 4294967296;
+
+  var CHANNELS = 6;                  /* the HuC6280 PSG voices */
+  var WAVE_STEPS = 32;               /* 5-bit samples per channel waveform */
+  var WAVE_MAX = 0x1F;               /* a sample's width */
+
+  /* The nine PSG registers, their manual pages and what each write does —
+   * the table the toy author's reference (#61) publishes for the sound
+   * chapter, and the same order write() decodes ($0800 + n).  The page
+   * numbers are docs/PSG.md's (Hudson HuC6280 PSG manual).  Toys cannot
+   * reach the PSG yet (#71); this table is here so the reference and the
+   * model cannot disagree about what the registers are. */
+  var REGISTERS = [
+    { n: 0, name: "channel select", manual: "PSG PB-2",
+      what: "selects the channel R1-R7 act on (0-5); a select alone makes no sound" },
+    { n: 1, name: "main amplitude", manual: "PSG PB-3",
+      what: "L/R master volume, one nibble per side" },
+    { n: 2, name: "frequency LSB", manual: "PSG PB-3",
+      what: "low 8 bits of the 12-bit frequency divider F" },
+    { n: 3, name: "frequency MSB", manual: "PSG PB-3",
+      what: "high 4 bits of F" },
+    { n: 4, name: "channel control", manual: "PSG PB-3",
+      what: "channel on/off, DDA mode, and the channel level" },
+    { n: 5, name: "channel balance", manual: "PSG PB-4",
+      what: "per-channel L/R volume, one nibble per side" },
+    { n: 6, name: "waveform data", manual: "PSG PB-4",
+      what: "one 5-bit sample of the 32-step wave; in DDA mode, the held level" },
+    { n: 7, name: "noise control", manual: "PSG PB-6",
+      what: "noise enable and frequency for channels 4 and 5 only" },
+    { n: 8, name: "LFO frequency", manual: "PSG PB-6",
+      what: "8-bit LFO rate" },
+    { n: 9, name: "LFO control", manual: "PSG PB-6",
+      what: "LFO trigger (bit 7) and depth/control" }
+  ];
   var BLIP_RES = 256;                  /* 1 << BLIP_PHASE_BITS (8) */
   var QUALITY = 12;                    /* Blip_Synth<blip_good_quality, 8192> */
   var IMPULSE_SIZE = BLIP_RES / 2 * QUALITY + 1;    /* 1537 */
@@ -264,7 +297,7 @@
   function Channel() {
     /* psg_channel (psg.h), power-on values from Power() (psg.cpp:539) */
     this.waveform = new Array(32);
-    for (var i = 0; i < 32; i++) this.waveform[i] = 0;
+    for (var i = 0; i < WAVE_STEPS; i++) this.waveform[i] = 0;
     this.waveformIndex = 0;
     this.dda = 0;
     this.control = 0;
@@ -287,7 +320,7 @@
     this.imp = buildImpulses();
     this.db = buildDbTable();
     this.ch = [];
-    for (var i = 0; i < 6; i++) this.ch.push(new Channel());
+    for (var i = 0; i < CHANNELS; i++) this.ch.push(new Channel());
     this.select = 0;
     this.globalbalance = 0;
     this.lfofreq = 0;
@@ -690,6 +723,10 @@
     render: render,
     CLOCK: CLOCK,
     SAMPLE_RATE: SAMPLE_RATE,
-    FACTOR: FACTOR
+    FACTOR: FACTOR,
+    REGISTERS: REGISTERS,
+    CHANNELS: CHANNELS,
+    WAVE_STEPS: WAVE_STEPS,
+    WAVE_MAX: WAVE_MAX
   };
 });

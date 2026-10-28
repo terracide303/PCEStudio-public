@@ -2268,6 +2268,7 @@
     VDW_LINES: VDW_LINES,
     OPCODES: OP,
     TYPES: T,
+    MAX_INSTRUCTIONS: MAX_INSTRUCTIONS,
     HELPERS: Object.keys(HELPERS),
     REFUSALS: {
       "il-syntax": "Lua's own compile error, with file:line",

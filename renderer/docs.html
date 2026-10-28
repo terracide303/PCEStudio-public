@@ -1,0 +1,187 @@
+<!doctype html>
+<!-- PCEStudio — the toy author's reference (card #61). GENERATED FILE:
+     node tools/docs.js --html writes it from the runtime's own tables;
+     tests/check-docs.js fails if it differs from the generator's output.
+     Do not edit by hand. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCEStudio — The toy author's reference</title>
+<style>
+  :root { --bg:#111; --card:#181818; --line:#2a2a2a; --ink:#ddd; --dim:#999;
+          --accent:#8fc; --code:#0c0c0c; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:14px/1.55 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { padding:1.4rem 1.6rem .8rem; border-bottom:1px solid var(--line); }
+  header h1 { margin:0 0 .3rem; font-size:1.35rem; letter-spacing:.01em; }
+  header p { margin:0; max-width:52rem; color:var(--dim); }
+  .layout { display:grid; grid-template-columns:15rem minmax(0,52rem);
+            gap:2rem; padding:1.4rem 1.6rem 4rem; align-items:start; }
+  nav { position:sticky; top:1.2rem; display:flex; flex-direction:column;
+        gap:.15rem; font-size:.92rem; }
+  nav a { color:var(--dim); text-decoration:none; padding:.22rem .5rem;
+          border-left:2px solid transparent; border-radius:0 4px 4px 0; }
+  nav a:hover { color:var(--ink); background:var(--card);
+                border-left-color:var(--accent); }
+  main { min-width:0; }
+  section { background:var(--card); border:1px solid var(--line);
+            border-radius:8px; padding:1rem 1.2rem 1.2rem; margin:0 0 1.2rem; }
+  h2 { margin:.1rem 0 .7rem; font-size:1.1rem; color:#fff; }
+  h3 { margin:1.1rem 0 .4rem; font-size:.98rem; }
+  .src { color:var(--dim); font:11px ui-monospace, monospace; font-weight:400; }
+  p { margin:.55rem 0; }
+  table { border-collapse:collapse; width:100%; margin:.7rem 0;
+          font-size:.92rem; }
+  th, td { text-align:left; vertical-align:top; padding:.36rem .55rem;
+           border-bottom:1px solid var(--line); }
+  th { color:var(--accent); font-weight:600; font-size:.82rem;
+       text-transform:uppercase; letter-spacing:.04em; }
+  tr:last-child td { border-bottom:0; }
+  table.tight th:last-child, table.tight td:last-child { white-space:nowrap; }
+  code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { background:var(--code); border:1px solid var(--line);
+        border-radius:6px; padding:.7rem .85rem; overflow:auto;
+        font:12.5px/1.5 ui-monospace, monospace; margin:.7rem 0 .2rem; }
+  footer { color:var(--dim); font-size:.85rem; padding:0 1.6rem 2.5rem;
+           max-width:52rem; }
+  @media (max-width:760px) { .layout { grid-template-columns:1fr; }
+    nav { position:static; flex-direction:row; flex-wrap:wrap; } }
+</style>
+</head>
+<body>
+<header>
+<h1>The toy author's reference</h1>
+<p>PCEStudio runs Lua toys on emulated PC Engine hardware. This page is generated from the runtime's own tables, so every range, cap and refusal code below is the one the code enforces.</p>
+</header>
+<div class="layout">
+<nav>
+      <a href="#the-toy">The toy</a>
+      <a href="#registers">Registers</a>
+      <a href="#palettes">Palettes and colour</a>
+      <a href="#sprites">Sprites and the SAT</a>
+      <a href="#raster">Raster: changes per line</a>
+      <a href="#pads">Pads</a>
+      <a href="#passwords">Passwords</a>
+      <a href="#sound">Sound: the PSG</a>
+      <a href="#budgets">Budgets and limits</a>
+      <a href="#refusals">Refusal codes</a>
+</nav>
+<main>
+<section id="the-toy">
+<h2>The toy</h2>
+<p>A toy is one Lua file. It draws to a 256x224 picture on the PC Engine's VDC and VCE through a small set of calls; everything it does is checked against the hardware's own limits before it is stored.</p>
+<p>Three entry points, all optional:</p>
+<table><thead><tr><th>function</th><th>when it runs</th></tr></thead><tbody><tr><td>init()</td><td>once, after the file's top-level statements</td></tr><tr><td>frame(t, f)</td><td>every video frame; t = f/60 seconds, f = frame number</td></tr><tr><td>raster(line)</td><td>every VDW display line 0..223 of the frame, after frame(), for per-line changes</td></tr></tbody></table>
+<p>State is ordinary Lua globals and persists across frames. A frame is deterministic: t is f/60, not the clock.</p>
+<pre><code class="lua">function frame(t, f)
+  reg(&quot;BXR&quot;, floor(t * 32))
+end
+
+function raster(line)
+  pal(0, line % 512)
+end</code></pre>
+</section>
+<section id="registers">
+<h2>Registers</h2>
+<p>A toy may set three VDC registers with reg(name, value). The value must be a whole number in the register's range; anything else is reg-range. Any other name is reg-forbidden — the toy host writes only these, and the rest of the VDC belongs to the ROM.</p>
+<table class="tight"><thead><tr><th>register</th><th>range</th><th>width</th><th>what it does</th><th>manual</th></tr></thead><tbody><tr><td>BXR</td><td>0..1023</td><td>10-bit</td><td>background horizontal scroll, in pixels (VDC R07)</td><td>VDC H7-7</td></tr><tr><td>BYR</td><td>0..511</td><td>9-bit</td><td>background vertical scroll, in lines (VDC R08)</td><td>VDC H7-7</td></tr><tr><td>CR</td><td>0..255</td><td>8-bit</td><td>control: BB background on (bit 7), SB sprites on (bit 6), and the VDC interrupt enables (RC bit 2 is the line interrupt)</td><td>VDC H7-5</td></tr></tbody></table>
+<pre><code class="lua">function frame(t, f)
+  reg(&quot;BXR&quot;, 64 + floor(32 * sin(t)))
+  reg(&quot;BYR&quot;, 0)
+  reg(&quot;CR&quot;, 0x80 | 0x40)
+end</code></pre>
+<p>The VDC's other registers — the memory and increment controls, the interrupt mask, the line-match register — are not a toy's to write: the ROM configures them and a toy that changes them would break the frame flow both runtimes share.</p>
+</section>
+<section id="palettes">
+<h2>Palettes and colour</h2>
+<p>The VCE holds 512 colour entries (CRAM). pal(addr, word) writes one: the address is 0..511 and the word is a 9-bit colour, 0..511. Either one out of range is pal-range.</p>
+<p>A colour word is three 3-bit channels: green in bits 6-8, red in bits 3-5, blue in bits 0-2. rgb(r, g, b) builds one, masking each channel to 0..7.</p>
+<table><thead><tr><th>entries</th><th>what it is</th></tr></thead><tbody><tr><td>0..255</td><td>16 background palettes of 16 colours; a BAT cell names one of the 16 in its palette bits</td></tr><tr><td>256..511</td><td>16 sprite palettes of 16 colours; a SAT entry names one of the 16 in its attribute word</td></tr></tbody></table>
+<p>Colour 0 of every background palette is the shared backdrop (CRAM $000): a pixel whose colour number is 0 shows CRAM[0] whatever palette its cell named. Sprite pixel 0 is transparent instead, so a sprite palette's entry 0 never shows on a sprite.</p>
+<pre><code class="lua">function init()
+  for i = 0, 15 do pal(i, rgb(0, i * 2, 7 - i)) end
+end</code></pre>
+</section>
+<section id="sprites">
+<h2>Sprites and the SAT</h2>
+<p>The sprite attribute table holds 64 entries of 4 words each, at VRAM $7F00. sprite(i, spec) fills entry i from a table; sat(i, k, v) writes one raw word. An entry index outside 0..63 is sat-range (sprite-range for the composed form), and so is a field outside its width.</p>
+<table><thead><tr><th>word</th><th>field</th></tr></thead><tbody><tr><td>0</td><td>Y; $40 is display row 0</td></tr><tr><td>1</td><td>X; $20 is display column 0</td></tr><tr><td>2</td><td>pattern code, written &lt;&lt; 1</td></tr><tr><td>3</td><td>palette | SPBG&lt;&lt;7 | CGX&lt;&lt;8 | HFLIP&lt;&lt;11 | CGY&lt;&lt;12 | VFLIP&lt;&lt;15</td></tr></tbody></table>
+<table><thead><tr><th>sprite field</th><th>range</th></tr></thead><tbody><tr><td>x</td><td>0..1023</td></tr><tr><td>y</td><td>0..1023</td></tr><tr><td>pattern</td><td>0..1023</td></tr><tr><td>palette</td><td>0..15</td></tr><tr><td>cgy</td><td>0..3</td></tr><tr><td>spbg, cgx, hflip, vflip</td><td>true or false</td></tr></tbody></table>
+<p>CGX doubles the width and CGY picks the height; the six sizes the VDC draws are below. cells is the 64-word VRAM span the pattern occupies.</p>
+<table><thead><tr><th>size</th><th>cells</th><th>flags</th><th>alignment</th></tr></thead><tbody><tr><td>16x16</td><td>1 cell</td><td>CGX 0, CGY 0</td><td>1-cell</td></tr><tr><td>32x16</td><td>2 cells</td><td>CGX 1, CGY 0</td><td>2-cell</td></tr><tr><td>16x32</td><td>4 cells</td><td>CGX 0, CGY 1</td><td>4-cell</td></tr><tr><td>32x32</td><td>4 cells</td><td>CGX 1, CGY 1</td><td>4-cell</td></tr><tr><td>16x64</td><td>8 cells</td><td>CGX 0, CGY 2</td><td>8-cell</td></tr><tr><td>32x64</td><td>8 cells</td><td>CGX 1, CGY 2</td><td>8-cell</td></tr></tbody></table>
+<p>Per display line the VDC collects at most 16 strips of 16 pixels (256 pixels) in SAT order; a 32-pixel sprite asks for two strips. Sprites past the limit are dropped, not refused — that is the line budget, and the editor reports it per line.</p>
+<pre><code class="lua">function init()
+  sprite(0, { x = 32, y = 64, pattern = 0, palette = 1 })
+  sprite(1, { x = 80, y = 64, pattern = 0, palette = 2, hflip = true })
+end</code></pre>
+</section>
+<section id="raster">
+<h2>Raster: changes per line</h2>
+<p>The PC Engine has no HDMA. The per-line trigger is the VDC's line interrupt (RCR): the ROM arms RCR for line 0x40 + the display line, and the handler runs once for each of the 224 display lines. A toy expresses per-line changes two ways.</p>
+<p>1. A callback: define raster(line). Both runtimes call it for every line 0..223 after frame() and record the register and palette writes it makes as that line's entry.</p>
+<p>2. A table entry: call raster(line, spec) from frame() (or init() for a static table). spec may set bxr, byr, cr and cram = {{addr, word}, ...}.</p>
+<table><thead><tr><th>what can change per line</th><th>range</th><th>refusal</th></tr></thead><tbody><tr><td>bxr</td><td>0..1023</td><td>reg-range</td></tr><tr><td>byr</td><td>0..511</td><td>reg-range</td></tr><tr><td>cr</td><td>0..255</td><td>reg-range</td></tr><tr><td>a colour entry (addr, word)</td><td>0..511 / 0..511</td><td>pal-range</td></tr></tbody></table>
+<p>A line gets one entry, because the interrupt fires once per line: a second registration for the same line is raster-line-full, and so is more than 64 colour writes in one line's callback. A line outside 0..223 is raster-line.</p>
+<p>The VCE keeps CRAM across frames, so a row above this frame's first write still shows the previous frame's value; the runtime carries that in cramPrev. Inside a table entry, registers the entry does not name keep the frame-wide value.</p>
+<pre><code class="lua">function frame(t, f)
+  for line = 0, 223 do
+    raster(line, { bxr = line * 2,
+                   cram = { { 0, line % 512 } } })
+  end
+end</code></pre>
+</section>
+<section id="pads">
+<h2>Pads</h2>
+<p>pad[n] is controller n, 1..5. A pad is 2-button: the D-pad, I, II, Select and Run — 8 read-only booleans, refreshed before frame(). Five pads is the multitap; pad 1 is the console's own port.</p>
+<table><thead><tr><th>field</th><th>the button</th></tr></thead><tbody><tr><td>pad[n].up</td><td>Up</td></tr><tr><td>pad[n].down</td><td>Down</td></tr><tr><td>pad[n].left</td><td>Left</td></tr><tr><td>pad[n].right</td><td>Right</td></tr><tr><td>pad[n].i</td><td>I</td></tr><tr><td>pad[n].ii</td><td>II</td></tr><tr><td>pad[n].select</td><td>Select</td></tr><tr><td>pad[n].run</td><td>Run</td></tr></tbody></table>
+<p>A pad is true while its button is held, not only on the frame it goes down; remember the previous frame when an action should happen once. Writing a pad field is refused (il-pad-write in the IL; the Lua table is read-only).</p>
+<pre><code class="lua">local was_ii = false
+
+function frame(t, f)
+  if pad[1].ii and not was_ii then print(&quot;jump&quot;) end
+  was_ii = pad[1].ii
+end</code></pre>
+</section>
+<section id="passwords">
+<h2>Passwords</h2>
+<p>A bare HuCard has no save memory, so a toy saves with a password (Dennis, 2026-10-28). password.pack(value) turns a value into a short code starting P1 (base32 alphabet, then a check byte) and password.unpack(code) returns it; a mistyped or foreign code is password-code.</p>
+<p>A value is nil, a boolean, an integer, a string, or a table with number or string keys. Every cap is a maximum the round trip holds to; one past it is refused naming the edge, never truncated.</p>
+<table><thead><tr><th>value</th><th>maximum</th><th>past it</th></tr></thead><tbody><tr><td>an integer</td><td>-1073741824..1073741823</td><td>password-value</td></tr><tr><td>a non-integer number</td><td>none — not an integer</td><td>password-value</td></tr><tr><td>a string</td><td>64 bytes</td><td>password-value</td></tr><tr><td>a table</td><td>32 entries, nested 6 tables deep</td><td>password-value</td></tr><tr><td>the value's bytes</td><td>96, before the check byte</td><td>password-value</td></tr><tr><td>the whole code</td><td>200 characters</td><td>password-code</td></tr></tbody></table>
+<p>The integer cap is 2^30, not the VM's full 32-bit range: an integer is 32 bits and the zig-zag encoding spends one bit on the sign, so a magnitude of 2^30 doubles to 2^31 and would wrap (card #73).</p>
+<pre><code class="lua">function frame(t, f)
+  local code = password.pack({ high = 1200, level = 3 })
+  print(code)
+end</code></pre>
+</section>
+<section id="sound">
+<h2>Sound: the PSG</h2>
+<p>The HuC6280 PSG has 6 channels, each a 32-step waveform of 5-bit samples (0..31), plus noise on channels 4 and 5 and an LFO. The model is renderer/pce-psg.js, a literal transcription of Mednafen's pipeline at 44100 Hz. Sound is not reachable from a toy yet (card #71); note(name or MIDI) already returns the PSG's 12-bit frequency F so a toy's music data can be written now.</p>
+<table class="tight"><thead><tr><th>register</th><th>name</th><th>what a write does</th><th>manual</th></tr></thead><tbody><tr><td>R0</td><td>channel select</td><td>selects the channel R1-R7 act on (0-5); a select alone makes no sound</td><td>PSG PB-2</td></tr><tr><td>R1</td><td>main amplitude</td><td>L/R master volume, one nibble per side</td><td>PSG PB-3</td></tr><tr><td>R2</td><td>frequency LSB</td><td>low 8 bits of the 12-bit frequency divider F</td><td>PSG PB-3</td></tr><tr><td>R3</td><td>frequency MSB</td><td>high 4 bits of F</td><td>PSG PB-3</td></tr><tr><td>R4</td><td>channel control</td><td>channel on/off, DDA mode, and the channel level</td><td>PSG PB-3</td></tr><tr><td>R5</td><td>channel balance</td><td>per-channel L/R volume, one nibble per side</td><td>PSG PB-4</td></tr><tr><td>R6</td><td>waveform data</td><td>one 5-bit sample of the 32-step wave; in DDA mode, the held level</td><td>PSG PB-4</td></tr><tr><td>R7</td><td>noise control</td><td>noise enable and frequency for channels 4 and 5 only</td><td>PSG PB-6</td></tr><tr><td>R8</td><td>LFO frequency</td><td>8-bit LFO rate</td><td>PSG PB-6</td></tr><tr><td>R9</td><td>LFO control</td><td>LFO trigger (bit 7) and depth/control</td><td>PSG PB-6</td></tr></tbody></table>
+<pre><code class="lua">function init()
+  print(note(&quot;A4&quot;))  -- the PSG's F for 440 Hz
+end</code></pre>
+</section>
+<section id="budgets">
+<h2>Budgets and limits</h2>
+<p>The limits a toy lives inside, each enforced where the table says.</p>
+<table><thead><tr><th>budget</th><th>limit</th><th>source</th></tr></thead><tbody><tr><td>one hook's Lua time</td><td>100 ms</td><td>toy-timeout</td></tr><tr><td>the page's log</td><td>200 lines</td><td>print()</td></tr><tr><td>VRAM</td><td>32768 words</td><td>vram-range</td></tr><tr><td>CRAM</td><td>512 entries</td><td>pal-range</td></tr><tr><td>SAT</td><td>64 entries</td><td>sat-range</td></tr><tr><td>display lines</td><td>224</td><td>raster-line</td></tr><tr><td>raster colour writes on one line</td><td>64</td><td>raster-line-full</td></tr><tr><td>sprites' strips on one line</td><td>16 strips (256 pixels)</td><td>line budget</td></tr><tr><td>tiles in the ROM layout</td><td>1536</td><td>tile-space</td></tr><tr><td>one hook's IL instructions</td><td>5000000</td><td>toy-timeout</td></tr><tr><td>a password's value bytes</td><td>96</td><td>password-value</td></tr><tr><td>a password's table entries</td><td>32</td><td>password-value</td></tr><tr><td>a password's nesting</td><td>6 tables</td><td>password-value</td></tr><tr><td>a password string</td><td>64 bytes</td><td>password-value</td></tr></tbody></table>
+</section>
+<section id="refusals">
+<h2>Refusal codes</h2>
+<p>A refusal is a named failure, not a silent drop: the call throws (or the page shows) an error whose code is one of these, and both runtimes use the same code for the same fault.</p>
+<h3>The toy host (both runtimes) <span class="src">renderer/pce-toyhost.js</span></h3>
+<table><thead><tr><th>code</th><th>meaning</th></tr></thead><tbody><tr><td>pad-range</td><td>a pad number outside 1..5</td></tr><tr><td>pal-range</td><td>a colour-table address or word outside 0..511</td></tr><tr><td>raster-line</td><td>a raster line outside VDW 0..223</td></tr><tr><td>raster-line-full</td><td>a second raster entry on one line, or too many colour writes on it</td></tr><tr><td>reg-forbidden</td><td>a register a toy may not touch</td></tr><tr><td>reg-range</td><td>a register value outside the VDC register's width</td></tr><tr><td>sat-range</td><td>a SAT entry outside 0..63 or a SAT word past $FFFF</td></tr><tr><td>sprite-range</td><td>a sprite field outside the SAT's range</td></tr><tr><td>vram-range</td><td>a VRAM word address outside 0..32767 or a word past $FFFF</td></tr></tbody></table>
+<h3>The Lua runtime <span class="src">renderer/pce-toys.js</span></h3>
+<table><thead><tr><th>code</th><th>meaning</th></tr></thead><tbody><tr><td>no-vm</td><td>the Lua VM (Fengari) is not loaded, so no toy can run</td></tr><tr><td>pal-range</td><td>a colour-table address or word outside 0..511</td></tr><tr><td>password-code</td><td>a password that is not one</td></tr><tr><td>password-value</td><td>a save value that cannot be packed</td></tr><tr><td>raster-line</td><td>a raster line outside VDW 0..223</td></tr><tr><td>raster-line-full</td><td>a second raster entry on one line, or too many colour writes on it</td></tr><tr><td>reg-forbidden</td><td>a register a toy may not touch</td></tr><tr><td>reg-range</td><td>a register value outside the VDC register's width</td></tr><tr><td>sat-range</td><td>a SAT entry outside 0..63 or a SAT word past $FFFF</td></tr><tr><td>sprite-range</td><td>a sprite field outside the SAT's range</td></tr><tr><td>toy-error</td><td>a Lua error inside the toy, naming file:line</td></tr><tr><td>toy-timeout</td><td>a toy hook past the frame's Lua budget</td></tr><tr><td>vram-range</td><td>a VRAM word address outside 0..32767 or a word past $FFFF</td></tr></tbody></table>
+<h3>The IL lowerer <span class="src">renderer/pce-il.js</span></h3>
+<table><thead><tr><th>code</th><th>meaning</th></tr></thead><tbody><tr><td>il-arity</td><td>a call with the wrong argument count</td></tr><tr><td>il-cond</td><td>a condition that is not a bool</td></tr><tr><td>il-env</td><td>_ENV used as a value</td></tr><tr><td>il-fixed-range</td><td>a fixed-point constant outside Q16.16</td></tr><tr><td>il-for-in</td><td>a generic for (pairs/ipairs)</td></tr><tr><td>il-int-range</td><td>an integer constant outside the IL's 32-bit int</td></tr><tr><td>il-jump</td><td>a jump without an instruction boundary</td></tr><tr><td>il-key</td><td>a table key the IL cannot use</td></tr><tr><td>il-method</td><td>a `:` method call</td></tr><tr><td>il-mixed</td><td>int and fixed in one place</td></tr><tr><td>il-multret</td><td>more than one value returned or requested</td></tr><tr><td>il-op</td><td>a Lua construct the IL has no instruction for</td></tr><tr><td>il-pad-write</td><td>writing a pad table</td></tr><tr><td>il-reg-name</td><td>reg() without a constant name</td></tr><tr><td>il-string</td><td>a string used as a value</td></tr><tr><td>il-surface-shadow</td><td>a toy reassigns a surface builtin</td></tr><tr><td>il-syntax</td><td>Lua's own compile error, with file:line</td></tr><tr><td>il-table-read</td><td>reading a field of a toy-built table</td></tr><tr><td>il-type</td><td>an unresolvable or conflicting type</td></tr><tr><td>il-undefined</td><td>a global that is never defined</td></tr><tr><td>il-unsupported</td><td>a helper the IL half does not provide</td></tr><tr><td>il-vararg</td><td>`...`</td></tr></tbody></table>
+<h3>The picture editor <span class="src">renderer/pce-editor.js</span></h3>
+<table><thead><tr><th>code</th><th>meaning</th></tr></thead><tbody><tr><td>17th-colour</td><td>a 17th colour in one tile: a tile shows 16 (the backdrop + 15 palette entries), a palette holds 16, a pixel is 4 bits</td></tr><tr><td>17th-palette</td><td>a 17th background palette: the BAT's palette field is 4 bits, so there are 16</td></tr><tr><td>17th-sprite-palette</td><td>a 17th sprite palette: the VDC has 16 (CRAM $100-$1FF)</td></tr><tr><td>65th-sprite</td><td>a 65th SAT entry: the SAT holds 64</td></tr><tr><td>backdrop-entry</td><td>writing colour 0 of a palette: it is the shared backdrop (CRAM $000), set with setBackdrop</td></tr><tr><td>colour-index</td><td>a pixel colour number outside 0..15</td></tr><tr><td>colour-range</td><td>a VCE colour word outside the 9-bit range 0..511</td></tr><tr><td>entry-range</td><td>a palette entry outside 0..15</td></tr><tr><td>frame-range</td><td>a raster frame number that is not a non-negative integer</td></tr><tr><td>line-range</td><td>a display line outside 0..223, or a range that runs backwards</td></tr><tr><td>map-range</td><td>a map (BAT) column outside 0..31 or row outside 0..31</td></tr><tr><td>no-renderer</td><td>renderPreview called without pce-bg.js and pce-sprites.js loaded</td></tr><tr><td>no-tile</td><td>a character code with no tile behind it</td></tr><tr><td>not-in-palette</td><td>painting a colour the tile's own palette does not hold</td></tr><tr><td>palette-range</td><td>a background palette outside 0..15</td></tr><tr><td>parallax-range</td><td>a parallax band list or speed that is not valid</td></tr><tr><td>pixel-range</td><td>a tile pixel coordinate outside 0..7</td></tr><tr><td>raster-line-full</td><td>two per-line effects on one line: a VDW line carries one raster entry (one RCR interrupt)</td></tr><tr><td>register-range</td><td>a VDC register value outside its width (BXR 10 bits, BYR 9, a wobble amplitude past the BXR swing)</td></tr><tr><td>sprite-entry-range</td><td>a sprite palette entry outside 0..15</td></tr><tr><td>sprite-flag-range</td><td>a sprite flag (priority, hflip, vflip) that is not 0 or 1</td></tr><tr><td>sprite-palette-range</td><td>a sprite palette outside 0..15</td></tr><tr><td>sprite-pattern-range</td><td>a sprite pattern index that does not exist</td></tr><tr><td>sprite-pattern-vram</td><td>a sprite pattern whose VRAM cells would reach the SAT at VRAM $7F00</td></tr><tr><td>sprite-pixel-range</td><td>a sprite pattern pixel outside the pattern</td></tr><tr><td>sprite-range</td><td>a sprite index, or an x/y placement outside the 256x224 view</td></tr><tr><td>sprite-size</td><td>a sprite size the VDC cannot draw: 16 or 32 wide, 16, 32, 64 tall</td></tr><tr><td>tile-space</td><td>no room for another tile: the ROM layout gives 1536, or the patterns would reach the SAT</td></tr><tr><td>vram-range</td><td>a character code outside the 2048-word VRAM</td></tr><tr><td>wobble-range</td><td>a wobble period or speed that is not an integer in range</td></tr></tbody></table>
+</section>
+</main>
+</div>
+<footer>Generated by node tools/docs.js from the modules listed above. Do not edit renderer/docs.html by hand: tests/check-docs.js regenerates it and fails on a hand-written number.<br>Sources: renderer/pce-toyhost.js, renderer/pce-editor.js, renderer/pce-toys.js, renderer/pce-il.js, renderer/pce-psg.js.</footer>
+</body>
+</html>
