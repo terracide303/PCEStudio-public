@@ -6,7 +6,9 @@ real PC Engine or TurboGrafx (Dennis, 2026-10-27).
 
 The idea comes from **ppu.toys** (a studio of this kind for the SNES: a live model of its picture chip, small "toys"
 written in Lua, a compiler that turns them into a real cartridge with a frame-budget validator, and an MCP link so
-Claude Code can build with you). **Nothing of ppu.toys is used** — no code, no text, no design: only the idea. And
+Claude Code can build with you). ppu.toys is MIT-licensed: its ideas and, where they fit, its code may be used, with
+credit to Liora Labs. (An earlier version of this file said "nothing of ppu.toys is used" and gave it as Dennis's
+rule; he never said that — corrected 2026-10-28.) And
 PCEStudio is not a SNES studio with the names changed: it is built around what the PC Engine is, and leaves out what
 it does not have.
 

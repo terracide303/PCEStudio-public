@@ -175,8 +175,9 @@ Rust engine behind ppu.toys:
   read-only counters are not modelled; it has **no PC Engine anything**; the
   open repository does **not** contain the Studio UI or the ROM compiler/export
   — those are the hosted service, so their terms are outside the MIT repo.
-- **Verdict:** **the idea is the reference, not the code.** Dennis already
-  decided that nothing of ppu.toys is used — no code, text or design. This survey
+- **Verdict:** **the idea is the reference, not the code.** (Correction 2026-10-28: this
+  said Dennis had ruled out any ppu.toys code, text or design; he never did. ppu.toys is
+  MIT and may be used with credit where it fits — see docs/PPU-TOYS.md, #53.) This survey
   confirms the shape it proves (headless GPU model + small scripting language +
   frame-budget validator + agent link) and confirms that the PCEStudio version
   must be built from PCE facts, not by adapting SNES code.

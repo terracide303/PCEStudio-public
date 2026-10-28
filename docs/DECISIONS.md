@@ -101,10 +101,11 @@ it. **ares is a cross-check, not the oracle**: the Hudson manuals and real hardw
   hardware; the sprite scenes; and a cold break of the ares check by a second seat (our own one-pixel break is
   recorded in `ARES.md`).
 
-## 2026-10-28 — ppu.toys may be studied for Phases 3 and 5 (Dennis)
+## 2026-10-28 — ppu.toys: its code may be used, with credit (Dennis)
 
-The 2026-10-27 rule was "nothing of ppu.toys is used — no code, text or design". Dennis now allows a **study**:
-how ppu.toys builds its Lua toy runtime, its validator (frame time, budgets), its CLI and its agent link, written
-up as lessons for PCEStudio's Phases 3 and 5. Still **no code and no text copied** (it is Rust and SNES anyway);
-PCEStudio stays JavaScript in the browser, Python tools and PCEAS assembly. Where an idea is taken, the write-up
-credits ppu.toys (MIT, Liora Labs).
+SPEC.md and SURVEY.md said "nothing of ppu.toys is used — no code, text or design" and gave it as Dennis's rule.
+**He never said it** (Dennis, 2026-10-28: "I have never said we can not use code from ppu toys"); it was written in
+by Claude on 2026-10-27 and both files are corrected. ppu.toys is MIT (Liora Labs): its ideas **and its code** may be
+used where they fit, with the licence notice kept and credit given. Card #53 studies how it builds its toy runtime,
+validator, CLI and agent link, and says what is worth reusing for Phases 3 and 5, including whether its Rust code
+is worth taking over as-is (PCEStudio itself is JavaScript in the browser, Python tools and PCEAS assembly).
