@@ -47,7 +47,8 @@ Progress tab is drawn from these tables.
 | Part | Status | How we know | Where |
 |---|---|---|---|
 | Toys as code (Lua, compiler, validator) | UNTESTED | | #30–#33 |
-| Sound chip (PSG) in the browser | PROVEN | `node tests/check-psg.js`: 8 Mednafen recordings (tone, chord, balance, volume, noise, both LFO modes, DDA) matched sample for sample. Noise generator: Mednafen and MAME's c6280 use the same LFSR taps (two emulators); real console unmeasured | #34 — `docs/PSG.md` |
-| Music (Furnace → HuTrack) and wave editor | UNTESTED | | #35 |
+| Sound chip (PSG) in the browser | PROVEN | `node tests/check-psg.js`: 8 Mednafen recordings (tone, chord, balance, volume, noise, both LFO modes, DDA) matched sample for sample. Noise generator: Mednafen and MAME's c6280 use the same LFSR taps (two emulators); real console unmeasured. Breaker: 11 of 15 caught → #63 | #34 — `docs/PSG.md` |
+| Wave editor (32-step waves, 6 channels) | PROVEN | `node tests/check-wave.js`: 3 patches exported byte-equal to PCEAS and recorded in Mednafen, sample for sample | #62 |
+| Music (Furnace → HuTrack) | UNTESTED | the tracker half of #35 | #35 |
 | AI link (MCP server, describe-it) | UNTESTED | | #36, #24 |
 | Photo import, data export, public release | UNTESTED | | #18–#20, #37 |
