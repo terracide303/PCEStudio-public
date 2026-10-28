@@ -9,30 +9,36 @@ and what is refused. The pipeline is the one ppu.toys' author described
 toy.lua --(Fengari's parser, the browser's own Lua)--> Lua 5.3 bytecode
         --(renderer/pce-il.js, the lowerer)---------->  PCEStudio IL
         --(#32: analysis)--------------------------->  HuC6280 code
-        --(renderer/pce-cgen.js, part A, §9)------->  C -> llvm-mos -> .pce
+        --(renderer/pce-cgen.js, parts A + C, §9/§10)  C -> llvm-mos -> .pce
 ```
 
 The IL is where the validator (#32) will count cycles per frame, sprites per
 line and memory, and where `raster()` is checked against the line budget. The
 first half delivered the IL, the lowering, and a reference interpreter that
 runs it over the same host and the same models as the browser runtime (`#30`).
-Part A of the console half (§9) delivers the first backend: the palette toy
-through the same IL → C → llvm-mos → a HuCard ROM → Mednafen.
+Part A of the console half (§9) delivered the first backend: the palette toy
+through the same IL → C → llvm-mos → a HuCard ROM → Mednafen. Part C (§10)
+adds `raster(line)` on the console: a compile-ahead table replayed by a
+hand-written RCR handler, with the compiled callback's measured cost saying
+why it is not the handler.
 
 - `docs/IL.md` — this file: the instructions, the types, the lowering table,
-  the refusals, and part A's backend.
+  the refusals, and parts A and C of the backend.
 - `renderer/pce-il.js` — `compile(source)` → the IL program; `create(source)`
   → a runtime with `load()`, `frame(f)`, `setPad()`, the same shape as
   `renderer/pce-toys.js`.
 - `renderer/pce-toyhost.js` — the toy's hardware host, extracted so both front
   ends use one copy (the surface, the ranges, the raster table, the pads, the
   frame flow).
-- `renderer/pce-cgen.js` — part A's `emitC(program)` → C (refusals by code).
+- `renderer/pce-cgen.js` — `emitC(program)` → C (refusals by code; `reg`,
+  int globals and the raster hook added by part C).
+- `tools/toyc/toy_runtime.c` — the console runtime: VDC/VCE setup, the frame
+  flow, the raster table and its hand-written RCR handler.
 - `tools/build-toyc.sh` — Lua toy → IL → C → `mos-pce-clang -Os` → `.pce`.
-- `tools/capture-toy.sh` — build, run in Mednafen, harvest the state and every
-  frame.
+- `tools/capture-toy.sh` — build, run in Mednafen, harvest the state, every
+  frame and the timer measurements.
 - `tests/check-il.js` — the IL half's evidence (§8).
-- `tests/check-il-console.js` — part A's evidence (§9).
+- `tests/check-il-console.js` — parts A and C's evidence (§9.3, §10.3).
 
 ---
 
@@ -414,9 +420,9 @@ route can have: **#30's palette-cycling toy** (the `TOY_PALETTE` of
 `tests/check-il.js`, committed as `tools/toys/palette.lua`) is lowered from
 the IL to C, compiled by **llvm-mos's PCE target**, run in Mednafen, and its
 frames and state are compared with the browser's own run of the same toy.
-Part A is deliberately one toy and one backend; the comparison of routes
-(llvm-mos vs HuC vs a direct HuC6280 generator), `raster()` on the console and
-the analysis of #32 are later parts.
+Part A is deliberately one toy and one backend; `raster()` on the console is
+part C (§10), and the comparison of routes (llvm-mos vs HuC vs a direct
+HuC6280 generator) is part D, still owed.
 
 ### The pieces
 
@@ -537,10 +543,11 @@ per site), `cgen-key`, and `cgen-target`.
 
 Not proven, written down:
 
-- **One toy, one backend.** Nothing here says the IL → C route handles the
-  other #30 toys (`raster()`, sprites, pads), the five example toys, or any
-  toy beyond the palette one. Parts B (HuC) and C (`raster()` on the console)
-  come next; part D is the measured comparison sent to ppu.toys' author.
+- **Part A is one toy.** Nothing in §9 says the IL → C route handles the
+  other #30 toys, the five example toys, or any toy beyond the palette one.
+  Part C (§10) adds `raster()` through parallax.lua, but not sprites or
+  pads; parts B (HuC) and D (the measured comparison sent to ppu.toys'
+  author) remain.
 - **No comparison of routes yet.** llvm-mos is the first route, not the
   chosen one; the note in `docs/PLAN.md` still requires measuring it against
   vendor/huc and a direct generator on the same toy.
@@ -587,14 +594,160 @@ data-port write lands back in MAWR. And the **VBlank status bit needs CR bit 3**
 
 ---
 
-## 10. Not proven, and the next half
+## 10. Part C of the console half: raster() on the console
 
-- **Only part A of the machine code exists.** The palette toy runs on the
-  console through IL → C → llvm-mos (§9); the other toys, `raster()`, sprites
-  and pads do not. The HuC route, a direct HuC6280 generator, and their
-  measured comparison are still the card's next part. No backend choice is
-  baked into the IL: the types, the explicit surface instructions and the
-  line info are the parts every backend reads.
+The workshop's instruction for this part was explicit: compile the IL's
+`raster(line)` hook into an IRQ1 handler driven by the VDC's RCR line
+interrupt, reuse #16's proven blank budget (~100 CPU cycles, `viewer.asm`),
+count the cycles, and **if the compiled handler cannot meet the blank, say so
+with the measured cycles and propose the fix**. That is what happened.
+
+The toy is **#29's `toys/parallax.lua`**: four 56-line bands, one `reg("BXR",
+…)` on lines 0, 56, 112 and 168, and a frame number in the int global `g_f`.
+It is also run frame for frame through the browser runtime
+(`renderer/pce-toys.js`). `tools/build-toyc.sh` detects the emitted
+`toy_raster` and compiles the runtime with `-DTOY_RASTER_BUILD`; a toy
+without a callback does not carry the table or the IRQ handler (part A's
+palette ROM stays byte-identical).
+
+### 10.1 The compiled callback cannot be the interrupt handler, measured
+
+The TMA timer brackets every `toy_raster(line)` call while the table is
+built. Over the committed run (`tests/dumps/toyparallax`), **39,268 calls**
+measured a mean of **1,510 cycles per call** (1.47 timer ticks, one tick per
+1024 CPU clocks; the call includes the timer read, ~10 cycles). The call is
+`il_call` → `il_fn_7`, the toy's callback: four `line == N` tests, a 32-bit
+`//`, and `toy_reg`. The RCR write budget is **~123 CPU cycles** — 92 VDC
+clocks between the match and the next line's display, as `viewer.asm` counts
+it, i.e. slightly more than a hundred CPU cycles. A handler that simply
+called the compiled callback would be **more than ten times over that
+budget** before its first store, so `raster()` is not compiled into the
+interrupt. (The number is a lower bound on such a handler: it excludes the
+interrupt's own entry, status acknowledge and RCR re-arm.)
+
+### 10.2 The fix: a table built ahead, a hand-written replay handler
+
+This is #16's answer, applied to a compiled toy instead of a generated
+table:
+
+- **Collection.** The main loop calls `toy_raster(0..223)` with the host in a
+  collecting mode. `toy_reg`/`toy_pal` write a per-line record in RAM
+  instead of the VDC: op byte (BXR, BYR, CR, first colour, second colour)
+  plus 14 page-aligned 256-byte arrays. The screen is not touched, so the
+  video frame being computed stays static.
+- **Replay.** A hand-written IRQ1 handler (`toy_runtime.c`, inline 6502) is
+  the RCR chain. It saves A/X/Y (the C main loop is live between lines) and
+  writes the line's entry: **BXR first** (measured: with the colour checks
+  first, the boundary writes landed late by ~100 pixels and the band
+  boundaries were one line off), then BYR, CR, then up to two colour words.
+  RCR is re-armed last, with the **carry into bit 8** — the RCR is nine bits,
+  and zeroing the high byte ended the chain at line 191 (measured; 0x40 +
+  192 = 0x100).
+- **Line 0** is applied by the main loop, in the VBlank before arming, and
+  the chain starts at line 1. The VDC latches BYR for the first display line
+  at the VDW entry, before the RCR match; a write in the interrupt is one
+  line late for line 0. This was measured on `toys/status-bar.lua`, whose
+  bar only appeared once entry 0 moved out of the chain.
+- **The schedule** is two-phase per toy frame, paced by the VBlank interrupt
+  counter: compute (frame(f) then all 224 calls), apply the base and line 0,
+  arm at the next VBlank, then one video frame of replay. The collection
+  measures **338,757 cycles = 2.84 video frames**, so one toy frame takes
+  five video frames: **≈12–15 Hz**. The picture sequence is the browser's;
+  only the rate differs.
+
+### 10.3 What the evidence shows
+
+`node tests/check-il-console.js` exits 0 with **116 checks** (parts A and C):
+
+- the palette toy's ROM still rebuilds byte-identically (`c6296524…`,
+  8,192 B) — the raster machinery is compiled out of it;
+- the parallax ROM rebuilds byte-identically (sha in
+  `tests/dumps/toyparallax/meta.json`), 8,192 B, used `.text` 7,325 B +
+  `early_start` 825 B + vector 10 B; the table, the handler and the toy's
+  IL functions all fit the 8 KiB fixed bank;
+- **40 consecutive display frames are diff 0** against the browser's frames
+  f135..f174, one every five captured frames (the other four are the compute
+  period's static frame, which the comparison ignores — it is not a wrong
+  picture, it is the rate);
+- the save's `vram`, `cram` and `sat` are byte-equal to the browser's at the
+  last matched frame, BYR/MWR are equal, CR is the browser's with bits 3 and
+  2 (VBlank status and scanline interrupt) set, and BXR is the displayed
+  frame's last-line value (or the next frame's line-0 write, if the save
+  caught the compute);
+- the emitter lowers `reg` to `toy_reg()` with a register id, an int global
+  to a C slot the frame and the callback share, and the raster hook to
+  `toy_raster(line)`; the refusals still come back by code (`cgen-op` for
+  sprites/pads, `cgen-arity` at five parameters, `cgen-closure-loop` when a
+  function value can escape, `cgen-global` for a pad global);
+- the measurements are read from the save's RAM and reported: frame()
+  **1,204 cycles**, one raster call **1,510 cycles**, one collection
+  **338,757 cycles**, and the flags byte is 0 (no list overflow, no `vset`
+  from a callback).
+
+### 10.4 What part C refuses, and what it does not prove
+
+Refused by code rather than guessed: `reg` names outside BXR/BYR/CR
+(`cgen-op`); sprite/pad/table/print/vget still (`cgen-op`/`cgen-global`);
+more than four parameters (`cgen-arity`); a raster hook that is not one int
+parameter (`cgen-hook`); a closure inside a loop when a function value can
+be stored — returned, written to a function-typed global outside the chunk,
+or into an upvalue/table (`cgen-closure-loop`). `fixed` is still refused.
+
+Runtime limits, not compile-time refusals: at most **2 colour writes per
+raster line** and **32 colour/VRAM writes per `frame()`** (the flags byte
+records an overflow); a `vset` from a raster callback is dropped and flagged
+(bit 2) because VRAM is fetched as the line draws; a base write made by
+`frame()` reaches the VDC at the next VBlank (it is captured, not applied
+while the display runs).
+
+**Not proven:**
+
+- **Two of the three named toys.** `toys/status-bar.lua` gets its bar right
+  but its scrolled playfield is four lines out of phase against the browser;
+  #30's `TOY_RASTER` (per-line BXR plus a palette write every 8 lines) does
+  not match across the whole picture. Both are measured failures, left
+  recorded here rather than hidden; parallax is the committed evidence.
+- **The rate.** ~12–15 Hz, not 60. The toy's own raster work is 2.84 video
+  frames; a 60 Hz toy must keep its callback under ~500 cycles a call, and
+  the IL → C route is far from that for this toy. Pricing it is #32's job.
+- **Mednafen is the only witness**, and the line-0 BYR latch and the RCR
+  match timing are Mednafen's behaviour; no console run yet.
+- **The direct-ISR measurement is of the callback**, not of a built
+  interrupt handler; the compiler-in-ISR route was rejected on the measured
+  call cost plus the interrupt's own overhead.
+- **Rule 2 is owed**: the test and the runtime were written by the same seat
+  that wrote the emitter; a cold break of the RCR chain, the table and the
+  schedule (and a cold look at the pictures) is required before the card's
+  console half closes.
+
+### 10.5 Three facts this part paid for
+
+1. **The hook's first argument is `line`.** `toy_frame` passes `(t, f)` as
+   `(a0, a1)`, and the first version of `toy_raster` copied that shape and
+   passed `(0, line)`. Every call then saw `line == 0`, wrote BXR=0 on all
+   224 lines, and the table looked plausible while the picture was wrong.
+2. **The RCR is nine bits.** `0x40 + line` overflows at line 192; the
+   handler's `stz` of the high byte made the chain die at line 191 — the
+   first band worked and the rest of the screen kept the last value.
+3. **A 16-bit VBlank counter tears against the interrupt's increment.** A
+   skipped wait started the next collection during the display it had just
+   armed; one video frame in ten mixed two collections (band 0 from the next
+   frame, the other bands from the last). An 8-bit counter cannot tear, and
+   the collection now waits out the display frame.
+
+---
+
+## 11. Not proven, and the next half
+
+- **Parts A and C of the machine code exist; B and D do not.** The palette
+  toy runs on the console through IL → C → llvm-mos (§9), and
+  `toys/parallax.lua`'s `raster()` runs through the table and RCR chain
+  (§10). Sprites and pads are still refused, `status-bar.lua` and #30's
+  `TOY_RASTER` do not match (§10.4), and the **HuC route, the direct
+  HuC6280 generator and their measured comparison (parts B and D) are the
+  card's next parts**. No backend choice is baked into the IL: the types,
+  the explicit surface instructions and the line info are the parts every
+  backend reads.
 - **No browser page for the IL yet.** The interpreter runs in Node and in a
   browser via the same UMD pattern; `renderer/toys.html` still runs the
   Fengari path. Wiring a "compile to IL" run into the page is worth doing when

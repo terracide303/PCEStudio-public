@@ -38,6 +38,27 @@
  * timing, one tick per 1024 CPU clocks, not an estimate.  Code sizes come
  * from the build's llvm-size/llvm-nm report in meta.json.
  *
+ * Part C (docs/IL.md §10) adds the raster() half, with toys/parallax.lua
+ * (#29's line-scroll example):
+ *
+ *   5. The emitter lowers reg() and the raster hook: toy_reg(...) for the
+ *      three VDC registers, an int global the frame number travels in, and
+ *      toy_raster(line) at the callee slot.  The palette toy's ROM must
+ *      still rebuild to its committed sha; the raster toy's ROM rebuilds to
+ *      its own.
+ *
+ *   6. The console's raster frames are the browser's: the captured frames
+ *      are searched for ones that are diff 0 against a browser frame, and at
+ *      least eight consecutive browser frames must be present in order.  The
+ *      toy is slower than 60 Hz by measurement (its 224 calls cost ~2.8
+ *      frames), so the exact frames are every Nth captured frame — that is
+ *      the rate, not a wrong picture.
+ *
+ *   7. The measurements say why the compiled callback is not the interrupt
+ *      handler: cycles per raster call and per collection are read from the
+ *      save's RAM and reported; both must be sane, and the per-call cost
+ *      must be above the ~123-cycle blanket budget the RCR write has.
+ *
  * Written by @design because the card names this evidence; per workshop
  * rule 2 a cold break by another seat is owed.
  */
@@ -56,8 +77,11 @@ const ilTest = require("./check-il.js");      /* the one toy source */
 const ROOT = path.join(__dirname, "..");
 const DUMP = path.join(ROOT, "tests/dumps/toypalette");
 const TOY_FILE = path.join(ROOT, "tools/toys/palette.lua");
+const RASTER_DUMP = path.join(ROOT, "tests/dumps/toyparallax");
+const RASTER_FILE = path.join(ROOT, "toys/parallax.lua");
 const LLVM_DEFAULT = "/Volumes/External II/pce-tools/llvm-mos/llvm-mos";
 const FRAMES = 8;                              /* one palette cycle */
+const RASTER_RUNS = 8;                         /* consecutive raster frames */
 
 let checks = 0;
 let failures = [];
@@ -175,8 +199,10 @@ function refusal(name, source, code, mutate) {
 }
 
 function checkRefusals() {
-  refusal("a reg() instruction (no VDC register writes in part A)", `
-function init() reg("BXR", 1) end
+  /* Part C added reg() and int globals; what is still refused moves up:
+   * a sprite instruction, five parameters, a table global. */
+  refusal("a sprite instruction (no SAT writes on the console yet)", `
+function init() sprite(0, {x = 1, y = 2}) end
 function frame(t, f) end`, "cgen-op");
   refusal("a fixed-point constant", `
 function init() local x = 1.5 print(x) end
@@ -185,22 +211,22 @@ function frame(t, f) end`, "cgen-fixed");
 function frame(t, f) print(t) end`, "cgen-fixed");
   refusal("no frame hook", `
 function init() end`, "cgen-hook");
-  refusal("three parameters", `
-local function f(a, b, c) return a end
-function init() f(1, 2, 3) end
+  refusal("five parameters", `
+local function f(a, b, c, d, e) return a end
+function init() f(1, 2, 3, 4, 5) end
 function frame(t, f) end`, "cgen-arity");
-  refusal("a closure created in a loop", `
+  /* A closure in a loop is allowed since part C when no function value can
+   * escape its static slot; a global function assignment is an escape. */
+  refusal("a closure in a loop that escapes through a global", `
+j = 0
 function frame(t, f)
-  local i = 0
-  while i < 2 do
-    local g = function() return i end
-    i = i + 1
+  while j < 2 do
+    saved = function() return 1 end
+    j = j + 1
   end
 end`, "cgen-closure-loop");
-  refusal("an int global", `
-x = 5
-function init() end
-function frame(t, f) vram[0] = x end`, "cgen-global");
+  refusal("a pad read (no padset in the C globals)", `
+function frame(t, f) if pad[1].right then vram[0] = 1 end end`, "cgen-global");
   refusal("a string constant", ilTest.TOY_PALETTE, "cgen-key", function (p) {
     const fn = p.functions[p.hooks.frame];
     const ins = fn.code.filter(function (i) { return i.t === "const"; })[0];
@@ -369,11 +395,182 @@ function checkDump(meta) {
   browser.dispose();
 }
 
+/* ---- 5. the raster emitter (part C) ----------------------------------- */
+
+function checkRasterEmitter() {
+  const source = fs.readFileSync(RASTER_FILE, "utf8");
+  const program = il.compile(source, { chunkName: "parallax.lua" });
+  const c = cgen.emitC(program);
+  eq("the raster C emitter is deterministic", c, cgen.emitC(program));
+  check(/void toy_raster\(int32_t line\) \{/.test(c),
+        "the raster() hook lowers to toy_raster(line)");
+  check(/il_call\(il_globals\[\d+\], line, 0, 0, 0\)/.test(c),
+        "toy_raster passes the line as the hook's first parameter");
+  check(/toy_reg\(TOY_REG_BXR,/.test(c) && /toy_reg\(TOY_REG_BYR,/.test(c),
+        "the IL reg instruction lowers to toy_reg() with a register id");
+  check(/il_globals\[\d+\] = r\[\d+\];/.test(c) && /r\[\d+\] = il_globals\[\d+\];/.test(c),
+        "an int global is a C slot the frame and the callback share");
+  check(!/\b(double|float)\b/.test(c), "the raster C carries no float type");
+}
+
+/* ---- 6. the console ran the raster toy -------------------------------- */
+
+/* A cheap 32-bit hash (every 97th byte) so 200 captured frames can be matched
+ * against the browser without a full diff of every pair. */
+function frameHash(pixels) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < pixels.length; i += 97) {
+    h ^= pixels[i];
+    h = (h * 0x01000193) >>> 0;
+  }
+  return h;
+}
+
+function checkRasterDump(meta) {
+  const frameDir = path.join(RASTER_DUMP, "frames");
+  if (!fs.existsSync(frameDir)) {
+    check(false, "tests/dumps/toyparallax/frames exists (run tools/capture-toy.sh toyparallax toys/parallax.lua)");
+    return;
+  }
+  const files = fs.readdirSync(frameDir).filter(function (f) {
+    return /^frame\d+\.png$/.test(f);
+  }).sort();
+  check(files.length > 100,
+        "the raster dump carries a long recording (" + files.length + " frames)");
+  if (files.length <= 100) return;
+
+  const movie = files.slice(-200).map(function (f) {
+    return decodePng(fs.readFileSync(path.join(frameDir, f)));
+  });
+  check(movie.every(function (m) {
+    return m.width === toys.WIDTH && m.height === toys.HEIGHT;
+  }), "every raster frame is " + toys.WIDTH + "x" + toys.HEIGHT);
+
+  const browser = toys.create(fs.readFileSync(RASTER_FILE, "utf8"),
+                              { budgetMs: 2000 });
+  browser.load();
+  const want = [];
+  const byHash = new Map();
+  for (let f = 0; f < 260; f++) {
+    const fr = browser.frame(f);
+    want.push(fr);
+    const h = frameHash(fr.pixels);
+    if (!byHash.has(h)) byHash.set(h, []);
+    byHash.get(h).push(f);
+  }
+  check(want.every(function (w) { return w.pixels.length === 256 * 224 * 3; }),
+        "the browser frames are 256x224");
+
+  /* Match every captured frame to a browser frame by hash, then confirm the
+   * match with a full pixel diff.  A compute frame (the two-frame schedule's
+   * first frame) matches nothing; a display frame matches exactly. */
+  const matches = [];
+  movie.forEach(function (img, i) {
+    const candidates = byHash.get(frameHash(img.pixels)) || [];
+    for (let k = 0; k < candidates.length; k++) {
+      if (diff(img.pixels, want[candidates[k]].pixels).n === 0) {
+        matches.push({ captured: i, browser: candidates[k] });
+        break;
+      }
+    }
+  });
+  check(matches.length >= RASTER_RUNS,
+        "at least " + RASTER_RUNS + " captured frames are diff 0 against the browser (" +
+        matches.length + ")");
+  if (matches.length < RASTER_RUNS) { browser.dispose(); return; }
+
+  /* The longest run of consecutive browser frames present in order. */
+  let best = [], run = [matches[0]];
+  for (let i = 1; i < matches.length; i++) {
+    if (matches[i].browser === matches[i - 1].browser + 1 &&
+        matches[i].captured > matches[i - 1].captured) {
+      run.push(matches[i]);
+    } else {
+      if (run.length > best.length) best = run;
+      run = [matches[i]];
+    }
+  }
+  if (run.length > best.length) best = run;
+  check(best.length >= RASTER_RUNS,
+        "at least " + RASTER_RUNS + " consecutive browser frames are present in order (" +
+        best.length + ")");
+  if (best.length < RASTER_RUNS) { browser.dispose(); return; }
+
+  let total = 0;
+  for (let i = 0; i < best.length; i++) {
+    const d = diff(movie[best[i].captured].pixels,
+                   want[best[i].browser].pixels);
+    total += d.n;
+    check(d.n === 0, "console display frame " + files.slice(-200)[best[i].captured] +
+          " is diff 0 against the browser's frame " + best[i].browser);
+  }
+  eq("every display frame in the run is diff 0", total, 0);
+
+  /* The save state is the last display's (or the next compute's line 0). */
+  const lastF = best[best.length - 1].browser;
+  const vram = fs.readFileSync(path.join(RASTER_DUMP, "vram.bin"));
+  const cram = fs.readFileSync(path.join(RASTER_DUMP, "cram.bin"));
+  const sat = fs.readFileSync(path.join(RASTER_DUMP, "sat.bin"));
+  const regs = JSON.parse(fs.readFileSync(path.join(RASTER_DUMP, "regs.json")));
+  const st = want[lastF].state;
+  eq("the raster toy's vram is byte-equal to the browser's",
+     diff(Buffer.from(st.vram), vram).n, 0);
+  eq("the raster toy's cram is byte-equal to the browser's",
+     diff(Buffer.from(st.cram), cram).n, 0);
+  eq("the raster toy's sat is byte-equal to the browser's",
+     diff(Buffer.from(st.sat), sat).n, 0);
+  eq("BYR/MWR equal", [regs.BYR, regs.MWR], [st.regs.BYR, st.regs.MWR]);
+  eq("CR is the browser's with only the VBlank and RCR enables set",
+     regs.CR, st.regs.CR | 0x0C);
+  /* Either the last line of the displayed frame (2*f mod 1024) or the next
+   * frame's line-0 write (the compute ran after the save's display). */
+  const bxrOk = [ (2 * lastF) % 1024, ((lastF + 1) >> 3), (2 * (lastF + 1)) % 1024 ];
+  check(bxrOk.indexOf(regs.BXR) >= 0,
+        "BXR is the displayed frame's last-line value or the next frame's line 0 (" +
+        regs.BXR + " in " + JSON.stringify(bxrOk) + ")");
+
+  /* 7. The measurements: the toy's own cost and why the compiled callback
+   * cannot be the interrupt handler. */
+  const m = meta.capture.measure;
+  check(m.count > 10, "the timer measured more than 10 frames (" + m.count + ")");
+  check(m.cycles_per_frame > 200 && m.cycles_per_frame < 5000,
+        "frame() measures " + m.cycles_per_frame.toFixed(0) + " cycles");
+  check(m.raster_calls > 1000,
+        "the timer measured the raster calls (" + m.raster_calls + ")");
+  check(Math.abs(m.raster_calls - m.collections * 224) <= 224,
+        "raster calls are 224 per collection (" + m.raster_calls + " in " +
+        m.collections + " collections; the last may be mid-collection)");
+  check(m.cycles_per_raster_call > 123 && m.cycles_per_raster_call < 6000,
+        "one raster() call measures " + m.cycles_per_raster_call.toFixed(0) +
+        " cycles, over the ~123-cycle blank a compiled handler would need");
+  check(m.cycles_per_collection > 50000 && m.cycles_per_collection < 900000,
+        "one 224-call collection measures " +
+        m.cycles_per_collection.toFixed(0) + " cycles");
+  eq("no console-side list overflowed and no vset came from raster()",
+     m.flags, 0);
+
+  console.log("      raster: " + m.raster_calls + " calls in " + m.collections +
+              " collections, " + m.cycles_per_raster_call.toFixed(0) +
+              " cycles/call = " + m.cycles_per_collection.toFixed(0) +
+              " cycles/frame (" +
+              (m.cycles_per_collection / 119318).toFixed(2) + " video frames)");
+  console.log("      frames: " + files.length + " recorded; " + best.length +
+              " consecutive display frames diff 0 (browser f" +
+              best[0].browser + ".." + lastF + ", one every " +
+              ((best[best.length - 1].captured - best[0].captured) /
+               (best.length - 1)) + " captured frames)");
+  console.log("      code:   ROM " + meta.rom_bytes + " B, used .text " +
+              ((meta.section_sizes || {})[".text"] || 0) + " B + .rodata " +
+              ((meta.section_sizes || {})[".rodata"] || 0) + " B");
+  browser.dispose();
+}
+
 /* ---- main ------------------------------------------------------------- */
 
 function main() {
   checkEmitter();
   checkRefusals();
+  checkRasterEmitter();
 
   const metaPath = path.join(DUMP, "meta.json");
   if (!fs.existsSync(metaPath)) {
@@ -386,13 +583,43 @@ function main() {
     checkDump(meta);
   }
 
+  const rasterMetaPath = path.join(RASTER_DUMP, "meta.json");
+  if (!fs.existsSync(rasterMetaPath)) {
+    check(false, "tests/dumps/toyparallax/meta.json exists (run tools/capture-toy.sh toyparallax toys/parallax.lua)");
+  } else {
+    const meta = JSON.parse(fs.readFileSync(rasterMetaPath, "utf8"));
+    eq("the raster dump's toy is toys/parallax.lua", meta.source,
+       "toys/parallax.lua");
+    /* The rebuild is the same check as part A's: without llvm-mos it is
+     * skipped, and the committed dump still runs. */
+    const llvm = process.env.LLVM_MOS || LLVM_DEFAULT;
+    if (!fs.existsSync(path.join(llvm, "bin/mos-pce-clang"))) {
+      skipped.push("raster ROM rebuild (llvm-mos not found)");
+      console.log("SKIP  raster ROM rebuild: llvm-mos not found");
+    } else {
+      const r = spawnSync(path.join(ROOT, "tools/build-toyc.sh"),
+                          [RASTER_FILE, "toyparallax"],
+                          { cwd: ROOT, encoding: "utf8", env: process.env });
+      check(r.status === 0, "tools/build-toyc.sh (raster) exits 0");
+      if (r.status === 0) {
+        const rom = fs.readFileSync(path.join(ROOT, "tools/gen/toyparallax.pce"));
+        const sha = require("crypto").createHash("sha256").update(rom)
+          .digest("hex");
+        eq("the rebuilt raster ROM is byte-equal to the committed ROM",
+           sha, meta.rom_sha256);
+        eq("the raster ROM is the 8 KiB fixed bank", rom.length, 8192);
+      }
+    }
+    checkRasterDump(meta);
+  }
+
   if (failures.length) {
     console.log("FAIL  " + failures.length + " of " + checks + " checks failed" +
                 (skipped.length ? " (" + skipped.length + " skipped)" : ""));
     process.exit(1);
   }
-  console.log("PASS  " + checks + " checks, #31 part A: IL -> C -> llvm-mos -> " +
-              "Mednafen equals the browser's toy" +
+  console.log("PASS  " + checks + " checks, #31 parts A and C: IL -> C -> " +
+              "llvm-mos -> Mednafen equals the browser's toys" +
               (skipped.length ? "; SKIP " + skipped.join("; ") : ""));
 }
 

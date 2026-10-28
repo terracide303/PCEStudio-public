@@ -28,8 +28,17 @@ fi
 mkdir -p tools/gen
 node tools/toyc/emit.js "$SRC" "tools/gen/$NAME.c"
 
+# A toy with a raster() hook needs the runtime's RCR chain (the IRQ handler
+# and the line table); a toy without one must not carry it, both because it
+# costs RAM/ROM and because part A's palette ROM is a committed, byte-fixed
+# image.  The generated C names the hook, so that is the test.
+EXTRA=""
+if grep -q "void toy_raster(int32_t line)" "tools/gen/$NAME.c"; then
+  EXTRA="-DTOY_RASTER_BUILD"
+fi
+
 # -Os: the ROM is 8 KiB (bank 0).  -I tools/toyc is where toy_runtime.h lives.
-"$CC" -Os -Itools/toyc -o "tools/gen/$NAME.pce" \
+"$CC" -Os $EXTRA -Itools/toyc -o "tools/gen/$NAME.pce" \
   tools/toyc/toy_runtime.c "tools/gen/$NAME.c"
 
 ROM="tools/gen/$NAME.pce"
