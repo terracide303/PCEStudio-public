@@ -324,3 +324,11 @@ Dennis, asked why the MCP server ships as a zip: "no we'll open the repo tomorro
 terracide303/PCEStudio becomes public; the guide can then say "clone the repo" for Claude Code users (the #142 zip
 stays built, unused until Dennis says). Opening it is Dennis's action, not a seat's. Card #146 lists what must be
 settled first — among them this log's own 2026-10-28 condition on vendor/huc.
+
+## 2026-10-29 — The public repo leaves vendor/huc out (Dennis)
+
+After `docs/PUBLIC-CHECK.md` F1 (HuC has no statable licence and carries commercial material: a System Card IPL
+fragment, Legend of Xanadu 2 art, Bonk sprites, Sherlock Holmes CD data), @workshop proposed: the public repo is
+a filtered copy whose history has no `vendor/huc`, and `tools/build-huc.sh` downloads HuC itself when someone wants
+the HuC comparison. Dennis: "yes make it so". The private repo keeps `vendor/huc` untouched (nothing is deleted);
+it just stops being read. Author emails (F2) are not rewritten — not decided. Publishing stays Dennis's action. Card #152.
