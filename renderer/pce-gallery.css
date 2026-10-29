@@ -226,7 +226,20 @@ a { color: inherit; }
   display: block; image-rendering: pixelated;
   width: min(100%, calc((100vh - 210px) * 256 / 224));
   aspect-ratio: 256 / 224; background: #000;
+  outline: 0;
 }
+/* #124: the output takes the keyboard when it is clicked, and says so.  The
+ * focus ring is on :focus, not :focus-visible, because a mouse click is how a
+ * player gives the screen the keyboard and the ring must follow that click. */
+.toy-screen canvas:focus {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+.toy-pad-hint {
+  margin: 14px 0 0; color: var(--dim);
+  font: 11px/1.5 var(--mono); text-align: center;
+}
+.toy-pad-hint b { color: var(--text2); font-weight: 600; }
 .toy-transport {
   display: flex; align-items: center; gap: 12px;
   margin-top: 14px; color: var(--dim); font: 11px var(--mono);
@@ -285,6 +298,11 @@ body.is-play .toy-stage {
 }
 body.is-play .toy-screen canvas {
   width: min(100vw, calc(100vh * 256 / 224)); aspect-ratio: 256 / 224;
+}
+body.is-play .toy-pad-hint {
+  position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+  margin: 0; z-index: 30; padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.65); border-radius: 999px;
 }
 body.is-play .toy-playbar {
   position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
