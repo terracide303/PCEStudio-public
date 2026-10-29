@@ -53,8 +53,13 @@
 <main class="toy-page" id="toy-page">
   <section class="toy-stage">
     <div class="toy-screen">
-      <canvas id="out" width="256" height="224"
-              aria-label="The toy's live picture"></canvas>
+      <canvas id="out" width="256" height="224" tabindex="0"
+              aria-label="The toy's live picture. Click it to give it the
+                         keyboard: IJKL moves, N fires, M is the second
+                         button, O and P are Select and Run."></canvas>
+      <p class="toy-pad-hint" id="pad-hint">Click the screen, then
+        <b>IJKL</b> to move · <b>N</b> fire · <b>M</b> second button ·
+        <b>O</b>/<b>P</b> Select/Run</p>
     </div>
     <div class="toy-transport">
       <button type="button" class="btn" id="btn-play">Pause</button>
@@ -208,6 +213,42 @@
     onError(e) { showError(e); syncPlayButtons(); }
   });
 
+  /* #124: the pad keys on the focused output.  Same mapping as the studio's
+   * PAD_KEYS (ppu.toys' SNES pad on the PCE's two-button pad): IJKL is the
+   * D-pad, N/M are I/II, O is Select, P is Run.  The page mutates one object
+   * and the player shares it with the runtime, so a held key is seen by the
+   * next frame. */
+  const PAD_KEYS = {
+    KeyI: "up", KeyK: "down", KeyJ: "left", KeyL: "right",
+    KeyN: "i", KeyM: "ii", KeyO: "select", KeyP: "run"
+  };
+  const heldPad = {};
+  function releasePad() {
+    for (const k of Object.keys(heldPad)) delete heldPad[k];
+    if (player) player.setPad(heldPad);
+  }
+  canvas.addEventListener("focus", () => {
+    if (player) player.setPad(heldPad);
+  });
+  canvas.addEventListener("blur", () => {
+    /* a keyup that lands elsewhere must not leave a button held down */
+    releasePad();
+  });
+  canvas.addEventListener("keydown", (e) => {
+    const button = PAD_KEYS[e.code];
+    if (!button) return;
+    heldPad[button] = true;
+    if (player) player.setPad(heldPad);
+    e.preventDefault();
+  });
+  canvas.addEventListener("keyup", (e) => {
+    const button = PAD_KEYS[e.code];
+    if (!button) return;
+    delete heldPad[button];
+    if (player) player.setPad(heldPad);
+    e.preventDefault();
+  });
+
   function play() { if (player) { player.play(); syncPlayButtons(); } }
   function pause() { if (player) { player.pause(); syncPlayButtons(); } }
 
@@ -290,6 +331,95 @@
         ((e && e.message) || e));
     }
   }
+  /* #124's evidence route: the page dispatches its own page-level key events
+   * on the output (no OS input), runs frames synchronously and publishes the
+   * numbers.  tests/check-pad-keys.js launches this page in headless Chrome
+   * and asserts them; the page itself only reports, so the check is not the
+   * page agreeing with itself.  STARFALL's ship is SAT slot 6 (its own
+   * source's sprite table). */
+  if (qs.get("padtest")) {
+    pause();
+    /* STARFALL's ship is the sprite with pattern SHIP = 28 (its own source).
+     * Its SAT slot moved once already (#119: 6 -> 0), so the test finds the
+     * ship by pattern rather than hard-coding a slot. */
+    const SHIP_PATTERN = 28;
+    const key = (target, type, code, name) => target.dispatchEvent(
+      new KeyboardEvent(type, { code: code, key: name, bubbles: true,
+                                cancelable: true }));
+    const word = (slot, k) => {
+      const sat = player.state().sat;
+      return sat[slot * 8 + k * 2] | (sat[slot * 8 + k * 2 + 1] << 8);
+    };
+    const shipSlot = () => {
+      const sat = player.state().sat;
+      for (let slot = 0; slot < sat.length / 8; slot++)
+        if ((word(slot, 2) >> 1) === SHIP_PATTERN) return slot;
+      return -1;
+    };
+    const shipX = () => { const s = shipSlot(); return s < 0 ? 0 : word(s, 1); };
+    const shipY = () => { const s = shipSlot(); return s < 0 ? 0 : word(s, 0); };
+    /* STARFALL hides the ship's SAT entry on some frames (y = 0), so a single
+     * "after" read can be zero; the last visible x is what moved. */
+    const run = (n) => {
+      let lastVisible = null, hidden = 0;
+      for (let i = 0; i < n; i++) {
+        player.frames(1);
+        const x = shipX();
+        if (x) lastVisible = x; else hidden++;
+      }
+      return { x: lastVisible, hidden: hidden };
+    };
+    const out = { id: toy.id, frames: 0 };
+    try {
+      /* the right direction: focus, hold L, run frames */
+      player.reset();
+      out.shipStart = run(5).x;
+      out.shipY = shipY();
+      out.shipSlot = shipSlot();
+      out.tabindex = canvas.getAttribute("tabindex");
+      canvas.focus();
+      out.focused = document.activeElement === canvas;
+      key(canvas, "keydown", "KeyL", "l");
+      out.padKeyDown = Object.assign({}, player.pad());
+      const right = run(20);
+      out.shipRight = right.x;
+      out.rightHidden = right.hidden;
+      key(canvas, "keyup", "KeyL", "l");
+      out.padKeyUp = Object.assign({}, player.pad());
+
+      /* the left direction */
+      player.reset();
+      out.shipStartLeft = run(5).x;
+      key(canvas, "keydown", "KeyJ", "j");
+      out.shipLeft = run(20).x;
+      key(canvas, "keyup", "KeyJ", "j");
+
+      /* control: the output is not focused, so the keys land on the body */
+      player.reset();
+      out.shipControlStart = run(5).x;
+      canvas.blur();
+      out.focusedForControl = document.activeElement === canvas;
+      key(document.body, "keydown", "KeyL", "l");
+      out.shipControl = run(20).x;
+      key(document.body, "keyup", "KeyL", "l");
+
+      /* what a player sees: the ring on the focused output and the hint */
+      canvas.focus();
+      const style = getComputedStyle(canvas);
+      out.outlineStyle = style.outlineStyle;
+      out.outlineWidth = style.outlineWidth;
+      const hint = $("pad-hint");
+      out.hint = hint ? hint.textContent.replace(/\s+/g, " ").trim() : null;
+      out.frames = 25;
+    } catch (e) {
+      out.error = (e && e.code ? e.code + ": " : "") + ((e && e.message) || e);
+    }
+    const el = $("selftest");
+    el.hidden = false;
+    el.textContent = JSON.stringify(out);
+    document.title = (out.error ? "FAIL" : "PADTEST") + " — " + toy.title;
+  }
+
 })();
 </script>
 </body>

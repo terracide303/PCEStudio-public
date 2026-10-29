@@ -649,6 +649,18 @@
     width: 100%; height: 100%; display: block;
     image-rendering: pixelated; outline: 0; background: #000;
   }
+  /* #124: the output takes the pad keys while it has focus, and the ring says
+   * it has them.  On :focus (not :focus-visible): a mouse click on the screen
+   * is the normal way a player gives it the keyboard. */
+  #out:focus {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .pad-hint {
+    margin: 6px 0 0; color: var(--dim); text-align: center;
+    font: 10px/1.5 var(--mono);
+  }
+  .pad-hint b { color: var(--text2); font-weight: 600; }
   .canvas-wrap.crt::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     background: repeating-linear-gradient(
@@ -1577,6 +1589,9 @@
         </div>
         <div class="error" id="error" hidden></div>
       </div>
+      <p class="pad-hint" id="pad-hint">Click the screen, then <b>IJKL</b>
+        to move · <b>N</b> fire · <b>M</b> second button · <b>O</b>/<b>P</b>
+        Select/Run</p>
       <div class="transport">
         <button type="button" class="tbtn" id="btn-play" aria-label="Play">▶</button>
         <button type="button" class="tbtn" id="btn-stop" aria-label="Stop">■</button>
@@ -4452,6 +4467,96 @@ function buildDocs() {
   });
 }
 
+/* #124's evidence route: the page dispatches its own page-level key events on
+ * the focused output (no OS input), steps the play loop's own stepForward and
+ * publishes the numbers.  tests/check-pad-keys.js launches this page in
+ * headless Chrome and asserts them; the page only reports, so the check is not
+ * the page agreeing with itself.  STARFALL's ship is SAT slot 6 (its source's
+ * sprite table).  ?padmode=il runs the same test through the IL runtime. */
+function runPadTest() {
+  /* STARFALL's ship is the sprite with pattern SHIP = 28 (its own source).
+   * Its SAT slot moved once already (#119: 6 -> 0), so the test finds the
+   * ship by pattern rather than hard-coding a slot. */
+  const SHIP_PATTERN = 28;
+  const canvas = $("out");
+  const key = (target, type, code, name) => target.dispatchEvent(
+    new KeyboardEvent(type, { code: code, key: name, bubbles: true,
+                              cancelable: true }));
+  const word = (slot, k) => {
+    const sat = runtime.state.sat;
+    return sat[slot * 8 + k * 2] | (sat[slot * 8 + k * 2 + 1] << 8);
+  };
+  const shipSlot = () => {
+    const sat = runtime.state.sat;
+    for (let slot = 0; slot < sat.length / 8; slot++)
+      if ((word(slot, 2) >> 1) === SHIP_PATTERN) return slot;
+    return -1;
+  };
+  const step = (n) => { for (let i = 0; i < n; i++) stepForward(); };
+  /* STARFALL hides the ship's SAT entry on some frames (y = 0), so a single
+   * "after" read can be zero; the last visible x is what moved. */
+  const run = (n) => {
+    let lastVisible = null, hidden = 0;
+    for (let i = 0; i < n; i++) {
+      stepForward();
+      const slot = shipSlot();
+      const x = slot < 0 ? 0 : word(slot, 1);
+      if (x) lastVisible = x; else hidden++;
+    }
+    return { x: lastVisible, hidden: hidden };
+  };
+  const out = { mode: current.mode };
+  const padqs = new URLSearchParams(location.search);
+  try {
+    if (padqs.get("padmode") === "il" && current.mode !== "il") setMode("il");
+    out.mode = current.mode;
+    pause();
+    seek(0);
+    out.shipStart = run(5).x;
+    out.tabindex = canvas.getAttribute("tabindex");
+    canvas.focus();
+    out.focused = document.activeElement === canvas;
+    key(canvas, "keydown", "KeyL", "l");
+    out.padKeyDown = Object.assign({}, heldPad);
+    const right = run(20);
+    out.shipRight = right.x;
+    out.rightHidden = right.hidden;
+    out.padRuntime = JSON.parse(JSON.stringify(runtime.pad || {}));
+    key(canvas, "keyup", "KeyL", "l");
+    out.padKeyUp = Object.assign({}, heldPad);
+
+    /* the other direction */
+    seek(0);
+    out.shipStartLeft = run(5).x;
+    key(canvas, "keydown", "KeyJ", "j");
+    out.shipLeft = run(20).x;
+    key(canvas, "keyup", "KeyJ", "j");
+
+    /* control: the output is not focused, so the keys land on the body */
+    seek(0);
+    out.shipControlStart = run(5).x;
+    canvas.blur();
+    out.focusedForControl = document.activeElement === canvas;
+    key(document.body, "keydown", "KeyL", "l");
+    out.shipControl = run(20).x;
+    key(document.body, "keyup", "KeyL", "l");
+
+    /* what a player sees: the ring on the focused output and the hint */
+    canvas.focus();
+    const style = getComputedStyle(canvas);
+    out.outlineStyle = style.outlineStyle;
+    out.outlineWidth = style.outlineWidth;
+    const hint = $("pad-hint");
+    out.hint = hint ? hint.textContent.replace(/\s+/g, " ").trim() : null;
+  } catch (e) {
+    out.error = (e && e.code ? e.code + ": " : "") + ((e && e.message) || e);
+  }
+  const el = $("selftest");
+  el.hidden = false;
+  el.textContent = JSON.stringify(out);
+  document.title = (out.error ? "FAIL" : "PADTEST");
+}
+
 function init() {
   loadSettings();
   /* #102: every panel module registers itself first, then the dock, the
@@ -4632,6 +4737,7 @@ function init() {
     }
 
   }
+  if (qs.get("padtest")) runPadTest();
   updateResolution();
 }
 
