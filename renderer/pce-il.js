@@ -102,9 +102,12 @@
   var OP_NAMES = {};
   for (var opName in OP) { if (OP.hasOwnProperty(opName)) OP_NAMES[OP[opName]] = opName; }
 
-  /* Lua 5.3 constant tags as fengari stores them (ljstype.js: LUA_TNUMFLT=3,
-   * LUA_TNUMINT=19, LUA_TSTRING=20). */
-  var K_NUMFLT = 3, K_NUMINT = 19, K_STRING = 20;
+  /* Lua 5.3 constant tags as fengari stores them (ljstype.js: LUA_TBOOLEAN=1,
+   * LUA_TNUMFLT=3, LUA_TNUMINT=19, LUA_TSTRING=20). A bool literal used
+   * directly in an RK operand — `{spbg=true}`, `1 + true` — is put in the
+   * constant table by luaK_exp2RK, so it arrives here rather than as a
+   * LOADBOOL into a register. */
+  var K_BOOL = 1, K_NUMFLT = 3, K_NUMINT = 19, K_STRING = 20;
 
   /* ---- types ------------------------------------------------------------ */
 
@@ -305,6 +308,7 @@
       return { t: "fixed", v: fv };
     }
     if (tt === K_STRING) return { t: "str", v: constString(k) };
+    if (tt === K_BOOL) return { t: "bool", v: !!k.value };
     return { t: "nil", v: null };
   }
 
