@@ -1509,10 +1509,13 @@
 <script src="pce-vram-map.js"></script>
 <script src="pce-sat.js"></script>
 <script src="pce-psg.js"></script>
-<!-- #98: the CONSOLE panel runs #32's validator and #31's C emitter over the
-     toy, so the tab can say what stops it reaching a real console.  Both sit
-     after pce-il.js/pce-sprites.js/pce-toyhost.js, which they need. -->
+<!-- #99: the validator prices a toy for the ASSETS panel's ROM bar; it needs
+     pce-il.js, pce-sprites.js and pce-toyhost.js, all loaded above. -->
+
+<!-- #98: the CONSOLE panel runs the C emitter too, so the tab can say what
+     stops a toy reaching a real console.  pce-cgen.js has no dependencies. -->
 <script src="pce-cgen.js"></script>
+<script src="pce-assets.js"></script>
 <script src="pce-docs.js"></script>
 <!-- #87: the generated pceglobals.lua document, built from the register,
      pad and helper tables above (the ppuglobals.lua tab ppu.toys has). -->
@@ -1531,6 +1534,7 @@
 <script src="studio-panel-console.js"></script>
 <script src="studio-panel-markers.js"></script>
 <script src="studio-panel-agent.js"></script>
+<script src="studio-panel-assets.js"></script>
 <script>
 "use strict";
 /* -------------------------------------------------------------------------
