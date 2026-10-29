@@ -125,6 +125,15 @@
  *   - 97-A2: the row's L/R balance sliders fired as DOM events;
  *   - 98-C2: the count with a warning but no error ("0 errors · 1 warning");
  *   - 107-P2: ```LUA / ```Luau fences, and the old source kept on a refusal.
+ *
+ * #145 (checkNewToyFromLua): a dropped or pasted single .lua starts a NEW toy.
+ * STARFALL is loaded, the generated tab opened, and a one-file toy dropped
+ * through the page's own drop path; the file set, SCREEN's tile count,
+ * SPRITES' sprites/patterns, PALETTES' blank flag and the running toy's VRAM
+ * must all be the new toy's, the generated tab closed, and STARFALL must be in
+ * the recovery slot and come back through Open… → Recover. A second STARFALL,
+ * edited, must be asked about: "Keep this toy" changes nothing, "Start the new
+ * toy" replaces it. A page that keeps the old asset files fails 5 of these.
  * Blind spots: this still cannot see the panels' painted pixels (the stub
  * canvas records calls) and does not exercise the browser driver for these
  * eight beyond what --browser already covers.
@@ -2300,6 +2309,149 @@ function checkPasteRun(page) {
   studio.seek(0);
 }
 
+/* ---- 7c. #145: a single .lua is a NEW toy ----------------------------- */
+/* Dennis, 2026-10-29: after dragging a new main.lua in, the SCREEN panel still
+ * showed STARFALL's stars — its tiles.json/palettes.json — and a
+ * pceglobals.lua tab stayed open; the toy also BOOTS from those files (#117),
+ * so a game that does not overwrite all of VRAM shows the old art.
+ *
+ * A dropped or pasted .lua now starts a NEW toy: main.lua plus the empty
+ * default asset files (the file set Open… → From file gives a plain .lua),
+ * the way ppu.toys' new_toy opens a fresh toy and keeps the previous one in
+ * the person's library. The displaced toy goes to the recovery slot, and a toy
+ * with unsaved edits is asked about before it is replaced.
+ *
+ * The control this fails on is a page that keeps the old files: then SCREEN's
+ * tile count, SPRITES' sprite count and PALETTES' blank flag read STARFALL's,
+ * the runtime's VRAM starts with its tiles, and the recovery slot is empty. */
+function checkNewToyFromLua(page) {
+  const studio = page.sandbox.PCEStudio.studio;
+  const dom = page.dom;
+  const SRC = "function frame(t, f)\n  pal(0, rgb(f % 8, 0, 0))\nend\n";
+
+  studio.loadExample("starfall", true);
+  studio.pause();
+  const starFiles = studio.fileNames().slice();
+  const starMain = studio.current().source;
+  const star = {
+    tiles: studio.screen().tiles,
+    blank: studio.palettes().blank,
+    sprites: studio.sprites().count,
+    patterns: studio.sprites().patterns
+  };
+  check(starFiles.indexOf("tiles.json") >= 0 && star.tiles > 0 &&
+        star.blank === false && (star.sprites > 0 || star.patterns > 0),
+        "#145: STARFALL's files are loaded (" + starFiles.join(",") + "; " +
+        star.tiles + " tiles, " + star.sprites + " sprites, " +
+        star.patterns + " patterns, palette blank " + star.blank + ")");
+
+  /* the second symptom: the generated pceglobals.lua tab was open too */
+  studio.showGlobals();
+  check(studio.globalsOpen(),
+        "#145: the pceglobals.lua tab is open before the drop");
+
+  /* a one-file toy dropped through the page's own drop path (the page asks
+   * the File for its text; this stand-in answers like one does) */
+  studio.dropFile({ name: "one-file.lua",
+                    text: () => ({ then: (ok) => { ok(SRC); } }) });
+  check(studio.lastDrop().status === "done",
+        "#145: the dropped .lua loads (drop status " +
+        studio.lastDrop().status + ")");
+  check(studio.current().source === SRC,
+        "#145: the dropped file is the Lua the page runs");
+  check(studio.fileNames().join(",") ===
+        "main.lua,tiles.json,palettes.json,sprites.json,waves.json",
+        "#145: the toy is a new file set (" +
+        studio.fileNames().join(",") + ")");
+  check(!studio.globalsOpen(),
+        "#145: the pceglobals.lua tab does not stay open over the new toy");
+
+  /* SCREEN / SPRITES / PALETTES show the new toy's state, not the old art */
+  const scr = studio.screen(), spr = studio.sprites(), pal = studio.palettes();
+  /* a blank picture is the editor's one empty tile, char $40 (pce-editor's
+   * newPicture); STARFALL's sheet is its own set */
+  check(scr.tiles === 1,
+        "#145: SCREEN's tile sheet is the new toy's — one blank tile (" +
+        scr.tiles + " tiles, was " + star.tiles + ")");
+  check(spr.count === 0 && spr.patterns === 0,
+        "#145: SPRITES has the new toy's slots and patterns (" + spr.count +
+        " sprites, " + spr.patterns + " patterns, was " + star.sprites +
+        "/" + star.patterns + ")");
+  check(pal.blank === true,
+        "#145: PALETTES is the new toy's empty table (blank " + pal.blank +
+        ", was " + star.blank + ")");
+
+  /* and the toy boots from them (#117): no STARFALL tiles in VRAM */
+  const vram = studio.runtime().last.state.vram;
+  let set = 0;
+  for (let i = 0; i < vram.length; i++) if (vram[i]) set++;
+  check(set === 0,
+        "#145: the running toy's VRAM powers on empty (" + set +
+        " words set) — the old toy's tiles cannot leak in");
+
+  /* the displaced toy is kept, the way ppu.toys keeps the previous toy */
+  let recFiles = [];
+  try { recFiles = JSON.parse(studio.recoverText()).files.map((f) => f.name); }
+  catch (e) { recFiles = ["<unreadable: " + e.message + ">"]; }
+  check(recFiles.join(",") === starFiles.join(","),
+        "#145: the replaced toy is kept in the recovery slot (" +
+        recFiles.join(",") + ")");
+  const item = dom.get("open-recover");
+  check(item.hidden === false, "#145: Open… offers the replaced toy back");
+  item.click();
+  check(studio.current().source === starMain && studio.screen().tiles === star.tiles,
+        "#145: Open… → Recover puts STARFALL back (" +
+        studio.current().source.length + " B of main.lua, " +
+        studio.screen().tiles + " tiles)");
+
+  /* a toy with unsaved edits is asked about first, and nothing is lost */
+  studio.loadExample("starfall", true);
+  studio.pause();
+  studio.setEditorText(studio.editorText() + "\n-- my own line\n");
+  const before = studio.editorText();
+  check(studio.hasUnsavedEdits() === true,
+        "#145: an edit since the open is an unsaved edit");
+  studio.dropFile({ name: "two.lua",
+                    text: () => ({ then: (ok) => { ok(SRC); } }) });
+  check(studio.lastDrop().status === "asked" && studio.replaceAsk().open === true,
+        "#145: a .lua over unsaved edits asks first (status " +
+        studio.lastDrop().status + ")");
+  check(studio.editorText() === before,
+        "#145: nothing is replaced until the question is answered");
+  studio.answerReplace(false);
+  check(studio.replaceAsk().open === false && studio.editorText() === before &&
+        studio.lastDrop().status === "kept",
+        "#145: 'Keep this toy' leaves the toy alone (status " +
+        studio.lastDrop().status + ")");
+  studio.startNewToy(SRC, "two.lua");
+  check(studio.replaceAsk().open === true,
+        "#145: the same .lua asks again after the answer was 'keep'");
+  dom.get("replace-go").click();
+  check(studio.current().source === SRC && studio.screen().tiles === 1,
+        "#145: 'Start the new toy' replaces it (" +
+        studio.screen().tiles + " tiles)");
+
+  /* a dropped envelope is its own file set, not a new toy (the extension the
+   * version string names, beside the older .pce.json) */
+  const ENV = JSON.stringify({
+    version: "pce.studio/1", title: "envelope toy", description: "",
+    files: [{ name: "main.lua", source: SRC },
+            { name: "song.json", source: "{\n  \"version\": 1,\n  \"steps\": []\n}\n" }],
+    sources: []
+  });
+  studio.dropFile({ name: "two-files.pce.studio",
+                    text: () => ({ then: (ok) => { ok(ENV); } }) });
+  check(studio.lastDrop().status === "done" &&
+        studio.fileNames().join(",") === "main.lua,song.json",
+        "#145: a dropped .pce.studio envelope opens its own file set (" +
+        studio.lastDrop().status + ": " + studio.fileNames().join(",") + ")");
+
+  /* leave a working toy for the checks after this one */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
 /* ---- 9b. the resizable regions (#139) --------------------------------- */
 /* The card's evidence is the --browser run, which drags each divider with
  * in-page pointer events and reloads the page.  This is the same page code
@@ -2933,6 +3085,12 @@ const DRIVER_HTML = [
   '    for (var w7 = 0; w7 < 100 && cs.lastDrop().status === "pending"; w7++) {',
   '      await new Promise(function (r) { setTimeout(r, 20); });',
   '    }',
+  '    /* #145: the undo above left unsaved edits, so the drop asks before it',
+  '     * replaces the toy; the page\'s own button answers it. */',
+  '    ck(cs.lastDrop().status === "asked" && cs.replaceAsk().open === true,',
+  '       "#145: a drop over unsaved edits asks first (" + cs.lastDrop().status +',
+  '       ")");',
+  '    cdoc.getElementById("replace-go").click();',
   '    ck(cs.lastDrop().status === "done",',
   '       "a dropped .lua loads (drop status " + cs.lastDrop().status + ")");',
   '    ck(cs.lastDrop().name === "from-ai.lua",',
@@ -7028,6 +7186,7 @@ async function main() {
   checkStudioSplits(page);
   checkExamplesVisible(page);
   checkPasteRun(page);
+  checkNewToyFromLua(page);
   checkScreenPanel(page);
   checkSpritesPanel(page);
   checkPanelModules(page);
