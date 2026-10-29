@@ -181,18 +181,56 @@
   .account { color: var(--dim); font-size: 12px; white-space: nowrap; }
 
   /* ---------- the two columns ---------- */
+  /* #139: each region pair is a three-track grid — the first region, a 6 px
+   * divider, the second.  With no saved size the tracks are the original
+   * fractions (61.25fr/38.75fr here, 44.3fr/55.7fr for the workspace rows);
+   * once a divider is dragged the first track becomes a px size and the
+   * second takes the rest.  The sizes live in custom properties, not inline
+   * grid templates, so the narrow-window rule below can ignore them without
+   * an inline style outranking it. */
   .studio {
-    display: grid; grid-template-columns: minmax(0, 61.25fr) minmax(0, 38.75fr);
+    display: grid;
+    grid-template-columns: minmax(0, var(--split-left, 61.25fr))
+      6px minmax(0, var(--split-right, 38.75fr));
     min-height: 0;
   }
   .workspace {
-    display: grid; grid-template-rows: minmax(220px, 44.3fr) minmax(0, 55.7fr);
+    display: grid;
+    grid-template-rows: minmax(200px, var(--split-code, 44.3fr))
+      6px minmax(0, var(--split-dock, 55.7fr));
     /* #92: the one column is capped at the workspace's own width.  Without
      * this its implicit `auto` column was sized by the widest child's
      * max-content, so a panel with a wide flex row (SCANLINES' preview)
      * pushed the dock — and that preview — off the page. */
     grid-template-columns: minmax(0, 1fr);
     min-height: 0; border-right: 1px solid var(--line);
+  }
+
+  /* ---------- the dividers (#139) ----------
+   * One per region pair: the left and right columns, CODE and the dock, and
+   * OUTPUT and the MARKERS/AGENT drawer.  Each fills its 6 px grid track, so
+   * it is a real grid item rather than an overlay that could drift from the
+   * boundary.  It is focusable and a separator, which is the WAI-ARIA window
+   * splitter: arrow keys resize, Home resets, double-click resets. */
+  .divider {
+    position: relative; padding: 0; margin: 0; border: 0;
+    background: var(--line); touch-action: none; user-select: none;
+  }
+  .divider::after {
+    content: ""; position: absolute; left: 50%; top: 50%;
+    transform: translate(-50%, -50%); border-radius: 2px;
+    background: var(--dim); opacity: 0.6;
+  }
+  .divider-v { cursor: col-resize; }
+  .divider-h { cursor: row-resize; }
+  .divider-v::after { width: 2px; height: 26px; }
+  .divider-h::after { width: 26px; height: 2px; }
+  .divider:hover, .divider.is-dragging { background: var(--accent); }
+  .divider:hover::after, .divider.is-dragging::after {
+    background: var(--accent-ink); opacity: 1;
+  }
+  .divider:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: -2px;
   }
 
   /* ---------- code column ---------- */
@@ -585,7 +623,11 @@
   /* ---------- output column ---------- */
   .output-pane {
     display: grid;
-    grid-template-rows: 30px 40px minmax(0, 1fr) auto auto auto 28px minmax(0, 0.6fr);
+    /* #139: head, sub-bar, the canvas, the four fixed rows under it, the
+     * divider, the drawer's tabs and the drawer.  The drawer's last track is
+     * the one the bottom divider resizes (0.6fr until it is dragged). */
+    grid-template-rows: 30px 40px minmax(90px, 1fr) auto auto auto auto
+      6px 28px minmax(0, var(--split-bottom, 0.6fr));
     min-height: 0; background: var(--pane); position: relative;
   }
   .out-head {
@@ -927,6 +969,8 @@
   .docs-frame { display: block; width: 100%; height: 100%; border: 0; background: var(--bg); }
   @media (max-width: 900px) {
     .studio { grid-template-columns: minmax(0, 1fr); grid-template-rows: 1fr 1fr; }
+    /* the columns stack, so there is no vertical boundary left to drag */
+    .divider-v { display: none; }
     .workspace { border-right: 0; border-bottom: 1px solid var(--line2); }
     .account, .doc-head .saved { display: none; }
   }
@@ -968,7 +1012,7 @@
     </div>
   </header>
 
-  <main class="studio">
+  <main class="studio" id="studio-main">
     <section class="workspace" id="workspace">
       <div class="code-pane" id="code-pane">
         <div class="code-tabs" role="tablist" aria-label="Workspace">
@@ -1003,6 +1047,11 @@
           <div class="asset-list" id="asset-list"></div>
         </div>
       </div>
+
+      <div class="divider divider-h" id="split-rows" role="separator"
+           aria-orientation="horizontal" tabindex="0"
+           aria-label="Resize the code editor and the panel dock"
+           title="Drag to resize · double-click or Home resets"></div>
 
       <section class="dock" id="dock">
         <div class="dock-tabs" id="dock-tabs" role="tablist"
@@ -1555,6 +1604,11 @@
       </section>
     </section>
 
+    <div class="divider divider-v" id="split-cols" role="separator"
+         aria-orientation="vertical" tabindex="0"
+         aria-label="Resize the code column and the output column"
+         title="Drag to resize · double-click or Home resets"></div>
+
     <section class="output-pane" id="output-pane">
       <div class="out-head">
         <span class="out-title">OUTPUT</span>
@@ -1614,6 +1668,10 @@
         <span class="length">Length
           <input type="number" id="length" min="1" max="3600" value="300">frames</span>
       </div>
+      <div class="divider divider-h" id="split-bottom" role="separator"
+           aria-orientation="horizontal" tabindex="0"
+           aria-label="Resize the output and the markers and agent drawer"
+           title="Drag to resize · double-click or Home resets"></div>
       <div class="bottom-tabs">
         <button type="button" class="btab is-on" id="tab-markers">MARKERS</button>
         <button type="button" class="btab" id="tab-agent">AGENT</button>
@@ -1994,6 +2052,8 @@ const TOY_VERSION = "pce.studio/1";
 const TOY_KEY = "pcestudio.toy.v1";
 const TOY_KEY_LEGACY = "pcestudio.toy";
 const SETTINGS_KEY = "pcestudio.settings.v1";
+/* #139: the three divider positions, in px, per browser. */
+const SPLIT_KEY = "pcestudio.layout.v1";
 const DEFAULT_ASSET_FILES = [
   { name: "tiles.json", kind: "tiles",
     source: '{\n  "version": 1,\n  "tiles": []\n}\n' },
@@ -2937,6 +2997,270 @@ function selectBottomTab(which) {
   $("bottom-markers").hidden = !markersOn;
   $("bottom-agent").hidden = markersOn;
 }
+
+/* ---- the draggable dividers (#139) -------------------------------------
+ * Three region pairs, one divider each:
+ *   cols   — the left column (CODE + dock) and the OUTPUT column
+ *   rows   — CODE and the panel dock inside the left column
+ *   bottom — OUTPUT and the MARKERS/AGENT drawer inside the output column
+ *
+ * Each divider is a 6 px grid track between the two regions, so the page's
+ * grid is what moves, not an overlay drawn on top of it.  The dragged px
+ * size goes into a custom property on the pair's container (the CSS keeps
+ * the untouched pairs on their original fr split), and is saved per browser
+ * under SPLIT_KEY.  Double-click or Home resets a divider; the arrow keys
+ * move it by 8 px (40 with Shift), which is the WAI-ARIA window-splitter
+ * keyboard contract, announced through aria-valuenow/min/max.
+ *
+ * Drag input is pointer events on the divider itself with pointer capture;
+ * the pointer may leave the 6 px strip and the drag continues.  No OS input
+ * is involved — check-studio.js's --browser driver dispatches the same
+ * events in the page. */
+const SPLIT_IDS = { cols: "split-cols", rows: "split-rows", bottom: "split-bottom" };
+const SPLIT_MIN = { cols: 320, rows: 200, bottom: 64 };
+const SPLIT_OTHER_MIN = { cols: 300, rows: 120, bottom: 90 };
+let splits = { cols: null, rows: null, bottom: null };
+let splitDrag = null;
+
+function splitHost(which) {
+  if (which === "cols") return $("studio-main");
+  if (which === "rows") return $("workspace");
+  return $("output-pane");
+}
+
+/* The region whose size the divider sets: the left column, the code pane,
+ * the drawer.  Read back for the bounds and for the evidence. */
+function splitTarget(which) {
+  if (which === "cols") return $("workspace");
+  if (which === "rows") return $("code-pane");
+  return $("bottom-body");
+}
+
+function splitVars(which) {
+  if (which === "cols") return ["--split-left", "--split-right"];
+  if (which === "rows") return ["--split-code", "--split-dock"];
+  return ["--split-bottom", null];
+}
+
+function setCssVar(el, name, value) {
+  if (!el || !el.style) return;
+  if (typeof el.style.setProperty === "function") el.style.setProperty(name, value);
+  else el.style[name] = value;
+}
+
+function clearCssVar(el, name) {
+  if (!el || !el.style) return;
+  if (typeof el.style.removeProperty === "function") el.style.removeProperty(name);
+  else delete el.style[name];
+}
+
+/* The px size the divider currently sets, from the live layout. */
+function splitSize(which) {
+  const r = splitTarget(which).getBoundingClientRect();
+  return which === "cols" ? r.width : r.height;
+}
+
+/* The clamp: neither region may collapse to nothing, and the drawer always
+ * leaves room for the picture above it. */
+function splitBounds(which) {
+  const host = splitHost(which).getBoundingClientRect();
+  const min = SPLIT_MIN[which];
+  let max;
+  if (which === "bottom") {
+    const canvas = $("canvas-wrap").getBoundingClientRect().height;
+    max = splitSize("bottom") + canvas - SPLIT_OTHER_MIN.bottom;
+  } else {
+    const total = which === "cols" ? host.width : host.height;
+    max = total - 6 - SPLIT_OTHER_MIN[which];
+  }
+  if (!(max >= min)) max = min;
+  return { min: min, max: Math.round(max) };
+}
+
+function applySplit(which, px) {
+  const host = splitHost(which);
+  const vars = splitVars(which);
+  if (px == null) {
+    clearCssVar(host, vars[0]);
+    if (vars[1]) clearCssVar(host, vars[1]);
+    splits[which] = null;
+    return null;
+  }
+  const n = Math.round(px);
+  setCssVar(host, vars[0], n + "px");
+  if (vars[1]) setCssVar(host, vars[1], "1fr");
+  splits[which] = n;
+  return n;
+}
+
+function clampSplit(which, px) {
+  const b = splitBounds(which);
+  return Math.max(b.min, Math.min(b.max, px));
+}
+
+/* aria-valuenow is the region's live size; the bounds are the live clamp. */
+function updateSplitAria(which) {
+  const el = $(SPLIT_IDS[which]);
+  if (!el || !el.setAttribute) return;
+  const r = splitTarget(which).getBoundingClientRect();
+  const b = splitBounds(which);
+  el.setAttribute("aria-valuemin", String(Math.round(b.min)));
+  el.setAttribute("aria-valuemax", String(Math.round(b.max)));
+  el.setAttribute("aria-valuenow",
+                  String(Math.round(which === "cols" ? r.width : r.height)));
+}
+
+function saveSplits() {
+  try {
+    if (typeof localStorage === "undefined") return false;
+    localStorage.setItem(SPLIT_KEY, JSON.stringify(splits));
+    return true;
+  } catch (e) { return false; }
+}
+
+function loadSplits() {
+  let saved = null;
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(SPLIT_KEY);
+      if (raw) saved = JSON.parse(raw);
+    }
+  } catch (e) { saved = null; }
+  for (const which of ["cols", "rows", "bottom"]) {
+    const v = saved && saved[which];
+    if (typeof v === "number" && isFinite(v) && v >= SPLIT_MIN[which]) {
+      /* a size saved on a wider window is clamped only when the clamp is
+       * meaningful; before the page has been laid out the bounds have no
+       * room between min and max, and the saved px is kept as it is */
+      const b = splitBounds(which);
+      applySplit(which, b.max > b.min ? Math.max(b.min, Math.min(b.max, v)) : v);
+    }
+  }
+}
+
+/* After a drag or reset: the editor re-measures and the dock's canvas panels
+ * redraw at their new size. */
+function afterSplitResize() {
+  if (editor && typeof editor.refresh === "function") editor.refresh();
+  panelDirty = true;
+  refreshPanels(true);
+  for (const which of ["cols", "rows", "bottom"]) updateSplitAria(which);
+}
+
+function resetSplit(which) {
+  applySplit(which, null);
+  saveSplits();
+  afterSplitResize();
+  return splits[which];
+}
+
+function startSplitDrag(which, ev) {
+  const b = splitBounds(which);
+  splitDrag = { which: which, x: ev.clientX, y: ev.clientY,
+                start: splitSize(which), bounds: b };
+  const el = $(SPLIT_IDS[which]);
+  if (el && el.classList) el.classList.add("is-dragging");
+}
+
+function moveSplitDrag(which, ev) {
+  if (!splitDrag || splitDrag.which !== which) return false;
+  const d = which === "cols" ? ev.clientX - splitDrag.x : ev.clientY - splitDrag.y;
+  /* the bottom divider grows the drawer by moving UP, the other two grow
+   * their first region by moving down/right */
+  const px = which === "bottom" ? splitDrag.start - d : splitDrag.start + d;
+  applySplit(which, Math.max(splitDrag.bounds.min,
+                             Math.min(splitDrag.bounds.max, px)));
+  return true;
+}
+
+function endSplitDrag(which) {
+  if (!splitDrag || splitDrag.which !== which) return false;
+  splitDrag = null;
+  const el = $(SPLIT_IDS[which]);
+  if (el && el.classList) el.classList.remove("is-dragging");
+  saveSplits();
+  afterSplitResize();
+  return true;
+}
+
+function splitKey(which, ev) {
+  const step = ev.shiftKey ? 40 : 8;
+  const key = ev.key;
+  let delta = 0;
+  if (which === "bottom") {
+    if (key === "ArrowUp") delta = step;
+    else if (key === "ArrowDown") delta = -step;
+  } else {
+    if (key === "ArrowLeft" || key === "ArrowUp") delta = -step;
+    else if (key === "ArrowRight" || key === "ArrowDown") delta = step;
+  }
+  if (key === "Home" || key === "Enter" || key === " ") {
+    ev.preventDefault();
+    resetSplit(which);
+    return true;
+  }
+  if (!delta) return false;
+  ev.preventDefault();
+  const from = splits[which] == null ? splitSize(which) : splits[which];
+  applySplit(which, clampSplit(which, from + delta));
+  saveSplits();
+  afterSplitResize();
+  return true;
+}
+
+function bindSplits() {
+  for (const which of ["cols", "rows", "bottom"]) {
+    const el = $(SPLIT_IDS[which]);
+    if (!el || !el.addEventListener) continue;
+    el.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== undefined && ev.button !== 0) return;
+      if (ev.preventDefault) ev.preventDefault();
+      /* capture keeps the drag alive when the pointer leaves the 6 px strip;
+       * a synthetic pointer has no capture to take, so a failure is fine */
+      if (typeof el.setPointerCapture === "function") {
+        try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+      }
+      startSplitDrag(which, ev);
+    });
+    el.addEventListener("pointermove", (ev) => {
+      if (!splitDrag || splitDrag.which !== which) return;
+      if (ev.preventDefault) ev.preventDefault();
+      moveSplitDrag(which, ev);
+    });
+    const stop = () => { endSplitDrag(which); };
+    el.addEventListener("pointerup", stop);
+    el.addEventListener("pointercancel", stop);
+    el.addEventListener("lostpointercapture", stop);
+    el.addEventListener("dblclick", (ev) => {
+      if (ev.preventDefault) ev.preventDefault();
+      resetSplit(which);
+    });
+    el.addEventListener("keydown", (ev) => splitKey(which, ev));
+  }
+  /* A window that shrinks below a saved size must not leave either region at
+   * zero: the saved px are clamped to the new bounds. */
+  if (typeof window !== "undefined" && window.addEventListener) {
+    /* A second path for the drag in case pointer capture was refused: the
+     * move and the release still arrive from the window.  Both paths use
+     * the drag's start point, so a move seen twice changes nothing. */
+    window.addEventListener("pointermove", (ev) => {
+      if (splitDrag) moveSplitDrag(splitDrag.which, ev);
+    });
+    window.addEventListener("pointerup", () => {
+      if (splitDrag) endSplitDrag(splitDrag.which);
+    });
+    window.addEventListener("resize", () => {
+      for (const which of ["cols", "rows", "bottom"]) {
+        if (splits[which] == null) continue;
+        applySplit(which, clampSplit(which, splits[which]));
+      }
+      afterSplitResize();
+    });
+  }
+  /* the values are set at load, so a screen reader never sees a stale 0 */
+  for (const which of ["cols", "rows", "bottom"]) updateSplitAria(which);
+}
+
 
 /* ---- markers ----------------------------------------------------------
  * The markers are the MARKERS module's (renderer/studio-panel-markers.js):
@@ -4574,6 +4898,10 @@ function init() {
   buildDocs();
   closeDocs();
   bind();
+  /* #139: the divider sizes are restored before the first paint, so a
+   * reload comes back at the sizes the author left. */
+  loadSplits();
+  bindSplits();
   selectPanel("screen");
   selectCodeTab("code");
   selectBottomTab("markers");
@@ -4950,7 +5278,20 @@ const studio = {
   layout: {
     drawer: (which) => selectBottomTab(which),
     codeTab: (which) => selectCodeTab(which),
-    panel: (id) => selectPanel(id)
+    panel: (id) => selectPanel(id),
+    /* #139: the three dividers.  split() is the saved px (null = the
+     * default fr split), splitEl() the focusable separator, setSplit() the
+     * same path a pointer drag ends on, resetSplit() the double-click. */
+    split: (which) => (which ? splits[which] : Object.assign({}, splits)),
+    splitEl: (which) => $(SPLIT_IDS[which]),
+    setSplit: (which, px) => applySplit(which, px),
+    resetSplit: (which) => resetSplit(which),
+    splitSize: (which) => splitSize(which),
+    splitBounds: (which) => splitBounds(which),
+    splitKey: (which, ev) => splitKey(which, ev),
+    splitDragStart: (which, ev) => startSplitDrag(which, ev),
+    splitDragMove: (which, ev) => moveSplitDrag(which, ev),
+    splitDragEnd: (which) => endSplitDrag(which)
   },
   follow: () => (followAt ? { x: followAt.x, y: followAt.y } : null),
 
