@@ -303,6 +303,15 @@ const NOT_PICTURES = {
        "meta.json, not regs.json, so the saved state renders diff 0 only at " +
        "that crop (86,595 differing pixels of 178,176 bytes at this " +
        "check's default 4) — a capture crop, not a renderer difference",
+  /* #115: the status-bar toy (two register writes at line 24) on the same
+   * bytecode route, judged by check-ilvm.js: its bar is diff 0 and its
+   * playfield is the known four-line phase, so this check's whole-save
+   * pixel comparison is not the judge. */
+  "toystatusbar-ilvm": "a toy capture through the bytecode route (#115), " +
+       "judged by tests/check-ilvm.js: the fixed bar (rows 0-23) is diff 0 " +
+       "against the browser and the playfield carries the #31C handler's " +
+       "known four-line phase, so this check's whole-save comparison is not " +
+       "its judge",
 };
 
 /* ---- the #15 raster-table checks -------------------------------------- */

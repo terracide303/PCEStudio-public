@@ -141,6 +141,13 @@ const { execFileSync, spawn } = require("child_process");
 
 const sprites = require("../renderer/pce-sprites.js");
 const vramModel = require("../renderer/pce-vram-map.js");
+/* #115 — the Export button's route 1, built in the page: the same three
+ * modules tests/check-ilvm.js runs in Node, so the page's bytes can be held
+ * against Node's without a second implementation. */
+const il = require("../renderer/pce-il.js");
+const ilbc = require("../renderer/pce-ilbc.js");
+const romLib = require("../renderer/pce-rom.js");
+const ILVM = path.join(__dirname, "..", "renderer", "ilvm.bin");
 
 /* The three toy sources are read from tests/check-il.js's own text instead of
  * requiring it: at this revision check-il.js runs its whole suite when
@@ -170,6 +177,30 @@ function readIlToys() {
 }
 
 const ilExports = readIlToys();
+
+/* #115 — what Node's buildToyRom makes of the two toys the browser driver
+ * exports.  The driver compares the downloaded Blob's FNV-1a and length
+ * against these; the byte-for-byte equality is the stub test's (checkExport
+ * above) and check-ilvm.js's committed ROM shas. */
+function fnv1a(bytes) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < bytes.length; i++) {
+    h = Math.imul(h ^ bytes[i], 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+function toyRomExpectation(source) {
+  const bank0 = fs.readFileSync(ILVM);
+  const encoded = ilbc.encode(il.compile(source, { chunkName: "@main.lua" }));
+  const bytes = romLib.buildToyRom({ bank0: bank0, bytecode: encoded.bytes });
+  return { length: bytes.length, fnv: fnv1a(bytes),
+           bytecodeBytes: encoded.bytes.length };
+}
+const EXPORT_EXPECT = {
+  palette: toyRomExpectation(ilExports.TOY_PALETTE),
+  parallax: toyRomExpectation(fs.readFileSync(
+    path.join(__dirname, "..", "toys", "parallax.lua"), "utf8"))
+};
 
 const RENDERER = path.join(__dirname, "..", "renderer");
 const PAGE = path.join(RENDERER, "studio.html");
@@ -749,17 +780,33 @@ function checkDocs(page) {
         "openDocs('sprites') lands on the sprites chapter");
   studio.closeDocs();
 
-  /* the export button opens a message that names #31, and the message is in
-   * the page (the stub does not parse static HTML into textContent). */
+  /* #115: the export dialog is #87's spec, in the page's own markup — the
+   * title, the close ×, the can't-run lead, the findings list, the footer
+   * with the static-estimate sentence, and the route line.  The stub does
+   * not parse static HTML into textContent, so the strings are read from the
+   * file; the browser driver reads them rendered. */
   clickOne(page, "btn-export");
   check(page.dom.get("export-modal").hidden === false,
         "Export opens its dialog");
-  const html = fs.readFileSync(PAGE, "utf8");
-  check(/NEEDS #31/.test(html) && /toy compiler is card #31/.test(html),
-        "the Export dialog says it needs #31");
+  const exportHtml = fs.readFileSync(PAGE, "utf8");
+  check(/<h2 id="export-title">Export to ROM/.test(exportHtml),
+        "the Export dialog's title is Export to ROM (#87's spec)");
+  check(/id="export-close"[\s\S]{0,80}aria-label="Close the export dialog"/.test(
+          exportHtml) || /aria-label="Close the export dialog"[\s\S]{0,80}id="export-close"/.test(
+          exportHtml),
+        "the Export dialog has ppu.toys' close ×");
+  check(/id="export-findings"/.test(exportHtml),
+        "the dialog has a findings list (#98's findings go there)");
+  check(/Experimental: frame timing is\s+a static estimate, checked on an emulator, not on hardware\./.test(
+          exportHtml),
+        "the dialog's footer is the Experimental static-estimate sentence");
   clickOne(page, "export-close");
   check(page.dom.get("export-modal").hidden === true,
-        "the Export dialog closes");
+        "the Export dialog's × closes it");
+  clickOne(page, "btn-export");
+  clickOne(page, "export-done");
+  check(page.dom.get("export-modal").hidden === true,
+        "the Export dialog's Close button closes it");
 
   /* the same panel from a URL (this is how the screenshots open it) */
   const q = runPage("?docs=sprites&paused=1");
@@ -768,6 +815,138 @@ function checkDocs(page) {
   check(q.sandbox.PCEStudio.studio.docsChapter() === "sprites",
         "?docs=sprites lands on the sprites chapter");
   q.sandbox.PCEStudio.studio.closeDocs();
+}
+
+/* ---- 1c. #115 — Export to ROM, built in the page ----------------------- *
+ * The same three modules check-ilvm.js runs in Node are handed to the page's
+ * own exportBytes(), and the bytes must be Node's byte for byte.  A toy the
+ * CONSOLE tab refuses shows its findings; a toy the console accepts but the
+ * IL bytecode cannot carry (timer()) is the encoder's own refusal, and it
+ * must appear as a finding rather than a broken download. */
+async function checkExport(page) {
+  const studio = page.sandbox.PCEStudio.studio;
+  const bank0 = fs.readFileSync(ILVM);
+  function nodeBytes(source) {
+    const program = il.compile(source, { chunkName: "@main.lua" });
+    const encoded = ilbc.encode(program);
+    return Buffer.from(romLib.buildToyRom({ bank0: bank0,
+                                            bytecode: encoded.bytes }));
+  }
+  function pageBuild(where) {
+    const got = studio.exportBytes(bank0);
+    check(got.ok, where + ": the page exports the toy (" +
+          JSON.stringify(got.findings) + ")");
+    return got;
+  }
+
+  /* the studio's two examples, built in the page and in Node */
+  for (const id of ["palette", "raster"]) {
+    studio.loadExample(id, true);
+    const source = studio.current().source;
+    const got = pageBuild(id);
+    if (!got.ok) continue;
+    eq("#115: " + id + " export is 24,576 B", got.bytes.length, 24576);
+    check(Buffer.from(got.bytes).equals(nodeBytes(source)),
+          "#115: " + id + "'s page-built ROM is Node buildToyRom's bytes");
+    eq("#115: " + id + "'s bytecode length is the encoder's",
+       got.bytecodeBytes, ilbc.encode(il.compile(source)).bytes.length);
+    check(/^[A-Za-z0-9._-]+\.pce$/.test(got.name),
+          "#115: " + id + " downloads a .pce (" + got.name + ")");
+    const route1 = got.route1;
+    check(route1 && route1.collectionCycles > 0,
+          "#115: " + id + "'s export carries route 1's projection");
+  }
+
+  /* #29's parallax toy, the raster case, through the page's gallery */
+  studio.loadExample("parallax", true);
+  const parallaxSource = fs.readFileSync(path.join(__dirname, "..", "toys",
+    "parallax.lua"), "utf8");
+  check(studio.current().source === parallaxSource,
+        "#115: the gallery loads toys/parallax.lua's exact source");
+  const par = pageBuild("parallax");
+  if (par.ok) {
+    check(Buffer.from(par.bytes).equals(nodeBytes(parallaxSource)),
+          "#115: the parallax ROM built in the page is Node's bytes");
+    check(par.route1 && par.route1.shape === "raster" &&
+          par.route1.meets60 === false,
+          "#115: the validator says the raster route 1 does not meet 60 Hz");
+    check(par.route1.collectionCycles > par.bytes.length * 100,
+          "#115: the projection is the interpreter's cost, not the ROM's size");
+  }
+
+  /* the asset tail: a non-default file rides after the bytecode, and the
+   * default empty files add nothing (so the evidence toys stay identical). */
+  studio.loadExample("palette", true);
+  const plain = studio.exportBytes(bank0);
+  const tiles = studio.toy.file("tiles.json");
+  tiles.source = '{"version":1,"tiles":[{"char":64}]}\n';
+  const withTail = pageBuild("asset tail");
+  if (plain.ok && withTail.ok) {
+    /* The data bank is one 8 KiB bank, so the ROM's length does not change:
+     * the tail starts right after the bytecode and the bank's 0xFF padding
+     * follows it. */
+    const tail = Buffer.from(JSON.stringify({ version: 1, files: [
+      { name: "tiles.json", source: tiles.source }] }), "utf8");
+    const at = 16384 + withTail.bytecodeBytes;
+    eq("#115: the asset tail starts after the bytecode", at,
+       16384 + plain.bytecodeBytes);
+    check(Buffer.from(withTail.bytes.slice(at, at + tail.length))
+      .equals(tail), "#115: the tail is the asset files' JSON bytes");
+    check(withTail.bytes[at + tail.length] === 0xFF,
+          "#115: … and 0xFF pads the rest of the data bank");
+    check(withTail.bytes.length === plain.bytes.length,
+          "#115: the tail rides inside the one data bank, not on top of it");
+  }
+  studio.loadExample("palette", true);
+
+  /* a toy the CONSOLE tab refuses: its findings are the dialog's findings */
+  studio.loadExample("palette", true);
+  studio.setEditorText('function frame(t, f)\n  reg("NOPE", 0)\nend\n');
+  const bad = studio.exportAnalysis();
+  check(!bad.ok, "#115: a toy the CONSOLE tab refuses does not export");
+  check(bad.findings.some((f) => f.code === "validate-range"),
+        "#115: … its finding is the console's validate-range (" +
+        bad.findings.map((f) => f.code).join(", ") + ")");
+  check(bad.findings.some((f) => f.line === 2),
+        "#115: … with main.lua:2 for the dialog's link");
+  await studio.exportToy();
+  const badDialog = studio.exportDialog();
+  check(badDialog && badDialog.phase === "blocked",
+        "#115: the dialog does not build a refused toy");
+  check(badDialog && /This toy can't run on the PC Engine as written yet\.\s+The compiler's findings point at what to change:/
+        .test(badDialog.lead),
+        "#115: … and leads with #87's can't-run sentence (" +
+        JSON.stringify(badDialog && badDialog.lead) + ")");
+  check(badDialog && badDialog.findings.some((f) => f.line === 2),
+        "#115: … with the findings the dialog lists");
+
+  /* the console accepts timer(); route 1's encoder does not */
+  studio.setEditorText("function init()\n  timer(60, function() end)\nend\n" +
+                       "function frame(t, f)\nend\n");
+  const con = studio.console();
+  eq("#115: the timer toy has no console errors", con.errors, 0);
+  const timer = studio.exportAnalysis();
+  check(!timer.ok, "#115: a route-1-refused toy does not export");
+  check(timer.findings.some((f) => /^ilbc-/.test(f.code)),
+        "#115: … and the encoder's refusal is a finding (" +
+        timer.findings.map((f) => f.code).join(", ") + ")");
+  check(/route 1 cannot carry/.test((timer.findings.find((f) =>
+        /^ilbc-/.test(f.code)) || {}).message || ""),
+        "#115: … worded as route 1's refusal, not a compiler bug");
+
+  /* the button's own action in the stub: no fetch, so it ends blocked with
+   * the image finding instead of throwing */
+  studio.loadExample("palette", true);
+  page.dom.get("btn-export").click();
+  await new Promise((resolve) => setImmediate(resolve));
+  const dialog = studio.exportDialog();
+  check(dialog && dialog.phase === "blocked",
+        "#115: the Export button's action reports its state (" +
+        JSON.stringify(dialog && dialog.phase) + ")");
+  check(dialog && dialog.findings.some((f) => f.code === "export-image"),
+        "#115: … naming the interpreter image it could not fetch in the stub");
+  check(studio.exportOpen() === true, "#115: the dialog stays open on that");
+  studio.loadExample("palette", true);
 }
 
 /* ---- 2/3. 40 frames diff 0 against check-toys' expected state ---------- */
@@ -2035,6 +2214,7 @@ const DRIVER_HTML = [
   '<script>',
   '(function () {',
   '  var log = [], failed = 0;',
+  '  var EXPECT = ' + JSON.stringify(EXPORT_EXPECT) + ';',
   '  function ck(ok, name) { log.push((ok ? "PASS " : "FAIL ") + name);',
   '    if (!ok) failed++; }',
   '  function done() {',
@@ -2375,6 +2555,112 @@ const DRIVER_HTML = [
   '    ck(cs.pasteBox().open === false, "the box closes once the toy runs");',
   '    ck(cs.editorText() === beforePaste && cs.lastError() === null,',
   '       "the box\'s code becomes main.lua and runs");',
+  '',
+  '    /* #115 — Export to ROM from the page.  The Export button analyses the',
+  '     * toy with the CONSOLE tab\'s checks, encodes it, fetches renderer/',
+  '     * ilvm.bin over this HTTP origin and downloads a Blob.  The anchor is',
+  '     * intercepted so headless Chrome writes no file; the blob URL is',
+  '     * fetched back and held against Node buildToyRom\'s FNV and length. */',
+  '    var downloads = [];',
+  '    var proto = a.win.HTMLAnchorElement && a.win.HTMLAnchorElement.prototype;',
+  '    if (proto) proto.click = function () {',
+  '      downloads.push({ name: this.download, href: this.href });',
+  '    };',
+  '    function fnv(u8) { var h = 2166136261 >>> 0;',
+  '      for (var i = 0; i < u8.length; i++)',
+  '        h = Math.imul(h ^ u8[i], 16777619) >>> 0; return h >>> 0; }',
+  '    function sameBytes(x, y) { if (x.length !== y.length) return false;',
+  '      for (var i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;',
+  '      return true; }',
+  '    async function exportAndDownload(s, example) {',
+  '      downloads.length = 0;',
+  '      s.loadExample(example, true);',
+  '      var st = await s.exportToy();',
+  '      var link = downloads[0] || null, bytes = null;',
+  '      if (link) bytes = new Uint8Array(await (await a.win.fetch(link.href))',
+  '        .arrayBuffer());',
+  '      return { state: st, link: link, bytes: bytes };',
+  '    }',
+  '    var pex = await exportAndDownload(cs, "palette");',
+  '    ck(pex.state && pex.state.phase === "built",',
+  '       "the Export button builds the palette toy in the page (" +',
+  '       (pex.state && pex.state.phase) + ")");',
+  '    ck(!!pex.link && pex.link.name === "palette-cycle.pce",',
+  '       "the page downloads palette-cycle.pce (" +',
+  '       (pex.link && pex.link.name) + ")");',
+  '    ck(!!pex.bytes && pex.bytes.length === EXPECT.palette.length &&',
+  '       fnv(pex.bytes) === EXPECT.palette.fnv,',
+  '       "the downloaded palette ROM is Node buildToyRom\'s bytes (" +',
+  '       (pex.bytes ? pex.bytes.length : "none") + " B, fnv " +',
+  '       (pex.bytes ? fnv(pex.bytes) : "none") + ")");',
+  '    var pAgain = cs.exportBytes(cs.exportBank0());',
+  '    ck(pAgain.ok && sameBytes(pAgain.bytes, pex.bytes),',
+  '       "the download is the page\'s own exportBytes build");',
+  '    ck(/Built palette-cycle\\.pce/.test(',
+  '         cdoc.getElementById("export-lead").textContent),',
+  '       "the dialog says what it built (" +',
+  '       cdoc.getElementById("export-lead").textContent + ")");',
+  '    ck(/does not meet 60 Hz/.test(',
+  '         cdoc.getElementById("export-route").textContent),',
+  '       "the dialog says route 1 does not meet 60 Hz (" +',
+  '       cdoc.getElementById("export-route").textContent + ")");',
+  '    ck(/Experimental: frame timing is\\s+a static estimate, checked on an\\s+' +
+    'emulator, not on hardware\\./.test(',
+  '         cdoc.getElementById("export-footer").textContent),',
+  '       "the dialog footer is the Experimental static-estimate sentence");',
+  '',
+  '    var xex = await exportAndDownload(cs, "parallax");',
+  '    ck(xex.state && xex.state.phase === "built",',
+  '       "the Export button builds the parallax toy in the page (" +',
+  '       (xex.state && xex.state.phase) + ")");',
+  '    ck(!!xex.link && xex.link.name === "parallax.pce",',
+  '       "the page downloads parallax.pce (" +',
+  '       (xex.link && xex.link.name) + ")");',
+  '    ck(!!xex.bytes && xex.bytes.length === EXPECT.parallax.length &&',
+  '       fnv(xex.bytes) === EXPECT.parallax.fnv,',
+  '       "the downloaded parallax ROM is Node buildToyRom\'s bytes (" +',
+  '       (xex.bytes ? xex.bytes.length : "none") + " B, fnv " +',
+  '       (xex.bytes ? fnv(xex.bytes) : "none") + ")");',
+  '    ck(/Route 1: \\d+ B of IL bytecode/.test(',
+  '         cdoc.getElementById("export-route").textContent),',
+  '       "the dialog names the route and the bytecode (" +',
+  '       cdoc.getElementById("export-route").textContent + ")");',
+  '',
+  '    downloads.length = 0;',
+  '    cs.setEditorText("function frame(t, f)\\n  reg(\\"NOPE\\", 0)\\nend\\n");',
+  '    var bex = await cs.exportToy();',
+  '    ck(bex.phase === "blocked",',
+  '       "a toy the CONSOLE tab refuses does not build (" + bex.phase + ")");',
+  '    ck(downloads.length === 0,',
+  '       "… and downloads nothing (" + downloads.length + ")");',
+  '    ck(/can\'t run on the PC Engine as written yet/.test(',
+  '         cdoc.getElementById("export-lead").textContent),',
+  '       "the dialog leads with the can\'t-run sentence");',
+  '    var fits = cdoc.getElementById("export-findings")',
+  '      .querySelectorAll(".export-finding");',
+  '    ck(fits.length > 0 && /main\\.lua:2/.test(fits[0].textContent),',
+  '       "the findings list carries main.lua:2 (" +',
+  '       (fits[0] && fits[0].textContent) + ")");',
+  '    var flink = fits[0] && fits[0].querySelector("button.export-line");',
+  '    if (flink) flink.click();',
+  '    ck(cs.codeMirror().getCursor().line === 1,',
+  '       "a finding\'s main.lua:2 link moves the editor to line 2 (" +',
+  '       cs.codeMirror().getCursor().line + ")");',
+  '',
+  '    cdoc.getElementById("btn-export").click();',
+  '    await new Promise(function (r) { setTimeout(r, 50); });',
+  '    cs.setEditorText("function init()\\n  timer(60, function() end)\\nend\\n" +',
+  '                     "function frame(t, f)\\nend\\n");',
+  '    var tex = await cs.exportToy();',
+  '    ck(tex.phase === "blocked" && (tex.findings || []).some(function (f) {',
+  '         return /^ilbc-/.test(f.code); }),',
+  '       "route 1\'s encoder refusal is a finding (" +',
+  '       (tex.findings || []).map(function (f) { return f.code; })',
+  '         .join(", ") + ")");',
+  '    cdoc.getElementById("export-done").click();',
+  '    ck(cdoc.getElementById("export-modal").hidden === true,',
+  '       "the Export dialog closes");',
+  '    cs.loadExample("palette", true);',
   '',
   '    done();',
   '  })().catch(function (e) {',
@@ -5961,6 +6247,7 @@ async function main() {
   }
   checkBoot(page);
   checkDocs(page);
+  await checkExport(page);
   checkFortyFrames(page);
   checkIlSwitch(page);
   checkButtons(page);
