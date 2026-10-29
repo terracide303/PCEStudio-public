@@ -1007,6 +1007,8 @@
     WIDTH: WIDTH,
     HEIGHT: HEIGHT,
     PAD_FIELDS: ["up", "down", "left", "right", "i", "ii", "select", "run"],
+    /* the chunk installed before the toy, for the generated name list (#87) */
+    PRELUDE: PRELUDE,
     BUDGET_MS: DEFAULT_BUDGET_MS,
     HOOK_COUNT: HOOK_COUNT,
     PASSWORD: PASSWORD,

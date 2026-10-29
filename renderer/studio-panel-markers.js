@@ -18,6 +18,41 @@
     register: function (studio) {
       var markers = [];
 
+      /* #87 — ppu.toys' "Go to marker" control: a select above the scrubber
+       * that pauses and seeks to the chosen marker, then falls back to the
+       * placeholder so the same marker can be chosen again. It is disabled
+       * with no markers, exactly as theirs is. */
+      function drawGoTo() {
+        var sel = studio.$("go-marker");
+        if (!sel) return;
+        while (sel.firstChild) sel.removeChild(sel.firstChild);
+        var ph = studio.document.createElement("option");
+        ph.value = "";
+        ph.textContent = "Choose marker…";
+        sel.appendChild(ph);
+        for (var i = 0; i < markers.length; i++) {
+          var f = markers[i];
+          var opt = studio.document.createElement("option");
+          opt.value = String(f);
+          opt.textContent = "frame " + f + " · " + (f / 60).toFixed(2) + "s";
+          sel.appendChild(opt);
+        }
+        sel.disabled = markers.length === 0;
+        sel.value = "";
+      }
+
+      function goToMarker(value) {
+        var f = Number(value);
+        if (!String(value) || !isFinite(f)) return;
+        for (var i = 0; i < markers.length; i++) {
+          if (markers[i] === f) {
+            studio.render.pause();
+            studio.render.seek(f);
+            return;
+          }
+        }
+      }
+
       function draw() {
         var host = studio.$("marker-list");
         while (host.firstChild) host.removeChild(host.firstChild);
@@ -36,6 +71,7 @@
             host.appendChild(b);
           })(m);
         }
+        drawGoTo();
       }
 
       function addMarker() {
@@ -50,6 +86,12 @@
 
       if (studio.$("btn-addmarker"))
         studio.$("btn-addmarker").addEventListener("click", addMarker);
+      if (studio.$("go-marker"))
+        studio.$("go-marker").addEventListener("change", function (e) {
+          var sel = (e && e.target) || studio.$("go-marker");
+          goToMarker(sel.value);
+          sel.value = "";
+        });
       draw();
 
       studio.panels.register({

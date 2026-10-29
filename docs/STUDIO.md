@@ -26,7 +26,7 @@ Dennis's 2026-10-28 update allows taking them with credit. The credit comment is
 
 | ppu.toys source (URL) | what was adapted | where it lives |
 |---|---|---|
-| `https://ppu.toys/assets/App-6Y57MjOu.css` | the design tokens (`--bg`, `--panel`, `--panel2`, `--editor`, `--line`, `--txt`, `--orange`, the IBM Plex / Pixelify Sans font stacks, radii, 50 px toolbar), and the rules for the toolbar, file tabs, dock tabs, buttons, chips, layout menu, settings panel, scrollbars, and the docs page (hero, kicker, search box, chapter map, sticky TOC, chapter cards, tables, code blocks) | the `<style>` in `renderer/studio.html`, plus `DOCS_IFRAME_CSS` injected into the docs panel's iframe |
+| `https://ppu.toys/assets/App-6Y57MjOu.css` | the design tokens (`--bg`, `--panel`, `--panel2`, `--editor`, `--line`, `--txt`, `--orange`, the IBM Plex / Pixelify Sans font stacks, radii, 50 px toolbar), and the rules for the toolbar, file tabs, dock tabs, buttons, chips, layout menu, settings panel, scrollbars, the docs page (hero, kicker, search box, chapter map, sticky TOC, chapter cards, tables, code blocks), the output frame box (`.display`/`.display-frame`, #87) and the agent panel's pre-connection state (`.agent-panel`/`.agent-head`/`.agent-intro`/`.agent-connect`, #87) | the `<style>` in `renderer/studio.html`, plus `DOCS_IFRAME_CSS` injected into the docs panel's iframe |
 | `https://ppu.toys/docs` | the docs page's region order — kicker → big display title → intro → search → two-column chapter map (numbered) → sticky chapter nav → chapter cards — and the search-filter behaviour | the docs panel's injected markup and script in `renderer/studio.html` |
 | `https://ppu.toys/studio` | the region layout, panel strip, toolbar order, transport/scrubber and shortcuts that this page mirrors (the study in §2–§5); no markup is copied from this page, the CSS above is the shared source | `renderer/studio.html`; this document |
 | `https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Pixelify+Sans:wght@600&display=swap` | the font families and loading URL ppu.toys uses (Google Fonts, not a ppu.toys file) | `<link>` in `studio.html` and in the docs iframe; system-font fallbacks keep the page usable offline |
@@ -161,6 +161,7 @@ and our scrubber row is much shorter than their timeline block, so our drawer st
 | resolution | `renderer/pce-bg.js`'s own `DOT_CLOCK` / `frameWidth`: 256 / 341 / 512 dots for VCE CR DCC `00` / `01` / `10` (#27). The live toy host is fixed at 256×224, so it reads `256×224`; the mapping is the renderer's, and the label's tooltip names the dot clock | `pce-bg.js` |
 | counter / length | the scrubber's max is `Length − 1`; a seek clamps to it, a shortened length moves the playhead inside it, and playback stops on the last frame | page |
 | markers | `Add marker at frame N` records the current frame; each marker is a button that pauses and seeks to it | page |
+| Go to marker | a select above the scrubber listing every marker as `frame N · 0.12s`; choosing one pauses and seeks, then the select falls back to `Choose marker…` so the same marker can be chosen again; disabled with no markers | page, ppu.toys' `.timeline-controls` |
 | pad keys | with the canvas focused: IJKL = D-pad, N/M = I/II, O = Select, P = Run (pad 1). The page-wide Space/R shortcuts do not consume them | page, §5.2 |
 
 **Where ours deliberately differs.** No account/publishing controls (there is no backend); `Run` and
@@ -168,6 +169,23 @@ and our scrubber row is much shorter than their timeline block, so our drawer st
 comparison; the dock has eight PCE panels rather than eleven SNES panels (§3); `Lua / IL` replaces
 `Lua / Cart` because the compiler's IR exists (#31) and machine code does not; `Length` is frames because our
 toy clock is `t = f/60` and a seek replays deterministically.
+
+**The output is scaled like theirs (#87).** ppu.toys puts the canvas in a `.display` box whose
+`.display-frame` is `width: min(100cqw, calc(100cqh * 8 / 7))` with `aspect-ratio: 8 / 7`, the canvas
+filling it at `100%` with `image-rendering: pixelated`, and its JS resizes the backing store to the client
+rectangle. `studio.html` uses that rule in its own names: `.canvas-wrap` is the size container,
+`.display-frame` takes the largest box of the frame's aspect that fits, and `#out` fills it with no
+`object-fit` and no 10 px padding. The one difference is the PC Engine's dot clock: ppu.toys' ratio is fixed
+at 8:7; ours reads `--frame-w`/`--frame-h` from the frame `paint()` receives, so a 341- or 512-dot frame
+(#27) gets its own ratio instead of being letterboxed into 256:224. Measured in headless Chrome at
+1600×1000: the frame box is 466×408 px in a 580×460 content box, i.e. `min(580, 460*256/224) = 466.3`.
+
+**The AGENT drawer's text and Sign-in placeholder (#87).** The drawer is ppu.toys' pre-connection
+`.agent-panel` state in this page's tokens: a status dot, `NOT CONNECTED`, the intro paragraph and the
+`Sign in` pill. The text names what PCEStudio actually has — card #36's local MCP server,
+`tools/mcp/server.js` — and keeps ppu.toys' sentence ("Your agent signs in as you, so sign in first"); the
+button is a placeholder that says accounts and publishing are #37 and the local server needs no account.
+The live link into this tab is #104.
 
 ---
 
@@ -1127,3 +1145,12 @@ the served bundle (§3.4), which is a source, not a pixel match.
   make Save write only `main.lua`, stop autosaving, break a shortcut — and for #78 the output column: stop
   masking the hidden layer, write CR in view-only, break the resolution table, make a marker not seek, let
   the length run past its max, or drop a pad key, and the check must catch each.
+* **#87's four parity details are measured in a scratch driver, not yet in the suite.** The `pceglobals.lua`
+  tab (its content, its read-only state, Save never writing it into a toy file, switching back), Go to
+  marker (options, seek-and-pause, the reset, disabled with no markers), the AGENT panel's text and Sign-in
+  placeholder, and the frame box's scaling were measured with a one-off headless-Chrome driver over the
+  served page — 31 checks, all PASS — and with the screenshots `$TMPDIR/pce87/ours-studio-87.png`,
+  `ours-agent-87.png` and `ours-globals-87.png`; the driver is scratch and is not committed. No check in
+  `tests/check-studio.js` covers them yet, and a cold break by another seat (rule 2) is owed: remove the
+  tab, make it editable, drop the `showingGlobals` guards, break the select's seek or its reset, or reduce
+  the frame box to `object-fit: contain`, and the checks must catch each.
