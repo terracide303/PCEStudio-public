@@ -89,6 +89,7 @@ These are the names and ranges the runtime enforces. A value past a range is ref
 | sprite(i, spec) | composes SAT entry i from a table {x, y, pattern, palette, spbg, cgx, hflip, cgy, vflip} | x 0..1023, y 0..1023, pattern 0..1023, palette 0..15, cgy 0..3, the rest true/false; sprite-range |
 | raster(line, spec) | registers one line's entry: {bxr, byr, cr, cram = {{addr, word}, ...}} | line 0..223; one entry per line and at most 64 colour writes on it; raster-line, raster-line-full |
 | pad[n].<button> | controller n, read-only, refreshed before frame() | n 1..5; up, down, left, right, i, ii, select, run |
+| note(name or MIDI) | the PSG's 12-bit F divider for a note name (Lua only) or a MIDI number (both runtimes); feed it to sfx() | a MIDI number 0..127; the result is clamped to 0..4095, and the IL carries no strings so a cartridge uses the number |
 | music(index) | plays song index from the start — the whole engine restarts, as HuTrack's playSong does | an index into the songs the runtime was given (0..songs-1) |
 | sfx(channel, freq, volume, frames) | takes the channel (HuTrack's reserve), loads a 32-step square, sets F = freq and AL = volume, and gives it back after frames | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 |
 | release(channel) | gives a channel back now (HuTrack's release): control and noise off, and the music waits for a fresh note on it | channel 0..5; a channel no SFX owns is left alone |
@@ -98,11 +99,11 @@ These are the names and ranges the runtime enforces. A value past a range is ref
 
 Defaults: the screen starts with a blank VDC — 256 x 224, MWR 0 (a 32 x 32 BAT), BXR = BYR = 0, CR = 0x80 (background on, sprites OFF), and every VRAM, CRAM and SAT word zero. That last default is why a sprite does not appear until reg("CR", 0xC0).
 
-Keyboard: pad 1 is IJKL (I up, J left, K down, L right) with N and M as the I and II buttons, O Select and P Run, after a click on the picture. Pad[2]..pad[5] exist for a multitap and are not driven by the studio's keyboard.
+Keyboard: the studio's keys are I/J/K/L for the D-pad directions up/left/down/right, N and M for the two fire buttons, O for Select and P for Run, after a click on the picture. A pad FIELD names a pad BUTTON, and a button's name is not always its key: pad[1].i is the I button, pressed with keyboard key N, while pad[1].up is the Up direction, pressed with keyboard key I. So never tell the person to "press I": say "the I button (key N)" or "Up (key I)". Pad[2]..pad[5] exist for a multitap and are not driven by the studio's keyboard.
 
 ## 5. A complete first program
 
-This file is complete and runs as it is. Copy it whole, then change one thing at a time. puttile writes a background character and putsprite writes a 16 x 16 sprite pattern; both encode the hardware's bitplane layout, which is the part first toys get wrong.
+This file is complete and runs as it is. Copy it whole, then change one thing at a time. puttile writes a background character and putsprite writes a 16 x 16 sprite pattern; both encode the hardware's bitplane layout, which is the part first toys get wrong. It is also inside the cartridge subset: the sprite is placed with four sat() words because sprite(i, spec) takes a table, and the console back end cannot lower tables (section 8).
 
 ```lua
 -- main.lua — one 16x16 sprite you can move, on a solid field.
@@ -128,7 +129,7 @@ end
 
 -- A sprite pattern is 64 VRAM words, NOT a background character: pattern p
 -- starts at word p*64, plane n at p*64 + n*16 + row, leftmost pixel in bit
--- 15.  This is the layout #90 found written the wrong way.
+-- 15.  This is the layout section 7.1 describes getting wrong.
 local function putsprite(pattern, fn)
   for row = 0, 15 do
     local p0, p1, p2, p3 = 0, 0, 0, 0
@@ -177,7 +178,13 @@ function frame(t, f)
   if sx > 32 + 240 then sx = 32 + 240 end
   if sy < 64 then sy = 64 end
   if sy > 64 + 208 then sy = 64 + 208 end
-  sprite(0, { x = sx, y = sy, pattern = 0x100, palette = 0 })
+  -- SAT entry 0 is four words: Y, X, pattern<<1, palette | flags.  Written
+  -- with sat() because sprite(0, { ... }) takes a table, which the console
+  -- export cannot lower (section 8); sat() is the same four hardware words.
+  sat(0, 0, sy)               -- Y
+  sat(0, 1, sx)               -- X
+  sat(0, 2, 0x100 << 1)       -- pattern 0x100, the SAT stores it shifted
+  sat(0, 3, 0)                -- palette 0, no flips
 end
 
 ```
@@ -191,7 +198,7 @@ Five complete toys, each one classic effect and the trick that makes it. They ar
 ### Line-scroll parallax — four bands, four BXR values (toys/parallax.lua)
 
 ```lua
--- parallax.lua — line-scroll parallax (card #29).
+-- parallax.lua — line-scroll parallax.
 --
 -- THE TRICK: the PC Engine has no HDMA, so a horizontal offset that differs
 -- per line of the picture is made by letting the RCR line interrupt write
@@ -276,9 +283,14 @@ end
 function raster(line)
   -- Line 0 must restate the top value: the table's frame-start latch takes
   -- the last band's BXR, so the first band has to write its own.
-  if line == 0 then reg("BXR", g_f // 8) end
-  if line == BAND_H then reg("BXR", g_f // 2) end
-  if line == BAND_H * 2 then reg("BXR", g_f) end
+  --
+  -- BXR is 10 bits (0..1023): a value that grows with the frame number must
+  -- be wrapped, or the host refuses it (reg-range) after a couple of minutes
+  -- — the near band reaches 1024 at frame 1024.  `% 1024` keeps every band
+  -- scrolling forever; the picture repeats, the crash does not happen.
+  if line == 0 then reg("BXR", (g_f // 8) % 1024) end
+  if line == BAND_H then reg("BXR", (g_f // 2) % 1024) end
+  if line == BAND_H * 2 then reg("BXR", g_f % 1024) end
   if line == BAND_H * 3 then reg("BXR", (g_f * 2) % 1024) end
 end
 
@@ -287,7 +299,7 @@ end
 ### A sky gradient — the palette moves, not the tiles (toys/sky-gradient.lua)
 
 ```lua
--- sky-gradient.lua — a vertical sky gradient with no gradient tiles (card #29).
+-- sky-gradient.lua — a vertical sky gradient with no gradient tiles.
 --
 -- THE TRICK: the VCE colour table can be rewritten during the frame, and a
 -- write made in the horizontal blanking before line L shows on line L.  So
@@ -381,7 +393,7 @@ end
 ### A pseudo-3D road — BYR picks a row, BXR bends it (toys/road.lua)
 
 ```lua
--- road.lua — a pseudo-3D road from three per-line registers (card #29).
+-- road.lua — a pseudo-3D road from three per-line registers.
 --
 -- THE TRICK: there is no 3D hardware, only a scrolling tilemap and the RCR
 -- interrupt.  Each of the three things it writes per line does one job:
@@ -530,7 +542,7 @@ end
 ### A fixed status bar — an RCR split at line 24 (toys/status-bar.lua)
 
 ```lua
--- status-bar.lua — a fixed status bar over a scrolling playfield (card #29).
+-- status-bar.lua — a fixed status bar over a scrolling playfield.
 --
 -- THE TRICK: the RCR line interrupt fires on any line you choose.  Write the
 -- scroll registers on line 0 (BXR = BYR = 0) and again on line 24 (the
@@ -648,7 +660,7 @@ end
 ### Palette cycling — water and fire by rotating colours (toys/palette-cycle.lua)
 
 ```lua
--- palette-cycle.lua — water and fire by rotating palette entries (card #29).
+-- palette-cycle.lua — water and fire by rotating palette entries.
 --
 -- THE TRICK: a tilemap pixel names a palette entry, and the palette is 512
 -- words in a table the CPU can rewrite at any time.  Rotating the colours
@@ -735,7 +747,7 @@ end
 
 ### 1. A sprite pattern is not a background tile
 
-The BAT addresses a tile with 16 VRAM words (vram[char * 16 + row]). The SAT addresses a sprite pattern with 64 words: pattern p starts at word p * 64, plane n at p * 64 + n * 16 + row, and bit 15 of a plane word is the strip's left pixel. Writing vram[p * 16 + row] for a sprite leaves the pattern the SAT reads empty, so the sprite is invisible even though the code "wrote a pattern". Use the putsprite helper in section 5 (this is #90). Keep the pattern number below 512: 512 x 64 words is all of VRAM.
+The BAT addresses a tile with 16 VRAM words (vram[char * 16 + row]). The SAT addresses a sprite pattern with 64 words: pattern p starts at word p * 64, plane n at p * 64 + n * 16 + row, and bit 15 of a plane word is the strip's left pixel. Writing vram[p * 16 + row] for a sprite leaves the pattern the SAT reads empty, so the sprite is invisible even though the code "wrote a pattern". Use the putsprite helper in section 5. The hardware does not check where a pattern lives, so the usable numbers are set by the two tables it must not overwrite: in the default layout the BAT owns VRAM words 0..1023 (patterns 0..15) and the SAT owns $7F00..$7FFF (patterns 508..511). A sprite pattern is therefore 16..507 — and your background tiles share that space, because character 0x40 starts at word 0x400 (pattern 16), so keep tiles and patterns apart: the starter uses tile 0x40 and sprite pattern 0x100.
 
 ### 2. Colour 0 is the backdrop, and sprite colour 0 is transparent
 
@@ -755,7 +767,7 @@ The per-line handler journals registers and palette writes. A VRAM or SAT write 
 
 ### 6. A pad is a held state, not an event
 
-pad[1].i is true for every frame the button is held. If an action should fire once, remember the previous frame: `if pad[1].i and not was_i then ... end; was_i = pad[1].i`.
+pad[1].i is true for every frame the I button is held — the I BUTTON, keyboard key N; pad[1].up is the Up direction, key I. Name which you mean. If an action should fire once, remember the previous frame: `if pad[1].i and not was_i then ... end; was_i = pad[1].i`.
 
 ### 7. Integers, not fractions
 
@@ -779,7 +791,7 @@ The studio's Check compiles the file through PCEStudio's IL, the same intermedia
 
 - No string used as a value. A string is allowed as reg's name and in print, not in a variable.
 
-- Tables: the IL reads them back (t[i], t.x), but pce-cgen, the console back end, does not lower tables at all (cgen-op), so a toy with a table read runs in the browser and will not export. The worked examples fill a table with constants and do not read it back; keep to that if the person wants a cartridge.
+- Tables: the IL reads them back (t[i], t.x), but pce-cgen, the console back end, does not lower tables at all (cgen-op), so a toy with a table read runs in the browser and will not export. sprite(i, spec) is a table too: place sprites with sat() words (section 5) when the toy must export. The worked examples fill a table with constants and do not read it back; keep to that if the person wants a cartridge.
 
 - No method calls (:), no varargs (...), no pairs/ipairs, and no multiple return values. Use for i = a, b, step do and plain functions.
 
@@ -789,7 +801,7 @@ The refused constructs come back by code (il-syntax, il-op, il-string, il-mixed,
 
 ## 9. When it goes wrong
 
-Every refusal is a named failure, not a silent drop: the studio shows `code: file:line: message` (or the error line under the picture). Read the code first, then the line, then fix the value or the construct. The codes a first toy meets:
+Every refusal is a named failure, not a silent drop: the studio shows `code: file:line: message` (or the error line under the picture). Read the code first, then the line, then fix the value or the construct. The codes a first toy meets, and the ones its cartridge export can raise:
 
 | code | meaning |
 | --- | --- |
@@ -802,11 +814,15 @@ Every refusal is a named failure, not a silent drop: the studio shows `code: fil
 | raster-line | a raster line outside VDW 0..223 |
 | raster-line-full | a second raster entry on one line, or too many colour writes on it |
 | pad-range | a pad number outside 1..5 |
+| il-pad-write | writing a pad table |
 | music-range | a song index outside the songs the runtime was given |
 | sfx-range | an SFX channel, frequency, volume or length outside its range |
 | no-psg | the PSG model or the song player is not loaded, so no toy can make sound |
 | password-value | a save value that cannot be packed |
 | password-code | a password that is not one |
+| tile-space | no room for another tile: the ROM layout gives 1536, or the patterns would reach the SAT |
+| validate-rom | an estimated ROM past the HuCard's 1 MB |
+| cgen-op | an IL instruction this backend has no C lowering for (tables, sprite(), fixed point, some builtins) |
 | toy-timeout | a toy hook past the frame's Lua budget |
 | toy-error | a Lua error inside the toy, naming file:line |
 | il-syntax | Lua's own compile error, with file:line |
@@ -840,7 +856,8 @@ State is ordinary Lua globals and persists across frames. A frame is determinist
 
 ```lua
 function frame(t, f)
-  reg("BXR", floor(t * 32))
+  -- f is an integer frame count; BXR is 10 bits, so wrap it
+  reg("BXR", (f * 2) % 1024)
 end
 
 function raster(line)
@@ -860,9 +877,10 @@ A toy may set three VDC registers with reg(name, value). The value must be a who
 
 ```lua
 function frame(t, f)
-  reg("BXR", 64 + floor(32 * sin(t)))
-  reg("BYR", 0)
-  reg("CR", 0x80 | 0x40)
+  -- whole numbers only: f, never t or sin(), and a wrap for BXR
+  reg("BXR", (f * 2) % 1024)
+  reg("BYR", (f // 2) % 512)
+  reg("CR", 0xC0)
 end
 ```
 
@@ -890,6 +908,8 @@ end
 ### 10.4 Sprites and the SAT
 
 The sprite attribute table holds 64 entries of 4 words each, at VRAM $7F00. sprite(i, spec) fills entry i from a table; sat(i, k, v) writes one raw word. An entry index outside 0..63 is sat-range (sprite-range for the composed form), and so is a field outside its width.
+
+The hardware does not police where a pattern lives, so the usable numbers are set by the two tables a pattern must not overwrite. In the default layout the BAT owns VRAM words 0..1023 (patterns 0..15) and the SAT owns $7F00..$7FFF (patterns 508..511). A sprite pattern is therefore 16..507, and the background tiles share that region — character 0x40 starts at word 0x400, which is pattern 16 — so keep the two apart (the starter uses tile 0x40 and pattern 0x100).
 
 | word | field |
 | --- | --- |
@@ -922,8 +942,9 @@ Per display line the VDC collects at most 16 strips of 16 pixels (256 pixels) in
 
 ```lua
 function init()
-  sprite(0, { x = 32, y = 64, pattern = 0, palette = 1 })
-  sprite(1, { x = 80, y = 64, pattern = 0, palette = 2, hflip = true })
+  reg("CR", 0xC0)   -- sprites start OFF; without this they never show
+  sprite(0, { x = 32, y = 64, pattern = 16, palette = 1 })
+  sprite(1, { x = 80, y = 64, pattern = 16, palette = 2, hflip = true })
 end
 ```
 
@@ -959,16 +980,18 @@ end
 
 pad[n] is controller n, 1..5. A pad is 2-button: the D-pad, I, II, Select and Run — 8 read-only booleans, refreshed before frame(). Five pads is the multitap; pad 1 is the console's own port.
 
-| field | the button |
-| --- | --- |
-| pad[n].up | Up |
-| pad[n].down | Down |
-| pad[n].left | Left |
-| pad[n].right | Right |
-| pad[n].i | I |
-| pad[n].ii | II |
-| pad[n].select | Select |
-| pad[n].run | Run |
+| field | the pad button | keyboard key |
+| --- | --- | --- |
+| pad[n].up | Up | I |
+| pad[n].down | Down | K |
+| pad[n].left | Left | J |
+| pad[n].right | Right | L |
+| pad[n].i | I | N |
+| pad[n].ii | II | M |
+| pad[n].select | Select | O |
+| pad[n].run | Run | P |
+
+The field names the pad BUTTON, and the button's name is not always its key's: pad[n].i is the I button, which the keyboard presses with key N, while pad[n].up is the Up direction, which the keyboard presses with key I. Say which one you mean — "the I button (key N)" or "Up (key I)" — never just "press I".
 
 A pad is true while its button is held, not only on the frame it goes down; remember the previous frame when an action should happen once. Writing a pad field is refused (il-pad-write in the IL; the Lua table is read-only).
 
@@ -983,7 +1006,7 @@ end
 
 ### 10.7 Passwords
 
-A bare HuCard has no save memory, so a toy saves with a password (Dennis, 2026-10-28). password.pack(value) turns a value into a short code starting P1 (base32 alphabet, then a check byte) and password.unpack(code) returns it; a mistyped or foreign code is password-code.
+A bare HuCard has no save memory, so a toy saves with a password. password.pack(value) turns a value into a short code starting P1 (base32 alphabet, then a check byte) and password.unpack(code) returns it; a mistyped or foreign code is password-code.
 
 A value is nil, a boolean, an integer, a string, or a table with number or string keys. Every cap is a maximum the round trip holds to; one past it is refused naming the edge, never truncated.
 
@@ -996,10 +1019,12 @@ A value is nil, a boolean, an integer, a string, or a table with number or strin
 | the value's bytes | 96, before the check byte | password-value |
 | the whole code | 200 characters | password-code |
 
-The integer cap is 2^30, not the VM's full 32-bit range: an integer is 32 bits and the zig-zag encoding spends one bit on the sign, so a magnitude of 2^30 doubles to 2^31 and would wrap (card #73).
+The integer cap is 2^30, not the VM's full 32-bit range: an integer is 32 bits and the zig-zag encoding spends one bit on the sign, so a magnitude of 2^30 doubles to 2^31 and would wrap.
 
 ```lua
-function frame(t, f)
+function init()
+  -- once, not every frame: print() adds a log line and the log
+  -- keeps only 200 lines
   local code = password.pack({ high = 1200, level = 3 })
   print(code)
 end
@@ -1009,12 +1034,15 @@ end
 
 The HuC6280 PSG has 6 channels, each a 32-step waveform of 5-bit samples (0..31), plus noise on channels 4 and 5 and an LFO. The model is renderer/pce-psg.js, a literal transcription of Mednafen's pipeline at 44100 Hz.
 
-A toy reaches it three ways. music(index) plays a song the runtime was given — a module read by the tracker route (renderer/pce-dmf.js, renderer/pce-song.js), whose writes are the ones HuTrack's engine makes, one VBlank per frame. sfx(channel, freq, volume, frames) takes a channel from the music the way HuTrack reserves one, loads a 32-step square, sets F and AL, and gives the channel back after frames frames. release(channel) gives a channel back now.
+music(index) plays a song from the list the runtime was given — a module read by the tracker route (renderer/pce-dmf.js, renderer/pce-song.js), whose writes are the ones HuTrack's engine makes, one VBlank per frame. A toy pasted into the studio gets no such list: the studio builds its runtime without songs, so music(0) there is music-range, and music() is not how a first toy gets sound. Use sfx() and note() instead; music() is for a runtime a page hands a song list.
+
+sfx(channel, freq, volume, frames) takes a channel from the music the way HuTrack reserves one, loads a 32-step square, sets F and AL, and gives the channel back after frames frames. release(channel) gives a channel back now. If the page did not load the PSG model or the song player, a sound call is no-psg.
 
 A release does not resume the middle of a held note: the music waits for the next note row on that channel, and that fresh note reloads the instrument's waveform (all 32 steps) even when it has not changed — HuTrack's channel hand-off. The writes go to renderer/pce-psg.js in the frame's order, so a toy's sound is the model's own PCM.
 
 | call | what it does | limits and refusal |
 | --- | --- | --- |
+| note(name or MIDI) | the PSG's 12-bit F divider for a note name (Lua only) or a MIDI number (both runtimes); feed it to sfx() | a MIDI number 0..127; the result is clamped to 0..4095, and the IL carries no strings so a cartridge uses the number |
 | music(index) | plays song index from the start — the whole engine restarts, as HuTrack's playSong does | an index into the songs the runtime was given (0..songs-1) |
 | sfx(channel, freq, volume, frames) | takes the channel (HuTrack's reserve), loads a 32-step square, sets F = freq and AL = volume, and gives it back after frames | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 |
 | release(channel) | gives a channel back now (HuTrack's release): control and noise off, and the music waits for a fresh note on it | channel 0..5; a channel no SFX owns is left alone |
@@ -1035,11 +1063,8 @@ A release does not resume the middle of a held note: the music waits for the nex
 F is the PSG's 12-bit divider, so a note's F is 7,159,090 / (64 f). note(name or MIDI) returns it — a name in Lua, a MIDI number in both runtimes (the IL carries no strings).
 
 ```lua
-function init()
-  music(0)                        -- the song the page was given
-end
-
 function frame(t, f)
+  -- pad[1].ii is the II BUTTON, pressed with keyboard key M
   if pad[1].ii then sfx(3, note(76), 24, 10) end
 end
 ```
@@ -1080,6 +1105,6 @@ Ask what they see. You are done when the picture on their screen is the one they
 
 ---
 
-Generated by node tools/docs.js --claude: the API chapters from renderer/pce-docs.js (#61), which reads every range and refusal out of the module that enforces it; the examples from toys/. Do not edit this file by hand — tests/check-guide.js regenerates it and fails on a hand-written number.
+Generated by node tools/docs.js --claude: the API chapters from renderer/pce-docs.js, which reads every range and refusal out of the module that enforces it; the examples from toys/. Do not edit this file by hand — tests/check-guide.js regenerates it and fails on a hand-written number.
 
-Sources: renderer/pce-toyhost.js, renderer/pce-editor.js, renderer/pce-toys.js, renderer/pce-il.js, renderer/pce-psg.js, renderer/pce-song.js, renderer/pce-guide.js, toys/*.lua.
+Sources: renderer/pce-toyhost.js, renderer/pce-editor.js, renderer/pce-toys.js, renderer/pce-il.js, renderer/pce-psg.js, renderer/pce-validate.js, renderer/pce-cgen.js, renderer/pce-song.js, renderer/pce-guide.js, toys/*.lua.
