@@ -681,6 +681,59 @@ exercised by the LAYERS checks, so the per-line CR gating in a preview is the mo
 capture. The fade is one step per frame, not a duration in seconds.
 
 
+### 3.9 AUDIO as a mixer (#97)
+
+ppu.toys' AUDIO panel is the working example (shown to us on 2026-10-29; recorded on #97 in
+`docs/PLAN.md`): "The sound chip", a song and a play button, `LIVE MIX` with Release all / Load saved /
+Save mix, one row per voice, a VOICE detail with Trigger / Release / Reset and tabs, master and echo, a
+"Master registers & echo" fold, and `Sound RAM · N B free · mix saves with the toy`. This is that shape
+for the HuC6280 PSG. The differences are the chip's, and the panel prints them instead of hiding them:
+
+| ppu.toys (AUDIO, from the card's reading of it) | `studio.html`'s AUDIO panel |
+|---|---|
+| eight sample voices with echo and a mixer | **six** PSG voices. No sample engine and no echo register; the fold carries the card's own line — "The PC Engine PSG has no echo; fake it with a second, later, quieter voice" |
+| a sample picker per voice | a **mode** picker: `wave` (the 32-step 5-bit wave, R6), `noise` (channels 5-6 only, R7 — greyed on the other four, and refused `noise-channel` rather than dropped, which is what the chip does), `dda` (R4 bit 6, R6 holds one level) |
+| a waveform picture per voice | the 32 steps drawn as a mini picture per row; the selected voice's wave is **#62's editor inline** (click a column to set its value, the seven shapes from `PRESETS`) |
+| an ADSR envelope meter 0/127 | a **level meter** per side that is the PSG's own attenuation — `pce-psg.js`'s `getVL` reduction and its `2^(-vl/4)` dB table, exported for this — and an envelope tab that is the **driver's** R4 sequence, because the PSG has no hardware ADSR |
+| volume trim L/R in dB | volume AL 0-31 (R4) and balance L 0-15 / R 0-15 (R5); the meter's dB is that PSG arithmetic, and `check-studio.js` measures it against the rendered PCM |
+| pitch with −/+ | the 12-bit frequency word (R2 LSB, R3 high nibble) **and** the note it makes (`fMASTER/(64*F)`, PB-3): A4 is F 254, and −/+ step one semitone |
+| echo send, M, S | M (mute) and S (solo) — a muted voice is R4 bit 7 clear, and while any voice is soloed the others are too. Echo is the honest line instead |
+| VOICE detail: Trigger / Release note / Reset voice, tabs envelope/sample/advanced (Attack/Decay/Sustain/Rate) | Trigger / Release note / Reset voice, and tabs **wave / envelope / LFO / registers**. LFO is the PSG's one: channel 2 is the carrier and modulates channel 1's frequency (R8 rate, R9 LFCTL depth, and R9's bit-7 strobe) |
+| Master and Echo sliders | **Master** L/R: R1's two 4-bit levels, the one master volume the chip has |
+| `Sound RAM · N B free · mix saves with the toy` | `DDA sample bytes in the ROM · N B · the mix saves with the toy (waves.json)`. The PCE has no sample RAM: a DDA sample is one byte per step in the ROM, so that is what is counted, and the mix is the toy's `waves.json` |
+
+**One generator, one meter, one file.** `renderer/pce-mix.js` is the model. It does not keep a second
+copy of the PSG: `soundOf()` folds the mix into `renderer/pce-wave.js`'s document (mute and solo into the
+channel's on bit, DDA into the held level, noise into R7) and the register writes come out of that
+module's own `instructions()`, so the mixer and #62's wave editor cannot disagree about what a write is —
+`check-studio.js` asserts the two streams are identical. The panel's edits go through the model's
+refusals (`mode-range`, `env-range`, `dda-range`, `waves-json`, `mix-voices`) and `pce-wave.js`'s
+(`wave-step`, `wave-range`, `freq-range`, `al-range`, `balance-range`, `noise-channel`, `noise-range`,
+`lfo-range`, `channel-range`). The mix is written to `waves.json` only, through the page's
+`writeWavesAssets` (the same `syncFiles` contract `pce-palettes.js` and `pce-sat.js` follow), so the
+other panels' files are never rewritten.
+
+**Live from the toy.** #71's host records every PSG write a toy makes as `{f, t, reg, value}` —
+`pce-psg.js`'s own event shape. `pce-mix.js`'s `fromEvents()` replays that stream into the mixer's view,
+and the panel shows it in the header ("live toy: N PSG writes, frame F") and renders the PCM from the
+same events, so what the panel says the toy is doing and what it sounds like are one source. The page
+loads `renderer/pce-song.js` for it: the toy host resolves the song player through that file, and
+without it a toy's `sfx()` is refused `no-psg`. That is the one page change this card needed outside its
+own panel, and it is what makes "live from `pce-psg.js` while a toy plays" true rather than aspirational.
+
+**Evidence.** `tests/check-studio.js` adds `checkAudioPanel` (+134 checks): every control is driven
+through the panel's API and checked twice — the register words and the PCM. AL 31→10 moves R4 `$9F`→`$8A`
+and the meter says −31.61 dB where the rendered PCM measures −31.61; balance `$F0` is heard on the left
+and not the right; the master is R1; A4 is F 254 and C4 is F 428; `+` steps a semitone and raises the
+pitch *downward* in F, as a divider does; noise writes R7 `$8F` on voice 5 and is refused on voice 1;
+DDA sets R4 bit 6, writes no 32-step wave, and its held level is the one R6 write; M writes R4 `$00` and
+S leaves one voice on; the LFO writes R8 and R9's strobe and forces channel 2 to `$80`; the envelope is
+7 R4 values for attack 4 / decay 2; Trigger and Release are the R4 writes the driver makes and Release
+ends at `$00`; a wave edit reaches R6; `waves.json` round-trips byte for byte and a hand-written one is
+read back; a broken one is `waves-json` and is not written over; and a running toy's writes reach the
+panel through `audioLive()`, decoded onto the voice the toy used, with the PCM rendered from the same
+events. The `--browser` run is not extended for this panel; the screenshot below is.
+
 ## 4. The Docs panel (the generated #61 reference)
 
 The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel under the top bar:
@@ -1179,6 +1232,20 @@ pointer/mouse events **at the DOM** of their page — no keyboard or mouse event
 the one capture in this document made that way, and it is named here rather than implied). No pixel
 comparison between the two pictures is claimed: the panels are different by design.
 
+**#97's AUDIO panel.** `$TMPDIR/pce97-shots/ours-audio-97.png` (1600×1000) is headless Chrome's command
+line on `renderer/studio.html?panel=audio&demo=palette&frame=30&paused=1`, no synthetic input — the
+`?panel=` trick §1 describes. What it shows: the dock tab strip with `AUDIO` selected, the gloss line
+"Six PSG voices — wave, noise or DDA — with a meter the PCM agrees with; the mix saves as waves.json",
+`THE SOUND CHIP · six PSG voices · 32-step 5-bit waves · no sample playback, no echo` with `▶ Play mix` /
+`■ Stop`, the `LIVE MIX` row (`Release all`, `Load saved`, `Save mix`), the six voice rows with their
+mode picker, mini wave, L/R meter, volume slider, balance pair, frequency plus note, `M`, `S` and `▶`,
+the `MASTER` row reading `R1 $FF · main volume L 15 R 15`, the footer `DDA sample bytes in the ROM · 0 B ·
+the mix saves with the toy (waves.json)`, the folded `MASTER REGISTERS & ECHO`, and the VOICE detail
+(`VOICE 1 · wave · on · R4 $9F · R5 $FF`, Trigger / Release note / Reset voice, the four tabs, the wave
+editor with the square's 32 steps and the `preset` picker). ppu.toys' AUDIO tab was not captured in this
+session — the card's reading of it (§3.6's table) is the comparison, so no side-by-side and no pixel
+comparison with their page is claimed.
+
 ---
 
 ## 12. Not proven, and what comes next
@@ -1228,6 +1295,24 @@ comparison between the two pictures is claimed: the panels are different by desi
   toy-API decision, not a panel one. The view itself honours the VDC registers the renderer reads (MWR, HSR,
   HDR, VPR, VDR, VCR, VCECR) but nothing in the renderer reads a PSG, timer or IRQ override, so those pokes
   are stored and written back (or refused) but change no pixel.
+* **The AUDIO panel (#97) is not proved by a cold break either.** Its checks in `tests/check-studio.js`
+  were written by the builder, so rule 2 is owed. Also not proven: the mix is modelled, not measured — a
+  DDA voice holds one level (R6 written once) because a stepped sample needs a timer-IRQ writer that is
+  #71's, so `ddaBytes` counts the bytes a stepped sample *would* occupy, not a sample the panel can play;
+  the level meter is compared with the rendered PCM in the stub, not against a Mednafen recording of a
+  real mix (`tests/check-psg.js` is that evidence for the model, not for this panel); `--browser` does not
+  drive the panel's controls (the screenshot is the only real-DOM evidence); the AudioContext path —
+  `▶ Play mix` through the page's own speakers — is not exercised headlessly at all, only the render it
+  feeds; and the envelope's Attack/Decay/Sustain/Rate is a *panel* convention for the R4 sequence a
+  driver writes (HuTrack's own volume envelope is `pce-song.js`'s), not a measured HuTrack feature.
+* **#71's `sfx()` does not make the sound it documents.** Observed while building #97's live view and
+  reported rather than absorbed: the host writes `R4 = $40 | volume` (`renderer/pce-toyhost.js`), i.e.
+  DDA mode with the channel-enable bit 7 clear, after filling the 32-step square into R6 while the
+  channel was off. `pce-psg.js` renders that as a DC step, not the square: for the same write stream the
+  measured RMS is 905 (R4 `$5F`) against 5899 with R4 `$9F` — waveform mode, which is what "loads a
+  32-step square" means. `tests/check-toys.js`'s `sfxPairs()` encodes `$40 | volume`, so the evidence
+  agrees with the bug. The panel's live view shows the chip's real state (`on: false` for that channel)
+  and `checkAudioPanel` asserts that, so the gap is measured here, not hidden.
 * **The SPRITES panel (#86) is not proved by a cold break.** Its checks in `tests/check-studio.js` were
   written by the builder, so rule 2 is owed: another seat, another model, breaks the model, the panel and
   the file round-trip and the checks must catch every break. Also not proven: the stub DOM draws no canvas
