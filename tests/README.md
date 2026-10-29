@@ -79,7 +79,7 @@ at BaseRAM `$2100`), and `movframes.py --all` for every recorded frame
 (SLSTART=3 puts captured row 0 at VCE line 17 = VDW line 0, so the crop is the
 toy's own 256×224 picture).
 
-`node tests/check-il-console.js` exits 0 with 116 checks. It asserts the
+`node tests/check-il-console.js` exits 0 with 125 checks. It asserts the
 emitter's refusal codes, rebuilds both ROMs and requires their committed
 `meta.json` sha256s (SKIP when llvm-mos is absent), compares the palette
 dump's last 8 frames with the browser runtime's frames 5..12 (exactly one
@@ -800,7 +800,7 @@ ranges. `docs/VALIDATE.md` gives the per-op cycle table and says where each
 number comes from (the HuC6280 timings' shapes; a scale calibrated on part A's
 7,417-cycle palette frame and part C's 1,204-cycle parallax `frame()`).
 
-`node tests/check-validate.js` exits 0 with 143 checks. The five #29 toys pass
+`node tests/check-validate.js` exits 0 with 178 checks. The five #29 toys pass
 and their budgets are printed; parallax's prediction is held out of the
 calibration and must be within the stated 15% of part C's TMA measurements
 (`frame()` 1,203 vs 1,204, mean `raster()` 1,398 vs 1,510, −7.4%). A frame()
@@ -814,5 +814,58 @@ register and a colour word.
 
 Not proven: the table is calibrated on two toys and Mednafen only; the ROM
 estimate is ±2x per function; the rate and blank overruns are warnings, not
-refusals (the five toys must pass). The test was written by the seat that
-wrote the validator (rule 2: a cold break is owed).
+refusals (the five toys must pass). The #89 section below records the seven
+gaps in this instrument that a cold break found and the fixtures that now
+catch them; the test was written by the seat that wrote the validator, so
+those fixtures are the only part of this file written by another seat.
+
+## #89 — the eleven breaks the cold review found MISSED, and what now catches them
+
+`docs/REVIEW-31C.md` broke the three instruments 26 ways: 13 DETECTED, 11
+MISSED, 2 NO-OP. The eleven missed breaks were fixed by fixtures, written by
+@test (a different seat from all three builders) — and each break was re-run
+against the **unmodified** new check in a scratch copy of the tree
+(`git archive HEAD` + these test files under `$TMPDIR`), one break at a time,
+with the substitution asserted to occur exactly once. The real repository was
+never edited. **11 DETECTED, 0 MISSED.**
+
+| break | check | the fixture that catches it | what the re-run printed |
+|---|---|---|---|
+| C08 arity guard removed | `check-il-console.js` | a one-int raster toy's IL with `params = ["int","int"]`, refused `cgen-hook` (and the control proves the one-parameter shape emits `toy_raster(int32_t line)`) | `FAIL cgen refusal a raster hook with two parameters was accepted` |
+| V01 `OP_CYCLES.reg` 24→28 | `check-validate.js` | the table compared row by row with a literal, plus a fixed IL program costing exactly the sum of its ops | `FAIL V01 the op-cycle table …` and `got 1279, want 1275` |
+| V03 CGX counted as one strip | `check-validate.js` | 8 CGX (16 strips) pass; 8 CGX + 1 plain (17) and 9 CGX (18) are refused | `FAIL V03 eight CGX sprites ask for 16 strips (got 8)` |
+| V06 raster range off by one | `check-validate.js` | a constant `lineArg` (the IL lowers literals to registers, so the fixture sets it as the export API can): 0 and 223 pass, 224 is the validator's `validate-range` | `FAIL V06 the validator's static range reports raster line 224, not only the host's run-time refusal (raster-line)` |
+| V07 ceiling 8→7 | `check-validate.js` | a 16,900-op toy at ~880,000 cycles, between 7 and 8 frames, must be slow but not refused; the refusal message must name 8 frames / 954,544 cycles | `FAIL V07 a toy between 7 and 8 display frames is slow, not refused` |
+| V09 ROM baseline off 5.8 KB | `check-validate.js` | each toy's estimate within 35% of the `rom_bytes` in its committed capture `meta.json` (the build it was captured from) | `FAIL V09 toypalette's ROM estimate 14,021 B … (off 71.2%)` |
+| V10 three colour words | `check-validate.js` | `raster()` writing three `pal()` words on one line; two must pass at 101 cycles | `FAIL V10 three colour words on one line are refused` |
+| V11 VRAM from `raster()` | `check-validate.js` | `vram[0] = 1` in `raster()`; the same write from `frame()` passes | `FAIL V11 a VRAM write from raster() is refused` |
+| S02 envelope drops a source | `check-studio.js` | all five files' sources snapshotted before Save and compared in the envelope and after reopen | `FAIL the envelope carries every file's source exactly …; wrong: palettes.json` |
+| S04 Ctrl+S only autosaves | `check-studio.js` | the anchor `downloadText()` creates is watched: exactly one `.pce.json` download, its decoded text carrying the edit | `FAIL Ctrl+S starts exactly one download (got 0, want 1)` |
+| S06 `editorText()` ignores CodeMirror | `check-studio.js` | a fake `window.CodeMirror` whose buffer differs from a deliberately stale textarea; the editor's text must be what runs | `FAIL editorText() is CodeMirror's text, not the stale textarea's` |
+
+Every new check can print three things: **PASS**, **FAIL** naming the property
+(which is the only failure the re-runs rely on), or a crash / a FAIL from
+another check. The first two were both exercised above; a `FAIL` on a
+different line would be reported as `DETECTED-OTHER`, not counted.
+
+Not proven by these fixtures:
+
+- **V06 is only reachable through a hand-built IL program.** From Lua the
+  literal is materialised into a register, so the static branch never fires
+  and the host's own `raster-line` refusal is what a user sees. The fixture
+  pins the branch the emitter's exported API can take, not a path a Lua toy
+  reaches today.
+- **V09's band is ±35%, not exact.** It holds the unmodified model (palette
+  +0.4% of its built ROM, parallax +27.7%), so a baseline error under about
+  0.5–1.8 KB would still pass. It catches V09's 5.8 KB and nothing finer.
+- **V03's fixture sets the CGX bit with `sat(i, 3, 0x100)`, not
+  `cgx = true`**: the IL lowers a `true` literal in a table to `nil` today, so
+  a sprite spec's `cgx` field never reaches the host (a separate bug, not one
+  of the eleven).
+- **S06's stand-in is not CodeMirror.** It models the two behaviours the break
+  depended on (the textarea is not kept in sync; edits arrive through
+  "change"). The vendored editor's real keymap, modes and DOM are still only
+  exercised by `--browser`.
+- **C01–C06 still close on the pinned ROM sha only.** Those six were already
+  DETECTED in the review, but without llvm-mos they SKIP; this card did not
+  change that (`docs/REVIEW-31C.md` residual weakness 1).

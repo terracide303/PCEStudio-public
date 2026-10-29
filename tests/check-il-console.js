@@ -66,6 +66,11 @@
  * sign correction changed the emitted C (and a toy's ROM) while every check
  * stayed green.
  *
+ * #89 (REVIEW-31C C08) pins the raster hook's one-int-parameter guard, which
+ * il.compile enforces for a Lua toy but only cgen.emitC enforces for the IL
+ * program its exported API accepts: a hand-built two-int-parameter hook must
+ * be refused cgen-hook, and the one-parameter control must emit toy_raster.
+ *
  * Written by @design because the card names this evidence; per workshop
  * rule 2 a cold break by another seat is owed.
  */
@@ -359,6 +364,31 @@ function frame(t, f) if pad[1].right then vram[0] = 1 end end`, "cgen-global");
       return i.t === "jmp" || i.t === "br" || i.t === "fornext";
     })[0];
     ins.target = 9999;
+  });
+
+  /* #89 / REVIEW-31C C08: the raster hook is the toy API's one int parameter,
+   * and the emitter is the last place that checks it.  il.compile already
+   * refuses a two-parameter Lua hook (il-type), so only a hand-built IL
+   * program — which cgen.emitC accepts as its exported API — reaches the
+   * guard.  The control first proves the one-parameter shape is emitted, so a
+   * refusal here cannot be some other failure. */
+  const RASTER_ONE_INT = [
+    "function init() end",
+    "function frame(t, f) end",
+    "function raster(line)",
+    "  reg(\"BXR\", 0)",
+    "end",
+    ""
+  ].join("\n");
+  {
+    const c = cgen.emitC(il.compile(RASTER_ONE_INT,
+                                    { chunkName: "refusal.lua" }));
+    check(/void toy_raster\(int32_t line\) \{/.test(c),
+          "cgen emits a one-parameter raster hook (the C08 control)");
+  }
+  refusal("a raster hook with two parameters", RASTER_ONE_INT, "cgen-hook",
+          function (p) {
+    p.functions[p.hooks.raster].params = ["int", "int"];
   });
 }
 
