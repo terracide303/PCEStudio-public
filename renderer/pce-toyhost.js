@@ -16,6 +16,19 @@
  * draws nothing: render() hands renderer/pce-sprites.js the exact input it
  * already takes.
  *
+ * Assets (#117): options.files, when a caller passes the toy's file set, is
+ * the panels' picture (tiles.json, sprites.json, palettes.json) and the
+ * importer below copies it into VRAM, CRAM, the SAT and BXR/BYR/CR when the
+ * host is created — before the toy's top-level statements and init() — so a
+ * toy boots inside the picture the panels show.  The toy's own later writes
+ * win.  The importer is IN this file, not a module a page must remember to
+ * load: the host exists wherever a toy runs, so the boot step cannot be
+ * missing.  It reads the files with the panels' own models
+ * (renderer/pce-sat.js's pictureFromFiles, renderer/pce-editor.js's
+ * toPicture), resolved when a host is created; a page that never passes files
+ * never loads them.  A page that passes files without them is refused by
+ * code (no-import) rather than silently skipped.
+ *
  * Sound (#71): the host runs one song on renderer/pce-song.js's player, one
  * VBlank per toy frame, and lets the toy take a channel for an SFX and give
  * it back (HuTrack's reserve/release channel hand-off). Every PSG write is
@@ -27,9 +40,9 @@
  *
  * Refusal codes: reg-forbidden, reg-range, pal-range, vram-range, sat-range,
  * sprite-range, raster-line, raster-line-full, pad-range, music-range,
- * sfx-range, no-psg, toy-error. The front ends add their own (the Lua VM
- * adds password-*, toy-timeout; the IL lowerer adds il-*). docs/TOYS.md §2
- * is the surface; docs/IL.md §5 is the same contract seen from the IL.
+ * sfx-range, no-psg, no-import, toy-error. The front ends add their own (the
+ * Lua VM adds password-*, toy-timeout; the IL lowerer adds il-*). docs/TOYS.md
+ * §2 is the surface; docs/IL.md §5 is the same contract seen from the IL.
  *
  * The ranges and their manual pages are the ones docs/TOYS.md records:
  * BXR 10 bits (VDC H7-7), BYR 9 bits (H7-7), CR 8 bits (H7-5), 512 CRAM
@@ -39,14 +52,19 @@
   if (typeof module === "object" && module.exports) {
     module.exports = factory(require("./pce-sprites.js"),
                              function () { return require("./pce-song.js"); },
-                             function () { return require("./pce-psg.js"); });
+                             function () { return require("./pce-psg.js"); },
+                             function () { return require("./pce-editor.js"); },
+                             function () { return require("./pce-sat.js"); });
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.toyhost = factory(root.PCEStudio.sprites,
       function () { return root.PCEStudio.song; },
-      function () { return root.PCEStudio.psg; });
+      function () { return root.PCEStudio.psg; },
+      function () { return root.PCEStudio.editor; },
+      function () { return root.PCEStudio.sat; });
   }
-})(typeof self !== "undefined" ? self : this, function (sprites, songDep, psgDep) {
+})(typeof self !== "undefined" ? self : this, function (sprites, songDep, psgDep,
+                                                        editorDep, satDep) {
   "use strict";
 
   var WIDTH = 256;               /* the toy frame: 32 BAT columns, 28 rows */
@@ -184,6 +202,149 @@
   }
 
   function booleanOf(v) { return !!v; }
+
+  /* ---- the asset importer (#117) ---------------------------------------
+   *
+   * The picture the SCREEN, SPRITES and PALETTES panels edit, into the toy's
+   * hardware.  Until #117 a toy could not read its own tiles.json /
+   * sprites.json / palettes.json: the studio saved them and a toy still
+   * spelled its art out as vram[]/pal() writes (toys/demo-game bridged it
+   * with a Node tool that generated a Lua block).  This is the bridge, and
+   * it is the panels' own readers, not a second model: pce-sat.js's
+   * pictureFromFiles() (pce-screen.js's, plus sprites.json) builds the
+   * picture, and pce-editor.js's toPicture() lays it out in the VDC's words.
+   *
+   *   VRAM  all 32768 words: the BAT at word 0, the tiles from character $40,
+   *         the sprite patterns at the cells patternLayout() packs, and the
+   *         SAT at $7F00 — toPicture()'s exact layout.
+   *   CRAM  all 512 entries: the 16 background palettes at $000-$0FF (entry 0
+   *         of each is the shared backdrop) and the sprite palettes $100-$1FF.
+   *   SAT   the 64 entries copied out of VRAM $7F00, where state.sat lives.
+   *   regs  BXR/BYR from tiles.json's map scroll, MWR 0 (the 32x32 BAT) and
+   *         CR: BB on, plus SB when the picture has sprites — the CR
+   *         toPicture()/viewRegs give the panel's preview, so a toy boots
+   *         showing what the panel shows instead of a blank sprite layer.
+   *
+   * EMPTY FILES ARE NOT A PICTURE.  A new toy's default files carry no tiles,
+   * no sprites and no palette rows; importing them would paint a blank BAT of
+   * character $40 into a toy that had written nothing, so hasArt() is false
+   * and apply() returns null.  The first panel edit makes them a picture.
+   *
+   * NOT IMPORTED: tiles.json's `video` (a VCE dot clock outside the toy
+   * surface — the host's frame is fixed at 256x224, so a 336/512-dot picture
+   * is imported at its words and shown on the 256-dot window), and the
+   * picture's 240-line preview against the host's 224-line frame.  Both are
+   * stated in docs/STUDIO.md §7.
+   */
+
+  /* The three files the panels edit.  waves.json is the PSG's (#71), not the
+   * picture, and is not touched here. */
+  var ASSET_FILES = ["tiles.json", "palettes.json", "sprites.json"];
+  var IMPORT_SAT_WORDS = 256;    /* 64 entries x 4 words */
+
+  var editorLib = null, satLib = null;
+  function editorModule() {
+    if (editorLib === null) editorLib = editorDep() || false;
+    return editorLib || null;
+  }
+  function satModule() {
+    if (satLib === null) satLib = satDep() || false;
+    return satLib || null;
+  }
+
+  /* The file set as name -> text.  main.lua and waves.json are ignored. */
+  function assetTexts(files) {
+    var out = {};
+    for (var i = 0; i < (files || []).length; i++) {
+      var f = files[i];
+      if (!f || ASSET_FILES.indexOf(f.name) < 0) continue;
+      out[f.name] = f.source == null ? "" : String(f.source);
+    }
+    return out;
+  }
+
+  function parseAsset(text, name) {
+    try { return JSON.parse(text); }
+    catch (e) { refuse("asset-json", name + " is not JSON: " + e.message); }
+  }
+
+  /* Is there a picture in these files?  A tile, a map, a pattern, a sprite,
+   * or a palette entry that is not the power-on zero.  A file the panels
+   * could not read is refused here, by the panels' own parse, rather than
+   * silently skipped. */
+  function hasArt(files) {
+    var texts = assetTexts(files), t;
+    if (texts["tiles.json"] != null) {
+      t = parseAsset(texts["tiles.json"], "tiles.json");
+      if (Array.isArray(t.tiles) && t.tiles.length) return true;
+      if (t.map && Array.isArray(t.map.cells) && t.map.cells.length) return true;
+    }
+    if (texts["sprites.json"] != null) {
+      t = parseAsset(texts["sprites.json"], "sprites.json");
+      if (Array.isArray(t.patterns) && t.patterns.length) return true;
+      if (Array.isArray(t.sprites) && t.sprites.length) return true;
+    }
+    if (texts["palettes.json"] != null) {
+      t = parseAsset(texts["palettes.json"], "palettes.json");
+      if (t.backdrop) return true;
+      if (Array.isArray(t.background) && t.background.length) return true;
+      if (Array.isArray(t.sprites) && t.sprites.length) return true;
+    }
+    return false;
+  }
+
+  /* The files as the hardware would hold the picture.  null when there is no
+   * art to import; `no-import` when the panels' models are not loaded. */
+  function readAssets(files) {
+    if (!hasArt(files)) return null;
+    var editor = editorModule(), sat = satModule();
+    if (!editor || !sat) {
+      refuse("no-import", "this toy brings asset files, but the picture " +
+             "models (renderer/pce-editor.js, renderer/pce-sat.js) are not " +
+             "loaded, so the picture cannot reach VRAM");
+    }
+    var pic = sat.pictureFromFiles(files);
+    var data = editor.toPicture(pic);
+    var tiles = 0;
+    for (var c = editor.FIRST_CHAR; c < pic.nextChar; c++) if (pic.tiles[c]) tiles++;
+    return {
+      picture: pic,
+      vram: data.vram,
+      cram: data.cram,
+      sat: data.vram.slice(editor.SAT_ADDR * 2,
+                           editor.SAT_ADDR * 2 + IMPORT_SAT_WORDS * 2),
+      regs: { BXR: data.regs.BXR, BYR: data.regs.BYR,
+              MWR: data.regs.MWR, CR: data.regs.CR },
+      tiles: tiles,
+      patterns: pic.spritePatterns.length,
+      sprites: pic.sprites.length
+    };
+  }
+
+  /* Copy one readAssets() into a host's live state, before the toy runs.
+   * Returns a summary (the host keeps it as host.assets). */
+  function applyAssets(host, files) {
+    var w = readAssets(files);
+    if (!w) return null;
+    host.state.vram.set(w.vram);
+    host.state.cram.set(w.cram);
+    host.state.sat.set(w.sat);
+    host.state.regs.BXR = w.regs.BXR;
+    host.state.regs.BYR = w.regs.BYR;
+    host.state.regs.MWR = w.regs.MWR;
+    host.state.regs.CR = w.regs.CR;
+    return {
+      files: ASSET_FILES.slice(),
+      tiles: w.tiles,
+      patterns: w.patterns,
+      sprites: w.sprites,
+      vram: w.vram.length / 2,     /* words: 32768 */
+      cram: CRAM_ENTRIES,
+      sat: IMPORT_SAT_WORDS,
+      regs: { BXR: w.regs.BXR, BYR: w.regs.BYR, MWR: w.regs.MWR,
+              CR: w.regs.CR }
+    };
+  }
 
   function createHost(options) {
     options = options || {};
@@ -781,11 +942,28 @@
       frameCount: function () { return frameCount; }
     };
 
+    /* The toy's asset files (#117), if the caller brought them: the panels'
+     * picture into VRAM/CRAM/SAT and the config registers, before the toy's
+     * top-level code and init() run.  host.assets is the import's summary, or
+     * null when the files hold no picture (a new toy's empty defaults). */
+    if (options.files && options.files.length) {
+      host.assets = applyAssets(host, options.files);
+    }
+
     return host;
   }
 
   return {
     createHost: createHost,
+    /* the asset importer (#117): read the panels' files as the hardware's
+     * words; createHost applies the same thing to options.files */
+    importer: {
+      FILES: ASSET_FILES,
+      fileTexts: assetTexts,
+      hasArt: hasArt,
+      read: readAssets,
+      apply: applyAssets
+    },
     ToyError: ToyError,
     WIDTH: WIDTH,
     HEIGHT: HEIGHT,
@@ -832,7 +1010,9 @@
       "timer-range": "a timer reload value outside 0..127",
       "music-range": "a song index outside the songs the runtime was given",
       "sfx-range": "an SFX channel, frequency, volume or length outside its range",
-      "no-psg": "the PSG model or the song player is not loaded, so no toy can make sound"
+      "no-psg": "the PSG model or the song player is not loaded, so no toy can make sound",
+      "asset-json": "a tile, sprite or palette file the importer reads is not JSON",
+      "no-import": "the toy brings asset files and the picture models (renderer/pce-editor.js, renderer/pce-sat.js) are not loaded"
     }
   };
 });
