@@ -3687,13 +3687,10 @@ function toyEnvelope() {
    * active file's — never save the generated document into a toy file. */
   if (cur && !showingGlobals) cur.source = editorText();
   current.source = mainSource();
-  return {
-    version: TOY_VERSION,
-    title: toyTitle || "",
-    description: toyDescription || "",
-    files: files.map((f) => ({ name: f.name, source: f.source })),
-    sources: []
-  };
+  /* #160: the envelope is renderer/pce-source.js's one builder, which the
+   * MCP server's toy_save calls too — one format, so a toy saved from
+   * Claude Code opens here and this file's Save opens there. */
+  return PCEStudio.source.envelope(toyTitle || "", toyDescription || "", files);
 }
 
 function toyEnvelopeText() {
