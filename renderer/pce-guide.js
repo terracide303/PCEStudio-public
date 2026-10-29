@@ -50,7 +50,7 @@ const REFUSALS_A_BEGINNER_HITS = [
   "sprite-range", "raster-line", "raster-line-full", "pad-range",
   "music-range", "sfx-range", "no-psg", "password-value", "password-code",
   "toy-timeout", "toy-error",
-  "il-syntax", "il-op", "il-table-read", "il-string", "il-mixed",
+  "il-syntax", "il-op", "il-string", "il-mixed",
   "il-method", "il-for-in", "il-undefined", "il-arity"
 ];
 
@@ -292,9 +292,9 @@ function guide() {
       p("- Use only the calls in this guide. If a call is not here, it does " +
         "not exist; do not invent ppu.toys or SNES API."),
       p("- Keep the code inside the cartridge-ready Lua subset in section 8 " +
-        "(integers, no string values, no table reads). The studio's Check " +
-        "button compiles the same file through its IL and refuses what that " +
-        "subset refuses."),
+        "(integers, no string values, and tables only if the person does " +
+        "not need a cartridge). The studio's Check button compiles the same " +
+        "file through its IL and refuses what that subset refuses."),
       p("- Never say the toy works. Ask the person what they see, or for the " +
         "error line, and then say what you think is happening.")
     ]
@@ -465,12 +465,13 @@ function guide() {
         "IL is a fixed-point machine and refuses or diverges on mixes " +
         "(il-mixed), and integer maths makes a frame reproducible. t is " +
         "f/60 seconds, but prefer f when you need a frame count."),
-      h3("8. No strings, no tables you read back"),
-      p("The cartridge subset has no string values and cannot read a field " +
-        "of a table the toy built (il-string, il-table-read). Write tables " +
-        "with constant keys and read them back through constants (the toys " +
-        "do), or use separate globals. for i = a, b, step do is fine; " +
-        "pairs/ipairs are not."),
+      h3("8. No strings, and keep tables simple"),
+      p("The cartridge subset has no string values (il-string). A table the " +
+        "toy builds can now be read back in the browser (t[i] and t.x run in " +
+        "both runtimes), but the console export has no tables yet, so a toy " +
+        "that must become a cartridge should fill tables with constant keys " +
+        "and read them back through constants (the toys do), or use separate " +
+        "globals. for i = a, b, step do is fine; pairs/ipairs are not."),
       h3("9. print() is not the browser console"),
       p("print(...) adds a line to the studio's log, not to devtools. It is " +
         "useful, but a print in frame() runs 60 times a second and fills the " +
@@ -493,18 +494,19 @@ function guide() {
       p("- Numbers stay inside 32 bits (about -2,000,000,000..2,000,000,000)."),
       p("- No string used as a value. A string is allowed as reg's name and " +
         "in print, not in a variable."),
-      p("- A table the toy builds is write-only in the IL: fill it with " +
-        "constants or integers you already hold, but do not read t[i] back " +
-        "later. The worked examples show the patterns that work."),
+      p("- Tables: the IL reads them back (t[i], t.x), but pce-cgen, the " +
+        "console back end, does not lower tables at all (cgen-op), so a toy " +
+        "with a table read runs in the browser and will not export. The " +
+        "worked examples fill a table with constants and do not read it back; " +
+        "keep to that if the person wants a cartridge."),
       p("- No method calls (:), no varargs (...), no pairs/ipairs, and no " +
         "multiple return values. Use for i = a, b, step do and plain " +
         "functions."),
       p("- A named function must be defined before it is called, in the " +
         "same file."),
       p("The refused constructs come back by code (il-syntax, il-op, " +
-        "il-string, il-mixed, il-table-read, il-method, il-for-in, " +
-        "il-undefined, il-arity); a browser-only toy fails Check with one of " +
-        "those.")
+        "il-string, il-mixed, il-method, il-for-in, il-undefined, il-arity); " +
+        "a browser-only toy fails Check with one of those.")
     ]
   });
 
@@ -557,7 +559,7 @@ function guide() {
         "only calls from section 4; integers; reg(\"CR\", 0xC0) before the " +
         "first sprite; the BAT filled; sprite patterns through putsprite; " +
         "the raster callback a few writes per line; no string values; no " +
-        "table reads."),
+        "table reads if the toy must export."),
       p("Then end with the line the person needs in order to run it:"),
       p("**" + COPY_LINE + "**"),
       p("Ask what they see. You are done when the picture on their screen is " +

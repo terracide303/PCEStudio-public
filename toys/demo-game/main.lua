@@ -28,8 +28,8 @@
 -- for toy sound.  A toy cannot read SR (CC/OR) at all (#119), so collisions
 -- are arithmetic; and sfx() with no music() is master-muted (#113), so the
 -- game's sound writes PSG events that fall silent — the README lists both.
--- The entity lists and the HUD digits are spelled out because the IL refuses
--- to read a table index (#118).
+-- The entity lists and the HUD digits are int arrays, read back with a table
+-- index (#118).
 --
 -- Everything between the markers is generated: do not edit it by hand.
 
@@ -41,7 +41,7 @@
 
 C_BAR = 1        -- the status bar's backdrop (VCE word)
 C_FIELD = 3      -- the playfield's
-DIGIT_BASE = 20000      -- the ten digit pattern codes, in VRAM
+DIGIT = {18, 19, 20, 21, 22, 23, 24, 25, 26, 27}   -- the ten digit pattern codes (SPRITES panel)
 SHIP = 28   ENEMY = 29   BULLET = 30   HEART = 31
 START_PX = 120   START_PY = 160
 E0X0 = 32   E0Y0 = 40
@@ -396,17 +396,6 @@ function art_boot()
   vram[2008] = 0x0FC0
   vram[2009] = 0x0780
   vram[2010] = 0x0300
-  -- the ten digit pattern codes as the one array a toy can read
-  vram[20000] = 18
-  vram[20001] = 19
-  vram[20002] = 20
-  vram[20003] = 21
-  vram[20004] = 22
-  vram[20005] = 23
-  vram[20006] = 24
-  vram[20007] = 25
-  vram[20008] = 26
-  vram[20009] = 27
 end
 
 -- The SAT the SPRITES panel shows: every slot's start position.
@@ -431,36 +420,30 @@ function art_sat()
 end
 -- <<< PCEStudio demo art — do not edit above this line
 
--- The game's state lives in globals, one per value instead of an array:
--- the IL's tables are write-only (il-table-read, card #118), so `b[0].x`
--- cannot exist.  That is a shortfall of the toy language this game had to work
--- around; see the README.
+-- The game's state lives in int arrays, one element per entity: the IL reads
+-- a table index (#118), so four bullets and six drones are three arrays each
+-- and every operation is one loop.  (The IL gives an array one element type,
+-- and all of these are int; see docs/IL.md §5.)
 --
 -- Sprite slots (the SAT):
 --   0..2  score digits, hundreds/tens/ones   3..5  lives
 --   6     player                             7..12 enemies
 --   13..16 bullets
 --
--- The pattern numbers (SHIP, ENEMY, BULLET, HEART, DIGIT_*), the starting
+-- The pattern numbers (SHIP, ENEMY, BULLET, HEART, DIGIT table), the starting
 -- positions (START_PX, E0X0..) and the two bar colours come from the
 -- generated block above, so the picture the panels show and the game's first
 -- frame are one source.
 
-function reset_bullet(n)
-  if n == 0 then b0l = 0 elseif n == 1 then b1l = 0
-  elseif n == 2 then b2l = 0 else b3l = 0 end
-end
-
--- A free bullet leaves from the ship's nose.  No array: four slots, spelled.
+-- A free bullet leaves from the ship's nose: the first of the four slots.
 function fire()
-  if b0l == 0 then
-    b0l = 1 b0x = px + 7 b0y = py - 2
-  elseif b1l == 0 then
-    b1l = 1 b1x = px + 7 b1y = py - 2
-  elseif b2l == 0 then
-    b2l = 1 b2x = px + 7 b2y = py - 2
-  elseif b3l == 0 then
-    b3l = 1 b3x = px + 7 b3y = py - 2
+  for i = 1, 4 do
+    if bl[i] == 0 then
+      bl[i] = 1
+      bx[i] = px + 7
+      by[i] = py - 2
+      return
+    end
   end
 end
 
@@ -517,116 +500,55 @@ function init()
   scroll = 0
   rng = 3
 
-  b0l = 0 b0x = 0 b0y = 0
-  b1l = 0 b1x = 0 b1y = 0
-  b2l = 0 b2x = 0 b2y = 0
-  b3l = 0 b3x = 0 b3y = 0
-
-  ex0 = E0X0 ey0 = E0Y0 es0 = 1
-  ex1 = E1X0 ey1 = E1Y0 es1 = 2
-  ex2 = E2X0 ey2 = E2Y0 es2 = 1
-  ex3 = E3X0 ey3 = E3Y0 es3 = 2
-  ex4 = E4X0 ey4 = E4Y0 es4 = 1
-  ex5 = E5X0 ey5 = E5Y0 es5 = 1
+  -- four bullets (live, x, y) and six drones (x, y, speed), as arrays.  A
+  -- constructor with only integer values gives the IL the array's element
+  -- type; every later read and write is then an int.
+  bl = {0, 0, 0, 0}
+  bx = {0, 0, 0, 0}
+  by = {0, 0, 0, 0}
+  ex = {E0X0, E1X0, E2X0, E3X0, E4X0, E5X0}
+  ey = {E0Y0, E1Y0, E2Y0, E3Y0, E4Y0, E5Y0}
+  es = {1, 2, 1, 2, 1, 1}
 end
 
 -- Bullets: up four pixels a frame, gone above the bar.
 function move_bullets()
-  if b0l == 1 then
-    b0y = b0y - 4
-    if b0y < 26 then b0l = 0 end
-  end
-  if b1l == 1 then
-    b1y = b1y - 4
-    if b1y < 26 then b1l = 0 end
-  end
-  if b2l == 1 then
-    b2y = b2y - 4
-    if b2y < 26 then b2l = 0 end
-  end
-  if b3l == 1 then
-    b3y = b3y - 4
-    if b3y < 26 then b3l = 0 end
+  for i = 1, 4 do
+    if bl[i] == 1 then
+      by[i] = by[i] - 4
+      if by[i] < 26 then bl[i] = 0 end
+    end
   end
 end
 
 -- Enemies: down at their own speed, and a hit or a wrap sends them back to
--- the top at a new x.  Six slots, six blocks; there is no loop over the
--- entities because there is no way to index them.
+-- the top at a new x.  One loop over the six drones.
 function move_enemies()
-  ey0 = ey0 + es0
-  if ey0 > 232 then ey0 = 24 ex0 = rnd() % 224 end
-  ey1 = ey1 + es1
-  if ey1 > 232 then ey1 = 24 ex1 = rnd() % 224 end
-  ey2 = ey2 + es2
-  if ey2 > 232 then ey2 = 24 ex2 = rnd() % 224 end
-  ey3 = ey3 + es3
-  if ey3 > 232 then ey3 = 24 ex3 = rnd() % 224 end
-  ey4 = ey4 + es4
-  if ey4 > 232 then ey4 = 24 ex4 = rnd() % 224 end
-  ey5 = ey5 + es5
-  if ey5 > 232 then ey5 = 24 ex5 = rnd() % 224 end
+  for i = 1, 6 do
+    ey[i] = ey[i] + es[i]
+    if ey[i] > 232 then
+      ey[i] = 24
+      ex[i] = rnd() % 224
+    end
+  end
 end
 
+-- Every live bullet against every drone: the first drone it meets is hit,
+-- then the next bullet.  The break is the old if/elseif chain's "first hit
+-- only", and the rnd() call order is the same.
 function collide()
-  if b0l == 1 then
-    if hit(b0x, b0y, ex0, ey0) == 1 then
-      b0l = 0 score = score + 1 ey0 = 24 ex0 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b0x, b0y, ex1, ey1) == 1 then
-      b0l = 0 score = score + 1 ey1 = 24 ex1 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b0x, b0y, ex2, ey2) == 1 then
-      b0l = 0 score = score + 1 ey2 = 24 ex2 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b0x, b0y, ex3, ey3) == 1 then
-      b0l = 0 score = score + 1 ey3 = 24 ex3 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b0x, b0y, ex4, ey4) == 1 then
-      b0l = 0 score = score + 1 ey4 = 24 ex4 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b0x, b0y, ex5, ey5) == 1 then
-      b0l = 0 score = score + 1 ey5 = 24 ex5 = rnd() % 224 sfx(1, 700, 16, 6)
-    end
-  end
-  if b1l == 1 then
-    if hit(b1x, b1y, ex0, ey0) == 1 then
-      b1l = 0 score = score + 1 ey0 = 24 ex0 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b1x, b1y, ex1, ey1) == 1 then
-      b1l = 0 score = score + 1 ey1 = 24 ex1 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b1x, b1y, ex2, ey2) == 1 then
-      b1l = 0 score = score + 1 ey2 = 24 ex2 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b1x, b1y, ex3, ey3) == 1 then
-      b1l = 0 score = score + 1 ey3 = 24 ex3 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b1x, b1y, ex4, ey4) == 1 then
-      b1l = 0 score = score + 1 ey4 = 24 ex4 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b1x, b1y, ex5, ey5) == 1 then
-      b1l = 0 score = score + 1 ey5 = 24 ex5 = rnd() % 224 sfx(1, 700, 16, 6)
-    end
-  end
-  if b2l == 1 then
-    if hit(b2x, b2y, ex0, ey0) == 1 then
-      b2l = 0 score = score + 1 ey0 = 24 ex0 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b2x, b2y, ex1, ey1) == 1 then
-      b2l = 0 score = score + 1 ey1 = 24 ex1 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b2x, b2y, ex2, ey2) == 1 then
-      b2l = 0 score = score + 1 ey2 = 24 ex2 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b2x, b2y, ex3, ey3) == 1 then
-      b2l = 0 score = score + 1 ey3 = 24 ex3 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b2x, b2y, ex4, ey4) == 1 then
-      b2l = 0 score = score + 1 ey4 = 24 ex4 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b2x, b2y, ex5, ey5) == 1 then
-      b2l = 0 score = score + 1 ey5 = 24 ex5 = rnd() % 224 sfx(1, 700, 16, 6)
-    end
-  end
-  if b3l == 1 then
-    if hit(b3x, b3y, ex0, ey0) == 1 then
-      b3l = 0 score = score + 1 ey0 = 24 ex0 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b3x, b3y, ex1, ey1) == 1 then
-      b3l = 0 score = score + 1 ey1 = 24 ex1 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b3x, b3y, ex2, ey2) == 1 then
-      b3l = 0 score = score + 1 ey2 = 24 ex2 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b3x, b3y, ex3, ey3) == 1 then
-      b3l = 0 score = score + 1 ey3 = 24 ex3 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b3x, b3y, ex4, ey4) == 1 then
-      b3l = 0 score = score + 1 ey4 = 24 ex4 = rnd() % 224 sfx(1, 700, 16, 6)
-    elseif hit(b3x, b3y, ex5, ey5) == 1 then
-      b3l = 0 score = score + 1 ey5 = 24 ex5 = rnd() % 224 sfx(1, 700, 16, 6)
+  for i = 1, 4 do
+    if bl[i] == 1 then
+      for j = 1, 6 do
+        if hit(bx[i], by[i], ex[j], ey[j]) == 1 then
+          bl[i] = 0
+          score = score + 1
+          ey[j] = 24
+          ex[j] = rnd() % 224
+          sfx(1, 700, 16, 6)
+          break
+        end
+      end
     end
   end
 end
@@ -635,22 +557,21 @@ function touch_player()
   if inv > 0 then
     inv = inv - 1
   else
-    if hit(px, py, ex0, ey0) == 1 then lose_life()
-    elseif hit(px, py, ex1, ey1) == 1 then lose_life()
-    elseif hit(px, py, ex2, ey2) == 1 then lose_life()
-    elseif hit(px, py, ex3, ey3) == 1 then lose_life()
-    elseif hit(px, py, ex4, ey4) == 1 then lose_life()
-    elseif hit(px, py, ex5, ey5) == 1 then lose_life()
+    for j = 1, 6 do
+      if hit(px, py, ex[j], ey[j]) == 1 then
+        lose_life()
+        break
+      end
     end
   end
 end
 
--- One digit's pattern for a score digit.  The ten pattern codes sit in VRAM
--- at DIGIT_BASE and are read back with vram[], because a table of ten numbers
--- cannot be read in the IL (il-table-read) and a ten-way if would bury the
--- logic.  VRAM is the one array both runtimes can read.
+-- One digit's pattern for a score digit: DIGIT is the ten-entry table the
+-- generated block emits from the SPRITES panel's own pattern codes (card
+-- #118: a table a toy builds is read back now, so no VRAM detour and no
+-- ten-way if).
 function digit_pattern(d)
-  return vram[DIGIT_BASE + d]
+  return DIGIT[d + 1]
 end
 
 -- The HUD.  Score on the right, lives on the left; both are sprites, so the
@@ -693,35 +614,19 @@ function draw_ship()
 end
 
 function draw_bullets()
-  if b0l == 1 then
-    sprite(13, {x = b0x, y = b0y + 64, pattern = BULLET, palette = 3})
-  else
-    sprite(13, {y = 0})
-  end
-  if b1l == 1 then
-    sprite(14, {x = b1x, y = b1y + 64, pattern = BULLET, palette = 3})
-  else
-    sprite(14, {y = 0})
-  end
-  if b2l == 1 then
-    sprite(15, {x = b2x, y = b2y + 64, pattern = BULLET, palette = 3})
-  else
-    sprite(15, {y = 0})
-  end
-  if b3l == 1 then
-    sprite(16, {x = b3x, y = b3y + 64, pattern = BULLET, palette = 3})
-  else
-    sprite(16, {y = 0})
+  for i = 1, 4 do
+    if bl[i] == 1 then
+      sprite(12 + i, {x = bx[i], y = by[i] + 64, pattern = BULLET, palette = 3})
+    else
+      sprite(12 + i, {y = 0})
+    end
   end
 end
 
 function draw_enemies()
-  sprite(7, {x = ex0, y = ey0 + 64, pattern = ENEMY, palette = 2})
-  sprite(8, {x = ex1, y = ey1 + 64, pattern = ENEMY, palette = 2})
-  sprite(9, {x = ex2, y = ey2 + 64, pattern = ENEMY, palette = 2})
-  sprite(10, {x = ex3, y = ey3 + 64, pattern = ENEMY, palette = 2})
-  sprite(11, {x = ex4, y = ey4 + 64, pattern = ENEMY, palette = 2})
-  sprite(12, {x = ex5, y = ey5 + 64, pattern = ENEMY, palette = 2})
+  for i = 1, 6 do
+    sprite(6 + i, {x = ex[i], y = ey[i] + 64, pattern = ENEMY, palette = 2})
+  end
 end
 
 function frame(t, f)

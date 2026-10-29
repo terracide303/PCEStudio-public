@@ -34,8 +34,9 @@ end
 
 local function note_at(i)
   -- Eight MIDI notes (C E G C G E C G), then the same tune a fifth higher,
-  -- then round again. Written as if-chains, not a table: the IL does not
-  -- read back a table the toy built itself (il-table-read, docs/IL.md §5).
+  -- then round again. Written as if-chains, not a table: the IL reads a
+  -- table back, but the console back end has no tables, so a table read
+  -- would not export (docs/IL.md §5).
   local k = i % 8
   local n = 60
   if k == 1 then n = 64 end

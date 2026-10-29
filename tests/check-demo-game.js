@@ -37,8 +37,10 @@
  *     the PCM's RMS; when #113 lands the line stops saying 0.
  *   - The hardware's collision flags are not used because a toy cannot read
  *     them (card #119); hit() is arithmetic.
- *   - The entity lists and the HUD digits are spelled out because the IL
- *     refuses a table index (card #118).
+ *   - The entity lists are int arrays now that the IL reads a table index
+ *     (card #118): four bullets and six drones are three arrays each and
+ *     every operation is one loop over them.  The HUD digits are a ten-entry
+ *     table from the generated block.
  *
  * Written by @design because the card names this file (as check-toys.js and
  * check-validate.js were).  Per workshop rule 2 a cold break by another seat
