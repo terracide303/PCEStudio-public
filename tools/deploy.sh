@@ -14,7 +14,7 @@ CP="${PCE_CP_HOST:-https://sv97.ifastnet.com:2083}"
 USER="${PCE_CP_USER:-terracid}"
 DEST="${PCE_CP_DIR:-public_html/pcestudio}"
 
-files=$( { find renderer -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' -o -name '*.bin' -o -name '*.json' -o -name '*.png' \);
+files=$( { find renderer -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' -o -name '*.bin' -o -name '*.json' -o -name '*.png' -o -name '*.md' \);
            find toys -type f;
            find vendor/codemirror vendor/fengari vendor/ppu-toys -type f;
            echo LICENSE; } | grep -v '/\.' | sort )
@@ -42,10 +42,12 @@ mkd() {      # make <path> under the destination (parent must exist)
   curl -s --max-time 40 -b "$jar" "$CP$token/execute/Fileman/mkdir?path=$parent&name=$name" >/dev/null
 }
 
-# The site root opens the studio.
+# The site root opens the studio, and carries the chat-AI guide (#105) so it
+# can be fetched by its own URL: https://pcestudio.terracides.com/pcestudio-for-claude.md
 index=$(mktemp -d)/index.html
-printf '<!doctype html><meta charset="utf-8"><title>PCEStudio</title>\n<meta http-equiv="refresh" content="0; url=renderer/studio.html">\n<a href="renderer/studio.html">PCEStudio</a>\n' > "$index"
+printf '<!doctype html><meta charset="utf-8"><title>PCEStudio</title>\n<meta http-equiv="refresh" content="0; url=renderer/studio.html">\n<a href="renderer/studio.html">PCEStudio</a>\n<p><a href="pcestudio-for-claude.md">PCEStudio for Claude</a> — the guide to paste into a chat AI.</p>\n' > "$index"
 upload "$DEST" "$index" >/dev/null
+upload "$DEST" renderer/pcestudio-for-claude.md >/dev/null
 
 total=0
 for d in $(echo "$files" | xargs -n1 dirname | sort -u); do
