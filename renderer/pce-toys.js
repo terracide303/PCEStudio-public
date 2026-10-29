@@ -503,7 +503,11 @@
 
     var budgetMs = options.budgetMs != null ? options.budgetMs : DEFAULT_BUDGET_MS;
     /* The toy's hardware state and frame flow, shared with the IL runtime.
-     * options.songs is the song list music(index) plays (#71). */
+     * options.songs is the song list music(index) plays (#71); options.files
+     * is the toy's asset files, and createHost imports them into VRAM/CRAM/
+     * SAT before the toy's code runs (#117) — the same importer the IL host
+     * uses, so a demo whose art lives in its files shows it in both runtimes
+     * and on the gallery cards (#156). */
     var host = toyhost.createHost(options);
     var state = host.state;
     var log = host.log;
