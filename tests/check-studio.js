@@ -7196,20 +7196,53 @@ function checkGallery(page) {
   check(cards.every((c) => c.rawHref === "../toys/" + c.file),
         "each card names the toy's own file");
 
-  /* #156: the deployed gallery (tools/gallery.js --with-demo-art, what
-   * tools/deploy.sh builds) carries each demo's art as the studio's named
-   * files — main.lua first, sources.json last, the envelope's order — and
-   * the card the page draws from them is a picture.  The committed gallery
-   * never does; where the art is not on the machine this block skips. */
+  /* #156, and Dennis 2026-10-29's follow-up (the demos were BLACK in Browse
+   * and in the studio's Lua Run while the IL/MCP host rendered them): the
+   * deployed gallery (tools/gallery.js --with-demo-art, what tools/deploy.sh
+   * builds) carries each demo's art as the studio's named files — main.lua
+   * first, sources.json last, the envelope's order — and every route that
+   * draws a demo must show that picture, not black: the card, the studio's
+   * Lua-mode Run and the IL Run, all three pixel-equal, with the same toy
+   * minus its files (the control) black.  The committed gallery never
+   * carries the art; where the art is not on the machine this block skips. */
   {
     const demo = process.env.DEMO_ART ||
       "/Volumes/External/agent-workshop-demo/demo-art";
     const present = ["oak-woods", "city"].every((id) =>
       fs.existsSync(path.join(demo, id, "sources.json")));
     if (present) {
-      const gdata = require(path.join(RENDERER, "..", "tools", "gallery.js"))
-        .data(true);
+      const galleryTool = require(path.join(RENDERER, "..", "tools",
+                                           "gallery.js"));
+      const gdata = galleryTool.data(true);
       const G = require(path.join(RENDERER, "pce-gallery.js"));
+      const toysM = require(path.join(RENDERER, "pce-toys.js"));
+      const ilM = require(path.join(RENDERER, "pce-il.js"));
+      /* one demo through one runtime to frame 60, with the exact options
+       * the studio's rebuild() passes (renderer/studio.html) — this is the
+       * studio's Run in Lua mode and its IL mode */
+      const run60 = (factory, t, files) => {
+        let rt = null;
+        try {
+          rt = factory.create(t.source, { budgetMs: 120,
+                                          songs: t.songs || [],
+                                          files: files || [] });
+          rt.load();
+          let frame = null;
+          for (let f = 0; f <= 60; f++) {
+            rt.setPad(1, {});
+            frame = rt.frame(f);
+          }
+          return { frame: frame, error: null };
+        } catch (e) {
+          return { frame: null, error: (e && e.code ? e.code + ": " : "") +
+                   ((e && e.message) || String(e)) };
+        } finally {
+          if (rt) { try { rt.dispose(); } catch (e) { /* freed */ } }
+        }
+      };
+      const samePixels = (a, b) => !!a && !!b &&
+        a.pixels.length === b.pixels.length &&
+        a.pixels.every((p, i) => p === b.pixels[i]);
       for (const id of ["oak-woods", "city"]) {
         const t = gdata.toys.find((x) => x.id === id) || {};
         eq("#156: the deployed gallery's " + id + " is a folder of five",
@@ -7223,11 +7256,69 @@ function checkGallery(page) {
               sdoc.sources.every((s) => s.name && s.kind),
               "#156: " + id + "'s gallery entry names its sources (" +
               sdoc.sources.map((s) => s.name).join(", ") + ")");
-        const thumb = G.still(null, t.source, 60,
-                              { songs: t.songs, files: t.files });
-        check(thumb && G.countInk(thumb) > 1000,
+        const card = G.still(null, t.source, 60,
+                             { songs: t.songs, files: t.files });
+        check(card && G.countInk(card) > 1000,
               "#156: the deployed " + id + " card draws the art's frame 60 (" +
-              (thumb ? G.countInk(thumb) : 0) + " pixels)");
+              (card ? G.countInk(card) : 0) + " pixels)");
+        const lua = run60(toysM, t, t.files);
+        const il = run60(ilM, t, t.files);
+        check(lua.frame && G.countInk(lua.frame) > 1000,
+              "#156: " + id + "'s studio Lua-mode frame 60 draws the art (" +
+              (lua.frame ? G.countInk(lua.frame) : 0) + " pixels" +
+              (lua.error ? ", " + lua.error : "") + ")");
+        check(il.frame && samePixels(lua.frame, il.frame),
+              "#156: " + id + "'s Lua-mode frame equals its IL frame" +
+              (il.error ? " (" + il.error + ")" : ""));
+        check(samePixels(card, il.frame),
+              "#156: " + id + "'s card frame equals its IL frame");
+        const bare = G.still(null, t.source, 60, { songs: t.songs });
+        check(bare && G.countInk(bare) === 0,
+              "#156: " + id + " without its files is black (the control; " +
+              (bare ? G.countInk(bare) : -1) + " pixels)");
+      }
+      /* The page wiring (the black cards came from a page whose scripts
+       * predate #156): browse.html's own script list, loaded in its order
+       * with the deployed gallery swapped in for the committed one, must
+       * draw each demo's card — a page missing the picture models refuses
+       * instead of drawing. */
+      {
+        const html = fs.readFileSync(BROWSE_PAGE, "utf8");
+        const srcs = [];
+        const reSrc = /<script\s+src="([^"]+)"\s*><\/script>/g;
+        let m;
+        while ((m = reSrc.exec(html))) srcs.push(m[1]);
+        const sandbox = { console, Uint8Array, Uint8ClampedArray, Array,
+                          Math, JSON, Object, String, Number, parseInt,
+                          parseFloat, isNaN, Date, RegExp, Promise, Set,
+                          Map, setTimeout, clearTimeout,
+                          performance: { now: () => 0 } };
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        vm.createContext(sandbox);
+        for (const src of srcs) {
+          const text = src === "gallery-toys.js"
+            ? galleryTool.render(true)
+            : fs.readFileSync(path.resolve(RENDERER, src), "utf8");
+          vm.runInContext(text, sandbox, { filename: "renderer/" + src });
+        }
+        const Gv = sandbox.PCEStudio.gallery;
+        const toysV = sandbox.PCEStudio.galleryData.toys;
+        for (const id of ["oak-woods", "city"]) {
+          const t = toysV.find((x) => x.id === id) || {};
+          let frame = null, err = null;
+          try {
+            frame = Gv.still(null, t.source, 60,
+                             { songs: t.songs, files: t.files });
+          } catch (e) {
+            err = (e && e.code ? e.code + ": " : "") +
+              ((e && e.message) || String(e));
+          }
+          check(frame && Gv.countInk(frame) > 1000,
+                "#156: browse.html's own script order draws the deployed " +
+                id + " card (" + (frame ? Gv.countInk(frame) : 0) +
+                " pixels" + (err ? ", " + err : "") + ")");
+        }
       }
     } else {
       console.log("      demo art is not on this machine — the deployed " +
