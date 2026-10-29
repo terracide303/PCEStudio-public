@@ -85,10 +85,24 @@
   <div class="wall-grid" id="wall-grid"></div>
 
   <p class="wall-note">The example toys live in <code>toys/</code>: the five
-    of #29, one classic PC Engine effect each, and STARFALL, the #88 demo
-    game — all runnable through both the Lua runtime and the IL. Their
-    sources are the gallery's own (<code>renderer/gallery-toys.js</code>,
-    generated from the files).</p>
+    of #29, one classic PC Engine effect each, STARFALL the #88 demo game, and
+    the pack demos (CITY from #125) — all runnable through both the Lua
+    runtime and the IL. Their sources are the gallery's own
+    (<code>renderer/gallery-toys.js</code>, generated from the files).</p>
+
+  <!-- #125: the demo toys' art is third-party, and the credit goes where the
+       demo plays.  Dennis, 2026-10-29: the art stays out of the GPL
+       repository but may be shown on the site (docs/DECISIONS.md); the pack's
+       own note grants commercial use and asks for credit.  A new pack demo
+       adds a line here — the same words as toys/<toy>/README.md. -->
+  <div class="wall-note" id="demo-credits">
+    <strong>Demo art.</strong>
+    CITY — “Action Pack - CITY” by
+    <a href="https://www.patreon.com/Anokolisa">Anokolisa</a>. The pack’s
+    Autor_note.txt: <q>all the assets here are totally free for commercial use
+    and the like. credits are optional but appreciated.</q> The art is not in
+    this repository; it is uploaded with the toy.
+  </div>
 </main>
 
 <footer class="site-foot">
@@ -186,10 +200,26 @@
      * toy that will not run says so on its card rather than showing black. */
     const entry = { toy: toy, el: card, canvas: canvas, ink: 0, frame: null,
                     error: null, href: link.getAttribute("href"),
-                    studioHref: open.getAttribute("href") };
+                    studioHref: open.getAttribute("href"),
+                    /* #125: this card's picture comes from the site
+                     * (art/city/), so a blank frame here means the fetch had
+                     * nothing to fetch, not that the toy is broken */
+                    art: !!toy.art };
     try {
-      entry.frame = gallery.still(canvas, toy.source, gallery.THUMB_FRAME);
-      entry.ink = gallery.countInk(entry.frame);
+      if (toy.art) {
+        /* #125: a demo's art is on the site, not in the repo.  The card is
+         * built now and its picture filled in when the fetch lands; until
+         * then it shows the frame with no background, and a page offline
+         * simply keeps that. */
+        entry.pending = gallery.loadArt(toy).then(function (files) {
+          entry.frame = gallery.still(canvas, toy.source, gallery.THUMB_FRAME, files);
+          entry.ink = gallery.countInk(entry.frame);
+          return entry;
+        });
+      } else {
+        entry.frame = gallery.still(canvas, toy.source, gallery.THUMB_FRAME);
+        entry.ink = gallery.countInk(entry.frame);
+      }
     } catch (e) {
       entry.error = (e && e.code ? e.code + ": " : "") +
         ((e && e.message) || String(e));
@@ -348,7 +378,7 @@
       tags: e.toy.tags.slice(), href: e.href, studioHref: e.studioHref,
       rawHref: gallery.rawHref(e.toy),
       frame: e.frame ? e.frame.frame : null,
-      ink: e.ink, error: e.error
+      ink: e.ink, error: e.error, art: e.art
     })),
     visible: () => visibleOrder(),
     setQuery: setQuery,
@@ -367,7 +397,9 @@
   }
 
   if (qs.get("selftest")) {
-    const failed = cards.filter((e) => e.error || !e.ink);
+    /* #125: a card whose art is uploaded with the site (CITY) is blank when
+     * the fetch cannot happen; that is not a failed card. */
+    const failed = cards.filter((e) => e.error || (!e.ink && !e.art));
     const detail = cards.map((e) => e.toy.id + " " + e.ink).join(", ");
     if (cards.length !== TOYS.length) {
       finishText("FAIL only " + cards.length + " of " + TOYS.length +

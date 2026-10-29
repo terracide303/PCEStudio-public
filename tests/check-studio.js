@@ -6116,12 +6116,24 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  check(data.length === 6,
-        "the gallery carries the five #29 toys and STARFALL (got " +
+  check(data.length === 7,
+        "the gallery carries the five #29 toys, STARFALL and CITY (got " +
         data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall"]);
+      "starfall", "city"]);
+  /* #125: CITY's picture is a third-party pack's and is NOT in the repo
+   * (Dennis, 2026-10-29; docs/DECISIONS.md) — the entry names where the site
+   * keeps it and carries no tile, palette or pattern bytes. */
+  const city = data.find((t) => t.id === "city") || {};
+  check(!!city.art && city.art.base === "art/city/" &&
+        (city.art.files || []).map((f) => f.name).join(",") ===
+          "tiles.json,palettes.json,sprites.json",
+        "#125: the CITY entry points at the site's art/city/, not at repo files");
+  check((city.files || []).map((f) => f.name).join(",") === "main.lua",
+        "#125: the CITY entry carries main.lua and no art file");
+  check(!("tiles" in city) && !("palettes" in city),
+        "#125: no converted art rides in gallery-toys.js");
   let mismatched = [];
   for (const t of data) {
     if (t.source !== toySource(t.file)) mismatched.push(t.file);
@@ -6239,6 +6251,12 @@ function checkGallery(page) {
      "main.lua,tiles.json,palettes.json,sprites.json");
   check(studio.current().source === toySource("demo-game/main.lua"),
         "#121: … and the game's own main.lua");
+  studio.loadExample("city", true);
+  eq("#125: the studio opens CITY", studio.current().id, "city");
+  eq("#125: … with its Lua and no art file", studio.fileNames().join(","),
+     "main.lua");
+  check(studio.current().source === toySource("city/main.lua"),
+        "#125: … and the demo's own main.lua");
   studio.loadExample("palette", true);   /* leave the page on a #29 toy */
 
   const miss = runPage("?toy=no-such-toy&paused=1");
@@ -6255,9 +6273,12 @@ function checkGallery(page) {
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall"]);
-  check(cards.every((c) => c.ink > 0 && !c.error),
-        "every card drew its frame 60 (" +
+      "starfall", "city"]);
+  /* #125: a card whose art is fetched from the site (CITY) is blank when the
+   * fetch cannot happen — a stub DOM here, a clone served locally, or a site
+   * whose upload skipped the folder.  Every other card must have ink. */
+  check(cards.every((c) => !c.error && (c.ink > 0 || c.art)),
+        "every card drew its frame 60, or waits for the site's art (" +
         cards.map((c) => c.id + " " + c.ink).join(", ") + ")");
   check(cards.every((c) => c.href === "toy.html?id=" + c.id),
         "each card links to the toy's own page");
@@ -6288,8 +6309,8 @@ function checkGallery(page) {
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["status-bar", "parallax", "palette-cycle", "road", "sky-gradient",
-      "starfall"]);
+     ["city", "status-bar", "parallax", "palette-cycle", "road",
+      "sky-gradient", "starfall"]);
   B.setSort("written");
 
   const bt = runBarePage(BROWSE_PAGE, "?tag=raster");

@@ -19,7 +19,27 @@ files=$( { find renderer -type f \( -name '*.html' -o -name '*.js' -o -name '*.c
            find vendor/codemirror vendor/fengari vendor/ppu-toys -type f;
            echo LICENSE; } | grep -v '/\.' | sort )
 
-if [ "${1:-}" = "--dry" ]; then echo "$files"; echo "$(echo "$files" | wc -l | tr -d ' ') files"; exit 0; fi
+# #125: a demo toy's art is NOT in the repo (Dennis, 2026-10-29; docs/DECISIONS.md).
+# It lives beside the repo in demo-art/<toy>/ and goes up with the toy, at
+# art/<toy>/, which is where the gallery entry's `art` base points
+# (renderer/pce-gallery.js's loadArt).  A folder without tiles.json is not a
+# toy's picture and is skipped; the evidence/ subfolder stays behind.
+DEMO_ART="${PCE_DEMO_ART:-/Volumes/External/agent-workshop-demo/demo-art}"
+demo_files=""
+for d in "$DEMO_ART"/*/; do
+  [ -f "$d/tiles.json" ] || continue
+  toy=$(basename "$d")
+  for f in "$d"tiles.json "$d"palettes.json "$d"sprites.json; do
+    [ -f "$f" ] && demo_files="$demo_files $f"
+  done
+done
+
+if [ "${1:-}" = "--dry" ]; then
+  echo "$files"
+  [ -n "$demo_files" ] && for f in $demo_files; do echo "-> art/$(basename "$(dirname "$f")")/$(basename "$f")  $f"; done
+  echo "$(echo "$files" | wc -l | tr -d ' ') files, $(echo $demo_files | wc -w | tr -d ' ') demo-art files"
+  exit 0
+fi
 : "${PCE_CP_PASS:?set PCE_CP_PASS (never put it in a file)}"
 
 jar=$(mktemp); trap 'rm -f "$jar"' EXIT
@@ -57,4 +77,13 @@ for d in $(echo "$files" | xargs -n1 dirname | sort -u); do
   upload "$target" $group >/dev/null
   total=$((total + $(echo "$group" | wc -l)))
 done
+# the demo art, at art/<toy>/ (the gallery's `art` base)
+for d in $(echo "$demo_files" | tr ' ' '\n' | xargs -n1 dirname | sort -u); do
+  [ -n "$d" ] || continue
+  toy=$(basename "$d")
+  mkd "$DEST/art"; mkd "$DEST/art/$toy"
+  upload "$DEST/art/$toy" $(echo "$demo_files" | tr ' ' '\n' | grep "^$d/" | tr '\n' ' ') >/dev/null
+  total=$((total + $(echo "$demo_files" | tr ' ' '\n' | grep -c "^$d/")))
+done
+
 echo "uploaded $total files + index.html to $DEST"
