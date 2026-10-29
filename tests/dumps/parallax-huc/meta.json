@@ -78,17 +78,17 @@
    "used": 7894
   },
   "05": {
-   "free": 797,
+   "free": 698,
    "name": "",
    "sections": [
     {
-     "bytes": 7395,
-     "end": 48354,
+     "bytes": 7494,
+     "end": 48453,
      "kind": "CODE",
      "start": 40960
     }
    ],
-   "used": 7395
+   "used": 7494
   },
   "06": {
    "free": 6469,
@@ -117,30 +117,30 @@
    "used": 414
   }
  },
- "build_seconds": 0.188,
+ "build_seconds": 0.247,
  "capture": {
-  "frames": 525,
-  "last_frame": "frame0524.png",
+  "frames": 494,
+  "last_frame": "frame0493.png",
   "measure": {
-   "collect_sum_ticks_7bit": 4681,
-   "collections": 42,
-   "count": 42,
-   "cycles_per_collection": 835047.619047619,
-   "cycles_per_frame": 2925.714285714286,
-   "cycles_per_raster_call": 3727.891156462585,
+   "collect_sum_ticks_7bit": 4516,
+   "collections": 39,
+   "count": 39,
+   "cycles_per_collection": 839680.0,
+   "cycles_per_frame": 2914.4615384615386,
+   "cycles_per_raster_call": 3748.5714285714284,
    "flags": 0,
    "max_ticks": 3,
-   "mean_ticks": 2.857142857142857,
+   "mean_ticks": 2.8461538461538463,
    "min_ticks": 2,
-   "raster_calls": 9408,
-   "raster_max_ticks": 7,
-   "raster_sum_ticks": 34250,
-   "sum_ticks": 120
+   "raster_calls": 8736,
+   "raster_max_ticks": 9,
+   "raster_sum_ticks": 31980,
+   "sum_ticks": 111
   },
   "slend": 234,
   "slstart": 3
  },
- "code_bytes": 0,
+ "code_bytes": 28651,
  "flags": {
   "huc": "-S -fno-recursive",
   "pceas": "-S"
@@ -153,14 +153,14 @@
   "_il_fn_4": 180,
   "_il_fn_5": 366,
   "_il_fn_6": 117,
-  "_il_fn_7": 987
+  "_il_fn_7": 1086
  },
  "name": "parallax",
  "rom": "tools/gen/parallax-huc.pce",
  "rom_bytes": 66048,
- "rom_sha256": "babf4b575d42708e82d0ecd3e826e582f15fd549091b4d5e48809b98b83aa857",
+ "rom_sha256": "fed8b265f9d5b368199149edb8f8172805212d17058006bde2daf95d217b7599",
  "route": "huc",
  "source": "toys/parallax.lua",
- "source_sha256": "fdb3cfd11904c6601d73fb033969863af60262711ff20ba1fec4e4cacda7f52a",
- "toolchain": "/Volumes/External II/pce-tools/huc-toyc"
+ "source_sha256": "b22ff94879c3ca94c74fe7838b5023633a6802fc1cd97342314b174dbb213a80",
+ "toolchain": "/Volumes/External/pce-tools/huc-src"
 }

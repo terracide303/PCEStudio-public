@@ -124,13 +124,14 @@ timer sums (`raster_calls`, `cycles_per_raster_call`,
 
 ## `check-il-huc.js` — #31 part B: the same IL through HuC
 
-The same emitter with `{target: "huc"}` writes C that vendor/huc's compiler
+The same emitter with `{target: "huc"}` writes C that HuC's compiler
 accepts (16-bit `int`, no `<stdint.h>`, no attributes, no local initialiser
 lists, declarations first); `tools/toyc/huc_runtime.c` is the console side
 and `tools/toyc/huc_raster.asm` is part C's RCR handler as a bank-0 PCEAS
 file, hooked through HuC's user IRQ1 vector. `tools/build-huc.sh` compiles
 with `bin/huc` and `bin/pceas` from `HUC_DIR` (default
-`/Volumes/External II/pce-tools/huc-toyc`); `tools/capture-huc.sh` is the
+`/Volumes/External/pce-tools/huc-src`, fetched and built by the script
+itself); `tools/capture-huc.sh` is the
 same Mednafen route and writes `tests/dumps/<name>-huc/`.
 
 `node tests/check-il-huc.js` exits 0 with 74 checks: the dialect and its

@@ -17,11 +17,12 @@
  *      guard at 16 bits, and four argument slots for a three-parameter
  *      function — the first and third also compiled through vendor HuC.
  *
- *   2. The ROMs rebuild.  tools/build-huc.sh (vendor/huc's own compiler and
- *      PCEAS, external under /Volumes/External II/pce-tools) builds the
- *      palette and parallax toys; their sha256 must equal the committed
- *      dumps' meta.json.  Without HuC the section prints SKIP (the
- *      llvm-mos/PCEAS rule) and the dumps are still checked.
+ *   2. The ROMs rebuild.  tools/build-huc.sh (HuC's own compiler and
+ *      PCEAS, fetched and built by the script itself as an external tool
+ *      under /Volumes/External/pce-tools, #152) builds the palette and
+ *      parallax toys; their sha256 must equal the committed dumps'
+ *      meta.json.  Without HuC the section prints SKIP (the llvm-mos/PCEAS
+ *      rule) and the dumps are still checked.
  *
  *   3. The console ran the same toys.  tests/dumps/palette-huc/frames/ and
  *      tests/dumps/parallax-huc/frames/ hold every video frame Mednafen
@@ -56,7 +57,7 @@ const cgen = require("../renderer/pce-cgen.js");
 const ilTest = require("./check-il.js");
 
 const ROOT = path.join(__dirname, "..");
-const HUC_DEFAULT = "/Volumes/External II/pce-tools/huc-toyc";
+const HUC_DEFAULT = "/Volumes/External/pce-tools/huc-src";
 const PALETTE_FILE = path.join(ROOT, "tools/toys/palette.lua");
 const RASTER_FILE = path.join(ROOT, "toys/parallax.lua");
 const PALETTE_DUMP = path.join(ROOT, "tests/dumps/palette-huc");
@@ -229,8 +230,8 @@ function frame(t, f) end`, "cgen-arity");
    * The two shipped toys never reach these branches — they use no `>>`, no
    * function with exactly three parameters, and no constant at the 16-bit
    * boundary — so the pinned ROM shas proved the two ROMs, not the dialect.
-   * One fixture per edge, at the emitter (always) and through vendor HuC
-   * where the toolchain is present. */
+   * One fixture per edge, at the emitter (always) and through the real
+   * HuC toolchain where it is present. */
   function emitHuc(source, chunkName) {
     try {
       return { c: cgen.emitC(il.compile(source, { chunkName: chunkName }),
@@ -500,6 +501,27 @@ function checkRasterDump(meta) {
   browser.dispose();
 }
 
+/* ---- 0. nothing may read the vendored HuC copy ------------------------ *
+ * #152: the public repo ships without the vendored copy, so nothing under
+ * tools/, tests/ or renderer/ may reference it — tools/build-huc.sh
+ * fetches the toolchain itself.  The needle is split below so this very
+ * file does not contain the path it greps for. */
+function checkNoVendoredReads() {
+  const needle = "vendor/" + "huc";
+  const r = spawnSync("git", ["grep", "-l", "-F", "-e", needle, "--",
+                              "tools", "tests", "renderer"],
+                      { cwd: ROOT, encoding: "utf8" });
+  if (r.status !== 0 && r.status !== 1) {
+    check(false, "the vendored-copy grep runs (git grep exit " + r.status +
+          ": " + (r.stderr || "").trim() + ")");
+    return;
+  }
+  const hits = (r.stdout || "").trim().split("\n").filter(Boolean);
+  check(hits.length === 0,
+        "nothing in tools/, tests/ or renderer/ references the vendored " +
+        "HuC copy" + (hits.length ? ": " + hits.join(", ") : ""));
+}
+
 /* ---- main ------------------------------------------------------------- */
 
 function rebuildAndCompare(tool, name, toy, dump) {
@@ -533,6 +555,7 @@ function rebuildAndCompare(tool, name, toy, dump) {
 }
 
 function main() {
+  checkNoVendoredReads();
   checkDialect();
 
   const paletteMeta = rebuildAndCompare(null, "palette", PALETTE_FILE,
