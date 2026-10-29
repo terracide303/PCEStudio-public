@@ -388,7 +388,7 @@ const TAIL_MARK = "PCEStudio demo art for toys/city";
 
 /* The generated tail.  It comes AFTER the repo file in the same Lua chunk, so
  * its assignments replace the stub's before init() runs — the same shape
- * tools/cave-assets.js writes for #127.  The picture itself is the asset
+ * tools/oak-woods-art.js writes for #128.  The picture itself is the asset
  * files (card #156): the #117 importer loads tiles.json, palettes.json and
  * sprites.json before the toy runs, so art_boot() has nothing to write and
  * the tail is only the numbers the toy reads. */
