@@ -24,7 +24,7 @@ const ROOT = path.resolve(__dirname, "..");
 const TOYS = path.join(ROOT, "toys");
 const OUT = path.join(ROOT, "renderer", "gallery-toys.js");
 
-/* The gallery, in the order docs/EXAMPLES.md tells the tricks in.  `effect`
+/* The gallery, in the order toys/README.md tells the tricks in.  `effect`
  * is the one-line "what it proves" the toy page prints under the title. */
 const TOYS_META = [
   {
