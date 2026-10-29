@@ -224,8 +224,8 @@
   }
 
   /* True when the file's table is still all black: the honest note the panel
-   * shows, because a toy writing its own pal() does not fill palettes.json
-   * until #24/#71's importer reads it. */
+   * shows, because the import is one way (palettes.json -> CRAM, #117) and a
+   * toy writing its own pal() never writes the file back. */
   function isBlank(pic) {
     if (pic.backdrop !== 0) return false;
     for (var p = 0; p < PALETTES; p++)

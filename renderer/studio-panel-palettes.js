@@ -267,8 +267,8 @@
           note.textContent = error ? "" :
             pa.isBlank(p)
               ? "palettes.json is still all black: this is the picture the " +
-                "files make, and a toy writing its own pal() does not fill " +
-                "them until the importer (#24/#71)."
+                "files make; a toy writing its own pal() does not write the " +
+                "file back (the import is one way, #117)."
               : "";
         }
       }
