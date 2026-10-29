@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /*
- * tests/check-studio.js — the evidence for #75 (layout + run + panels) and
- * #77 (the CodeMirror editor, the toy's files, save/open, autosave, Vim).
+ * tests/check-studio.js — the evidence for #75 (layout + run + panels),
+ * #77 (the CodeMirror editor, the toy's files, save/open, autosave, Vim) and
+ * #78 (the output column's layers, CRT, SND, markers, length, resolution and
+ * pad keys).
  *
  * NOTE: written by @design because the card names this file. Under the
  * workshop role split a test written by the builder is flagged for @review to
@@ -48,7 +50,13 @@
  *  8. #77: every PCE meaning of docs/STUDIO.md §5's shortcut table executes
  *     (Space, R, Ctrl+Enter, Ctrl+., Ctrl+,, Ctrl+S, Escape, Tab and the pad
  *     keys), and Settings → Vim is an opt-in that persists.
- *  9. --browser (optional): the real page is loaded in headless Google
+ *  9. #78: the output column — BG/SPR through CR bit 7/6 (pixel diff 0 against
+ *     pce-sprites.renderFrame with the bit cleared, and the exact changed-pixel
+ *     counts), View only masking the picture without a register write, the
+ *     resolution label over 256/341/512, markers that seek, the scrubber's
+ *     length (clamp, max, playhead), the CRT overlay, SND's honest #71 state,
+ *     and all eight pad keys on the focused output.
+ * 10. --browser (optional): the real page is loaded in headless Google
  *     Chrome with ?selftest=1&frames=40; the DOM must say PASS 40 frames and
  *     its frame-39 digest must equal the one computed here from check-toys'
  *     hand-built expected state. A second load with ?docs=sprites must show
@@ -1070,6 +1078,289 @@ function checkShortcuts(page) {
   studio.seek(0);
 }
 
+/* ---- 9. #78: the output column ---------------------------------------- *
+ * Each control is exercised through the page's own state and the pixels are
+ * compared with renderer/pce-sprites.js drawing the same frame with the
+ * layer's CR bit cleared — the model the toy runtime itself uses. */
+function renderMasked(page, clearBits) {
+  const rt = page.sandbox.PCEStudio.studio.runtime();
+  const opts = rt.options();
+  opts.regs = Object.assign({}, opts.regs);
+  opts.regs.CR = (opts.regs.CR & ~clearBits) & 0xFF;
+  return sprites.renderFrame(opts).pixels;
+}
+
+/* Pixels whose RGB differs, not bytes: diffCount counts channels, and a
+ * layer change that keeps one channel equal would look smaller than it is. */
+function pixelDiffCount(a, b) {
+  let n = 0;
+  for (let i = 0; i + 2 < a.length && i + 2 < b.length; i += 3) {
+    if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) n++;
+  }
+  return n;
+}
+
+/* A working 16×16 sprite for the Sprite layer check. The page's own
+ * sprite-pad.lua writes its pattern at 0x100*16 words, but the renderer's
+ * SAT pattern code p addresses cell p at p*64 words (pce-sprites.js
+ * stripWords), so that example draws no sprite. This fixture puts the plane
+ * where the renderer reads it, with the same SAT values the page's example
+ * uses, and runs through the page's own editor → Run path. */
+const SPRITE_TOY = [
+  "function init()",
+  "  for row = 0, 15 do vram[0x100 * 64 + row] = 0xFFFF end",
+  "  pal(0x101, rgb(7, 7, 0))",
+  "  reg(\"CR\", 0xC0)",
+  "  sx, sy = 32, 64",
+  "end",
+  "function frame(t, f)",
+  "  sprite(0, { x = sx, y = sy, pattern = 0x100, palette = 0 })",
+  "end",
+  ""
+].join("\n");
+
+function runEditorSource(studio, source) {
+  studio.selectFile("main.lua");
+  studio.setEditorText(source);
+  studio.handleShortcut({ key: "Enter", code: "Enter", ctrlKey: true,
+    metaKey: false, shiftKey: false, altKey: false, target: null,
+    preventDefault() {}, stopPropagation() {} });
+  studio.pause();
+  studio.seek(0);
+}
+
+function checkOutputColumn(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const html = fs.readFileSync(PAGE, "utf8");
+  const seek = page.dom.get("seek");
+  const length = page.dom.get("length");
+
+  /* -- the resolution label follows the dot clock (256/341/512) -- */
+  const labels = [0, 1, 2, 3].map((v) => studio.resolutionFor(v).label);
+  eq("resolution at VCE CR DCC 00/01/10/11", labels,
+     ["256×224", "341×224", "512×224", "512×224"]);
+  check(studio.resolutionFor(1).width === S.bg.DOT_CLOCK.frameWidth[1] &&
+        studio.resolutionFor(2).width === S.bg.DOT_CLOCK.frameWidth[2],
+        "the label's widths are renderer/pce-bg.js's DOT_CLOCK table");
+  check(/5\.37 MHz/.test(studio.resolutionFor(0).title) &&
+        /7\.16 MHz/.test(studio.resolutionFor(1).title) &&
+        /10\.74 MHz/.test(studio.resolutionFor(2).title),
+        "the label names the dot clock of the selected VCE CR");
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  const live = studio.resolution();
+  check(live.width === 256 && live.height === 224 && live.dotClock === 0,
+        "the live toy " + live.width + "×" + live.height + " on dot clock " +
+        live.dotClock);
+  check(page.dom.get("res").textContent === "256×224" &&
+        /VCE dot clock 5\.37 MHz/.test(page.dom.get("res").title),
+        "the output row's label reads " + page.dom.get("res").textContent);
+
+  /* -- Layers: BG through CR bit 7 (BB) -- */
+  const paletteOn = studio.output();
+  samePixels("the canvas shows the palette toy's own frame",
+             paletteOn.pixels, studio.runtime().last.pixels);
+  const bgOffPixels = renderMasked(page, 0x80);
+  studio.setLayer("bg", false);
+  check(studio.layers().bg === false && studio.layers().viewOnly === false,
+        "Layers → BG clears the layer in the hardware mode");
+  samePixels("BG off is the renderer with CR bit 7 clear",
+             studio.output().pixels, bgOffPixels);
+  const bgDiff = pixelDiffCount(paletteOn.pixels, studio.output().pixels);
+  check(bgDiff === paletteOn.width * paletteOn.height,
+        "BG off changes every pixel (BB blanks the whole background): " +
+        bgDiff + " of " + (paletteOn.width * paletteOn.height));
+  let allBlank = true;
+  for (let i = 0; i < studio.output().pixels.length; i++) {
+    if (studio.output().pixels[i] !== 0) { allBlank = false; break; }
+  }
+  check(allBlank, "with BB clear every pixel is CRAM[$100] (colour 0 here)");
+  check(studio.state().regs.CR === 0x00 &&
+        studio.runtime().state.regs.CR === 0x00,
+        "the live VDC's CR bit 7 is clear, the way a register write would");
+  studio.setLayer("bg", true);
+  samePixels("BG on restores the toy's frame", studio.output().pixels,
+             paletteOn.pixels);
+  check(studio.state().regs.CR === 0x80,
+        "BG on restores CR bit 7 the toy wrote");
+
+  /* -- Layers: sprites through CR bit 6 (SB) -- */
+  runEditorSource(studio, SPRITE_TOY);
+  const spriteOn = studio.output();
+  const sprOffPixels = renderMasked(page, 0x40);
+  studio.setLayer("sprites", false);
+  samePixels("SPR off is the renderer with CR bit 6 clear",
+             studio.output().pixels, sprOffPixels);
+  const sprDiff = pixelDiffCount(spriteOn.pixels, studio.output().pixels);
+  check(sprDiff === 16 * 16,
+        "SPR off changes exactly the 16×16 sprite: " + sprDiff + " pixels");
+  let outside = 0;
+  for (let y = 0; y < spriteOn.height; y++) {
+    for (let x = 0; x < spriteOn.width; x++) {
+      const i = (y * spriteOn.width + x) * 3;
+      const changed = spriteOn.pixels[i] !== studio.output().pixels[i] ||
+        spriteOn.pixels[i + 1] !== studio.output().pixels[i + 1] ||
+        spriteOn.pixels[i + 2] !== studio.output().pixels[i + 2];
+      if (changed && (x >= 16 || y >= 16)) outside++;
+    }
+  }
+  check(outside === 0, "no pixel outside the sprite's 16×16 box changed (" +
+        outside + " did)");
+  check(studio.state().regs.CR === 0x80,
+        "SPR off clears CR bit 6 and leaves bit 7 set");
+  studio.setLayer("sprites", true);
+  samePixels("SPR on restores the sprite", studio.output().pixels,
+             spriteOn.pixels);
+
+  /* -- View only: the same picture, no register write -- */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  studio.setLayerViewOnly(true);
+  const crBefore = studio.runtime().state.regs.CR;
+  studio.setLayer("bg", false);
+  samePixels("View only BG off draws the same blank frame",
+             studio.output().pixels, renderMasked(page, 0x80));
+  check(studio.runtime().state.regs.CR === crBefore &&
+        studio.state().regs.CR === 0x80,
+        "View only leaves the toy's CR alone (" +
+        studio.runtime().state.regs.CR + ")");
+  studio.seek(3);
+  check(studio.runtime().state.regs.CR === 0x80,
+        "View only keeps the toy's CR across a seek");
+  let stillBlank = true;
+  for (let i = 0; i < studio.output().pixels.length; i++) {
+    if (studio.output().pixels[i] !== 0) { stillBlank = false; break; }
+  }
+  check(stillBlank, "the hidden layer stays hidden on every frame of a seek");
+  studio.setLayerViewOnly(false);
+  check(studio.runtime().state.regs.CR === 0x00,
+        "leaving View only applies the hidden layer to CR");
+  studio.setLayer("bg", true);
+  check(studio.runtime().state.regs.CR === 0x80,
+        "showing BG again restores the bit the toy set");
+  /* A layer shown while still in View only is restored when the mode ends:
+   * View only never writes CR, so the bit comes back on the way out. */
+  studio.setLayer("bg", false);
+  studio.setLayerViewOnly(true);
+  studio.setLayer("bg", true);
+  check(studio.runtime().state.regs.CR === 0x00,
+        "showing a layer in View only still does not write CR");
+  studio.setLayerViewOnly(false);
+  check(studio.runtime().state.regs.CR === 0x80,
+        "leaving View only restores a layer that was shown in it");
+  studio.setLayer("sprites", true);
+
+  /* -- markers: add at the current frame, click to seek -- */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(7);
+  studio.addMarker();
+  studio.seek(3);
+  studio.addMarker();
+  studio.addMarker();
+  const marks = studio.markers();
+  check(marks.indexOf(7) >= 0 && marks.indexOf(3) >= 0 &&
+        marks.indexOf(3) === marks.lastIndexOf(3),
+        "markers are added once each at the current frame (" +
+        JSON.stringify(marks) + ")");
+  check(marks.every((m, i) => i === 0 || marks[i - 1] <= m),
+        "the marker list is sorted");
+  studio.seek(0);
+  const markerList = page.dom.get("marker-list");
+  const markerButtons = markerList.children.filter((el) =>
+    /frame \d+/.test(el.textContent));
+  check(markerButtons.length === marks.length,
+        "each marker has a button (" + markerButtons.length + " of " +
+        marks.length + ")");
+  const at7 = markerButtons.find((b) => b.textContent === "frame 7");
+  check(!!at7, "the frame-7 marker is in the list");
+  if (at7) {
+    at7.click();
+    check(studio.current().frame === 7 && studio.isPlaying() === false,
+          "clicking a marker seeks to its frame and pauses (frame " +
+          studio.current().frame + ")");
+  }
+
+  /* -- the scrubber's length holds -- */
+  studio.setLength(120);
+  check(studio.length() === 120 && seek.max === "119" &&
+        length.value === "120",
+        "Length 120 sets the slider's max to 119");
+  studio.seek(500);
+  check(studio.current().frame === 119,
+        "a seek past the length clamps to the last frame (" +
+        studio.current().frame + ")");
+  studio.seek(100);
+  studio.setLength(50);
+  check(studio.length() === 50 && studio.current().frame === 49,
+        "shortening the length moves the playhead inside it (" +
+        studio.current().frame + ")");
+  check(studio.setLength(0) === 1 && seek.max === "0",
+        "Length clamps up to 1 frame");
+  check(studio.setLength(99999) === 3600 && seek.max === "3599",
+        "Length clamps down to 3600 frames");
+  studio.setLength(300);
+
+  /* -- the CRT look is a real scanline overlay -- */
+  const wrap = page.dom.get("canvas-wrap");
+  const crtWas = wrap.classList.contains("crt");
+  clickOne(page, "btn-crt");
+  check(wrap.classList.contains("crt") === !crtWas &&
+        page.dom.get("btn-crt").getAttribute("aria-pressed") ===
+          String(!crtWas),
+        "CRT toggles the canvas's scanline overlay");
+  clickOne(page, "btn-crt");
+  check(wrap.classList.contains("crt") === crtWas, "CRT toggles back");
+  check(/\.canvas-wrap\.crt::after/.test(html) &&
+        /repeating-linear-gradient/.test(html),
+        "the CRT look is the page's repeating scanline gradient");
+
+  /* -- SND: the honest state until #71 -- */
+  check(/id="btn-snd"[^>]*aria-pressed="false"/.test(html) &&
+        /No toy sound surface until #71/.test(html),
+        "SND is not claiming a sound that is off, and its tooltip names #71");
+  clickOne(page, "btn-snd");
+  check(/Sound is card #71/.test(page.dom.get("toast").textContent) &&
+        /PSG model/.test(page.dom.get("toast").textContent),
+        "SND says the PSG model exists but toys have no sound surface (#71)");
+  check(page.dom.get("btn-snd").getAttribute("aria-pressed") === "false",
+        "clicking SND leaves it unpressed (no invented control)");
+
+  /* -- pad keys on the focused output: all eight of the 2-button pad -- */
+  const canvas = page.dom.get("out");
+  const padKeys = [["KeyI", "up"], ["KeyK", "down"], ["KeyJ", "left"],
+                   ["KeyL", "right"], ["KeyN", "i"], ["KeyM", "ii"],
+                   ["KeyO", "select"], ["KeyP", "run"]];
+  let padOk = true;
+  for (const [code, field] of padKeys) {
+    for (const fn of canvas.listeners.keydown || []) {
+      fn({ code: code, key: code.slice(3).toLowerCase(), target: canvas,
+           preventDefault() {}, stopPropagation() {} });
+    }
+    if (studio.pad()[field] !== true) padOk = false;
+    for (const fn of canvas.listeners.keyup || []) {
+      fn({ code: code, key: "", target: canvas,
+           preventDefault() {}, stopPropagation() {} });
+    }
+    if (studio.pad()[field] !== undefined) padOk = false;
+  }
+  check(padOk, "IJKL/NM/OP hold and release all eight pad-1 fields");
+  check(studio.handleShortcut({ key: "l", code: "KeyL", target: null }) === false,
+        "the page-wide shortcuts leave the pad keys to the focused output");
+
+  /* Leave the page as the other checks expect it. */
+  studio.setLayerViewOnly(false);
+  studio.setLayer("bg", true);
+  studio.setLayer("sprites", true);
+  studio.setLength(300);
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
 /* ---- 8. the real headless browser (optional) --------------------------- */
 /* The #77 browser evidence needs a page that can edit, reload and read the
  * studio back. A same-origin iframe driver served over HTTP does that with
@@ -1436,6 +1727,7 @@ async function main() {
   checkButtons(page);
   checkFiles(page);
   checkShortcuts(page);
+  checkOutputColumn(page);
 
   let browser = "not-requested";
   if (process.argv.indexOf("--browser") >= 0) browser = await checkBrowser();
@@ -1448,8 +1740,8 @@ async function main() {
   }
   console.log("PASS  " + checks + " checks, " + FRAMES +
               " frames diff 0 vs check-toys' expected state, Lua == IL for 3 " +
-              "examples, editor/files/shortcuts, every button's handler " +
-              "executed (" + buttonCount + " buttons)" +
+              "examples, editor/files/shortcuts, output column, every button's " +
+              "handler executed (" + buttonCount + " buttons)" +
               (browser === "pass" ? ", headless Chrome: PASS 40 + driver" : "") +
               " (" + ms + " ms)");
 }
