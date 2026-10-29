@@ -126,9 +126,10 @@ than stopping at the first hit. "Route 1" is `pce-ilbc.js` + `renderer/ilvm.bin`
 | `builtin sr` | 1 | 570 | `ilbc-builtin`, `cgen-op` | #137 |
 
 **246 of 1,919 instructions (12.8%)** are refused by at least one backend.
-Five kinds are refused by both; pad reads are a **route-1-only** gap (the C
-backend lowers `padref`/`padget` — `pce-cgen.js:457 and 466` — so the two backends
-disagree about what a toy can do).
+Nine of the eleven kinds are refused by both; pad reads are a
+**route-1-only** gap (the C backend lowers `padref`/`padget` —
+`pce-cgen.js:457 and 466` — so the two backends disagree about what a toy can
+do).
 
 Two notes that matter for whoever closes these:
 
