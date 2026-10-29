@@ -31,6 +31,13 @@
       var SLOT_COLS = 8;           /* the 64 slots as an 8x8 grid */
       var SLOT_PX = 24;            /* one slot's cell, in canvas pixels */
       var SHEET_PER_ROW = 8;       /* the pattern sheet's columns */
+      /* #120: this screen draws the toy's ASSETS with SB forced on
+       * (pce-editor.js renderPreview); the running toy's own CR decides, and
+       * the host powers on at $80, so a sprite is invisible in Run until the
+       * toy writes reg("CR", 0xC0).  docs/TOYS.md §2 states the same. */
+      var SB_HINT = "Run shows these sprites only when the toy sets SB: " +
+        "reg(\"CR\", 0xC0) (the host powers on with CR $80, background " +
+        "only). This screen previews the assets either way.";
 
       /* ---- the model's state -------------------------------------------- */
       function ready() { return !!(sat && ed); }
@@ -612,6 +619,12 @@
       }
 
       function drawText() {
+        /* #120: the line that stops the panel's picture from lying about
+         * Run.  Written on every draw, error or not: the requirement does
+         * not depend on the assets loading. */
+        if (studio.$("spr-sbhint")) {
+          studio.$("spr-sbhint").textContent = SB_HINT;
+        }
         var st = pic && sess ? { pic: pic, sess: sess } : null;
         if (!st) {
           if (studio.$("spr-note")) {

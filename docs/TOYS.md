@@ -154,11 +154,25 @@ frames. `t` is deterministic (`f/60`), not wall-clock: a frame is reproducible.
 | `print(...)` | the page's log (not the console) | captured, 200 lines |
 
 Defaults: a blank VDC — 256x224, `MWR = 0` (32x32 BAT), `BXR = BYR = 0`,
-`CR = 0x80` (BB: background on), all VRAM, CRAM and SAT words zero. `sprite`
+`CR = 0x80` (BB: background on, **SB: sprites OFF**), all VRAM, CRAM and SAT
+words zero. `sprite`
 fields: `x` and `y` 0..1023 (SAT X 32 / Y 64 is the display's top-left),
 `pattern` 0..1023, `palette` 0..15, `cgy` 0..3, and booleans `spbg`, `cgx`,
 `hflip`, `vflip` — composed into the four SAT words exactly as
 `renderer/pce-sprites.js` reads them (SAT Y 64 = display row 0).
+
+**The sprite layer is off until the toy sets SB.** `sprite()` (and a raw `sat()`
+write) fills the SAT, but the VDC draws no sprites while CR bit 6 (SB) is
+clear, and the host powers on with `CR = 0x80`. A toy that draws sprites writes
+`reg("CR", 0xC0)` — BB (0x80) | SB (0x40) — once, at the top of its `init()`.
+Nothing refuses a sprite that cannot be seen; the symptom is a blank Run, or
+sprites missing from a background that is otherwise exactly right, so check SB
+before the pattern layout (below). The studio's SPRITES panel previews the
+toy's assets, not its running frame: it draws the sprites whatever CR is (its
+picture comes from `pce-editor.js`'s `renderPreview`, which turns SB on when the
+picture has sprites), so the panel showing a sprite while Run shows none is this
+bit, not a broken asset. `toys/demo-game/main.lua` and the studio's
+`sprite-pad.lua` example both open with that `reg()` call.
 
 **A sprite pattern is not a background tile.** The BAT addresses a tile as 16
 words (`vram[char*16 + row]`, two bitplanes per word); the SAT addresses a
