@@ -30,12 +30,12 @@ The two milestones Dennis asked for:
 | Sprites: 64, sizes 16x16-32x64, 16 palettes, priority, 16 per line | PROVEN | `check.js` sprite scenes; breaker 24/24 after #40; `check-viewer.js` | #12, #40, #42 |
 | Scanline effects (raster table: scroll, layers, colours per line) | PROVEN | `check.js` raster1-13 diff 0, effects visible; breaker gaps closed; the two-CRAM-word step's last store finishes in the blank (~78 cycles) — `check.js` and `check-viewer.js` diff 0 on raster12, the old handler leaves 6,285 bytes different (#69) | #15, #43, #68, #69 |
 | Display window and border (224/240 lines, narrow windows) | PROVEN | `check.js` scenes 11-14, every border pixel | #48, #67 |
-| Wide screens 256 / 341 / 512 px | PROVEN | `check.js` wide336, wide512, wide512b | #27, #70, #76 |
+| Wide screens 256 / 341 / 512 px | PROVEN | `check.js` wide336, wide512, wide512b diff 0; the viewer/editor half #70 is implemented — `vwide336`/`vwide512` and `wedit336`/`wedit512` diff 0 in Mednafen, `check-viewer` 37 captures and `check-export` 28 scenes byte-equal — rule 2's cold break owed | #27, #70, #76 |
 | VRAM-to-VRAM copy (DMA) | PROVEN | `check-dma.js` 5 captures word for word | #49, #76 |
 | Status flags: sprite overflow, collision, VBlank | PROVEN | `check-status.js`: 79 saved states register-for-register and 30 read-cleared (the four toy captures' runtimes poll and clear SR), with the sprite overflow/collision/VBlank conditions on the captured scenes | #50, #76, #108 |
 | Flicker: more than 16 sprites on a line | PARTIAL | viewer + renderer proven (`check.js` flicker, 4 frames); the editor/toy option is still to do | #28 |
 | Sound chip (PSG): 6 voices, noise, LFO, samples (DDA) | PROVEN | `check-psg.js` 11 recordings sample for sample; `psg-mutation.js` 15/15. Derived from Mednafen, so the project is GPL-3.0 | #34, #63 |
-| Second emulator agrees (ares) | PARTIAL | pictures 1-3 + painted proven (`check-ares.js`); the newer ROMs need a re-capture with the screen unlocked | #41 |
+| Second emulator agrees (ares) | PARTIAL | pictures 1-3 + painted proven (`check-ares.js`); today's run SKIPs the 10 newer vraster/effect captures because this machine has no screen — they need a re-capture with the screen unlocked | #41 |
 | Real PC Engine | WAITING | Dennis: one run of `tools/gen/vraster5.pce` on the PC Engine or MiSTer | #16 |
 | TurboGrafx (US) image | NOT PROVEN | bit-reversed export passes `check-us-card.js`; no TurboGrafx here | #25 |
 
@@ -44,9 +44,9 @@ The two milestones Dennis asked for:
 | Part | Status | How we know | Where |
 |---|---|---|---|
 | Studio page laid out like ppu.toys, online at pcestudio.terracides.com | PROVEN | `check-studio.js --browser`; screenshots compared by @workshop | #75 |
-| Code editor (CodeMirror), files, save/open, autosave, Vim, shortcuts | PROVEN | `check-studio.js` 1,162 checks | #77 |
+| Code editor (CodeMirror), files, save/open, autosave, Vim, shortcuts | PROVEN | `check-studio.js` 1,227 checks | #77 |
 | Output column: layers, CRT, sound, markers, timeline, pad keys (IJKL) | PROVEN | `check-studio.js`; breaker gaps closed by #91 | #78 |
-| Panels in separate files (so several can be built at once) | PROVEN | `check-studio.js` 1,162 checks; ten `renderer/studio-panel-<name>.js` modules through one registry (docs/STUDIO.md §3.2) | #102 |
+| Panels in separate files (so several can be built at once) | PROVEN | `check-studio.js` 1,227 checks; ten `renderer/studio-panel-<name>.js` modules through one registry (docs/STUDIO.md §3.2) | #102 |
 | SCREEN panel: map editor with tools, zoom, tiles, palette | PROVEN | tools, zoom, map, tile sheet, curves, map-size and width dropdowns; breaker gaps closed by #106 | #84, #102 |
 | PALETTES and VRAM panels (512-colour picker, VRAM sheet) | PROVEN | `check-studio.js`: the 512-colour picker edits a 9-bit entry, the VRAM panel is a drawn map; palettes.json only | #85 |
 | SPRITES panel (64 sprites, sizes, patterns) | PROVEN | `check-studio.js` (102 checks for this panel): SAT slots, six pattern tools, per-sprite size, park/clear/release; board lists #86 as needs-checking (a different seat's break is owed) | #86 |
@@ -70,13 +70,13 @@ The two milestones Dennis asked for:
 | Five example toys (parallax, sky, road, status bar, palette cycling) | PROVEN | `check-examples.js` 120 frames each | #29 |
 | Sound in toys (a song and sound effects) | PARTIAL | song + SFX through HuTrack's channel hand-off; effects, arpeggio and samples still to do; #111 is open: the toy host's `sfx()` writes R4 = $40 (DDA with the channel-enable bit 7 clear), so `pce-psg.js` renders a constant level, RMS 905 against 5899 for $9F | #71, #111 |
 | Pads 1-5 and the timer, browser and console | PROVEN | `check-toys.js` 831 checks; console frame and browser frame 1293 both put the sprite at (154,138); the timer ticks 6.47 a frame, arithmetic 6.473 (tests/dumps/pads) | #45 |
-| The IL (our intermediate language) | PROVEN | `check-il.js` 973 checks, Lua == IL; #112 is open: a literal `true` used as a table field (`spbg=true`) is dropped, so the documented sprite form gives SAT word 3 = 0 while `spbg=1` sets bit 7 | #31, #112 |
+| The IL (our intermediate language) | PARTIAL | `check-il.js` 973 checks, Lua == IL, and the exports through llvm-mos and HuC run it; one documented form fails: a literal `true` in a table field (`spbg=true`) is dropped, so SAT word 3 = 0 while `spbg=1` sets bit 7 (#112) | #31, #112 |
 | The checker: frame time, sprites per line, memory | PROVEN | `check-validate.js`; breaker gaps closed by #89 | #32 |
 | A small game made only in the studio (demo-ready test) | TODO | starts when the panels and sound are in | #88 |
 | AI link part 1: an MCP server (an agent writes, runs, checks and exports toys) | PROVEN | `check-mcp.js` 101 checks: a real MCP client over stdio, frame_png, a register poke, validate with file:line, export_pce byte for byte; the board card is still open for rule 2 | #36 |
-| AI link part 2: the agent skill with recipes | RUNNING | a seat is building it now; `check-skill.js` 104 checks already pass on the pushed work (5 recipes through the MCP server, the cold seat's toy from SKILL.md alone runs), and the board card #103 is still open | #103 |
-| Guide file for chat AIs (paste into Claude) + Download button | PROVEN | `renderer/pcestudio-for-claude.md`, generated from the code; online (#105); `check-guide.js` 151 checks | #105 |
-| Paste & Run in the studio | PROVEN | `check-studio.js` 1,162 checks (paste box, dropped files, one undo step); the board lists #107 as needs-checking (a different seat's break is owed) | #107 |
+| AI link part 2: the agent skill with recipes | PROVEN | `check-skill.js` 104 checks pass (5 recipes through the MCP server, the cold seat's toy from SKILL.md alone runs); the board card #103 stays open for rule 2's cold break, because `board.py start` is refused while its feature is unrefined | #103 |
+| Guide file for chat AIs (paste into Claude) + Download button | PARTIAL | the generated guide works: `renderer/pcestudio-for-claude.md` (9,988 words) builds from the code and `check-guide.js` 151 checks pass (a cold seat given only the guide made a visible, validator-clean toy); the studio Download button is in the working tree only, the Browse-page button awaits #80, the deploy ran `--dry` only, and rule 2 is owed | #105 |
+| Paste & Run in the studio | PROVEN | `check-studio.js` 1,227 checks (paste box, dropped files, one undo step); the board lists #107 as needs-checking (a different seat's break is owed) | #107 |
 
 ## 4. Getting it onto a console — export to `.pce`
 
@@ -89,7 +89,7 @@ The two milestones Dennis asked for:
 | The Python builder (`tools/genviewer.py`) agrees with the browser builder | PROVEN | `check-python-builder.js`: 9/13/14 regions and the 108-bank fixture byte-equal; G11 and G16 DETECTED when re-broken | #60 |
 | Toys to `.pce` via llvm-mos (the yardstick, needs a native install) | PROVEN | `check-il-console.js` 126 checks: 2 toys diff 0 in Mednafen, 7,417 cycles/frame | #31 A/C |
 | Toys to `.pce` via HuC (comparison) | PROVEN | `check-il-huc.js`; 14x slower than llvm-mos | #31 B/D |
-| Toys to `.pce` in the browser, route 1 (interpreter in the ROM) | PARTIAL | first half proven: the IL as bytecode, interpreted on the console in Mednafen (`check-ilvm.js` 49 checks); the studio's Export button and raster are the second half, and its seat is idle with the card still open | #100 |
+| Toys to `.pce` in the browser, route 1 (interpreter in the ROM) | PARTIAL | first half proven: the IL as bytecode, interpreted on the console in Mednafen (`check-ilvm.js` 50 checks); the studio's Export button and raster are the second half, and its seat is idle with the card still open | #100 |
 | Toys to `.pce` in the browser, route 2 (our own compiler) | TODO | for speed, after route 1 | #101 |
 | Music in the `.pce` (Furnace DMF to HuTrack) | PROVEN | `check-export-song.js`, `check-hutrack.js` | #35 |
 | Sound patches to `.pce` (wave editor) | PROVEN | `check-wave.js` | #62 |
@@ -110,7 +110,7 @@ The two milestones Dennis asked for:
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone (`78b2c73`, 2026-10-29): 36 PASS, 1 SKIP (check-ares, no screen), 0 FAIL; `check-studio.js` 1,162 checks, `check-assets.js` 246 and #103's new `check-skill.js` 104 among them | #83, #108, #109 |
+| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone (`21e6d5e`, 2026-10-29): 36 PASS, 1 SKIP (check-ares, no screen: 10 vraster/effect captures), 0 FAIL; `check-studio.js` 1,227 checks, `check-assets.js` 246 and #103's `check-skill.js` 104 among them | #83, #108, #109 |
 | Every new test broken by a different seat (rule 2) | PROVEN | `docs/REVIEW-*.md`; each miss became a card and is closed | rule 2 |
 | Every manual read and mapped to a card | PROVEN | `docs/MANUALS.md` | #44, #55 |
 | Phase 1 read cold by a reviewer | PROVEN | `docs/REVIEW.md`: 12 ranked findings, each fixed in #38/#39 with a test | #11 |
@@ -118,7 +118,7 @@ The two milestones Dennis asked for:
 | The survey, the outcome statement and the rulebook are written down | PROVEN | `docs/SURVEY.md`, `docs/SPEC.md`, `docs/PPU-TOYS.md`; `docs/RETROSPECTIVE.md` six Log rows and RULES.md rule 2 | #1, #2, #4, #53 |
 | The skill the survey would add is installed and confirmed loaded | TODO | #1 found no existing skill to install; revisit when a PCE lesson has been paid for | #3 |
 | check.js stops judging an animated toy capture as a still picture | PROVEN | the by-name skip carries its reason (palette-huc, parallax-huc, toypalette-ilvm, toyparallax-ilvm) and the unlisted-dump guard still fails a toy copy as a pixel diff; those frames are judged by `check-il-huc.js`/`check-ilvm.js` | #81, #108 |
-| The suites are green again after a big card lands | PROVEN | #64's claim holds on today's fresh clone: `check-review-fixes` and `renderer-mutation` green, 34 PASS / 0 FAIL | #64, #108 |
+| The suites are green again after a big card lands | PROVEN | #64's claim holds on today's fresh clone: `check-review-fixes` and `renderer-mutation` green, 36 PASS / 1 SKIP / 0 FAIL | #64, #108 |
 | Phase 3 read cold by a reviewer | TODO | | #33 |
 | A recurring progress check keeps this page and the fresh-clone run current | RUNNING | this page and the run above are its output; #109 as a board card is still unrefined | #109 |
 
