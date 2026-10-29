@@ -16,7 +16,7 @@ Rules that keep the conversation working:
 
 - Use only the calls in this guide. If a call is not here, it does not exist; do not invent ppu.toys or SNES API.
 
-- Keep the code inside the cartridge-ready Lua subset in section 8 (integers, no string values, no table reads). The studio's Check button compiles the same file through its IL and refuses what that subset refuses.
+- Keep the code inside the cartridge-ready Lua subset in section 8 (integers, no string values, and tables only if the person does not need a cartridge). The studio's Check button compiles the same file through its IL and refuses what that subset refuses.
 
 - Never say the toy works. Ask the person what they see, or for the error line, and then say what you think is happening.
 
@@ -761,9 +761,9 @@ pad[1].i is true for every frame the button is held. If an action should fire on
 
 Stay in whole numbers: `x // 16`, not `x / 16` or 1.5. The studio's IL is a fixed-point machine and refuses or diverges on mixes (il-mixed), and integer maths makes a frame reproducible. t is f/60 seconds, but prefer f when you need a frame count.
 
-### 8. No strings, no tables you read back
+### 8. No strings, and keep tables simple
 
-The cartridge subset has no string values and cannot read a field of a table the toy built (il-string, il-table-read). Write tables with constant keys and read them back through constants (the toys do), or use separate globals. for i = a, b, step do is fine; pairs/ipairs are not.
+The cartridge subset has no string values (il-string). A table the toy builds can now be read back in the browser (t[i] and t.x run in both runtimes), but the console export has no tables yet, so a toy that must become a cartridge should fill tables with constant keys and read them back through constants (the toys do), or use separate globals. for i = a, b, step do is fine; pairs/ipairs are not.
 
 ### 9. print() is not the browser console
 
@@ -779,13 +779,13 @@ The studio's Check compiles the file through PCEStudio's IL, the same intermedia
 
 - No string used as a value. A string is allowed as reg's name and in print, not in a variable.
 
-- A table the toy builds is write-only in the IL: fill it with constants or integers you already hold, but do not read t[i] back later. The worked examples show the patterns that work.
+- Tables: the IL reads them back (t[i], t.x), but pce-cgen, the console back end, does not lower tables at all (cgen-op), so a toy with a table read runs in the browser and will not export. The worked examples fill a table with constants and do not read it back; keep to that if the person wants a cartridge.
 
 - No method calls (:), no varargs (...), no pairs/ipairs, and no multiple return values. Use for i = a, b, step do and plain functions.
 
 - A named function must be defined before it is called, in the same file.
 
-The refused constructs come back by code (il-syntax, il-op, il-string, il-mixed, il-table-read, il-method, il-for-in, il-undefined, il-arity); a browser-only toy fails Check with one of those.
+The refused constructs come back by code (il-syntax, il-op, il-string, il-mixed, il-method, il-for-in, il-undefined, il-arity); a browser-only toy fails Check with one of those.
 
 ## 9. When it goes wrong
 
@@ -811,7 +811,6 @@ Every refusal is a named failure, not a silent drop: the studio shows `code: fil
 | toy-error | a Lua error inside the toy, naming file:line |
 | il-syntax | Lua's own compile error, with file:line |
 | il-op | a Lua construct the IL has no instruction for |
-| il-table-read | reading a field of a toy-built table |
 | il-string | a string used as a value |
 | il-mixed | int and fixed in one place |
 | il-method | a `:` method call |
@@ -1071,7 +1070,7 @@ The limits a toy lives inside, each enforced where the table says.
 
 ## 11. Before you answer
 
-Check the code against this list before sending it: the whole file; only calls from section 4; integers; reg("CR", 0xC0) before the first sprite; the BAT filled; sprite patterns through putsprite; the raster callback a few writes per line; no string values; no table reads.
+Check the code against this list before sending it: the whole file; only calls from section 4; integers; reg("CR", 0xC0) before the first sprite; the BAT filled; sprite patterns through putsprite; the raster callback a few writes per line; no string values; no table reads if the toy must export.
 
 Then end with the line the person needs in order to run it:
 

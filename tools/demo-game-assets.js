@@ -286,8 +286,9 @@ function buildPicture() {
     ed.paintMapCell(pic, col, row, chars[tile]);
 
   /* Sprite patterns: the ten digits, then the ship, drone, bolt and heart.
-   * The order is the SAT's pattern numbering and the tool writes the ten
-   * digit codes into VRAM so the game can look one up (see main.lua). */
+   * The order is the SAT's pattern numbering, and the ten digit codes become
+   * the DIGIT table in the generated block so the game can look one up
+   * (see main.lua; card #118 made the table readable). */
   const patterns = {};
   for (let d = 0; d < 10; d++) {
     const p = ed.newSpritePattern(pic, 16, 16);
@@ -407,7 +408,9 @@ function luaBlock(pic) {
   push("");
   push("C_BAR = " + BG.backdrop + "        -- the status bar's backdrop (VCE word)");
   push("C_FIELD = " + C_FIELD + "      -- the playfield's");
-  push("DIGIT_BASE = 20000      -- the ten digit pattern codes, in VRAM");
+  const digitCodes = [];
+  for (let d = 0; d < 10; d++) digitCodes.push(layout.codes[d]);
+  push("DIGIT = {" + digitCodes.join(", ") + "}   -- the ten digit pattern codes (SPRITES panel)");
   push("SHIP = " + pat[10] + "   ENEMY = " + pat[11] +
        "   BULLET = " + pat[12] + "   HEART = " + pat[13]);
   const player = SPRITES.find((s) => s.slot === "player");
@@ -472,9 +475,6 @@ function luaBlock(pic) {
       if (w.word) push("  vram[" + w.addr + "] = " + hex16(w.word));
   }
 
-  push("  -- the ten digit pattern codes as the one array a toy can read");
-  for (let d = 0; d < 10; d++)
-    push("  vram[" + (20000 + d) + "] = " + layout.codes[d]);
   push("end");
 
   push("");
