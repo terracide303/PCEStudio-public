@@ -1,4 +1,4 @@
--- sky-gradient.lua — a vertical sky gradient with no gradient tiles (card #29).
+-- sky-gradient.lua — a vertical sky gradient with no gradient tiles.
 --
 -- THE TRICK: the VCE colour table can be rewritten during the frame, and a
 -- write made in the horizontal blanking before line L shows on line L.  So

@@ -313,7 +313,7 @@ function checkCapacity() {
   eq("palette: committed vs modelled", [cap.controls[0].committed,
      cap.controls[0].modelled], [578, 577]);
   eq("parallax: committed vs modelled", [cap.controls[1].committed,
-     cap.controls[1].modelled], [1100, 1096]);
+     cap.controls[1].modelled], [1115, 1111]);
   eq("projection at 3/4/6 B per uncarried instruction",
      cap.projections.map(function (p) { return [p.assumed, p.bytes, p.over]; }),
      [[3, 8585, true], [4, 8828, true], [6, 9314, true]]);

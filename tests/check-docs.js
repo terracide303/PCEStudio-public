@@ -43,11 +43,13 @@ const editor = require("../renderer/pce-editor.js");
 const toys = require("../renderer/pce-toys.js");
 const il = require("../renderer/pce-il.js");
 const psg = require("../renderer/pce-psg.js");
+const cgen = require("../renderer/pce-cgen.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const HTML_PATH = path.join(ROOT, "renderer", "docs.html");
 const SOURCES = ["renderer/pce-toyhost.js", "renderer/pce-toys.js",
-                 "renderer/pce-il.js", "renderer/pce-editor.js"];
+                 "renderer/pce-il.js", "renderer/pce-editor.js",
+                 "renderer/pce-cgen.js"];
 
 let checks = 0;
 const failures = [];
@@ -208,6 +210,11 @@ function checkRefusals() {
   for (const code of printed)
     check(Object.prototype.hasOwnProperty.call(index, code),
           "printed code " + code + " is a module's refusal");
+
+  /* the C backend's two tables stay one list: CODES is what it can raise,
+   * REFUSALS is what the page prints, and neither may drift from the other */
+  eq("cgen.REFUSALS describes exactly cgen.CODES",
+     Object.keys(cgen.REFUSALS).sort(), cgen.CODES.slice().sort());
 
   /* the merged index keeps one description per code and names its module */
   eq("the merged index has no duplicate keys",
