@@ -1817,6 +1817,99 @@ function checkExamplesVisible(page) {
   studio.seek(0);
 }
 
+/* ---- 7b. #107: Paste & Run, in the stub DOM --------------------------- */
+/* The clipboard is not in the stub DOM (there is no navigator), so the
+ * browser driver is where the button and the drop are proven. What is proven
+ * here is the rule itself and every outcome of pasting text in hand: the
+ * fence strip, the refusals by code, a good toy running and showing its
+ * picture, and a broken one naming main.lua line N in the error line and in
+ * CONSOLE. */
+function checkPasteRun(page) {
+  const studio = page.sandbox.PCEStudio.studio;
+  const dom = page.dom;
+  studio.loadExample("raster", true);
+  studio.pause();
+
+  /* one rule: the code is the fence's contents, whatever prose surrounds it */
+  const body = "function frame(t, f)\n  pal(0, 63, 0, 0)\nend\n";
+  check(studio.stripFence("Here is your toy:\n\n```lua\n" + body +
+                          "```\n\nCopy it, then press Paste & Run.") === body,
+        "#107: a ```lua fence is stripped and the prose around it dropped");
+  check(studio.stripFence(body) === body,
+        "#107: code with no fence passes through unchanged");
+  check(studio.stripFence("```\n" + body + "```") === body,
+        "#107: a fence with no language is still a fence");
+  check(studio.stripFence("```lua\r\n" + body.replace(/\n/g, "\r\n") + "```") === body,
+        "#107: CRLF text is normalised, so the line numbers stay the toy's");
+  check(studio.stripFence("```lua\n\nfunction frame() end\n```") ===
+        "\nfunction frame() end\n",
+        "#107: a blank first line is kept, so line numbers stay the toy's");
+
+  let langErr = null;
+  try { studio.stripFence("```js\nconsole.log(1)\n```"); }
+  catch (e) { langErr = e; }
+  check(!!langErr && langErr.code === "paste-language",
+        "#107: a ```js fence is refused by code (" +
+        (langErr && langErr.code) + ")");
+  let fenceErr = null;
+  try { studio.stripFence("```lua\nfunction frame() end"); }
+  catch (e) { fenceErr = e; }
+  check(!!fenceErr && fenceErr.code === "paste-fence",
+        "#107: an unclosed fence is refused by code (" +
+        (fenceErr && fenceErr.code) + ")");
+
+  /* a real toy, pasted the way an AI answers: prose, a fence, more prose */
+  const palette = studio.examples.filter((e) => e.id === "palette")[0];
+  const answer = "Here is a palette-cycling toy.\n\n```lua\n" +
+    palette.source + "```\n\nCopy this, then press Paste & Run.";
+  check(studio.pasteText(answer) === true,
+        "#107: pasting a fenced toy reports that it ran");
+  check(studio.lastError() === null, "#107: a good paste leaves no error");
+  check(studio.current().source === studio.stripFence(answer),
+        "#107: main.lua is the fence's code, not the prose");
+  check(studio.editorText() === studio.current().source,
+        "#107: the editor shows the pasted source");
+  check(dom.get("doc-title").textContent === "main.lua",
+        "#107: the document title says main.lua");
+  check(dom.get("error").hidden === true, "#107: the error line is empty");
+
+  /* it ran, and the picture is on the canvas: the palette example's field at
+   * frame 60 (the same threshold checkExamplesVisible uses) */
+  studio.seek(60);
+  studio.pause();
+  const out = studio.output();
+  const cram = studio.runtime().last.state.cram;
+  const vis = visibleBox(out, cram, [0, 0, 256, 224]);
+  check(vis.n > 50000,
+        "#107: the pasted toy runs and shows its picture (" + vis.n +
+        " non-backdrop pixels at frame 60)");
+
+  /* a broken paste: the error line says where, in the studio's file name */
+  const broken = "function frame(t, f)\n  nope()\nend\n";
+  check(studio.pasteText(broken) === false, "#107: a broken paste reports failure");
+  const err = studio.lastError();
+  check(!!err && err.code === "toy-error" && /^main\.lua line 2:/.test(err.message),
+        "#107: the error line names main.lua line 2 (" +
+        (err && err.code + ": " + err.message) + ")");
+  check(/main\.lua line 2/.test(dom.get("error").textContent),
+        "#107: the page's error line carries that line");
+  studio.panels.select("console");
+  studio.panels.refresh(true);
+  const consoleText = dom.get("console-table").textContent;
+  check(/last error: toy-error: main\.lua line 2/.test(consoleText),
+        "#107: CONSOLE repeats it, so one line can go back to the AI");
+
+  /* nothing to run */
+  check(studio.pasteText("   \n") === false &&
+        studio.lastError().code === "paste-empty",
+        "#107: an empty paste is refused as paste-empty");
+
+  /* leave a working toy for the checks after this one */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
 /* ---- 8. the real headless browser (optional) --------------------------- */
 /* The #77 browser evidence needs a page that can edit, reload and read the
  * studio back. A same-origin iframe driver served over HTTP does that with
@@ -2096,6 +2189,79 @@ const DRIVER_HTML = [
   '       cs.vram().selected + ")");',
   '    ck(cs.vram().overlays.labels.indexOf("BAT") >= 0,',
   '       "the BAT is labelled on the drawn map in the browser");',
+  '    /* #107 — Paste & Run: the clipboard, the fence, the run, undo, a dropped',
+  '     * .lua, and the fallback box when the browser refuses the clipboard. */',
+  '    cs.loadExample("raster", true);',
+  '    var beforePaste = cs.editorText();',
+  '    var paletteSrc = cs.examples.filter(function (e) { return e.id === "palette"; })[0].source;',
+  '    var fenced = "Here is your toy:\\n\\n```lua\\n" + paletteSrc +',
+  '      "```\\n\\nCopy this, then press Paste & Run.";',
+  '    try {',
+  '      Object.defineProperty(a.win.navigator, "clipboard", { configurable: true,',
+  '        value: { readText: function () { return Promise.resolve(fenced); } } });',
+  '    } catch (e) { ck(false, "the test can stand in for the clipboard"); }',
+  '    cdoc.getElementById("btn-paste-run").click();',
+  '    await new Promise(function (r) { setTimeout(r, 200); });',
+  '    ck(cs.lastError() === null, "Paste & Run from the clipboard leaves no error (" +',
+  '       JSON.stringify(cs.lastError()) + ")");',
+  '    ck(cs.editorText() === paletteSrc,',
+  '       "the pasted main.lua is the fence\'s code, not the prose around it");',
+  '    ck(cs.current().source === paletteSrc,',
+  '       "the pasted source is the Lua the page runs");',
+  '    cs.seek(60); cs.pause();',
+  '    var out7 = cs.output(), cram7 = cs.runtime().last.state.cram, vis7 = 0;',
+  '    function cramRgb7(cram, addr) {',
+  '      var v = cram[addr * 2] | (cram[addr * 2 + 1] << 8);',
+  '      return [36 * ((v >> 3) & 7), 36 * ((v >> 6) & 7), 36 * (v & 7)];',
+  '    }',
+  '    var bg7 = cramRgb7(cram7, 0);',
+  '    for (var i7 = 0; i7 < out7.pixels.length; i7 += 3) {',
+  '      if (out7.pixels[i7] !== bg7[0] || out7.pixels[i7 + 1] !== bg7[1] ||',
+  '          out7.pixels[i7 + 2] !== bg7[2]) vis7++;',
+  '    }',
+  '    ck(vis7 > 50000, "the pasted toy runs and is visible (" + vis7 +',
+  '       " non-backdrop pixels at frame 60)");',
+  '',
+  '    cs.codeMirror().undo();',
+  '    ck(cs.editorText() === beforePaste,',
+  '       "Ctrl+Z restores the source that Paste & Run replaced");',
+  '    ck(cs.current().source === beforePaste,',
+  '       "and the page runs the restored source again");',
+  '',
+  '    try {',
+  '      var dt7 = new a.win.DataTransfer();',
+  '      dt7.items.add(new a.win.File([paletteSrc], "from-ai.lua",',
+  '        { type: "text/plain" }));',
+  '      a.win.dispatchEvent(new a.win.DragEvent("drop",',
+  '        { dataTransfer: dt7, bubbles: true, cancelable: true }));',
+  '    } catch (e) { ck(false, "a DragEvent could be built (" + e.message + ")"); }',
+  '    for (var w7 = 0; w7 < 100 && cs.lastDrop().status === "pending"; w7++) {',
+  '      await new Promise(function (r) { setTimeout(r, 20); });',
+  '    }',
+  '    ck(cs.lastDrop().status === "done",',
+  '       "a dropped .lua loads (drop status " + cs.lastDrop().status + ")");',
+  '    ck(cs.lastDrop().name === "from-ai.lua",',
+  '       "the dropped file is the one that loaded (" + cs.lastDrop().name + ")");',
+  '    ck(cs.editorText() === paletteSrc && cs.current().source === paletteSrc,',
+  '       "the dropped .lua is main.lua and the Lua the page runs");',
+  '',
+  '    try {',
+  '      Object.defineProperty(a.win.navigator, "clipboard", { configurable: true,',
+  '        value: { readText: function () {',
+  '          return Promise.reject(new Error("denied")); } } });',
+  '    } catch (e) {}',
+  '    cdoc.getElementById("btn-paste-run").click();',
+  '    await new Promise(function (r) { setTimeout(r, 100); });',
+  '    ck(cs.pasteBox().open === true,',
+  '       "the browser refusing the clipboard opens the fallback paste box");',
+  '    ck(/refused/i.test(cs.pasteBox().note),',
+  '       "the box says why (" + cs.pasteBox().note.slice(0, 64) + ")");',
+  '    cs.setPasteBoxText("```lua\\n" + beforePaste + "```");',
+  '    cdoc.getElementById("paste-go").click();',
+  '    ck(cs.pasteBox().open === false, "the box closes once the toy runs");',
+  '    ck(cs.editorText() === beforePaste && cs.lastError() === null,',
+  '       "the box\'s code becomes main.lua and runs");',
+  '',
   '    done();',
   '  })().catch(function (e) {',
   '    ck(false, "driver threw: " + (e && e.message ? e.message : e));',
@@ -3731,6 +3897,7 @@ async function main() {
   checkCodeMirrorEditorText();
   checkOutputColumn(page);
   checkExamplesVisible(page);
+  checkPasteRun(page);
   checkScreenPanel(page);
   checkSpritesPanel(page);
   checkPanelModules(page);

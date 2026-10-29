@@ -621,6 +621,17 @@
   #panels-pop { top: 54px; right: 300px; min-width: 190px; }
   #settings-pop { top: 54px; right: 218px; width: 280px; }
   #open-pop { top: 54px; right: 24px; min-width: 250px; }
+  /* Paste & Run (#107) sits under the button that opens it, left of the
+   * action cluster so it never runs off a narrow window. */
+  #paste-pop { top: 54px; left: 90px; width: 460px; max-width: 90vw; }
+  .paste-box {
+    width: 100%; min-height: 200px; box-sizing: border-box;
+    background: var(--code); color: var(--text);
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px; resize: vertical;
+    font: 12px/1.45 var(--mono); white-space: pre;
+  }
+  .paste-row { display: flex; justify-content: flex-end; padding: 6px 2px 2px; }
   .pop-head {
     display: flex; align-items: center; justify-content: space-between;
     color: var(--dim); font: 9px var(--mono); letter-spacing: 0.13em;
@@ -731,6 +742,8 @@
     </div>
     <div class="top-actions">
       <button type="button" class="btn" id="btn-run">Run</button>
+      <button type="button" class="btn" id="btn-paste-run"
+              title="Read the clipboard (or drop a .lua / .pce.json file on the page), put it in main.lua and run it">Paste &amp; Run</button>
       <button type="button" class="btn" id="btn-check">Check</button>
       <button type="button" class="btn btn-accent" id="btn-export"
               title="Export .pce — needs #31 (the toy compiler)">Export…</button>
@@ -1148,6 +1161,21 @@
   <button type="button" class="pop-item" id="open-file">From file…</button>
   <input type="file" id="file-input"
          accept=".json,.pce.json,.lua,.txt,application/json,text/plain" hidden>
+</div>
+
+<!-- Paste & Run's fallback (#107): when the browser will not hand the page the
+     clipboard, the paste lands here instead. -->
+<div class="popover" id="paste-pop" hidden>
+  <div class="pop-head"><span>PASTE &amp; RUN</span>
+    <button type="button" class="pop-close" id="paste-close"
+            aria-label="Close paste">×</button></div>
+  <div class="pop-note" id="paste-note">Paste the code here, then press
+    Paste &amp; Run. A surrounding <code>```lua</code> fence is stripped.</div>
+  <textarea class="paste-box" id="paste-box" spellcheck="false"
+            placeholder="```lua&#10;function frame(t, f) ... end&#10;```"></textarea>
+  <div class="paste-row">
+    <button type="button" class="btn btn-accent" id="paste-go">Paste &amp; Run</button>
+  </div>
 </div>
 
 <!-- Docs: #61's generated reference, docked in the studio with ppu.toys'
@@ -1691,6 +1719,12 @@ let savedBits = { bg: false, sprites: false };
 let presented = null;        /* the frame the canvas shows (after masking) */
 let image = null;            /* the RGBA buffer behind the canvas */
 let imageW = 0, imageH = 0;
+/* The last failure, in the words the error line and CONSOLE show it (#107):
+ * {code, message}. Null after a run that started. */
+let lastError = null;
+/* The last dropped file (#107): {status: "pending"|"done"|"failed", name,
+ * error}. The drop is async (reading a File), so the evidence polls this. */
+let dropRun = { status: "idle", name: "", error: null };
 
 /* The toy's file set and the editor in front of it. `current.source` stays
  * the Lua the runtime runs (main.lua); an asset edit never changes it. */
@@ -1942,13 +1976,32 @@ function toast(message) {
     toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
   }
 }
-function showError(e) {
-  const el = $("error");
-  el.textContent = (e && e.code ? e.code + ": " : "") +
-                   (e && e.message ? e.message : String(e));
-  el.hidden = false;
+/* The runtime loads the toy as the chunk `toy.lua` (pce-toys.js). The studio's
+ * editor tab is main.lua, and the person reporting the failure to a chat AI
+ * reads the tab, not the chunk: say the name on the tab. */
+function mainLuaWhere(message) {
+  return String(message).replace(/(^|[^A-Za-z0-9_])toy\.lua:(\d+)/g,
+    "$1main.lua line $2");
 }
-function clearError() { $("error").hidden = true; $("error").textContent = ""; }
+
+/* The one error line (#107): the code, then the message with the file and
+ * line, which is what a chat AI needs to fix its own code. CONSOLE repeats it
+ * (renderer/studio-panel-console.js). */
+function showError(e) {
+  const code = e && e.code ? String(e.code) : "error";
+  const message = mainLuaWhere(e && e.message ? e.message : String(e));
+  lastError = { code: code, message: message };
+  const el = $("error");
+  el.textContent = code + ": " + message;
+  el.hidden = false;
+  panelDirty = true;
+  refreshPanels(true);
+}
+function clearError() {
+  lastError = null;
+  $("error").hidden = true;
+  $("error").textContent = "";
+}
 function setSaved(text) { $("saved").textContent = text; }
 
 /* ---- the runtime ------------------------------------------------------ */
@@ -2852,6 +2905,267 @@ function checkToy() {
   }
 }
 
+/* ---- Paste & Run (#107) ------------------------------------------------
+ * The chat-AI loop: the AI answers with one ```lua block, the person copies
+ * the answer, presses Paste & Run, and the toy runs.  Three doors into the
+ * same two functions — the clipboard, the fallback paste box, and a dropped
+ * .lua / .pce.json file — and one rule: the new source is main.lua and the
+ * previous source stays on CodeMirror's undo stack.
+ */
+const PASTE_FENCE = /```[ \t]*([A-Za-z0-9_+-]*)[^\n]*\n([\s\S]*?)```/;
+
+/* The Lua a pasted answer carries. A fence anywhere in the text wins (an AI
+ * usually puts a sentence above the block); a bare program passes through
+ * unchanged. A fence that names another language is refused by name: running
+ * JavaScript as Lua would only produce a Lua syntax error at the wrong line. */
+function stripCodeFence(text) {
+  const s = String(text == null ? "" : text).replace(/\r\n?/g, "\n");
+  const m = s.match(PASTE_FENCE);
+  if (m) {
+    const lang = m[1].toLowerCase();
+    if (lang && lang !== "lua" && lang !== "luau")
+      throw toyRefuse("paste-language",
+        "the code fence says ```" + m[1] + ", not ```lua: the studio runs " +
+        "Lua — ask the AI for the toy as one ```lua block");
+    return m[2].replace(/\s+$/, "") + "\n";
+  }
+  if (/```/.test(s))
+    throw toyRefuse("paste-fence",
+      "the text has an opening ``` but no closing fence: copy the whole " +
+      "block, from ```lua to the last ```");
+  return s;
+}
+
+/* Make `text` the toy's main.lua. CodeMirror gets one replaceRange, which is
+ * one undo unit and keeps the history: Ctrl/Cmd+Z brings the old source
+ * back. The stub DOM's textarea has no history; it gets setValue plus the
+ * same bookkeeping the editor's change event would have done. */
+function replaceMainLua(text) {
+  const f = findFile("main.lua");
+  if (!f) throw toyRefuse("paste-no-main",
+    "this toy has no main.lua to replace — open a toy first");
+  /* the source is the editor's from here, not an example's */
+  current.example = null;
+  if (editor && activeFile !== "main.lua") {
+    /* show main.lua first; setValue clears the history, and the next change
+     * is the only one undo has to reverse */
+    selectFile("main.lua");
+  }
+  if (editor && activeFile === "main.lua") {
+    const last = editor.lastLine();
+    editor.replaceRange(text, { line: 0, ch: 0 },
+      { line: last, ch: editor.getLine(last).length }, "+paste-run");
+    /* editor.on("change") has already mirrored it into f.source, current.source
+     * and the autosave */
+  } else {
+    if (activeFile !== "main.lua") selectFile("main.lua");
+    setEditorText(text);
+    f.source = text;
+    current.source = mainSource();
+    persistToy();
+    setSaved("pasted — Run to apply");
+  }
+  activeFile = "main.lua";
+  $("doc-title").textContent = "main.lua";
+  updateFileTabs();
+  renderAssets();
+  selectCodeTab("code");
+  return text;
+}
+
+/* Apply the editor's Lua and start it, with every failure on the error line:
+ * a refusal while compiling, an error in init(), and an error in the first
+ * frame all come back coded and with the line the runtime named. */
+function runToy() {
+  clearError();
+  try {
+    if (!applySource()) return false;   /* applySource already showed it */
+  } catch (e) {
+    /* the first frame ran during applySource's seek(0) and threw; the run
+     * loop never started, so there is nothing to pause */
+    pause();
+    runtime = null;
+    showError(e);
+    setSaved("not running — " + (e.code || "error"));
+    return false;
+  }
+  play();
+  return true;
+}
+
+function pasteFailed(e) {
+  showError(e);
+  setSaved("not running — " + (e.code || "error"));
+  return false;
+}
+
+/* The one Paste & Run action: text in hand, no clipboard. Returns true when
+ * the toy ran. */
+function pasteRun(text, label) {
+  let code;
+  try {
+    code = stripCodeFence(text);
+    if (!code.trim())
+      throw toyRefuse("paste-empty",
+        "there is no code to run: copy the AI's complete main.lua — one " +
+        "```lua block — and press Paste & Run again");
+    replaceMainLua(code);
+  } catch (e) {
+    return pasteFailed(e);
+  }
+  let ran = false;
+  try {
+    ran = runToy();
+  } catch (e) {
+    return pasteFailed(e);
+  }
+  if (!ran) {
+    /* the error line already names it; put it in the log too, so the person
+     * can copy it back to the AI unchanged */
+    toast("Paste & Run failed — " + (lastError ? lastError.code + ": " +
+      lastError.message : "see the error line"));
+    return false;
+  }
+  toast("Pasted " + (label || "the code") + " into main.lua and running. " +
+        "Ctrl+Z brings the old source back.");
+  return true;
+}
+
+/* The fallback paste box: shown when the browser gives the page no clipboard
+ * or refuses the read. The paste button opens it and says why in its note. */
+function openPasteBox(note) {
+  $("paste-note").textContent = note || ("Paste the code here, then press " +
+    "Paste & Run. A surrounding ```lua fence is stripped.");
+  for (const other of ["panels-pop", "settings-pop", "open-pop"]) {
+    $(other).hidden = true;
+  }
+  $("paste-pop").hidden = false;
+  const box = $("paste-box");
+  if (box && box.focus) box.focus();
+  return true;
+}
+
+/* The button: read the clipboard, or open the box when the browser will not. */
+function pasteFromClipboard() {
+  const nav = typeof navigator !== "undefined" ? navigator : null;
+  if (!nav || !nav.clipboard || typeof nav.clipboard.readText !== "function") {
+    openPasteBox("This browser does not give the page the clipboard. Paste " +
+      "the code below, then press Paste & Run.");
+    return Promise.resolve(false);
+  }
+  let reading;
+  try {
+    reading = nav.clipboard.readText();
+  } catch (e) {
+    openPasteBox("The browser refused the clipboard (" +
+      (e && e.message || e) + "). Paste the code below, then press Paste & Run.");
+    return Promise.resolve(false);
+  }
+  return Promise.resolve(reading).then((text) => {
+    if (text == null || !String(text).trim()) {
+      openPasteBox("The clipboard is empty. Copy the AI's code, then paste " +
+        "it below and press Paste & Run.");
+      return false;
+    }
+    return pasteRun(String(text), "the clipboard");
+  }, (e) => {
+    openPasteBox("The browser refused the clipboard (" +
+      (e && e.message || e) + "). Paste the code below, then press Paste & Run.");
+    return false;
+  });
+}
+
+/* ---- dropped files (#107) ----------------------------------------------- */
+function droppedFileKind(name) {
+  const n = String(name || "").toLowerCase();
+  if (/\.lua$/.test(n)) return "lua";
+  if (/\.pce\.json$/.test(n) || /^(toy|tiles|palettes|sprites|waves)\.json$/.test(n))
+    return "toy";
+  if (/\.(json|txt)$/.test(n)) return "toy";
+  return "";
+}
+
+function readFileText(file, cb) {
+  if (file && typeof file.text === "function") {
+    const p = file.text();
+    if (p && typeof p.then === "function") {
+      p.then((t) => cb(null, String(t)), (e) => cb(e));
+      return;
+    }
+  }
+  if (typeof FileReader === "function") {
+    const reader = new FileReader();
+    reader.onload = () => cb(null, String(reader.result || ""));
+    reader.onerror = () => cb(reader.error || new Error("the file could not be read"));
+    reader.readAsText(file);
+    return;
+  }
+  cb(new Error("this browser cannot read a dropped file"));
+}
+
+/* A .lua is new main.lua text, the same as a paste (assets are kept); a toy
+ * file is its whole envelope, the Open menu's path. Both run at once. */
+function dropRunFile(file) {
+  const name = String(file && file.name || "dropped file");
+  const kind = droppedFileKind(name);
+  dropRun = { status: "pending", name: name, error: null };
+  if (!kind) {
+    dropRun = { status: "failed", name: name,
+                error: { code: "drop-kind", message: name + " is not a .lua " +
+                  "or a .pce.json toy file" } };
+    showError(dropRun.error);
+    toast("Cannot run " + name + " — drop a .lua or a .pce.json toy file.");
+    return;
+  }
+  readFileText(file, (err, text) => {
+    if (err) {
+      dropRun = { status: "failed", name: name,
+                  error: { code: "drop-read", message: name + ": " +
+                    (err.message || err) } };
+      showError(dropRun.error);
+      return;
+    }
+    try {
+      if (kind === "lua") {
+        pasteRun(text, name);
+      } else {
+        clearError();
+        openToy(text, name);
+        play();
+        toast("Opened " + name + " and running.");
+      }
+      dropRun = { status: lastError ? "failed" : "done", name: name,
+                  error: lastError };
+    } catch (e) {
+      showError(e);
+      dropRun = { status: "failed", name: name, error: lastError };
+    }
+  });
+}
+
+/* Drop anywhere on the page. The default for a dropped file is to navigate
+ * away from the studio to it, so the page has to claim the event. */
+function bindDrops() {
+  if (typeof window === "undefined" || !window.addEventListener) return;
+  const hasFiles = (e) => !!(e && e.dataTransfer && e.dataTransfer.types &&
+    Array.prototype.indexOf.call(e.dataTransfer.types, "Files") >= 0);
+  window.addEventListener("dragover", (e) => {
+    if (hasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }
+  });
+  window.addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    const list = e.dataTransfer.files;
+    if (!list || !list.length) {
+      dropRun = { status: "failed", name: "", error: { code: "drop-empty",
+        message: "the drop carried no file" } };
+      showError(dropRun.error);
+      return;
+    }
+    dropRunFile(list[0]);
+  });
+}
+
 /* ---- init ------------------------------------------------------------- */
 function buildExamplesMenu() {
   const host = $("example-list");
@@ -2873,11 +3187,23 @@ function bind() {
    * page binds the layout, the editor, the output and the transport. */
   /* top bar */
   $("btn-run").addEventListener("click", () => {
-    if (!applySource()) return;
-    play();
+    if (!runToy()) return;
     toast("Running " + (current.example ? current.example.name : "the toy") + ".");
   });
   $("btn-check").addEventListener("click", checkToy);
+  /* #107 — the clipboard, and the box the browser's refusal falls back to. */
+  $("btn-paste-run").addEventListener("click", () => pasteFromClipboard());
+  $("paste-close").addEventListener("click", () => hidePop("paste-pop"));
+  $("paste-go").addEventListener("click", () => {
+    const text = $("paste-box").value;
+    if (!String(text == null ? "" : text).trim()) {
+      showError(toyRefuse("paste-empty",
+        "the paste box is empty: copy the AI's complete main.lua into it"));
+      return;
+    }
+    if (pasteRun(text, "the paste box")) hidePop("paste-pop");
+  });
+  bindDrops();
   $("btn-export").addEventListener("click", () => {
     $("export-modal").hidden = false;
   });
@@ -3412,7 +3738,10 @@ const studio = {
     output: () => (presented ? { frame: presented.frame,
                                  width: presented.width,
                                  height: presented.height,
-                                 pixels: presented.pixels } : null)
+                                 pixels: presented.pixels } : null),
+    /* #107 — the error line's last words, for CONSOLE */
+    lastError: () => (lastError ? { code: lastError.code,
+                                    message: lastError.message } : null)
   },
 
   /* ---- pokes, and undo/redo over them -------------------------------- */
@@ -3519,6 +3848,22 @@ const studio = {
   openToy: openToy,
   parseToy: parseToyFile,
   handleShortcut: handleShortcut,
+  /* #107 — Paste & Run. paste() is the button (clipboard, then the box);
+   * pasteText(text) is the same action with the text in hand (a drop, the
+   * box, the evidence); stripFence is the one rule on what a pasted answer
+   * carries. lastError/lastDrop are what the error line and CONSOLE show. */
+  paste: pasteFromClipboard,
+  pasteText: (text) => pasteRun(text, "the clipboard"),
+  stripFence: stripCodeFence,
+  pasteBox: () => ({ open: !$("paste-pop").hidden,
+                     note: $("paste-note").textContent,
+                     text: $("paste-box").value }),
+  setPasteBoxText: (text) => { $("paste-box").value = String(text || ""); },
+  openPasteBox: openPasteBox,
+  lastError: () => (lastError ? { code: lastError.code,
+                                  message: lastError.message } : null),
+  lastDrop: () => ({ status: dropRun.status, name: dropRun.name,
+                     error: dropRun.error }),
 
   /* #84 — the SCREEN panel's cell-map editor. The module owns these; the
    * evidence drives the same functions its DOM handlers call. */
