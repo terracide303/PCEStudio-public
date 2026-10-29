@@ -35,7 +35,7 @@ So this folder holds **the toy, not its picture**:
 
 `demo-art/` sits **beside** the repository
 (`/Volumes/External/agent-workshop-demo/demo-art/`). The join happens at
-**deploy**, the same way as CAVE (#127) and OAK WOODS (#128):
+**deploy**, the same way as OAK WOODS (#128):
 
 ```sh
 node tools/gallery.js --with-demo-art   # gallery-toys.js with the playable source
@@ -178,7 +178,7 @@ deploy puts on the site — not a stand-in.
 - **No Mednafen capture or export.** The card asks for the Export button and a
   capture in Mednafen; neither was done in this session — and export is blocked
   for every full-screen picture by card #148's other half (the IL bytecode's
-  127-constant pool, `renderer/pce-ilbc.js`), which refuses CITY, CAVE, OAK
+  127-constant pool, `renderer/pce-ilbc.js`), which refuses CITY, OAK
   WOODS and MINE alike. What is proven is the browser
   runtimes and the validator, in `tests/check-city.js`.
 - **Rule 2**: this test was written by the card's own seat (@design). A cold

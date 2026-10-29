@@ -3745,6 +3745,39 @@ function checkScreenPanel(page) {
   const back = sc.pictureFromFiles([{ name: "tiles.json", source: text }]);
   eq("tiles.json round-trips byte for byte", sc.tilesText(back), text);
 
+  /* #161: a toy opened from a file carries its song, and music(0) plays it.
+   * The studio compiles the song with renderer/pce-seq.js songsFromFiles —
+   * the same call the MCP server makes — so a game written through the
+   * tools sounds the same opened here. */
+  const seqLib = require("../renderer/pce-seq.js");
+  const openedSong = seqLib.newSong(16);
+  openedSong.name = "opened song";
+  seqLib.setCell(openedSong, 0, 0, 0, { note: 36, instrument: 0, length: 2 });
+  seqLib.setCell(openedSong, 0, 1, 0, { note: 24, instrument: 1, length: 8 });
+  const songEnv = JSON.stringify({
+    version: "pce.studio/1", title: "song toy", description: "",
+    files: [
+      { name: "main.lua",
+        source: "function init()\n  music(0)\nend\n" +
+                "function frame(t, f)\nend\n" },
+      { name: "song.json", source: seqLib.toJSON(openedSong) }
+    ], sources: []
+  });
+  studio.openToy(songEnv, "song.pce.json", { persist: false });
+  const songRt = studio.runtime();
+  check(!!songRt && songRt.sound && songRt.sound.songs.length === 1,
+        "#161: a toy opened from a file is handed its song.json");
+  check(!!songRt && songRt.sound && songRt.sound.index === 0 &&
+        songRt.sound.events.length > 0,
+        "#161: music(0) plays the opened toy's song (" +
+        (songRt && songRt.sound ? songRt.sound.events.length : -1) +
+        " writes)");
+  studio.seek(20);                       /* a note row is applied in a frame */
+  check(!!songRt && songRt.sound && songRt.sound.player &&
+        songRt.sound.player.notes.length >= 1 &&
+        songRt.sound.player.notes[0].instrument === 0,
+        "#161: the player starts the song's notes with its instrument");
+
   /* leave the page on a clean example */
   studio.loadExample("palette", true);
   studio.pause();
@@ -6907,6 +6940,27 @@ function toySource(file) {
   return fs.readFileSync(path.join(TOYS_DIR, file), "utf8");
 }
 
+/* #157: the Open popover's markup, from its opening <div> to the matching
+ * </div>.  The stub DOM does not parse the static markup, and grepping the
+ * page for "#<digits>" would match the maintenance comments, so the text
+ * check strips comments and tags first and reads only what a stranger sees. */
+function openPopoverMarkup(html) {
+  const start = html.indexOf('<div class="popover" id="open-pop"');
+  if (start < 0) return "";
+  const re = /<div\b|<\/div>/g;
+  re.lastIndex = start;
+  let depth = 0, m;
+  while ((m = re.exec(html))) {
+    if (m[0] === "</div>") {
+      depth--;
+      if (depth === 0) return html.slice(start, m.index + m[0].length);
+    } else {
+      depth++;
+    }
+  }
+  return html.slice(start);
+}
+
 function checkGallery(page) {
   const S = page.sandbox.PCEStudio;
   const studio = S.studio;
@@ -6924,15 +6978,16 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  /* #128 added OAK WOODS, #127 CAVE, #125 CITY and #147 PLATFORMER and TOWER
-   * — five demos besides the sky gradient (#29) and STARFALL; #151 added
-   * DUSK RUN and took the other four #29 effects out of Browse (their toys
-   * stay in toys/).  Browse and the studio read the same generated list. */
-  check(data.length === 8,
-        "the gallery carries the sky gradient, STARFALL, OAK WOODS, CAVE, " +
-        "CITY, PLATFORMER, TOWER and DUSK RUN (got " + data.length + ")");
+  /* #128 added OAK WOODS, #125 CITY and #147 PLATFORMER and TOWER — four
+   * demos besides the sky gradient (#29) and STARFALL; #151 added DUSK RUN
+   * and took the other four #29 effects out of Browse (their toys stay in
+   * toys/); #159 removed CAVE.  Browse and the studio read the same
+   * generated list. */
+  check(data.length === 7,
+        "the gallery carries the sky gradient, STARFALL, OAK WOODS, CITY, " +
+        "PLATFORMER, TOWER and DUSK RUN (got " + data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
-     ["sky-gradient", "starfall", "oak-woods", "cave", "city", "platformer",
+     ["sky-gradient", "starfall", "oak-woods", "city", "platformer",
       "tower", "dusk-run"]);
   /* #125: the committed gallery carries CITY's art-free toy — the playable
    * file with the pack's picture is demo-art/city/main.lua and only the
@@ -7060,6 +7115,56 @@ function checkGallery(page) {
      "main.lua,tiles.json,palettes.json,sprites.json");
   check(studio.current().source === toySource("demo-game/main.lua"),
         "#121: … and the game's own main.lua");
+  /* #157: Open… is the Browse gallery — the same ids in the same order, each
+   * button carrying the id the page opens — and the three test toys are not
+   * in it.  The same assertion is run on the pre-#157 list as a control: it
+   * must fail, or the check proves nothing about the change. */
+  const menuIds = (menu ? menu.children : [])
+    .filter((el) => el.getAttribute && el.getAttribute("data-example-id"))
+    .map((el) => el.getAttribute("data-example-id"));
+  const galleryIds = data.map((t) => t.id);
+  eq("#157: Open… lists the gallery's toys, in the gallery's order",
+     menuIds, galleryIds);
+  /* The pre-#157 menu was the three test examples plus the first gallery toy
+   * that carries files (STARFALL, #121).  The same equality check, fed that
+   * list, must say NO — otherwise it proves nothing about the change. */
+  const oldMenuIds = studio.examples.map((e) => e.id);
+  const oldPlayable = data.find((t) => t.files && t.files.length);
+  if (oldPlayable) oldMenuIds.push(oldPlayable.id);
+  const oldMatches = oldMenuIds.length === galleryIds.length &&
+    oldMenuIds.every((id, i) => id === galleryIds[i]);
+  check(!oldMatches,
+        "#157: control — the pre-#157 menu's list fails that check (" +
+        oldMenuIds.join(", ") + ")");
+  check(galleryIds.indexOf("palette") < 0 &&
+        galleryIds.indexOf("raster") < 0 &&
+        galleryIds.indexOf("sprite") < 0,
+        "#157: the three test-only examples are not gallery ids");
+  const skyBtn = (menu ? menu.children : []).find(
+    (el) => el.getAttribute &&
+          el.getAttribute("data-example-id") === "sky-gradient");
+  if (skyBtn) skyBtn.click();
+  eq("#157: the Open… button opens the gallery's toy", studio.current().id,
+     "sky-gradient");
+  check(studio.current().source === toySource("sky-gradient.lua"),
+        "#157: … with the toy's own main.lua");
+
+  /* #157: every caption a stranger reads — the static popover with its HTML
+   * comments removed, plus the entries and link built into the list — names
+   * no card number, no test file and no "envelope". */
+  const rawPage = fs.readFileSync(PAGE, "utf8");
+  const staticText = openPopoverMarkup(rawPage).replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+  const dynamicText = (menu ? menu.children : [])
+    .map((el) => el.textContent || "").join(" ");
+  const menuText = staticText + " " + dynamicText;
+  check(!/#\d/.test(menuText),
+        "#157: the Open… menu names no card number (" +
+        JSON.stringify((menuText.match(/#\d+/g) || []).join(", ")) + ")");
+  check(menuText.indexOf("tests/") < 0,
+        "#157: the Open… menu names no test file");
+  check(!/envelope/i.test(menuText),
+        "#157: the Open… menu does not say 'envelope'");
   studio.loadExample("palette", true);   /* leave the page on a #29 toy */
 
   const miss = runPage("?toy=no-such-toy&paused=1");
@@ -7075,7 +7180,7 @@ function checkGallery(page) {
   const cards = B.cards();
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
-     ["sky-gradient", "starfall", "oak-woods", "cave", "city", "platformer",
+     ["sky-gradient", "starfall", "oak-woods", "city", "platformer",
       "tower", "dusk-run"]);
   /* #125: the committed CITY card runs the art-free toy, so it draws no
    * picture here; the deployed gallery carries the playable file and does.
@@ -7091,21 +7196,54 @@ function checkGallery(page) {
   check(cards.every((c) => c.rawHref === "../toys/" + c.file),
         "each card names the toy's own file");
 
-  /* #156: the deployed gallery (tools/gallery.js --with-demo-art, what
-   * tools/deploy.sh builds) carries each demo's art as the studio's named
-   * files — main.lua first, sources.json last, the envelope's order — and
-   * the card the page draws from them is a picture.  The committed gallery
-   * never does; where the art is not on the machine this block skips. */
+  /* #156, and Dennis 2026-10-29's follow-up (the demos were BLACK in Browse
+   * and in the studio's Lua Run while the IL/MCP host rendered them): the
+   * deployed gallery (tools/gallery.js --with-demo-art, what tools/deploy.sh
+   * builds) carries each demo's art as the studio's named files — main.lua
+   * first, sources.json last, the envelope's order — and every route that
+   * draws a demo must show that picture, not black: the card, the studio's
+   * Lua-mode Run and the IL Run, all three pixel-equal, with the same toy
+   * minus its files (the control) black.  The committed gallery never
+   * carries the art; where the art is not on the machine this block skips. */
   {
     const demo = process.env.DEMO_ART ||
       "/Volumes/External/agent-workshop-demo/demo-art";
-    const present = ["oak-woods", "cave", "city"].every((id) =>
+    const present = ["oak-woods", "city"].every((id) =>
       fs.existsSync(path.join(demo, id, "sources.json")));
     if (present) {
-      const gdata = require(path.join(RENDERER, "..", "tools", "gallery.js"))
-        .data(true);
+      const galleryTool = require(path.join(RENDERER, "..", "tools",
+                                           "gallery.js"));
+      const gdata = galleryTool.data(true);
       const G = require(path.join(RENDERER, "pce-gallery.js"));
-      for (const id of ["oak-woods", "cave", "city"]) {
+      const toysM = require(path.join(RENDERER, "pce-toys.js"));
+      const ilM = require(path.join(RENDERER, "pce-il.js"));
+      /* one demo through one runtime to frame 60, with the exact options
+       * the studio's rebuild() passes (renderer/studio.html) — this is the
+       * studio's Run in Lua mode and its IL mode */
+      const run60 = (factory, t, files) => {
+        let rt = null;
+        try {
+          rt = factory.create(t.source, { budgetMs: 120,
+                                          songs: t.songs || [],
+                                          files: files || [] });
+          rt.load();
+          let frame = null;
+          for (let f = 0; f <= 60; f++) {
+            rt.setPad(1, {});
+            frame = rt.frame(f);
+          }
+          return { frame: frame, error: null };
+        } catch (e) {
+          return { frame: null, error: (e && e.code ? e.code + ": " : "") +
+                   ((e && e.message) || String(e)) };
+        } finally {
+          if (rt) { try { rt.dispose(); } catch (e) { /* freed */ } }
+        }
+      };
+      const samePixels = (a, b) => !!a && !!b &&
+        a.pixels.length === b.pixels.length &&
+        a.pixels.every((p, i) => p === b.pixels[i]);
+      for (const id of ["oak-woods", "city"]) {
         const t = gdata.toys.find((x) => x.id === id) || {};
         eq("#156: the deployed gallery's " + id + " is a folder of five",
            (t.files || []).map((f) => f.name),
@@ -7118,11 +7256,69 @@ function checkGallery(page) {
               sdoc.sources.every((s) => s.name && s.kind),
               "#156: " + id + "'s gallery entry names its sources (" +
               sdoc.sources.map((s) => s.name).join(", ") + ")");
-        const thumb = G.still(null, t.source, 60,
-                              { songs: t.songs, files: t.files });
-        check(thumb && G.countInk(thumb) > 1000,
+        const card = G.still(null, t.source, 60,
+                             { songs: t.songs, files: t.files });
+        check(card && G.countInk(card) > 1000,
               "#156: the deployed " + id + " card draws the art's frame 60 (" +
-              (thumb ? G.countInk(thumb) : 0) + " pixels)");
+              (card ? G.countInk(card) : 0) + " pixels)");
+        const lua = run60(toysM, t, t.files);
+        const il = run60(ilM, t, t.files);
+        check(lua.frame && G.countInk(lua.frame) > 1000,
+              "#156: " + id + "'s studio Lua-mode frame 60 draws the art (" +
+              (lua.frame ? G.countInk(lua.frame) : 0) + " pixels" +
+              (lua.error ? ", " + lua.error : "") + ")");
+        check(il.frame && samePixels(lua.frame, il.frame),
+              "#156: " + id + "'s Lua-mode frame equals its IL frame" +
+              (il.error ? " (" + il.error + ")" : ""));
+        check(samePixels(card, il.frame),
+              "#156: " + id + "'s card frame equals its IL frame");
+        const bare = G.still(null, t.source, 60, { songs: t.songs });
+        check(bare && G.countInk(bare) === 0,
+              "#156: " + id + " without its files is black (the control; " +
+              (bare ? G.countInk(bare) : -1) + " pixels)");
+      }
+      /* The page wiring (the black cards came from a page whose scripts
+       * predate #156): browse.html's own script list, loaded in its order
+       * with the deployed gallery swapped in for the committed one, must
+       * draw each demo's card — a page missing the picture models refuses
+       * instead of drawing. */
+      {
+        const html = fs.readFileSync(BROWSE_PAGE, "utf8");
+        const srcs = [];
+        const reSrc = /<script\s+src="([^"]+)"\s*><\/script>/g;
+        let m;
+        while ((m = reSrc.exec(html))) srcs.push(m[1]);
+        const sandbox = { console, Uint8Array, Uint8ClampedArray, Array,
+                          Math, JSON, Object, String, Number, parseInt,
+                          parseFloat, isNaN, Date, RegExp, Promise, Set,
+                          Map, setTimeout, clearTimeout,
+                          performance: { now: () => 0 } };
+        sandbox.window = sandbox;
+        sandbox.self = sandbox;
+        vm.createContext(sandbox);
+        for (const src of srcs) {
+          const text = src === "gallery-toys.js"
+            ? galleryTool.render(true)
+            : fs.readFileSync(path.resolve(RENDERER, src), "utf8");
+          vm.runInContext(text, sandbox, { filename: "renderer/" + src });
+        }
+        const Gv = sandbox.PCEStudio.gallery;
+        const toysV = sandbox.PCEStudio.galleryData.toys;
+        for (const id of ["oak-woods", "city"]) {
+          const t = toysV.find((x) => x.id === id) || {};
+          let frame = null, err = null;
+          try {
+            frame = Gv.still(null, t.source, 60,
+                             { songs: t.songs, files: t.files });
+          } catch (e) {
+            err = (e && e.code ? e.code + ": " : "") +
+              ((e && e.message) || String(e));
+          }
+          check(frame && Gv.countInk(frame) > 1000,
+                "#156: browse.html's own script order draws the deployed " +
+                id + " card (" + (frame ? Gv.countInk(frame) : 0) +
+                " pixels" + (err ? ", " + err : "") + ")");
+        }
       }
     } else {
       console.log("      demo art is not on this machine — the deployed " +
@@ -7229,15 +7425,11 @@ function checkGallery(page) {
      ["sky-gradient"]);
   B.setQuery("PCEStudio");
   eq("search by author finds the toys PCEStudio made", B.visible(),
-     B.toys().map((t) => t.id).filter((id) => id !== "cave"));
-  /* #127: the cave's card carries the pack's author, because the pack's
-   * licence asks for attribution — and the search can find it there */
-  B.setQuery("Will Tice");
-  eq("the CAVE card is found by the pack's author", B.visible(), ["cave"]);
+     B.toys().map((t) => t.id));
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["cave", "city", "dusk-run", "oak-woods", "platformer", "sky-gradient",
+     ["city", "dusk-run", "oak-woods", "platformer", "sky-gradient",
       "starfall", "tower"]);
   B.setSort("written");
 

@@ -1,10 +1,11 @@
 # The MCP server (#36, part 1)
 
 `tools/mcp/server.js` is PCEStudio's Model Context Protocol server. It lets an
-agent — Claude Code, or any MCP client — write a toy, run it, look at a frame,
-read and poke registers, check it with the validator, export a `.pce`, and
-read the toy author's reference. It is a **thin wrapper**: every pixel comes
-from `renderer/pce-sprites.js`, every frame from `renderer/pce-il.js`, every
+agent — Claude Code, or any MCP client — write a toy, give it art and a song,
+run it, look at a frame, read and poke registers, check it with the validator,
+save the whole toy as the file the studio opens, export a `.pce`, and read
+the toy author's reference. It is a **thin wrapper**: every pixel comes from
+`renderer/pce-sprites.js`, every frame from `renderer/pce-il.js`, every
 refusal from the module that owns it, every document from
 `renderer/pce-docs.js`. There is no second model.
 
@@ -19,7 +20,7 @@ refusal from the module that owns it, every document from
 `plugin/` is a Claude Code plugin in the ppu.toys shape
 (`docs/PPU-TOYS.md` §4): `.claude-plugin/plugin.json` and one skill,
 `skills/creating-pce-toys/SKILL.md`. The skill teaches this server's tools, the
-hardware's limits, the toy API, the IL subset and six worked recipes. Install:
+hardware's limits, the toy API, the IL subset and seven worked recipes. Install:
 
 ```sh
 claude mcp add pcestudio -- node "$PWD/tools/mcp/server.js"
@@ -102,10 +103,24 @@ One toy at a time, in one process:
 - `source_add` turns a picture into those asset files (#153): a base64 PNG or
   a pixel grid with a palette becomes tiles, sprites, a tilesheet or a
   palette, merged into the toy's files, and the reply is the VRAM/CRAM
-  budget (tiles, palettes, words used, warnings).
+  budget (tiles, palettes, words used, warnings). Kind `song` takes a base64
+  `.mid` and writes `song.json` (#161).
+- `toy_save` (#160) hands the whole session to the person as one
+  `pce.studio/1` envelope in the studio's own Save format, so the game opens
+  in the studio with the art the imports made — the studio's `Open… → From
+  file` path, and `renderer/pce-source.js importStudio` reads it. The songs
+  ride in the same envelope: `song.json` is one of the files it writes, and
+  the SEQUENCER opens it.
 - `toy_run` imports the asset files into VRAM, CRAM and the SAT **before
   `init()`**, exactly as the studio does (#117, #153) — the one importer, no
   second model — and its reply carries the import's summary as `assets`.
+- A toy's song files are its `music(index)` slots (#161): `song.json` (the
+  SEQUENCER's own document) and any playable `songs.json` entry are compiled
+  by `renderer/pce-seq.js`'s `songsFromFiles` — the module `pce-song.js`'s
+  `createPlayer()` takes — and handed to the runtime as `options.songs`, the
+  same list the studio gives a gallery toy. `song_write` composes one from a
+  step list, `source_add` kind `song` imports a `.mid` as the same file, and
+  a toy with no song file still gets none (so `music(0)` is `music-range`).
 - `toy_run` starts a **fresh, deterministic** run: frame indices `0` to
   `frames-1`, `t = f/60`, not the clock. It returns the final state and its
   VRAM/CRAM/SAT digests.
@@ -148,14 +163,72 @@ Example reply:
 
 ```json
 {"ok":true,"files":["main.lua"],"main_lua_bytes":45,"assets":[],
- "language":"pce-il","hooks":{"init":null,"frame":1,"raster":null},
+ "songs":[],"language":"pce-il","hooks":{"init":null,"frame":1,"raster":null},
  "functions":2,
- "note":"main.lua is compiled now; the asset files ride along and toy_run imports them into VRAM/CRAM/SAT before init() (#117, #153), so the files the panels edit are the art the toy boots inside"}
+ "note":"main.lua is compiled now; the asset files ride along and toy_run imports them into VRAM/CRAM/SAT before init() (#117, #153), and the song files are the music(index) slots (#161) — so the files the panels edit are the art and the music the toy boots with"}
 ```
 
 A toy the IL refuses (for example `pairs`, or a syntax error) comes back with
 `isError:true`, the IL's code and the file and line in the message:
 `{"ok":false,"code":"il-syntax","message":"[string \"main.lua\"]:2: …"}`.
+
+A song file the model cannot compile refuses the write the same way, by the
+sequencer's or the player's own code (`seq-json`, `seq-tempo`, `song-*`), and
+the toy that was loaded keeps playing.
+### `toy_save(path, title, description)`
+
+Writes the session as the **studio's own file** (#160): one
+`pce.studio/1` JSON envelope holding `main.lua`, every asset file the
+imports made (`tiles.json`, `palettes.json`, `sprites.json`), the named
+sources (`sources.json`, #156) and the songs (`song.json`, `songs.json`) —
+whatever the session holds, each byte for byte. The text is built by
+`renderer/pce-source.js`'s `envelopeText()`, the same function
+`renderer/studio.html`'s Save uses (`saveToyFile` → `toyEnvelope`), so there
+is **one format, not two**: what this writes is what Save writes.
+`tests/check-mcp.js` opens the saved file through the studio's own
+`importStudio()` and gets the frame the MCP run drew, diff 0.
+
+The person then opens it in the studio with **Open… → From file…** (or drops
+it on the page) and plays the toy with its art. Before this tool existed an
+agent could only hand over `main.lua`, and every tile and sprite stayed in
+the server's process.
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `path` | string | the file to write, **inside the working folder**; `.pce.json` is appended when the name has no `.pce.json` / `.pce.studio` extension |
+| `title` | string, optional | the toy's title; default: the file's own base name |
+| `description` | string, optional | one line, saved as the envelope's `description` |
+
+The **working folder** is the folder the server was started in — for Claude
+Code, the person's project folder — or `PCE_MCP_WORKDIR` when that names
+one. A path that resolves outside it, by `..` or by an absolute path, is
+refused with `save-path` and nothing is written: an agent must not be able to
+overwrite files it was never pointed at.
+
+Example call:
+
+```json
+{"name":"toy_save","arguments":{"path":"red-toy.pce.json"}}
+```
+
+Example reply:
+
+```json
+{"ok":true,"version":"pce.studio/1",
+ "path":"/work/red-toy.pce.json","name":"red-toy.pce.json",
+ "title":"red-toy","description":"","bytes":4210,
+ "sha256":"…",
+ "files":["main.lua","palettes.json","sprites.json","sources.json"],
+ "note":"one pce.studio/1 envelope — the studio's own Save format, built by renderer/pce-source.js envelopeText() — holding every file and source; in the studio, Open… → From file (or drop it on the page) plays this toy with its art"}
+```
+
+The envelope's keys are the studio's, in the studio's order: `version`,
+`title`, `description`, `files`, `sources`, two-space JSON and a last
+newline. `sources` is the ppu.toys field for binary sources (card #24) and
+is `[]`; the art travels as the text asset files, named by `sources.json`.
+
+Refusals: `no-toy`, `save-path` (a missing path, or one outside the working
+folder), `save-io` (the folder or file could not be written).
 
 ### `toy_run(frames, pad)`
 
@@ -183,7 +256,12 @@ Example reply (abridged):
   "raster":{"entries":4,"base":{"bxr":116,"byr":0,"cr":128}},
   "vram_words":32768,"cram_entries":512,"sat_entries":64,
   "vram_sha256":"…","cram_sha256":"…","sat_sha256":"…"},
- "log":[],"sound_writes":0,"overrides":{}}
+ "sound":{"writes":1322,"songs":1,
+  "music":{"index":0,"name":"Oak Woods","playing":true,"notes":12},
+  "channels":[{"channel":0,"notes":5,"instrument":"square",
+               "instruments":["square"],
+               "last_note":{"frame":54,"note":55},"sfx":null}, …]},
+ "log":[],"sound_writes":1322,"overrides":{}}
 ```
 
 `state.regs` is the toy's own VDC state at the final frame. Full VRAM, CRAM
@@ -192,6 +270,16 @@ client can tell runs apart without moving the buffers. `log` is the toy's
 `print()` output (the host's 200-line log). When the toy has asset files the
 reply also carries `assets` — the #117 import's summary: the file names and
 the tiles, patterns and sprites the import placed.
+
+`sound` is the ear an agent does not have (#161). `writes` is the PSG write
+stream the run recorded; `songs` is the number of song slots the runtime was
+given; `music` is null until `music(n)` runs, then the index, the song's
+name, whether the player is running, and the notes it applied. `channels`
+has one entry per PSG voice (0..5): how many notes pce-song.js started on it,
+the instrument the last one sounds with (the compiled song's own instrument
+library; `instruments` lists every one it used), the last note's frame and
+engine note, and the SFX that owns the channel at the end of the run if any.
+`sound_writes` is kept beside it for the count alone.
 
 Refusals: `no-toy`, `frame-range`, `pad-script`, `pad-button`, and any
 runtime refusal (for example `toy-timeout`, `reg-range`) keeps its code.
@@ -210,7 +298,8 @@ the current files and the reply is the budget. Call it before `toy_run`;
 | `png` | string | base64 of an RGB or RGBA PNG; either this or `grid` |
 | `grid` | object | `{width 1..256, height 1..240, pixels[]}` — palette indices, `-1` transparent; either this or `png` |
 | `palette` | array of `[r,g,b]` | the grid's palette; required with `grid` |
-| `kind` | `bg` \| `sprites` \| `tilesheet` \| `palette` | what the picture becomes |
+| `kind` | `bg` \| `sprites` \| `tilesheet` \| `palette` \| `song` | what the source becomes; `song` takes `mid` |
+| `mid` | string | for kind `song`: a Standard MIDI File, base64 |
 | `name` | string | shown in the reply and the files |
 | `dither` | `none` \| `ordered` \| `diffusion`, default `none` | how non-exact colours are reduced |
 | `alphaThreshold` | 0..255, default 128 | pixels at or below this alpha are transparent |
@@ -251,8 +340,63 @@ Merge rules, so a second add never silently destroys the first:
 Refusals: `source-kind`, `source-picture` (png and grid both or neither),
 `source-grid`, `source-size`, `source-tiles`, `source-empty`,
 `source-palettes` (no free sprite palette row), `source-sat` (past 64
-sprites), the `png-*` family from the studio's importer, and `asset-json`
-when the toy's own asset files do not parse.
+sprites), the `png-*` family from the studio's importer, `asset-json` when
+the toy's own asset files do not parse, and `source-song` / the `mid-*`
+family from the song importer (below).
+
+#### kind `song` — a `.mid` becomes the toy's song (#161)
+
+`source_add` kind `song` takes `mid` — a Standard MIDI File, base64 — and
+runs it through the studio's own `.mid` importer
+(`renderer/pce-source.js importMidi`, #123): its MIDI channels become the
+PSG's six voices and its notes become a SEQUENCER song, written as the toy's
+`song.json`. It replaces the toy's one song, and `music(0)` plays it.
+
+```json
+{"name":"source_add","arguments":{"kind":"song","name":"title tune",
+ "mid":"TVRoZAAAAAYAAAABAeBNVHJrAAAA…"}}
+```
+
+The reply is the importer's stats (`notes`, `patterns`, `tempo`, `steps`,
+`channels`, `ignored`), the file set, the `songs` slots and the `song`
+document that was written, plus `music_index` — the index `music()` takes.
+Refusals: `source-song` (no `mid`, or it decodes to nothing) and the
+importer's own `mid-signature`, `mid-smtpe`, `source-seq`, `seq-*`.
+
+### `song_write(notes | song, …)`
+
+Composes the toy's song (#161) with the SEQUENCER's built-in instruments and
+writes it as `song.json` — the file `music(index)` plays and the studio's
+SEQUENCER edits. Two forms, exactly one of them:
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `notes` | array of `{channel, step, note, length, instrument}` | the step list; `channel` 0..5 (default 0), `step` ≥ 0, `note` a name (`C4`) or the engine note 0..83, `length` in steps (default 1, to the end of the pattern), `instrument` a built-in name or index (default lead) |
+| `song` | object | the SEQUENCER's own document (`pce-seq.js` VERSION): `{name, tempo, swing, key, steps, patterns, order, instruments}` |
+| `name` | string | the song's name, on both forms |
+| `tempo`, `steps`, `swing`, `key` | integer | the notes form's grid settings; pce-seq.js's own ranges |
+
+The built-in instruments are `lead`, `bass`, `bell`, `strings` (wave voices)
+and `kick`, `snare` (noise drums; `pce-song.js` does not play effect 0F yet,
+so through `music()` they sound their envelope on a wave channel — use `sfx()`
+for a percussion hit in a toy). `step` counts columns from 0 across patterns
+of `steps` columns, so step 32 is pattern 2 column 0.
+
+```json
+{"name":"song_write","arguments":{"name":"game tune","tempo":140,"steps":16,
+ "notes":[{"channel":0,"step":0,"note":"C4","length":2,"instrument":"lead"},
+          {"channel":1,"step":0,"note":"C3","length":8,"instrument":"bass"}]}}
+```
+
+The reply: `file`, `name`, `tempo`, `steps`, `patterns`, `order`,
+`notes_placed`, `instruments`, `frames` and `seconds` (the whole song's
+length at the player's tick rate), the file set, the `songs` slots,
+`music_index`, the `song` document written, and `warnings` (a song with no
+notes says so). Refusals: `song-input` (both forms or neither),
+`seq-note`, `seq-instrument`, `seq-channel`, `seq-length`, `seq-pattern`,
+`seq-tempo`, `seq-steps`, `seq-swing`, `seq-key`, `seq-voice` (a noise drum
+on a channel without the noise generator), `seq-json`. A refused song leaves
+the toy and the loaded song alone.
 
 ### `frame_png(frame)`
 
@@ -512,9 +656,9 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
 ## Evidence
 
 `node tests/check-mcp.js` starts `tools/mcp/server.js`, speaks MCP over
-stdio, and asserts 150 checks:
+stdio, and asserts 257 checks:
 
-- `initialize`, `ping`, and `tools/list` with all nine tools and their
+- `initialize`, `ping`, and `tools/list` with all eleven tools and their
   schemas;
 - #29's parallax toy written, 60 frames run, and the PNG at frame 60 equal
   to `tests/dumps/examples/parallax.png` (check-examples' frame 60) pixel
@@ -536,6 +680,26 @@ stdio, and asserts 150 checks:
   import is blank there); a second add appends, a refused add leaves the toy
   byte-identical, and a toy with `tiles.json` renders the same frame through
   the MCP server as through the studio host (`pictureFromFiles`), diff 0;
+- the song route (#161): `toys/oak-woods/song.json` in `toy_write`'s files
+  is the runtime's `options.songs`, so `music(0)` plays — PSG writes are
+  recorded, every channel the compiled song uses starts notes and reports
+  its instrument, and the run matches an independent `il.create(source,
+  {songs})` run's write count; the same toy without the file is refused
+  `music-range` (the control); a `.mid` through `source_add` kind `song`
+  becomes `song.json` through the Add Source importer and `music(0)` plays
+  it; `song_write` composes a tune with the built-in instruments; a refused
+  `.mid` or song leaves the loaded song playing; and the written song's
+  `pce.studio/1` envelope opens through `renderer/pce-source.js
+  importStudio`, with the SEQUENCER's own read-back (`pce-seq.js fromJSON`)
+  returning the same grid;
+- the hand-off (#160): `toy_save` writes one `pce.studio/1` envelope with
+  the studio's key order and text, holding `main.lua`, the added PNG's
+  `sprites.json`/`palettes.json` and the named `sources.json` byte for byte;
+  the studio's own `importStudio()` reads it and the frame it renders is the
+  MCP run's frame, diff 0; a control saved without the art opens and draws
+  the sky where the saved toy draws its sprite; `..` and absolute paths
+  outside the working folder are refused with `save-path` and write nothing,
+  and a server started in another folder saves into that folder;
 - `docs` chapter list, a chapter's own numbers, and a refused unknown topic.
 
 Written by @design because the card names the file. Per workshop rule 2, a

@@ -1219,7 +1219,7 @@ The static-picture path is separate and unchanged: the editor paints VRAM/CRAM/r
   title, author and tag chips, and a search box) and `/t/<id>` (the picture, the title, the author, the
   tags, `Play full screen`, `Raw output`, `Fork`, and the source under file tabs) are the reference for
   `renderer/browse.html` and `renderer/toy.html`. The example toys of #29 plus the demos (STARFALL,
-  OAK WOODS, CAVE, CITY, PLATFORMER, TOWER, DUSK RUN) are the gallery's content — #151 took the
+  OAK WOODS, CITY, PLATFORMER, TOWER, DUSK RUN) are the gallery's content — #151 took the
   parallax, road, status-bar and palette-cycle effects out of Browse, though their files stay in
   `toys/`; the sources are `renderer/gallery-toys.js`, generated from `toys/*.lua` by `tools/gallery.js`, so a card,
   a toy's page, the studio and `tests/check-examples.js` all read the same bytes. The studio's top bar
@@ -1436,13 +1436,13 @@ What it does, in order:
       `consoleRefresh()`/a panel select instead), and the browser driver has no CONSOLE case.
 16. **The gallery, the Browse page and a toy's own page (#80).** `checkGallery` (its own runner,
     `runBarePage`, boots a page that is not the studio): `tools/gallery.js --check` passes and
-    `renderer/gallery-toys.js`'s eight sources are `toys/<file>` byte for byte; `studio.gallery` is those
-    eight; `?toy=sky-gradient` loads `sky-gradient.lua` and its **40 frames** are pixel- and state-equal
+    `renderer/gallery-toys.js`'s seven sources are `toys/<file>` byte for byte; `studio.gallery` is those
+    seven; `?toy=sky-gradient` loads `sky-gradient.lua` and its **40 frames** are pixel- and state-equal
     to the same file through `PCEStudio.toys` directly; `?toy=<unknown>` records the miss and leaves the
-    first example. `browse.html` builds eight cards in the toys' order, every card's frame-60 ink is
+    first example. `browse.html` builds seven cards in the toys' order, every card's frame-60 ink is
     non-zero except the art-free committed CITY placeholder, the two links per card are `toy.html?id=`
-    and `studio.html?toy=`, `?tag=raster` and the search box filter the wall, search by author finds all
-    but the credited CAVE, and A–Z sorts it. `toy.html?id=sky-gradient` shows its source, its
+    and `studio.html?toy=`, `?tag=raster` and the search box filter the wall, search by author finds
+    every toy, and A–Z sorts it. `toy.html?id=sky-gradient` shows its source, its
     `../toys/sky-gradient.lua` and `studio.html?toy=sky-gradient` links, its two tag chips and 60 frames
     with a
     picture; `?id=<unknown>` is refused `unknown-toy` and marks the page root. What the stub cannot show is

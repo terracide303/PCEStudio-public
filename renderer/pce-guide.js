@@ -305,19 +305,25 @@ function guide() {
         "~/.claude/skills/creating-pce-toys"),
       p("The server needs Node and nothing else: no npm install, no " +
         "compiler. The link is the skill that ships beside it (SKILL.md and " +
-        "six worked recipes). Skills load when a session starts, so start a " +
+        "seven worked recipes). Skills load when a session starts, so start a " +
         "new Claude Code session after this."),
       h3("The tools"),
       table(["tool", "what it does"], [
         ["toy_write", "replace the session's toy: a file set whose main.lua runs"],
         ["toy_run", "run it frame by frame, with an optional pad script; " +
-                    "returns registers, the raster shape and VRAM/CRAM/SAT hashes"],
+                    "returns registers, the raster shape, VRAM/CRAM/SAT hashes " +
+                    "and what each PSG channel played"],
         ["source_add", "turn a PNG or a pixel grid with a palette into the " +
-                       "toy's tiles, sprites, a tilesheet or a palette, before " +
-                       "toy_run; returns the VRAM/CRAM budget"],
+                       "toy's tiles, sprites, a tilesheet or a palette, or a " +
+                       ".mid into its song.json, before toy_run; returns the " +
+                       "VRAM/CRAM budget"],
+        ["song_write", "compose the toy's song.json from a step list with the " +
+                       "SEQUENCER's built-in instruments; music(0) plays it"],
         ["frame_png", "the picture at a frame, as a PNG you can look at"],
         ["validate", "check it against the hardware's limits, with file:line " +
                      "findings"],
+        ["toy_save", "save the whole toy — code, art, songs — as one " +
+                     ".pce.json the person opens in the studio"],
         ["export_pce", "build the HuCard .pce from the same IL the studio runs"],
         ["docs", "the reference chapters, generated from the runtime's tables"],
         ["registers_get", "read a VDC, VCE or PSG register with its range"],
@@ -329,9 +335,20 @@ function guide() {
         "a pixel grid with its palette becomes the toy's tiles, sprites, a " +
         "tilesheet or a palette, merged into its asset files, and the reply " +
         "is the VRAM/CRAM budget — toy_run imports those files into VRAM, " +
-        "CRAM and the SAT before init(), exactly as the studio does. A toy " +
+        "CRAM and the SAT before init(), exactly as the studio does. Add " +
+        "music with song_write (or source_add kind song for a .mid): it " +
+        "writes song.json and music(0) plays it, while toy_run's sound report " +
+        "says what started on each channel. A toy " +
         "that runs without errors does not mean it looks right: look at the " +
         "frame."),
+      p("**Finish with toy_save.** It writes one .pce.json holding every file " +
+        "— main.lua, the art source_add made, the named sources and the songs " +
+        "— in the studio's own Save format, inside the folder the server runs " +
+        "in (a path outside it is refused). Then tell the person: open " +
+        "PCEStudio, press Open… → From file…, pick that file — or drop it on " +
+        "the page — and the game plays with its art. Without this step you " +
+        "can only hand over the code, and everything source_add imported " +
+        "stays behind."),
       p("No tools at all? Ignore this section. Sections 1 to 11 are the " +
         "paste-and-run route and work the same.")
     ]

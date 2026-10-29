@@ -604,9 +604,10 @@ function checkReviewFixes() {
   check(sndCode.includes("sfx(") && sndCode.includes("note("),
         "the sound example uses sfx() with note()");
   const sndText = parasOf(refSection("sound"));
-  check(sndText.includes("music-range") && sndText.includes("song list"),
-        "the sound chapter says a pasted toy has no song list and music() is " +
-        "music-range there");
+  check(sndText.includes("music-range") && sndText.includes("song.json") &&
+        sndText.includes("songsFromFiles"),
+        "the sound chapter says a toy's song.json is its music() list " +
+        "(pce-seq songsFromFiles), and no song file is music-range");
   const apiSec = guide.guide().sections.find((s) => s.id === "api");
   const apiRows = apiSec.blocks.find((b) => b.type === "table").rows;
   check(apiRows.some((r) => /^note\(/.test(r[0])),
