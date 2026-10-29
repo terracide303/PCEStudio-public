@@ -30,10 +30,17 @@
  * (#83) are the two toy captures: #31's capture route records an animation
  * and saves its state when Mednafen is interrupted, so the state is a frame
  * of the animation rather than the recorded last frame; those frames are
- * check-il-console.js's evidence, aligned against the browser run.  The skip
- * list is explicit below and a dump with the background off that is not on
- * it is rendered like any other, so a bad capture cannot hide behind a
- * blanket "not a picture" rule.
+ * check-il-console.js's evidence, aligned against the browser run.
+ * tests/dumps/palette-huc and parallax-huc (#45's HuC builds) and
+ * toypalette-ilvm and toyparallax-ilvm (#100's bytecode builds) are the same
+ * two toys captured through the toy route again: that route writes the crop
+ * to meta.json, not regs.json, so this check's default crop puts the saved
+ * state one line off.  Measured (#108): each renders diff 0 at the capture's
+ * own slstart 3 and only at that crop, so the skip is the capture route, not
+ * a renderer difference; check-il-huc.js and check-ilvm.js judge their
+ * frames against the browser run.  The skip list is explicit below and a
+ * dump with the background off that is not on it is rendered like any
+ * other, so a bad capture cannot hide behind a blanket "not a picture" rule.
  *
  * A dump with raster.json (the #15 raster scenes) is verified against it
  * first (checkRaster below: the table must describe what the ROM actually
@@ -253,6 +260,44 @@ const NOT_PICTURES = {
        "against the browser run by tests/check-il-console.js: its saved state " +
        "is one frame of a 537-frame animation, not the still scene this " +
        "check diffs against the recorded last frame",
+  /* #108: #45's HuC build of the palette toy.  The toy capture route
+   * (capture-huc.sh) writes slstart 3 to meta.json and nothing to
+   * regs.json, so this check's default crop 4 renders the saved state one
+   * line off: measured 29,088 differing pixels of 178,176 bytes, and diff 0
+   * against the dump's mednafen.png at slstart 3.  The skip is for that
+   * capture route, not for a renderer difference; check-il-huc.js diffs the
+   * recorded frames against the browser run. */
+  "palette-huc": "a toy capture through the HuC route (#45), judged frame " +
+       "by frame against the browser run by tests/check-il-huc.js: the " +
+       "route records its crop slstart 3 in meta.json, not regs.json, so " +
+       "the saved state renders diff 0 only at that crop (29,088 differing " +
+       "pixels of 178,176 bytes at this check's default 4) — a capture " +
+       "crop, not a renderer difference",
+  /* #108: the same for #45's HuC build of the raster toy (86,595 differing
+   * pixels at the default crop; diff 0 at slstart 3). */
+  "parallax-huc": "a toy capture through the HuC route (#45), judged frame " +
+       "by frame against the browser run by tests/check-il-huc.js: the " +
+       "route records its crop slstart 3 in meta.json, not regs.json, so " +
+       "the saved state renders diff 0 only at that crop (86,595 differing " +
+       "pixels of 178,176 bytes at this check's default 4) — a capture " +
+       "crop, not a renderer difference",
+  /* #108: #100's IL-bytecode build of the palette toy (29,248 differing
+   * pixels at the default crop; diff 0 at slstart 3), judged frame by frame
+   * by check-ilvm.js. */
+  "toypalette-ilvm": "a toy capture through the bytecode route (#100), " +
+       "judged frame by frame against the browser run by " +
+       "tests/check-ilvm.js: the route records its crop slstart 3 in " +
+       "meta.json, not regs.json, so the saved state renders diff 0 only at " +
+       "that crop (29,248 differing pixels of 178,176 bytes at this " +
+       "check's default 4) — a capture crop, not a renderer difference",
+  /* #108: the same for #100's bytecode build of the raster toy (86,595
+   * differing pixels at the default crop; diff 0 at slstart 3). */
+  "toyparallax-ilvm": "a toy capture through the bytecode route (#100), " +
+       "judged frame by frame against the browser run by " +
+       "tests/check-ilvm.js: the route records its crop slstart 3 in " +
+       "meta.json, not regs.json, so the saved state renders diff 0 only at " +
+       "that crop (86,595 differing pixels of 178,176 bytes at this " +
+       "check's default 4) — a capture crop, not a renderer difference",
 };
 
 /* ---- the #15 raster-table checks -------------------------------------- */

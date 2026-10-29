@@ -350,8 +350,37 @@ function frame(t, f)
     j = j + 1
   end
 end`, "cgen-closure-loop");
-  refusal("a pad read (no padset in the C globals)", `
-function frame(t, f) if pad[1].right then vram[0] = 1 end end`, "cgen-global");
+  /* #108: #45 lowered pad reads to the runtime (toy_pad) and timer/sat too,
+   * so the old "a pad read (no padset in the C globals)" refusal is gone by
+   * design: the read now compiles.  Hold the new behaviour instead of
+   * dropping the case — the emitted C must call the runtime's own port read
+   * with the field's TOY_PAD_* bit.  Measured: `pad[1].right` emits
+   * `toy_pad(r[2], TOY_PAD_RIGHT)`. */
+  {
+    const PAD_READ = [
+      "function frame(t, f)",
+      "  if pad[1].right then vram[0] = 1 end",
+      "end",
+      ""
+    ].join("\n");
+    const c = cgen.emitC(il.compile(PAD_READ, { chunkName: "pad.lua" }));
+    check(/toy_pad\(r\[\d+\], TOY_PAD_RIGHT\)/.test(c),
+          "cgen lowers a pad read to toy_pad(port, TOY_PAD_RIGHT) (#45)");
+  }
+  /* cgen-global stays reachable for a global this backend cannot put in C;
+   * #45 deleted the pad case, so hold the code with a global name the IL's
+   * type map does not carry (the refusal prints the offending name). */
+  refusal("a global with no declared C type", `
+g = 0
+function frame(t, f) g = g + 1 end`, "cgen-global", function (p) {
+    for (const fn of p.functions) {
+      if (!fn) continue;
+      for (const ins of fn.code) {
+        if (ins.t === "getglobal" || ins.t === "setglobal")
+          ins.name = "__no_such_global";
+      }
+    }
+  });
   refusal("a string constant", ilTest.TOY_PALETTE, "cgen-key", function (p) {
     const fn = p.functions[p.hooks.frame];
     const ins = fn.code.filter(function (i) { return i.t === "const"; })[0];

@@ -46,7 +46,11 @@
  * happened, a read cleared it) are consistent.  #31's toy captures
  * (toypalette, toyparallax) are the third case, by name: toyc's runtime
  * polls the status register for the VBlank flag, so the save state is 0 for
- * the same reason, and the model must report VD.
+ * the same reason, and the model must report VD.  #108 adds #45's HuC builds
+ * (palette-huc, parallax-huc) and #100's bytecode builds (toypalette-ilvm,
+ * toyparallax-ilvm): their runtimes poll $0000 the same way — measured,
+ * saved status $0 against the model's VD bit — so they join the same
+ * name list.
  *
  * #49 adds one bit to that comparison: DV (SR bit 4), the VRAM-to-VRAM
  * DMA-done flag, which #50's per-frame SR does not cover (that is CC/OR/RR/
@@ -177,8 +181,12 @@ function dumpNames() {
  * The dumps are still checked line by line through compareDump; only the
  * saved-register equality is unavailable.  This is a NAME list, not a
  * structural rule: a still capture that happens to carry meta.json is not
- * skipped, and a toy capture under an unlisted name still gets compared. */
-const TOY_CAPTURES = new Set(["toypalette", "toyparallax"]);
+ * skipped, and a toy capture under an unlisted name still gets compared.
+ * #108 adds #45's HuC builds (same toy_runtime.c flow) and #100's bytecode
+ * builds (ilvm_runtime.c polls $0000 for VD before each frame). */
+const TOY_CAPTURES = new Set(["toypalette", "toyparallax",
+                              "palette-huc", "parallax-huc",
+                              "toypalette-ilvm", "toyparallax-ilvm"]);
 
 /* ---- the independent status oracle (raw bytes only) -------------------- */
 
