@@ -69,6 +69,8 @@
 <link rel="stylesheet" href="studio-panel-sprites.css">
 <!-- #98: the CONSOLE panel's own styles, beside its module -->
 <link rel="stylesheet" href="studio-panel-console.css">
+<!-- #93: the LAYERS panel's own styles, beside its module -->
+<link rel="stylesheet" href="studio-panel-layers.css">
 <style>
   :root {
     /* ppu.toys' design tokens, adapted (source URL in the credit block). */
@@ -1179,6 +1181,13 @@
               surface yet: that is card #71. <code>note()</code> already
               returns the PSG's 12-bit F word, so the vocabulary is in place.</p>
           </div>
+          <div class="panel" id="panel-layers" data-panel="layers" hidden>
+            <!-- #93: ppu.toys' COMPOSE, answered by the PCE — backdrop, BG,
+                 sprites and the composed frame side by side; the stacking
+                 order; layers on/off through CR (BB/SB) and per-sprite SPBG;
+                 a palette fade (the PCE has no brightness register); the CR
+                 and SAT priority bits.  The module builds its controls. -->
+          </div>
           <div class="panel" id="panel-scanlines" data-panel="scanlines" hidden>
             <!-- #92: ppu.toys' SCANLINES, on the PCE's line interrupt. A
                  band is what the RCR writes at its first line and holds
@@ -1508,6 +1517,7 @@
 <script src="pce-palettes.js"></script>
 <script src="pce-vram-map.js"></script>
 <script src="pce-sat.js"></script>
+<script src="pce-layers.js"></script>
 <script src="pce-psg.js"></script>
 <!-- #99: the validator prices a toy for the ASSETS panel's ROM bar; it needs
      pce-il.js, pce-sprites.js and pce-toyhost.js, all loaded above. -->
@@ -1529,6 +1539,7 @@
 <script src="studio-panel-palettes.js"></script>
 <script src="studio-panel-sprites.js"></script>
 <script src="studio-panel-audio.js"></script>
+<script src="studio-panel-layers.js"></script>
 <script src="studio-panel-scanlines.js"></script>
 <script src="studio-panel-registers.js"></script>
 <script src="studio-panel-console.js"></script>
@@ -3905,6 +3916,38 @@ function init() {
     try { a.apply(); } catch (e) { /* the panel shows the refusal */ }
     if (applySource()) { seek(parseInt(qs.get("frame"), 10) || 0); pause(); }
   }
+  /* #93: ?fade=bg0+sp0,white,16,linear sets the LAYERS panel's fade and
+   * captures its plan from the current frame, so its screenshot needs no
+   * synthetic input — the same trick as ?poke=, ?bands= and ?tab=assets.
+   * Tokens: all | b0..b15 (background palettes) | s0..s15 (sprite palettes)
+   * joined by +, then the target (black, white or a $9-bit word), the steps,
+   * the curve and optionally the step shown — e.g. ?fade=b0+s0,white,16,
+   * linear,8 (+ is a space in a query string, so both separators are read). */
+  if (qs.get("fade")) {
+    const parts = qs.get("fade").split(",");
+    const wantAll = String(parts[0] || "all").split(/[+ ]+/).indexOf("all") >= 0;
+    const palettes = wantAll ? "all"
+      : String(parts[0] || "").split(/[+ ]+/).map((t) => {
+          const m = /^([bs])(\d+)$/.exec(t.trim());
+          return m ? { kind: m[1] === "s" ? "sprite" : "background",
+                       palette: parseInt(m[2], 10) } : null;
+        }).filter(Boolean);
+    const target = parts[1] === "white" ? "white"
+                 : parts[1] === "black" || !parts[1] ? "black"
+                 : parseInt(String(parts[1]).replace("$", ""), 16);
+    const def = panelById("layers");
+    if (def && def.api) {
+      try {
+        def.api.setFade({ palettes: palettes, target: target,
+                          steps: parts[2] ? parseInt(parts[2], 10) : undefined,
+                          curve: parts[3] || undefined,
+                          at: parts[4] ? parseInt(parts[4], 10) : undefined });
+        if (applySource()) { seek(parseInt(qs.get("frame"), 10) || 0); pause(); }
+        def.api.fadePlan();
+      } catch (e) { /* a bad spec leaves the panel alone; the URL is a hint */ }
+    }
+
+  }
   updateResolution();
 }
 
@@ -4376,7 +4419,27 @@ const studio = {
   vramDescribe: (word) => panelApi("vram").describe(word),
   vramImage: () => panelApi("vram").image(),
   vramAt: (x, y) => panelApi("vram").wordAt(x, y),
-  vramCharPixels: (ch) => panelApi("vram").charPixels(ch)
+  vramCharPixels: (ch) => panelApi("vram").charPixels(ch),
+
+  /* #93 — the LAYERS panel: the four previews, the layer table, the SAT's
+   * priority bits in the view, and the palette fade (plan, step, Lua, the
+   * two write-backs).  The module owns these; the evidence drives the same
+   * functions its DOM handlers call.  `layers()` stays the #78 mask the
+   * output column owns — this is the panel's own surface. */
+  layerPanel: () => { const a = panelApi("layers"); return a ? a.state() : null; },
+  layerPreviews: () => panelApi("layers").previews(),
+  layerRows: () => panelApi("layers").rows(),
+  layerRegisters: () => panelApi("layers").registers(),
+  layerSetSpritePriority: (slot, front) =>
+    panelApi("layers").setSpritePriority(slot, front),
+  layerClearSpritePriorities: () => panelApi("layers").clearSpritePriorities(),
+  fadeSpec: () => panelApi("layers").fadeSpec(),
+  fadeSetSpec: (spec) => panelApi("layers").setFade(spec),
+  fadePlan: () => panelApi("layers").fadePlan(),
+  fadeStep: (k) => panelApi("layers").fadeStep(k),
+  fadeLua: () => panelApi("layers").fadeLua(),
+  fadeWriteToy: () => panelApi("layers").writeFadeToy(),
+  fadeSaveAsset: () => panelApi("layers").saveFadeAsset()
 };
 
 /* The registry's methods live on the chip-panel array, so `studio.panels` is
