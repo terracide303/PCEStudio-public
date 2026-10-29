@@ -127,6 +127,7 @@ The two milestones Dennis asked for:
 | Part | Status | How we know | Where |
 |---|---|---|---|
 | AI link part 3: the live link — an agent drives the open studio | LATER | after the beta | #104 |
+| Port our ways of working into the public agent-workshop | LATER | after beta 1; the list is `my-workshop/PORT_TO_AGENT_WORKSHOP.md` | #110 |
 | Describe it, get it (a sentence becomes a picture) | LATER | | #24 |
 | Publish a toy, play other people's, sign in | LATER | needs a server | #37 |
 | A photo becomes a PCE picture | LATER | | #18 |
