@@ -166,7 +166,7 @@ function checkEncoder() {
   eq("the encoder is deterministic", Buffer.from(pal.bytes),
      Buffer.from(pal2.bytes));
   eq("the palette bytecode is 578 B", pal.bytes.length, 578);
-  eq("the parallax bytecode is 1100 B", par.bytes.length, 1100);
+  eq("the parallax bytecode is 1115 B", par.bytes.length, 1115);
   eq("the container starts with ILBC", Array.from(pal.bytes.slice(0, 4)),
      [0x49, 0x4C, 0x42, 0x43]);
   eq("version 1", pal.bytes[4], 1);

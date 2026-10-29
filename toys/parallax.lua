@@ -1,4 +1,4 @@
--- parallax.lua — line-scroll parallax (card #29).
+-- parallax.lua — line-scroll parallax.
 --
 -- THE TRICK: the PC Engine has no HDMA, so a horizontal offset that differs
 -- per line of the picture is made by letting the RCR line interrupt write
@@ -83,8 +83,13 @@ end
 function raster(line)
   -- Line 0 must restate the top value: the table's frame-start latch takes
   -- the last band's BXR, so the first band has to write its own.
-  if line == 0 then reg("BXR", g_f // 8) end
-  if line == BAND_H then reg("BXR", g_f // 2) end
-  if line == BAND_H * 2 then reg("BXR", g_f) end
+  --
+  -- BXR is 10 bits (0..1023): a value that grows with the frame number must
+  -- be wrapped, or the host refuses it (reg-range) after a couple of minutes
+  -- — the near band reaches 1024 at frame 1024.  `% 1024` keeps every band
+  -- scrolling forever; the picture repeats, the crash does not happen.
+  if line == 0 then reg("BXR", (g_f // 8) % 1024) end
+  if line == BAND_H then reg("BXR", (g_f // 2) % 1024) end
+  if line == BAND_H * 2 then reg("BXR", g_f % 1024) end
   if line == BAND_H * 3 then reg("BXR", (g_f * 2) % 1024) end
 end

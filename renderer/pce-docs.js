@@ -16,6 +16,8 @@
  *                             the Lua runtime's refusal codes
  *   renderer/pce-il.js        the IL's refusal codes and instruction budget
  *   renderer/pce-psg.js       the nine PSG registers and their manual pages
+ *   renderer/pce-validate.js  the cartridge validator's refusal codes
+ *   renderer/pce-cgen.js      the console C backend's refusal codes
  *
  * tools/docs.js renders `markdown(reference())` to stdout and
  * `html(reference())` to renderer/docs.html; tests/check-docs.js proves the
@@ -32,17 +34,21 @@
                              require("./pce-editor.js"),
                              require("./pce-toys.js"),
                              require("./pce-il.js"),
-                             require("./pce-psg.js"));
+                             require("./pce-psg.js"),
+                             require("./pce-validate.js"),
+                             require("./pce-cgen.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.docs = factory(root.PCEStudio.toyhost,
                                   root.PCEStudio.editor,
                                   root.PCEStudio.toys,
                                   root.PCEStudio.il,
-                                  root.PCEStudio.psg);
+                                  root.PCEStudio.psg,
+                                  root.PCEStudio.validate,
+                                  root.PCEStudio.cgen);
   }
 })(typeof self !== "undefined" ? self : this,
-   function (host, editor, toys, il, psg) {
+   function (host, editor, toys, il, psg, validate, cgen) {
   "use strict";
 
   function range(lo, hi) { return lo + ".." + hi; }
@@ -59,6 +65,10 @@
       source: "renderer/pce-toys.js", codes: toys.REFUSALS },
     { id: "il", title: "The IL lowerer",
       source: "renderer/pce-il.js", codes: il.REFUSALS },
+    { id: "validate", title: "The cartridge validator",
+      source: "renderer/pce-validate.js", codes: validate.REFUSALS },
+    { id: "cgen", title: "The console C backend",
+      source: "renderer/pce-cgen.js", codes: cgen.REFUSALS },
     { id: "editor", title: "The picture editor",
       source: "renderer/pce-editor.js", codes: editor.REFUSALS }
   ];
@@ -107,7 +117,8 @@
             "frames. A frame is deterministic: t is f/60, not the clock." },
         { type: "code", lang: "lua", text:
           "function frame(t, f)\n" +
-          "  reg(\"BXR\", floor(t * 32))\n" +
+          "  -- f is an integer frame count; BXR is 10 bits, so wrap it\n" +
+          "  reg(\"BXR\", (f * 2) % " + (host.ALLOWED_REGS.BXR + 1) + ")\n" +
           "end\n" +
           "\n" +
           "function raster(line)\n" +
@@ -133,9 +144,10 @@
           rows: regRows },
         { type: "code", lang: "lua", text:
           "function frame(t, f)\n" +
-          "  reg(\"BXR\", 64 + floor(32 * sin(t)))\n" +
-          "  reg(\"BYR\", 0)\n" +
-          "  reg(\"CR\", 0x80 | 0x40)\n" +
+          "  -- whole numbers only: f, never t or sin(), and a wrap for BXR\n" +
+          "  reg(\"BXR\", (f * 2) % " + (host.ALLOWED_REGS.BXR + 1) + ")\n" +
+          "  reg(\"BYR\", (f // 2) % " + (host.ALLOWED_REGS.BYR + 1) + ")\n" +
+          "  reg(\"CR\", 0xC0)\n" +
           "end" },
         { type: "p", text: "The VDC's other registers — the memory and " +
             "increment controls, the interrupt mask, the line-match register " +
@@ -182,6 +194,12 @@
 
     /* 4. sprites ---------------------------------------------------------- */
     var fieldRange = host.SAT_FIELD_RANGES;
+    /* In the default MWR 0 layout the BAT owns the first host.BAT_WORDS
+     * words and the SAT the top 256, so a pattern p (64 words each) is free
+     * only from firstPattern to lastPattern.  Printed, not typed: the guide
+     * reads these numbers back from here. */
+    var firstPattern = host.BAT_WORDS / 64;
+    var lastPattern = editor.SAT_ADDR / 64 - 1;
     var sizeRows = editor.SPRITE_SIZES.map(function (s) {
       return [s.width + "x" + s.height, s.cells + " cell" +
               (s.cells === 1 ? "" : "s"), "CGX " + s.cgx + ", CGY " + s.cgy,
@@ -192,10 +210,20 @@
       blocks: [
         { type: "p", text: "The sprite attribute table holds " +
             host.SAT_ENTRIES + " entries of " + host.SAT_WORDS + " words each, " +
-            "at VRAM " + "$7F00. sprite(i, spec) fills entry i from a table; " +
+            "at VRAM $7F00. sprite(i, spec) fills entry i from a table; " +
             "sat(i, k, v) writes one raw word. An entry index outside " +
             range(0, host.SAT_ENTRIES - 1) + " is sat-range (sprite-range for " +
             "the composed form), and so is a field outside its width." },
+        { type: "p", text: "The hardware does not police where a pattern " +
+            "lives, so the usable numbers are set by the two tables a pattern " +
+            "must not overwrite. In the default layout the BAT owns VRAM words " +
+            "0.." + (host.BAT_WORDS - 1) + " (patterns 0.." +
+            (firstPattern - 1) + ") and the SAT owns $7F00..$7FFF (patterns " +
+            (lastPattern + 1) + ".." + (lastPattern + 4) + "). A sprite pattern is " +
+            "therefore " + firstPattern + ".." + lastPattern + ", and the " +
+            "background tiles share that region — character 0x40 starts at " +
+            "word 0x400, which is pattern " + firstPattern + " — so keep the " +
+            "two apart (the starter uses tile 0x40 and pattern 0x100)." },
         { type: "table",
           headers: ["word", "field"],
           rows: [
@@ -227,8 +255,11 @@
             "and the editor reports it per line." },
         { type: "code", lang: "lua", text:
           "function init()\n" +
-          "  sprite(0, { x = 32, y = 64, pattern = 0, palette = 1 })\n" +
-          "  sprite(1, { x = 80, y = 64, pattern = 0, palette = 2, hflip = true })\n" +
+          "  reg(\"CR\", 0xC0)   -- sprites start OFF; without this they never show\n" +
+          "  sprite(0, { x = 32, y = 64, pattern = " + firstPattern +
+          ", palette = 1 })\n" +
+          "  sprite(1, { x = 80, y = 64, pattern = " + firstPattern +
+          ", palette = 2, hflip = true })\n" +
           "end" }
       ]
     });
@@ -334,11 +365,18 @@
             "frame(). Five pads is the multitap; pad 1 is the console's own " +
             "port." },
         { type: "table",
-          headers: ["field", "the button"],
+          headers: ["field", "the pad button", "keyboard key"],
           rows: host.PAD_FIELDS.map(function (f) {
-            return ["pad[n]." + f, f === "i" ? "I" : f === "ii" ? "II" :
-                    f.charAt(0).toUpperCase() + f.slice(1)];
+            return ["pad[n]." + f,
+                    f === "i" ? "I" : f === "ii" ? "II" :
+                    f.charAt(0).toUpperCase() + f.slice(1),
+                    host.PAD_KEYS[f]];
           }) },
+        { type: "p", text: "The field names the pad BUTTON, and the button's " +
+            "name is not always its key's: pad[n].i is the I button, which the " +
+            "keyboard presses with key N, while pad[n].up is the Up direction, " +
+            "which the keyboard presses with key I. Say which one you mean — " +
+            "\"the I button (key N)\" or \"Up (key I)\" — never just \"press I\"." },
         { type: "p", text: "A pad is true while its button is held, not only on " +
             "the frame it goes down; remember the previous frame when an action " +
             "should happen once. Writing a pad field is refused (il-pad-write " +
@@ -397,10 +435,10 @@
       id: "passwords", title: "Passwords",
       blocks: [
         { type: "p", text: "A bare HuCard has no save memory, so a toy saves " +
-            "with a password (Dennis, 2026-10-28). password.pack(value) turns " +
-            "a value into a short code starting " + P.prefix + " (base32 " +
-            "alphabet, then a check byte) and password.unpack(code) returns " +
-            "it; a mistyped or foreign code is password-code." },
+            "with a password. password.pack(value) turns a value into a short " +
+            "code starting " + P.prefix + " (base32 alphabet, then a check " +
+            "byte) and password.unpack(code) returns it; a mistyped or " +
+            "foreign code is password-code." },
         { type: "p", text: "A value is nil, a boolean, an integer, a string, or " +
             "a table with number or string keys. Every cap is a maximum the " +
             "round trip holds to; one past it is refused naming the edge, " +
@@ -420,9 +458,11 @@
         { type: "p", text: "The integer cap is 2^30, not the VM's full 32-bit " +
             "range: an integer is 32 bits and the zig-zag encoding spends one " +
             "bit on the sign, so a magnitude of 2^30 doubles to 2^31 and would " +
-            "wrap (card #73)." },
+            "wrap." },
         { type: "code", lang: "lua", text:
-          "function frame(t, f)\n" +
+          "function init()\n" +
+          "  -- once, not every frame: print() adds a log line and the log\n" +
+          "  -- keeps only " + host.LOG_MAX + " lines\n" +
           "  local code = password.pack({ high = 1200, level = 3 })\n" +
           "  print(code)\n" +
           "end" }
@@ -445,14 +485,20 @@
             "and 5 and an LFO. The model is renderer/pce-psg.js, a literal " +
             "transcription of Mednafen's pipeline at " + psg.SAMPLE_RATE +
             " Hz." },
-        { type: "p", text: "A toy reaches it three ways. music(index) plays " +
-            "a song the runtime was given — a module read by the tracker " +
-            "route (renderer/pce-dmf.js, renderer/pce-song.js), whose writes " +
-            "are the ones HuTrack's engine makes, one VBlank per frame. " +
-            "sfx(channel, freq, volume, frames) takes a channel from the " +
-            "music the way HuTrack reserves one, loads a 32-step square, sets " +
-            "F and AL, and gives the channel back after frames frames. " +
-            "release(channel) gives a channel back now." },
+        { type: "p", text: "music(index) plays a song from the list the " +
+            "runtime was given — a module read by the tracker route " +
+            "(renderer/pce-dmf.js, renderer/pce-song.js), whose writes are the " +
+            "ones HuTrack's engine makes, one VBlank per frame. A toy pasted " +
+            "into the studio gets no such list: the studio builds its runtime " +
+            "without songs, so music(0) there is music-range, and music() is " +
+            "not how a first toy gets sound. Use sfx() and note() instead; " +
+            "music() is for a runtime a page hands a song list." },
+        { type: "p", text: "sfx(channel, freq, volume, frames) takes a " +
+            "channel from the music the way HuTrack reserves one, loads a " +
+            "32-step square, sets F and AL, and gives the channel back after " +
+            "frames frames. release(channel) gives a channel back now. If the " +
+            "page did not load the PSG model or the song player, a sound call " +
+            "is no-psg." },
         { type: "p", text: "A release does not resume the middle of a held " +
             "note: the music waits for the next note row on that channel, and " +
             "that fresh note reloads the instrument's waveform (all " +
@@ -470,11 +516,8 @@
             "Lua, a MIDI number in both runtimes (the IL carries no " +
             "strings)." },
         { type: "code", lang: "lua", text:
-          "function init()\n" +
-          "  music(0)                        -- the song the page was given\n" +
-          "end\n" +
-          "\n" +
           "function frame(t, f)\n" +
+          "  -- pad[1].ii is the II BUTTON, pressed with keyboard key M\n" +
           "  if pad[1].ii then sfx(3, note(76), 24, 10) end\n" +
           "end" }
       ]
@@ -543,6 +586,7 @@
       sources: [
         "renderer/pce-toyhost.js", "renderer/pce-editor.js",
         "renderer/pce-toys.js", "renderer/pce-il.js", "renderer/pce-psg.js",
+        "renderer/pce-validate.js", "renderer/pce-cgen.js",
         "renderer/pce-song.js"
       ],
       footer: "Generated by node tools/docs.js from the modules listed above. " +

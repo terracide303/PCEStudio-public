@@ -961,6 +961,23 @@
     /* exported for the test: the refusal codes part A can raise */
     CODES: ["cgen-op", "cgen-fixed", "cgen-cond", "cgen-global",
             "cgen-arity", "cgen-hook", "cgen-closure-loop", "cgen-key",
-            "cgen-target", "cgen-width"]
+            "cgen-target", "cgen-width"],
+    /* The same ten codes with their meanings, for the toy author's reference
+     * (#61) and the chat-AI guide's error table: one table, so a code added
+     * above is described here or the reference test notices. */
+    REFUSALS: {
+      "cgen-op": "an IL instruction this backend has no C lowering for " +
+                 "(tables, sprite(), fixed point, some builtins)",
+      "cgen-fixed": "fixed-point arithmetic or a fixed-point constant",
+      "cgen-cond": "a branch whose condition the IL did not type as bool",
+      "cgen-global": "a global whose type this backend cannot put in C",
+      "cgen-arity": "more than two parameters or arguments",
+      "cgen-hook": "no frame() hook, no top-level chunk, or a raster() hook " +
+                   "that is not one int parameter",
+      "cgen-closure-loop": "a closure created inside a loop",
+      "cgen-key": "a constant operand that is neither int nor bool",
+      "cgen-target": "a jump target that is not an instruction",
+      "cgen-width": "a constant that does not fit the C dialect's width"
+    }
   };
 });
