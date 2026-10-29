@@ -268,7 +268,7 @@ no PCE counterpart; the palette *entries* are edited in the PALETTES panel (#85)
 
 Every panel is its own file — `renderer/studio-panel-<name>.js` for `screen`, `vram`, `palettes`,
 `sprites`, `audio`, `scanlines`, `registers`, `console`, `markers` and `agent`. Each pushes one module with
-a `register(studio)`; `studio.html` loads the ten files and calls every `register(studio)` before it builds
+a `register(studio)`; `studio.html` loads the eleven files and calls every `register(studio)` before it builds
 the dock, **after** which the page names no panel:
 
 ```
@@ -316,8 +316,8 @@ implementation):
 | `theme.token(name)` / `.tokens()` | the page's CSS custom properties (`--bg`, `--accent`, …), read from `:root` |
 | `$`, `document`, `toast(msg)`, `hex`, `follow()`, `layout.drawer(which)` | the small DOM/layout surface: an element by id, a note, the followed pixel, and a workspace drawer |
 
-**The split is enforced, not just tidy.** `tests/check-studio.js` asserts each of the ten files is loaded,
-that the ten register in order, that the dock and the Panels menu are built from the registry, and that
+**The split is enforced, not just tidy.** `tests/check-studio.js` asserts each of the eleven files is loaded,
+that the eleven register in order, that the dock and the Panels menu are built from the registry, and that
 `studio.html`'s inline script no longer contains the panels' drawing code (`function drawVram`,
 `function drawScreen`, `function drawMarkers`, `let screenPic`, …). The page keeps the layout, the editor,
 the output, the transport and the API; a panel keeps its own state and drawing.
@@ -569,6 +569,65 @@ API: `studio.console()` is the panel's report (`{banner, errors, warnings, findi
 the runtime, the frames run and the last error in the error line's words (#107).
 
 ---
+
+### 3.7 ASSETS: the memory, the songs and the built-in sounds (#99)
+
+ppu.toys' ASSETS tab is three things in one pane (Dennis, 2026-10-29): the toy's memory as three bars
+(`ASSETS · untitled toy`, `+ Add`, VRAM `0x8000`, CGRAM `256`, ARAM `0x10000`), its songs (`song1  SONG
+"12 notes · 1 patterns"` with a menu), and `Built-in samples (15)` — piano, bass, lead, strings, organ,
+bell, flute, pluck, kick, snare, hat, ohat, tom, clap, crash — each marked `BUILT-IN · not in sound RAM`
+with a Place button. The studio's ASSETS tab already lists the toy's files (#77); #99 adds the other three
+parts beneath that list, through `renderer/studio-panel-assets.js`, and the model behind them is
+`renderer/pce-assets.js`.
+
+| ppu.toys (measured 2026-10-29) | `studio.html`'s ASSETS tab |
+|---|---|
+| three bars: VRAM `0x8000`, CGRAM `256`, ARAM `0x10000` | three bars: **VRAM `0x8000` words**, **CRAM `512` colours** (256 background + 256 sprites), **ROM up to 1 MB** — the PC Engine has no separate sound RAM to fill, so the third bar is the HuCard itself (#57) |
+| the bars are filled from what the toy put in each RAM | VRAM: the words the frame's own regions claim — the BAT, the tiles, the sprite patterns and the SAT, from `pce-panels.js` `vramMap()` (#26), free space excluded, with each part named under the bar. CRAM: the entries that hold a colour, split BG/sprites. ROM: `pce-validate.js`'s estimate plus the toy's own files, in four parts (code, assets, songs, instruments) |
+| a song is `song1  SONG  12 notes · 1 patterns`, with a menu | `songs.json`, each entry `name  SONG  N notes · M patterns` with a `⋯` menu (rows, speed, orders, patterns, notes, whether it came from a `.dmf`); a song with no music says `no music yet` rather than `0 notes` |
+| `Built-in samples (15)`, each `BUILT-IN`, `not in sound RAM`, a **Place** button | the same fifteen names, each a **PSG patch generated here** (see below), tagged `BUILT-IN`, with **Add to toy** — the Place button, writing the patch into the toy's `instruments.json`. A patch the toy holds is tagged `IN TOY` and its button is disabled; the toy's own list is below, with Remove |
+| `+ Add` makes a new asset | `+ Add` offers **Tiles, Palettes, Sprites, Map** (which select the panel that edits that file — SCREEN, PALETTES, SPRITES — because those files already exist in every toy), **Song** (a blank `songs.json` entry) and **Wave** (a blank 32-step wave in `instruments.json`) |
+
+**The fifteen instruments.** The eight melodic ones are a 32-step 5-bit wave — the PSG's R6, exactly what
+#62's wave editor edits — generated from a harmonic series in `pce-assets.js` (a bell's odd partials, a
+flute's near-sine, a strings' saw), plus a volume envelope in HuTrack's `{size, loop, data}` shape stepped
+once per frame into R4's channel level. The seven drums are noise presets on channels 5–6 — the only two
+with the generator, R7 bits 0–4 (`PSG PB-6`) — with their NF and an amplitude envelope; `kick` is the
+slowest noise clock and `crash` the fastest. Nothing is copied from anywhere: every wave is arithmetic and
+every envelope is written out in the model.
+
+| name | kind | what it is |
+|---|---|---|
+| piano | wave | bright strike, eight harmonics falling away, decay |
+| bass | wave | fundamental with a little second harmonic, held |
+| lead | wave | hollow odd harmonics, held |
+| strings | wave | sawtooth, bowed in over four frames |
+| organ | wave | drawbar partials, no decay |
+| bell | wave | odd partials and a long ring |
+| flute | wave | almost a sine, eased in |
+| pluck | wave | a short, stringy decay |
+| kick, tom | noise | low noise clocks (NF 3, 6) |
+| snare, clap | noise | mid noise (NF 12, 16); the clap is three bursts |
+| hat, ohat, crash | noise | high noise (NF 26, 26, 29); ohat holds the hat's clock open |
+
+**Playing one is the PSG's, not this file's.** `pce-assets.js` `play()` writes the registers a toy would
+(channel select, R2/R3 frequency, R5 balance, the 32 R6 wave writes or R7 noise, and one R4 per frame for
+the envelope) and renders them through `renderer/pce-psg.js`, the sample-exact Mednafen model (#34). The
+pitch is the register's: `F = round(7159090 / (64 · Hz))`, so A4 is F 254 and sounds 440.4 Hz.
+
+**What is not there, and says so.** The drums are noise, not DDA samples — the card allows either, and the
+noise route needs no ROM budget; a DDA sample would be the third bar's fourth part and is left to the card
+that gives toys a sound surface (#71). A song is listed, not played: the tracker's route (#35) reads a
+`.dmf` with `renderer/pce-dmf.js` and exports it with `renderer/pce-hutrack.js`, and `fromDmf()` summarises
+one for the list — but the studio has no `.dmf` drop yet, so `+ Add → Song` makes a blank entry. There is no
+undo on Add to toy (delete the line from `instruments.json`, or Remove). The **Panels ▾** menu now carries
+two entries that open ASSETS — the page's own WORKSPACE item and this module's — because the three layout
+items (Editor, Assets, Output) still live in `studio.html`; merging them into the module is the card that
+owns the layout.
+
+**Refusals.** `asset-json`, `asset-shape`, `asset-wave` (a wave that is not 32 steps of 0–31),
+`asset-envelope` (a level past 31, or a size that disagrees with the data), `asset-noise` (noise off
+channels 5–6, or NF outside 0–31), `asset-duplicate` (a name the toy already has) and `asset-name`.
 
 ## 4. The Docs panel (the generated #61 reference)
 
@@ -865,7 +924,7 @@ What it does, in order:
     `no-tile` (a map word with no tile; a missing tile to select).
     * The stub DOM has no canvas pixels, so the same panel is proved in the browser (11.2) and in the
       screenshot (11.3); the stub proves the model, the files and the frame.
-12. **The panel modules and the studio API (#102).** The ten files are loaded and register in order
+12. **The panel modules and the studio API (#102).** The eleven files are loaded and register in order
     (`screen, vram, palettes, sprites, audio, scanlines, registers, console, markers, agent`); the chip
     panels are the registry's, in dock order; every chip panel but AUDIO has a `draw` from its module; a
     duplicate id is refused; the dock tabs and the Panels menu are built from the registrations; CONSOLE's
