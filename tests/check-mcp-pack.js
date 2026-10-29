@@ -16,7 +16,7 @@
  *      pcestudio-mcp/tools/mcp/server.js over stdio with that directory as
  *      the working directory: every module it loads comes out of the zip, not
  *      out of this checkout;
- *   3. it speaks MCP: initialize, tools/list (all 9 tools, each with a
+ *   3. it speaks MCP: initialize, tools/list (all 10 tools, each with a
  *      schema), then runs one recipe FROM THE UNPACKED SKILL through
  *      toy_write, toy_run and frame_png, and the frame it gets back is a
  *      visible 256x224 picture (more than 1000 non-backdrop pixels) — the
@@ -293,7 +293,7 @@ function listZip(zip) {
     const names = tools.map((t) => t.name).sort();
     eq("the unpacked server lists every tool", names,
        ["docs", "export_pce", "frame_png", "register_set", "registers_get",
-        "source_add", "toy_run", "toy_write", "validate"]);
+        "source_add", "toy_run", "toy_save", "toy_write", "validate"]);
     for (const t of tools) {
       check(t.inputSchema && t.inputSchema.type === "object" &&
             t.inputSchema.properties,
@@ -353,7 +353,7 @@ function listZip(zip) {
     process.exit(1);
   }
   console.log("PASS  " + checks + " checks: the pack builds, unzips alone " +
-              "into an empty folder, starts over stdio, lists all 9 tools, " +
+              "into an empty folder, starts over stdio, lists all 10 tools, " +
               "and runs a recipe from the unpacked skill to a visible " +
               WIDTH + "x" + HEIGHT + " frame");
 })();

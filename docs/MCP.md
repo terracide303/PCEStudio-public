@@ -2,8 +2,9 @@
 
 `tools/mcp/server.js` is PCEStudio's Model Context Protocol server. It lets an
 agent — Claude Code, or any MCP client — write a toy, run it, look at a frame,
-read and poke registers, check it with the validator, export a `.pce`, and
-read the toy author's reference. It is a **thin wrapper**: every pixel comes
+read and poke registers, check it with the validator, save the whole toy as
+the file the studio opens, export a `.pce`, and read the toy author's
+reference. It is a **thin wrapper**: every pixel comes
 from `renderer/pce-sprites.js`, every frame from `renderer/pce-il.js`, every
 refusal from the module that owns it, every document from
 `renderer/pce-docs.js`. There is no second model.
@@ -103,6 +104,10 @@ One toy at a time, in one process:
   a pixel grid with a palette becomes tiles, sprites, a tilesheet or a
   palette, merged into the toy's files, and the reply is the VRAM/CRAM
   budget (tiles, palettes, words used, warnings).
+- `toy_save` (#160) hands the whole session to the person as one
+  `pce.studio/1` envelope in the studio's own Save format, so the game opens
+  in the studio with the art the imports made — the studio's `Open… → From
+  file` path, and `renderer/pce-source.js importStudio` reads it.
 - `toy_run` imports the asset files into VRAM, CRAM and the SAT **before
   `init()`**, exactly as the studio does (#117, #153) — the one importer, no
   second model — and its reply carries the import's summary as `assets`.
@@ -156,6 +161,61 @@ Example reply:
 A toy the IL refuses (for example `pairs`, or a syntax error) comes back with
 `isError:true`, the IL's code and the file and line in the message:
 `{"ok":false,"code":"il-syntax","message":"[string \"main.lua\"]:2: …"}`.
+
+### `toy_save(path, title, description)`
+
+Writes the session as the **studio's own file** (#160): one
+`pce.studio/1` JSON envelope holding `main.lua`, every asset file the
+imports made (`tiles.json`, `palettes.json`, `sprites.json`), the named
+sources (`sources.json`, #156) and the songs (`song.json`, `songs.json`) —
+whatever the session holds, each byte for byte. The text is built by
+`renderer/pce-source.js`'s `envelopeText()`, the same function
+`renderer/studio.html`'s Save uses (`saveToyFile` → `toyEnvelope`), so there
+is **one format, not two**: what this writes is what Save writes.
+`tests/check-mcp.js` opens the saved file through the studio's own
+`importStudio()` and gets the frame the MCP run drew, diff 0.
+
+The person then opens it in the studio with **Open… → From file…** (or drops
+it on the page) and plays the toy with its art. Before this tool existed an
+agent could only hand over `main.lua`, and every tile and sprite stayed in
+the server's process.
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `path` | string | the file to write, **inside the working folder**; `.pce.json` is appended when the name has no `.pce.json` / `.pce.studio` extension |
+| `title` | string, optional | the toy's title; default: the file's own base name |
+| `description` | string, optional | one line, saved as the envelope's `description` |
+
+The **working folder** is the folder the server was started in — for Claude
+Code, the person's project folder — or `PCE_MCP_WORKDIR` when that names
+one. A path that resolves outside it, by `..` or by an absolute path, is
+refused with `save-path` and nothing is written: an agent must not be able to
+overwrite files it was never pointed at.
+
+Example call:
+
+```json
+{"name":"toy_save","arguments":{"path":"red-toy.pce.json"}}
+```
+
+Example reply:
+
+```json
+{"ok":true,"version":"pce.studio/1",
+ "path":"/work/red-toy.pce.json","name":"red-toy.pce.json",
+ "title":"red-toy","description":"","bytes":4210,
+ "sha256":"…",
+ "files":["main.lua","palettes.json","sprites.json","sources.json"],
+ "note":"one pce.studio/1 envelope — the studio's own Save format, built by renderer/pce-source.js envelopeText() — holding every file and source; in the studio, Open… → From file (or drop it on the page) plays this toy with its art"}
+```
+
+The envelope's keys are the studio's, in the studio's order: `version`,
+`title`, `description`, `files`, `sources`, two-space JSON and a last
+newline. `sources` is the ppu.toys field for binary sources (card #24) and
+is `[]`; the art travels as the text asset files, named by `sources.json`.
+
+Refusals: `no-toy`, `save-path` (a missing path, or one outside the working
+folder), `save-io` (the folder or file could not be written).
 
 ### `toy_run(frames, pad)`
 
@@ -512,9 +572,9 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
 ## Evidence
 
 `node tests/check-mcp.js` starts `tools/mcp/server.js`, speaks MCP over
-stdio, and asserts 150 checks:
+stdio, and asserts 192 checks:
 
-- `initialize`, `ping`, and `tools/list` with all nine tools and their
+- `initialize`, `ping`, and `tools/list` with all ten tools and their
   schemas;
 - #29's parallax toy written, 60 frames run, and the PNG at frame 60 equal
   to `tests/dumps/examples/parallax.png` (check-examples' frame 60) pixel
@@ -536,6 +596,14 @@ stdio, and asserts 150 checks:
   import is blank there); a second add appends, a refused add leaves the toy
   byte-identical, and a toy with `tiles.json` renders the same frame through
   the MCP server as through the studio host (`pictureFromFiles`), diff 0;
+- the hand-off (#160): `toy_save` writes one `pce.studio/1` envelope with
+  the studio's key order and text, holding `main.lua`, the added PNG's
+  `sprites.json`/`palettes.json` and the named `sources.json` byte for byte;
+  the studio's own `importStudio()` reads it and the frame it renders is the
+  MCP run's frame, diff 0; a control saved without the art opens and draws
+  the sky where the saved toy draws its sprite; `..` and absolute paths
+  outside the working folder are refused with `save-path` and write nothing,
+  and a server started in another folder saves into that folder;
 - `docs` chapter list, a chapter's own numbers, and a refused unknown topic.
 
 Written by @design because the card names the file. Per workshop rule 2, a
