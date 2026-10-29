@@ -30,8 +30,11 @@
      (Fengari) or renderer/pce-il.js (the IL interpreter) over the one toy
      host (renderer/pce-toyhost.js), drawn by renderer/pce-sprites.js and
      renderer/pce-bg.js, the models diffed against Mednafen, and inspected by
-     the #26 panels (renderer/pce-panels.js). The Docs panel renders #61's
-     generated reference (renderer/pce-docs.js → renderer/docs.html) with
+     the #26 panels. Each panel is its own module (renderer/studio-panel-
+     <name>.js) registered through the studio API (#102); this page keeps the
+     layout, the editor, the output, the transport and that API, and names no
+     panel. docs/STUDIO.md §3.2 is the API's reference. The Docs panel renders
+     #61's generated reference (renderer/pce-docs.js → renderer/docs.html) with
      ppu.toys' docs layout adapted around it.
 
      Serve the repo root and open renderer/studio.html:
@@ -41,6 +44,8 @@
        ?frame=N                       seek to frame N and pause (a screenshot)
        ?paused=1                      load without autoplay
        ?tab=assets                    open the ASSETS file list
+       ?panel=<id>                    show a dock panel (a screenshot)
+       ?bottom=<markers|agent>        open a bottom drawer (a screenshot)
        ?docs=<chapter>                open the Docs panel at a chapter
        ?selftest=1&frames=40          run the example headlessly, write the
                                       result to <pre id="selftest"> and the title
@@ -389,6 +394,12 @@
   .scr-line { color: var(--text2); font: 11px var(--mono);
     display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
   .scr-line b { color: var(--text); font-weight: 600; }
+  .scr-line select {
+    background: var(--pane2); color: var(--text2); border: 1px solid var(--line);
+    border-radius: 4px; font: 11px var(--mono); padding: 1px 3px;
+  }
+  .scr-line select:focus-visible { outline: 1px solid var(--accent); }
+  .scr-curve { color: var(--cyan); }
   .scr-hint { color: var(--dim); font: 10px/1.4 var(--mono); max-width: 16rem; }
   .scr-palette { display: flex; gap: 1px; }
   .scr-palette .sw {
@@ -763,21 +774,33 @@
                 </div>
                 <div class="scr-head">Map</div>
                 <div class="scr-line">map base <code>$0000</code></div>
-                <div class="scr-line">map size <code id="scr-mapsize">32 × 32</code>
+                <div class="scr-line">map size
+                  <select id="scr-mapsize" aria-label="Map size (MWR)"
+                          title="The VDC's six MWR sizes; the panel draws the 32 × 32 BAT (MWR $00) and refuses the wider maps (part B)"></select>
                   (MWR <code id="scr-mwr">$00</code>)</div>
                 <div class="scr-line">tile size <code>8 × 8</code></div>
+                <div class="scr-line">screen width
+                  <select id="scr-video" aria-label="VCE dot clock"
+                          title="The VCE's three dot clocks — the picture these assets make"></select>
+                  <span id="scr-video-note">256×224 · 0 MHz</span></div>
                 <div class="scr-line">BXR
                   <button type="button" class="btn-mini" id="scr-bxr-down"
                           title="BXR −">−</button>
                   <b id="scr-bxr">0</b>
                   <button type="button" class="btn-mini" id="scr-bxr-up"
-                          title="BXR +">+</button></div>
+                          title="BXR +">+</button>
+                  <button type="button" class="btn-mini scr-curve"
+                          id="scr-bxr-curve"
+                          title="BXR curve — keyframed register pokes are card #79">∿</button></div>
                 <div class="scr-line">BYR
                   <button type="button" class="btn-mini" id="scr-byr-down"
                           title="BYR −">−</button>
                   <b id="scr-byr">0</b>
                   <button type="button" class="btn-mini" id="scr-byr-up"
-                          title="BYR +">+</button></div>
+                          title="BYR +">+</button>
+                  <button type="button" class="btn-mini scr-curve"
+                          id="scr-byr-curve"
+                          title="BYR curve — keyframed register pokes are card #79">∿</button></div>
                 <div class="scr-hint">The picture these assets make; a toy
                   writes its own VRAM until the importer (#24/#71).</div>
               </div>
@@ -1003,6 +1026,20 @@
 <script src="pce-screen.js"></script>
 <script src="pce-psg.js"></script>
 <script src="pce-docs.js"></script>
+<!-- #102: every panel is its own module. Each file registers one panel — its
+     tab, its Panels-menu entry, its Guide chapter and its draw — through
+     register(studio) in init(); this page only loads them and draws the
+     layout, the editor, the output and the transport. docs/STUDIO.md §3.2. -->
+<script src="studio-panel-screen.js"></script>
+<script src="studio-panel-vram.js"></script>
+<script src="studio-panel-palettes.js"></script>
+<script src="studio-panel-sprites.js"></script>
+<script src="studio-panel-audio.js"></script>
+<script src="studio-panel-scanlines.js"></script>
+<script src="studio-panel-registers.js"></script>
+<script src="studio-panel-console.js"></script>
+<script src="studio-panel-markers.js"></script>
+<script src="studio-panel-agent.js"></script>
 <script>
 "use strict";
 /* -------------------------------------------------------------------------
@@ -1145,33 +1182,53 @@ const DEFAULT_ASSET_FILES = [
     source: '{\n  "version": 1,\n  "channels": []\n}\n' }
 ];
 
-/* The panel strip, in ppu.toys' order and with the PCE's own answers.
- * docs/STUDIO.md §3 maps each to its ppu.toys counterpart. */
-const PANELS = [
-  { id: "screen", label: "SCREEN",
-    gloss: "The tile layer: BAT size, scroll, and which layer won a pixel." },
-  { id: "vram", label: "VRAM",
-    gloss: "All 32768 words: the BAT, tiles, sprite patterns and the SAT." },
-  { id: "palettes", label: "PALETTES",
-    gloss: "The VCE's 512 colours as 32 palettes of 16 — the picture's only colours." },
-  { id: "sprites", label: "SPRITES",
-    gloss: "The 64-entry SAT: position, pattern, palette, size and flags." },
-  { id: "audio", label: "AUDIO",
-    gloss: "The PSG is its own card (#71); toys have no sound surface yet." },
-  { id: "scanlines", label: "SCANLINES",
-    gloss: "Per-line BXR/BYR/CR from the raster table — the RCR interrupt, not HDMA." },
-  { id: "registers", label: "REGISTERS",
-    gloss: "The VDC's R00–R13 for one line, with where each value came from." },
-  { id: "console", label: "CONSOLE",
-    gloss: "The PC Engine's frame budget and where the compiler stands (#31)." }
-];
+/* -------------------------------------------------------------------------
+ * #102 — the Panels registry.
+ *
+ * Every panel is its own module (renderer/studio-panel-<name>.js) and calls
+ * studio.panels.register({id, label, group, chapter, gloss, draw, ...}) from
+ * its register(studio) in init().  The dock's tabs, the Panels menu's "THE
+ * CHIP" group, the Guide's chapter and the draw call are all built from what
+ * the modules registered; this page names no panel.  The chip panels are also
+ * `PANELS`, in registration order (= script order in the page), and that is
+ * the array studio.panels is for the evidence.
+ *
+ * A workspace module (MARKERS, AGENT) registers group "workspace" with an
+ * open(studio) that shows its drawer; the three workspace items that are not
+ * panels (Editor, Assets, Output) stay in the page, because they are the
+ * layout.
+ * ---------------------------------------------------------------------- */
+const PANELS = [];         /* the chip panels, in dock order */
+const panelDefs = [];      /* every registered panel, chip and workspace */
 
-const WORKSPACE_ITEMS = [
+function registerPanel(def) {
+  if (!def || !def.id) throw new Error("a panel needs an id");
+  if (panelDefs.some((p) => p.id === def.id))
+    throw new Error("two panels registered as " + def.id);
+  panelDefs.push(def);
+  if ((def.group || "chip") === "chip") PANELS.push(def);
+  return def;
+}
+
+function panelById(id) {
+  return panelDefs.find((p) => p.id === id) || null;
+}
+
+/* A panel whose model is the toy's asset files subscribes here; the page
+ * says an asset file changed (a hand edit, a new example, an opened toy) and
+ * each subscriber decides whether that is its input.  #102's API. */
+const assetEditWatchers = [];
+function notifyAssetEdit(name) {
+  for (const fn of assetEditWatchers) {
+    try { fn(name); } catch (e) { /* a watcher must not break the edit */ }
+  }
+}
+
+/* The three menu items that are the page's layout, not panels. */
+const WORKSPACE_LAYOUT = [
   { id: "editor", label: "Editor" },
   { id: "assets", label: "Assets" },
-  { id: "output", label: "Output" },
-  { id: "markers", label: "Markers" },
-  { id: "agent", label: "Agent" }
+  { id: "output", label: "Output" }
 ];
 
 /* ppu.toys' controller keys on its SNES pad, mapped to the PCE's 2-button
@@ -1182,12 +1239,12 @@ const PAD_KEYS = {
 };
 
 /* A panel's Guide opens the #61 reference at the chapter that explains it.
- * The chapter ids are docs.html's own section ids (pce-docs.js). */
-const DOCS_CHAPTER = {
-  screen: "registers", vram: "the-toy", palettes: "palettes",
-  sprites: "sprites", audio: "sound", scanlines: "raster",
-  registers: "registers", console: "budgets"
-};
+ * The chapter ids are docs.html's own section ids (pce-docs.js); each panel
+ * module carries its own in its registration. */
+function docsChapterFor(panelId) {
+  const def = panelById(panelId);
+  return (def && def.chapter) || "the-toy";
+}
 
 /* ---------------------------------------------------------------------
  * The Docs panel. #61 generates the reference (renderer/pce-docs.js ->
@@ -1393,10 +1450,6 @@ function toggleDocs() {
   else closeDocs();
 }
 
-function docsChapterFor(panelId) {
-  return DOCS_CHAPTER[panelId] || "the-toy";
-}
-
 const $ = (id) => document.getElementById(id);
 
 /* ---- state ------------------------------------------------------------ */
@@ -1410,19 +1463,26 @@ let fps = 0;
 let fpsFrames = 0;
 let fpsStarted = 0;
 let lengthFrames = 300;
-let markers = [];
 let heldPad = {};
 let padLog = [];              /* frame -> pad object, so a seek replays it */
 let followAt = null;
 let panelState = null;
 let panelDirty = true;
 let activePanel = "screen";
-let visiblePanels = PANELS.map((p) => p.id);
+let visiblePanels = [];       /* filled from the registry in init() */
 let lineNumbers = true;
 let crtDefault = false;
 let vimOn = false;
-let palCells = null;
 let toastTimer = null;
+
+/* #79's hook, and #102's API: a poke is a keyframed register override — a
+ * value the panel shows in place of the toy's own for one frame onward.  The
+ * list is the model; undo/redo move one poke between the two stacks.  No
+ * panel pokes yet (SCREEN's curve buttons name #79), so an empty list
+ * changes nothing about what is drawn. */
+let pokeList = [];
+let undoStack = [];
+let redoStack = [];
 
 /* #78: the output column's Layer controls. `layerOn` is what the author wants
  * to see; `layerViewOnly` says whether the toggles write CR (the hardware
@@ -1513,6 +1573,9 @@ function outputOptions() {
   const opts = runtime.options();
   if (runtime.lastRaster) opts.raster = runtime.lastRaster;
   opts.regs = Object.assign({}, opts.regs);
+  /* #79/#102: a poke overrides a register from its frame on; no poke is in
+   * force until a panel makes one, so the drawn frame is the toy's. */
+  applyPokes(opts, currentFrame);
   return opts;
 }
 
@@ -1537,10 +1600,12 @@ function applyHardwareLayers() {
 }
 
 /* Draw what the author should see, masking the hidden layers. With every
- * layer visible this is the runtime's own frame, byte for byte. */
+ * layer visible and no poke in force this is the runtime's own frame, byte
+ * for byte; a poke (#102's hook for #79) re-renders it through the same
+ * renderer with the override, so playback shows it too. */
 function present(frame) {
   let shown = frame;
-  if (!layerOn.bg || !layerOn.sprites) {
+  if (!layerOn.bg || !layerOn.sprites || pokeList.length) {
     const opts = maskedOptions();
     if (opts) {
       const img = PCEStudio.sprites.renderFrame(opts);
@@ -1847,799 +1912,33 @@ function hex(v, width) {
   return "$" + (v == null ? "-" : v.toString(16).toUpperCase().padStart(width, "0"));
 }
 
-/* ---- the SCREEN panel's cell-map editor (#84) -------------------------
- *
- * ppu.toys' BACKGROUNDS panel is the working example: the background layer
- * drawn as a map of cells, a tool row (select, pencil, rect, fill, erase,
- * move), a grid, a zoom, and the tile sheet and palette strip beside it.
- * The model is renderer/pce-screen.js over pce-editor.js's picture; the
- * pixels come from pce-bg.js through ed.renderPreview, so the canvas cannot
- * show a picture the VDC could not.  What it edits is the toy's assets —
- * tiles.json holds the tiles and the BAT (and its BXR/BYR), palettes.json the
- * colours — not the running frame: a toy still writes its own VRAM/CRAM until
- * #24's importer exists, and the panel says so. */
-let screenPic = null;
-let screenSess = null;
-let screenError = "";
-let screenDirty = true;
-
-function screenReady() {
-  return !!(PCEStudio.screen && PCEStudio.editor);
-}
-
-/* The next draw rebuilds the picture from the asset files (a different toy,
- * or an asset edited in the code editor). */
-function screenInvalidate() {
-  screenPic = null;
-  screenSess = null;
-  screenDirty = true;
-}
-
-function screenState() {
-  if (screenPic && screenSess) return { pic: screenPic, sess: screenSess };
-  if (!screenReady()) return null;
-  try {
-    screenPic = PCEStudio.screen.pictureFromFiles(files);
-    screenError = "";
-  } catch (e) {
-    screenError = (e.code ? e.code + ": " : "") + e.message;
-    screenPic = PCEStudio.editor.newPicture();
-  }
-  screenSess = PCEStudio.screen.session(screenPic);
-  screenDirty = true;
-  return { pic: screenPic, sess: screenSess };
-}
-
-function screenEntryColour(pic, palette, index) {
-  return index === 0 ? pic.backdrop : pic.palettes[palette][index];
-}
-
-function screenCss(colour) {
-  const c = PCEStudio.editor.colourChannels(colour);
-  return "rgb(" + (c.r * 36) + "," + (c.g * 36) + "," + (c.b * 36) + ")";
-}
-
-/* Every edit lands in the asset files the toy saves (the #77 envelope); the
- * code editor shows the file if it is the one open. */
-function screenCommit() {
-  if (!screenPic || !PCEStudio.screen) return [];
-  let changed = [];
-  try { changed = PCEStudio.screen.syncFiles(screenPic, files); }
-  catch (e) { screenFail(e); return []; }
-  if (!changed.length) { screenDirty = true; drawScreenEditor(); return []; }
-  if (changed.indexOf(activeFile) >= 0) {
-    const f = findFile(activeFile);
-    if (f) { switchingFile = true; setEditorText(f.source); switchingFile = false; }
-  }
-  persistToy();
-  setSaved("saved in this browser");
-  panelDirty = true;
-  screenDirty = true;
-  drawScreenEditor();
-  if (!$("assets-pane").hidden) renderAssets();
-  return changed;
-}
-
-function screenFail(e) {
-  screenError = (e && e.code ? e.code + ": " : "") + (e && e.message ? e.message : e);
-  const el = $("scr-pick");
-  if (el) el.textContent = screenError;
-  toast(screenError);
-}
-
-/* The zoom's scale: 1x is one screen pixel per map pixel (a 256-px map),
- * Fit fills the panel's map column, and the label is what the chip says. */
-function screenScale() {
-  const sess = screenSess;
-  const zoom = sess ? sess.zoom : "fit";
-  if (zoom === "fit") {
-    const body = $("dock-body");
-    const availW = (body && body.clientWidth ? body.clientWidth : 780) - 300;
-    const availH = (body && body.clientHeight ? body.clientHeight : 400) - 70;
-    return Math.max(1, Math.min(3,
-      Math.min(Math.floor(availW / 256) || 1, Math.floor(availH / 256) || 1)));
-  }
-  return Number(String(zoom).replace("x", "")) || 1;
-}
-
-/* ---- the map canvas --------------------------------------------------- */
-const SCR_MAP_PX = 256;          /* 32 cells x 8 pixels */
-
-function screenDrawMap() {
-  const st = screenState();
-  const canvas = $("scr-map");
-  if (!st || !canvas) return;
-  const pic = st.pic, sess = st.sess;
-  const scale = screenScale();
-  canvas.width = SCR_MAP_PX * scale;
-  canvas.height = SCR_MAP_PX * scale;
-  canvas.style.width = canvas.width + "px";
-  canvas.style.height = canvas.height + "px";
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-
-  /* The map at 1x, then scaled: 65536 fillRects would be slow, one
-   * putImageData then drawImage is not. */
-  let off = null, octx = null;
-  try {
-    off = document.createElement("canvas");
-    off.width = SCR_MAP_PX; off.height = SCR_MAP_PX;
-    octx = off.getContext("2d");
-  } catch (e) { off = null; }
-  if (octx) {
-    const img = octx.createImageData(SCR_MAP_PX, SCR_MAP_PX);
-    for (let my = 0; my < PCEStudio.screen.ROWS; my++) {
-      for (let mx = 0; mx < PCEStudio.screen.COLS; mx++) {
-        const char = PCEStudio.editor.mapCell(pic, mx, my);
-        const tile = pic.tiles[char];
-        const palette = tile ? tile.palette : 0;
-        for (let y = 0; y < 8; y++) {
-          for (let x = 0; x < 8; x++) {
-            const v = tile ? tile.pixels[y * 8 + x] : 0;
-            const c = PCEStudio.editor.colourChannels(
-              screenEntryColour(pic, palette, v));
-            const o = ((my * 8 + y) * SCR_MAP_PX + mx * 8 + x) * 4;
-            img.data[o] = c.r * 36; img.data[o + 1] = c.g * 36;
-            img.data[o + 2] = c.b * 36; img.data[o + 3] = 255;
-          }
-        }
-      }
-    }
-    octx.putImageData(img, 0, 0);
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
-  } else {
-    ctx.fillStyle = "#08090c";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-  }
-
-  /* The cell grid, ppu.toys' "#". */
-  if (sess.grid) {
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= PCEStudio.screen.COLS; i++) {
-      const at = Math.round(i * 8 * scale) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(at, 0); ctx.lineTo(at, canvas.height);
-      ctx.stroke();
-    }
-    for (let j = 0; j <= PCEStudio.screen.ROWS; j++) {
-      const at = Math.round(j * 8 * scale) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(0, at); ctx.lineTo(canvas.width, at);
-      ctx.stroke();
-    }
-  }
-
-  /* The visible screen: the display window over the map, from BXR/BYR.  The
-   * window is 256 dots wide (the map's full width, so only its vertical
-   * offset shows) and the picture's own height. */
-  const lines = screenWindowLines();
-  const win = screenWinLines(pic);
-  const y0 = ((pic.scroll.BYR % SCR_MAP_PX) + SCR_MAP_PX) % SCR_MAP_PX;
-  const height = Math.min(lines, SCR_MAP_PX - y0);
-  ctx.strokeStyle = "rgba(255,255,255,0.55)";
-  ctx.beginPath();
-  ctx.rect(0.5, y0 * scale + 0.5, canvas.width - 1, height * scale - 1);
-  ctx.stroke();
-  if (y0 + lines > SCR_MAP_PX) {
-    ctx.beginPath();
-    ctx.rect(0.5, 0.5, canvas.width - 1,
-             (y0 + lines - SCR_MAP_PX) * scale - 1);
-    ctx.stroke();
-  }
-  if (win && win.width !== 256)
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-
-  /* The selection and any drag in progress. */
-  const r = sess.dragRect || sess.selection;
-  if (r) {
-    ctx.strokeStyle = sess.dragRect ? "rgba(95,201,232,0.9)" :
-                                      "rgba(95,201,232,0.55)";
-    ctx.setLineDash(sess.dragRect ? [4, 3] : []);
-    ctx.strokeRect(r.x0 * 8 * scale + 0.5, r.y0 * 8 * scale + 0.5,
-                   (r.x1 - r.x0 + 1) * 8 * scale - 1,
-                   (r.y1 - r.y0 + 1) * 8 * scale - 1);
-    ctx.setLineDash([]);
-  }
-}
-
-function screenWindowLines() {
-  const pic = screenPic || {};
-  try {
-    const win = PCEStudio.editor.windowOf
-      ? PCEStudio.editor.windowOf(pic) : null;
-    return win && win.lines ? win.lines : 224;
-  } catch (e) { return 224; }
-}
-
-function screenWinLines(pic) {
-  try {
-    return PCEStudio.editor.windowOf(pic);
-  } catch (e) { return null; }
-}
-
-/* ---- the tile sheet, the tile and the palette strip -------------------- */
-const SCR_TILES_PER_ROW = 32;
-
-function screenDrawTiles() {
-  const st = screenState();
-  const canvas = $("scr-tiles");
-  if (!st || !canvas) return;
-  const sheet = PCEStudio.screen.tileSheet(st.pic);
-  const rows = Math.max(1, Math.ceil(sheet.length / SCR_TILES_PER_ROW));
-  canvas.width = 256;
-  canvas.height = rows * 8;
-  canvas.style.width = "256px";
-  canvas.style.height = Math.max(16, canvas.height) + "px";
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  try {
-    const img = ctx.createImageData(256, canvas.height);
-    for (let i = 0; i < sheet.length; i++) {
-      const cell = sheet[i];
-      const tile = st.pic.tiles[cell.char];
-      const tx = (i % SCR_TILES_PER_ROW) * 8;
-      const ty = Math.floor(i / SCR_TILES_PER_ROW) * 8;
-      for (let y = 0; y < 8; y++) {
-        for (let x = 0; x < 8; x++) {
-          const v = tile.pixels[y * 8 + x];
-          const c = PCEStudio.editor.colourChannels(
-            screenEntryColour(st.pic, cell.palette, v));
-          const o = ((ty + y) * 256 + tx + x) * 4;
-          img.data[o] = c.r * 36; img.data[o + 1] = c.g * 36;
-          img.data[o + 2] = c.b * 36; img.data[o + 3] = 255;
-        }
-      }
-    }
-    ctx.putImageData(img, 0, 0);
-    const at = sheet.findIndex((c) => c.char === st.sess.tile);
-    if (at >= 0) {
-      ctx.strokeStyle = "rgba(255,149,64,0.95)";
-      ctx.strokeRect((at % SCR_TILES_PER_ROW) * 8 + 0.5,
-                     Math.floor(at / SCR_TILES_PER_ROW) * 8 + 0.5, 7, 7);
-    }
-  } catch (e) { /* a canvas that cannot draw still leaves the sheet clickable */ }
-}
-
-function screenDrawTileEdit() {
-  const st = screenState();
-  const canvas = $("scr-tileedit");
-  if (!st || !canvas) return;
-  const tile = st.pic.tiles[st.sess.tile];
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const SCALE = 8;
-  for (let y = 0; y < 8; y++) {
-    for (let x = 0; x < 8; x++) {
-      const v = tile ? tile.pixels[y * 8 + x] : 0;
-      ctx.fillStyle = screenCss(screenEntryColour(st.pic,
-        tile ? tile.palette : 0, v));
-      ctx.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);
-    }
-  }
-  ctx.strokeStyle = "rgba(255,255,255,0.18)";
-  for (let i = 1; i < 8; i++) {
-    ctx.beginPath();
-    ctx.moveTo(i * SCALE + 0.5, 0); ctx.lineTo(i * SCALE + 0.5, 64);
-    ctx.moveTo(0, i * SCALE + 0.5); ctx.lineTo(64, i * SCALE + 0.5);
-    ctx.stroke();
-  }
-}
-
-function screenDrawPalette() {
-  const st = screenState();
-  const host = $("scr-palette");
-  if (!st || !host) return;
-  while (host.firstChild) host.removeChild(host.firstChild);
-  const palette = PCEStudio.screen.tilePalette(st.sess, st.sess.tile);
-  for (let e = 0; e < PCEStudio.editor.ENTRIES; e++) {
-    const sw = document.createElement("span");
-    sw.className = "sw" + (e === 0 ? " entry0" : "") +
-      (e === st.sess.colour ? " is-on" : "");
-    sw.style.background = screenCss(screenEntryColour(st.pic, palette, e));
-    sw.title = "colour " + e + (e === 0 ? " (the shared backdrop)" : "");
-    sw.addEventListener("click", () => {
-      try {
-        PCEStudio.screen.selectColour(st.sess, e);
-        screenDirty = true;
-        drawScreenEditor();
-      } catch (err) { screenFail(err); }
-    });
-    host.appendChild(sw);
-  }
-  if ($("scr-palno")) $("scr-palno").textContent = String(palette);
-}
-
-/* ---- the tool row, the zoom and the footers --------------------------- */
-function screenToolButtons() {
-  const host = $("scr-tools");
-  if (!host || host.children.length || !PCEStudio.screen) return;
-  for (const tool of PCEStudio.screen.TOOLS) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.id = "scr-tool-" + tool.id;
-    b.className = "scr-tool";
-    b.title = tool.title;
-    const label = document.createElement("span");
-    label.textContent = tool.label;
-    b.appendChild(label);
-    const k = document.createElement("kbd");
-    k.textContent = tool.key;
-    b.appendChild(k);
-    b.addEventListener("click", () => screenSetTool(tool.id));
-    host.appendChild(b);
-  }
-}
-
-function screenZoomButtons() {
-  const host = $("scr-zooms");
-  if (!host || host.children.length || !PCEStudio.screen) return;
-  for (const zoom of PCEStudio.screen.ZOOMS) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.id = "scr-zoom-" + zoom;
-    b.className = "scr-zoom";
-    b.textContent = zoom === "fit" ? "FIT" : zoom.toUpperCase().replace("X", "×");
-    b.title = "Zoom " + (zoom === "fit" ? "to the panel" : zoom);
-    b.addEventListener("click", () => screenSetZoom(zoom));
-    host.appendChild(b);
-  }
-}
-
-function screenSetTool(id) {
-  const st = screenState();
-  if (!st) return;
-  try {
-    PCEStudio.screen.setTool(st.sess, id);
-    screenDirty = true;
-    drawScreenEditor();
-  } catch (e) { screenFail(e); }
-}
-
-function screenSetZoom(id) {
-  const st = screenState();
-  if (!st) return;
-  try {
-    PCEStudio.screen.setZoom(st.sess, id);
-    screenDirty = true;
-    drawScreenEditor();
-  } catch (e) { screenFail(e); }
-}
-
-function screenToggleGrid(on) {
-  const st = screenState();
-  if (!st) return;
-  PCEStudio.screen.toggleGrid(st.sess, on);
-  screenDirty = true;
-  drawScreenEditor();
-}
-
-function screenSelectChar(char) {
-  const st = screenState();
-  if (!st) return;
-  try {
-    PCEStudio.screen.selectTile(st.sess, char);
-    screenDirty = true;
-    drawScreenEditor();
-  } catch (e) { screenFail(e); }
-}
-
-function screenNewTile() {
-  const st = screenState();
-  if (!st) return;
-  try {
-    const char = PCEStudio.editor.newTile(st.pic,
-      PCEStudio.screen.tilePalette(st.sess, st.sess.tile));
-    PCEStudio.screen.selectTile(st.sess, char);
-    screenCommit();
-  } catch (e) { screenFail(e); }
-}
-
-function screenScroll(dx, dy) {
-  const st = screenState();
-  if (!st) return;
-  try {
-    PCEStudio.editor.setScroll(st.pic, {
-      BXR: st.pic.scroll.BXR + dx, BYR: st.pic.scroll.BYR + dy
-    });
-    screenCommit();
-  } catch (e) { screenFail(e); }
-}
-
-/* One place that draws all of it, gated so the play loop's per-frame panel
- * refresh does not repaint 65,536 pixels. */
-function drawScreenEditor(force) {
-  if (!screenReady()) return;
-  if (!force && !screenDirty) { screenDrawFoot(); return; }
-  const st = screenState();
-  if (!st) return;
-  screenDirty = false;
-  screenToolButtons();
-  screenZoomButtons();
-  if ($("scr-grid")) $("scr-grid").checked = st.sess.grid;
-  for (const tool of PCEStudio.screen.TOOLS) {
-    const b = $("scr-tool-" + tool.id);
-    if (b) b.classList.toggle("is-on", st.sess.tool === tool.id);
-  }
-  for (const zoom of PCEStudio.screen.ZOOMS) {
-    const b = $("scr-zoom-" + zoom);
-    if (b) b.classList.toggle("is-on", st.sess.zoom === zoom);
-  }
-  screenDrawMap();
-  screenDrawTiles();
-  screenDrawTileEdit();
-  screenDrawPalette();
-  const sheet = PCEStudio.screen.tileSheet(st.pic);
-  if ($("scr-tile")) {
-    $("scr-tile").textContent = "$" +
-      st.sess.tile.toString(16).toUpperCase();
-  }
-  if ($("scr-tilerange")) {
-    $("scr-tilerange").textContent = sheet.length +
-      (sheet.length === 1 ? " tile" : " tiles");
-  }
-  if ($("scr-charbase")) {
-    $("scr-charbase").textContent = "$" +
-      (st.sess.tile * 16).toString(16).toUpperCase();
-  }
-  if ($("scr-bxr")) $("scr-bxr").textContent = String(st.pic.scroll.BXR);
-  if ($("scr-byr")) $("scr-byr").textContent = String(st.pic.scroll.BYR);
-  if ($("scr-mapsize")) {
-    const size = PCEStudio.screen.readMapSize(st.pic);
-    $("scr-mapsize").textContent = size.width + " × " + size.height;
-    $("scr-mwr").textContent = "$" + size.mwr.toString(16).toUpperCase()
-      .padStart(2, "0");
-  }
-  screenDrawFoot();
-}
-
-function screenDrawFoot() {
-  const st = screenSess && screenPic ? { pic: screenPic, sess: screenSess } : null;
-  const foot = $("scr-foot"), pick = $("scr-pick");
-  if (foot) {
-    foot.textContent = "32 × 32 cells · faint white = visible screen";
-  }
-  if (!pick) return;
-  if (screenError) { pick.textContent = screenError; return; }
-  if (!st) { pick.textContent = "Click or drag to select · Select first cell"; return; }
-  const r = st.sess.dragRect || st.sess.selection;
-  if (r) {
-    const n = PCEStudio.screen.cellCount(r);
-    pick.textContent = (st.sess.dragRect ? "dragging · " : "selected · ") +
-      (r.x1 - r.x0 + 1) + " × " + (r.y1 - r.y0 + 1) + " = " + n + " cell" +
-      (n === 1 ? "" : "s") + " · (" + r.x0 + "," + r.y0 + ")";
-  } else {
-    pick.textContent = "Click or drag to select · Select first cell";
-  }
-}
-
-/* ---- the pointer and the keys ---------------------------------------- */
-function screenCellAt(ev, elem) {
-  const r = elem.getBoundingClientRect();
-  const w = r.width || elem.width || 256;
-  const h = r.height || elem.height || 256;
-  const x = Math.floor((ev.clientX - r.left) * PCEStudio.screen.COLS / w);
-  const y = Math.floor((ev.clientY - r.top) * PCEStudio.screen.ROWS / h);
-  return PCEStudio.screen.clampCell(x, y);
-}
-
-/* press/drag/release from a DOM event, or from the evidence with a plain
- * {clientX, clientY} over the element's rect. */
-function screenPointer(kind, ev, elem) {
-  const st = screenState();
-  if (!st || !elem) return 0;
-  let n = 0;
-  try {
-    const cell = screenCellAt(ev, elem);
-    if (kind === "press") n = PCEStudio.screen.press(st.sess, cell.x, cell.y);
-    else if (kind === "drag") n = PCEStudio.screen.drag(st.sess, cell.x, cell.y);
-    else if (kind === "release") n = PCEStudio.screen.release(st.sess, cell.x, cell.y);
-    if (n) screenCommit();
-    else { screenDirty = true; drawScreenEditor(); }
-  } catch (e) { screenFail(e); }
-  return n;
-}
-
-function screenTileAt(ev, elem) {
-  const st = screenState();
-  if (!st) return 0;
-  const r = elem.getBoundingClientRect();
-  const w = r.width || elem.width || 256;
-  const h = r.height || elem.height || 8;
-  const col = Math.floor((ev.clientX - r.left) * SCR_TILES_PER_ROW / w);
-  const row = Math.floor((ev.clientY - r.top) *
-                         (elem.height || 8) / (h * 8));
-  const sheet = PCEStudio.screen.tileSheet(st.pic);
-  const at = row * SCR_TILES_PER_ROW + col;
-  if (at < 0 || at >= sheet.length) return 0;
-  screenSelectChar(sheet[at].char);
-  return sheet[at].char;
-}
-
-function screenTilePixelAt(ev, elem) {
-  const st = screenState();
-  if (!st) return 0;
-  const r = elem.getBoundingClientRect();
-  const w = r.width || 64, h = r.height || 64;
-  const x = Math.floor((ev.clientX - r.left) * 8 / w);
-  const y = Math.floor((ev.clientY - r.top) * 8 / h);
-  try {
-    PCEStudio.screen.paintTilePixel(st.sess,
-      Math.max(0, Math.min(7, x)), Math.max(0, Math.min(7, y)));
-    screenCommit();
-    return 1;
-  } catch (e) { screenFail(e); return 0; }
-}
-
-/* press/drag/release at cell coordinates — the same calls the DOM handlers
- * make, for the evidence. */
-function screenPressRelease(kind, x, y) {
-  const st = screenState();
-  if (!st) return 0;
-  let n = 0;
-  try {
-    const cell = PCEStudio.screen.clampCell(x, y);
-    if (kind === "press") n = PCEStudio.screen.press(st.sess, cell.x, cell.y);
-    else if (kind === "drag") n = PCEStudio.screen.drag(st.sess, cell.x, cell.y);
-    else n = PCEStudio.screen.release(st.sess, cell.x, cell.y);
-    if (n) screenCommit();
-    else { screenDirty = true; drawScreenEditor(); }
-  } catch (e) { screenFail(e); }
-  return n;
-}
-
-function screenKey(ev) {
-  const st = screenState();
-  if (!st) return false;
-  const key = ev.key ? ev.key.toLowerCase() : "";
-  const tool = PCEStudio.screen.TOOLS.find((t) => t.key.toLowerCase() === key);
-  if (tool) { screenSetTool(tool.id); return true; }
-  if (key === "#") { screenToggleGrid(); return true; }
-  return false;
-}
-
-function bindScreenEditor() {
-  if (!screenReady()) return;
-  const map = $("scr-map");
-  if (map) {
-    map.addEventListener("mousedown", (ev) => {
-      screenPointer("press", ev, map); ev.preventDefault();
-    });
-    map.addEventListener("mousemove", (ev) => {
-      if (screenSess && screenSess.dragging) screenPointer("drag", ev, map);
-    });
-    map.addEventListener("mouseup", (ev) => {
-      screenPointer("release", ev, map); ev.preventDefault();
-    });
-    map.addEventListener("mouseleave", (ev) => {
-      if (screenSess && screenSess.dragging) screenPointer("release", ev, map);
-    });
-    map.addEventListener("keydown", (ev) => {
-      /* The map's own keys stop here: R would otherwise also restart the toy
-       * through the page-wide shortcut. */
-      if (screenKey(ev)) { ev.preventDefault(); ev.stopPropagation(); }
-    });
-  }
-  const tiles = $("scr-tiles");
-  if (tiles) tiles.addEventListener("click", (ev) => screenTileAt(ev, tiles));
-  const tileedit = $("scr-tileedit");
-  if (tileedit) {
-    tileedit.addEventListener("mousedown", (ev) => {
-      screenTilePixelAt(ev, tileedit); ev.preventDefault();
-    });
-  }
-  if ($("scr-grid")) $("scr-grid").addEventListener("change", () =>
-    screenToggleGrid($("scr-grid").checked));
-  if ($("scr-newtile")) $("scr-newtile").addEventListener("click", screenNewTile);
-  if ($("scr-bxr-down")) $("scr-bxr-down").addEventListener("click", () => screenScroll(-1, 0));
-  if ($("scr-bxr-up")) $("scr-bxr-up").addEventListener("click", () => screenScroll(1, 0));
-  if ($("scr-byr-down")) $("scr-byr-down").addEventListener("click", () => screenScroll(0, -1));
-  if ($("scr-byr-up")) $("scr-byr-up").addEventListener("click", () => screenScroll(0, 1));
-}
-
-function drawScreen(st) {
-  drawScreenEditor();
-  if (!st) {
-    if ($("screen-summary")) {
-      $("screen-summary").textContent = screenError || "no frame yet";
-    }
-    return;
-  }
-  const line = panelLine(st);
-  const v = PCEStudio.panels.lineValues(st, line);
-  $("screen-summary").textContent =
-    "VDW line " + v.line + " · BXR " + v.BXR + " · BYR " + v.BYR +
-    " · CR " + hex(v.CR, 2) + " · BG_YOffset " + v.BG_YOffset + "\n" +
-    "BAT " + st.geom.width + "×" + st.geom.height + " (MWR " +
-    hex((st.regs.MWR || 0) & 0xFF, 2) + ") · " + st.width + "×" + st.height +
-    " · frame " + Math.max(0, currentFrame);
-  if (!followAt) {
-    $("follow-info").textContent =
-      "Click the output to follow a pixel: the layer that won, its BAT entry " +
-      "or sprite, and the register values on that line.";
-    return;
-  }
-  let t;
-  try { t = PCEStudio.panels.followPixel(st, followAt.x, followAt.y); }
-  catch (e) { $("follow-info").textContent = e.message; return; }
-  let out = "pixel (" + t.x + "," + t.y + ") · VDW line " + t.line +
-            " · winner: " + t.layer + "\n";
-  out += "colour index " + hex(t.index, 2) + " · CRAM word " +
-         hex(t.colour.word, 4) + " · rgb(" + t.colour.r + "," +
-         t.colour.g + "," + t.colour.b + ")\n";
-  const b = t.background || {};
-  if (b.blanking) out += "background: blanking fill (BB clear)\n";
-  else {
-    out += "BAT word " + b.batIndex + " = " + hex(b.batWord, 4) +
-           " · char " + hex(b.char, 3) + " · palette " + b.palette +
-           " · tile row " + b.tileRow + " col " + b.tileColumn +
-           " · colour " + b.colourNumber + "\n";
-  }
-  if (t.sprite) {
-    out += "sprite " + t.sprite.number + " · pattern " +
-           hex(t.sprite.pattern, 3) + " · palette " + t.sprite.palette +
-           " · colour " + t.sprite.colourNumber + " · cell " +
-           t.sprite.cell + "\n";
-  }
-  const r = t.registers;
-  out += "line registers: BXR " + r.BXR + " · BYR " + r.BYR + " · CR " +
-         hex(r.CR, 2) + " · MWR " + hex(r.MWR, 2);
-  $("follow-info").textContent = out;
-}
-
-function drawVram(st) {
-  const map = PCEStudio.panels.vramMap(st);
-  const c = $("vrammap").getContext("2d");
-  const w = $("vrammap").width || 512, h = $("vrammap").height || 44;
-  c.fillStyle = "#08090c"; c.fillRect(0, 0, w, h);
-  const colour = (kind) =>
-    kind.indexOf("sprite patterns") === 0 ? "#c08040" :
-    kind === "BAT" ? "#3f8f6f" :
-    kind === "tiles" ? "#4f6fd0" :
-    kind === "SAT" ? "#b05090" : "#3a3f49";
-  for (const seg of map.segments) {
-    const x0 = Math.floor(seg.start * w / 32768);
-    const x1 = Math.max(x0 + 1, Math.floor((seg.start + seg.words) * w / 32768));
-    c.fillStyle = colour(seg.kind);
-    c.fillRect(x0, 0, x1 - x0, h);
-  }
-  let out = "whole VRAM, 0..32767 words\n";
-  for (const seg of map.segments) {
-    out += seg.kind.padEnd(16).slice(0, 16) + " " +
-      String(seg.start).padStart(5) + ".." +
-      String(seg.start + seg.words - 1).padStart(5) + "  (" + seg.words + ")\n";
-  }
-  const free = map.free.reduce((a, b) => a + b.words, 0);
-  out += "free: " + free + " of 32768 words";
-  $("vram-legend").textContent = out;
-}
-
-function drawPalettes(st) {
-  const vce = PCEStudio.panels.vcePalettes(st, panelLine(st));
-  const host = $("pal32");
-  if (!palCells) {
-    palCells = [];
-    for (let p = 0; p < 32; p++) {
-      const row = document.createElement("div");
-      row.className = "prow";
-      const num = document.createElement("span");
-      num.className = "pnum";
-      num.textContent = String(p);
-      row.appendChild(num);
-      const cells = [];
-      for (let e = 0; e < 16; e++) {
-        const sw = document.createElement("span");
-        sw.className = "psw" + (e === 0 && p < 16 ? " entry0" : "");
-        row.appendChild(sw);
-        cells.push(sw);
-      }
-      host.appendChild(row);
-      palCells.push(cells);
-    }
-  }
-  for (let p = 0; p < 32; p++) {
-    for (let e = 0; e < 16; e++) {
-      const c = vce.palettes[p][e];
-      const sw = palCells[p][e];
-      sw.style.background = "rgb(" + c.r + "," + c.g + "," + c.b + ")";
-      sw.title = "palette " + p + " entry " + e + " · CRAM " +
-        hex(c.index, 3) + " · word " + hex(c.word, 3);
-    }
-  }
-}
-
-function drawSprites(st) {
-  const sat = PCEStudio.panels.satTable(st);
-  let out = " #    Y    X  pattern pal size   flags cells\n";
-  for (const s of sat) {
-    if (s.empty) { out += String(s.number).padStart(2) + "   (empty)\n"; continue; }
-    const flags = (s.spbg ? "P" : "-") + (s.hflip ? "H" : "-") +
-                  (s.vflip ? "V" : "-") + (s.cgx ? "X" : "-");
-    out += String(s.number).padStart(2) + " " + String(s.y).padStart(4) + " " +
-      String(s.x).padStart(4) + " " + hex(s.pattern, 3).padStart(6) + " " +
-      String(s.palette).padStart(3) + "  " + s.width + "x" + s.height +
-      "  " + flags + "   " + s.cells.join(",") + "\n";
-  }
-  $("sat-table").textContent = out;
-}
-
-function drawScanlines(st) {
-  const lines = PCEStudio.panels.registerLines(st);
-  let out = "  line  BXR  BYR  CR  entry RCR\n";
-  for (const l of lines) {
-    out += (l.entryAtLine ? "*" : " ") + String(l.line).padStart(5) + " " +
-      String(l.BXR).padStart(4) + " " + String(l.BYR).padStart(4) + " " +
-      hex(l.CR, 2).padStart(4) + "  " + (l.entryAtLine ? "yes " : "  . ") +
-      (l.rcr == null ? "  -  " : hex(l.rcr, 4)) + "\n";
-  }
-  $("scan-table").textContent = out;
-}
-
-function drawRegisters(st) {
-  const row = panelLine(st);
-  const v = PCEStudio.panels.lineValues(st, row);
-  const regs = PCEStudio.panels.vdcRegisters(st, row);
-  let out = "VDW line " + v.line + " · BXR " + v.BXR + " · BYR " + v.BYR +
-    " · CR " + hex(v.CR, 2) + "\n\n";
-  out += " #  name     value   source\n";
-  for (const r of regs) {
-    out += "R" + r.number.toString(16).toUpperCase().padStart(2, "0") + "  " +
-      r.name.padEnd(8) + " " +
-      (r.value == null ? "-" : hex(r.value, 4)).padStart(7) + "  " +
-      (r.source || "-") + "\n";
-  }
-  const s = PCEStudio.panels.status(st);
-  out += "\nstatus (VDC SR): OR " + s.orLines.length + " · CC " +
-    s.ccLines.length + " · RR " + s.rrLines.length + " · SR " +
-    hex(s.sr, 2);
-  $("reg-table").textContent = out;
-}
-
-function drawConsole(st) {
-  let count = 0;
-  for (const s of PCEStudio.panels.satTable(st)) if (!s.empty) count++;
-  const perFrame = 119904;
-  $("console-table").textContent =
-    "PC Engine frame: " + perFrame + " CPU cycles (7.16 MHz, 60 Hz)\n" +
-    "per-line trigger: RCR interrupt (no HDMA)\n" +
-    "sprite entries in the SAT: " + count + "\n" +
-    "runtime: " + (current.mode === "il" ? "IL interpreter (#31)" : "Fengari Lua 5.3") + "\n" +
-    "frames run this session: " + (runtime ? runtime.frameCount : 0) + "\n" +
-    "compiler: IL only — machine code is #31's next half\n" +
-    "export: second half of #75";
-}
-
 function refreshPanels(force) {
   if (!force && !panelDirty) return;
   panelDirty = false;
   const st = stateNow();
-  /* #84: the SCREEN panel's cell map is the toy's assets, not the running
-   * frame, so it draws before a toy has run too. */
-  if (!st) { if (activePanel === "screen") drawScreen(null); return; }
-  $("inspect-line").textContent = "line " + panelLine(st) + " · full frame";
-  if (activePanel === "screen") drawScreen(st);
-  else if (activePanel === "vram") drawVram(st);
-  else if (activePanel === "palettes") drawPalettes(st);
-  else if (activePanel === "sprites") drawSprites(st);
-  else if (activePanel === "scanlines") drawScanlines(st);
-  else if (activePanel === "registers") drawRegisters(st);
-  else if (activePanel === "console") drawConsole(st);
+  const active = panelById(activePanel);
+  if (st) $("inspect-line").textContent = "line " + panelLine(st) + " · full frame";
+  /* The panel module draws itself: a panel whose model is the toy's assets
+   * (SCREEN) draws before a toy has run, so a null state is passed on and
+   * the panel decides. */
+  if (active && active.draw) active.draw(st);
+  if (!st) return;
   const detail = $("layer-detail");
   if (detail) detail.textContent = shownLayerText(st);
 }
 
 function selectPanel(id) {
   if (visiblePanels.indexOf(id) < 0) return;
+  const meta = panelById(id);
+  if (!meta) return;
   activePanel = id;
   for (const p of PANELS) {
     $("panel-" + p.id).hidden = p.id !== id;
     const tab = $("dtab-" + p.id);
     if (tab) tab.classList.toggle("is-on", p.id === id);
   }
-  const meta = PANELS.find((p) => p.id === id);
   $("dock-title").textContent = meta.label;
-  $("dock-gloss").textContent = meta.gloss;
+  $("dock-gloss").textContent = meta.gloss || "";
   const chapter = docsChapterFor(id);
   $("dock-guide").dataset.chapter = chapter;
   $("dock-guide").title = "Open the reference: " + meta.label + " → " + chapter;
@@ -2647,6 +1946,8 @@ function selectPanel(id) {
 }
 
 /* ---- the dock tabs and the Panels menu -------------------------------- */
+/* Both are built from the registry the panel modules filled, so a new panel
+ * appears in the dock and the menu from its own file (#102). */
 function buildDock() {
   const host = $("dock-tabs");
   for (const p of PANELS) {
@@ -2697,14 +1998,16 @@ function buildPanelsMenu() {
     return b;
   };
   group("WORKSPACE");
-  for (const w of WORKSPACE_ITEMS) {
+  for (const w of WORKSPACE_LAYOUT) {
     item(w.label, true, () => {
       if (w.id === "editor") $("code-pane").hidden = !$("code-pane").hidden;
       else if (w.id === "output") $("output-pane").hidden = !$("output-pane").hidden;
       else if (w.id === "assets") selectCodeTab("assets");
-      else if (w.id === "markers") selectBottomTab("markers");
-      else if (w.id === "agent") selectBottomTab("agent");
     });
+  }
+  for (const p of panelDefs) {
+    if ((p.group || "chip") !== "workspace") continue;
+    item(p.label, true, () => { if (p.open) p.open(studio); });
   }
   group("THE CHIP");
   for (const p of PANELS) {
@@ -2740,7 +2043,6 @@ function togglePanel(id) {
   }
 }
 
-/* ---- code / assets tabs ---------------------------------------------- */
 function selectCodeTab(which) {
   const code = which === "code";
   $("tab-code").classList.toggle("is-on", code);
@@ -2759,28 +2061,10 @@ function selectBottomTab(which) {
   $("bottom-agent").hidden = markersOn;
 }
 
-/* ---- markers ---------------------------------------------------------- */
-function drawMarkers() {
-  const host = $("marker-list");
-  while (host.firstChild) host.removeChild(host.firstChild);
-  for (const m of markers) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "marker";
-    b.textContent = "frame " + m;
-    b.title = "Seek to frame " + m;
-    b.addEventListener("click", () => { pause(); seek(m); });
-    host.appendChild(b);
-  }
-}
-function addMarker() {
-  const f = Math.max(0, Math.min(lengthFrames - 1, currentFrame));
-  if (markers.indexOf(f) < 0) markers.push(f);
-  markers.sort((a, b) => a - b);
-  drawMarkers();
-  toast("Marker at frame " + f + ".");
-  return f;
-}
+/* ---- markers ----------------------------------------------------------
+ * The markers are the MARKERS module's (renderer/studio-panel-markers.js):
+ * the list, the add button and the state live there, and the studio API
+ * reaches them through the registry (studio.markers / studio.addMarker). */
 
 /* ---- popovers --------------------------------------------------------- */
 function hidePop(id) { $(id).hidden = true; }
@@ -2860,9 +2144,10 @@ function onEditorChange() {
   current.source = mainSource();
   setSaved("edited — Run to apply");
   persistToy();
-  /* #84: an asset file edited by hand is what the SCREEN panel draws next. */
+  /* An asset file edited by hand is a new input for the panels that draw
+   * the assets (SCREEN): each one decides whether it cares. */
   if (f && (f.name === "tiles.json" || f.name === "palettes.json")) {
-    screenInvalidate();
+    notifyAssetEdit(f.name);
     panelDirty = true;
     if (activePanel === "screen") refreshPanels(true);
   }
@@ -2995,7 +2280,7 @@ function loadExample(id, quiet, noApply) {
   switchingFile = true;
   setEditorText(ex.source);
   switchingFile = false;
-  screenInvalidate();
+  notifyAssetEdit("tiles.json");
   panelDirty = true;
   if (editor) editor.setOption("mode", "lua");
   $("doc-title").textContent = ex.name;
@@ -3107,7 +2392,7 @@ function openToy(text, fileName, opts) {
   $("doc-title").textContent = "main.lua";
   updateFileTabs();
   renderAssets();
-  screenInvalidate();
+  notifyAssetEdit("tiles.json");
   panelDirty = true;
   if (!opts || opts.apply !== false) applySource();
   if (!opts || opts.persist !== false) persistToy();
@@ -3260,8 +2545,9 @@ function closeOverlays() {
 
 /* ppu.toys' shortcut table (docs/STUDIO.md §5.1) where the PCE has the same
  * action. Modifier shortcuts work while typing; Space/R do not, or the editor
- * could not type an R. Poke undo/redo is absent because our panels are
- * read-only; CodeMirror's own undo covers edits. */
+ * could not type an R. Ctrl/Cmd+Z and Shift+Z undo/redo a panel *poke* (the
+ * #79 keyframed register override) — outside a text field, because inside one
+ * they are CodeMirror's own text undo. */
 function handleShortcut(e) {
   if (!e) return false;
   const mod = !!(e.ctrlKey || e.metaKey);
@@ -3272,6 +2558,8 @@ function handleShortcut(e) {
     if (key === ".") { pause(); seek(Math.min(lengthFrames - 1, currentFrame + 1)); return true; }
     if (key === ",") { pause(); seek(Math.max(0, currentFrame - 1)); return true; }
     if (key.toLowerCase() === "s") { saveToyFile(); return true; }
+    if (key.toLowerCase() === "z" && !typingTarget(e.target))
+      return e.shiftKey ? redo() : undo();
     return false;
   }
   if (key === "Escape") return closeOverlays();
@@ -3384,8 +2672,8 @@ function buildExamplesMenu() {
 }
 
 function bind() {
-  /* #84: the SCREEN panel's map, tile sheet and palette strip */
-  bindScreenEditor();
+  /* The panels' own controls are bound by their modules in register(); the
+   * page binds the layout, the editor, the output and the transport. */
   /* top bar */
   $("btn-run").addEventListener("click", () => {
     if (!applySource()) return;
@@ -3479,10 +2767,9 @@ function bind() {
   });
   $("length").addEventListener("change", () => setLength($("length").value));
 
-  /* markers / agent */
+  /* markers / agent drawers; the MARKERS module binds its own Add button */
   $("tab-markers").addEventListener("click", () => selectBottomTab("markers"));
   $("tab-agent").addEventListener("click", () => selectBottomTab("agent"));
-  $("btn-addmarker").addEventListener("click", addMarker);
 
   /* the canvas: follow a pixel, and the controller while it has focus */
   canvas.addEventListener("click", (e) => {
@@ -3570,6 +2857,10 @@ function buildDocs() {
 
 function init() {
   loadSettings();
+  /* #102: every panel module registers itself first, then the dock, the
+   * Panels menu and the visible set are built from what registered. */
+  registerPanelModules();
+  visiblePanels = PANELS.map((p) => p.id);
   buildDock();
   buildPanelsMenu();
   buildExamplesMenu();
@@ -3585,6 +2876,11 @@ function init() {
     ? new URLSearchParams(location.search) : new URLSearchParams("");
   const panelParam = qs.get("panel");
   if (panelParam && PANELS.some((p) => p.id === panelParam)) selectPanel(panelParam);
+  /* ?bottom=agent|markers opens a drawer without synthetic input, the way
+   * ?tab=assets opens the ASSETS list (#84's screenshots). */
+  const bottomParam = qs.get("bottom");
+  if (bottomParam === "agent" || bottomParam === "markers")
+    selectBottomTab(bottomParam);
 
   const startExample = EXAMPLES[0];
   const demo = qs.get("demo");
@@ -3663,11 +2959,246 @@ function init() {
   updateResolution();
 }
 
-/* The tests read the page's own state through this object: no second copy of
- * a toy, and no test-only branch in the runtime. */
-PCEStudio.studio = {
-  examples: EXAMPLES,
+/* -------------------------------------------------------------------------
+ * #102 — the studio API.
+ *
+ * The page owns the layout, the editor, the output, the transport and this
+ * object; every panel owns its own drawing and talks to the page only here.
+ * docs/STUDIO.md §3.2 is the reference: the names below, what each returns,
+ * and what a panel may and may not do with it.
+ *
+ *   studio.panels     the Panels registry (register/list/get/select/toggle/
+ *                     refresh/active/visible/dirty). The chip panels are the
+ *                     array itself, in dock order, for the evidence.
+ *   studio.toy        the current toy and its asset files: current/mode/
+ *                     source/files/file/activeFile/mainSource, writeAssets
+ *                     (the asset write-back), persist/saved/refreshAssets,
+ *                     onAssetEdit (an asset file changed).
+ *   studio.render     state/frame/currentFrame/panelLine/hex/runtime,
+ *                     seek/play/pause/isPlaying, length/setLength, runFrames,
+ *                     resolution/resolutionFor, output.
+ *   studio.poke       add a keyframed register override; pokes()/clearPokes();
+ *                     undo()/redo()/canUndo()/canRedo() move the actions.
+ *   studio.theme      the CSS custom properties the page's :root holds.
+ *   studio.$/document/toast/layout/follow  the small DOM and layout surface.
+ * ---------------------------------------------------------------------- */
+const THEME_NAMES = [
+  "--bg", "--bar", "--pane", "--pane2", "--raised", "--chipbg", "--hover",
+  "--code", "--sunken", "--line", "--line2", "--text", "--text2", "--muted",
+  "--dim", "--faint", "--accent", "--accent-ink", "--cyan", "--green", "--ok",
+  "--bad", "--scrollbar-thumb", "--mono", "--sans", "--display"
+];
+
+/* A theme token is the CSS custom property of that name on :root, read when
+ * the DOM can compute styles (the stub DOM cannot; it answers ""). */
+function themeToken(name) {
+  if (String(name).indexOf("--") !== 0) name = "--" + name;
+  if (THEME_NAMES.indexOf(name) < 0) return "";
+  try {
+    if (typeof getComputedStyle === "function" && document.documentElement) {
+      const v = getComputedStyle(document.documentElement)
+        .getPropertyValue(name);
+      if (v) return v.trim();
+    }
+  } catch (e) { /* no computed styles in a stub DOM */ }
+  return "";
+}
+
+function themeTokens() {
+  const out = {};
+  for (const name of THEME_NAMES) out[name] = themeToken(name);
+  return out;
+}
+
+/* A poke is a keyframed register override: `reg` holds `value` from `frame`
+ * on, until a later poke of the same register.  Pokes are the view's, not the
+ * toy's — the running state keeps what the toy wrote — which is what makes
+ * undo a pure move between two lists. #79 builds the curve editor on this. */
+function poke(reg, value, at) {
+  if (typeof reg !== "string" || !/^[A-Za-z0-9]+$/.test(reg))
+    throw new Error("poke: the first argument is a VDC register name");
+  const frame = at == null ? Math.max(0, currentFrame) : Math.max(0, at | 0);
+  const entry = { reg: reg.toUpperCase(), value: value | 0, frame: frame };
+  pokeList.push(entry);
+  redoStack.length = 0;
+  undoStack.push({ type: "poke", poke: entry });
+  panelDirty = true;
+  if (runtime) renderCurrent();
+  refreshPanels(true);
+  return entry;
+}
+
+function pokes() { return pokeList.slice(); }
+
+function clearPokes() {
+  if (!pokeList.length) return false;
+  undoStack.push({ type: "clear", pokes: pokeList.slice() });
+  redoStack.length = 0;
+  pokeList = [];
+  panelDirty = true;
+  if (runtime) renderCurrent();
+  refreshPanels(true);
+  return true;
+}
+
+function undo() {
+  const action = undoStack.pop();
+  if (!action) return false;
+  if (action.type === "poke") {
+    const i = pokeList.indexOf(action.poke);
+    if (i >= 0) pokeList.splice(i, 1);
+  } else if (action.type === "clear") {
+    pokeList = action.pokes.slice();
+  }
+  redoStack.push(action);
+  panelDirty = true;
+  if (runtime) renderCurrent();
+  refreshPanels(true);
+  return true;
+}
+
+function redo() {
+  const action = redoStack.pop();
+  if (!action) return false;
+  if (action.type === "poke") {
+    pokeList.push(action.poke);
+    pokeList.sort((a, b) => a.frame - b.frame);
+  } else if (action.type === "clear") {
+    pokeList = [];
+  }
+  undoStack.push(action);
+  panelDirty = true;
+  if (runtime) renderCurrent();
+  refreshPanels(true);
+  return true;
+}
+
+/* Every override in force at a frame, folded into the options' registers. */
+function applyPokes(opts, frame) {
+  if (!opts || !pokeList.length) return opts;
+  for (const p of pokeList) {
+    if (p.frame <= frame) opts.regs[p.reg] = p.value;
+  }
+  return opts;
+}
+
+/* The asset write-back: the panel's picture is written into the toy's files
+ * (the #77 envelope), the open editor follows, and the toy autosaves.  The
+ * SCREEN panel is the caller; a refusal is thrown for it to show. */
+function writeAssets(pic) {
+  let changed = [];
+  try { changed = PCEStudio.screen.syncFiles(pic, files); }
+  catch (e) { throw e; }
+  if (!changed.length) return [];
+  if (changed.indexOf(activeFile) >= 0) {
+    const f = findFile(activeFile);
+    if (f) {
+      switchingFile = true;
+      setEditorText(f.source);
+      switchingFile = false;
+    }
+  }
+  persistToy();
+  setSaved("saved in this browser");
+  panelDirty = true;
+  if (!$("assets-pane").hidden) renderAssets();
+  return changed;
+}
+
+function registerPanelModules() {
+  const modules = (PCEStudio && PCEStudio.studioPanelModules) || [];
+  for (const m of modules) {
+    if (typeof m.register !== "function")
+      throw new Error("panel module " + m.id + " has no register(studio)");
+    m.register(studio);
+  }
+  return modules.length;
+}
+
+/* The screen panel's evidence surface, read from the module that owns it. */
+function screenApi() {
+  const def = panelById("screen");
+  return (def && def.api) || null;
+}
+
+const studio = {
+  /* ---- the layout (the page's, not a panel's) ------------------------- */
+  $: $,
+  document: document,
+  toast: toast,
+  hex: hex,
+  layout: {
+    drawer: (which) => selectBottomTab(which),
+    codeTab: (which) => selectCodeTab(which),
+    panel: (id) => selectPanel(id)
+  },
+  follow: () => (followAt ? { x: followAt.x, y: followAt.y } : null),
+
+  /* ---- the Panels registry ------------------------------------------- */
   panels: PANELS,
+
+  /* ---- the current toy and its assets -------------------------------- */
+  toy: {
+    current: () => ({ id: current.example && current.example.id,
+                      name: current.example && current.example.name,
+                      mode: current.mode, frame: currentFrame,
+                      source: current.source }),
+    mode: () => current.mode,
+    source: () => current.source,
+    /* the live array: an asset panel writes through writeAssets() */
+    files: () => files,
+    file: (name) => findFile(name),
+    activeFile: () => activeFile,
+    mainSource: mainSource,
+    writeAssets: writeAssets,
+    persist: persistToy,
+    saved: setSaved,
+    refreshAssets: renderAssets,
+    onAssetEdit: (fn) => {
+      if (typeof fn !== "function") throw new Error("onAssetEdit needs a function");
+      assetEditWatchers.push(fn);
+      return fn;
+    }
+  },
+
+  /* ---- render and seek ----------------------------------------------- */
+  render: {
+    state: () => (runtime ? stateNow() : null),
+    currentFrame: () => currentFrame,
+    panelLine: panelLine,
+    hex: hex,
+    runtime: () => runtime,
+    seek: seek,
+    play: play,
+    pause: pause,
+    isPlaying: () => playing,
+    length: () => lengthFrames,
+    setLength: setLength,
+    runFrames: runFrames,
+    resolution: resolution,
+    resolutionFor: resolutionFor,
+    /* the frame on the canvas after the layer mask: what is shown, not the
+     * toy alone */
+    output: () => (presented ? { frame: presented.frame,
+                                 width: presented.width,
+                                 height: presented.height,
+                                 pixels: presented.pixels } : null)
+  },
+
+  /* ---- pokes, and undo/redo over them -------------------------------- */
+  poke: poke,
+  pokes: pokes,
+  clearPokes: clearPokes,
+  undo: undo,
+  redo: redo,
+  canUndo: () => undoStack.length > 0,
+  canRedo: () => redoStack.length > 0,
+
+  /* ---- the theme tokens ---------------------------------------------- */
+  theme: { token: themeToken, tokens: themeTokens },
+
+  /* ---- the evidence surface (unchanged names) ------------------------ */
+  examples: EXAMPLES,
   current: () => ({ id: current.example && current.example.id,
                     name: current.example && current.example.name,
                     mode: current.mode, frame: currentFrame,
@@ -3684,7 +3215,14 @@ PCEStudio.studio = {
   loadExample: loadExample,
   state: () => (runtime ? stateNow() : null),
   runtime: () => runtime,
-  markers: () => markers.slice(),
+  markers: () => {
+    const def = panelById("markers");
+    return def && def.markers ? def.markers() : [];
+  },
+  addMarker: () => {
+    const def = panelById("markers");
+    return def && def.addMarker ? def.addMarker() : -1;
+  },
   docsHtml: docsRawHtml,
   docsPage: docsPageHtml,
   docsChapter: () => $("docs-panel").dataset.chapter,
@@ -3708,9 +3246,9 @@ PCEStudio.studio = {
     drawGutter();
     persistToy();
     setSaved("edited — Run to apply");
-    /* #84: text set through this path is an asset edit too */
+    /* text set through this path is an asset edit too */
     if (activeFile === "tiles.json" || activeFile === "palettes.json") {
-      screenInvalidate();
+      notifyAssetEdit(activeFile);
       panelDirty = true;
     }
   },
@@ -3731,7 +3269,6 @@ PCEStudio.studio = {
   resolutionFor: resolutionFor,
   length: () => lengthFrames,
   setLength: setLength,
-  addMarker: addMarker,
   editorOptions: () => {
     if (!editor) return null;
     const mode = editor.getOption("mode");
@@ -3753,67 +3290,46 @@ PCEStudio.studio = {
   parseToy: parseToyFile,
   handleShortcut: handleShortcut,
 
-  /* #84 — the SCREEN panel's cell-map editor.  The evidence drives the page's
-   * own tools here (the same functions the DOM handlers call), and reads the
-   * picture the assets make; there is no second copy. */
-  screen: () => {
-    const st = screenState();
-    if (!st) return null;
-    return {
-      tool: st.sess.tool, zoom: st.sess.zoom, grid: st.sess.grid,
-      tile: st.sess.tile, colour: st.sess.colour,
-      palette: PCEStudio.screen.tilePalette(st.sess, st.sess.tile),
-      selection: st.sess.selection,
-      scroll: { BXR: st.pic.scroll.BXR, BYR: st.pic.scroll.BYR },
-      tiles: PCEStudio.screen.tileSheet(st.pic).length,
-      mapSize: PCEStudio.screen.readMapSize(st.pic),
-      error: screenError,
-      cell: (x, y) => PCEStudio.editor.mapCell(st.pic, x, y),
-      pixels: () => PCEStudio.editor.tilePixels(st.pic, st.sess.tile),
-      colours: () => PCEStudio.editor.paletteColours(st.pic,
-        PCEStudio.screen.tilePalette(st.sess, st.sess.tile))
-    };
-  },
-  screenSession: () => screenState() && screenState().sess,
-  screenPicture: () => screenState() && screenState().pic,
-  screenFrame: () => {
-    const st = screenState();
-    return st ? PCEStudio.screen.frame(st.pic) : null;
-  },
-  screenSetTool: screenSetTool,
-  screenSetZoom: screenSetZoom,
-  screenToggleGrid: screenToggleGrid,
-  screenSelectChar: screenSelectChar,
-  screenSelectColour: (n) => {
-    const st = screenState();
-    PCEStudio.screen.selectColour(st.sess, n);
-    screenDirty = true; drawScreenEditor();
-    return st.sess.colour;
-  },
-  screenNewTile: screenNewTile,
-  screenScroll: screenScroll,
-  screenPaintTilePixel: (x, y) => {
-    const st = screenState();
-    PCEStudio.screen.paintTilePixel(st.sess, x, y);
-    return screenCommit().length;
-  },
-  screenPress: (x, y) => screenPressRelease("press", x, y),
-  screenDrag: (x, y) => screenPressRelease("drag", x, y),
-  screenRelease: (x, y) => screenPressRelease("release", x, y),
-  screenClick: (x, y) => {
-    let n = screenPressRelease("press", x, y);
-    n += screenPressRelease("release", x, y);
-    return n;
-  },
-  screenCellAt: (x, y) => screenState() &&
-    PCEStudio.screen.clampCell(x, y),
+  /* #84 — the SCREEN panel's cell-map editor. The module owns these; the
+   * evidence drives the same functions its DOM handlers call. */
+  screen: () => { const a = screenApi(); return a ? a.state() : null; },
+  screenSession: () => { const a = screenApi(); return a ? a.session() : null; },
+  screenPicture: () => { const a = screenApi(); return a ? a.picture() : null; },
+  screenFrame: () => { const a = screenApi(); return a ? a.frame() : null; },
+  screenSetTool: (id) => screenApi().setTool(id),
+  screenSetZoom: (id) => screenApi().setZoom(id),
+  screenToggleGrid: (on) => screenApi().toggleGrid(on),
+  screenSelectChar: (ch) => screenApi().selectChar(ch),
+  screenSelectColour: (n) => screenApi().selectColour(n),
+  screenNewTile: () => screenApi().newTile(),
+  screenScroll: (dx, dy) => screenApi().scroll(dx, dy),
+  screenPaintTilePixel: (x, y) => screenApi().paintTilePixel(x, y),
+  screenPress: (x, y) => screenApi().press(x, y),
+  screenDrag: (x, y) => screenApi().drag(x, y),
+  screenRelease: (x, y) => screenApi().release(x, y),
+  screenClick: (x, y) => screenApi().click(x, y),
+  screenCellAt: (x, y) => screenApi().cellAt(x, y),
   /* the DOM path: a {clientX, clientY} over an element's rect */
-  screenPointer: (kind, ev, elem) => screenPointer(kind, ev,
-    elem || $("scr-map")),
-  screenCanvas: () => ({ map: $("scr-map").width,
-                         tiles: $("scr-tiles").height }),
-  screenDrawn: () => !!$("scr-foot") && !!$("scr-foot").textContent
+  screenPointer: (kind, ev, elem) => screenApi().pointer(kind, ev, elem),
+  screenCanvas: () => screenApi().canvas(),
+  screenDrawn: () => screenApi().drawn()
 };
+
+/* The registry's methods live on the chip-panel array, so `studio.panels` is
+ * both the dock's ordered list (`.length`, `[i]`) and the way a module
+ * registers. */
+PANELS.register = registerPanel;
+PANELS.list = () => panelDefs.slice();
+PANELS.get = panelById;
+PANELS.active = () => activePanel;
+PANELS.visible = () => visiblePanels.slice();
+PANELS.select = (id) => selectPanel(id);
+PANELS.toggle = (id) => togglePanel(id);
+PANELS.refresh = (force) => refreshPanels(force);
+PANELS.dirty = () => { panelDirty = true; };
+PANELS.modules = () => (PCEStudio.studioPanelModules || []).map((m) => m.id);
+
+PCEStudio.studio = studio;
 
 init();
 </script>

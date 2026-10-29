@@ -26,9 +26,14 @@
  *
  * Part A is the 32x32 BAT (MWR $00), the size the toy host's 256x224 frame
  * uses and the size pce-editor.js's picture model holds.  The VDC's other
- * MWR sizes (64x32, 128x32, 32x64, 64x64, 128x64) and the 224-dot window are
- * part B's, not silently pretended here: readMapSize() reports the mode the
- * asset names, and a file asking for another refuses with `map-size`.
+ * MWR sizes (64x32, 128x32, 32x64, 64x64, 128x64) are part B, not silently
+ * pretended here: setMapSize() lists them and refuses every one but $00 with
+ * `map-size`, and a file asking for another refuses the same way.  The
+ * picture's VCE dot clock (#70's 256/336/512) is a model property the panel's
+ * screen-width picker sets; tiles.json carries it as `video`.
+ *
+ * Card #102 moved the panel itself to renderer/studio-panel-screen.js; this
+ * file is and stays the model (docs/STUDIO.md §3.2).
  *
  * Dual use: CommonJS module in Node (tests/check-studio.js) and a browser
  * global (renderer/studio.html), like pce-bg.js and pce-editor.js.
@@ -420,6 +425,20 @@
   var TILES_VERSION = 1;
   var PALETTES_VERSION = 1;
   var MWR_32x32 = 0;
+  /* The VDC's MWR codes (bits 4-6): bit 4 widens the BAT to 64 cells, bit 5
+   * to 128, bit 6 makes it 64 rows.  The panel draws $00 and refuses the
+   * rest as part B; the list is here so the map-size dropdown names the
+   * hardware's sizes rather than a made-up set. */
+  var MAP_SIZES = [
+    { mwr: 0x00, width: 32, height: 32 },
+    { mwr: 0x10, width: 64, height: 32 },
+    { mwr: 0x20, width: 128, height: 32 },
+    { mwr: 0x40, width: 32, height: 64 },
+    { mwr: 0x50, width: 64, height: 64 },
+    { mwr: 0x60, width: 128, height: 64 }
+  ];
+  /* The picture's VCE dot clock, as the editor's VIDEO_MODES names it. */
+  var VIDEO_WIDTHS = [256, 336, 512];
 
   function parseJson(text, what) {
     try { return JSON.parse(text); }
@@ -492,6 +511,7 @@
 
     if (byName["tiles.json"]) {
       var tiles = parseJson(byName["tiles.json"], "tiles.json");
+      if (tiles.video !== undefined) setVideoWidth(pic, tiles.video);
       if (Array.isArray(tiles.tiles) && tiles.tiles.length) {
         var next = FIRST_CHAR;
         for (var t = 0; t < tiles.tiles.length; t++) {
@@ -548,6 +568,10 @@
     }
     var doc = {
       version: TILES_VERSION,
+      /* The VCE dot clock the picture is drawn at (#70's three clocks); 256
+       * is the toy host's and the default.  tiles.json carries it because the
+       * panel edits this picture, not the running toy. */
+      video: (pic.video || 256),
       tiles: tiles,
       map: { mwr: MWR_32x32,
              bxr: pic.scroll.BXR, byr: pic.scroll.BYR,
@@ -591,6 +615,37 @@
     return { mwr: MWR_32x32, width: COLS, height: ROWS };
   }
 
+  /* The map-size dropdown's setter.  The picture model holds one size, so a
+   * request for another is refused with the same `map-size` code a hand-
+   * written tiles.json gets — never silently stored. */
+  function setMapSize(pic, mwr) {
+    var size = null;
+    for (var i = 0; i < MAP_SIZES.length; i++)
+      if (MAP_SIZES[i].mwr === mwr) size = MAP_SIZES[i];
+    if (!size)
+      throw fail("map-size", "$" + (mwr || 0).toString(16) +
+                 " is not an MWR code (the six are $00, $10, $20, $40, $50, $60)");
+    if (mwr !== MWR_32x32)
+      throw fail("map-size", "MWR $" + mwr.toString(16) + " is a " +
+                 size.width + "x" + size.height + " BAT; this panel draws " +
+                 "the 32x32 BAT (MWR $00), and the wider maps are part B");
+    return readMapSize(pic);
+  }
+
+  /* The screen-width dropdown: the VCE's three dot clocks (#70).  The editor
+   * owns the modes (VIDEO_MODES); this is the same picture property. */
+  function readVideoWidth(pic) {
+    return (pic && pic.video) || 256;
+  }
+
+  function setVideoWidth(pic, width) {
+    if (VIDEO_WIDTHS.indexOf(width) < 0)
+      throw fail("video-mode", "the VCE has three dot clocks: 256, 336 or " +
+                 "512 dots; " + width + " is not one of them");
+    ed.setVideoMode(pic, width);
+    return width;
+  }
+
   /* The picture as the VDC would show it: the renderer's own frame of
    * toPicture(), at the picture's window (pce-editor.js).  This is the
    * canvas the panel paints, and the frame the evidence compares. */
@@ -621,6 +676,11 @@
     palettesText: palettesText,
     syncFiles: syncFiles,
     readMapSize: readMapSize,
+    setMapSize: setMapSize,
+    MAP_SIZES: MAP_SIZES,
+    readVideoWidth: readVideoWidth,
+    setVideoWidth: setVideoWidth,
+    VIDEO_WIDTHS: VIDEO_WIDTHS,
     frame: frame
   };
 });

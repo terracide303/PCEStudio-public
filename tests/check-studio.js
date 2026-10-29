@@ -2447,6 +2447,304 @@ function checkScreenPanel(page) {
   studio.pause();
 }
 
+/* ---- #102: every panel is its own module ------------------------------ *
+ * The page only loads the ten modules; each one registers itself (its tab,
+ * its Panels-menu entry, its Guide chapter and its draw) through the studio
+ * API.  This block proves the split is real — the page's inline script no
+ * longer holds the panels' drawing code — and that the registry builds the
+ * dock and the menu from what registered. */
+const PANEL_MODULES = ["screen", "vram", "palettes", "sprites", "audio",
+                       "scanlines", "registers", "console", "markers", "agent"];
+const CHIP_PANELS = ["screen", "vram", "palettes", "sprites", "audio",
+                     "scanlines", "registers", "console"];
+
+function checkPanelModules(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+
+  eq("#102: the ten panel modules registered, chip panels first",
+     studio.panels.modules().join(","), PANEL_MODULES.join(","));
+  for (const id of PANEL_MODULES) {
+    check(page.loaded.indexOf("studio-panel-" + id + ".js") >= 0,
+          "#102: the page loads renderer/studio-panel-" + id + ".js");
+  }
+  eq("#102: the chip panels are the registry's, in dock order",
+     studio.panels.map((p) => p.id).join(","), CHIP_PANELS.join(","));
+
+  /* The registry: the array is the chip list and carries the methods. */
+  check(typeof studio.panels.register === "function" &&
+        typeof studio.panels.list === "function" &&
+        typeof studio.panels.get === "function" &&
+        typeof studio.panels.select === "function" &&
+        typeof studio.panels.toggle === "function" &&
+        typeof studio.panels.refresh === "function" &&
+        typeof studio.panels.dirty === "function",
+        "#102: studio.panels is the registry and the chip list");
+  eq("#102: the registry holds all ten panels",
+     studio.panels.list().length, PANEL_MODULES.length);
+  check(studio.panels.get("vram").group === "chip" &&
+        studio.panels.get("markers").group === "workspace",
+        "#102: a panel carries its group");
+  check(studio.panels.get("vram").chapter === "the-toy" &&
+        studio.panels.get("screen").chapter === "registers",
+        "#102: a panel carries its Guide chapter");
+  for (const id of CHIP_PANELS) {
+    const def = studio.panels.get(id);
+    check(id === "audio" ? !def.draw : typeof def.draw === "function",
+          "#102: " + id + "'s draw comes from its module (" +
+          (typeof def.draw) + ")");
+  }
+  let dup = null;
+  try { studio.panels.register({ id: "vram", label: "again" }); }
+  catch (e) { dup = e.message; }
+  check(!!dup && /two panels registered as vram/.test(dup),
+        "#102: a duplicate panel id is refused (" + dup + ")");
+
+  /* The dock and the Panels menu are built from the registry. */
+  const tabs = page.dom.get("dock-tabs").children.map((b) => b.id);
+  eq("#102: a dock tab per chip panel", tabs.join(","),
+     CHIP_PANELS.map((id) => "dtab-" + id).join(","));
+  const menu = page.dom.get("panels-pop");
+  const items = menu.children.filter((c) => c.className === "pop-item")
+    .map((b) => (b.children[1] && b.children[1].textContent) || b.textContent);
+  check(items.indexOf("Markers") >= 0 && items.indexOf("Agent") >= 0,
+        "#102: the workspace modules added Markers and Agent to the menu (" +
+        items.join(" · ") + ")");
+  for (const id of CHIP_PANELS) {
+    check(items.indexOf(studio.panels.get(id).label) >= 0,
+          "#102: " + id + " added itself to the Panels menu");
+  }
+
+  /* The split is real: the page's own inline script holds no panel drawing
+   * code and no panel state — it is in the module files. */
+  const html = fs.readFileSync(PAGE, "utf8");
+  for (const gone of ["function drawVram", "function drawPalettes",
+                      "function drawSprites", "function drawScanlines",
+                      "function drawRegisters", "function drawConsole",
+                      "function drawScreen", "function screenDrawMap",
+                      "function bindScreenEditor", "function drawMarkers",
+                      "function addMarker", "let palCells", "let screenPic",
+                      'label: "SCREEN"']) {
+    check(html.indexOf(gone) < 0,
+          "#102: studio.html no longer holds " + JSON.stringify(gone));
+  }
+  for (const fn of ["studio-panel-screen.js", "studio-panel-vram.js",
+                    "studio-panel-palettes.js", "studio-panel-sprites.js",
+                    "studio-panel-audio.js", "studio-panel-scanlines.js",
+                    "studio-panel-registers.js", "studio-panel-console.js",
+                    "studio-panel-markers.js", "studio-panel-agent.js"]) {
+    check(html.indexOf('src="' + fn + '"') >= 0,
+          "#102: studio.html loads " + fn);
+  }
+
+  /* A panel's Guide chapter comes from its registration. */
+  studio.panels.select("console");
+  clickOne(page, "dock-guide");
+  eq("#102: CONSOLE's Guide opens its module's chapter",
+     S.studio.docsChapter(), "budgets");
+  studio.closeDocs();
+  studio.panels.select("screen");
+}
+
+/* ---- #102 closes #84's visual gaps ------------------------------------ *
+ * ppu.toys' BACKGROUNDS has a curve button beside each offset, and its map
+ * size and screen width are pickers.  Ours: the curve buttons name #79 (the
+ * keyframes are that card's), the map-size picker lists the VDC's six MWR
+ * sizes and refuses anything but $00 with the model's own code (part B), and
+ * the screen-width picker changes the picture's VCE dot clock, which
+ * tiles.json carries. */
+function checkScreenGaps(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const sc = S.screen;
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+
+  /* the curve buttons exist, are handlers, and name #79 */
+  const pageHtml = fs.readFileSync(PAGE, "utf8");
+  for (const reg of ["bxr", "byr"]) {
+    const b = page.dom.get("scr-" + reg + "-curve");
+    check(!!b && (b.listeners.click || []).length === 1,
+          "#102: the " + reg.toUpperCase() + " curve button has a handler");
+    check(new RegExp("id=\"scr-" + reg + "-curve\"[^>]*title=\"[^\"]*#79")
+            .test(pageHtml),
+          "#102: the " + reg.toUpperCase() + " curve button says #79 in its " +
+          "title");
+    for (const fn of b.listeners.click || []) fn(page.dom.fakeEvent(b));
+    check(/#79/.test(page.dom.get("toast").textContent),
+          "#102: clicking the " + reg.toUpperCase() + " curve button names " +
+          "#79 (" + page.dom.get("toast").textContent + ")");
+  }
+
+  /* the map-size dropdown: the six MWR sizes on offer, $00 works, the rest
+   * refuse with map-size and snap back */
+  const sizeSel = page.dom.get("scr-mapsize");
+  eq("#102: the map-size picker lists the VDC's six MWR sizes",
+     sizeSel.children.length, 6);
+  const offered = sizeSel.children.map((o) => o.value + "=" + o.textContent);
+  eq("#102: the six sizes are the hardware's", offered.join(","),
+     "0=32 × 32,16=64 × 32,32=128 × 32,64=32 × 64,80=64 × 64,96=128 × 64");
+  check(studio.screen().mapSize.mwr === 0 && sizeSel.value === "0",
+        "#102: the picker starts on the 32 × 32 BAT ($00)");
+  sizeSel.value = "16";
+  for (const fn of sizeSel.listeners.change || [])
+    fn(page.dom.fakeEvent(sizeSel));
+  check(/map-size/.test(studio.screen().error),
+        "#102: picking a wider map refuses with map-size (" +
+        studio.screen().error + ")");
+  check(sizeSel.value === "0",
+        "#102: the refused picker snaps back to $00");
+  sizeSel.value = "0";
+  for (const fn of sizeSel.listeners.change || [])
+    fn(page.dom.fakeEvent(sizeSel));
+  check(studio.screen().error === "",
+        "#102: re-picking $00 clears the refusal");
+
+  /* the screen-width dropdown: 256 / 341 / 512 dots, carried in tiles.json */
+  const videoSel = page.dom.get("scr-video");
+  eq("#102: the screen-width picker lists the VCE's three dot clocks",
+     videoSel.children.map((o) => o.value).join(","), "256,336,512");
+  const frame256 = studio.screenFrame();
+  check(frame256.width === 256,
+        "#102: 256 dots draws a 256-px frame (" + frame256.width + ")");
+  videoSel.value = "336";
+  for (const fn of videoSel.listeners.change || [])
+    fn(page.dom.fakeEvent(videoSel));
+  eq("#102: 336 dots is the picture's mode", studio.screen().video, 336);
+  const frame336 = studio.screenFrame();
+  check(frame336.width === 341,
+        "#102: 336 dots draws the VCE's 341-px frame (" + frame336.width + ")");
+  check(/341×224 · 7\.16 MHz/.test(
+          page.dom.get("scr-video-note").textContent),
+        "#102: the width note names the frame and the dot clock (" +
+        page.dom.get("scr-video-note").textContent + ")");
+  let tiles = JSON.parse(studio.files().find((f) =>
+    f.name === "tiles.json").source);
+  eq("#102: tiles.json carries the dot clock", tiles.video, 336);
+  eq("#102: the drop-down agrees with the file", videoSel.value, "336");
+  /* save and reopen keeps it */
+  const env = studio.envelopeText();
+  studio.openToy(env, "wide.pce.json", { apply: false, persist: false });
+  eq("#102: reopening the toy restores the dot clock",
+     studio.screen().video, 336);
+  videoSel.value = "512";
+  for (const fn of videoSel.listeners.change || [])
+    fn(page.dom.fakeEvent(videoSel));
+  check(studio.screenFrame().width === 512,
+        "#102: 512 dots draws a 512-px frame (" +
+        studio.screenFrame().width + ")");
+  videoSel.value = "256";
+  for (const fn of videoSel.listeners.change || [])
+    fn(page.dom.fakeEvent(videoSel));
+  check(studio.screenFrame().width === 256 &&
+        studio.screen().video === 256,
+        "#102: back to the 256-dot clock");
+
+  /* the module's own refusals for the two pickers */
+  let code = null;
+  const pic = studio.screenPicture();
+  try { sc.setMapSize(pic, 0x30); } catch (e) { code = e.code; }
+  eq("#102: an MWR code that does not exist is refused", code, "map-size");
+  code = null;
+  try { sc.setVideoWidth(pic, 320); } catch (e) { code = e.code; }
+  eq("#102: a fourth dot clock is refused", code, "video-mode");
+
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
+/* ---- #102: the studio API the panels are written against -------------- *
+ * current toy and assets (the SCREEN tests above drive them), render/seek,
+ * pokes with undo/redo, the Panels registry and the theme tokens. */
+function checkStudioApi(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(30);
+
+  check(typeof studio.toy.files === "function" &&
+        studio.toy.files() === studio.toy.files(),
+        "#102: toy.files() is the live asset array, not a copy");
+  check(studio.render.currentFrame() === 30 &&
+        studio.render.length() === 300 &&
+        studio.render.state() !== null,
+        "#102: render exposes the frame, the length and the state");
+  check(typeof studio.render.panelLine === "function" &&
+        typeof studio.render.hex === "function" &&
+        typeof studio.render.runFrames === "function",
+        "#102: render exposes the line, hex and runFrames");
+
+  /* the theme tokens: the page's CSS custom properties by name */
+  const tokens = studio.theme.tokens();
+  check(Object.keys(tokens).length >= 26 &&
+        Object.keys(tokens).every((k) => k.indexOf("--") === 0),
+        "#102: the theme exposes the page's custom properties (" +
+        Object.keys(tokens).length + ")");
+  eq("#102: a theme token is read by name", studio.theme.token("bg"),
+     tokens["--bg"]);
+
+  /* a poke overrides a register and the drawn frame follows; undo and redo
+   * move it between the two stacks */
+  const before = studio.output().pixels.slice();
+  studio.poke("CR", 0x00);
+  eq("#102: the poke is in the list", studio.pokes().length, 1);
+  check(studio.canUndo() && !studio.canRedo(),
+        "#102: a poke can be undone, and redo is empty");
+  const poked = studio.output().pixels;
+  check(diffCount(before, poked).n > 0,
+        "#102: a CR $00 poke blanks the picture in the drawn frame (" +
+        diffCount(before, poked).n + " bytes)");
+  studio.undo();
+  samePixels("#102: undo restores the toy's own frame", studio.output().pixels,
+             before);
+  check(studio.pokes().length === 0 && studio.canRedo(),
+        "#102: undo emptied the poke list and armed redo");
+  studio.redo();
+  check(diffCount(before, studio.output().pixels).n > 0 &&
+        studio.pokes().length === 1,
+        "#102: redo re-applies the poke");
+  studio.clearPokes();
+  samePixels("#102: clearPokes restores the frame", studio.output().pixels,
+             before);
+
+  /* Ctrl/Cmd+Z outside a text field is the poke undo; inside it belongs to
+   * the editor, so it is not consumed */
+  studio.poke("BXR", 2);
+  check(studio.handleShortcut({ key: "z", code: "KeyZ", ctrlKey: true,
+                                metaKey: false, shiftKey: false,
+                                target: null }) === true,
+        "#102: Ctrl+Z undoes a poke outside the editor");
+  check(studio.pokes().length === 0, "#102: and the poke is gone");
+  studio.setEditorText(studio.editorText());
+  check(studio.handleShortcut({ key: "z", code: "KeyZ", ctrlKey: true,
+                                metaKey: false, shiftKey: false,
+                                target: page.dom.get("source") }) === false,
+        "#102: Ctrl+Z in a text field is left to the editor");
+
+  /* the panel registry, driven through the API */
+  check(studio.panels.active() === "screen",
+        "#102: the registry knows the active panel");
+  studio.panels.select("registers");
+  check(studio.panels.active() === "registers" &&
+        page.dom.get("panel-registers").hidden === false,
+        "#102: the registry selects a panel");
+  studio.panels.toggle("vram");
+  check(studio.panels.visible().indexOf("vram") < 0,
+        "#102: the registry hides a panel");
+  studio.panels.toggle("vram");
+  studio.panels.select("screen");
+  studio.panels.dirty();
+  studio.panels.refresh(true);
+
+  studio.clearPokes();
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
 /* ---- main ------------------------------------------------------------- */
 async function main() {
   const started = Date.now();
@@ -2468,6 +2766,9 @@ async function main() {
   checkOutputColumn(page);
   checkExamplesVisible(page);
   checkScreenPanel(page);
+  checkPanelModules(page);
+  checkScreenGaps(page);
+  checkStudioApi(page);
 
   let browser = "not-requested";
   if (process.argv.indexOf("--browser") >= 0) browser = await checkBrowser();

@@ -191,21 +191,22 @@ CONSOLE → budgets.
 ### 3.1 SCREEN as a visual editor (#84, part A)
 
 ppu.toys' BACKGROUNDS panel is the working example: the layer is not a table of numbers but a map you
-draw on. `renderer/pce-screen.js` is the PCE counterpart's model, and `renderer/studio.html` wires it to
-the panel. It reuses `renderer/pce-editor.js`'s picture rather than a second editor: every edit is that
+draw on. `renderer/pce-screen.js` is the PCE counterpart's model, and
+`renderer/studio-panel-screen.js` (the panel's module since #102) wires it to the panel, over the studio
+API of §3.2. It reuses `renderer/pce-editor.js`'s picture rather than a second editor: every edit is that
 module's own call (`paintMapCell`, `paintTileIndex`, `newTile`, `setPaletteColour`, `setScroll`), so the
 refusals are the editor's (`17th-colour`, `not-in-palette`, `tile-space`, `map-range`, …), and the canvas is
 `pce-bg.js` drawing `toPicture()` — the same renderer as the output column. There is no second picture.
 
 | ppu.toys (BACKGROUNDS, measured 2026-10-29) | `studio.html`'s SCREEN panel |
 |---|---|
-| BG1–BG4, Mode, 4bpp, Visible | **one background** (the VDC has one; a BG2 is #21's SuperGrafx), no mode/bpp (always 4bpp); the map size is shown instead: `32 × 32` and `MWR $00` |
+| BG1–BG4, Mode, 4bpp, Visible | **one background** (the VDC has one; a BG2 is #21's SuperGrafx), no mode/bpp (always 4bpp); a **map-size picker** lists the VDC's six MWR sizes and shows the current `32 × 32 (MWR $00)` |
 | tool icons: select (key S), pencil, rect, bucket fill (F), erase, move | `Select S · Pencil P · Rect R · Fill F · Erase E · Move M`; the same six behaviours |
 | `#` grid | the `grid` checkbox (and `#` while the map has focus) |
 | Fit / 1× / 2× / 4× | the same four; 1× is a 256-px map canvas, Fit uses the dock's width and height |
 | the map as a cell grid, the visible screen outlined | the 32×32 BAT drawn from its tiles, a cell grid, and a faint white outline at `BYR` over the picture's window height |
 | Characters: char base, tile range, palette strip, tile sheet | tile `$nn`, its VRAM address (`tile × 16` words), the tile count, the tile's 16 colours (click one to paint with it), the tile sheet (click a tile), and an 8×8 tile editor |
-| Map: map base, map size, tile size, HOFS/VOFS with −/+ and a curve button, Mosaic | map base `$0000` (read-only), map size, tile size `8 × 8` (read-only), BXR/BYR with −/+; no Mosaic (no PCE counterpart) |
+| Map: map base, map size, tile size, HOFS/VOFS with −/+ and a curve button, Mosaic | map base `$0000` (read-only), **map size (MWR) picker**, tile size `8 × 8` (read-only), **screen width (VCE dot clock) picker**, BXR/BYR with −/+ **and a curve button** (`∿`, naming #79 — the keyframes are that card's); no Mosaic (no PCE counterpart) |
 | footer `32 x 32 cells - faint white = visible screen` | `32 × 32 cells · faint white = visible screen`, plus the selection's size and origin |
 | — | the live frame summary and the follow-a-pixel readout (#26) stay below the editor |
 
@@ -222,9 +223,67 @@ so a value the VDC cannot show cannot be stored by either front end (see [`EDITO
 
 **Part A's limits, stated rather than pretended.** The map is the 32×32 BAT (MWR `$00`), the size the toy
 host's 256×224 frame uses and the size `pce-editor.js`'s picture model holds; the VDC's other MWR sizes
-(64×32 … 128×64) are part B and a `tiles.json` asking for one refuses with `map-size`. The BXR/BYR curve
-buttons (keyframes, undo/redo) are #79's; a mosaic has no PCE counterpart; the palette *entries* are edited
-in the PALETTES panel (#85), not here.
+(64×32 … 128×64) are part B. The map-size picker lists all six — so the hardware's sizes are visible — and
+picking one refuses with `map-size` and snaps back to `$00`. The BXR/BYR curve buttons are there (ppu.toys
+has one beside each offset) but the keyframed register pokes behind them are #79's, so clicking one says so;
+the studio API's `poke`/`undo`/`redo` (§3.2) is the hook that card fills in. The **screen-width picker** is
+real: 256, 336 or 512 dots sets the picture's VCE dot clock through `pce-editor.js`'s `setVideoMode`, and
+`tiles.json` carries it as `video` (the panel's own frame becomes 256, 341 or 512 dots wide). A mosaic has
+no PCE counterpart; the palette *entries* are edited in the PALETTES panel (#85), not here.
+
+### 3.2 The panel modules and the studio API (#102)
+
+Every panel is its own file — `renderer/studio-panel-<name>.js` for `screen`, `vram`, `palettes`,
+`sprites`, `audio`, `scanlines`, `registers`, `console`, `markers` and `agent`. Each pushes one module with
+a `register(studio)`; `studio.html` loads the ten files and calls every `register(studio)` before it builds
+the dock, **after** which the page names no panel:
+
+```
+studio-panel-vram.js
+  PCEStudio.studioPanelModules.push({
+    id: "vram",
+    register: function (studio) {
+      studio.panels.register({
+        id: "vram", label: "VRAM", group: "chip", chapter: "the-toy",
+        gloss: "All 32768 words: …",
+        draw: function (st) { … }        // st = the frame's model, or null
+      });
+    }
+  });
+```
+
+A registration carries the tab and menu label (`label`), `group` (`"chip"` = the dock tab and the Panels
+menu's **THE CHIP**; `"workspace"` = a **WORKSPACE** entry, with `open(studio)` showing its drawer), the
+Guide's `chapter` (§3), the dock's `gloss`, and `draw(st)`. `audio` has no `draw` (nothing to show yet);
+`markers` also exposes `markers()`/`addMarker()`, which the studio API delegates to. The registry lives at
+`studio.panels`: the array of chip panels in dock order (so `studio.panels[0]` and `.length` are the dock)
+with `register`, `list`, `get`, `active`, `visible`, `select`, `toggle`, `refresh`, `dirty` and `modules` on
+it. A duplicate id throws.
+
+**The API a panel is written against** (the object passed to `register(studio)`; `studio.html` is its only
+implementation):
+
+| member | what it is |
+|---|---|
+| `panels` | the registry above — a panel adds itself and may select/dirty the dock |
+| `toy.current()` / `.mode()` / `.source()` | the toy on the page: its example id/name, `"lua"` or `"il"`, the Lua that runs |
+| `toy.files()` / `.file(name)` / `.activeFile()` / `.mainSource()` | the toy's asset files (**the live array**, as the ASSET tab sees it) and the editor's current file |
+| `toy.writeAssets(pic)` | writes a `pce-screen.js` picture into `tiles.json`/`palettes.json`, follows in the open editor, autosaves; returns the changed names, throws the model's refusal |
+| `toy.persist()` / `.saved(text)` / `.refreshAssets()` | the page's own autosave, status line and ASSETS list |
+| `toy.onAssetEdit(fn)` | subscribe to "an asset file changed" (a hand edit, a new example, an opened toy) — SCREEN invalidates its picture |
+| `render.state()` / `.currentFrame()` / `.panelLine(st)` / `.hex(v, w)` / `.runtime()` | the frame the panels read, the followed line, and the formatter |
+| `render.seek(n)` / `.play()` / `.pause()` / `.isPlaying()` / `.length()` / `.setLength(n)` | the transport and scrubber |
+| `render.runFrames(n, example, mode)` / `.resolution()` / `.resolutionFor(vcecr)` / `.output()` | the headless run, the dot-clock label, the frame actually drawn |
+| `poke(reg, value, at)` / `pokes()` / `clearPokes()` | a keyframed register override: `reg` holds `value` from frame `at` on, in the **view** (the toy's state is untouched) |
+| `undo()` / `redo()` / `canUndo()` / `canRedo()` | move the last poke/clear between the two stacks; `Ctrl/Cmd+Z`/`Shift+Z` outside a text field do the same (§5.2) |
+| `theme.token(name)` / `.tokens()` | the page's CSS custom properties (`--bg`, `--accent`, …), read from `:root` |
+| `$`, `document`, `toast(msg)`, `hex`, `follow()`, `layout.drawer(which)` | the small DOM/layout surface: an element by id, a note, the followed pixel, and a workspace drawer |
+
+**The split is enforced, not just tidy.** `tests/check-studio.js` asserts each of the ten files is loaded,
+that the ten register in order, that the dock and the Panels menu are built from the registry, and that
+`studio.html`'s inline script no longer contains the panels' drawing code (`function drawVram`,
+`function drawScreen`, `function drawMarkers`, `let screenPic`, …). The page keeps the layout, the editor,
+the output, the transport and the API; a panel keeps its own state and drawing.
 
 ---
 
@@ -275,6 +334,7 @@ The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel u
 | R | restart from frame 0 and play (same rule) |
 | Ctrl/Cmd + Enter | compile the editor's text and run (same as `Run`) |
 | Ctrl/Cmd + . / , | step one frame forward / back (pauses, then seeks) |
+| Ctrl/Cmd + Z / Shift+Z | undo / redo the last panel **poke** (a keyframed register override, §3.2) outside a text field; inside the editor it stays CodeMirror's text undo |
 | Ctrl/Cmd + S | save the toy as one `.pce.json` envelope; the browser also keeps it in `localStorage` |
 | Tab | insert two spaces in the editor (CodeMirror's `Tab`, and the textarea fallback's) |
 | Escape | close the panels/settings/open popovers, the export dialog and the Docs panel |
@@ -289,12 +349,13 @@ The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel u
 | `Lua` / `IL` | switch the runtime: Fengari Lua 5.3, or the IL interpreter over the same toy host (#31) |
 | resolution label | follows the dot clock through `pce-bg.js`: 256 / 341 / 512 dots (VCE CR DCC `00` / `01` / `10`) |
 | `Markers` | add a marker at the current frame; click a marker to seek |
-| `Panels ▾` | show/hide workspace regions and chip panels; `Reset to default` |
+| `Panels ▾` | show/hide workspace regions and chip panels; `Reset to default`. Both groups are built from the panel modules' registrations (#102) |
 | `Docs` | open the #61 reference as the Docs panel (§4), at the active panel's chapter via `Guide` |
 | Docs search | filter the reference's chapters and chapter nav by text |
 
-Every ppu.toys shortcut that has a PCE meaning is implemented. Deliberately not: the poke undo/redo
-(our panels are read-only, so there is no poke to undo; CodeMirror's own undo handles edits), and the SNES
+Every ppu.toys shortcut that has a PCE meaning is implemented. The poke undo/redo exists as the studio
+API's `undo`/`redo` (§3.2) and the shortcut above, but no panel creates a poke yet — the keyframes are
+#79's, so it is a working hook rather than a control with something to undo. Deliberately not: the SNES
 `hdma()` shortcut vocabulary (the PCE's per-line mechanism is `raster(line)` and the RCR interrupt).
 
 ---
@@ -433,8 +494,8 @@ claims a file it cannot make.
 `node tests/check-studio.js` (written by `@design`; flagged for `@review` cold, rule 2):
 
 ```
-PASS  588 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
-      every button's handler executed (103 buttons) (… ms)
+PASS  691 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
+      editor/files/shortcuts, output column, every button's handler executed (105 buttons) (… ms)
 ```
 
 What it does, in order:
@@ -456,9 +517,10 @@ What it does, in order:
    on all 40, frame numbers and 256×224 dimensions intact; a second 40-frame run is byte-identical.
 5. Runs the same 40 frames through the page's Lua/IL switch for all three examples: state, raster table and
    pixels equal, so the IL path is exercised through the studio, not just imported.
-6. Clicks **every button** the page builds (88 at this revision: top bar, Docs/close/Guide, code tabs, file
-   tabs, asset `Edit` buttons, dock tabs, transport, layers/CRT/SND, markers, settings, open, export, and
-   every dynamically built panel-menu and example entry), asserts each has a click handler and none throws;
+6. Clicks **every button** the page builds (105 at this revision: top bar, Docs/close/Guide, code tabs, file
+   tabs, asset `Edit` buttons, dock tabs, the SCREEN tools/zooms and its two curve buttons, transport,
+   layers/CRT/SND, settings, open, export, and every dynamically built panel-menu and example entry),
+   asserts each has a click handler and none throws;
    then exercises the source box, scrubber and length control, and shows `Check` uses the source box's
    edited text (not the example on disk) and keeps that edit. The stub checks are named, so a page that
    stopped building a dock or menu fails the count rather than passing vacuously.
@@ -516,6 +578,23 @@ What it does, in order:
     `no-tile` (a map word with no tile; a missing tile to select).
     * The stub DOM has no canvas pixels, so the same panel is proved in the browser (11.2) and in the
       screenshot (11.3); the stub proves the model, the files and the frame.
+12. **The panel modules and the studio API (#102).** The ten files are loaded and register in order
+    (`screen, vram, palettes, sprites, audio, scanlines, registers, console, markers, agent`); the chip
+    panels are the registry's, in dock order; every chip panel but AUDIO has a `draw` from its module; a
+    duplicate id is refused; the dock tabs and the Panels menu are built from the registrations; CONSOLE's
+    `Guide` opens `budgets` from its own `chapter`; and `studio.html`'s inline script no longer contains
+    `function drawVram`, `function drawScreen`, `function drawMarkers`, `let screenPic`, `let palCells` or
+    the old metadata literal. The API is exercised directly: `toy.files()` is the live array, `render`
+    exposes frame/length/state/line/hex/runFrames, `theme.tokens()` is the page's 26 custom properties,
+    `panels` selects/hides/refreshes, and a `poke("CR", $00)` changes the drawn frame, `undo()` restores
+    it byte for byte, `redo()` re-applies it, `clearPokes()` restores it, and `Ctrl+Z` outside a text field
+    is the poke undo while inside one it is left to the editor.
+13. **#84's visual gaps.** Both curve buttons exist, have handlers, name #79 in their `title` and in a
+    toast. The map-size picker lists the VDC's six MWR sizes (`$00/$10/$20/$40/$50/$60` as
+    `32×32/64×32/128×32/32×64/64×64/128×64`), starts on `$00`, refuses `$10` with `map-size` and snaps
+    back. The screen-width picker lists 256/336/512, and 336 draws the VCE's **341**-dot frame and 512 a
+    512-dot one, `tiles.json` carries `video`, save/reopen keeps it, `$30` is refused as `map-size` and
+    320 as `video-mode`.
 
 ### 11.2 The real browser
 
@@ -525,7 +604,7 @@ What it does, in order:
 browser: PASS 40 frames · palette · frame 39 · 256x224 · pixels 172032 · digest f45fd1c2
 browser docs: docs-panel open, #61 reference + ppu.toys layout
 browser driver: 38 checks, 0 failed
-PASS  631 checks, … every button's handler executed (103 buttons), headless Chrome says PASS 40 (… ms)
+PASS  734 checks, … every button's handler executed (105 buttons), headless Chrome says PASS 40 (… ms)
 ```
 
 The first run is `?selftest=1&frames=40&example=palette`: the page runs 40 frames, and an FNV-1a digest of
@@ -607,6 +686,17 @@ in the repo; theirs is empty because ppu.toys' default toy has no art. Captured 
 command line only, no synthetic input. `ours-screen.png` is our 1600×1000 capture on its own; `theirs-
 backgrounds.png` is theirs.
 
+**#102's module split, before and after.** `$TMPDIR/pce102/before/` and `$TMPDIR/pce102/after/` hold
+1600×1000 captures of every panel (`?panel=screen|vram|palettes|sprites|audio|scanlines|registers|console`),
+the editor, the ASSETS tab (`?tab=assets`) and the two drawers (`?bottom=markers|agent`), taken with
+headless Chrome's command line, one profile per capture. Captured before the split and after it from the
+same page URLs, **every tab is pixel-equal**: the only differing pixels are 7 in the CodeMirror caret's
+blink area at (10,540)–(12,560), and two runs of the same page produce exactly the same 7 — the split moves
+no pixel. The SCREEN tab is also captured with the #84 gap controls removed (`$TMPDIR/pce102/refactor/`):
+that page matches `before/` the same way, so the difference between `refactor/` and `after/` — the SCREEN
+dock's Map column — is the two curve buttons and the two pickers, and nothing else. The diff images
+(`cmp-screen-dock.png`) and the pixel counts are what was measured, not a claim.
+
 ---
 
 ## 12. Not proven, and what comes next
@@ -640,10 +730,19 @@ backgrounds.png` is theirs.
 * **Only SCREEN is an editor so far.** ppu.toys' panels are all editors with pokes and keyframes; ours
   reads the toy's own state in VRAM/PALETTES/SPRITES/SCANLINES/REGISTERS. #84 made SCREEN an editor of the
   toy's *assets* (§3.1); PALETTES (#85), SPRITES (#86) and the keyframed register pokes (#79) are next.
+  #102 puts each panel in its own file and the API in §3.2, so those cards can run in parallel.
 * **The SCREEN panel's map is the 32×32 BAT.** MWR `$00` is what the toy host's 256×224 frame and
-  `pce-editor.js`'s picture model hold; the VDC's 64×32 … 128×64 maps refuse with `map-size` and are
-  part B. The BXR/BYR curve buttons are #79's keyframes, there is no undo, and a mosaic has no PCE
-  counterpart, so neither is built.
+  `pce-editor.js`'s picture model hold; the map-size picker lists the VDC's 64×32 … 128×64 sizes, but
+  choosing one refuses with `map-size` and snaps back — part B, not silently stored. The BXR/BYR curve
+  buttons exist and name #79; the keyframes themselves (and so a curve to draw) are that card's. A mosaic
+  has no PCE counterpart. The screen-width picker is real but edits the *asset picture*: `tiles.json`
+  carries `video` (256/336/512) and the panel's frame becomes 341 or 512 dots wide; the running toy is
+  still fixed at 256×224 by `pce-toyhost.js`.
+* **Rule 2 for #102.** The module-split and gap checks in `tests/check-studio.js` were written by the seat
+  that did the split (the card names the file), so a cold break is owed: move a panel back into
+  `studio.html`, register a duplicate id, drop a `draw`, stop building the menu from the registry, break a
+  picker's refusal, or make the video mode not carry into `tiles.json`, and the check must catch each.
+  Another seat's break, not the builder's.
 * **The SCREEN panel edits assets, and no toy reads them yet.** Drawing into the map changes
   `tiles.json`/`palettes.json` and the panel's own rendered picture; it cannot change a running toy's
   frame until #24's importer reads the files into VRAM/CRAM. The panel says so, and its canvas never
