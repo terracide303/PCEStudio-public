@@ -3207,7 +3207,8 @@ function checkSpritesPanel(page) {
  * longer holds the panels' drawing code — and that the registry builds the
  * dock and the menu from what registered. */
 const PANEL_MODULES = ["screen", "vram", "palettes", "sprites", "audio",
-                       "scanlines", "registers", "console", "markers", "agent"];
+                       "scanlines", "registers", "console", "markers", "agent",
+                       "assets"];
 const CHIP_PANELS = ["screen", "vram", "palettes", "sprites", "audio",
                      "scanlines", "registers", "console"];
 
@@ -3215,7 +3216,7 @@ function checkPanelModules(page) {
   const S = page.sandbox.PCEStudio;
   const studio = S.studio;
 
-  eq("#102: the ten panel modules registered, chip panels first",
+  eq("#102: the eleven panel modules registered, chip panels first",
      studio.panels.modules().join(","), PANEL_MODULES.join(","));
   for (const id of PANEL_MODULES) {
     check(page.loaded.indexOf("studio-panel-" + id + ".js") >= 0,
