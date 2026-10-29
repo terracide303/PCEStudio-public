@@ -105,7 +105,7 @@ half the VDC's VRAM).
 node tests/check-city.js
 ```
 
-42 checks when the art is present, and a clean `SKIP` when it is not:
+45 checks when the art is present, and a clean `SKIP` when it is not:
 
 - **main.lua's numbers are the art's** — every pattern code, the tracer and the
   three water CRAM entries are rebuilt from the converted files through
