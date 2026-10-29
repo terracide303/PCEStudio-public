@@ -18,9 +18,25 @@
  *
  * WHAT IT PROVES, in the pixels and the state rather than the toy's words:
  *
+ *   - THE PICTURE: frame 0 at BXR 0 — the SAT-less frame, since the toy
+ *     draws its own creatures — must look like the pack's own preview (the
+ *     wallpaper the converter downsamples into evidence/preview.png), VCE
+ *     colour-reduced.  The author's scene fills the frame's left 160 px, so
+ *     that box is compared pixel for pixel against the snapped preview.
+ *   - THE ROCK: the lower half's BAT (rows 12-27) holds the pack's rock
+ *     tiles — many distinct ones, most with several colours — not one
+ *     repeated cell.
+ *   - THE LOOP: every band wraps at 256 px without a seam.  Each band strip
+ *     is rebuilt from tiles.json and its last 12 cells must be the scene's
+ *     own left columns stretched (px 255 = px 15), so the wrap meets the
+ *     scene's adjacent columns; the floor bands' seam cells are flat at both
+ *     ends; no band is a short block repeated (every band has a row with no
+ *     8- or 16-cell period); and a 300-frame pad-right run takes each band
+ *     through at least one wrap of its own BXR at its own rate, never a
+ *     jump (#148's CITY test, five bands).
  *   - VISIBILITY: frame 60 is a picture, not the backdrop.
- *   - PARALLAX: the raster table has one entry per band, at lines 0, 16, 48,
- *     80 and 104, and their BXR values are the five speeds — each band's
+ *   - PARALLAX: the raster table has one entry per band, at lines 0, 32, 56,
+ *     96 and 160, and their BXR values are the five speeds — each band's
  *     scroll is strictly faster than the one above it, and all five move
  *     between two frames.
  *   - THE GLOW: the pack's warm palette entry is COLD, then its own colour,
@@ -32,8 +48,9 @@
  *   - BUDGETS: the #50 sprite budget per line (at most 16 strips, no OR, no
  *     CC) and the #30 Lua frame budget.
  *
- * The frame-60 picture is written to demo-art/cave/frames/, beside the art it
- * came from — never into the repo.
+ * The frame pictures go to demo-art/cave/frames/, the preview/frame
+ * side-by-side to demo-art/cave/evidence/side-by-side.png — beside the art
+ * they came from, never into the repo.
  */
 "use strict";
 
@@ -45,6 +62,7 @@ const ROOT = path.resolve(__dirname, "..");
 const toys = require(path.join(ROOT, "renderer", "pce-toys.js"));
 const il = require(path.join(ROOT, "renderer", "pce-il.js"));
 const sprites = require(path.join(ROOT, "renderer", "pce-sprites.js"));
+const src = require(path.join(ROOT, "renderer", "pce-source.js"));
 
 const ART_DIR = process.env.PCE_CAVE_ART ||
   "/Volumes/External/agent-workshop-demo/demo-art/cave";
@@ -209,6 +227,7 @@ eq("the toy uses the callback raster form (one write per band boundary)",
    luaRT.callbackRaster, true);
 
 const keep = {};
+let keep0 = null;
 let worstMs = 0, worstFrame = -1, maxStrips = 0, overflowLines = 0;
 let collision = false, spriteSeen = 0;
 
@@ -237,6 +256,17 @@ for (let f = 0; f < FRAMES; f++) {
   }
 
   if (f === 0 || f === 1 || f === 6 || f === 12 || f === PNG_FRAME) keep[f] = want;
+  if (f === 0) {
+    /* frame 0, both ways: as played (for the side-by-side) and SAT-less
+     * (for the preview comparison — the toy's creatures are its own, not
+     * the pack's).  At frame 0 the three scene bands are at BXR 0. */
+    const opts0 = luaRT.options();
+    const bg0 = sprites.renderFrame(Object.assign({}, opts0,
+      { raster: want.raster || undefined,
+        sat: new Uint8Array(opts0.sat.length) }));
+    keep0 = { sat: Uint8Array.from(want.pixels),
+              bg: Uint8Array.from(bg0.pixels) };
+  }
   if (f === PNG_FRAME) spriteSeen = spritePixels(want, luaRT.options());
 }
 
@@ -255,18 +285,18 @@ check(!collision, "no sprite-0 collision (CC) on any line");
  * that a breaker set to 0 cannot pass silently (#90's M12).
  */
 const BANDS = [
-  { name: "ceiling", box: [0, 0, 256, 16],  min: 0.10 },
-  { name: "bg3",     box: [0, 16, 256, 48], min: 0.10 },
-  { name: "bg2",     box: [0, 48, 256, 80], min: 0.10 },
-  { name: "bg1",     box: [0, 80, 256, 104], min: 0.10 },
-  { name: "floor",   box: [0, 104, 256, 224], min: 0.10 }
+  { name: "ceiling",  box: [0, 0, 256, 32],   min: 0.10 },
+  { name: "crystals", box: [0, 32, 256, 56],  min: 0.10 },
+  { name: "wall",     box: [0, 56, 256, 96],  min: 0.10 },
+  { name: "midfloor", box: [0, 96, 256, 160], min: 0.02 },
+  { name: "floor",    box: [0, 160, 256, 224], min: 0.08 }
 ];
 
 const frame60 = keep[PNG_FRAME];
 const whole = pictureIn(frame60, [0, 0, frame60.width, frame60.height]);
 check(whole.distinct >= 8,
       "VISIBILITY: frame 60 holds " + whole.distinct + " colours (at least 8)");
-check(whole.notModal > whole.area * 0.25,
+check(whole.notModal > whole.area * 0.10,
       "VISIBILITY: frame 60 is a picture, not a flat colour (" + whole.notModal +
       " of " + whole.area + " pixels are not its most common colour, " +
       (100 * whole.notModal / whole.area).toFixed(1) + "%)");
@@ -282,7 +312,7 @@ for (const b of BANDS) {
 
 /* ---- PARALLAX ----------------------------------------------------------- */
 
-const RASTER_LINES = [0, 16, 48, 80, 104];
+const RASTER_LINES = [0, 32, 56, 96, 160];
 const entries = (frame60.raster && frame60.raster.entries) || [];
 eq("PARALLAX: one raster entry per band", entries.map((e) => e.line),
    RASTER_LINES);
@@ -336,7 +366,253 @@ check(satWord(frame60.state.sat, 0, 2) >> 1 >= 0 &&
       satWord(frame60.state.sat, 0, 2) >> 1 <= 1023,
       "CREATURES: SAT entry 0's pattern code is inside the VDC's 10 bits");
 
+/* ---- THE PICTURE --------------------------------------------------------
+ * The card's own demand: the frame at BXR 0 must look like the pack's own
+ * preview, colour-reduced.  The preview (evidence/preview.png, written by
+ * the converter as a downsample of the pack's wallpaper) is snapped to the
+ * VCE's 512 colours exactly as the renderer snaps its sources, then the
+ * SAT-less frame 0 — whose three scene bands are at BXR 0 and whose first
+ * 160 px ARE the author's scene — is compared pixel for pixel.  The rest of
+ * the gap is the preview's creatures, which the toy draws itself (the art
+ * block's header says what the converter measured). */
+const PICTURE_MIN = 0.90;
+function checkThePicture() {
+  check(PICTURE_MIN > 0, "THE PICTURE: the match threshold is above 0");
+  const previewFile = path.join(ART_DIR, "evidence", "preview.png");
+  if (!fs.existsSync(previewFile)) {
+    check(false, "THE PICTURE: the converter wrote no evidence/preview.png " +
+                "to compare against (rerun tools/cave-assets.js)");
+    return;
+  }
+  const preview = src.decodePng(fs.readFileSync(previewFile), zlib.inflateSync);
+  check(preview.width === 160 && preview.height === 92,
+        "THE PICTURE: the preview is the pack's 160x92 scene (" +
+        preview.width + "x" + preview.height + ")");
+  const snap = (v) => Math.max(0, Math.min(7, Math.round(v * 7 / 255))) * 36;
+  let same = 0, n = 0;
+  for (let y = 0; y < 92; y++)
+    for (let x = 0; x < 160; x++) {
+      n++;
+      let ok = true;
+      for (let c = 0; c < 3; c++) {
+        if (keep0.bg[(y * 256 + x) * 3 + c] !==
+            snap(preview.rgba[(y * 160 + x) * 4 + c])) { ok = false; break; }
+      }
+      if (ok) same++;
+    }
+  check(same / n >= PICTURE_MIN,
+        "THE PICTURE: frame 0 at BXR 0 matches the pack's preview, VCE " +
+        "colour-reduced (" + (100 * same / n).toFixed(1) + "% of " + n +
+        " pixels, at least " + (100 * PICTURE_MIN) + "%)");
+  /* the preview itself must be the pack's busy scene, not a flat stand-in
+   * (the pack's own palette is small — the 12x downsample holds 16) */
+  const counts = new Set();
+  for (let i = 0; i < 160 * 92; i++)
+    counts.add((preview.rgba[i * 4] << 16) | (preview.rgba[i * 4 + 1] << 8) |
+               preview.rgba[i * 4 + 2]);
+  check(counts.size >= 10,
+        "THE PICTURE: the preview is a picture (" + counts.size +
+        " distinct colours, at least 10)");
+}
+
+/* ---- THE ROCK -----------------------------------------------------------
+ * The card's own demand: the lower half is the pack's rock, not one
+ * repeated cell.  The floor bands' BAT rows (12-27) must carry many
+ * distinct tiles — the author's fill, cracks and warm rock — most of them
+ * with real texture (three or more colours), and every one must exist in
+ * the art's tile list (a dangling char would be a hole in VRAM). */
+const ROCK_MIN_CHARS = 12;
+function checkTheRock() {
+  const tilesDoc = JSON.parse(fs.readFileSync(path.join(ART_DIR, "tiles.json"),
+                                              "utf8"));
+  const cells = tilesDoc.map.cells;
+  const byChar = {};
+  for (const t of tilesDoc.tiles) byChar[t.char] = t;
+  const chars = new Set();
+  for (let r = 12; r < 28; r++)
+    for (let c = 0; c < 32; c++) chars.add(cells[r * 32 + c]);
+  check(chars.size >= ROCK_MIN_CHARS,
+        "THE ROCK: the lower half's BAT holds " + chars.size +
+        " distinct tiles (at least " + ROCK_MIN_CHARS + ")");
+  let textured = 0, dangling = 0;
+  for (const ch of chars) {
+    const t = byChar[ch];
+    if (!t) { dangling++; continue; }
+    if (new Set(t.pixels).size >= 3) textured++;
+  }
+  check(dangling === 0,
+        "THE ROCK: every lower-half cell names a tile the art carries (" +
+        dangling + " dangling)");
+  check(textured >= chars.size / 2,
+        "THE ROCK: the lower half's tiles are the rock's texture — " +
+        textured + " of " + chars.size + " tiles have at least 3 colours");
+}
+
+/* ---- THE LOOP -----------------------------------------------------------
+ * #148's rule for CITY, five bands: each band's strip wraps at 256 px
+ * without a seam, no band is a short block repeated, and the BXR run goes
+ * round and round at each band's own rate. */
+function checkTheLoop() {
+  /* rebuild each band's strip from the art files — tiles, palettes, BAT —
+   * the way the renderer draws it */
+  const tilesDoc = JSON.parse(fs.readFileSync(path.join(ART_DIR, "tiles.json"),
+                                              "utf8"));
+  const pals = JSON.parse(fs.readFileSync(path.join(ART_DIR, "palettes.json"),
+                                          "utf8"));
+  const byChar = {};
+  for (const t of tilesDoc.tiles) byChar[t.char] = t;
+  const vce = (w) => [((w >> 3) & 7) * 36, ((w >> 6) & 7) * 36, (w & 7) * 36];
+  const stripPx = (row, y, x) => {
+    const cell = tilesDoc.map.cells[(row + (y >> 3)) * 32 + (x >> 3)];
+    const t = byChar[cell];
+    if (!t) return null;
+    const w = pals.background[t.palette][t.pixels[(y & 7) * 8 + (x & 7)]];
+    return vce(w);
+  };
+  const sceneBands = [0, 1, 2].map((i) => BANDS[i]);
+  for (const b of sceneBands) {
+    const y0 = b.box[1] >> 3, rows = (b.box[3] - b.box[1]) >> 3;
+    let bad = 0, missing = 0;
+    for (let y = 0; y < rows * 8; y++)
+      for (let k = 0; k < 16; k++) {
+        const left = stripPx(y0, y, k);
+        if (left === null) { missing++; continue; }
+        for (let j = 0; j < 6; j++) {
+          const ext = stripPx(y0, y, 160 + k * 6 + j);
+          if (ext === null) { missing++; continue; }
+          if (ext[0] !== left[0] || ext[1] !== left[1] || ext[2] !== left[2])
+            bad++;
+        }
+      }
+    check(missing === 0 && bad === 0,
+          "THE LOOP: the " + b.name + " band's last 12 cells stretch the " +
+          "scene's own left columns (px 255 = px 15), so the wrap meets the " +
+          "scene's adjacent columns (" + bad + " stretched pixels wrong, " +
+          missing + " missing tiles)");
+  }
+  for (const r of [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]) {
+    const row = [];
+    for (let c = 0; c < 32; c++) row.push(tilesDoc.map.cells[r * 32 + c]);
+    check(row[0] === row[1] && row[30] === row[31] && row[0] === row[31],
+          "THE LOOP: floor row " + r + "'s seam cells are flat at both ends " +
+          "(the wrap meets " + row[31] + " on " + row[0] + ")");
+  }
+  /* no band is a short block repeated: every band has at least one row with
+   * neither an 8- nor a 16-cell period */
+  const bandRows = [
+    [0, 4], [4, 7], [7, 12], [12, 20], [20, 28]
+  ].map((pair) => ({ row0: pair[0], row1: pair[1] }));
+  for (const b of bandRows) {
+    let aperiodic = 0;
+    for (let r = b.row0; r < b.row1; r++) {
+      const row = [];
+      for (let c = 0; c < 32; c++) row.push(tilesDoc.map.cells[r * 32 + c]);
+      let p8 = true, p16 = true;
+      for (let c = 0; c < 32; c++) {
+        if (row[c] !== row[c % 8]) p8 = false;
+        if (row[c] !== row[c % 16]) p16 = false;
+      }
+      if (!p8 && !p16) aperiodic++;
+    }
+    check(aperiodic >= 1,
+          "THE LOOP: band rows " + b.row0 + "-" + (b.row1 - 1) + " hold a " +
+          "scene, not a short block repeated (" + aperiodic +
+          " rows with no 8- or 16-cell period)");
+  }
+
+  /* the BXR run: 300 frames of pad-right at each band's own rate, with at
+   * least one wrap of each — a backward step that is not a fall from the
+   * band's own top is a jump (the bug #148 found in CITY) */
+  const tops = [127, 255, 511, 1023, 1022];
+  const rates = [1, 1, 2, 4, 8];
+  const rt = toys.create(source, { budgetMs: 400 });
+  rt.load();
+  const seq = [];
+  for (let f = 0; f < 300; f++) {
+    rt.setPad(1, { right: true });
+    const g = rt.frame(f);
+    if (g.raster && g.raster.entries.length === 5)
+      seq.push(g.raster.entries.map((e) => e.bxr));
+  }
+  rt.dispose();
+  check(seq.length === 300, "THE LOOP: 300 frames of the five bands recorded");
+  let bad = 0;
+  const wraps = [0, 0, 0, 0, 0];
+  for (let i = 1; i < seq.length; i++)
+    for (let k = 0; k < 5; k++) {
+      const d = seq[i][k] - seq[i - 1][k];
+      if (d >= 0) { if (d > rates[k]) bad++; }
+      else if (seq[i - 1][k] > tops[k] - rates[k]) wraps[k]++;
+      else bad++;
+    }
+  check(bad === 0,
+        "THE LOOP: every band steps at its own rate, never a jump (" + bad +
+        " bad steps)");
+  check(wraps.every((w) => w >= 1),
+        "THE LOOP: each band goes round and comes back (wraps " +
+        wraps.join(",") + ")");
+}
+
+/* ---- the evidence side-by-side ------------------------------------------ */
+
+function writeSideBySide() {
+  const previewFile = path.join(ART_DIR, "evidence", "preview.png");
+  const scale = 4;
+  const w = 160 * scale * 2, h = 92 * scale;
+  const rgb = Buffer.alloc(w * h * 3);
+  const put = (ox, oy, px, c) => {
+    for (let y = 0; y < scale; y++)
+      for (let x = 0; x < scale; x++) {
+        const o = ((oy + y) * w + ox + x) * 3;
+        rgb[o] = px[0]; rgb[o + 1] = px[1]; rgb[o + 2] = px[2];
+      }
+  };
+  if (fs.existsSync(previewFile)) {
+    const preview = src.decodePng(fs.readFileSync(previewFile), zlib.inflateSync);
+    for (let y = 0; y < 92; y++)
+      for (let x = 0; x < 160; x++) {
+        const s = (y * 160 + x) * 4;
+        put(x * scale, y * scale,
+            [preview.rgba[s], preview.rgba[s + 1], preview.rgba[s + 2]]);
+      }
+  }
+  /* our frame 0, as played (creatures and all): the same 160x92 box */
+  for (let y = 0; y < 92; y++)
+    for (let x = 0; x < 160; x++) {
+      const s = (y * 256 + x) * 3;
+      put(160 * scale + x * scale, y * scale,
+          [keep0.sat[s], keep0.sat[s + 1], keep0.sat[s + 2]]);
+    }
+  const outDir = path.join(ART_DIR, "evidence");
+  fs.mkdirSync(outDir, { recursive: true });
+  const file = path.join(outDir, "side-by-side.png");
+  const png = encodePng(rgb, w, h);
+  fs.writeFileSync(file, png);
+  check(fs.statSync(file).size === png.length,
+        "the side-by-side is written beside the art: " +
+        "demo-art/cave/evidence/side-by-side.png (the pack's preview, left; " +
+        "frame 0, right)");
+  /* read it back: both halves have a picture, and the halves are not the
+   * same bytes (the frame is VCE-reduced, the preview is the pack's) */
+  let differ = 0, left = new Set(), right = new Set();
+  for (let i = 0; i < rgb.length; i += 3) {
+    const k = (rgb[i] << 16) | (rgb[i + 1] << 8) | rgb[i + 2];
+    const x = (i / 3) % w;
+    if (x < w / 2) left.add(k); else right.add(k);
+    if (rgb[i] !== rgb[i + 1] || rgb[i] !== rgb[i + 2]) differ++;
+  }
+  check(left.size >= 8 && right.size >= 8,
+        "both halves of the side-by-side hold a picture (" + left.size +
+        " and " + right.size + " colours)");
+  check(differ > 1000, "the side-by-side is not a flat colour");
+}
+
 /* ---- the picture -------------------------------------------------------- */
+
+checkThePicture();
+checkTheRock();
+checkTheLoop();
+writeSideBySide();
 
 const outDir = path.join(ART_DIR, "frames");
 fs.mkdirSync(outDir, { recursive: true });

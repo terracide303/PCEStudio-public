@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCEStudio Beta Guide</title>
+<meta name="description" content="How to test PCEStudio beta 1: play, make a toy with an AI, report bugs on GitHub, and what does not work yet.">
+<link rel="stylesheet" href="pce-gallery.css">
+<style>
+  /* the testers' page: pce-gallery.css's tokens and site header, a reading column of its own */
+  .tg { max-width: 760px; margin: 0 auto; padding: 32px 16px 80px; color: var(--text2);
+        font: 15px/1.65 var(--sans); }
+  .tg h1 { font: 700 30px/1.2 var(--display); color: var(--text); margin: 6px 0 10px; }
+  .tg h2 { font: 600 19px/1.3 var(--sans); color: var(--text); margin: 40px 0 10px;
+           padding-top: 18px; border-top: 1px solid var(--line2); }
+  .tg h3 { font: 600 15px/1.3 var(--sans); color: var(--text); margin: 22px 0 6px; }
+  .tg p, .tg li { max-width: 68ch; }
+  .tg a { color: var(--accent); }
+  .tg code, .tg kbd { font: 13px var(--mono); background: var(--code); border: 1px solid var(--line2);
+                      border-radius: 4px; padding: 1px 5px; color: var(--text); }
+  .tg pre { font: 13px/1.5 var(--mono); background: var(--code); border: 1px solid var(--line2);
+            border-radius: 6px; padding: 12px 14px; overflow-x: auto; color: var(--text); }
+  .tg .kicker { font: 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .tg .lede { font-size: 17px; color: var(--text); }
+  .tg .box { background: var(--pane); border: 1px solid var(--line); border-radius: 8px;
+             padding: 14px 18px; margin: 18px 0; }
+  .tg .box.warn { border-color: var(--accent); }
+  .tg table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 14px; }
+  .tg th, .tg td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+  .tg th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .tg .status { font: 12px var(--mono); white-space: nowrap; }
+  .tg .ok { color: #7ad7a0; } .tg .no { color: var(--bad); } .tg .soon { color: var(--accent); }
+  .tg ol li, .tg ul li { margin: 4px 0; }
+  .tg .toc { columns: 2; column-gap: 32px; padding-left: 18px; font-size: 14px; }
+  @media (max-width: 560px) { .tg .toc { columns: 1; } .tg h1 { font-size: 24px; } }
+</style>
+</head>
+<body>
+<header class="site-head">
+  <a class="brand" href="browse.html" title="PCEStudio home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">PCE<span class="brand-dot">·</span>studio</span>
+  </a>
+  <nav class="site-nav" aria-label="Site">
+    <a href="studio.html">Studio</a>
+    <a href="browse.html">Browse</a>
+    <a href="docs.html">Docs</a>
+    <a href="testers.html" class="is-on" aria-current="page">Beta testers</a>
+  </nav>
+</header>
+
+<main class="tg">
+  <span class="kicker">Beta 1 · October 2026</span>
+  <h1>Welcome, tester</h1>
+  <p class="lede">PCEStudio is a PC Engine (TurboGrafx-16) studio that runs in your browser. You write small
+  programs, called <b>toys</b>, in Lua. They run on a model of the console's real graphics and sound chips, and
+  simple toys can be exported as a <code>.pce</code> ROM. Thank you for trying it this early. Every bug you
+  report makes it better.</p>
+
+  <div class="box warn">
+    <b>This is a beta.</b> Things will break, and some parts are not finished. The list of
+    <a href="#not-yet">what does not work yet</a> is below, so you don't spend time reporting things we already
+    know about. Anything not on that list is worth reporting.
+  </div>
+
+  <ul class="toc">
+    <li><a href="#start">1. Start in two minutes</a></li>
+    <li><a href="#keys">2. Keys</a></li>
+    <li><a href="#ai">3. Make a game with an AI</a></li>
+    <li><a href="#studio">4. A tour of the studio</a></li>
+    <li><a href="#test">5. What we'd love you to test</a></li>
+    <li><a href="#not-yet">6. What does not work yet</a></li>
+    <li><a href="#report">7. How to report a bug</a></li>
+    <li><a href="#ideas">8. Ideas and your own toys</a></li>
+    <li><a href="#about">9. About, licence, credits</a></li>
+  </ul>
+
+  <h2 id="start">1. Start in two minutes</h2>
+  <ol>
+    <li>Open <a href="browse.html">Browse</a> and pick a game, for example <b>TOWER</b> or <b>PLATFORMER</b>.
+    Its page starts playing at once; <b>Play full screen</b> gives you a bigger picture.</li>
+    <li><b>Click on the picture</b> so it gets your keyboard, then play. The keys are in the next section.</li>
+    <li>To look inside, press <b>Open in Studio</b>. The code is on the left and the running console on the right,
+    with the chips' memory in the panels below. In the studio, press <b>▶</b> to run. A game keeps running until
+    you press <b>■</b> (Stop).</li>
+  </ol>
+  <p>Use a desktop browser. Phones and tablets have not been tested. If a page looks old or half-updated,
+  press <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd> (Mac) or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>
+  (Windows/Linux) to reload it fully.</p>
+
+  <h2 id="keys">2. Keys</h2>
+  <p>Click the game picture first, then:</p>
+  <table>
+    <tr><th>Keyboard</th><th>PC Engine pad</th></tr>
+    <tr><td><kbd>I</kbd> <kbd>J</kbd> <kbd>K</kbd> <kbd>L</kbd></td><td>Up, Left, Down, Right</td></tr>
+    <tr><td><kbd>N</kbd></td><td>Button I (fire or jump in most games)</td></tr>
+    <tr><td><kbd>M</kbd></td><td>Button II</td></tr>
+    <tr><td><kbd>O</kbd> / <kbd>P</kbd></td><td>Select / Run</td></tr>
+  </table>
+  <p>Careful: the keyboard key <kbd>I</kbd> is <i>Up</i>, while pad <i>button I</i> is the key <kbd>N</kbd>.
+  When you report a bug, please write the keyboard key you pressed.</p>
+
+  <h2 id="ai">3. Make a game with an AI</h2>
+  <h3>With a chat AI (Claude, ChatGPT, …)</h3>
+  <ol>
+    <li>In the studio, press <b>Download for Claude</b>, or get the guide here:
+    <a href="../pcestudio-for-claude.md">pcestudio-for-claude.md</a>.</li>
+    <li>Start a new chat, attach the file, and say what you want, for example
+    <i>"make me a small PC Engine game where a cat jumps over boxes"</i>.</li>
+    <li>Copy the Lua the AI writes and press <b>Paste &amp; Run</b> in the studio. Or save it as a
+    <code>.lua</code> file and drag it onto the studio.</li>
+    <li>Tell the AI what you see, including any error. The guide teaches it to fix its own code.</li>
+  </ol>
+  <p>The guide makes the AI draw sprites and tiles in code. To use a picture of your own, use
+  <b>ASSETS → Add Source</b> in the studio. Drop a PNG there, and tell the AI which pattern number it got.</p>
+
+  <h3>With Claude Code (it drives the studio itself)</h3>
+  <p>PCEStudio has an MCP server, so Claude Code can write a toy, run it, look at the frames and check it without
+  you copying anything. You need <a href="https://nodejs.org">Node.js</a>.</p>
+<pre>git clone https://github.com/terracide303/PCEStudio-public.git
+cd PCEStudio-public
+claude mcp add pcestudio -- node "$PWD/tools/mcp/server.js"
+ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys</pre>
+  <p>Then ask Claude Code to make a toy. It can't import PNG sprites through the server yet (see
+  <a href="#not-yet">below</a>).</p>
+
+  <h2 id="studio">4. A tour of the studio</h2>
+  <table>
+    <tr><th>Where</th><th>What it does</th></tr>
+    <tr><td><b>Run</b> · <b>▶ ■ −1 +1</b></td><td>Run the toy, stop it, step one frame. The scrubber lets you go back
+      in time. <b>Length</b> is how many frames the scrubber keeps; it does not stop a game.</td></tr>
+    <tr><td><b>Paste &amp; Run</b></td><td>Takes Lua from the clipboard into <code>main.lua</code> and runs it.</td></tr>
+    <tr><td><b>Check</b></td><td>The validator: does the toy fit the console's limits (sprites per line, VRAM,
+      frame time)?</td></tr>
+    <tr><td><b>Export…</b></td><td>Builds a <code>.pce</code> ROM in the browser. Only simple toys for now
+      (see section 6).</td></tr>
+    <tr><td><b>Save file</b> / <b>Open…</b></td><td>Saves the whole toy (code and assets) as one
+      <code>.pce.json</code> file, and opens one again. Use this to send us a toy that shows a bug.</td></tr>
+    <tr><td><b>CODE</b> · <b>ASSETS</b></td><td>The toy's Lua files, and its art, palettes, waves, songs and
+      the 15 built-in instruments.</td></tr>
+    <tr><td>Panels: SCREEN, VRAM, PALETTES, SPRITES, AUDIO, SEQUENCER, LAYERS, SCANLINES, REGISTERS,
+      CONSOLE</td><td>The console's insides while it runs. CONSOLE shows the toy's <code>print()</code> output and
+      its errors. Please copy them into a bug report.</td></tr>
+    <tr><td><b>Docs</b></td><td>The full toy API, generated from the code.</td></tr>
+  </table>
+
+  <h2 id="test">5. What we'd love you to test</h2>
+  <ul>
+    <li><b>Play every game in Browse</b> for a minute or two. Look for anything that freezes, flickers,
+    sounds wrong, or ignores a key.</li>
+    <li><b>Make one toy with an AI</b> using the guide. Did the AI's first try run? What error did you get?
+    Where did you get stuck? This is the most useful report of all.</li>
+    <li><b>Change something</b> in a game's code and press Run. Does the studio tell you clearly what's wrong
+    when you break it?</li>
+    <li><b>Export</b> a simple toy (try <i>Sky gradient</i>) and run the <code>.pce</code> in an emulator
+    (Mednafen, Ares, …) or on real hardware. If you own a real PC Engine with a flash cart, we'd especially
+    like to hear from you: nothing has run on real hardware yet.</li>
+    <li><b>Your browser and computer.</b> Tell us what you use, even if everything works.</li>
+  </ul>
+
+  <h2 id="not-yet">6. What does not work yet</h2>
+  <p>Known and on the board. No need to report these, but tell us if one of them stops you completely.</p>
+  <table>
+    <tr><th>Area</th><th>What happens</th><th>Status</th></tr>
+    <tr><td>Export to <code>.pce</code></td><td>Only simple toys export. A game that uses Lua tables,
+      <code>sprite()</code>, reads the pad, or plays <code>sfx()</code> stops with a message such as
+      <code>il-table-read</code>. TOWER, PLATFORMER and STARFALL run in the browser but can't be exported yet.</td>
+      <td class="status soon">next big job</td></tr>
+    <tr><td>Real hardware</td><td>Exports are checked in an emulator only.</td><td class="status no">untested</td></tr>
+    <tr><td>Dropping a <code>.lua</code> file</td><td>The studio keeps the previous toy's art, so the SCREEN
+      panel can show old pictures. Reload the page before dropping a new file.</td><td class="status soon">being fixed</td></tr>
+    <tr><td>Game art in ASSETS</td><td>Art that a game draws in code shows only in VRAM, not as named assets with
+      a preview.</td><td class="status soon">being built</td></tr>
+    <tr><td>MCP server and pictures</td><td>Claude Code can't turn a PNG into sprites through the server yet; it
+      draws them in code.</td><td class="status soon">being built</td></tr>
+    <tr><td>Demos with bought art</td><td>CITY, OAK WOODS and CAVE use art packs and come online once they look
+      right.</td><td class="status soon">soon</td></tr>
+    <tr><td>Old files after an update</td><td>Your browser may keep old copies. Reload with
+      <kbd>Shift</kbd> (see section 1).</td><td class="status soon">being fixed</td></tr>
+    <tr><td>Phones and tablets</td><td>Not designed for them yet.</td><td class="status no">not planned for beta</td></tr>
+    <tr><td>CD-ROM, Arcade Card, SuperGrafx</td><td>Only the standard HuCard console is modelled.</td>
+      <td class="status no">not planned for beta</td></tr>
+  </table>
+
+  <h2 id="report">7. How to report a bug</h2>
+  <p>Bugs go to GitHub Issues: <a href="https://github.com/terracide303/PCEStudio-public/issues/new/choose">
+  github.com/terracide303/PCEStudio-public/issues</a>. You need a free GitHub account. Choose
+  <b>Bug report</b>; the form asks for everything below.</p>
+  <ol>
+    <li><b>Search first.</b> If someone already reported it, add a comment or a 👍 instead of a new issue.</li>
+    <li><b>One problem per issue.</b> Two bugs in one issue tend to get half-fixed.</li>
+    <li><b>A clear title</b> that says what goes wrong, for example
+    <i>"TOWER: the player falls through the second ladder"</i>, not <i>"broken"</i>.</li>
+    <li><b>Steps</b>: what you did, click by click, starting from opening the page.</li>
+    <li><b>What you expected</b> and <b>what happened instead</b>.</li>
+    <li><b>The frame number</b> shown under the picture (for example <code>frame 2089</code>) and any red text from
+    the CONSOLE panel or the Export/Check window. Copy the text; a screenshot of text is hard to search.</li>
+    <li><b>The toy</b>: press <b>Save file</b> and attach the <code>.pce.json</code> (zip it if GitHub refuses the
+    file), or paste the Lua inside a code block. If it's one of the games in Browse, its name is enough.</li>
+    <li><b>Your browser and system</b>, for example <i>Chrome 141 on macOS 26</i>.</li>
+    <li><b>A screenshot or a short screen recording</b> when it's something you see or hear.</li>
+  </ol>
+  <p>Please don't put passwords, API keys or private information in an issue: issues are public.</p>
+  <h3>What happens next</h3>
+  <p>We read every issue and turn the real ones into work on our board. The issue gets a label
+  (<code>bug</code>, <code>confirmed</code>, <code>fixed on the site</code>) and a comment when the fix is live.
+  If we can't reproduce it, we'll ask you a question in the issue, so watch for replies.</p>
+
+  <h2 id="ideas">8. Ideas and your own toys</h2>
+  <ul>
+    <li><b>Ideas</b> and "it would be great if…" go in an issue too: choose <b>Idea</b>.</li>
+    <li><b>Made something you like?</b> Choose <b>Share a toy</b> and attach the <code>.pce.json</code>. With your
+    OK, good ones go into Browse with your name on them.</li>
+    <li>Only share art you made yourself or are allowed to share (check the licence of any art pack you use).</li>
+  </ul>
+
+  <h2 id="about">9. About, licence, credits</h2>
+  <p>PCEStudio is made by Dennis Shaw with a team of AI agents. The source is public at
+  <a href="https://github.com/terracide303/PCEStudio-public">github.com/terracide303/PCEStudio-public</a>
+  under the GNU GPL, version 3 or later. The sound core is derived from Mednafen's PSG (GPL) and Blip_Buffer
+  (LGPL). The idea and the studio's shape come from <a href="https://ppu.toys">ppu.toys</a>, with its author's
+  blessing. Fengari, CodeMirror and HuTrack keep their own MIT licences.</p>
+  <p>PC Engine and TurboGrafx-16 are trademarks of their owners. PCEStudio is a fan project, not affiliated
+  with NEC, Hudson Soft or Konami.</p>
+</main>
+</body>
+</html>
