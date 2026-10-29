@@ -6064,10 +6064,12 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  check(data.length === 5,
-        "the gallery carries the five example toys (got " + data.length + ")");
+  check(data.length === 6,
+        "the gallery carries the five #29 toys and STARFALL (got " +
+        data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
-     ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle"]);
+     ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
+      "starfall"]);
   let mismatched = [];
   for (const t of data) {
     if (t.source !== toySource(t.file)) mismatched.push(t.file);
@@ -6076,8 +6078,29 @@ function checkGallery(page) {
         "every gallery source is toys/<file> byte for byte" +
         (mismatched.length ? " (" + mismatched.join(", ") + ")" : ""));
 
+  /* #121: STARFALL is a folder toy — the card's title, author, four tags and
+   * all four files, each the toys/demo-game/ file byte for byte. */
+  const star = data.find((t) => t.id === "starfall") || {};
+  eq("#121: STARFALL's title", star.title, "STARFALL");
+  eq("#121: STARFALL's author", star.author, "PCEStudio examples");
+  eq("#121: STARFALL's tags", star.tags,
+     ["playable", "sprites", "music", "raster"]);
+  check(/IJKL/.test(star.blurb || "") && /N fires/.test(star.blurb || ""),
+        "#121: STARFALL's description names the pad keys (" +
+        JSON.stringify(star.blurb) + ")");
+  eq("#121: STARFALL's files, main.lua first",
+     (star.files || []).map((f) => f.name + ":" + f.kind),
+     ["main.lua:lua", "tiles.json:tiles", "palettes.json:palettes",
+      "sprites.json:sprites"]);
+  const starWrong = (star.files || []).filter((f) =>
+    f.source !== toySource("demo-game/" + f.name));
+  check(star.files && star.files.length === 4 && starWrong.length === 0,
+        "#121: all four STARFALL files are toys/demo-game/ byte for byte" +
+        (starWrong.length ? " (wrong: " +
+         starWrong.map((f) => f.name).join(", ") + ")" : ""));
+
   /* 2. the studio: the gallery list, the top-bar link, and ?toy= */
-  eq("studio.gallery is the five toys", studio.gallery.map((g) => g.id),
+  eq("studio.gallery is the gallery's toys", studio.gallery.map((g) => g.id),
      data.map((t) => t.id));
   check(studio.gallery[2].source === toySource("road.lua"),
         "studio.gallery's road source is toys/road.lua");
@@ -6115,6 +6138,57 @@ function checkGallery(page) {
         "… with vram/cram/sat equal on every frame (" +
         stateDiffer + " differ)");
 
+  /* #121: ?toy=starfall opens the demo game as a folder toy — all four
+   * files, the panels' pictures among them — and runs visibly: frame 60 has
+   * tens of thousands of pixels that are not the frame's own background. */
+  const sg = runPage("?toy=starfall&paused=1");
+  const ss = sg.sandbox.PCEStudio.studio;
+  eq("#121: ?toy=starfall is the demo game", ss.current().id, "starfall");
+  check(ss.current().source === toySource("demo-game/main.lua"),
+        "#121: ?toy=starfall runs toys/demo-game/main.lua byte for byte");
+  eq("#121: the studio holds all four STARFALL files",
+     ss.fileNames().join(","),
+     "main.lua,tiles.json,palettes.json,sprites.json");
+  const sAssetWrong = ss.files().filter((f) => f.name !== "main.lua").filter(
+    (f) => f.source !== toySource("demo-game/" + f.name));
+  check(sAssetWrong.length === 0,
+        "#121: … and the three asset files are toys/demo-game/'s" +
+        (sAssetWrong.length ? " (wrong: " +
+         sAssetWrong.map((f) => f.name).join(", ") + ")" : ""));
+  let sEnv = null;
+  try { sEnv = JSON.parse(ss.envelopeText()); } catch (e) { /* checked */ }
+  check(!!sEnv && sEnv.title === "STARFALL" && /IJKL/.test(sEnv.description),
+        "#121: the studio's toy is titled STARFALL and its description names " +
+        "the pad keys");
+  const sFrames = ss.runFrames(61, null, "lua");
+  const sLast = sFrames[sFrames.length - 1];
+  /* the studio page does not load pce-gallery.js, so count the ink here */
+  let sInk = 0;
+  if (sLast && sLast.pixels) {
+    const px = sLast.pixels, r0 = px[0], g0 = px[1], b0 = px[2];
+    for (let i = 0; i < px.length; i += 3)
+      if (px[i] !== r0 || px[i + 1] !== g0 || px[i + 2] !== b0) sInk++;
+  }
+  check(sFrames.length === 61 && sInk > 1000,
+        "#121: STARFALL runs from frame 0 to 60 and frame 60 has a picture (" +
+        sInk + " pixels)");
+
+  /* #121: the Open… list offers it, and its button loads the same toy in
+   * place (the stub DOM's click runs the listener the person's click does). */
+  const menu = page.dom.get("example-list");
+  const starBtn = (menu ? menu.children : []).find(
+    (el) => el.getAttribute && el.getAttribute("data-example-id") === "starfall");
+  check(!!starBtn && /STARFALL/.test(starBtn.textContent),
+        "#121: Open… lists STARFALL (" +
+        JSON.stringify(starBtn ? starBtn.textContent : null) + ")");
+  if (starBtn) starBtn.click();
+  eq("#121: the Open… button loads STARFALL", studio.current().id, "starfall");
+  eq("#121: … with its four files", studio.fileNames().join(","),
+     "main.lua,tiles.json,palettes.json,sprites.json");
+  check(studio.current().source === toySource("demo-game/main.lua"),
+        "#121: … and the game's own main.lua");
+  studio.loadExample("palette", true);   /* leave the page on a #29 toy */
+
   const miss = runPage("?toy=no-such-toy&paused=1");
   const ms = miss.sandbox.PCEStudio.studio;
   eq("?toy=<unknown> records the miss", ms.galleryMiss(), "no-such-toy");
@@ -6128,7 +6202,8 @@ function checkGallery(page) {
   const cards = B.cards();
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
-     ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle"]);
+     ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
+      "starfall"]);
   check(cards.every((c) => c.ink > 0 && !c.error),
         "every card drew its frame 60 (" +
         cards.map((c) => c.id + " " + c.ink).join(", ") + ")");
@@ -6139,9 +6214,20 @@ function checkGallery(page) {
   check(cards.every((c) => c.rawHref === "../toys/" + c.file),
         "each card names the toy's own file");
 
+  /* #121: STARFALL's card is one of the wall's, drawn at frame 60 and
+   * linked both ways like the rest. */
+  const starCard = cards.find((c) => c.id === "starfall") || {};
+  check(starCard.ink > 1000 && !starCard.error,
+        "#121: Browse draws STARFALL's frame 60 (" + starCard.ink +
+        " pixels" + (starCard.error ? ", error " + starCard.error : "") + ")");
+  check(starCard.href === "toy.html?id=starfall" &&
+        starCard.studioHref === "studio.html?toy=starfall" &&
+        starCard.rawHref === "../toys/demo-game/main.lua",
+        "#121: the STARFALL card links to its page, the studio and its file");
+
   B.setTag("raster");
-  eq("the raster tag shows the four raster toys", B.visible(),
-     ["parallax", "sky-gradient", "road", "status-bar"]);
+  eq("the raster tag shows the five raster toys", B.visible(),
+     ["parallax", "sky-gradient", "road", "status-bar", "starfall"]);
   B.setTag("");
   B.setQuery("road");
   eq("the search box filters to the road", B.visible(), ["road"]);
@@ -6150,13 +6236,14 @@ function checkGallery(page) {
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["status-bar", "parallax", "palette-cycle", "road", "sky-gradient"]);
+     ["status-bar", "parallax", "palette-cycle", "road", "sky-gradient",
+      "starfall"]);
   B.setSort("written");
 
   const bt = runBarePage(BROWSE_PAGE, "?tag=raster");
   eq("?tag=raster opens the page filtered",
      bt.sandbox.PCEStudio.browse.visible(),
-     ["parallax", "sky-gradient", "road", "status-bar"]);
+     ["parallax", "sky-gradient", "road", "status-bar", "starfall"]);
 
   /* 4. a toy's own page */
   const t = runBarePage(TOY_PAGE, "?id=road&paused=1");
@@ -6201,7 +6288,7 @@ async function checkGalleryBrowser() {
                          "pcestudio-chrome-80-" + process.pid);
   const pages = [
     { name: "browse.html", file: BROWSE_PAGE, search: "?selftest=1",
-      want: /^PASS 5 cards, each drawn at frame 60 · ink / },
+      want: /^PASS 6 cards, each drawn at frame 60 · ink / },
     { name: "toy.html?id=road", file: TOY_PAGE, search: "?id=road&selftest=1",
       want: /^PASS 60 frames · road · 256x224 · ink [1-9][0-9]* · digest / }
   ];
