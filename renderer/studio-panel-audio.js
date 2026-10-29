@@ -94,6 +94,72 @@
         return null;
       }
 
+      /* ---- #140: the fifteen built-ins, offered directly ----------------
+       * ppu.toys' voice dropdown lists the song's own sample first, then a
+       * grey heading and every built-in sample, so a patch is one pick away
+       * instead of a trip through ASSETS.  Ours is the same shape with #99's
+       * set — the list is pce-assets.js's own INSTRUMENTS, read through
+       * `A.INSTRUMENTS`, so the two panels cannot drift. */
+      function builtins() {
+        return (A && Array.isArray(A.INSTRUMENTS)) ? A.INSTRUMENTS : [];
+      }
+
+      function builtinById(id) {
+        var list = builtins();
+        for (var i = 0; i < list.length; i++)
+          if (list[i].id === id) return list[i];
+        return null;
+      }
+
+      /* #140: adding a built-in writes the toy's instruments.json — ASSETS'
+       * own file, written the way its Add button writes it (putFile in
+       * studio-panel-assets.js): the live file array, then the page's save
+       * and its asset refresh.  One write path, so the two panels' lists
+       * cannot disagree. */
+      function writeInstruments(text) {
+        var list = studio.toy.files();
+        var f = null, i;
+        for (i = 0; i < list.length; i++)
+          if (list[i] && list[i].name === "instruments.json") { f = list[i]; break; }
+        if (!f) {
+          f = { name: "instruments.json", kind: "json", source: text };
+          list.push(f);
+        } else {
+          f.source = text;
+        }
+        if (studio.render && typeof studio.render.pause === "function")
+          studio.render.pause();
+        studio.toy.persist();
+        studio.toy.saved("saved in this browser");
+        studio.toy.refreshAssets();
+        return f;
+      }
+
+      /* Put a built-in into the toy unless it is already there.  addInstrument
+       * refuses a name the toy holds (`asset-duplicate`), which is the "no
+       * duplicates" rule: picking the same built-in twice reloads the one
+       * entry rather than adding a second. */
+      function addBuiltin(id) {
+        var inst = builtinById(id);
+        if (!inst) {
+          var e = new Error("no built-in instrument " + JSON.stringify(id));
+          e.code = "asset-name";
+          throw e;
+        }
+        if (!A || typeof A.addInstrument !== "function")
+          throw new Error("ASSETS' model is not loaded");
+        var text = typeof A.fileText === "function"
+          ? A.fileText(studio.toy.files(), "instruments.json") : null;
+        try {
+          writeInstruments(A.addInstrument(text, inst).text);
+          return { instrument: inst, added: true };
+        } catch (e2) {
+          if (e2 && e2.code === "asset-duplicate")
+            return { instrument: inst, added: false };
+          throw e2;
+        }
+      }
+
       /* The patch's HuTrack-shaped envelope ({size, loop, data}) as the
        * mixer's driver envelope ({attack, decay, sustain, rate}): attack is
        * the climb to the loudest level, decay the fall to the last one, and
@@ -113,16 +179,10 @@
         };
       }
 
-      /* Put the toy's patch on `voice` (default: the selected one).  Returns
+      /* Put the patch on `voice` (default: the selected one).  Returns
        * {voice, name}; the model's own refusals (wave-range, noise-channel)
        * are thrown, so the evidence reads the code the panel would toast. */
-      function loadToyInstrument(name, voice) {
-        var inst = toyByName(name);
-        if (!inst) {
-          var e = new Error("no instrument " + JSON.stringify(name));
-          e.code = "asset-name";
-          throw e;
-        }
+      function loadInstrument(inst, voice) {
         var m = state();
         var c = voice === undefined ? sel : voice;
         if (inst.kind === "noise" && mx.NOISE_VOICES.indexOf(c) < 0)
@@ -140,6 +200,41 @@
         chosen[c] = inst.name;
         sel = c;
         return { voice: c, name: inst.name, kind: inst.kind };
+      }
+
+      function loadToyInstrument(name, voice) {
+        var inst = toyByName(name);
+        if (!inst) {
+          var e = new Error("no instrument " + JSON.stringify(name));
+          e.code = "asset-name";
+          throw e;
+        }
+        return loadInstrument(inst, voice);
+      }
+
+      /* #140: choosing a built-in does two things in one step — the patch
+       * joins the toy, exactly as if ASSETS' Add had been pressed, and then
+       * it loads into the voice.  The toy's stored copy is what plays, so a
+       * patch edited in ASSETS later is the one heard here. */
+      function chooseBuiltin(id, voice) {
+        var got = addBuiltin(id);
+        var loaded = loadToyInstrument(id, voice);
+        loaded.added = got.added;
+        return loaded;
+      }
+
+      /* One entry point for both lists: a name the toy holds, or a built-in
+       * that is added first.  `added` says which happened. */
+      function chooseInstrument(name, voice) {
+        if (toyByName(name)) {
+          var out = loadToyInstrument(name, voice);
+          out.added = false;
+          return out;
+        }
+        if (builtinById(name)) return chooseBuiltin(name, voice);
+        var e = new Error("no instrument " + JSON.stringify(name));
+        e.code = "asset-name";
+        throw e;
       }
 
       /* ---- the document, read back from the toy's files ------------------ */
@@ -279,21 +374,25 @@
           });
         }
 
-        /* #122: the toy's instruments — the voice picker.  Its options are
-         * rebuilt on every draw (`paintInstrumentPicker`) because the toy's
-         * instruments can change while the panel is open. */
+        /* #122/#140: the song's patches and the fifteen built-ins — the
+         * voice picker.  Its options are rebuilt on every draw
+         * (`paintInstrumentPicker`) because the toy's instruments can change
+         * while the panel is open. */
         var waveTab = studio.$("aud-tab-wave");
         if (waveTab) {
           var line = el("div", "", "aud-line aud-instrument-line");
           line.appendChild(text("span", "aud-kicker", "instrument"));
           var pick = el("select", "aud-instrument", "aud-instrument");
           pick.setAttribute("aria-label",
-            "Load one of the toy's instruments into the selected voice");
+            "Load the song's instrument or a built-in into the selected voice");
           pick.addEventListener("change", function () {
             var v = pick.value;
-            if (!v || v.indexOf("toy:") !== 0) return;
+            if (!v) return;
             try {
-              edit(function () { loadToyInstrument(v.slice(4), sel); });
+              if (v.indexOf("toy:") === 0)
+                edit(function () { loadToyInstrument(v.slice(4), sel); });
+              else if (v.indexOf("builtin:") === 0)
+                edit(function () { chooseBuiltin(v.slice(8), sel); });
             } catch (e) { fail(e); }
           });
           line.appendChild(pick);
@@ -302,25 +401,49 @@
         built = true;
       }
 
-      /* The picker's options: the toy's instruments, with the one the
-       * selected voice holds shown as its value (and "—" when the voice is
-       * still the voice's own patch). */
+      /* The picker's options, in ppu.toys' order:
+       *
+       *   ✓ <name> · <kind>      the song's instruments (instruments.json),
+       *                          the one loaded into this voice checkmarked
+       *   ── load into the voice ──   the grey heading (an <optgroup>)
+       *   piano … crash          all fifteen built-ins, #99's set
+       *
+       * Picking a built-in adds it to the toy first, so the checkmark then
+       * appears on the song's copy of it. */
       function paintInstrumentPicker() {
         var pick = studio.$("aud-instrument");
         if (!pick) return;
         while (pick.firstChild) pick.removeChild(pick.firstChild);
-        var list = toyInstruments();
+
         var none = studio.document.createElement("option");
         none.value = "";
-        none.textContent = list.length ? "— (keep this voice's patch)"
-                                       : "(no instruments in the toy)";
+        none.textContent = "(this voice's own patch)";
         pick.appendChild(none);
+
+        var list = toyInstruments();
         for (var i = 0; i < list.length; i++) {
           var o = studio.document.createElement("option");
           o.value = "toy:" + list[i].name;
-          o.textContent = list[i].name + " · " + list[i].kind;
+          o.textContent = (chosen[sel] === list[i].name ? "✓ " : "") +
+            list[i].name + " · " + list[i].kind;
           pick.appendChild(o);
         }
+
+        /* the heading is the group, so the built-ins sit under it and cannot
+         * be mistaken for patches the song already holds */
+        var whole = builtins();
+        if (whole.length) {
+          var group = studio.document.createElement("optgroup");
+          group.label = "load into the voice";
+          for (i = 0; i < whole.length; i++) {
+            var b = studio.document.createElement("option");
+            b.value = "builtin:" + whole[i].id;
+            b.textContent = whole[i].name;
+            group.appendChild(b);
+          }
+          pick.appendChild(group);
+        }
+
         pick.value = chosen[sel] ? "toy:" + chosen[sel] : "";
       }
 
@@ -710,17 +833,20 @@
         } catch (e) { playing = false; return false; }
       }
 
-      /* #122: Trigger plays what the voice holds.  If a toy instrument was
-       * chosen for it, the patch's own registers play through pce-psg.js;
-       * otherwise the mix with this voice soloed, as ▶ does.  Headless there
-       * is no AudioContext, so the writes (and the mix) remain the evidence. */
+      /* #122/#140: Trigger plays what the voice holds.  If an instrument was
+       * chosen for it (from the song or a built-in), the patch's own
+       * registers play through pce-psg.js — at THIS voice's frequency and on
+       * this voice — otherwise the mix with this voice soloed, as ▶ does.
+       * Headless there is no AudioContext, so the writes (and the mix) remain
+       * the evidence. */
       function auditionVoice(i) {
         var name = chosen[i];
         if (name && A && typeof A.play === "function") {
-          var inst = toyByName(name);
+          var inst = toyByName(name) || builtinById(name);
           if (inst) {
             try {
-              var got = A.play(inst, { note: "C4", frames: 30 });
+              var v = mx.voice(state(), i);
+              var got = A.play(inst, { freq: v.freq, channel: i, frames: 30 });
               playPcm(got.pcm, got.sampleRate);
               return got;
             } catch (e) { /* fall through to the mix */ }
@@ -854,22 +980,39 @@
         text: function () { return mx.toJSON(state()); },
         invalidate: function () { mix = null; },
 
-        /* ---- #122: the toy's instruments, as the voice picker sees them */
+        /* ---- #122/#140: the picker's two lists -------------------------- */
         instruments: function () {
           return toyInstruments().map(function (i) {
             return { name: i.name, kind: i.kind, nf: i.nf || null,
                      envelope: i.envelope ? i.envelope.data.slice() : [] };
           });
         },
+        /* #140: every built-in the picker offers, in #99's order. */
+        builtins: function () {
+          return builtins().map(function (i) {
+            return { id: i.id, name: i.name, kind: i.kind, nf: i.nf || null };
+          });
+        },
+        /* Pick a name from either list: the toy's own patch, or a built-in
+         * that is added to the toy first.  `added` says which happened. */
         choose: function (name, voice) {
-          return apply(function () { return loadToyInstrument(name, voice); });
+          return apply(function () { return chooseInstrument(name, voice); });
         },
         loaded: function (i) {
           return chosen[i === undefined ? sel : i] || null;
         },
+        /* What Trigger plays, by code — the patch's own registers through
+         * pce-psg.js, at the voice's frequency. */
+        audition: function (i) {
+          var got = auditionVoice(i === undefined ? sel : i);
+          if (!got) return null;
+          return { pcm: got.pcm, sampleRate: got.sampleRate,
+                   frames: got.frames, trace: got.trace,
+                   channel: got.trace.channel, freq: got.trace.freq };
+        },
         /* The patch as pce-psg.js renders it — what Trigger plays, by code. */
         preview: function (name, note, frames) {
-          var inst = toyByName(name);
+          var inst = toyByName(name) || builtinById(name);
           if (!inst) {
             var e = new Error("no instrument " + JSON.stringify(name));
             e.code = "asset-name";

@@ -187,6 +187,52 @@ at 8:7; ours reads `--frame-w`/`--frame-h` from the frame `paint()` receives, so
 button is a placeholder that says accounts and publishing are #37 and the local server needs no account.
 The live link into this tab is #104.
 
+### 2.4 Resizable regions — the three dividers (#139)
+
+**What ppu.toys does.** Its Studio is built on [dockview](https://dockview.dev/), whose split view puts a
+`dv-sash` element (4 px, `cursor: ew-resize`) between panels and drags the panel boundary under the pointer;
+the library clamps each panel to its declared minimum/maximum and the layout is serialised, not saved to
+`localStorage` by the studio. Dennis, 2026-10-29: "in ppu.toys he can resize the regions — e.g. drag the
+divider between the code editor and the panel dock (SPRITES etc.) up or down." We read dockview's sash CSS
+in ppu.toys' served stylesheet (`App-6Y57MjOu.css`); **dockview itself is not taken** — its split view is a
+library with its own layout model, its own DOM and 100+ rules, and this page has three fixed region pairs.
+
+**What `studio.html` does.** Each pair is a three-track CSS grid — first region, a **6 px divider**, second
+region — so the divider is a real grid item at the boundary rather than an overlay that can drift from it:
+
+| divider | between | its px track |
+|---|---|---|
+| `#split-cols` (vertical) | the left column and the OUTPUT column | `--split-left` on `.studio` |
+| `#split-rows` (horizontal) | CODE and the panel dock | `--split-code` on `.workspace` |
+| `#split-bottom` (horizontal) | OUTPUT and the MARKERS/AGENT drawer | `--split-bottom` on `.output-pane` |
+
+- **Default:** no saved size means no custom property, and the tracks keep the original `61.25fr / 38.75fr`
+  and `44.3fr / 55.7fr` splits above. The sizes are custom properties, not inline `grid-template-*`, so the
+  `max-width: 900px` rule (which stacks the columns and hides `#split-cols`) still wins.
+- **Drag:** pointer events on the divider with pointer capture (so the pointer may leave the 6 px strip), and
+  a window-level move/up path as the fallback when capture is refused. The move is absolute from the drag's
+  start point, so the two paths cannot double-apply.
+- **Clamp:** the code column ≥ 320 px with ≥ 300 px left for the output column; the editor ≥ 200 px with
+  ≥ 120 px for the dock; the drawer ≥ 64 px with ≥ 90 px left for the picture. A window `resize` re-clamps a
+  saved size, so neither region collapses to zero.
+- **Keyboard and accessibility:** each divider is `tabindex="0"`, `role="separator"`, with
+  `aria-orientation` and live `aria-valuemin/valuemax/valuenow`; arrows move it 8 px (Shift 40 px), Enter,
+  Space or Home resets it. Double-click also resets it.
+- **Remembered:** the three px sizes are saved per browser under `pcestudio.layout.v1` and restored on the
+  next page; `null` means the default split.
+- **Not shrunk by the resize:** the canvas keeps ppu.toys' `.display-frame` rule (§2.3) — the largest box of
+  the frame's own aspect that fits — so its aspect is preserved at any divider position. **Integer scaling
+  is not added**: the frame box is ppu.toys' fractional `min(100cqw, 100cqh × w/h)` rule, documented here
+  with its 466×408 measurement; a true 1×/2×/3× snap is a change to that rule and would want its own card.
+
+**Evidence.** `tests/check-studio.js` has 38 checks for this in the stub DOM (drag arithmetic, clamp, the
+keyboard contract, double-click, the save/restore, and the output frame digest before/after) and a
+`--browser` block that drags all three dividers with in-page `PointerEvent`s, reads the regions' rectangles,
+checks the canvas's pixel digest is unchanged, opens a second page on the same browser profile and compares
+the restored sizes. Measured 2026-10-29: 31 browser-driver checks, the #139 block all PASS. Two failures in
+that driver are **older than this card** (the Space shortcut and the driver's `tiles.json` edit) — they were
+reproduced on a clean clone of `cea7029`, so `check-studio.js --browser` was already red there.
+
 ---
 
 ## 3. The panels, and their PCE counterparts

@@ -19,23 +19,10 @@ files=$( { find renderer -type f \( -name '*.html' -o -name '*.js' -o -name '*.c
            find vendor/codemirror vendor/fengari vendor/ppu-toys -type f;
            echo LICENSE; } | grep -v '/\.' | sort )
 
-# The demo art is never committed (docs/DECISIONS.md, 2026-10-29): it lives
-# beside the repo and goes up WITH the toy, folded into the one module the
-# pages read.  The repo's own renderer/gallery-toys.js stays the art-free
-# copy the tests check, so this is the only place the two are joined.
-ARTDIR="${PCE_DEMO_ART:-/Volumes/External/agent-workshop-demo/demo-art}"
-STAGE=$(mktemp -d "${TMPDIR:-/tmp}/pce-deploy-XXXXXX"); trap 'rm -rf "$STAGE"' EXIT
-[ -d "$ARTDIR" ] && { node tools/gallery.js --art-dir "$ARTDIR" > "$STAGE/gallery-toys.js" || exit 2; }
-
-if [ "${1:-}" = "--dry" ]; then
-  echo "$files"
-  [ -f "$STAGE/gallery-toys.js" ] && echo "$STAGE/gallery-toys.js  -> renderer/gallery-toys.js"
-  echo "$(echo "$files" | wc -l | tr -d ' ') files ($ARTDIR replaces renderer/gallery-toys.js)"
-  exit 0
-fi
+if [ "${1:-}" = "--dry" ]; then echo "$files"; echo "$(echo "$files" | wc -l | tr -d ' ') files"; exit 0; fi
 : "${PCE_CP_PASS:?set PCE_CP_PASS (never put it in a file)}"
 
-jar=$(mktemp); trap 'rm -rf "$jar" "$STAGE"' EXIT
+jar=$(mktemp); trap 'rm -f "$jar"' EXIT
 token=$(curl -s --max-time 40 -c "$jar" --data-urlencode "user=$USER" --data-urlencode "pass=$PCE_CP_PASS" \
           "$CP/login/?login_only=1" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("security_token",""))')
 [ -n "$token" ] || { echo "cPanel login failed" >&2; exit 1; }
@@ -70,9 +57,36 @@ for d in $(echo "$files" | xargs -n1 dirname | sort -u); do
   upload "$target" $group >/dev/null
   total=$((total + $(echo "$group" | wc -l)))
 done
-# the art-bearing gallery module goes over the top of the art-free one
-if [ -d "$ARTDIR" ]; then
-  upload "$DEST/renderer" "$STAGE/gallery-toys.js" >/dev/null
-  echo "uploaded the demo art with it (from $ARTDIR)"
+# ---- the demo art (#127, #128), which is NEVER in the repository ----------
+# Dennis, 2026-10-29: the packs' art may be shown on the site but not
+# committed (docs/DECISIONS.md).  Each demo's playable toy and its converted
+# picture live beside the repo in demo-art/<toy>/; this uploads them, and
+# makes the site's gallery carry the playable source instead of the repo's
+# placeholder.  The repo's own renderer/gallery-toys.js stays the art-free
+# copy the tests check — this is the only place the two are joined.
+DEMO_ART="${DEMO_ART:-/Volumes/External/agent-workshop-demo/demo-art}"
+demo_toys=""
+for toy in oak-woods cave; do
+  [ -f "$DEMO_ART/$toy/main.lua" ] && demo_toys="$demo_toys $toy"
+done
+if [ -n "$demo_toys" ]; then
+  stage=$(mktemp -d "${TMPDIR:-/tmp}/pce-deploy-XXXXXX")
+  node tools/gallery.js --with-demo-art > "$stage/gallery-toys.js"
+  upload "$DEST/renderer" "$stage/gallery-toys.js" >/dev/null
+  total=$((total + 1))
+  rm -rf "$stage"
+  for toy in $demo_toys; do
+    echo "demo art: $DEMO_ART/$toy"
+    # the art folder, and the playable main.lua where the toy page's Raw
+    # source and the gallery's ../toys/ link point
+    mkd "$DEST"; mkd "$DEST/demo-art"; mkd "$DEST/demo-art/$toy"; mkd "$DEST/toys/$toy"
+    art=$(find "$DEMO_ART/$toy" -type f ! -name '.*' | sort)
+    upload "$DEST/demo-art/$toy" $art >/dev/null
+    total=$((total + $(echo "$art" | wc -l)))
+    upload "$DEST/toys/$toy" "$DEMO_ART/$toy/main.lua" >/dev/null
+    total=$((total + 1))
+  done
+else
+  echo "demo art: none beside $DEMO_ART — the site keeps the placeholders"
 fi
 echo "uploaded $total files + index.html to $DEST"

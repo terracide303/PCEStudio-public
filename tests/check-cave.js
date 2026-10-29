@@ -49,17 +49,20 @@ const sprites = require(path.join(ROOT, "renderer", "pce-sprites.js"));
 const ART_DIR = process.env.PCE_CAVE_ART ||
   "/Volumes/External/agent-workshop-demo/demo-art/cave";
 const ART = path.join(ART_DIR, "art.lua");
-/* also the mutation probe's door: point PCE_CAVE_TOY at a broken copy and the
- * checks below must fail (see the header's "not proven") */
+/* The playable file — the repository's toy with the art appended, which is
+ * exactly what demo-art/cave/main.lua is and what the site runs.  Also the
+ * mutation probe's door: point PCE_CAVE_TOY at a broken copy and the checks
+ * below must fail (see the header's "not proven"). */
+const PLAY = path.join(ART_DIR, "main.lua");
 const TOY = process.env.PCE_CAVE_TOY ||
   path.join(ROOT, "toys", "cave", "main.lua");
 const FRAMES = 120;
 const PNG_FRAME = 60;
 const LUA_BUDGET_MS = 100;          /* renderer/pce-toys.js DEFAULT_BUDGET_MS */
 
-if (!fs.existsSync(ART)) {
+if (!fs.existsSync(ART) || !fs.existsSync(PLAY)) {
   console.log("SKIP  cave: the pack's converted art is not on this machine (" +
-              ART + ")");
+              ART_DIR + ")");
   console.log("      the demo art is never committed (docs/DECISIONS.md, " +
               "2026-10-29); run tools/cave-assets.js to make it, or set " +
               "PCE_CAVE_ART");
@@ -180,9 +183,15 @@ function encodePng(rgb, width, height) {
 
 const toySource = fs.readFileSync(TOY, "utf8");
 const artSource = fs.readFileSync(ART, "utf8");
-const source = toySource + "\n" + artSource;
+const source = fs.readFileSync(PLAY, "utf8");
 
-console.log("== cave: the art on this machine is " + ART);
+console.log("== cave: the art on this machine is " + ART_DIR);
+if (!process.env.PCE_CAVE_TOY) {
+  /* the playable file is the repository's toy plus the art, byte for byte:
+   * the site must not be playing something the repo's toy does not say */
+  check(source === toySource + "\n" + artSource,
+        "demo-art/cave/main.lua is toys/cave/main.lua with art.lua appended");
+}
 check(/Will Tice/.test(artSource),
       "the converted block carries the pack's credit (Will Tice)");
 

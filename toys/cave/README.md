@@ -20,6 +20,7 @@ sprite patterns, no frame strips, no ROMs.  `tools/cave-assets.js` converts
 the pack and writes it beside the repo:
 
 ```
+../demo-art/cave/main.lua        the playable toy: this file with art.lua appended
 ../demo-art/cave/art.lua         the Lua block the toy draws with (the art)
 ../demo-art/cave/tiles.json      the SCREEN panel's picture
 ../demo-art/cave/palettes.json   the PALETTES panel's picture
@@ -35,14 +36,14 @@ To rebuild the art after changing the converter:
 
 ```sh
 node tools/cave-assets.js --out ../demo-art/cave    # or --pack /path/to.zip
-node tests/check-cave.js                            # 876 checks with the art
+node tests/check-cave.js                            # 877 checks with the art
 ```
 
-To play it with the art, the page has to be given it: `node tools/gallery.js
---art-dir ../demo-art` appends `art.lua` to the toy's source in the module the
-pages read.  `tools/deploy.sh` does exactly that when it publishes, so the
-website's copy is the one with the picture, and the repo's copy is the one
-without.
+To play it with the art, the page has to be given it — the same rule the other
+demo (#128) follows: `node tools/gallery.js --with-demo-art` reads
+`demo-art/<toy>/main.lua` instead of the repo's file, and `tools/deploy.sh`
+does that when it publishes, so the website's copy is the one with the
+picture and the repo's copy is the one without.
 
 ## Credit, as the pack's licence asks
 
