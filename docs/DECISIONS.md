@@ -332,3 +332,14 @@ fragment, Legend of Xanadu 2 art, Bonk sprites, Sherlock Holmes CD data), @works
 a filtered copy whose history has no `vendor/huc`, and `tools/build-huc.sh` downloads HuC itself when someone wants
 the HuC comparison. Dennis: "yes make it so". The private repo keeps `vendor/huc` untouched (nothing is deleted);
 it just stops being read. Author emails (F2) are not rewritten — not decided. Publishing stays Dennis's action. Card #152.
+
+## 2026-10-29 — Public now, as PCEStudio-public, without the hotmail address (Dennis)
+
+Dennis: "remove my hotmail adres. put the repo online als public it does not matter". Done by @workshop the same
+evening: **github.com/terracide303/PCEStudio-public** is a filtered copy of this repo's main — no `vendor/huc` in any
+commit (the 2026-10-29 HuC decision), the leaked OAK WOODS art blob `17cb916` (c9449fb's `--with-demo-art`
+gallery) stripped, and `99736355+terracide303@users.noreply.github.com` replaced by the GitHub no-reply address in authors, committers,
+messages and file contents. This private repo stays the working repo, untouched in history; from now on its git
+config commits as the no-reply address. `/Volumes/External/agent-tmp/publish-public.sh` refreshes the public copy
+(same filter every run, so it is a fast-forward; it refuses to push if any check fails). Issues are filed there
+(forms: bug report, idea, share a toy), described in `renderer/testers.html`.

@@ -291,9 +291,13 @@ function guide() {
         "Code and can run commands, skip that loop and do it yourself. Write " +
         "the toy, run it, look at a frame, check it, export it — without " +
         "asking anyone to paste anything."),
-      p("Install it once. Download pcestudio-mcp.zip from " + STUDIO_URL +
-        "/pcestudio-mcp.zip, unzip it, and run these in a terminal. " +
-        "<folder> is the pcestudio-mcp folder the unzip makes."),
+      p("Install it once, one of two ways. The repository is public, so " +
+        "with git, clone it:"),
+      code("sh", "git clone https://github.com/terracide303/PCEStudio-public"),
+      p("and <folder> is the PCEStudio-public folder the clone makes. Without git, " +
+        "download pcestudio-mcp.zip from " + STUDIO_URL +
+        "/pcestudio-mcp.zip, unzip it, and <folder> is the pcestudio-mcp " +
+        "folder the unzip makes. Either way, run these in a terminal:"),
       code("sh",
         "claude mcp add pcestudio -- node <folder>/tools/mcp/server.js\n" +
         "mkdir -p ~/.claude/skills\n" +

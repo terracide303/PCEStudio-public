@@ -41,10 +41,11 @@
  *      the sound example needs no song, pad buttons and keys are named apart,
  *      the four missing refusal codes are in section 9, and no internal card
  *      number or personal attribution survives in the stranger-facing page.
- *   9. The guide opens with the MCP route (#142): the download URL, the
- *      `claude mcp add` line, the skill to link, and every tool
- *      tools/mcp/server.js's TOOLS array has — the list is read from the
- *      server, so a tool it gains without the guide naming it fails here.
+ *   9. The guide opens with the MCP route (#142): the repository clone URL,
+ *      the download URL (the route without git), the `claude mcp add` line,
+ *      the skill to link, and every tool tools/mcp/server.js's TOOLS array
+ *      has — the list is read from the server, so a tool it gains without
+ *      the guide naming it fails here.
  *
  * Written by @design because the card names this file.  Per workshop rule 2
  * a cold break by another seat is owed before it closes the card.
@@ -721,6 +722,9 @@ function checkMcpSection() {
   check(sec.length > 0, "the MCP section is in the generated Markdown");
 
   const url = guide.STUDIO_URL + "/pcestudio-mcp.zip";
+  check(sec.includes("git clone https://github.com/terracide303/PCEStudio-public"),
+        "the section offers the clone of the now-public repository (#146 " +
+        "draft)");
   check(sec.includes(url), "the section gives the download: " + url);
   check(sec.includes("claude mcp add pcestudio -- node <folder>/tools/mcp/server.js"),
         "the section gives the exact install command");
