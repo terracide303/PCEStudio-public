@@ -6907,6 +6907,27 @@ function toySource(file) {
   return fs.readFileSync(path.join(TOYS_DIR, file), "utf8");
 }
 
+/* #157: the Open popover's markup, from its opening <div> to the matching
+ * </div>.  The stub DOM does not parse the static markup, and grepping the
+ * page for "#<digits>" would match the maintenance comments, so the text
+ * check strips comments and tags first and reads only what a stranger sees. */
+function openPopoverMarkup(html) {
+  const start = html.indexOf('<div class="popover" id="open-pop"');
+  if (start < 0) return "";
+  const re = /<div\b|<\/div>/g;
+  re.lastIndex = start;
+  let depth = 0, m;
+  while ((m = re.exec(html))) {
+    if (m[0] === "</div>") {
+      depth--;
+      if (depth === 0) return html.slice(start, m.index + m[0].length);
+    } else {
+      depth++;
+    }
+  }
+  return html.slice(start);
+}
+
 function checkGallery(page) {
   const S = page.sandbox.PCEStudio;
   const studio = S.studio;
@@ -6924,15 +6945,16 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  /* #128 added OAK WOODS, #127 CAVE, #125 CITY and #147 PLATFORMER and TOWER
-   * — five demos besides the sky gradient (#29) and STARFALL; #151 added
-   * DUSK RUN and took the other four #29 effects out of Browse (their toys
-   * stay in toys/).  Browse and the studio read the same generated list. */
-  check(data.length === 8,
-        "the gallery carries the sky gradient, STARFALL, OAK WOODS, CAVE, " +
-        "CITY, PLATFORMER, TOWER and DUSK RUN (got " + data.length + ")");
+  /* #128 added OAK WOODS, #125 CITY and #147 PLATFORMER and TOWER — four
+   * demos besides the sky gradient (#29) and STARFALL; #151 added DUSK RUN
+   * and took the other four #29 effects out of Browse (their toys stay in
+   * toys/); #159 removed CAVE.  Browse and the studio read the same
+   * generated list. */
+  check(data.length === 7,
+        "the gallery carries the sky gradient, STARFALL, OAK WOODS, CITY, " +
+        "PLATFORMER, TOWER and DUSK RUN (got " + data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
-     ["sky-gradient", "starfall", "oak-woods", "cave", "city", "platformer",
+     ["sky-gradient", "starfall", "oak-woods", "city", "platformer",
       "tower", "dusk-run"]);
   /* #125: the committed gallery carries CITY's art-free toy — the playable
    * file with the pack's picture is demo-art/city/main.lua and only the
@@ -7060,6 +7082,56 @@ function checkGallery(page) {
      "main.lua,tiles.json,palettes.json,sprites.json");
   check(studio.current().source === toySource("demo-game/main.lua"),
         "#121: … and the game's own main.lua");
+  /* #157: Open… is the Browse gallery — the same ids in the same order, each
+   * button carrying the id the page opens — and the three test toys are not
+   * in it.  The same assertion is run on the pre-#157 list as a control: it
+   * must fail, or the check proves nothing about the change. */
+  const menuIds = (menu ? menu.children : [])
+    .filter((el) => el.getAttribute && el.getAttribute("data-example-id"))
+    .map((el) => el.getAttribute("data-example-id"));
+  const galleryIds = data.map((t) => t.id);
+  eq("#157: Open… lists the gallery's toys, in the gallery's order",
+     menuIds, galleryIds);
+  /* The pre-#157 menu was the three test examples plus the first gallery toy
+   * that carries files (STARFALL, #121).  The same equality check, fed that
+   * list, must say NO — otherwise it proves nothing about the change. */
+  const oldMenuIds = studio.examples.map((e) => e.id);
+  const oldPlayable = data.find((t) => t.files && t.files.length);
+  if (oldPlayable) oldMenuIds.push(oldPlayable.id);
+  const oldMatches = oldMenuIds.length === galleryIds.length &&
+    oldMenuIds.every((id, i) => id === galleryIds[i]);
+  check(!oldMatches,
+        "#157: control — the pre-#157 menu's list fails that check (" +
+        oldMenuIds.join(", ") + ")");
+  check(galleryIds.indexOf("palette") < 0 &&
+        galleryIds.indexOf("raster") < 0 &&
+        galleryIds.indexOf("sprite") < 0,
+        "#157: the three test-only examples are not gallery ids");
+  const skyBtn = (menu ? menu.children : []).find(
+    (el) => el.getAttribute &&
+          el.getAttribute("data-example-id") === "sky-gradient");
+  if (skyBtn) skyBtn.click();
+  eq("#157: the Open… button opens the gallery's toy", studio.current().id,
+     "sky-gradient");
+  check(studio.current().source === toySource("sky-gradient.lua"),
+        "#157: … with the toy's own main.lua");
+
+  /* #157: every caption a stranger reads — the static popover with its HTML
+   * comments removed, plus the entries and link built into the list — names
+   * no card number, no test file and no "envelope". */
+  const rawPage = fs.readFileSync(PAGE, "utf8");
+  const staticText = openPopoverMarkup(rawPage).replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+  const dynamicText = (menu ? menu.children : [])
+    .map((el) => el.textContent || "").join(" ");
+  const menuText = staticText + " " + dynamicText;
+  check(!/#\d/.test(menuText),
+        "#157: the Open… menu names no card number (" +
+        JSON.stringify((menuText.match(/#\d+/g) || []).join(", ")) + ")");
+  check(menuText.indexOf("tests/") < 0,
+        "#157: the Open… menu names no test file");
+  check(!/envelope/i.test(menuText),
+        "#157: the Open… menu does not say 'envelope'");
   studio.loadExample("palette", true);   /* leave the page on a #29 toy */
 
   const miss = runPage("?toy=no-such-toy&paused=1");
@@ -7075,7 +7147,7 @@ function checkGallery(page) {
   const cards = B.cards();
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
-     ["sky-gradient", "starfall", "oak-woods", "cave", "city", "platformer",
+     ["sky-gradient", "starfall", "oak-woods", "city", "platformer",
       "tower", "dusk-run"]);
   /* #125: the committed CITY card runs the art-free toy, so it draws no
    * picture here; the deployed gallery carries the playable file and does.
@@ -7103,7 +7175,7 @@ function checkGallery(page) {
   {
     const demo = process.env.DEMO_ART ||
       "/Volumes/External/agent-workshop-demo/demo-art";
-    const present = ["oak-woods", "cave", "city"].every((id) =>
+    const present = ["oak-woods", "city"].every((id) =>
       fs.existsSync(path.join(demo, id, "sources.json")));
     if (present) {
       const galleryTool = require(path.join(RENDERER, "..", "tools",
@@ -7138,7 +7210,7 @@ function checkGallery(page) {
       const samePixels = (a, b) => !!a && !!b &&
         a.pixels.length === b.pixels.length &&
         a.pixels.every((p, i) => p === b.pixels[i]);
-      for (const id of ["oak-woods", "cave", "city"]) {
+      for (const id of ["oak-woods", "city"]) {
         const t = gdata.toys.find((x) => x.id === id) || {};
         eq("#156: the deployed gallery's " + id + " is a folder of five",
            (t.files || []).map((f) => f.name),
@@ -7199,7 +7271,7 @@ function checkGallery(page) {
         }
         const Gv = sandbox.PCEStudio.gallery;
         const toysV = sandbox.PCEStudio.galleryData.toys;
-        for (const id of ["oak-woods", "cave", "city"]) {
+        for (const id of ["oak-woods", "city"]) {
           const t = toysV.find((x) => x.id === id) || {};
           let frame = null, err = null;
           try {
@@ -7320,15 +7392,11 @@ function checkGallery(page) {
      ["sky-gradient"]);
   B.setQuery("PCEStudio");
   eq("search by author finds the toys PCEStudio made", B.visible(),
-     B.toys().map((t) => t.id).filter((id) => id !== "cave"));
-  /* #127: the cave's card carries the pack's author, because the pack's
-   * licence asks for attribution — and the search can find it there */
-  B.setQuery("Will Tice");
-  eq("the CAVE card is found by the pack's author", B.visible(), ["cave"]);
+     B.toys().map((t) => t.id));
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["cave", "city", "dusk-run", "oak-woods", "platformer", "sky-gradient",
+     ["city", "dusk-run", "oak-woods", "platformer", "sky-gradient",
       "starfall", "tower"]);
   B.setSort("written");
 
