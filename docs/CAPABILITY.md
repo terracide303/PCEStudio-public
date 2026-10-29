@@ -55,7 +55,7 @@ The two milestones Dennis asked for:
 | LAYERS panel (stacking, priority, palette fades) | RUNNING | a seat is building it now | #93 |
 | AUDIO panel (the 6 voices live) | RUNNING | a seat is building it now | #97 |
 | CONSOLE panel ("can this run on a real PC Engine?") | PROVEN | `check-studio.js` `checkConsolePanel`: the palette example is green with a measured ROM size; `reg("NOPE",0)` on line 4 is red with range and C-emitter findings, and the `main.lua:4` link moves the editor cursor there; a 20,000-iteration frame is red on the frame budget. Board lists #98 as done; rule 2 is owed, and the numbers are the validator's static model, not a Mednafen/ares capture | #98 |
-| ASSETS: memory bars, sheets, songs, 15 built-in instruments | RUNNING | a seat is building it now | #99 |
+| ASSETS: memory bars, sheets, songs, 15 built-in instruments | PROVEN | `check-assets.js` 246 checks: fifteen built-ins play through `pce-psg.js` at their register's pitch, the three bars (VRAM/CGRAM/ARAM) are the toy's measured use, and Add to toy writes `instruments.json`; the board card #99 is still open (its seat finished without ticking it) and rule 2 is owed | #99 |
 | Details: DISPLAY tab, light theme, Raw output, Guide links, Panels menu | RUNNING | a seat is building it now | #87 |
 | Browse: a gallery of the example toys | TODO | | #80 |
 | Debug panels and follow a pixel (the earlier text panels) | PROVEN | `check-panels.js` 49,158 checks; breaker gaps closed | #26, #56 |
@@ -110,7 +110,7 @@ The two milestones Dennis asked for:
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone (`0d31701`, 2026-10-29): 34 PASS, 1 SKIP (check-ares, no screen), 0 FAIL | #83, #108, #109 |
+| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone (`582c2dd`, 2026-10-29): 35 PASS, 1 SKIP (check-ares, no screen), 0 FAIL; #99's `check-assets.js` counted for the first time | #83, #108, #109 |
 | Every new test broken by a different seat (rule 2) | PROVEN | `docs/REVIEW-*.md`; each miss became a card and is closed | rule 2 |
 | Every manual read and mapped to a card | PROVEN | `docs/MANUALS.md` | #44, #55 |
 | Phase 1 read cold by a reviewer | PROVEN | `docs/REVIEW.md`: 12 ranked findings, each fixed in #38/#39 with a test | #11 |
