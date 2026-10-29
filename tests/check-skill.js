@@ -24,7 +24,10 @@
  *   5. The recipes that teach something measurable are measured: the sprite
  *      recipe's picture CHANGES when pad 1's right is held; the song recipe
  *      records PSG writes; the fix recipe's `-before` file is REFUSED with
- *      validate-sprite-line and its fixed file is clean.
+ *      validate-sprite-line and its fixed file is clean; the source_add
+ *      recipe's `-- GRID` line becomes a sprite (source_add) that the recipe
+ *      then places — the picture before the add is the sky at that pixel,
+ *      after it the grid's red.
  *   6. One recipe exports: export_pce writes a .pce under $TMPDIR and the
  *      bytes are there.
  *   7. The cold-seat transcript (docs/SKILL-TRANSCRIPT.md) carries the
@@ -142,6 +145,18 @@ function diffBytes(a, b) {
 /* VCE 9-bit colour -> RGB, the renderer's own table (renderer/pce-bg.js). */
 function cramRgb(word) {
   return [36 * ((word >> 3) & 7), 36 * ((word >> 6) & 7), 36 * (word & 7)];
+}
+
+function pixelOf(img, x, y) {
+  const o = (y * img.width + x) * 3;
+  return [img.pixels[o], img.pixels[o + 1], img.pixels[o + 2]];
+}
+
+/* Recipe 06's picture travels on a -- GRID {json} comment line, so the
+ * recipe stays one file and this test adds it exactly as an agent would. */
+function gridOf(source) {
+  const m = /-- GRID (\{.*\})/.exec(source);
+  return m ? JSON.parse(m[1]) : null;
 }
 
 /* Pixels that are not the backdrop.  CRAM[0] is read from the SERVER
@@ -286,13 +301,14 @@ function firstLuaBlock(text) {
            "name: creating-pce-toys");
   check(/description:\s*\S/.test(fm ? fm[1] : ""),
         "the skill's frontmatter has a description");
-  eq("the skill's directory holds five fixed recipes and one broken one",
-     [FIXED.length, BEFORE.length], [5, 1]);
+  eq("the skill's directory holds six fixed recipes and one broken one",
+     [FIXED.length, BEFORE.length], [6, 1]);
   for (const name of recipeFiles) {
     contains("SKILL.md names the recipe file " + name, skillText, name);
   }
   for (const task of ["Parallax", "sprite on the pad", "sky gradient",
-                      "song in a toy", "Fixing a console finding"]) {
+                      "song in a toy", "Fixing a console finding",
+                      "sprite from a PNG"]) {
     contains("SKILL.md carries the recipe \"" + task + "\"", skillText, task);
   }
 
@@ -327,8 +343,8 @@ function firstLuaBlock(text) {
     /* 3 — every tool the skill names is one the server publishes */
     const list = await client.request("tools/list", {});
     const tools = (list.result.tools || []).map((t) => t.name);
-    for (const tool of ["toy_write", "toy_run", "frame_png", "validate",
-                        "export_pce", "docs"]) {
+    for (const tool of ["toy_write", "toy_run", "source_add", "frame_png",
+                        "validate", "export_pce", "docs"]) {
       contains("SKILL.md tells the agent about " + tool, skillText, tool);
       check(tools.indexOf(tool) >= 0,
             "the server publishes the tool " + tool + " that SKILL.md names");
@@ -336,6 +352,9 @@ function firstLuaBlock(text) {
 
     /* 4 and 5 — every fixed recipe, through the server */
     for (const name of FIXED) {
+      /* the source_add recipe needs its -- GRID line added first; its own
+       * block below does that, so the generic loop skips it */
+      if (name.indexOf("06-") === 0) continue;
       const source = recipeSource(name);
       const w = await client.call("toy_write", {
         files: [{ name: "main.lua", source: source }]
@@ -395,7 +414,7 @@ function firstLuaBlock(text) {
 
       if (name.indexOf("01-parallax") === 0) {
         /* SKILL.md states the export route is background-only and that a
-         * table makes export_pce refuse.  All five recipes use tables, so
+         * table makes export_pce refuse.  All six recipes use tables, so
          * the refusal is the documented, tested behaviour — and a
          * background-only toy is exported to prove the route itself works. */
         const refused = await client.call("export_pce", { name: "parallax" });
@@ -417,6 +436,54 @@ function firstLuaBlock(text) {
         if (!e.isError) {
           check(fs.existsSync(out) && fs.statSync(out).size > 0,
                 "export_pce wrote the .pce (" + e.body.bytes + " bytes)");
+        }
+      }
+    }
+
+    /* 6 — the source_add recipe: its -- GRID line becomes a sprite */
+    const six = recipeSource("06-add-a-sprite-from-a-png.lua");
+    const grid = gridOf(six);
+    check(!!grid, "recipe 06 carries its picture as a -- GRID line");
+    if (grid) {
+      await client.call("toy_write", {
+        files: [{ name: "main.lua", source: six }]
+      });
+      const before = imageOf(
+        await client.call("frame_png",
+          { frame: (await client.call("toy_run", { frames: 60 })).body.frame }));
+      eq("before source_add the sprite's spot is the sky",
+         pixelOf(before, 68, 36), cramRgb(7));
+      const add = await client.call("source_add", {
+        kind: "sprites", name: "square",
+        grid: { width: grid.width, height: grid.height, pixels: grid.pixels },
+        palette: grid.palette
+      });
+      check(!add.isError && add.body.ok, "the recipe's grid adds as sprites" +
+            (add.isError ? " (" + JSON.stringify(add.body) + ")" : ""));
+      const run = await client.call("toy_run", { frames: 60 });
+      check(!run.isError, "the recipe runs 60 frames with its sprite");
+      if (!run.isError) {
+        const img = imageOf(await client.call("frame_png", { frame: 59 }));
+        const backdrop = await backdropOf(client);
+        const vis = visibleCount(img, backdrop);
+        check(vis > VISIBLE_MIN,
+              "the recipe with its sprite is VISIBLE at frame 59 (" +
+              vis + " non-backdrop pixels)");
+        const shades = distinctColours(img);
+        check(shades >= 3,
+              "the recipe with its sprite is a picture, not a blank screen (" +
+              shades + " distinct colours)");
+        eq("the imported sprite's pixel is the grid's red",
+           pixelOf(img, 68, 36), [252, 0, 0]);
+        eq("the grid's white centre is where the grid put it",
+           pixelOf(img, 72, 40), [252, 252, 252]);
+        eq("toy_run reports the import: one sprite placed",
+           run.body.assets && run.body.assets.sprites, 1);
+        const v = await client.call("validate", { frames: 8 });
+        check(!v.isError, "the recipe with its sprite passes the console check");
+        if (!v.isError) {
+          eq("the recipe with its sprite is validator-CLEAN (zero findings)",
+             v.body.problems, []);
         }
       }
     }
