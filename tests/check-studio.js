@@ -1020,9 +1020,14 @@ function checkFiles(page) {
   check(moved > 0, "an edit to the editor's text changes the frame it runs (" +
         moved + " bytes moved in frame 2)");
 
-  /* An asset edit must not become the Lua that runs. */
+  /* An asset edit must not become the Lua that runs.  Since #117 the files
+   * are also the toy's starting VRAM/CRAM, so the edit is a VALID tiles.json
+   * (one blank tile) — an unreadable one is refused by the importer when the
+   * runtime is rebuilt, which is a different check (the refusal is the
+   * panels' asset-shape, not this round-trip's subject). */
   studio.selectFile("tiles.json");
-  const assetText = '{"version":1,"tiles":[{"char":64,"palette":0}]}\n';
+  const assetText = '{"version":1,"tiles":[{"char":64,"palette":0,"pixels":[' +
+    new Array(64).fill(0).join(",") + ']}]}\n';
   studio.setEditorText(assetText);
   check(studio.current().source === edited,
         "editing an asset file leaves the running Lua unchanged");
