@@ -112,7 +112,7 @@ Two first-hit aborts sit between the page and the truth:
 1. `pce-cgen.js:489` refuses the **first** IL instruction it cannot lower and
    throws. STARFALL's first is the `table` for the `DIGIT` digit-code array at
    `main.lua:47`.
-2. That error sets `errors > 0`, and `renderer/studio.html:3838` returns
+2. That error sets `errors > 0`, and `renderer/studio.html:3982` returns
    before the encoder is ever called — so the page never reports what
    `pce-ilbc.js` (route 1, the backend the Export actually uses) would say.
    Asked directly, `pce-ilbc.js` refuses with `ilbc-op: instruction table
@@ -346,7 +346,7 @@ watched to go red. The real repo was never edited for this.
 |-------|------|--------------|----------|
 | M1 | `pce-ilbc.js` `OPS` gains `table` | `table` is no longer route-1-refused | FAIL: `table: … got 44 instructions, ilbc 0` (and the four citation guards on that file, shifted by the insert) |
 | M2 | `pce-cgen.js` allow-list gains `table` | the `cgen-global` probe accepts | FAIL: "a table-typed global is refused with cgen-global — the emitter accepted it" |
-| M3 | `studio.html` early return disabled | the page-verdict citation | FAIL: `studio.html:3838 holds 'if (errors) return'` and "early return comes before the encoder — return at -1" |
+| M3 | `studio.html` early return disabled | the page-verdict citation | FAIL: `studio.html:3982 holds 'if (errors) return'` and "early return comes before the encoder — return at -1" |
 | M4 | `pce-rom.js` `BANK` 8 KiB → 16 KiB | the capacity projection | FAIL: projections are no longer OVER (`[[3,8585,false],…]`) |
 
 M1's cascade is the citation guard doing its job: a one-line insert in
