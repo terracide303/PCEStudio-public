@@ -1,0 +1,51 @@
+/*
+ * studio-panel-sprites.css — the SPRITES panel's own styles (card #86).
+ *
+ * The panel's chrome (tools, heads, lines, the palette strip) is the SCREEN
+ * panel's classes, which studio.html already defines; this file holds only
+ * what #86 adds, so the two panels look like one studio and the page's style
+ * block keeps nothing of this panel (#102's split).  Colours come from the
+ * page's tokens, so both themes work.
+ */
+
+.spr-cols { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.spr-main { min-width: 0; }
+.spr-side { display: flex; flex-direction: column; gap: 5px; }
+
+.spr-headline {
+  display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline;
+  font: 11px var(--mono); color: var(--text2); margin-bottom: 6px;
+}
+.spr-headline b { color: var(--text); font-weight: 600; }
+.spr-headline span { color: var(--dim); }
+
+#spr-screen {
+  display: block; image-rendering: pixelated; background: #08090c;
+  border: 1px solid var(--line); cursor: grab;
+}
+#spr-screen:focus { outline: 1px solid var(--accent, #5fc9e8); }
+#spr-screen:active { cursor: grabbing; }
+
+.spr-live, .spr-note {
+  font: 10px/1.4 var(--mono); color: var(--dim); margin-top: 4px;
+  white-space: pre-wrap;
+}
+.spr-note { color: var(--cyan); }
+
+#spr-slots, #spr-sheet, #spr-pattern {
+  display: block; image-rendering: pixelated; background: #08090c;
+  border: 1px solid var(--line); cursor: pointer;
+}
+#spr-pattern { cursor: crosshair; }
+#spr-pattern:focus { outline: 1px solid var(--accent, #5fc9e8); }
+
+.spr-palette { display: flex; gap: 1px; }
+.spr-palette .spr-sw {
+  width: 13px; height: 13px; box-sizing: border-box; cursor: pointer;
+  border: 1px solid var(--line2);
+}
+.spr-palette .spr-sw.entry0 {
+  border: 1px dashed #89909c;
+  background: repeating-linear-gradient(45deg, #1a1c22 0 3px, #101216 3px 6px);
+}
+.spr-palette .spr-sw.is-on { border-color: var(--text); }
