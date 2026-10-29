@@ -143,7 +143,10 @@ frames. `t` is deterministic (`f/60`), not wall-clock: a frame is reproducible.
 | `raster(line, spec)` | one raster-table entry (table form) | line 0..223, `raster-line` |
 | `pad[n].up/down/left/right/i/ii/select/run` | 2-button pad n (1..5), refreshed before `frame` | read-only booleans |
 | `rgb(r, g, b)` | a VCE word from 3-bit channels | channels are masked to 0..7 |
-| `note(name or MIDI)` | the PSG's 12-bit F for a note (sound is #71) | `toy-error` on a bad name |
+| `note(name or MIDI)` | the PSG's 12-bit F for a note | `toy-error` on a bad name |
+| `music(index)` | play song `index` from the start (#71) | an index into the songs the runtime was given; none or past them is `music-range` |
+| `sfx(channel, freq, volume, frames)` | take `channel`, play a 32-step square at F = `freq`, AL = `volume`, for `frames` frames, then give it back | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 (`sfx-range`) |
+| `release(channel)` | give a channel back now; the music waits for a fresh note | channel 0..5 (`sfx-range`); a channel no SFX owns is left alone |
 | `password.pack(v)` / `password.unpack(code)` | a save as a short code | `password-value` / `password-code` |
 | `print(...)` | the page's log (not the console) | captured, 200 lines |
 
@@ -219,6 +222,63 @@ contract applied to a code instead of a save medium.
 There is no `bram`: the card's old title mentioned it, the description and
 Dennis's decision supersede it.
 
+### Sound in toys (#71)
+
+A toy makes sound with the same model the rest of PCEStudio uses,
+`renderer/pce-psg.js` (#34), and the same player the tracker route does,
+`renderer/pce-song.js` (#35). It does not get a synth of its own.
+
+**Songs.** `toys.create(source, {songs: [song, ...]})` gives the toy a list of
+songs in the shape `renderer/pce-dmf.js` returns (a module the page read with
+`pce-dmf.read`/`parse`). `music(index)` starts one — HuTrack's `playSong`,
+which resets the engine (the two power-on rounds, 446 writes) and then runs
+one VBlank per toy frame. Calling it again restarts. A song index the runtime
+was not given is `music-range`, and a runtime given no songs at all refuses
+the same way rather than playing silence.
+
+**SFX and the channel hand-off.** `sfx(channel, freq, volume, frames)` hands
+one PSG channel to an SFX and `release(channel)` hands it back, as
+`HuTrackEngine.setChanForSFX` / `chanReleaseSFX` do
+(`vendor/hutrack/.../compatibility.md`, "SFX channel ownership"):
+
+- **reserve** writes the channel's select, control 0, noise off, the LFO off
+  on channels 0/1 (the hardware couples them) and balance both sides full;
+- the **SFX** loads a 32-step square in `.copy.wave`'s shape (the DDA/wave
+  toggles reset the PSG's wave pointer, the 32 R6 writes fill it), then sets
+  F and AL, and is **given back automatically** after `frames` frames;
+- during the SFX **the music keeps advancing its logical state** (rows, order,
+  envelopes) but writes nothing to that channel — HuTrack's four write paths
+  (frequency, waveform, control, DDA) all test the reservation;
+- **release** silences the channel and does not resume the middle of a held
+  note: the music **waits for the next note row** on that channel, and that
+  fresh note reloads the instrument's waveform (all 32 steps) even when it has
+  not changed, exactly as the engine does. A repeated release is harmless and
+  never silences a channel the music owns.
+
+The whole hand-off lives in `pce-song.js` (`createPlayer`'s `reserve`/
+`release` and its `sfx`/`waitNote` gating), so the engine has one
+implementation for the batch `trace()` and the live toy alike.
+
+**Order within a frame.** The PSG writes of a frame are recorded in the order
+a console would make them: the song's VBlank tick (and an expired SFX's
+release) first, at `beginFrame`, then whatever the toy's `frame()` asks for —
+the display period after the interrupt. Within a frame each write is 12 CPU
+cycles after the one before (`pce-song.js`'s order-preserving default), and a
+song started in `init()` shares frame 0's column order with that frame's
+first tick, so no two writes claim the same instant.
+
+**Limits.** 6 channels; F is the PSG's 12-bit divider (`note()` returns it; the
+same value from a MIDI number in both runtimes); volume is AL, 0..31; an SFX
+lasts 1..600 frames. The SFX waveform is fixed (a square) — a toy with more
+than one effect shape is a later card. The recording keeps
+`SOUND_EVENTS_MAX` = 65,536 writes per runtime and then stops recording
+(`sound.overflow`), because the browser's real-time playback (#78) will feed
+the PSG incrementally instead of keeping the whole session.
+
+**Not in this half.** Effect columns, arpeggios and DDA/PCM samples in the
+player are the second half of #71; `pce-song.js` still refuses such a song by
+code (`song-fx`, `song-arp`, `song-pcm`).
+
 ---
 
 ## 3. One model, one host
@@ -241,9 +301,13 @@ which composes the background through `renderer/pce-bg.js`. `tests/check-toys.js
 also asserts that a runtime frame is byte-identical to calling
 `sprites.renderFrame(runtime.options())` directly.
 
-`renderer/pce-psg.js` is deliberately not wired: sound in toys is #71. When it
-arrives it gets its own host surface (`psg`, `voice`) over the one PSG model;
-`note()` already returns the PSG's F for it.
+`renderer/pce-psg.js` is wired since #71, and not as a second sound model:
+the host records every PSG write the toy's music and SFX make as
+`{f, t, reg, value}` — the event shape `pce-psg.js` already takes — and
+`runtime.renderSound(count)` is that model's PCM for them. The two modules
+are resolved when a host is created, not when `pce-toyhost.js` loads, so a
+page may load them in any order; a page that never loads them still runs
+its toys and refuses sound with `no-psg`.
 
 ---
 
@@ -267,7 +331,7 @@ per-file judgement are in `vendor/ppu-toys/VENDORED.md`.
 
 ## 5. Evidence
 
-`node tests/check-toys.js` exits 0 with **718 checks**:
+`node tests/check-toys.js` exits 0 with **790 checks**:
 
 - three toys run **40 frames** each, and for every frame:
   - the runtime's `vram`, `cram`, `sat` and `regs` equal arrays built by hand
@@ -287,6 +351,20 @@ per-file judgement are in `vendor/ppu-toys/VENDORED.md`.
 - the sandbox: `os`, `io`, `require`, `dofile`, `loadfile`, `package`, `debug`
   and `coroutine` are nil inside a toy; `print` goes to the captured log.
 - the password round trip, determinism, and that numbers differ in the code.
+- **sound (#71)**: a fourth toy (`TOY_SOUND`, 21 frames) starts a song in
+  `init()` and fires an SFX on channel 0 when I is pressed. The test builds
+  every expected PSG write from the engine's own rules, not from the player:
+  both Reset rounds (446 writes), `SetFrequency`, `.copy.wave`'s upload, the
+  amplitude write, reserve's five, the square's 32 R6 steps and F/AL, and
+  release's four. The runtime's recording equals it write for write (frame,
+  order, register, value), including the frames where the music is silent
+  under the SFX (11..14 write nothing), the release frame (15 writes only the
+  release), and the resumed note (16 reloads all 32 wave steps). The PCM is
+  `psg.render()`'s output for those same writes and is not silence. The IL
+  runtime runs the same toy to the same writes and the same PCM (Lua == IL).
+  Refusals: `music-range` (a song index past the list, or no songs at all),
+  `sfx-range` (channel 6, F 4096, volume 32, 0 frames, `release(6)`), from
+  both runtimes.
 - the page's wiring: `renderer/toys.html`'s declared scripts and inline script
   are executed in a stub DOM (the `check-editor.js` pattern, no jsdom), the Run
   button is clicked and four `requestAnimationFrame` ticks are pumped; the page

@@ -87,7 +87,10 @@
     "call": 48, "ret": 3, "closure": 18, "getupval": 18, "setupval": 8,
     "forprep": 24, "fornext": 48, "reg": 24, "pal": 28, "sat": 24,
     "sprite": 28, "raster": 24, "print": 24, "vget": 28, "vset": 28,
-    "padref": 8, "padget": 8, "builtin": 36
+    "padref": 8, "padget": 8, "builtin": 36,
+    /* #71: sound, priced where the other host calls are — the box's own
+     * budget is #88's question, not this estimate's */
+    "music": 64, "sfx": 64, "release": 24
   };
   /* arith's op chooses the row (`mul`, `mod`, `div` are the expensive ones) */
   /* ---- bytes per static IL op, for the ROM estimate -------------------- */
@@ -104,7 +107,8 @@
     "call": 15, "ret": 3, "closure": 23, "getupval": 9, "setupval": 6,
     "forprep": 20, "fornext": 36, "reg": 12, "pal": 14, "sat": 15,
     "sprite": 18, "raster": 18, "print": 15, "vget": 14, "vset": 14,
-    "padref": 8, "padget": 8, "builtin": 17, "function": 10
+    "padref": 8, "padget": 8, "builtin": 17, "function": 10,
+    "music": 12, "sfx": 20, "release": 9
   };
   var MODIFIER_OPS = { "mul": true, "mod": true, "div": true };
 

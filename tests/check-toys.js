@@ -31,6 +31,14 @@
  * that must fire; and the 200-character code cap is pinned at its boundary
  * (200 accepted, 201 refused) with a 3 KB table that decodes cleanly.
  *
+ * #71 adds a fourth toy with sound: it starts a song (a small song written
+ * in the shape renderer/pce-dmf.js hands the player) and fires an SFX on
+ * channel 0 when I is pressed.  The PSG writes it makes are compared with
+ * the engine's own rules transcribed here (the two Reset rounds, the wave
+ * upload, the reserve/release hand-off), the PCM with renderer/pce-psg.js's
+ * output for those writes, the resume on a fresh note after the release,
+ * and the whole run with the IL runtime's (Lua == IL).
+ *
  * Written by @design because the card names this file. Per workshop rule 2 a
  * cold break by another seat is owed before this closes the card.
  */
@@ -41,6 +49,9 @@ const path = require("path");
 const bg = require("../renderer/pce-bg.js");
 const sprites = require("../renderer/pce-sprites.js");
 const toys = require("../renderer/pce-toys.js");
+const il = require("../renderer/pce-il.js");
+const psg = require("../renderer/pce-psg.js");
+const pceSong = require("../renderer/pce-song.js");
 
 const WIDTH = 256;
 const HEIGHT = 224;
@@ -1001,6 +1012,280 @@ function checkPage() {
         "no error after the frames: " + element("error").textContent);
 }
 
+/* ---- #71: sound in toys ------------------------------------------------ */
+
+/* The song the toy plays, written here in the shape renderer/pce-dmf.js
+ * hands the player: two 16-row orders of channel 0, a C4 at the top of
+ * each, the other five channels silent, one row per frame
+ * (tick1 = tick2 = 1), an instrument with no envelopes and one waveform.
+ * Every PSG write the runtime makes is then one this file can predict from
+ * the engine's rules, not by asking the player. */
+const SONG_WAVE = (function () {
+  const w = [];
+  for (let i = 0; i < 32; i++) w.push((i * 7) & 0x1f);
+  return w;
+})();
+
+function emptyRow() {
+  return { note: null, instrument: null, volume: null, effects: [] };
+}
+
+function makeSong() {
+  const rows = [];
+  for (let r = 0; r < 16; r++) rows.push(emptyRow());
+  rows[0] = { note: { octave: 4, semitone: 0 }, instrument: 0,
+              volume: null, effects: [] };
+  const order0 = rows.map((r) => Object.assign({}, r));
+  const order1 = rows.map((r) => Object.assign({}, r));
+  const silent = rows.map(() => emptyRow());
+  const orderMatrix = [[0, 1]];
+  const patterns = [[order0, order1]];
+  for (let ch = 1; ch < 6; ch++) {
+    orderMatrix.push([0, 0]);
+    patterns.push([silent]);
+  }
+  return {
+    timeBase: 1, frameMode: 1, customHz: false, samples: [],
+    tick1: 1, tick2: 1, rowsPerPattern: 16, orderCount: 2,
+    orderMatrix: orderMatrix, patterns: patterns,
+    instruments: [{
+      volumeEnv: { size: 0, loop: 0xff, data: [] },
+      wavetableEnv: { size: 0, loop: 0xff, data: [] },
+      arpeggioEnv: { size: 0 }
+    }],
+    wavetables: [SONG_WAVE]
+  };
+}
+
+/* ---- the writes the engine makes, from its rules ---------------------- */
+
+/* HuTrackEngine.Reset, called twice (Init and playSong): $801 = $FF, then
+ * per channel select, $805 = $FF, control $40 then $00, noise off, 32 zero
+ * wave steps.  446 writes. */
+function resetPairs() {
+  const out = [];
+  const round = () => {
+    out.push([1, 0xff]);
+    for (let ch = 0; ch < 6; ch++) {
+      out.push([0, ch], [5, 0xff], [4, 0x40], [4, 0x00], [7, 0x00]);
+      for (let s = 0; s < 32; s++) out.push([6, 0]);
+    }
+  };
+  round();
+  round();
+  return out;
+}
+
+/* .copy.wave's upload: the DDA/off toggles reset the PSG's wave pointer,
+ * the 32 R6 writes fill it, and the last control write returns to the
+ * previous state (processState is last frame's control). */
+function uploadPairs(ch, wave, processState) {
+  const vol = processState & 0x1f;
+  const out = [[0, ch], [4, (processState & 0xe0) | vol], [4, vol | 0x40],
+               [4, vol]];
+  for (let i = 0; i < 32; i++) out.push([6, wave[i] & 0x1f]);
+  out.push([4, vol | 0x40]);
+  return out;
+}
+
+/* a note's frame: SetFrequency, the wave upload, the amplitude write */
+function notePairs(ch, period, wave, before, control) {
+  return [[0, ch], [2, period & 0xff], [3, (period >> 8) & 0x0f]]
+    .concat(uploadPairs(ch, wave, before))
+    .concat([[0, ch], [4, control]]);
+}
+
+/* every other frame of a held note: SetFrequency then the amplitude */
+function holdPairs(ch, period, control) {
+  return [[0, ch], [2, period & 0xff], [3, (period >> 8) & 0x0f],
+          [0, ch], [4, control]];
+}
+
+/* HuTrackEngine.setChanForSFX: control and noise off, the LFO off on
+ * channels 0/1, balance to both sides full */
+function reservePairs(ch) {
+  const out = [[0, ch], [4, 0x00], [7, 0x00]];
+  if (ch < 2) out.push([9, 0x00]);
+  out.push([5, 0xff]);
+  return out;
+}
+
+/* HuTrackEngine.chanReleaseSFX: control and noise off, the LFO off */
+function releasePairs(ch) {
+  const out = [[0, ch], [4, 0x00], [7, 0x00]];
+  if (ch < 2) out.push([9, 0x00]);
+  return out;
+}
+
+/* The SFX the toy asks for: the channel's reserve, then a 32-step square
+ * (the host's documented waveform: 16 full steps, 16 zero), then F and
+ * AL.  The balance is reserve's $FF, both sides full. */
+function sfxPairs(ch, freq, volume) {
+  const out = [[0, ch], [4, 0x40], [4, 0x00]];
+  for (let i = 0; i < 32; i++) out.push([6, i < 16 ? 31 : 0]);
+  out.push([0, ch], [2, freq & 0xff], [3, (freq >> 8) & 0x0f],
+           [4, 0x40 | volume]);
+  return out;
+}
+
+const SOUND_FRAMES = 21;
+const MELODY_F = 213;     /* C4: HuTrack BaseLo/Hi $0D5E at the reference
+                           * octave, >> 4 for octave 4 */
+const SFX_F = 427;        /* the F the toy asks for */
+const SFX_VOL = 31;
+const CTL = 0x9f;         /* the engine's control byte: AL 31 and its $80 */
+
+/* The toy: music from init(), an SFX on I (held frames 10..12, so it fires
+ * once), and a second release at frame 18, when the music owns channel 0
+ * again — HuTrack's "repeated release is harmless". */
+const TOY_SOUND = `
+function init()
+  music(0)
+end
+
+was_i = false
+
+function frame(t, f)
+  if pad[1].i and not was_i then
+    sfx(0, ${SFX_F}, ${SFX_VOL}, 5)
+  end
+  was_i = pad[1].i
+  if f == 18 then release(0) end
+end
+`;
+
+function expectedSound() {
+  const frames = [];
+  frames[0] = resetPairs().concat(notePairs(0, MELODY_F, SONG_WAVE, 0x00, CTL));
+  for (let f = 1; f <= 9; f++) frames[f] = holdPairs(0, MELODY_F, CTL);
+  frames[10] = holdPairs(0, MELODY_F, CTL)
+    .concat(reservePairs(0), sfxPairs(0, SFX_F, SFX_VOL));
+  for (let f = 11; f <= 14; f++) frames[f] = [];
+  frames[15] = releasePairs(0);
+  frames[16] = notePairs(0, MELODY_F, SONG_WAVE, CTL, CTL);
+  for (let f = 17; f < SOUND_FRAMES; f++) frames[f] = holdPairs(0, MELODY_F, CTL);
+  const events = [];
+  frames.forEach((pairs, f) => {
+    pairs.forEach((p, i) => {
+      events.push({ f: f, t: i * 12, reg: p[0], value: p[1] });
+    });
+  });
+  return { frames: frames, events: events };
+}
+
+/* Run the sound toy in one runtime; hand back the PSG writes per frame and
+ * the PSG model's PCM. */
+function runSoundToy(makeRuntime, song) {
+  const rt = makeRuntime(TOY_SOUND, { budgetMs: 250, songs: [song] });
+  rt.load();
+  const counts = [];
+  for (let f = 0; f < SOUND_FRAMES; f++) {
+    rt.setPad(1, f >= 10 && f < 13 ? { i: true } : {});
+    rt.frame(f);
+    counts.push(rt.sound.events.filter((e) => e.f === f).length);
+  }
+  const pcm = rt.renderSound(SOUND_FRAMES);
+  const out = { events: rt.sound.events.slice(), pcm: pcm.pcm,
+                sampleRate: pcm.sampleRate, counts: counts };
+  rt.dispose();
+  return out;
+}
+
+function checkSound() {
+  const song = makeSong();
+  const expect = expectedSound();
+
+  const lua = runSoundToy(toys.create, song);
+  eq("sound: the toy's PSG writes are the engine's, frame by frame",
+     lua.events, expect.events);
+  eq("sound: writes per frame", lua.counts,
+     expect.frames.map((p) => p.length));
+  eq("sound: the song starts with both Reset rounds and the first note",
+     lua.counts[0], 446 + 42);
+  eq("sound: the SFX takes channel 0 (reserve, a 32-step square, F and AL)",
+     lua.counts[10], 5 + 44);
+  eq("sound: no music writes while the SFX owns the channel",
+     lua.counts.slice(11, 15), [0, 0, 0, 0]);
+  eq("sound: release silences the channel and the music waits for a note",
+     lua.counts[15], 4);
+  eq("sound: the music resumes on the next fresh note, reloading the wave",
+     lua.counts[16], 42);
+  eq("sound: a second release, of a channel the music owns, writes nothing",
+     lua.counts[18], 5);
+  /* the resume's 32 R6 writes are the instrument's waveform again */
+  const resume = lua.events.filter((e) => e.f === 16)
+    .filter((e) => e.reg === 6);
+  eq("sound: the resume reloads all 32 wave steps",
+     resume.map((e) => e.value), SONG_WAVE.map((w) => w & 0x1f));
+
+  /* the PCM is renderer/pce-psg.js's own output for those writes */
+  const wantPcm = psg.render(expect.events, pceSong.FRAME_CYCLES,
+                             SOUND_FRAMES);
+  sameBytes("sound: the toy's PCM is the PSG model's prediction",
+            lua.pcm, wantPcm.pcm);
+  eq("sound: the PCM's sample rate", lua.sampleRate, psg.SAMPLE_RATE);
+  check(diffCount(lua.pcm, new Int16Array(lua.pcm.length)).n > 0,
+        "sound: the PCM is not silence");
+
+  /* Lua == IL: the same toy, the same song, the same writes and PCM */
+  const inIl = runSoundToy(il.create, song);
+  eq("sound: the IL runtime makes the same PSG writes as the Lua runtime",
+     inIl.events, lua.events);
+  eq("sound: the IL runtime writes the same count per frame",
+     inIl.counts, lua.counts);
+  sameBytes("sound: the IL runtime's PCM equals the Lua runtime's",
+            inIl.pcm, lua.pcm);
+
+  /* refusals, by code, from both runtimes where the code is the host's */
+  const load = (makeRuntime, source, opts) => {
+    let got = null;
+    try {
+      const rt = makeRuntime(source, opts);
+      rt.load();
+      rt.frame(0);
+    } catch (e) {
+      got = e;
+    }
+    return got;
+  };
+  const oneSong = { budgetMs: 250, songs: [song] };
+  eq("sound: music(1) with one song is music-range",
+     (load(toys.create, "function init() music(1) end", oneSong) || {}).code,
+     "music-range");
+  eq("sound: music(0) with no song given is music-range",
+     (load(toys.create, "function init() music(0) end",
+           { budgetMs: 250 }) || {}).code, "music-range");
+  for (const [name, src] of [
+    ["channel 6", "function init() sfx(6, 100, 10, 5) end"],
+    ["F 4096", "function init() sfx(0, 4096, 10, 5) end"],
+    ["volume 32", "function init() sfx(0, 100, 32, 5) end"],
+    ["0 frames", "function init() sfx(0, 100, 10, 0) end"],
+    ["release(6)", "function init() release(6) end"]
+  ]) {
+    eq("sound: " + name + " is sfx-range",
+       (load(toys.create, src, oneSong) || {}).code, "sfx-range");
+  }
+  eq("sound: the IL refuses music(1) with the same code",
+     (load(il.create, "function init() music(1) end", oneSong) || {}).code,
+     "music-range");
+  eq("sound: the IL refuses sfx(6, ...) with the same code",
+     (load(il.create, "function init() sfx(6, 100, 10, 5) end",
+           oneSong) || {}).code, "sfx-range");
+
+  /* note() is the F a toy feeds sfx(): 7,159,090 / (64 * f), the same
+   * formula on both sides.  A4 (MIDI 69) is F = 254. */
+  const noteToy = "function init() print(note(69), note(76)) end";
+  const luaNote = toys.create(noteToy, { budgetMs: 250 });
+  luaNote.load();
+  const ilNote = il.create(noteToy, { budgetMs: 250 });
+  ilNote.load();
+  eq("sound: note(MIDI) is the same in Lua and the IL", ilNote.log, luaNote.log);
+  check(luaNote.log[0] && luaNote.log[0].indexOf("254") === 0,
+        "sound: note(69) is F 254 (got " + JSON.stringify(luaNote.log[0]) + ")");
+  luaNote.dispose();
+  ilNote.dispose();
+}
+
 /* ---- main ------------------------------------------------------------ */
 
 function main() {
@@ -1015,6 +1300,7 @@ function main() {
   checkSandbox();
   checkPasswords();
   checkOneModel();
+  checkSound();
   checkPage();
 
   const ms = Date.now() - started;
@@ -1024,7 +1310,10 @@ function main() {
     process.exit(1);
   }
   console.log("PASS  " + checks + " checks, 3 toys x " + framesRun +
-              " frames diff 0, every refusal by code (" + ms + " ms)");
+              " frames diff 0, every refusal by code, and #71's sound toy " +
+              "(" + SOUND_FRAMES + " frames: the engine's PSG writes, the " +
+              "model's PCM, the music resuming after the SFX, Lua == IL) " +
+              "(" + ms + " ms)");
 }
 
 main();

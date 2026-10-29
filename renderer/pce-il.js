@@ -209,7 +209,8 @@
    *   {sig:[types], ret:type} a value-returning helper implemented here.
    * The signatures are what the typer checks; the implementations are below
    * and docs/TOYS.md §2 is the surface both runtimes share. */
-  var SURFACE = ["reg", "pal", "sat", "sprite", "raster", "print"];
+  var SURFACE = ["reg", "pal", "sat", "sprite", "raster", "print",
+                 "music", "sfx", "release"];
   var HELPERS = {
     rgb: { sig: [T.INT, T.INT, T.INT], ret: T.INT },
     min: { sig: [T.INT, T.INT], ret: T.INT, numeric: true },
@@ -217,6 +218,10 @@
     floor: { sig: [T.INT], ret: T.INT, numeric: true },
     abs: { sig: [T.INT], ret: T.INT, numeric: true },
     clamp: { sig: [T.INT, T.INT, T.INT], ret: T.INT, numeric: true },
+    /* #71: note()'s numeric branch — a MIDI number to the PSG's 12-bit F.
+     * The Lua runtime also accepts a note name (a string); the IL carries
+     * no strings, so a name is refused there and the number is the way. */
+    note: { sig: [T.INT], ret: T.INT },
     lerp: { sig: [T.INT, T.INT, T.FIXED], ret: T.FIXED },
     ramp: { sig: [T.TABLE, T.FIXED], ret: T.FIXED },
     ramp_int: { sig: [T.TABLE, T.FIXED], ret: T.INT },
@@ -225,7 +230,6 @@
     sqrt: { sig: [T.FIXED], ret: T.FIXED }
   };
   var UNSUPPORTED_GLOBALS = {
-    note: "note() needs the string parser; it is part of the sound card (#71)",
     ease: "ease() takes an easing name (a string), which the IL does not carry",
     lerp_color: "lerp_color() takes colour words the IL has no type for yet",
     ramp_color: "ramp_color() takes colour keyframes the IL has no type for yet",
@@ -1131,6 +1135,15 @@
                               message: "print() cannot print a " + typeName(argTypes[pr]) });
                 }
               }
+            } else if (rc.name === "music") {
+              if (ins.args.length !== 1) errs.push({ code: "il-arity", line: line, message: "music(song) takes 1 argument" });
+              else wantInt(ins.args[0], line);
+            } else if (rc.name === "sfx") {
+              if (ins.args.length !== 4) errs.push({ code: "il-arity", line: line, message: "sfx(channel, freq, volume, frames) takes 4 arguments" });
+              else for (var sf = 0; sf < 4; sf++) wantInt(ins.args[sf], line);
+            } else if (rc.name === "release") {
+              if (ins.args.length !== 1) errs.push({ code: "il-arity", line: line, message: "release(channel) takes 1 argument" });
+              else wantInt(ins.args[0], line);
             }
           } else if (HELPERS[rc.name]) {
             var hs = HELPERS[rc.name];
@@ -1552,6 +1565,15 @@
           } else if (calleeName === "print") {
             push({ t: "print", args: ins.args.map(function (a) { return finalOperand(a, false); }),
                    line: line });
+          } else if (calleeName === "music") {
+            push({ t: "music", song: finalOperand(ins.args[0], false), line: line });
+          } else if (calleeName === "sfx") {
+            push({ t: "sfx", ch: finalOperand(ins.args[0], false),
+                   freq: finalOperand(ins.args[1], false),
+                   volume: finalOperand(ins.args[2], false),
+                   frames: finalOperand(ins.args[3], false), line: line });
+          } else if (calleeName === "release") {
+            push({ t: "release", ch: finalOperand(ins.args[0], false), line: line });
           }
         } else if (calleeName && HELPERS[calleeName]) {
           var pk = ins.paramKinds || [];
@@ -2079,6 +2101,18 @@
           host.raster(cnt(ins.lineArg), cnt(ins.spec));
           pc++;
           break;
+        case "music":
+          host.music(cnt(ins.song));
+          pc++;
+          break;
+        case "sfx":
+          host.sfx(cnt(ins.ch), cnt(ins.freq), cnt(ins.volume), cnt(ins.frames));
+          pc++;
+          break;
+        case "release":
+          host.release(cnt(ins.ch));
+          pc++;
+          break;
         case "print": {
           var parts = [];
           for (var pi = 0; pi < ins.args.length; pi++) {
@@ -2129,6 +2163,12 @@
       case "sqrt": return fixed(Math.sqrt(args[0]));
       case "ramp": return fixed(rampAt(args[0], args[1]));
       case "ramp_int": return Math.floor(rampAt(args[0], args[1]) + 0.5) | 0;
+      case "note": {
+        /* the Lua prelude's numeric branch, the same double arithmetic:
+         * F = 7,159,090 / (64 * 440 * 2^((midi - 69) / 12)) */
+        var f = 7159090 / (64 * 440 * Math.pow(2, (args[0] - 69) / 12));
+        return Math.max(0, Math.min(4095, Math.floor(f + 0.5))) | 0;
+      }
       default:
         fail(line, "the IL has no builtin `" + name + "`");
       }
@@ -2240,6 +2280,8 @@
       dispose: function () {},
       log: host.log,
       pad: host.padState,
+      sound: host.sound,
+      renderSound: host.renderSound,
       get initialized() { return initialized; },
       get broken() { return broken; },
       get error() { return broken ? new ToyError(broken.code, broken.message) : null; },

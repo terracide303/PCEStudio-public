@@ -115,8 +115,17 @@ HuTrack's own period tables and its octave shifts/12-bit clamp, the volume
 envelope (`floor(driverVolume * value / 31)` — `HuTrack.Math.volume`), the
 waveform envelope, and `.copy.wave`'s exact DDA/off control toggles around
 the 32-step upload. It feeds `renderer/pce-psg.js`, #34's sample-exact PSG
-model. Effect columns, arpeggio envelopes, DDA/PCM and SFX are refused with
-a code (`song-fx`, `song-arp`, `song-pcm`, ...), not silently dropped.
+model. Effect columns, arpeggio envelopes and DDA/PCM are refused with a
+code (`song-fx`, `song-arp`, `song-pcm`, ...), not silently dropped.
+
+Since #71 the player is also the toy host's engine: `createPlayer()` steps it
+one VBlank at a time and `reserve()`/`release()` are HuTrack's
+`setChanForSFX`/`chanReleaseSFX` — the writes both make, the four write paths
+they block while a channel is reserved or waiting, and the fresh note that
+hands the hardware back (`HuTrack_parser.asm` `.do.note_octave`: the
+waveform is reloaded even when it did not change). `trace()` is
+`createPlayer()` run to the end, so the browser player and a toy play the same
+engine. See docs/TOYS.md §2, "Sound in toys".
 
 What `node tests/check-dmf.js` proves:
 
@@ -330,11 +339,17 @@ Not proven here:
   writes the frame's level, and no measured sample was found to change, but
   it is not adjudicated here: #72's new assertions deliberately do not
   assert that byte, so they stay valid if the sequence is corrected.
-- **Effect columns, arpeggio envelopes, DDA samples, SFX, LFO and the music
+- **Effect columns, arpeggio envelopes, DDA samples, LFO and the music
   fade** are refused by the player, not implemented. The engine supports
   them; the converter emits effect-column data (song 2 exercises it), but
   song 2 is never recorded, so what those effects do to the audio is
   unmeasured.
+- **The channel hand-off's audio is modelled from the engine's source, not
+  recorded.** #71's reserve/release writes and the resume-on-fresh-note rule
+  are transcribed from `HuTrack_lib.asm` and `HuTrack_parser.asm`; no
+  Mednafen capture of a song with an SFX over it exists, so the writes are
+  promised and the PCM is what `pce-psg.js` makes of them. The toy's own
+  SFX (a square at a given F/AL) is the host's, not HuTrack's `HuSFX`.
 - **The checkers were written by @design** — `check-hutrack.js` and
   `check-dmf.js` — the seat that wrote the fixture, the song, the reader and
   the player (workshop RULES.md rule 2). @review owes both a cold break.
