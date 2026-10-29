@@ -65,6 +65,11 @@ node tests/check-browser.js     # #114: one setting decides the browser (a
                                 # profiles come from $TMPDIR; --browser also runs
                                 # check-studio --browser and requires no new
                                 # com.google.Chrome.code_sign_clone folder
+node tests/check-pad-keys.js    # #124: page-level KeyboardEvents on the focused
+                                # output move STARFALL on the toy page and in the
+                                # studio (Lua and IL); unfocused keys move nothing;
+                                # the ring and the hint are present.  SKIPs when
+                                # tests/browser.js finds no headless shell
 ```
 
 `check-breaker-78.js` also needs `pceas` (through `make -C tools`) and

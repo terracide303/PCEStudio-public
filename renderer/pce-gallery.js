@@ -106,7 +106,9 @@
 
   /* The live player behind both pages: a fixed 1/60 s step from frame 0, a
    * slow tab dropping steps rather than stretching time (the studio's rule),
-   * and the toy's pad empty (these examples read no input).  `pause` keeps
+   * and pad 1 from `setPad`: the page fills it from the IJKL / N M / O P keys
+   * on the focused output (card #124), so a game page and the studio drive a
+   * toy the same way.  `pause` keeps
    * the runtime, so `play` resumes where it stopped; `reset` puts it back at
    * frame 0. */
   function player(canvas, source, opts) {
@@ -114,6 +116,9 @@
     var step = 1000 / 60;
     var rt = null, index = 0, raf = null, last = 0, running = false;
     var error = null, lastFrame = null, torn = false;
+    /* the live pad: the page mutates this object, so the frame after a key
+     * sees it without the page and the runtime holding two copies */
+    var pad = {};
 
     function now() {
       return (typeof performance !== "undefined" && performance.now)
@@ -134,7 +139,7 @@
     }
 
     function runOne() {
-      rt.setPad(1, {});
+      rt.setPad(1, pad);
       lastFrame = rt.frame(index);
       index++;
       draw(canvas, lastFrame);
@@ -203,6 +208,13 @@
       index: function () { return index; },
       isPlaying: function () { return running; },
       error: function () { return error; },
+      /* The pad the page fills from the keys: the object is shared with the
+       * runtime, so a key held between frames is seen.  `pad()` is what the
+       * evidence reads back, and `state()` is the live SAT the test uses to
+       * find the ship. */
+      setPad: function (buttons) { pad = buttons || {}; return pad; },
+      pad: function () { return pad; },
+      state: function () { return rt ? rt.state : null; },
       dispose: function () { torn = true; pause(); disposeRuntime(); }
     };
   }
