@@ -26,6 +26,12 @@
  * each box the effect is meant to fill holds its own count (effectVisible).
  * Two runtimes and two states can agree on a black screen; this cannot.
  *
+ * #106 puts those guards through the cases they must REJECT (M09, M12 of
+ * docs/REVIEW-84.md; docs/CHECK-106.md): a backdrop-only frame counts zero
+ * non-backdrop pixels while the same counter counts one known pixel, a box
+ * the picture does not fill fails its threshold, and every example's
+ * threshold is pinned and asserted above zero.
+ *
  * Finally each toy must actually show its effect at frame 60:
  *
  *   - the frame's PNG is written to tests/dumps/examples/<name>.png and read
@@ -311,6 +317,15 @@ function countVisible(img, cram, box) {
   return n;
 }
 
+/* The per-box assertion as a function, so the control below exercises the
+ * same comparison the examples use: the box must hold at least its pinned
+ * threshold of non-backdrop pixels.  The #90 breaker's M12 replaced
+ * `n >= box[4]` with `n >= 0`, which every box passes; keeping the
+ * comparison in one callable place is what lets the control reach it. */
+function boxFilled(n, box) {
+  return n >= box[4];
+}
+
 function effectVisible(spec, stats) {
   const frame = stats.frame60;
   const whole = countVisible(frame, frame.state.cram,
@@ -321,12 +336,95 @@ function effectVisible(spec, stats) {
         " pixels)");
   for (const box of spec.visible) {
     const n = countVisible(frame, frame.state.cram, box);
-    check(n >= box[4],
+    check(boxFilled(n, box),
           spec.name + " VISIBILITY: the picture fills its place (" + n +
           " pixels at " + JSON.stringify(box.slice(0, 4)) + ", at least " +
           box[4] + ")");
   }
   return whole;
+}
+
+/* ---- the visibility helper's own controls ------------------------------ *
+ * The #90 breaker showed the guards were weak: the counter could count the
+ * backdrop (M09) and the per-box threshold could be zero (M12), and both
+ * still passed every example — a positive-only assertion cannot tell a
+ * guard from a dead one.  So each helper is put through the case it must
+ * REJECT, on a frame built here rather than read from a toy.  The backdrop
+ * is deliberately NOT black, so "0 visible" cannot come from a black frame
+ * by accident, and the same counter must count a known pixel so a counter
+ * that always returns 0 is caught too. */
+function controlFrame(width, height, rgb) {
+  const pixels = new Uint8Array(width * height * 3);
+  for (let i = 0; i < width * height; i++) {
+    pixels[i * 3] = rgb[0];
+    pixels[i * 3 + 1] = rgb[1];
+    pixels[i * 3 + 2] = rgb[2];
+  }
+  return { width: width, height: height, pixels: pixels };
+}
+
+/* CRAM[0] = $00F5 (red 6, green 3, blue 5); CRAM[1] = a different colour. */
+function controlCram() {
+  const cram = new Uint8Array(512);
+  cram[0] = 0xF5; cram[1] = 0x00;
+  cram[2] = 0xFF; cram[3] = 0x01;
+  return cram;
+}
+
+function checkVisibilityHelpers() {
+  const cram = controlCram();
+  const bg = cramRgb(cram, 0);
+  const other = cramRgb(cram, 1);
+  check(!sameRgb(bg, other),
+        "VISIBILITY control: the control palette has two different colours (" +
+        bg + " and " + other + ")");
+
+  /* M09: a frame that is nothing but the backdrop counts ZERO visible
+   * pixels.  The breaker's counter returned all 64 of an 8x8. */
+  const blank = controlFrame(16, 16, bg);
+  eq("VISIBILITY control: a backdrop-only frame counts 0 non-backdrop " +
+     "pixels (the counter must not count the backdrop)",
+     countVisible(blank, cram, [0, 0, 16, 16]), 0);
+
+  /* ...and the counter is not simply dead: one pixel of another colour
+   * counts one, and the box bounds it. */
+  const one = controlFrame(16, 16, bg);
+  const at = (5 * 16 + 7) * 3;
+  one.pixels[at] = other[0]; one.pixels[at + 1] = other[1];
+  one.pixels[at + 2] = other[2];
+  eq("VISIBILITY control: one non-backdrop pixel counts 1",
+     countVisible(one, cram, [0, 0, 16, 16]), 1);
+  eq("VISIBILITY control: the counter honours the box",
+     countVisible(one, cram, [0, 0, 7, 16]), 0);
+  eq("VISIBILITY control: the counter honours the box's right edge",
+     countVisible(one, cram, [8, 0, 16, 16]), 0);
+
+  /* M12: a box the picture does not fill FAILS its threshold, and one pixel
+   * short of it fails too; exactly at it passes.  With the threshold read
+   * as 0, all three pass. */
+  const needs = [0, 0, 8, 8, 4000];
+  check(boxFilled(0, needs) === false,
+        "VISIBILITY control: a box the picture does not fill FAILS its " +
+        "threshold (0 of 4000)");
+  check(boxFilled(3999, needs) === false,
+        "VISIBILITY control: one pixel short of the threshold FAILS (3999 " +
+        "of 4000)");
+  check(boxFilled(4000, needs) === true,
+        "VISIBILITY control: exactly the threshold passes (4000 of 4000)");
+
+  /* the thresholds themselves are pinned: a zero (or any quiet change) in
+   * the table is a failure, not a weaker example. */
+  for (const spec of TOYS)
+    for (const box of spec.visible)
+      check(box[4] > 0,
+            spec.name + " VISIBILITY: the threshold at " +
+            JSON.stringify(box.slice(0, 4)) + " is above zero (" + box[4] +
+            ")");
+  eq("the visibility thresholds are pinned",
+     TOYS.map(function (t) {
+       return t.visible.map(function (b) { return b[4]; }).join("/");
+     }).join(","),
+     "8000/8000/8000/8000,20000,15000,4000,15000/15000");
 }
 
 /* ---- the run ----------------------------------------------------------- */
@@ -580,6 +678,7 @@ eq("toys/ holds exactly the five example toys", names,
 
 const rows = [];
 checkILIdentity();
+checkVisibilityHelpers();
 for (const spec of TOYS) rows.push(runToy(spec));
 
 console.log("");
