@@ -1,4 +1,4 @@
--- status-bar.lua — a fixed status bar over a scrolling playfield (card #29).
+-- status-bar.lua — a fixed status bar over a scrolling playfield.
 --
 -- THE TRICK: the RCR line interrupt fires on any line you choose.  Write the
 -- scroll registers on line 0 (BXR = BYR = 0) and again on line 24 (the
