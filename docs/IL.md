@@ -320,7 +320,8 @@ the IL is not:
   not.)
 - **A table captured as an upvalue is read the same way**, through a scratch
   register the lowering allocates for the `getupval`. Writing a captured table
-  is still refused (below).
+  is still refused with `il-type`: the lowering has no upvalue operand to
+  write through.
 - An integer read of a table whose array part was never typed is an unknown,
   which the use may bind to `int`; the Lua runtime answers `nil` for a key
   never set and the IL has no `nil` value, so such a read is a toy bug either
