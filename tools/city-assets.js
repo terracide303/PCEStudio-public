@@ -80,10 +80,19 @@ const SCENE_SCALE = 4;
 const CROP = { x: 0, y: 48, w: 256, h: 224 };
 
 /* The frames, found by their empty column gaps (frame 1 is the leftmost).
- * 1..8 are the run cycle and 35 is the crouched aim the rifle fires from.
- * The leap needs no frame of its own: run frame 7's stride reads as one, and
- * the toy draws it from the run cycle's own patterns (1024 words saved). */
-const RUN_FRAMES = [1, 2, 3, 4, 5, 6, 7, 8];
+ *
+ * #148 (Dennis, playing it: "the animation of the character is not running
+ * correctly"): the run cycle is the author's own.  Full.gif plays sheet
+ * frames 3,4,5,6,7,8,9,10 in that order, and run.aseprite holds the same
+ * eight at 100 ms each, so the run is those eight at a steady rate and
+ * nothing else — the old build's frames 1..8 put the idle stand and the
+ * wind-up (frames 1 and 2) in the middle of the stride.  Frame 1 (the wide
+ * planted stand) is the idle; 35 is the crouched aim the rifle fires from,
+ * shown only while the fire key is held.  The leap needs no frame of its
+ * own: run frame 7's stride reads as one, and the toy draws it from the run
+ * cycle's own patterns (1024 words saved). */
+const RUN_FRAMES = [3, 4, 5, 6, 7, 8, 9, 10];
+const IDLE_FRAME = 1;
 const JUMP_FRAME = 7;        /* not a pattern of its own — see above */
 const SHOOT_FRAME = 35;
 
@@ -220,7 +229,9 @@ function build(pack) {
 
   const sheet = readPng(path.join(pack, SHEET_PNG));
   const boxes = frameBoxes(sheet);
-  const picks = RUN_FRAMES.concat([SHOOT_FRAME]);
+  /* two patterns a frame, in this order: the run's eight, the idle stand,
+   * then the aim — the tracer is added after them */
+  const picks = RUN_FRAMES.concat([IDLE_FRAME, SHOOT_FRAME]);
   const cut = spriteSheet(sheet, boxes, picks);
   const spr = src.importImage(cut.image, { kind: "sprites", size: [32, 64],
                                            dither: "none", name: "city-run" });
@@ -383,6 +394,8 @@ function playableToy(r) {
   lines.push("");
   lines.push("RUN_L = {" + c.run.map((p) => p[0]).join(", ") + "}");
   lines.push("RUN_R = {" + c.run.map((p) => p[1]).join(", ") + "}");
+  lines.push("IDLE_L = " + c.idle[0]);
+  lines.push("IDLE_R = " + c.idle[1]);
   lines.push("JUMP_L = " + c.jump[0]);
   lines.push("JUMP_R = " + c.jump[1]);
   lines.push("SHOOT_L = " + c.shoot[0]);
@@ -447,7 +460,8 @@ function constants(r) {
   const run = RUN_FRAMES.map(code);
   return {
     run,
-    jump: run[JUMP_FRAME - 1],
+    idle: code(IDLE_FRAME),
+    jump: run[RUN_FRAMES.indexOf(JUMP_FRAME)],
     shoot: code(SHOOT_FRAME),
     bullet: r.codes[r.codes.length - 1],
     water: r.water.map((w) => w.entries.map((e) => e.addr)),
@@ -474,6 +488,7 @@ function report(r) {
     "  VRAM total    " + s.vramWords + " of 32768 words",
     "",
     "  run patterns  " + JSON.stringify(c.run),
+    "  idle          " + JSON.stringify(c.idle),
     "  jump          " + JSON.stringify(c.jump),
     "  shoot         " + JSON.stringify(c.shoot),
     "  bullet        " + c.bullet,
@@ -567,7 +582,11 @@ function manifest(r) {
       "x render of a " + r.stats.scene + " picture. Its " + CROP.w + "x" + CROP.h +
       " window at " + CROP.x + "," + CROP.y + " is the background.\n" +
     "* `Legacy Action Pack - CHARACTER/Sheets/Full-Sheet.png` — frames " +
-      r.picks.join(", ") + ", two 32x64 sprite patterns each (left and right half).\n\n" +
+      r.picks.join(", ") + ", two 32x64 sprite patterns each (left and right half). " +
+      "The run cycle is the author's own: Full.gif plays frames 3..10 in that " +
+      "order and run.aseprite holds the same eight at 100 ms, so the toy runs " +
+      "them at one every four frames; frame 1 is the idle stand and 35 the aim " +
+      "(shown only while the fire key is held).\n\n" +
     "The pack's `Autor_note.txt`, quoted in full for the first three lines:\n\n" +
     "> all the assets here are totally free for commercial use and the like.\n" +
     ">\n" +
@@ -587,8 +606,9 @@ function manifest(r) {
     "studio's Add Source dialog runs. Regenerate with it; `--check` says whether\n" +
     "these files are its output.\n\n" +
     "## The numbers the toy uses\n\n" +
-    "```\nrun patterns  " + JSON.stringify(c.run) + "\njump          " +
-    JSON.stringify(c.jump) + "\nshoot         " + JSON.stringify(c.shoot) +
+    "```\nrun patterns  " + JSON.stringify(c.run) + "\nidle          " +
+    JSON.stringify(c.idle) + "\njump          " + JSON.stringify(c.jump) +
+    "\nshoot         " + JSON.stringify(c.shoot) +
     "\nbullet        " + c.bullet + "\nwater words   " + JSON.stringify(c.waterWords) +
     "\nwater CRAM    " + JSON.stringify(c.water) + "\nground row    " + c.groundY +
     "\ntiles         " + c.tiles + "\nVRAM words    " + c.vramWords + " of 32768\n```\n";
