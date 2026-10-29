@@ -70,11 +70,11 @@ The two milestones Dennis asked for:
 | Five example toys (parallax, sky, road, status bar, palette cycling) | PROVEN | `check-examples.js` 120 frames each | #29 |
 | Sound in toys (a song and sound effects) | PARTIAL | song + SFX through HuTrack's channel hand-off; effects, arpeggio and samples still to do; #111 is open: the toy host's `sfx()` writes R4 = $40 (DDA with the channel-enable bit 7 clear), so `pce-psg.js` renders a constant level, RMS 905 against 5899 for $9F | #71, #111 |
 | Pads 1-5 and the timer, browser and console | PROVEN | `check-toys.js` 831 checks; console frame and browser frame 1293 both put the sprite at (154,138); the timer ticks 6.47 a frame, arithmetic 6.473 (tests/dumps/pads) | #45 |
-| The IL (our intermediate language) | PROVEN | `check-il.js` 973 checks, Lua == IL | #31 |
+| The IL (our intermediate language) | PROVEN | `check-il.js` 973 checks, Lua == IL; #112 is open: a literal `true` used as a table field (`spbg=true`) is dropped, so the documented sprite form gives SAT word 3 = 0 while `spbg=1` sets bit 7 | #31, #112 |
 | The checker: frame time, sprites per line, memory | PROVEN | `check-validate.js`; breaker gaps closed by #89 | #32 |
 | A small game made only in the studio (demo-ready test) | TODO | starts when the panels and sound are in | #88 |
 | AI link part 1: an MCP server (an agent writes, runs, checks and exports toys) | PROVEN | `check-mcp.js` 101 checks: a real MCP client over stdio, frame_png, a register poke, validate with file:line, export_pce byte for byte; the board card is still open for rule 2 | #36 |
-| AI link part 2: the agent skill with recipes | RUNNING | a seat is building it now | #103 |
+| AI link part 2: the agent skill with recipes | RUNNING | a seat is building it now; `check-skill.js` 104 checks already pass on the pushed work (5 recipes through the MCP server, the cold seat's toy from SKILL.md alone runs), and the board card #103 is still open | #103 |
 | Guide file for chat AIs (paste into Claude) + Download button | PROVEN | `renderer/pcestudio-for-claude.md`, generated from the code; online (#105); `check-guide.js` 151 checks | #105 |
 | Paste & Run in the studio | PROVEN | `check-studio.js` 1,162 checks (paste box, dropped files, one undo step); the board lists #107 as needs-checking (a different seat's break is owed) | #107 |
 
@@ -110,7 +110,7 @@ The two milestones Dennis asked for:
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone (`49e9dfa`, 2026-10-29): 35 PASS, 1 SKIP (check-ares, no screen), 0 FAIL; `check-studio.js` 1,162 checks and #99's `check-assets.js` 246 checks among them | #83, #108, #109 |
+| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone (`78b2c73`, 2026-10-29): 36 PASS, 1 SKIP (check-ares, no screen), 0 FAIL; `check-studio.js` 1,162 checks, `check-assets.js` 246 and #103's new `check-skill.js` 104 among them | #83, #108, #109 |
 | Every new test broken by a different seat (rule 2) | PROVEN | `docs/REVIEW-*.md`; each miss became a card and is closed | rule 2 |
 | Every manual read and mapped to a card | PROVEN | `docs/MANUALS.md` | #44, #55 |
 | Phase 1 read cold by a reviewer | PROVEN | `docs/REVIEW.md`: 12 ranked findings, each fixed in #38/#39 with a test | #11 |
