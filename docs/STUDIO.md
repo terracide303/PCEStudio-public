@@ -7,14 +7,14 @@ from their website if needed, they are fine with that" — so where adapting the
 quicker than rebuilding it, this page does, with the credit below.
 
 **Split, and where it ended.** #75 was layout + run + panels, then #61's generated reference as the studio's
-Docs panel and the honest `needs #31` export message. **#77 is the editor and the files**: CodeMirror with
+Docs panel and its export dialog (now route 1, built in the page — §9). **#77 is the editor and the files**: CodeMirror with
 Lua highlighting and line numbers replaces the textarea, a toy is a file set beside `main.lua`, Save/Open
 use one versioned JSON envelope in ppu.toys' shape, autosave keeps the whole toy in the browser, Vim keys are
 opt-in in Settings, and every ppu.toys shortcut with a PCE meaning works. **#78 is the output column** (§2.3):
 the Layers controls (BG and sprites gated through CR, plus a view-only mode), the CRT look, SND's honest
 state, markers, the scrubber's frame length, the resolution label following the dot clock, and the pad keys
-on the focused output. A toy `.pce` still waits for the compiler; the static-picture export was already
-proven in the editor.
+on the focused output. **#115 exports a toy `.pce` from the page** through route 1's interpreter (§9);
+the compiled route is still a CLI path, and the static-picture export was already proven in the editor.
 
 ---
 
@@ -956,14 +956,26 @@ hand-built expected state, not with the page's own opinion.
 
 ---
 
-## 9. How a toy is exported — it needs #31
+## 9. How a toy is exported — route 1, built in the page (#115)
 
-ppu.toys has `Export to ROM` (and a `Cart` mode) because a SNES toy compiles to a cartridge. PCEStudio's toy
-compiler is **#31**: the IL half exists and runs the same examples, but there is no machine-code backend or
-toy ROM builder yet. The `Export…` button is wired to a dialog titled **`Export .pce — NEEDS #31`** that
-says exactly that, and points at the separate path that *is* proven: the editor paints
-VRAM/CRAM/registers and `Download .pce` builds a byte-exact ROM (`docs/EXPORT.md`, cards #9/#16). No button
-claims a file it cannot make.
+ppu.toys has `Export to ROM` (and a `Cart` mode) because a SNES toy compiles to a cartridge. PCEStudio's
+toy compiler is **#31**; of its routes, **route 1** is the one the page can run: the toy's IL is encoded
+as bytecode (`renderer/pce-ilbc.js`) and executed by the committed HuC6280 interpreter
+(`renderer/ilvm.bin`), glued into a 24,576 B `.pce` by `renderer/pce-rom.js`'s `buildToyRom()`. The
+`Export…` button is wired to that whole path in `renderer/studio.html` — `fetch("ilvm.bin")`, encode,
+build, download — with no compiler, no install and no Node (`docs/IL.md` §14.4).
+
+The dialog is #87's spec. The title is **Export to ROM** with a close `×`. The toy is analysed with the
+CONSOLE tab's own checks (#98): when one of them is an error, the dialog leads with *"This toy can't run
+on the PC Engine as written yet. The compiler's findings point at what to change:"* and lists the
+findings, each with its `main.lua:N` link; nothing is built. A toy the console accepts but the route-1
+encoder refuses (for example `timer()`) gets the encoder's own `ilbc-*` finding in the same list. A
+runnable toy is built and downloaded as `<title>.pce`; the dialog prints the bytecode size, the projected
+frame cost and whether the interpreter route meets 60 Hz. The footer is always there and always true:
+*"Experimental: frame timing is a static estimate, checked on an emulator, not on hardware."*
+
+The static-picture path is separate and unchanged: the editor paints VRAM/CRAM/registers and
+`Download .pce` builds a byte-exact ROM (`docs/EXPORT.md`, cards #9/#16).
 
 ---
 
@@ -1063,7 +1075,8 @@ What it does, in order:
 3. **Checks the Docs panel**: the panel's source is byte-equal to `renderer/docs.html` (the #61 generator's
    output); the injected page contains all ten chapters, ppu.toys' search, chapter map and `THE FIELD GUIDE`
    kicker; the top-bar button opens it, `×` closes it, `Guide` lands on the right chapter, `?docs=sprites`
-   opens it on load, and the `Export…` dialog names #31.
+   opens it on load, and the `Export…` dialog is #87's spec (title, findings list,
+   route line and the Experimental footer — §9).
 4. Runs **40 frames** through the page's `runFrames()` and compares every frame with the hand-built
    expected state copied from `tests/check-toys.js` — vram, cram, sat, BXR/BYR/MWR/CR and pixels — diff 0
    on all 40, frame numbers and 256×224 dimensions intact; a second 40-frame run is byte-identical.
@@ -1392,8 +1405,11 @@ comparison with their page is claimed.
   the side-by-sides are the evidence, and no pixel-diff against ppu.toys' page is claimed.
 * **`Check` is not the validator.** `Check` is determinism + Lua/IL agreement; cycles, sprites per line
   and source budgets are `#32`/`#61`, run by the **CONSOLE** tab (§3.6) rather than by the Check button.
-* **No toy export, compiler backend, sound in toys, asset import or agent link.** Those are #31, #71
-  and #24. `SND`, `ASSETS`, the AGENT drawer and the `NEEDS #31` export dialog say so in the page. The
+* **The toy export is route 1 only.** #115 wires the page to the IL interpreter
+  (`renderer/ilvm.bin`); the compiled route (#31 A-C) is still a CLI path, route 2 (#101) is the direct
+  generator that has not been built, and route 1's 60 Hz verdict is `pce-validate.js`'s static estimate,
+  not a per-toy capture. Sound in toys (#71), the asset importer (#24) and the agent link (#24) are also
+  absent: `SND`, `ASSETS` and the AGENT drawer say so in the page. The
   SEQUENCER (§3.10) is a song editor, not a toy's sound: what it plays is `pce-song.js`'s engine, and a
   toy cannot play a sequencer song until #71 gives toys a music call.
 * **#94's SEQUENCER is a grid, and its tests are the builder's.** Not proven: the staff view (#95), the

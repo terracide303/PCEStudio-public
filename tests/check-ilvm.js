@@ -19,6 +19,11 @@
  *      with a run of eight consecutive browser frames in order, and the
  *      saved VRAM/CRAM are the browser's.  The TMA measurements are printed
  *      and sanity-checked.
+ *   5. #115: tests/dumps/toystatusbar-ilvm, the RCR-split toy (two register
+ *      writes at line 24).  Its bar (rows 0-23) is diff 0 against the
+ *      browser; its playfield is the known four-line phase, printed as a
+ *      note rather than asserted away.  The raster hook is in the container
+ *      and the TMA measured its calls.
  *
  * Written by @design because the card names this evidence.  Per workshop
  * rule 2 a cold break by another seat and model is owed: the operand
@@ -48,6 +53,10 @@ const PALETTE = { name: "toypalette-ilvm", toy: "tools/toys/palette.lua",
                   period: 8, phase: 8, minMeanTicks: 127 };
 const PARALLAX = { name: "toyparallax-ilvm", toy: "toys/parallax.lua",
                    period: 0, phase: 8 };
+/* #115: #29's status-bar toy on the same interpreter — the RCR-split case
+ * (two register writes at line 24).  Its fixed bar is asserted; the
+ * playfield's known four-line phase is recorded, not hidden. */
+const STATUS = { name: "toystatusbar-ilvm", toy: "toys/status-bar.lua" };
 
 let checks = 0;
 let failures = [];
@@ -424,6 +433,114 @@ function checkMeasure(spec) {
   }
 }
 
+/* ---- #115: the status-bar toy, the RCR-split raster case ---------------- *
+ * The bar is 24 fixed lines over a scrolling playfield, so the table has
+ * entries at lines 0 and 24 (two registers each).  The console picture's
+ * playfield is four lines out of phase with the browser — the same known
+ * #31C handler limitation docs/IL.md §10.4 records for the compiled route,
+ * carried by the shared runtime — so this check does not pretend a whole
+ * frame matches.  What it proves: the toy's raster callback is in the
+ * container, the interpreter's 224 calls fill the table, the handler
+ * replays it, and the part the toy exists for (rows 0-23 not moving) is
+ * exactly the browser's. */
+function barHash(pixels) {
+  let h = 2166136261;
+  for (let y = 0; y < 24; y++) {
+    for (let x = 0; x < 256; x++) {
+      const i = (y * 256 + x) * 3;
+      h = ((h ^ pixels[i]) * 16777619) >>> 0;
+      h = ((h ^ pixels[i + 1]) * 16777619) >>> 0;
+      h = ((h ^ pixels[i + 2]) * 16777619) >>> 0;
+    }
+  }
+  return h;
+}
+
+function checkStatusBarDump() {
+  const dir = path.join(ROOT, "tests", "dumps", STATUS.name);
+  const metaPath = path.join(dir, "meta.json");
+  if (!fs.existsSync(metaPath)) {
+    check(false, "tests/dumps/" + STATUS.name +
+          "/meta.json exists (run tools/capture-ilvm.sh " + STATUS.name + ")");
+    return;
+  }
+  const meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+  eq("status-bar's capture is toys/status-bar.lua", meta.source, STATUS.toy);
+  eq("status-bar's container carries the raster callback",
+     meta.bytecode.hooks.raster, 2);
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ilvm-bar-"));
+  const fresh = path.join(tmp, "fresh.pce");
+  if (emitFresh(STATUS.toy, fresh)) {
+    eq("status-bar: a fresh browser-path build is the dumped ROM",
+       sha256(fs.readFileSync(fresh)), meta.rom_sha256);
+    eq("status-bar: the ROM is 24,576 B", fs.statSync(fresh).size, 24576);
+  }
+
+  const browser = toys.create(fs.readFileSync(path.join(ROOT, STATUS.toy),
+                                              "utf8"), { budgetMs: 1000 });
+  browser.load();
+  const maxF = 240;
+  const wantPixels = [], wantBars = [], wantState = [];
+  for (let f = 0; f < maxF; f++) {
+    const g = browser.frame(f);
+    wantPixels.push(g.pixels);
+    wantBars.push(barHash(g.pixels));
+    wantState.push({ vram: g.state.vram, cram: g.state.cram });
+  }
+  browser.dispose();
+
+  const frameDir = path.join(dir, "frames");
+  const files = fs.readdirSync(frameDir)
+    .filter(function (f) { return /^frame\d+\.png$/.test(f); }).sort();
+  check(files.length > 100, "status-bar has more than 100 recorded frames (" +
+        files.length + ")");
+  const use = files.slice(-300);
+  let hit = null;
+  for (const f of use) {
+    const img = decodePng(fs.readFileSync(path.join(frameDir, f)));
+    const h = barHash(img.pixels);
+    /* the bar's blink repeats every 60 frames, so every candidate must be
+     * tried on the whole picture, not just the first hash match */
+    const candidates = [];
+    for (let k = 0; k < maxF; k++) if (wantBars[k] === h) candidates.push(k);
+    if (!candidates.length) continue;
+    let bestK = -1, bestDiff = Infinity;
+    for (const k of candidates) {
+      const d = diff(img.pixels, wantPixels[k]);
+      if (d < bestDiff) { bestDiff = d; bestK = k; }
+    }
+    hit = { file: f, img: img, k: bestK, whole: bestDiff };
+    break;
+  }
+  check(!!hit, "status-bar: a captured frame's bar (rows 0-23) hashes to a " +
+        "browser frame's");
+  if (hit) {
+    check(diff(hit.img.pixels.slice(0, 24 * 256 * 3),
+               wantPixels[hit.k].slice(0, 24 * 256 * 3)) === 0,
+          "status-bar: the fixed bar is diff 0 against browser frame " + hit.k);
+    notes.push("status-bar: the playfield is " + hit.whole + " bytes off " +
+               "the closest browser frame with the same bar (frame " + hit.k +
+               "), the #31C handler's four-line phase (docs/IL.md §10.4); " +
+               "rows 0-23 are exact");
+  }
+
+  /* the save's VRAM is the toy's static init, and one blink state's CRAM */
+  const vram = fs.readFileSync(path.join(dir, "vram.bin"));
+  const cram = fs.readFileSync(path.join(dir, "cram.bin"));
+  check(diff(vram, wantState[0].vram) === 0,
+        "status-bar: the saved VRAM is the browser's");
+  let cramOk = false, cramFrame = -1;
+  for (let k = 0; k < maxF; k++) {
+    if (diff(cram, wantState[k].cram) === 0) { cramOk = true; cramFrame = k;
+                                               break; }
+  }
+  check(cramOk, "status-bar: the saved CRAM is a browser frame's blink state");
+  if (cramOk) notes.push("status-bar: the save's CRAM is browser frame " +
+                        cramFrame + "'s");
+  checkMeasure(STATUS);
+}
+
 /* ---- run -------------------------------------------------------------- */
 
 console.log("check-ilvm: #100 the IL as bytecode, interpreted");
@@ -442,6 +559,9 @@ checkMeasure(PALETTE);
 const parallaxMax = 400;
 checkDump(PARALLAX, parallaxMax, 500);
 checkMeasure(PARALLAX);
+
+/* #115: the RCR-split toy on the same interpreter */
+checkStatusBarDump();
 
 for (const n of notes) console.log("note  " + n);
 if (skipped.length) {

@@ -110,6 +110,26 @@ for (const name of TOYS) {
   check(b.vram.words <= 32768, name + ": VRAM " + b.vram.words + " words");
   check(b.sprites.requested <= 16, name + ": no sprite overflow");
   check(b.collectionCycles > 0, name + ": collection has a cost");
+  /* #115: route 1 — the interpreter the studio's Export button builds.  The
+   * report carries a projection per toy and the 60 Hz answer; the factor is
+   * the measured one for the toy's hook shape. */
+  check(b.route1 != null, name + ": the report has route 1's projection");
+  if (b.route1) {
+    check(b.route1.factor === (hasRaster ? validate.MODEL.ROUTE1.RASTER :
+                               validate.MODEL.ROUTE1.NO_RASTER),
+          name + ": route 1 uses the " + (hasRaster ? "raster" : "no-raster") +
+          " factor (" + b.route1.factor + ")");
+    eq(name + ": route 1's shape", b.route1.shape,
+       hasRaster ? "raster" : "no raster");
+    check(b.route1.collectionCycles ===
+          Math.round(b.collectionCycles * b.route1.factor),
+          name + ": route 1's projection is the collection times the factor");
+    check(b.route1.meets60 ===
+          (b.route1.collectionCycles <= validate.MODEL.FRAME_CLOCKS),
+          name + ": route 1's meets60 follows its own projection");
+    check(b.route1.hz > 0 && b.route1.ratio60 > 0,
+          name + ": route 1 has a positive rate");
+  }
 
   const blank = b.blank ? (b.blank.cycles + " cyc on line " + b.blank.line)
                         : "no writes";
@@ -141,6 +161,49 @@ for (const name of TOYS) {
   check(reports["palette-cycle"].budgets.collectionCycles <
         validate.MODEL.FRAME_CLOCKS,
         "palette-cycle fits inside one 60 Hz frame");
+}
+
+/* #115: route 1's projection is calibrated on the two captures in
+ * docs/IL.md §14.5, so it must reproduce both by construction — and the
+ * third capture (status-bar) is held out.  The held-out error is what the
+ * document quotes; the 60 Hz answer must agree with the measurement. */
+{
+  const R = validate.MODEL.ROUTE1;
+  /* the palette capture's toy is tools/toys/palette.lua, the estimator's
+   * first calibration point; palette-cycle.lua is a different, smaller toy */
+  const pal = validate.validate(fs.readFileSync(
+    path.join(REPO, "tools", "toys", "palette.lua"), "utf8"),
+    { frames: FRAMES }).budgets.route1;
+  const par = reports.parallax.budgets.route1;
+  const bar = reports["status-bar"].budgets.route1;
+  check(Math.abs(R.PALETTE_MEASURED / R.PALETTE_ESTIMATE - R.NO_RASTER) < 0.01,
+        "route 1's no-raster factor is the palette capture's ratio");
+  check(Math.abs(R.PARALLAX_MEASURED / R.PARALLAX_ESTIMATE - R.RASTER) < 0.01,
+        "route 1's raster factor is the parallax capture's ratio");
+  check(Math.abs(par.collectionCycles - R.PARALLAX_MEASURED) /
+        R.PARALLAX_MEASURED < 0.01,
+        "route 1 reproduces the parallax capture (projected " +
+        par.collectionCycles + " vs " + R.PARALLAX_MEASURED + " measured)");
+  check(Math.abs(pal.collectionCycles - R.PALETTE_MEASURED) /
+        R.PALETTE_MEASURED < 0.01,
+        "route 1 reproduces the palette capture (projected " +
+        pal.collectionCycles + " vs " + R.PALETTE_MEASURED + " measured)");
+  /* status-bar is held out: the raster factor overestimates it, and the
+   * overestimate is inside 2x, so the "no" is conservative, not a coin flip */
+  const heldOut = bar.collectionCycles / R.STATUS_MEASURED;
+  check(heldOut > 1 && heldOut < 2,
+        "status-bar's held-out projection is " + heldOut.toFixed(2) +
+        "x the measurement (inside 2x, conservative)");
+  for (const name of TOYS) {
+    check(reports[name].budgets.route1.meets60 === false,
+          name + ": route 1 does not meet 60 Hz (the measured captures " +
+          "are 0.9-38x the budget)");
+  }
+  console.log("  route 1: palette " + pal.collectionCycles + " (est " +
+              R.PALETTE_MEASURED + " measured), parallax " +
+              par.collectionCycles + " (est " + R.PARALLAX_MEASURED +
+              " measured), status-bar " + bar.collectionCycles +
+              " (est; " + R.STATUS_MEASURED + " measured)");
 }
 
 /* road.lua's three writes a line are over the blank; the validator says so,
