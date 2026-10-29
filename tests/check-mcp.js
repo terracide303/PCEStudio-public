@@ -8,8 +8,8 @@
  *   1. The server starts, answers `initialize` (protocol version,
  *      capabilities.tools, serverInfo) and `ping`.
  *   2. `tools/list` lists every tool with a schema: toy_write, toy_run,
- *      frame_png, registers_get, register_set, validate, export_pce, docs —
- *      each an object schema with properties.
+ *      source_add, frame_png, registers_get, register_set, validate,
+ *      export_pce, docs — each an object schema with properties.
  *   3. It writes #29's parallax toy, runs 60 frames, and the PNG at frame 60
  *      is #29/check-examples' frame 60: the committed
  *      tests/dumps/examples/parallax.png, decoded pixel for pixel.  Frame 60
@@ -37,6 +37,17 @@
  *      export is byte-identical.
  *   9. `docs` lists #61's chapters and returns one chapter as markdown with
  *      the code's own numbers; an unknown topic is refused.
+ *  10. `source_add` (#153): a 16x16 PNG becomes a sprite through the Add
+ *      Source importer and the toy's sat()/sprite() placement shows it at
+ *      the right pixel (a control without the import is blank); a second
+ *      add appends its pattern and takes a free palette row; the budget
+ *      report carries the importer's stats and the merged picture's VRAM
+ *      words; refused adds (a bad size, a bad grid, a toy whose asset files
+ *      the panels cannot read) leave the toy alone.  A toy whose
+ *      tiles.json/palettes.json name a checkerboard renders through MCP
+ *      exactly the frame an independent il.create(source, {files}) +
+ *      pce-sprites run renders (diff 0), and toy_run reports the #117
+ *      import summary.
  *
  * The test writes its .pce files under $TMPDIR, never into the repository.
  *
@@ -139,6 +150,64 @@ function diffCount(a, b) {
     if (a[i] !== b[i]) { if (first < 0) first = i; n++; }
   }
   return { n: n, first: first, lengths: a.length === b.length ? null : [a.length, b.length] };
+}
+
+/* ---- PNG: write one (source_add's input), independently of the server --- */
+
+const CRC_TABLE = (function () {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let crc = 0xFFFFFFFF;
+  for (const b of buf) crc = CRC_TABLE[(crc ^ b) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function encodePng(rgb, width, height) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;                       /* colour type: RGB */
+  const stride = width * 3;
+  const raw = Buffer.alloc((stride + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * (stride + 1)] = 0;
+    for (let x = 0; x < stride; x++) {
+      raw[y * (stride + 1) + 1 + x] = rgb[y * stride + x];
+    }
+  }
+  return Buffer.concat([
+    Buffer.from("\x89PNG\r\n\x1a\n", "latin1"),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlib.deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0))
+  ]);
+}
+function solidPng(width, height, rgb) {
+  const px = new Uint8Array(width * height * 3);
+  for (let i = 0; i < width * height; i++) {
+    px[i * 3] = rgb[0]; px[i * 3 + 1] = rgb[1]; px[i * 3 + 2] = rgb[2];
+  }
+  return encodePng(px, width, height).toString("base64");
+}
+
+function pixelOf(img, x, y) {
+  const o = (y * img.width + x) * 3;
+  return [img.pixels[o], img.pixels[o + 1], img.pixels[o + 2]];
 }
 
 function sameImage(name, got, want) {
@@ -274,6 +343,81 @@ function spriteToy(n) {
   return s + "end\nfunction frame(t, f)\nend\n";
 }
 
+/* The independent run this test compares the art import with: the same
+ * file set through il.create with files (the #117 host path) and the frame
+ * rendered by pce-sprites — not the server's code path. */
+function independentArtFrames(files, count, overrides) {
+  const main = files.filter((f) => f.name === "main.lua")[0];
+  const rt = il.create(main.source, { chunkName: "main.lua", files: files });
+  rt.load();
+  let last = null;
+  for (let f = 0; f < count; f++) last = rt.frame(f);
+  const st = last.state;
+  const regs = {
+    BXR: st.regs.BXR, BYR: st.regs.BYR, MWR: st.regs.MWR, CR: st.regs.CR,
+    RCRCount: 0, scanline: 18
+  };
+  for (const k of Object.keys(overrides || {})) regs[k] = overrides[k];
+  const opts = {
+    vram: st.vram, cram: st.cram, sat: st.sat, regs: regs,
+    width: 256, height: 224
+  };
+  if (last.raster) opts.raster = last.raster;
+  return sprites.renderFrame(opts);
+}
+
+/* The #153 test toys.  source_add's import already placed the sprite in the
+ * SAT (the panels' own placement); the toy moves it with sat() and places a
+ * copy with sprite(), reading the pattern's CG code back from the SAT's own
+ * copy in VRAM at $7F00.  SAT Y 64 is display row 0 and SAT X 32 is display
+ * column 0, so SAT (100, 100) is the pixel (68, 36). */
+function movedSpriteToy() {
+  return "function init()\n" +
+         "  reg(\"CR\", 0xC0)\n" +
+         "  pal(0, 7)\n" +
+         "  sat(0, 0, 100)\n" +
+         "  sat(0, 1, 100)\n" +
+         "end\nfunction frame(t, f)\nend\n";
+}
+function placedSpritesToy() {
+  return "function init()\n" +
+         "  reg(\"CR\", 0xC0)\n" +
+         "  pal(0, 7)\n" +
+         "  sat(0, 0, 100)\n" +
+         "  sat(0, 1, 100)\n" +
+         "  sat(1, 0, 100)\n" +
+         "  sat(1, 1, 140)\n" +
+         "  local code = vram[0x7F00 + 2] // 2\n" +
+         "  sprite(2, { x = 180, y = 100, pattern = code, palette = 0 })\n" +
+         "end\nfunction frame(t, f)\nend\n";
+}
+
+/* A checkerboard tiles.json + palettes.json the panels' readers accept:
+ * two tiles ($40 red, $41 white) over the 32x32 BAT. */
+function checkerFiles() {
+  const row0 = new Array(16).fill(0);
+  row0[1] = 56;                      /* vce 56: [252, 0, 0] */
+  row0[2] = 511;                     /* vce 511: [252, 252, 252] */
+  const cells = new Array(1024);
+  for (let i = 0; i < 1024; i++) {
+    cells[i] = (Math.floor(i / 32) + i) % 2 ? 64 : 65;
+  }
+  return [
+    { name: "tiles.json", source: JSON.stringify({
+      version: 1, video: 256,
+      tiles: [{ char: 64, palette: 0, pixels: new Array(64).fill(1) },
+              { char: 65, palette: 0, pixels: new Array(64).fill(2) }],
+      map: { mwr: 0, bxr: 0, byr: 0, cells: cells }
+    }, null, 2) + "\n" },
+    { name: "palettes.json", source: JSON.stringify({
+      version: 1, backdrop: 0, background: [row0], sprites: []
+    }, null, 2) + "\n" }
+  ];
+}
+function checkerCell(cells, x, y) {
+  return cells[Math.floor(y / 8) * 32 + Math.floor(x / 8)];
+}
+
 /* ---- main -------------------------------------------------------------- */
 
 (async function main() {
@@ -307,9 +451,9 @@ function spriteToy(n) {
     check(!list.error, "tools/list answers without a JSON-RPC error");
     const tools = list.result.tools || [];
     const names = tools.map((t) => t.name).sort();
-    eq("tools/list lists exactly the card's eight tools", names, [
+    eq("tools/list lists exactly the card's nine tools", names, [
       "docs", "export_pce", "frame_png", "register_set", "registers_get",
-      "toy_run", "toy_write", "validate"
+      "source_add", "toy_run", "toy_write", "validate"
     ]);
     for (const t of tools) {
       const schema = t.inputSchema;
@@ -325,6 +469,13 @@ function spriteToy(n) {
     eq("frame_png requires frame",
        list.result.tools.filter((t) => t.name === "frame_png")[0]
            .inputSchema.required, ["frame"]);
+    eq("source_add requires kind",
+       list.result.tools.filter((t) => t.name === "source_add")[0]
+           .inputSchema.required, ["kind"]);
+    eq("source_add's kinds are the card's four",
+       list.result.tools.filter((t) => t.name === "source_add")[0]
+           .inputSchema.properties.kind.enum,
+       ["bg", "sprites", "tilesheet", "palette"]);
 
     /* 3 — #29's parallax toy, 60 frames, frame 60 is check-examples' frame 60 */
     const wrote = await writeToy(client, "parallax");
@@ -559,6 +710,162 @@ function spriteToy(n) {
     eq("VCE has CR, CTA and CTW", all.body.vce.map((r) => r.name),
        ["CR", "CTA", "CTW"]);
 
+    /* 9 — the toy's art (#153): a PNG becomes sprites through source_add */
+
+    const redPng = solidPng(16, 16, [252, 0, 0]);
+    const whitePng = solidPng(16, 16, [252, 252, 252]);
+
+    const artToy = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: movedSpriteToy() }]
+    });
+    check(!artToy.isError && artToy.body.ok, "the sprite-mover toy compiles");
+
+    /* the control: the same toy without the import shows no sprite */
+    const controlRun = await client.call("toy_run", { frames: 1 });
+    check(!controlRun.isError && controlRun.body.ok, "the control toy runs");
+    const controlPng = await client.call("frame_png", { frame: 0 });
+    eq("without the import the sprite's pixel is the sky",
+       pixelOf(imageOf(controlPng), 68, 36), [0, 0, 252]);
+
+    const added = await client.call("source_add", {
+      kind: "sprites", name: "red-square", png: redPng
+    });
+    check(!added.isError && added.body.ok, "source_add imports the PNG as sprites");
+    eq("the report names the kind", added.body.kind, "sprites");
+    eq("the report names the source", added.body.name, "red-square");
+    eq("the importer's stats: one 16x16 pattern", added.body.stats.tiles, 1);
+    eq("one sprite palette row", added.body.stats.palettes, 1);
+    eq("two colours (entry 0 is the transparent zero)", added.body.stats.colours, 2);
+    eq("the toy's files now carry the sprite",
+       added.body.files.slice().sort(),
+       ["main.lua", "palettes.json", "sprites.json"]);
+    eq("the budget counts the placed sprite", added.body.budget.sprites, 1);
+    eq("one pattern packed after the blank tile", added.body.budget.patterns, 1);
+    eq("VRAM words: BAT + blank tile + pattern cell + SAT",
+       added.body.budget.vram_words, 1024 + 16 + 64 + 256);
+    eq("the budget names the VRAM total", added.body.budget.vram_total, 32768);
+    eq("no warnings", added.body.warnings, []);
+
+    const artRun = await client.call("toy_run", { frames: 1 });
+    check(!artRun.isError && artRun.body.ok, "the toy runs with the import");
+    eq("toy_run reports the #117 import summary", artRun.body.assets && {
+      files: artRun.body.assets.files,
+      tiles: artRun.body.assets.tiles,
+      patterns: artRun.body.assets.patterns,
+      sprites: artRun.body.assets.sprites
+    }, { files: ["tiles.json", "palettes.json", "sprites.json"],
+         tiles: 1, patterns: 1, sprites: 1 });
+    const artPng = await client.call("frame_png", { frame: 0 });
+    eq("the imported sprite's pixel is the PNG's red",
+       pixelOf(imageOf(artPng), 68, 36), [252, 0, 0]);
+    eq("the pixel left of the sprite is still the sky",
+       pixelOf(imageOf(artPng), 67, 36), [0, 0, 252]);
+
+    /* a second add appends its pattern and takes a free palette row */
+    const placed = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: placedSpritesToy() }]
+    });
+    check(!placed.isError && placed.body.ok, "the placer toy compiles");
+    const first = await client.call("source_add", {
+      kind: "sprites", name: "red-square", png: redPng
+    });
+    check(!first.isError && first.body.ok, "the first sprite is added");
+    const second = await client.call("source_add", {
+      kind: "sprites", name: "white-square", png: whitePng
+    });
+    check(!second.isError && second.body.ok, "the second sprite appends");
+    eq("two sprites are placed now", second.body.budget.sprites, 2);
+    eq("two patterns are packed now", second.body.budget.patterns, 2);
+    eq("the file set still has one of each",
+       second.body.files.slice().sort(),
+       ["main.lua", "palettes.json", "sprites.json"]);
+    const bothRun = await client.call("toy_run", { frames: 1 });
+    check(!bothRun.isError && bothRun.body.ok, "the two-sprite toy runs");
+    const bothPng = await client.call("frame_png", { frame: 0 });
+    eq("the first sprite is still the red square",
+       pixelOf(imageOf(bothPng), 68, 36), [252, 0, 0]);
+    eq("the appended sprite draws its own pattern in its own palette row",
+       pixelOf(imageOf(bothPng), 108, 36), [252, 252, 252]);
+    eq("sprite() places a copy by the code the SAT's VRAM copy carries",
+       pixelOf(imageOf(bothPng), 148, 36), [252, 0, 0]);
+
+    /* refused adds leave the toy alone */
+    const badSize = await client.call("source_add", {
+      kind: "sprites", png: redPng, size: [20, 20]
+    });
+    check(badSize.isError, "a sprite size the VDC cannot draw is refused");
+    eq("the refusal carries the importer's code", badSize.body.code,
+       "source-size");
+    const afterRefusal = await client.call("toy_run", { frames: 1 });
+    eq("the refused add changed nothing: two sprites still placed",
+       afterRefusal.body.assets.sprites, 2);
+    const badGrid = await client.call("source_add", {
+      kind: "bg", grid: { width: 2, height: 2, pixels: [0, 0, 1, 2] },
+      palette: [[252, 0, 0], [0, 252, 0]]
+    });
+    check(badGrid.isError && badGrid.body.code === "source-grid",
+          "a grid pixel past its palette is refused by source-grid");
+    const bothKinds = await client.call("source_add", {
+      kind: "sprites", png: redPng,
+      grid: { width: 1, height: 1, pixels: [0] },
+      palette: [[0, 0, 0]]
+    });
+    check(bothKinds.isError && bothKinds.body.code === "source-picture",
+          "passing png and grid both is refused by source-picture");
+    const badKind = await client.call("source_add", {
+      kind: "song", png: redPng
+    });
+    check(badKind.isError && badKind.body.code === "source-kind",
+          "a non-picture kind is refused by source-kind");
+
+    /* a toy whose asset files the panels cannot read: source_add refuses
+     * with the panels' own code and leaves the files alone */
+    const broken = await client.call("toy_write", {
+      files: [
+        { name: "main.lua", source: movedSpriteToy() },
+        { name: "palettes.json", source: "not json {{{" }
+      ]
+    });
+    check(!broken.isError, "a toy with a broken palettes.json writes");
+    const brokenAdd = await client.call("source_add", {
+      kind: "sprites", png: redPng
+    });
+    check(brokenAdd.isError, "an add into a toy the panels cannot read is refused");
+    eq("the refusal is the panels' own code", brokenAdd.body.code, "asset-json");
+    const brokenRun = await client.call("toy_run", { frames: 1 });
+    check(brokenRun.isError && brokenRun.body.code === "asset-json",
+          "toy_run's import refuses the same broken file by the same code");
+
+    /* tiles.json through MCP is the studio host's own frame, diff 0 */
+    const checker = checkerFiles();
+    const checkerMain = { name: "main.lua",
+                          source: "function init()\nend\nfunction frame(t, f)\nend\n" };
+    const checkerToy = await client.call("toy_write", {
+      files: [checkerMain].concat(checker)
+    });
+    check(!checkerToy.isError && checkerToy.body.ok,
+          "the checkerboard toy writes");
+    const checkerRun = await client.call("toy_run", { frames: 1 });
+    check(!checkerRun.isError && checkerRun.body.ok, "the checkerboard runs");
+    eq("toy_run reports the import: two tiles, no sprites",
+       checkerRun.body.assets && {
+         tiles: checkerRun.body.assets.tiles,
+         patterns: checkerRun.body.assets.patterns,
+         sprites: checkerRun.body.assets.sprites
+       }, { tiles: 2, patterns: 0, sprites: 0 });
+    const checkerPng = await client.call("frame_png", { frame: 0 });
+    const checkerImg = imageOf(checkerPng);
+    const model = independentArtFrames([checkerMain].concat(checker), 1, {});
+    sameImage("the MCP frame is the studio host's own frame (diff 0)",
+              checkerImg, model);
+    const cells = JSON.parse(checker[0].source).map.cells;
+    const checkerColour = (x, y) =>
+      checkerCell(cells, x, y) === 64 ? [252, 0, 0] : [252, 252, 252];
+    eq("the checkerboard's first cell draws its tile",
+       pixelOf(checkerImg, 4, 4), checkerColour(4, 4));
+    eq("the next cell draws the other tile",
+       pixelOf(checkerImg, 12, 4), checkerColour(12, 4));
+
     ok = true;
   } catch (e) {
     check(false, "the run threw: " + (e && e.stack || e));
@@ -577,7 +884,9 @@ function spriteToy(n) {
   console.log("PASS  " + checks + " checks: an MCP client spoke initialize, " +
               "tools/list and tools/call over stdio; parallax frame 60 is " +
               "check-examples' PNG; a BXR poke is the renderer's own picture; " +
-              "the validator refuses an over-budget toy with file:line; and " +
-              "export_pce is the #100 build byte for byte");
+              "the validator refuses an over-budget toy with file:line; " +
+              "export_pce is the #100 build byte for byte; and source_add's " +
+              "PNG reaches VRAM as sprites while tiles.json renders through " +
+              "MCP exactly as through the studio host");
   process.exit(0);
 })();

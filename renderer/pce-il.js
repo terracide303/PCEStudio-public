@@ -2382,6 +2382,9 @@
       pad: host.padState,
       sound: host.sound,
       renderSound: host.renderSound,
+      /* The #117 asset import's summary (host.assets from createHost), or
+       * null when the toy's files hold no picture. */
+      get assets() { return host.assets; },
       get initialized() { return initialized; },
       get broken() { return broken; },
       get error() { return broken ? new ToyError(broken.code, broken.message) : null; },
