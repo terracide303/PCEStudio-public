@@ -3329,6 +3329,9 @@ function checkScreenGaps(page) {
           "#102: clicking the " + reg.toUpperCase() + " curve button names " +
           "#79 (" + page.dom.get("toast").textContent + ")");
   }
+  /* #79 wired the button: it selects the REGISTERS panel and opens the
+   * offset's curve there, so the dock is on a different tab now. */
+  studio.panels.select("screen");
 
   /* the map-size dropdown: the six MWR sizes on offer, $00 works, the rest
    * refuse with map-size and snap back */

@@ -636,9 +636,19 @@
       }
 
       /* The curve buttons: ppu.toys' keyframed curve beside each offset.  The
-       * keyframes are #79's register pokes, so the button says so instead of
-       * pretending to edit one. */
+       * keyframes are #79's register pokes and they live in the REGISTERS
+       * panel (its curve box owns the values, the undo and the write-back),
+       * so this opens that panel's curve for the offset rather than growing a
+       * second editor here. */
       function curve(reg) {
+        var def = studio.panels && studio.panels.get
+          ? studio.panels.get("registers") : null;
+        if (def && def.api && def.api.curve) {
+          studio.panels.select("registers");
+          def.api.curve(reg);
+          studio.toast(reg + " curve: #79's keyframes are in the REGISTERS panel.");
+          return;
+        }
         studio.toast(reg + " curve: keyframed register pokes are card #79.");
       }
 
