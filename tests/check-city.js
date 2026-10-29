@@ -31,19 +31,29 @@
  *   4. IT PLAYS.  The pad walks the character, up jumps and lands again on the
  *      water line, fire puts a tracer in the SAT and it flies right six pixels
  *      a frame, and the water's palette cycles every eight frames.
- *   5. THE PARALLAX IS THE RASTER TABLE.  Two entries — the near band at its
- *      own scroll and the far band at about a third of it — and the near band
- *      moves 2-3 px a frame against the far band's 0-1.
- *   6. LUA == IL, FRAME BY FRAME.  120 frames: vram, cram, sat, registers, the
- *      raster table and the rendered pixels are byte-equal in both runtimes.
- *   7. THE RUN IS THE AUTHOR'S CYCLE (#148).  The shoot pattern appears on
- *      exactly the frames the fire key is held — the run cycle's sequence
- *      never contains it while fire is not pressed — and the pad at rest
- *      shows the idle stand, its own frame.
- *   8. THE EVIDENCE IS WHERE THE ART IS.  A ten-cell frame strip — one full
- *      run cycle in order, one jump, one shot — is written to
+ *   5. THE PARALLAX IS THE RASTER TABLE.  Two entries — the near band at twice
+ *      the camera and the far band at the camera's own rate — and the bands
+ *      move only while the camera scrolls: 0 when the pad is at rest or the
+ *      soldier walks on screen, far 1 and near 2 while he walks at the middle.
+ *   6. LUA == IL, FRAME BY FRAME.  480 frames of the card's own script plus
+ *      the gameplay's 120: vram, cram, sat, registers, the raster table and
+ *      the rendered pixels are byte-equal in both runtimes.
+ *   7. THE WALK IS CARD #158's.  The card's scripted pad — hold L (right) 300
+ *      frames, release 60, hold J (left) 120 — and its three claims: BXR does
+ *      not change while no direction is held; player x rises a pixel a frame
+ *      to the middle (px 96, the body's centre on the screen's middle x 128)
+ *      then stays while BXR rises; and the animation frame changes only while
+ *      moving — a new run pose every six frames of walking, the pack gif's
+ *      own 100 ms pace.  The walk back: the camera scrolls back to the
+ *      level's start and clamps there, then he walks back to the left edge
+ *      and stops; each band still goes round 0..255 with no jump (#148).
+ *   8. THE EVIDENCE IS WHERE THE ART IS.  A four-step frame strip — the idle
+ *      stand at the start, a step while walking, the middle, and the street
+ *      scrolled at the middle — is written to
  *      demo-art/city/evidence/strip.png (never into the repo), its cells are
- *      proved to be those poses, and it is read back pixel for pixel.
+ *      proved to be those poses, the street still until the last, the
+ *      soldier's body on the screen's middle (the card's "x ~ 128"), and it
+ *      is read back pixel for pixel.
  *   9. THE ART IS NAMED SOURCES (card #156).  sources.json's ranges match the
  *      files beside it; the studio's own model (renderer/pce-assets.js)
  *      previews each source with the importer's placement — the same codes
@@ -77,7 +87,6 @@ const DEMO_ART = process.env.PCE_DEMO_ART ||
 const ART = path.join(DEMO_ART, "city");
 const EVIDENCE = path.join(ART, "evidence");
 const ART_FILES = ["tiles.json", "palettes.json", "sprites.json", "main.lua"];
-const FRAMES = 120;
 const WIDTH = 256;
 const HEIGHT = 224;
 const PLAYABLE = path.join(ART, "main.lua");
@@ -257,16 +266,30 @@ function checkBudgets(source) {
 
 /* ---- 3-6: play, Lua and IL side by side -------------------------------- */
 
-/* The scripted pad: run right, stand still (the idle pose), jump, run back,
- * stand, jump again, and fire every twelve frames — enough to cover the run
- * cycle, the idle stand, two leaps and the aim pose. */
-function scriptedPad(f) {
+/* Card #158's scripted pad, exactly as the card writes it: hold L (right)
+ * 300 frames, release 60, hold J (left) 120.  From the level's start
+ * (px 8, cam 0) the soldier walks one pixel a frame to the middle, then
+ * the camera scrolls and he stays there. */
+function evidencePad(f) {
   const p = {};
-  if (f < 20) p.right = true;
-  else if (f >= 40 && f < 60) p.right = true;
-  else if (f >= 60 && f < 80) p.left = true;
-  else if (f >= 100) p.left = true;
-  if ((f >= 30 && f < 36) || (f >= 90 && f < 94)) p.up = true;
+  if (f < 300) p.right = true;
+  else if (f >= 360) p.left = true;
+  return p;
+}
+
+/* The gameplay script (jump, shot, water, the run cycle turning): walk
+ * right, jump, stand, walk right, jump, stand, walk back — fire every 12
+ * frames.  Each jump's 16 airborne frames end in a stand with the fire key
+ * up, so the idle stand really shows (the fire key's own frames show the
+ * aim pose by design, #148).  It never reaches the middle, so the street
+ * must stay still throughout: the bands move only with the camera (card
+ * #158, no auto-scroll). */
+function gameplayPad(f) {
+  const p = {};
+  if (f < 30) p.right = true;
+  else if (f >= 56 && f < 80) p.right = true;
+  else if (f >= 98) p.left = true;
+  if ((f >= 30 && f < 36) || (f >= 80 && f < 84)) p.up = true;
   if (f % 12 < 2) p.i = true;
   return p;
 }
@@ -309,7 +332,9 @@ function playTogether(files, padFn, frames, keep) {
     records.push({
       f: f,
       ink: ink,
-      px: visible(ga.state, 0) ? spriteX(ga.state, 0) : null,
+      /* SAT X 32 is display column 0 (the VDC's origin, main.lua's put_player
+       * comment), so the pair's screen x is the SAT word minus 32 */
+      px: visible(ga.state, 0) ? spriteX(ga.state, 0) - 32 : null,
       feet: visible(ga.state, 0) ? spriteY(ga.state, 0) : null,
       pattern: visible(ga.state, 0) ? spritePattern(ga.state, 0) : null,
       fire: !!(p.i || p.ii),
@@ -333,29 +358,131 @@ function playTogether(files, padFn, frames, keep) {
 }
 
 function checkPlay(files) {
-  const run = playTogether(files, scriptedPad, FRAMES, []);
-  const rec = run.records;
+  const MID = 96;      /* the toy's own dead-zone cap: the pair's left edge;
+                        * the body's centre +32 is the screen's middle, the
+                        * card's "x ~ 128" */
+  const longSource = fs.readFileSync(PLAYABLE, "utf8");
 
-  eq("Lua == IL: frame-by-frame differences over " + FRAMES + " frames",
-     run.diffs.slice(0, 8), []);
-  eq("both runtimes ran every frame", [run.counted.lua, run.counted.il],
-     [FRAMES - 1, FRAMES - 1]);
+  /* ---- the card's own script, and its three claims ----------------------- */
 
-  /* visible */
+  const ev = playTogether(files, evidencePad, 480, []);
+  const rec = ev.records;
+
+  eq("Lua == IL on the evidence's 480 frames", ev.diffs.slice(0, 8), []);
+  eq("both runtimes ran every frame", [ev.counted.lua, ev.counted.il],
+     [479, 479]);
+
+  /* the visible picture, and the character on the SAT every frame */
   const inks = rec.map((r) => r.ink);
   check(Math.min.apply(null, inks) > 20000,
-        "every frame has the picture's ink (at least " + Math.min.apply(null, inks) +
-        " of 57344 pixels differ from the first)");
+        "every frame has the picture's ink (at least " +
+        Math.min.apply(null, inks) + " of 57344 pixels differ from the first)");
+  check(rec.every((r) => r.px !== null),
+        "the character is on the SAT on every frame");
 
-  /* the character is on the SAT and moves with the pad */
-  const xs = rec.filter((r) => r.px !== null).map((r) => r.px);
-  check(xs.length === FRAMES, "the character is on the SAT on every frame");
-  check(Math.max.apply(null, xs) - Math.min.apply(null, xs) >= 40,
+  const xs = rec.map((r) => r.px);
+  const far = rec.map((r) => (r.bands.length ? r.bands[0].bxr : -1));
+  const near = rec.map((r) => (r.bands.length ? r.bands[1].bxr : -1));
+
+  /* claim 2, first half: player x rises a pixel a frame to the middle and
+   * stays there — the slower walk, one pixel a frame, no two-pixel strides
+   * (f0..f87 the walk from px 8, the rest of the run he is at the middle) */
+  eq("player x rises a pixel a frame to the middle and stays there",
+     xs, rec.map((r) => (r.f < 88 ? 9 + r.f : MID)));
+
+  /* claim 2, second half: once he is at the middle, BXR rises instead — the
+   * far band a pixel a frame and the near band two (its ratio to the
+   * camera), both rising the whole 212 frames of the hold */
+  const farSteps = [], nearSteps = [];
+  for (let f = 89; f < 300; f++) {
+    farSteps.push((far[f] - far[f - 1] + 256) % 256);
+    nearSteps.push((near[f] - near[f - 1] + 256) % 256);
+  }
+  eq("while he stays at the middle BXR rises: the far band a pixel a frame",
+     farSteps, new Array(211).fill(1));
+  eq("and the near band keeps its 2:1 ratio, two pixels a frame",
+     nearSteps, new Array(211).fill(2));
+  check(Math.max.apply(null, near) > Math.max.apply(null, far),
+        "the near band is the faster one");
+
+  /* claim 1: BXR does not change while no direction is held — the release
+   * 60 — and the idle stand shows the whole time */
+  let still = true;
+  for (let f = 301; f < 360; f++)
+    if (far[f] !== far[f - 1] || near[f] !== near[f - 1]) still = false;
+  check(still, "BXR does not change while no direction is held (the release 60)");
+  const idleL = listedInt("IDLE_L");
+  eq("the pad at rest shows the idle stand",
+     rec.slice(300, 360).map((r) => r.pattern), new Array(60).fill(idleL));
+
+  /* claim 3: the animation frame changes only while moving, and a new run
+   * pose every six frames of walking — the pack gif's own pace (Full.gif
+   * plays its 38 frames at 100 ms each, and six 60 Hz frames are 100 ms).
+   * The two changes outside the walk — f300 to the idle stand, f360 back
+   * to the run — are the walk's own stop and start. */
+  const changes = [];
+  for (let f = 1; f < 480; f++)
+    if (rec[f].pattern !== rec[f - 1].pattern) changes.push(f);
+  const expect = [];
+  for (let f = 5; f < 300; f += 6) expect.push(f);
+  expect.push(300, 360);
+  for (let f = 365; f < 480; f += 6) expect.push(f);
+  eq("the animation frame changes only while he moves, a pose every six " +
+     "frames of walking", changes, expect);
+
+  /* ---- the walk back (card #158's other half) ----------------------------- */
+
+  /* Hold L to the middle and a little past it (cam 12), then J 400 frames:
+   * the camera scrolls back to cam 0 — the level's start — and clamps
+   * there, then the soldier walks back to the left edge and stops; a pad
+   * held against the edge moves nothing and shows the idle stand. */
+  const rt = toys.create(longSource, { budgetMs: 400, files: files });
+  rt.load();
+  const back = [];
+  for (let f = 0; f < 500; f++) {
+    rt.setPad(1, f < 100 ? { right: true } : { left: true });
+    const g = rt.frame(f);
+    back.push({ x: spriteX(g.state, 0) - 32,
+                pattern: spritePattern(g.state, 0),
+                bxr: g.raster && g.raster.entries.length === 2
+                  ? g.raster.entries[0].bxr : -1 });
+  }
+  rt.dispose();
+  /* f0..f87 the walk to the middle (cam 0), f88..f99 the camera right
+   * (cam 12), f100..f111 the camera back to 0, f112..f199 the walk back to
+   * px 8, then the clamp for 300 frames */
+  check(back.slice(100, 112).every((r) => r.x === MID),
+        "he stays at the middle while the camera scrolls back");
+  check(back.every((r) => r.x >= 8),
+        "he never walks off the left edge");
+  check(back[199].x === 8 && back[500 - 1].x === 8,
+        "walking left takes him back to the level's start (px 8) and stops there");
+  let backOk = true, clampedBxr = true;
+  for (let f = 1; f < 500; f++) {
+    const d = (back[f].bxr - back[f - 1].bxr + 256) % 256;
+    if (f >= 100 && f <= 111 && d !== 255) backOk = false;
+    if (f >= 112 && d !== 0) clampedBxr = false;
+  }
+  check(backOk, "the far band scrolls back a pixel a frame while he is at the middle");
+  check(clampedBxr, "the camera clamps at the level's start — no negative scroll");
+  check(back.slice(200).every((r) => r.x === 8 && r.pattern === idleL),
+        "a pad held against the level's edge moves nothing and shows the idle stand");
+
+  /* ---- the gameplay: jump, shot, water, the run cycle turning ------------- */
+
+  const play = playTogether(files, gameplayPad, 120, []);
+  const gp = play.records;
+  eq("Lua == IL on the gameplay's 120 frames", play.diffs.slice(0, 8), []);
+  eq("both runtimes ran every frame", [play.counted.lua, play.counted.il],
+     [119, 119]);
+
+  const gx = gp.map((r) => r.px);
+  check(Math.max.apply(null, gx) - Math.min.apply(null, gx) >= 40,
         "the pad walks the character across the screen (" +
-        Math.min.apply(null, xs) + ".." + Math.max.apply(null, xs) + ")");
-  const patterns = rec.filter((r) => r.pattern !== null).map((r) => r.pattern);
-  check(new Set(patterns).size >= 4,
-        "the run cycle turns through " + new Set(patterns).size + " patterns");
+        Math.min.apply(null, gx) + ".." + Math.max.apply(null, gx) + ")");
+  check(new Set(gp.map((r) => r.pattern)).size >= 4,
+        "the run cycle turns through " +
+        new Set(gp.map((r) => r.pattern)).size + " patterns");
 
   /* #148 (Dennis, playing it): the aim pose plays only WHILE the fire key is
    * held — the old cooldown timer let the gun linger up after the release,
@@ -364,25 +491,27 @@ function checkPlay(files) {
    * wins in the air), and the run cycle's own sequence never contains it
    * while fire is not pressed. */
   const shootL = listedInt("SHOOT_L");
-  const fireFrames = rec.filter((r) => r.fire && r.feet === 208).map((r) => r.f);
-  const shotPose = rec.filter((r) => r.pattern === shootL).map((r) => r.f);
+  const fireFrames = gp.filter((r) => r.fire && r.feet === 208).map((r) => r.f);
+  const shotPose = gp.filter((r) => r.pattern === shootL).map((r) => r.f);
   check(shotPose.length > 0, "the aim pose shows while the fire key is held (" +
         shotPose.length + " frames)");
   eq("and on exactly those frames — never while fire is not pressed",
      shotPose, fireFrames);
 
-  /* the idle stand is its own frame (sheet frame 1), shown whenever the pad
-   * is at rest on the ground with no fire held — and on no other frame */
-  const idleL = listedInt("IDLE_L");
-  const idleFrames = rec.filter((r) => r.pattern === idleL).map((r) => r.f);
+  /* the idle stand is its own frame (sheet frame 1), shown whenever nothing
+   * moved — the run plays only while he moves (#158), so a still frame is
+   * an idle frame — and on no other frame */
+  const idleFrames = gp.filter((r) => r.pattern === idleL).map((r) => r.f);
   check(idleFrames.length >= 8, "the pad at rest shows the idle stand (" +
         idleFrames.length + " frames)");
   eq("on every still, grounded, not-firing frame, and no other", idleFrames,
-     rec.filter((r) => !r.left && !r.right && !r.fire && r.feet === 208)
+     gp.filter((r) => r.f > 0 && !r.fire && r.feet === 208 &&
+                    r.px === gp[r.f - 1].px &&
+                    JSON.stringify(r.bands) === JSON.stringify(gp[r.f - 1].bands))
         .map((r) => r.f));
 
   /* the jump: away from the water line and back to it */
-  const feet = rec.map((r) => r.feet);
+  const feet = gp.map((r) => r.feet);
   check(Math.min.apply(null, feet) < 208 - 20,
         "up lifts the character off the water line (lowest y " +
         Math.min.apply(null, feet) + " of 208)");
@@ -390,7 +519,7 @@ function checkPlay(files) {
         "and it lands back on the water line at y 208");
 
   /* the tracer */
-  const firing = rec.filter((r) => r.shotX !== null);
+  const firing = gp.filter((r) => r.shotX !== null);
   check(firing.length > 10, "fire puts tracers in the SAT (" + firing.length +
         " frames with one flying)");
   /* every bullet flies at six pixels a frame; a step is only compared
@@ -406,50 +535,49 @@ function checkPlay(files) {
         step + " steps of 6, " + jumped + " not)");
 
   /* the water cycles every eight frames */
-  let cycled = 0, still = 0;
-  for (let i = 1; i < rec.length; i++) {
-    const same = JSON.stringify(rec[i].water) === JSON.stringify(rec[i - 1].water);
-    if (rec[i].f % 8 === 0) { if (!same) cycled++; else still++; }
-    else if (!same) still++;
+  let cycled = 0, stillWater = 0;
+  for (let i = 1; i < gp.length; i++) {
+    const same = JSON.stringify(gp[i].water) === JSON.stringify(gp[i - 1].water);
+    if (gp[i].f % 8 === 0) { if (!same) cycled++; else stillWater++; }
+    else if (!same) stillWater++;
   }
-  check(cycled > 10 && still === 0,
+  check(cycled > 10 && stillWater === 0,
         "the water's three CRAM entries change on every 8th frame and only then (" +
-        cycled + " changes, " + still + " elsewhere)");
+        cycled + " changes, " + stillWater + " elsewhere)");
 
-  /* the raster split: two bands, the near one fast, the far one a third */
-  const bands = rec[rec.length - 1].bands;
+  /* the raster split: two bands, and they move only with the camera — on
+   * this script the soldier never reaches the middle, so the street is
+   * still the whole time (no auto-scroll, card #158) */
+  const bands = gp[gp.length - 1].bands;
   eq("the raster table has two entries", bands.map((b) => b.line), [0, 208]);
-  let near = [], far = [];
-  for (let i = 1; i < rec.length; i++) {
-    const a = rec[i - 1].bands, b = rec[i].bands;
+  let farB = [], nearB = [];
+  for (let i = 1; i < gp.length; i++) {
+    const a = gp[i - 1].bands, b = gp[i].bands;
     if (!a.length || !b.length) continue;
-    far.push(((b[0].bxr - a[0].bxr) + 256) % 256);
-    near.push(((b[1].bxr - a[1].bxr) + 256) % 256);
+    farB.push(((b[0].bxr - a[0].bxr) + 256) % 256);
+    nearB.push(((b[1].bxr - a[1].bxr) + 256) % 256);
   }
-  check(far.every((d) => d <= 1), "the far band moves at most a pixel a frame (" +
-        Math.max.apply(null, far) + ")");
-  check(near.every((d) => d >= 1 && d <= 3), "the near band moves 1-3 pixels a frame (" +
-        Math.min.apply(null, near) + ".." + Math.max.apply(null, near) + ")");
-  check(Math.max.apply(null, near) > Math.max.apply(null, far),
-        "the near band is the faster one");
+  check(farB.every((d) => d === 0) && nearB.every((d) => d === 0),
+        "the bands are still while he walks on screen and stands — no " +
+        "auto-scroll (far max " + Math.max.apply(null, farB) + ", near max " +
+        Math.max.apply(null, nearB) + ")");
 
   /* #148 (Dennis, playing it): "the second layer does not scroll to the end of
    * the screen and restart, it now stops somewhere in the middle".  A band
    * whose BXR is a divided shared counter climbs to 85 and snaps back.  This
-   * runs past both wraps — 300 frames of the near band at 2-3 px and the far
-   * band at 1 — and every step must be the band's own rate, with at least one
-   * wrap of each in the run. */
-  const longSource = fs.readFileSync(PLAYABLE, "utf8");
-  const rt = toys.create(longSource, { budgetMs: 400, files: files });
-  rt.load();
+   * holds right past both wraps — 400 frames: the walk to the middle, then
+   * the camera at a pixel a frame (the far band goes round once, the near
+   * twice, at its 2:1 rate) — and every step must be the band's own rate. */
+  const rt2 = toys.create(longSource, { budgetMs: 400, files: files });
+  rt2.load();
   const seq = [];
-  for (let f = 0; f < 300; f++) {
-    rt.setPad(1, f % 2 ? { right: true } : {});
-    const g = rt.frame(f);
+  for (let f = 0; f < 400; f++) {
+    rt2.setPad(1, { right: true });
+    const g = rt2.frame(f);
     if (g.raster && g.raster.entries.length === 2)
       seq.push([g.raster.entries[0].bxr, g.raster.entries[1].bxr]);
   }
-  rt.dispose();
+  rt2.dispose();
   /* a wrap is a fall from the top of 0..255 to a small value; anything else
    * that goes backwards (85 -> 0, the bug #148 found) is a jump */
   let farWrap = 0, nearWrap = 0, farBad = 0, nearBad = 0;
@@ -464,7 +592,7 @@ function checkPlay(files) {
     if (f[0] === "wrap") farWrap++; else if (f[0] === "bad") farBad++;
     if (n[0] === "wrap") nearWrap++; else if (n[0] === "bad") nearBad++;
   }
-  check(seq.length === 300, "300 frames of the two bands were recorded");
+  check(seq.length === 400, "400 frames of the two bands were recorded");
   check(farBad === 0 && nearBad === 0,
         "no band jumps: every step is its own rate (far " + farBad +
         " bad, near " + nearBad + " bad)");
@@ -472,7 +600,7 @@ function checkPlay(files) {
         "each band goes round and comes back (far " + farWrap + " wraps, near " +
         nearWrap + " wraps)");
 
-  return run;
+  return ev;
 }
 
 /* ---- 7: the frame strip, beside the art -------------------------------- */
@@ -521,27 +649,27 @@ function makePng(width, height, rgba) {
 }
 
 function writeStrip(files) {
-  /* The card's strip: one full run cycle, one jump, one shot.  Its own pad
-   * drives them: right for the cycle (a new run frame every four frames, so
-   * the cycle's eight land at 0, 3, 7, 11, 15, 19, 23, 27), up for the leap
-   * (kept mid-air), then a held fire for the aim. */
-  const stripPad = (f) => {
-    const p = {};
-    if (f < 32) p.right = true;
-    else if (f >= 40 && f < 46) p.up = true;
-    else if (f >= 60 && f < 62) p.i = true;
-    return p;
-  };
-  const cell = 128, ch = 120, cols = 4, picks = [0, 3, 7, 11, 15, 19, 23, 27, 41, 61];
-  const run = playTogether(files, stripPad, FRAMES, picks);
-  eq("Lua == IL on the strip's 120 frames", run.diffs.slice(0, 8), []);
+  /* Card #158's four-step strip: the idle stand at the level's start, a
+   * step while walking on screen, the middle (where the camera takes over),
+   * and the street scrolled at the middle.  One pad drives them: right from
+   * frame 10, so the 88-pixel walk reaches the middle at frame 97 and the
+   * camera scrolls after.  The picks share one water phase (f // 8 mod 3
+   * is 0 on all four), so the street itself is the only thing that differs
+   * between the cells. */
+  const stripPad = (f) => (f >= 10 ? { right: true } : {});
+  const cell = 144, ch = 120, cols = 4, picks = [5, 30, 97, 150];
+  const run = playTogether(files, stripPad, 160, picks);
+  eq("Lua == IL on the strip's 160 frames", run.diffs.slice(0, 8), []);
 
-  /* the kept frames are the poses the strip must show: the run cycle's eight
-   * patterns in order, then the leap's, then the aim's */
-  const wantPatterns = listedList("RUN_L")
-    .concat([listedInt("JUMP_L"), listedInt("SHOOT_L")]);
-  eq("the strip's ten cells are one run cycle in order, one jump, one shot",
+  /* the cells are the four steps: the idle stand, a step while walking, the
+   * middle, and the street scrolled — three poses of the run cycle after
+   * the idle (run_t 21, 88 and 141 walking frames: poses 3, 14 and 23) */
+  const wantPatterns = [listedInt("IDLE_L")]
+    .concat(listedList("RUN_L").slice(3, 4), listedList("RUN_L").slice(6, 8));
+  eq("the strip's four cells are one idle stand and three steps of the run",
      picks.map((f) => run.records[f].pattern), wantPatterns);
+  eq("the character stands at the start, steps right, and stays at the middle",
+     picks.map((f) => run.records[f].px), [8, 29, 96, 96]);
 
   const w = cols * cell, h = Math.ceil(picks.length / cols) * ch;
   const rgba = new Uint8Array(w * h * 4);
@@ -550,10 +678,11 @@ function writeStrip(files) {
     const px = run.kept.get(f);
     const ox = (i % cols) * cell, oy = Math.floor(i / cols) * ch;
     for (let y = 0; y < ch; y++) for (let x = 0; x < cell; x++) {
-      /* the character's own corner of the screen: the 64-px pair walks from
-       * x 104 to 232 and a leap tops out at y 109, so x 104..232, y 100..220
-       * holds every pose whole */
-      const sx = 104 + x, sy = 100 + y;
+      /* the character's own corner of the screen: he walks from x 8 to the
+       * middle at 96, and the middle pose's art (the 40-px run frame centred
+       * in its pair) spans x 108..147, so x 8..152, y 100..220 holds every
+       * pose whole */
+      const sx = 8 + x, sy = 100 + y;
       if (sx >= WIDTH || sy >= HEIGHT) continue;
       const si = (sy * WIDTH + sx) * 3, oi = ((oy + y) * w + ox + x) * 4;
       rgba[oi] = px[si]; rgba[oi + 1] = px[si + 1]; rgba[oi + 2] = px[si + 2];
@@ -565,6 +694,42 @@ function writeStrip(files) {
   fs.writeFileSync(file, png);
   check(fs.statSync(file).size === png.length,
         "the frame strip is written beside the art: demo-art/city/evidence/strip.png");
+
+  /* the story the strip tells, read in the column the character never
+   * covers on any cell (x 81..107 of the screen — the idle stand spans
+   * 24..55, the step 41..80, the middle pose 108..147): the street stands
+   * still while he walks to the middle (the first and third cells show one
+   * picture, cam 0), and it scrolls once he is there (cam 53 in the fourth
+   * cell) */
+  const region = (cellIdx) => {
+    const ox = (cellIdx % cols) * cell, oy = Math.floor(cellIdx / cols) * ch;
+    const row = [];
+    for (let y = 0; y < ch; y++) for (let x = 73; x < 100; x++) {
+      const oi = ((oy + y) * w + ox + x) * 4;
+      row.push(rgba[oi], rgba[oi + 1], rgba[oi + 2]);
+    }
+    return row.join(",");
+  };
+  check(region(0) === region(2),
+        "the street stands still while he walks to the middle (cells 1 and 3 match)");
+  check(region(2) !== region(3),
+        "and it scrolls once he is there (cells 3 and 4 differ)");
+
+  /* the card's "x ~ 128": cells 1 and 3 are both cam 0, so inside the
+   * middle pose's own corner (screen x 96..151, above the water line) the
+   * only ink that differs is the soldier himself — and its centre is the
+   * screen's middle */
+  let diffInk = 0, diffSum = 0;
+  for (let y = 44; y <= 107; y++) for (let x = 88; x <= 143; x++) {
+    const o1 = (y * w + x) * 4, o3 = (y * w + 2 * cell + x) * 4;
+    const d = Math.abs(rgba[o1] - rgba[o3]) + Math.abs(rgba[o1 + 1] - rgba[o3 + 1]) +
+              Math.abs(rgba[o1 + 2] - rgba[o3 + 2]);
+    if (d > 0) { diffInk++; diffSum += x; }
+  }
+  const cx = 8 + diffSum / diffInk;   /* crop x 0 is screen x 8 */
+  check(diffInk > 200 && Math.abs(cx - 128) <= 16,
+        "the soldier's body is the screen's middle (centre x " + cx.toFixed(0) +
+        " of " + diffInk + " differing ink pixels)");
 
   /* read it back: the strip is not one flat colour, and its cells differ */
   let flat = true, first = -1, differing = 0;
