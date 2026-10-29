@@ -6907,6 +6907,27 @@ function toySource(file) {
   return fs.readFileSync(path.join(TOYS_DIR, file), "utf8");
 }
 
+/* #157: the Open popover's markup, from its opening <div> to the matching
+ * </div>.  The stub DOM does not parse the static markup, and grepping the
+ * page for "#<digits>" would match the maintenance comments, so the text
+ * check strips comments and tags first and reads only what a stranger sees. */
+function openPopoverMarkup(html) {
+  const start = html.indexOf('<div class="popover" id="open-pop"');
+  if (start < 0) return "";
+  const re = /<div\b|<\/div>/g;
+  re.lastIndex = start;
+  let depth = 0, m;
+  while ((m = re.exec(html))) {
+    if (m[0] === "</div>") {
+      depth--;
+      if (depth === 0) return html.slice(start, m.index + m[0].length);
+    } else {
+      depth++;
+    }
+  }
+  return html.slice(start);
+}
+
 function checkGallery(page) {
   const S = page.sandbox.PCEStudio;
   const studio = S.studio;
@@ -7061,6 +7082,56 @@ function checkGallery(page) {
      "main.lua,tiles.json,palettes.json,sprites.json");
   check(studio.current().source === toySource("demo-game/main.lua"),
         "#121: … and the game's own main.lua");
+  /* #157: Open… is the Browse gallery — the same ids in the same order, each
+   * button carrying the id the page opens — and the three test toys are not
+   * in it.  The same assertion is run on the pre-#157 list as a control: it
+   * must fail, or the check proves nothing about the change. */
+  const menuIds = (menu ? menu.children : [])
+    .filter((el) => el.getAttribute && el.getAttribute("data-example-id"))
+    .map((el) => el.getAttribute("data-example-id"));
+  const galleryIds = data.map((t) => t.id);
+  eq("#157: Open… lists the gallery's toys, in the gallery's order",
+     menuIds, galleryIds);
+  /* The pre-#157 menu was the three test examples plus the first gallery toy
+   * that carries files (STARFALL, #121).  The same equality check, fed that
+   * list, must say NO — otherwise it proves nothing about the change. */
+  const oldMenuIds = studio.examples.map((e) => e.id);
+  const oldPlayable = data.find((t) => t.files && t.files.length);
+  if (oldPlayable) oldMenuIds.push(oldPlayable.id);
+  const oldMatches = oldMenuIds.length === galleryIds.length &&
+    oldMenuIds.every((id, i) => id === galleryIds[i]);
+  check(!oldMatches,
+        "#157: control — the pre-#157 menu's list fails that check (" +
+        oldMenuIds.join(", ") + ")");
+  check(galleryIds.indexOf("palette") < 0 &&
+        galleryIds.indexOf("raster") < 0 &&
+        galleryIds.indexOf("sprite") < 0,
+        "#157: the three test-only examples are not gallery ids");
+  const skyBtn = (menu ? menu.children : []).find(
+    (el) => el.getAttribute &&
+          el.getAttribute("data-example-id") === "sky-gradient");
+  if (skyBtn) skyBtn.click();
+  eq("#157: the Open… button opens the gallery's toy", studio.current().id,
+     "sky-gradient");
+  check(studio.current().source === toySource("sky-gradient.lua"),
+        "#157: … with the toy's own main.lua");
+
+  /* #157: every caption a stranger reads — the static popover with its HTML
+   * comments removed, plus the entries and link built into the list — names
+   * no card number, no test file and no "envelope". */
+  const rawPage = fs.readFileSync(PAGE, "utf8");
+  const staticText = openPopoverMarkup(rawPage).replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]*>/g, " ").replace(/\s+/g, " ");
+  const dynamicText = (menu ? menu.children : [])
+    .map((el) => el.textContent || "").join(" ");
+  const menuText = staticText + " " + dynamicText;
+  check(!/#\d/.test(menuText),
+        "#157: the Open… menu names no card number (" +
+        JSON.stringify((menuText.match(/#\d+/g) || []).join(", ")) + ")");
+  check(menuText.indexOf("tests/") < 0,
+        "#157: the Open… menu names no test file");
+  check(!/envelope/i.test(menuText),
+        "#157: the Open… menu does not say 'envelope'");
   studio.loadExample("palette", true);   /* leave the page on a #29 toy */
 
   const miss = runPage("?toy=no-such-toy&paused=1");
