@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCEStudio with Claude Code</title>
+<meta name="description" content="Let Claude Code write, run, look at and export PC Engine games through PCEStudio's MCP server: install on macOS, Linux or Windows, the tools, worked examples and troubleshooting.">
+<link rel="stylesheet" href="pce-gallery.css">
+<style>
+  /* the same reading column as testers.html */
+  .tg { max-width: 780px; margin: 0 auto; padding: 32px 16px 80px; color: var(--text2); font: 15px/1.65 var(--sans); }
+  .tg h1 { font: 700 30px/1.2 var(--display); color: var(--text); margin: 6px 0 10px; }
+  .tg h2 { font: 600 19px/1.3 var(--sans); color: var(--text); margin: 40px 0 10px; padding-top: 18px; border-top: 1px solid var(--line2); }
+  .tg h3 { font: 600 15px/1.3 var(--sans); color: var(--text); margin: 22px 0 6px; }
+  .tg p, .tg li { max-width: 70ch; }
+  .tg a { color: var(--accent); }
+  .tg code, .tg kbd { font: 13px var(--mono); background: var(--code); border: 1px solid var(--line2); border-radius: 4px; padding: 1px 5px; color: var(--text); }
+  .tg pre { font: 13px/1.5 var(--mono); background: var(--code); border: 1px solid var(--line2); border-radius: 6px; padding: 12px 14px; overflow-x: auto; color: var(--text); }
+  .tg pre code { border: 0; padding: 0; background: none; }
+  .tg .kicker { font: 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .tg .lede { font-size: 17px; color: var(--text); }
+  .tg .box { background: var(--pane); border: 1px solid var(--line); border-radius: 8px; padding: 14px 18px; margin: 18px 0; }
+  .tg .box.warn { border-color: var(--accent); }
+  .tg table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 14px; }
+  .tg th, .tg td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+  .tg th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .tg .say { border-left: 3px solid var(--accent); padding: 6px 12px; margin: 10px 0; color: var(--text); font-style: italic; background: var(--pane); }
+  .tg .soon { color: var(--accent); font: 12px var(--mono); }
+  .tg .os { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .tg .os > div { background: var(--pane); border: 1px solid var(--line2); border-radius: 8px; padding: 10px 14px; }
+  .tg .toc { columns: 2; column-gap: 32px; padding-left: 18px; font-size: 14px; }
+  @media (max-width: 560px) { .tg .toc { columns: 1; } .tg h1 { font-size: 24px; } }
+</style>
+</head>
+<body>
+<header class="site-head">
+  <a class="brand" href="browse.html" title="PCEStudio home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">PCE<span class="brand-dot">·</span>studio</span>
+  </a>
+  <nav class="site-nav" aria-label="Site">
+    <a href="studio.html">Studio</a>
+    <a href="browse.html">Browse</a>
+    <a href="docs.html">Docs</a>
+    <a href="testers.html">Beta testers</a>
+    <a href="claude-code.html" class="is-on" aria-current="page">Claude Code</a>
+  </nav>
+</header>
+
+<main class="tg">
+  <span class="kicker">Manual · beta 1</span>
+  <h1>PCEStudio with Claude Code</h1>
+  <p class="lede">With a chat AI, you copy code back and forth. Claude Code can do the whole loop itself: write the toy,
+  run it, look at the frames, fix what it sees, check it against the console's limits, and export a ROM. It does this
+  through PCEStudio's <b>MCP server</b>, a small program on your computer that runs the same engine as the studio.</p>
+
+  <ul class="toc">
+    <li><a href="#need">1. What you need</a></li>
+    <li><a href="#install">2. Install (macOS, Linux, Windows)</a></li>
+    <li><a href="#check">3. Check that it works</a></li>
+    <li><a href="#how">4. How a session goes</a></li>
+    <li><a href="#tools">5. The tools</a></li>
+    <li><a href="#examples">6. Worked examples</a></li>
+    <li><a href="#art">7. Art: pixel grids and PNGs</a></li>
+    <li><a href="#sound">8. Sound and music</a></li>
+    <li><a href="#studio">9. From Claude Code to the studio</a></li>
+    <li><a href="#trouble">10. Troubleshooting</a></li>
+    <li><a href="#limits">11. What doesn't work yet</a></li>
+  </ul>
+
+  <h2 id="need">1. What you need</h2>
+  <ul>
+    <li><b>Claude Code</b>, signed in (<a href="https://claude.com/claude-code">claude.com/claude-code</a>).</li>
+    <li><b>Node.js</b>, a current LTS version, from <a href="https://nodejs.org">nodejs.org</a>. The server uses
+    nothing else: no <code>npm install</code>, no compilers, no emulator.</li>
+    <li><b>git</b>, to download PCEStudio. Without git, use GitHub's <i>Code → Download ZIP</i> button.</li>
+  </ul>
+  <div class="box">The server is plain JavaScript and should run on macOS, Linux and Windows. In this beta it has only
+  been <b>tested on macOS</b>. If you're on Linux or Windows, please tell us how it goes, whether it works or not
+  (<a href="testers.html#report">how to report</a>).</div>
+
+  <h2 id="install">2. Install</h2>
+  <p>Do this once. Open a terminal (on Windows: PowerShell), go to the folder where you keep projects, and run:</p>
+  <div class="os">
+    <div><b>macOS / Linux</b>
+<pre>git clone https://github.com/terracide303/PCEStudio-public.git
+cd PCEStudio-public
+claude mcp add pcestudio -- node "$PWD/tools/mcp/server.js"
+mkdir -p ~/.claude/skills
+ln -s "$PWD/plugin/skills/creating-pce-toys" \
+      ~/.claude/skills/creating-pce-toys</pre></div>
+    <div><b>Windows (PowerShell)</b>
+<pre>git clone https://github.com/terracide303/PCEStudio-public.git
+cd PCEStudio-public
+claude mcp add pcestudio -- node "$PWD\tools\mcp\server.js"
+mkdir -Force "$HOME\.claude\skills"
+Copy-Item -Recurse plugin\skills\creating-pce-toys `
+  "$HOME\.claude\skills\creating-pce-toys"</pre></div>
+  </div>
+  <p>What each line does:</p>
+  <ul>
+    <li><code>git clone</code> downloads PCEStudio: the server, the engine it shares with the studio, and the skill.</li>
+    <li><code>claude mcp add pcestudio -- node …/server.js</code> tells Claude Code that a server called
+    <code>pcestudio</code> exists, and how to start it. Claude Code starts it itself when a session needs it; you
+    never run <code>server.js</code> by hand.</li>
+    <li>The skill (<code>creating-pce-toys</code>) teaches Claude the PC Engine's rules, the toy API and worked
+    recipes. Without it Claude can still use the tools, but it will guess more. On Windows it is copied rather than
+    linked; copy it again after a <code>git pull</code>.</li>
+  </ul>
+  <p>To update later: <code>cd PCEStudio-public</code> and <code>git pull</code>. To remove it:
+  <code>claude mcp remove pcestudio</code>.</p>
+  <p><code>claude mcp add</code> registers the server for the folder you run it in. To have it everywhere, add
+  <code>--scope user</code> right after <code>add</code>.</p>
+
+  <h2 id="check">3. Check that it works</h2>
+  <ol>
+    <li>Run <code>claude mcp list</code>. It should show <code>pcestudio</code> as connected.</li>
+    <li>Start Claude Code (<code>claude</code>) and type <code>/mcp</code>. You should see <b>pcestudio</b> with its
+    tools.</li>
+    <li>Ask it for something small:</li>
+  </ol>
+  <p class="say">Using the pcestudio tools, make a toy that fills the screen with a blue-to-orange sunset gradient,
+  run it and show me frame 30.</p>
+  <p>Claude will call <code>toy_write</code>, <code>toy_run</code> and <code>frame_png</code>, and show you the
+  picture. If it says it has no such tools, see <a href="#trouble">troubleshooting</a>.</p>
+
+  <h2 id="how">4. How a session goes</h2>
+  <p>Describe the game the way you'd describe it to a friend. Claude works in a loop:</p>
+  <ol>
+    <li><b>Read the rules</b>: the skill, and <code>docs</code> for the chapter it needs (sprites, raster, sound…).</li>
+    <li><b>Write</b> the toy with <code>toy_write</code>. If the code doesn't compile, the reply names the line.</li>
+    <li><b>Add art</b> with <code>source_add</code>, as a pixel grid or a PNG (section 7).</li>
+    <li><b>Run</b> it with <code>toy_run</code>, with a scripted pad if it's a game ("hold Right for 2 seconds, then
+    press I").</li>
+    <li><b>Look</b> at frames with <code>frame_png</code>. Running without errors doesn't mean it looks right, so a
+    good session looks at several frames.</li>
+    <li><b>Check</b> it with <code>validate</code>: sprites per line, VRAM, the frame budget.</li>
+    <li><b>Export</b> a <code>.pce</code> with <code>export_pce</code> (simple toys only for now), and
+    <b>save</b> it for the studio (section 9).</li>
+  </ol>
+  <p>Good habits to ask for: <i>"look at frames 0, 60 and 300 before you tell me it's done"</i>, and <i>"run
+  validate and fix every finding"</i>.</p>
+
+  <h2 id="tools">5. The tools</h2>
+  <table>
+    <tr><th>Tool</th><th>What it does</th></tr>
+    <tr><td><code>docs</code></td><td>The toy API reference, by chapter: the-toy, registers, palettes, sprites, raster,
+      pads, timer, passwords, sound, budgets, refusals. Generated from the engine, so it's never out of date.</td></tr>
+    <tr><td><code>toy_write</code></td><td>Loads a toy: <code>main.lua</code> plus any asset files. Compiles at once
+      and returns the error code and line if it doesn't.</td></tr>
+    <tr><td><code>source_add</code></td><td>Turns a picture into console art: a base64 PNG or a pixel grid with its
+      palette, as <code>bg</code>, <code>sprites</code>, <code>tilesheet</code> or <code>palette</code>. Reports the
+      tiles, palettes and VRAM it used.</td></tr>
+    <tr><td><code>toy_run</code></td><td>Runs up to 600 frames (10 s), optionally with a pad script, and returns the
+      registers, memory digests, the log and the sound activity.</td></tr>
+    <tr><td><code>frame_png</code></td><td>One frame (0–599) as a 256×224 PNG that Claude can see.</td></tr>
+    <tr><td><code>validate</code></td><td>The validator: findings with file and line, cycles, sprites per line, VRAM,
+      ROM size.</td></tr>
+    <tr><td><code>registers_get</code> / <code>register_set</code></td><td>Read the VDC, VCE and PSG registers, or try
+      a value on the current run without changing the code.</td></tr>
+    <tr><td><code>export_pce</code></td><td>Builds a <code>.pce</code> ROM (default: your temp folder,
+      <code>pce-mcp/&lt;name&gt;.pce</code>, or the path you give).</td></tr>
+    <tr><td><code>toy_save</code></td><td>Saves the whole toy — <code>main.lua</code>, the art
+      <code>source_add</code> made, the named sources and the songs — as one <code>.pce.json</code> in the studio's
+      own format, inside the folder you started it in. You open that file with <b>Open… → From file…</b>
+      (section 9).</td></tr>
+  </table>
+
+  <h2 id="examples">6. Worked examples</h2>
+  <p>Things to say to Claude Code. Each one is a good test of the setup.</p>
+
+  <h3>A first game</h3>
+  <p class="say">Make a one-screen PC Engine game: a cat runs left and right on the ground (J/L), jumps with N, and
+  catches falling fish for points. Draw the cat and the fish as 16×16 pixel-grid sprites. Show the score at the top.
+  Run it with a scripted pad, show me three frames, then run validate.</p>
+
+  <h3>Scrolling with depth</h3>
+  <p class="say">Make a side-scroller background with three bands that scroll at different speeds, sky slowest,
+  ground fastest, using raster(). The PC Engine has one background layer, so design the art as horizontal strips that
+  loop seamlessly. Show me frames 0 and 300 so I can see the bands moved.</p>
+  <p>Why this works: the console has <b>one</b> background. Depth comes from scrolling bands of lines at different
+  speeds, plus sprites in front. Art that wasn't drawn in bands gets cut at the band edges.</p>
+
+  <h3>Fix something that looks wrong</h3>
+  <p class="say">At frame 240 the hero flickers and part of him disappears. Run validate, tell me what it says about
+  sprites per line, and fix it.</p>
+
+  <h3>Make it a cartridge</h3>
+  <p class="say">Export this as a .pce. If the export refuses it, tell me which lines it can't carry yet and whether
+  you can rewrite them without tables.</p>
+
+  <h2 id="art">7. Art: pixel grids and PNGs</h2>
+  <p>Two ways to give a toy art through <code>source_add</code>:</p>
+  <ul>
+    <li><b>A pixel grid</b>: Claude draws it as numbers, each one a colour index into a small palette, with
+    <code>-1</code> for transparent. This is best for small sprites and tiles Claude invents itself.</li>
+    <li><b>A PNG</b>: your own picture or one Claude generates, sent as base64. The importer cuts it into 8×8 tiles
+    (or sprite patterns), snaps every colour to the console's 512, and groups tiles into palettes of 16 colours
+    (at most 16 palettes). Dithering and an alpha threshold are optional.</li>
+  </ul>
+  <p>A sprite example. This is the skill's recipe 06: a 16×16 red square with a white centre, placed with the SAT.</p>
+<pre><code>-- after source_add {kind: "sprites", name: "box", grid: {width:16, height:16,
+--   pixels:[0,0,…,1,1,…]}, palette: [[252,0,0],[252,252,252]]}
+function init()
+  reg("CR", 0xC0)              -- sprites + background on (sprites start OFF)
+  pal(0, rgb(0, 0, 7))         -- the backdrop: blue
+  sat(0, 0, 100)               -- sprite 0: Y
+  sat(0, 1, 100)               -- sprite 0: X
+end
+function frame(t, f) end</code></pre>
+  <p>Things that trip up every sprite toy, and that the skill teaches Claude:</p>
+  <ul>
+    <li>Sprites are <b>off</b> at power-on. Without <code>reg("CR", 0xC0)</code>, nothing shows and there is no
+    error.</li>
+    <li>A sprite has 15 colours plus transparent. There are 64 sprites in total, and at most 16 on one line.</li>
+    <li>Sizes go from 16×16 to 32×64.</li>
+    <li>Only use art you're allowed to use. If you give Claude a bought pack, check its licence before you share the
+    game.</li>
+  </ul>
+
+  <h2 id="sound">8. Sound and music</h2>
+  <ul>
+    <li><b>Sound effects and notes work now</b>: <code>sfx(channel, freq, volume, frames)</code> plays a note on one
+    of the PSG's six voices, and <code>note(midi)</code> turns a MIDI note number into its frequency. The skill's
+    recipe 04 plays a tune this way.</li>
+    <li><b>Songs</b>: in the studio you write songs in the SEQUENCER with the 15 built-in instruments, and a game
+    plays them with <code>music(0)</code>. Through the MCP server, songs are <span class="soon">coming</span>. Until
+    then <code>music(0)</code> is refused with <code>music-range</code>, so ask Claude to use <code>sfx</code>
+    notes, or add the song in the studio afterwards.</li>
+    <li>Claude can't hear. <code>toy_run</code> tells it how many sound writes happened, so ask it to check the
+    sound is active, then listen yourself in the studio.</li>
+  </ul>
+
+  <h2 id="studio">9. From Claude Code to the studio</h2>
+  <ul>
+    <li><b>Code and art — the usual way</b>: ask Claude to finish with <b><code>toy_save</code></b>. It writes
+    ONE <code>&lt;name&gt;.pce.json</code> holding <code>main.lua</code>, the art <code>source_add</code> made
+    (<code>tiles.json</code>, <code>palettes.json</code>, <code>sprites.json</code>), the named sources and the
+    songs — the same file the studio's own <b>Save</b> writes, byte for byte. Then open the
+    <a href="studio.html">studio</a> and press <b>Open… → From file…</b> (or drop the file on the page): the game
+    plays with its art, and the ASSETS panel lists the pictures by name. Ask Claude to save before it exports, too:
+    a game that can't export yet still opens and plays in the studio.</li>
+    <li><b>Code only</b> (art drawn in code, no <code>source_add</code>): ask Claude to write <code>main.lua</code>
+    to a file, then drag it into the studio or use <b>Paste &amp; Run</b>. A plain <code>.lua</code> starts a new toy
+    with no art, which is why the art route above is the one to use when there is any art.</li>
+    <li>Claude writes inside the folder you started it in; a <code>toy_save</code> path outside that folder is
+    refused with <code>save-path</code>. If the file isn't where you expect, ask for the reply's
+    <code>path</code>.</li>
+    <li><b>A ROM</b>: <code>export_pce</code> writes a <code>.pce</code> for an emulator (Mednafen, Ares, …) or a flash
+    cart.</li>
+  </ul>
+
+  <h2 id="trouble">10. Troubleshooting</h2>
+  <table>
+    <tr><th>What you see</th><th>What to do</th></tr>
+    <tr><td><code>claude mcp list</code> shows pcestudio as failed</td><td>Run <code>node --version</code>. If that
+      fails, Node.js isn't installed or isn't on your PATH. Then try
+      <code>node tools/mcp/server.js</code> in the PCEStudio-public folder. It should wait silently; press
+      <kbd>Ctrl</kbd>+<kbd>C</kbd>. An error there is worth a bug report.</td></tr>
+    <tr><td>Claude says it has no pcestudio tools</td><td>You added the server in another folder: run Claude Code from
+      that folder, or add it again with <code>--scope user</code>. Restart Claude Code after adding.</td></tr>
+    <tr><td>The path moved</td><td><code>claude mcp remove pcestudio</code>, then add it again with the new
+      path.</td></tr>
+    <tr><td>Windows: "node is not recognized"</td><td>Reopen PowerShell after installing Node.js, or give the full
+      path: <code>claude mcp add pcestudio -- "C:\Program Files\nodejs\node.exe" "$PWD\tools\mcp\server.js"</code>.</td></tr>
+    <tr><td>A reply with <code>ok:false</code> and a code</td><td>That's the engine refusing something, with a reason.
+      <code>sprite-range</code>, <code>reg-range</code> and <code>vram-range</code> mean a value is out of the
+      hardware's range. <code>il-…</code> codes mean the cartridge compiler can't carry that line yet. The
+      <code>docs</code> tool's <i>refusals</i> chapter lists them all.</td></tr>
+    <tr><td>A black frame</td><td>Usually sprites or the background are off (<code>reg("CR", 0xC0)</code>), the
+      palette is all black, or the art went into the wrong VRAM. Ask Claude to call <code>registers_get</code>
+      and check CR.</td></tr>
+    <tr><td><code>frame-range</code></td><td>One run holds frames 0–599. Ask for a frame inside that, or run
+      again.</td></tr>
+  </table>
+
+  <h2 id="limits">11. What doesn't work yet</h2>
+  <ul>
+    <li><b>Export</b>: games that use Lua tables, <code>sprite()</code>, the pad or <code>sfx()</code> don't export
+    to <code>.pce</code> yet. They run in the studio and through the server.</li>
+    <li><b>Songs through the server</b> are being built (section 8); a song already in a toy's file set is carried
+    by <code>toy_save</code> all the same.</li>
+    <li><b>Real hardware</b>: exports are checked in an emulator only.</li>
+    <li><b>Linux and Windows</b> haven't been tested yet (section 1).</li>
+  </ul>
+  <p>More: the <a href="testers.html">testers' guide</a>, the <a href="docs.html">toy API</a>, and the source at
+  <a href="https://github.com/terracide303/PCEStudio-public">github.com/terracide303/PCEStudio-public</a>.
+  Report problems there under <b>Issues</b>.</p>
+</main>
+</body>
+</html>

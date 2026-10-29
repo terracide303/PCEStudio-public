@@ -34,6 +34,12 @@
  * The override never touches the toy's source or its simulation, so an
  * agent's poke is reversible and cannot compound (docs/PPU-TOYS.md §4).
  *
+ * THE HAND-OFF (#160): toy_save writes the session as the studio's own file
+ * — one pce.studio/1 envelope with every file and source, through
+ * renderer/pce-source.js's envelopeText(), the builder the studio's Save
+ * uses.  Without it a session could only hand main.lua to the person, and
+ * the art stayed in the agent's process.
+ *
  * ART (#153): a toy's asset files (tiles.json, palettes.json, sprites.json)
  * are imported into VRAM/CRAM/SAT before init() exactly as the studio does —
  * toy_run passes them to renderer/pce-il.js, whose host runs the #117
@@ -44,6 +50,16 @@
  * (renderer/pce-source.js importImage, #123) and merged into the toy's asset
  * files, with the budget report back.  There is no second art model in this
  * file.
+ *
+ * MUSIC (#161): a toy's song files are its music(index) slots.  song.json is
+ * the SEQUENCER's own document; renderer/pce-seq.js songsFromFiles compiles
+ * it (and any playable songs.json entry) to the module pce-song.js's
+ * createPlayer() takes, and toy_run hands that list to the runtime as
+ * options.songs — the same list the studio gives a gallery toy.  source_add
+ * kind song imports a .mid (renderer/pce-source.js importMidi, #123) as
+ * song.json, song_write composes one from a step list, and toy_run's sound
+ * report says which channels started notes and with which instrument.
+ * There is no second song model in this file.
  *
  * stdout carries JSON-RPC only; logs go to stderr.  Nothing in this file
  * calls a compiler or an emulator: export_pce is #100's browser route
@@ -74,6 +90,7 @@ const psg = require(path.join(ROOT, "renderer", "pce-psg.js"));
 const sourceLib = require(path.join(ROOT, "renderer", "pce-source.js"));
 const satLib = require(path.join(ROOT, "renderer", "pce-sat.js"));
 const editorLib = require(path.join(ROOT, "renderer", "pce-editor.js"));
+const seqLib = require(path.join(ROOT, "renderer", "pce-seq.js"));
 
 const SERVER_INFO = { name: "pcestudio", version: "0.1.0" };
 const DEFAULT_PROTOCOL = "2025-06-18";
@@ -119,6 +136,7 @@ function errorMessage(e) {
 const session = {
   files: null,         /* [{name, source}] as written */
   source: null,        /* main.lua's text */
+  songs: [],           /* the compiled songs the toy's files carry (#161) */
   runtime: null,       /* renderer/pce-il.js runtime after toy_run */
   frames: [],          /* per frame: {state, raster} — the run is canonical */
   pad: [],             /* intervals {from, to, pad, buttons} */
@@ -130,6 +148,7 @@ const session = {
 function resetToy() {
   session.files = null;
   session.source = null;
+  session.songs = [];
   session.runtime = null;
   session.frames = [];
   session.pad = [];
@@ -271,6 +290,38 @@ function normaliseFiles(raw) {
   return out;
 }
 
+/* ---- songs (#161) ------------------------------------------------------ */
+
+/* A toy's song files are its music(index) slots, read by the sequencer's own
+ * model: renderer/pce-seq.js songsFromFiles takes song.json (the SEQUENCER's
+ * document) and any playable songs.json entry, and compiles each to the
+ * module pce-song.js's createPlayer() takes — the same list the studio hands
+ * a gallery toy (renderer/gallery-toys.js over tools/gallery.js).  The IL
+ * runtime passes it to the same host, so music(0) plays a song the toy's
+ * files carry instead of refusing music-range.  A song the model refuses is
+ * refused here, before the toy that was loaded is replaced. */
+function toySongs(list) {
+  try {
+    return seqLib.songsFromFiles(list);
+  } catch (e) {
+    refuse(errorCode(e), errorMessage(e));
+  }
+}
+
+/* What toy_write and song_write report about the slots, without the rows. */
+function songSummary(songs) {
+  return songs.map(function (s) {
+    return {
+      name: s.songName || "song",
+      instruments: (s.instruments || []).length,
+      orders: s.orderCount,
+      rows: s.rowsPerPattern,
+      tick1: s.tick1,
+      tick2: s.tick2
+    };
+  });
+}
+
 /* ---- pad script -------------------------------------------------------- */
 
 /* pad: [{from, to, pad, buttons: ["left", "i"]}] with from/to frame indices
@@ -331,8 +382,11 @@ function runFresh(frames, pad) {
   try {
     /* The asset files ride along (#117, #153): the IL host's createHost
      * imports them into VRAM/CRAM/SAT before load() runs top-level + init(),
-     * exactly as the studio's host does (renderer/pce-toyhost.js). */
-    rt = il.create(session.source, { chunkName: MAIN, files: session.files });
+     * exactly as the studio's host does (renderer/pce-toyhost.js).  The
+     * songs ride with them (#161): the toy's song.json is what music(0)
+     * plays, the same options.songs the studio's gallery toys receive. */
+    rt = il.create(session.source, { chunkName: MAIN, files: session.files,
+                                     songs: session.songs });
     rt.load();
   } catch (e) {
     throw e;
@@ -408,6 +462,54 @@ function renderFrame(frame) {
   return { img: img, rec: rec };
 }
 
+/* Per-channel sound activity (#161): an agent cannot hear the PSG, so the
+ * run says what each voice did — the notes pce-song.js started on it (its
+ * own player.notes, one entry per note row it applied), the instrument each
+ * one sounds with (the compiled song's instrument list), and whether an SFX
+ * owns the channel.  This is the engine's own record, not a second model. */
+function soundReport(rt) {
+  const sound = (rt && rt.sound) || {};
+  const events = sound.events || [];
+  const songs = sound.songs || [];
+  const index = sound.index == null ? null : sound.index;
+  const song = index == null ? null : songs[index];
+  const played = (sound.player && sound.player.notes) || [];
+  const channels = [];
+  for (let ch = 0; ch < toyhost.SOUND_CHANNELS; ch++) {
+    const mine = played.filter(function (n) { return n.channel === ch; });
+    const last = mine.length ? mine[mine.length - 1] : null;
+    const names = [];
+    for (const n of mine) {
+      const ins = song && song.instruments ? song.instruments[n.instrument] : null;
+      if (ins && names.indexOf(ins.name) < 0) names.push(ins.name);
+    }
+    const ins = last && song && song.instruments
+      ? song.instruments[last.instrument] : null;
+    const sfx = sound.sfx && sound.sfx[ch];
+    channels.push({
+      channel: ch,
+      notes: mine.length,
+      instrument: ins ? ins.name : null,
+      instruments: names,
+      last_note: last ? { frame: last.frame, note: last.note } : null,
+      sfx: sfx && (sfx.owned || sfx.active)
+        ? { freq: sfx.freq, volume: sfx.volume, frames: sfx.frames }
+        : null
+    });
+  }
+  return {
+    writes: events.length,
+    songs: songs.length,
+    music: index == null ? null : {
+      index: index,
+      name: song ? (song.songName || "song") : null,
+      playing: !!sound.player,
+      notes: played.length
+    },
+    channels: channels
+  };
+}
+
 function stateReport(rt, last) {
   const st = last.state;
   return {
@@ -433,6 +535,7 @@ function stateReport(rt, last) {
     },
     assets: rt.assets || null,
     log: (rt.log || []).slice(),
+    sound: soundReport(rt),
     sound_writes: rt.sound && rt.sound.events ? rt.sound.events.length : 0,
     overrides: Object.assign({}, session.overrides)
   };
@@ -616,21 +719,97 @@ function toolToyWrite(args) {
     /* a refused write leaves the toy that was already loaded alone */
     refuse(errorCode(e), errorMessage(e));
   }
+  /* The song files are compiled now too (#161), so a song the player cannot
+   * take is refused here, before the loaded toy is replaced. */
+  const songs = toySongs(files);
   resetToy();
   session.files = files;
   session.source = main.source;
+  session.songs = songs;
   return {
     ok: true,
     files: files.map(function (f) { return f.name; }),
     main_lua_bytes: Buffer.byteLength(session.source),
     assets: files.filter(function (f) { return f.name !== MAIN; })
                   .map(function (f) { return f.name; }),
+    songs: songSummary(songs),
     language: program.lang,
     hooks: program.hooks,
     functions: program.functions.length,
     note: "main.lua is compiled now; the asset files ride along and toy_run " +
-          "imports them into VRAM/CRAM/SAT before init() (#117, #153), so " +
-          "the files the panels edit are the art the toy boots inside"
+          "imports them into VRAM/CRAM/SAT before init() (#117, #153), and " +
+          "the song files are the music(index) slots (#161) — so the files " +
+          "the panels edit are the art and the music the toy boots with"
+  };
+}
+
+/* ---- toy_save (#160): the toy as the studio's own file ------------------
+ * The whole session — main.lua, every asset file, sources.json's named
+ * sources, the songs — written as ONE pce.studio/1 envelope, built by
+ * renderer/pce-source.js's envelopeText(): the same function the studio's
+ * Save (renderer/studio.html saveToyFile -> toyEnvelope) uses, so the bytes
+ * are the studio's bytes.  The person then opens it with Open… → From file
+ * (or drops it on the page) and has the game WITH its art; without this the
+ * only thing an agent's session could hand over was main.lua, which leaves
+ * every tile and sprite behind.
+ *
+ * WHERE IT MAY WRITE.  Inside the folder the server was started in — for
+ * Claude Code, the person's project folder — or PCE_MCP_WORKDIR when it
+ * names one.  A path outside that folder is refused (save-path): an agent
+ * must not be able to write over files it was never pointed at. */
+function saveWorkdir() {
+  const env = process.env.PCE_MCP_WORKDIR;
+  return path.resolve(env && env.trim() ? env : process.cwd());
+}
+
+function saveInside(work, outPath) {
+  const rel = path.relative(work, outPath);
+  if (rel === "" || rel === ".." || path.isAbsolute(rel) ||
+      rel.split(path.sep)[0] === "..") {
+    refuse("save-path", "toy_save writes inside the working folder only: " +
+           JSON.stringify(outPath) + " is outside " + JSON.stringify(work) +
+           "; pass a path inside it (PCE_MCP_WORKDIR names another folder)");
+  }
+}
+
+function toolToySave(args) {
+  requireToy();
+  if (typeof args.path !== "string" || !args.path.trim()) {
+    refuse("save-path", "path is the file to write, e.g. \"my-game.pce.json\"");
+  }
+  const work = saveWorkdir();
+  let outPath = path.resolve(work, args.path.trim());
+  /* the studio's own extension, docs/STUDIO.md §3.7a: .pce.json (or the
+   * newer .pce.studio); a bare name gets it appended rather than written as
+   * a file the studio's Open will not offer */
+  if (!/\.(pce\.json|pce\.studio)$/i.test(outPath)) outPath += ".pce.json";
+  saveInside(work, outPath);
+
+  const title = args.title == null
+    ? path.basename(outPath).replace(/\.(pce\.json|pce\.studio)$/i, "")
+    : String(args.title);
+  const description = args.description == null ? "" : String(args.description);
+  const text = sourceLib.envelopeText(title, description, session.files);
+  try {
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, text);
+  } catch (e) {
+    refuse("save-io", outPath + " could not be written: " + errorMessage(e));
+  }
+  return {
+    ok: true,
+    version: "pce.studio/1",
+    path: outPath,
+    name: path.basename(outPath),
+    title: title,
+    description: description,
+    bytes: Buffer.byteLength(text),
+    sha256: sha256(Buffer.from(text, "utf8")),
+    files: session.files.map(function (f) { return f.name; }),
+    note: "one pce.studio/1 envelope — the studio's own Save format, built " +
+          "by renderer/pce-source.js envelopeText() — holding every file " +
+          "and source; in the studio, Open… → From file (or drop it on the " +
+          "page) plays this toy with its art"
   };
 }
 
@@ -665,6 +844,12 @@ function toolToyRun(args) {
  * files changed, the frames are stale. */
 
 const ART_KINDS = ["bg", "sprites", "tilesheet", "palette"];
+
+/* #161: a .mid is the other thing source_add takes.  It becomes song.json —
+ * the SEQUENCER's own document, through renderer/pce-source.js importMidi
+ * (#123), the Add Source dialog's song importer — and replaces the toy's one
+ * song, so music(0) plays it. */
+const SOURCE_KINDS = ART_KINDS.concat(["song"]);
 
 /* The hand-drawn form: a pixel grid of palette indices (-1 transparent)
  * with the palette as [r, g, b] triples, turned into the same RGBA image a
@@ -854,12 +1039,62 @@ function pictureBudget(files) {
   };
 }
 
+/* A .mid through importMidi (#123) is the toy's song.json, and the toy's one
+ * song: music(0) plays it.  The merge and the compile happen before the
+ * session changes, so a .mid the importer or the player refuses leaves the
+ * toy as it was. */
+function songSourceAdd(args) {
+  if (args.mid == null) {
+    refuse("source-song", "kind song needs mid: the .mid file's bytes in " +
+           "base64 (a Standard MIDI File)");
+  }
+  const bytes = Buffer.from(String(args.mid), "base64");
+  if (!bytes.length) refuse("source-song", "mid decodes to no bytes");
+  let result;
+  try {
+    result = sourceLib.importMidi(bytes,
+      { name: args.name == null ? undefined : String(args.name) });
+  } catch (e) {
+    refuse(errorCode(e), errorMessage(e));
+  }
+  const byName = {};
+  for (const f of session.files) byName[f.name] = f.source;
+  byName["song.json"] = result.files["song.json"];
+  const merged = Object.keys(byName).map(function (name) {
+    return { name: name, source: byName[name] };
+  });
+  const songs = toySongs(merged);
+  session.files = merged;
+  session.songs = songs;
+  resetRun();                  /* the files changed: the frames are stale */
+  let index = -1;
+  for (let i = 0; i < songs.length; i++)
+    if (songs[i].songName === result.name) { index = i; break; }
+  return {
+    ok: true,
+    kind: "song",
+    name: result.name,
+    notes: result.stats.notes,
+    stats: result.stats,
+    files: session.files.map(function (f) { return f.name; }),
+    songs: songSummary(songs),
+    music_index: index,
+    song: JSON.parse(result.files["song.json"]),
+    warnings: result.warnings,
+    note: "the .mid became song.json through the Add Source importer " +
+          "(renderer/pce-source.js importMidi, #123); music(" + index +
+          ") plays it, and the SEQUENCER opens the same file. The previous " +
+          "run was cleared — call toy_run to hear it in the sound report"
+  };
+}
+
 function toolSourceAdd(args) {
   requireToy();
   const kind = args.kind;
-  if (typeof kind !== "string" || ART_KINDS.indexOf(kind) < 0) {
-    refuse("source-kind", "kind must be " + ART_KINDS.join(", "));
+  if (typeof kind !== "string" || SOURCE_KINDS.indexOf(kind) < 0) {
+    refuse("source-kind", "kind must be " + SOURCE_KINDS.join(", "));
   }
+  if (kind === "song") return songSourceAdd(args);
   if ((args.png == null) === (args.grid == null)) {
     refuse("source-picture", "pass one picture: png (base64) or grid " +
            "{width, height, pixels} with its palette");
@@ -915,6 +1150,162 @@ function toolSourceAdd(args) {
     if (e instanceof Refusal) throw e;
     refuse(errorCode(e), errorMessage(e));
   }
+}
+
+/* ---- song_write (#161): compose the toy's song -------------------------
+ * Two forms, one model:
+ *   - notes: a step list the agent writes directly — {channel, step, note,
+ *     length, instrument} — put into the SEQUENCER's grid
+ *     (renderer/pce-seq.js newSong/setCell) with its default instruments
+ *     (lead, bass, bell, strings, kick, snare; noise drums only on channels
+ *     4 and 5, which pce-seq.js enforces with seq-voice);
+ *   - song: the SEQUENCER's own document (what song.json is), validated by
+ *     fromJSON and the model's check().
+ * Either way it is compiled by pce-seq.js's compile() — the same module
+ * pce-song.js's createPlayer() takes — and written as song.json, the file
+ * the studio's SEQUENCER edits and saves, so the two see one song. */
+
+function findInstrument(song, want, where) {
+  if (want == null) return 0;
+  if (isInt(want)) {
+    if (want < 0 || want >= song.instruments.length)
+      refuse("seq-instrument", where + ": instrument " + want + " is not in " +
+             "the song (0.." + (song.instruments.length - 1) + ")");
+    return want;
+  }
+  if (typeof want === "string") {
+    for (let i = 0; i < song.instruments.length; i++)
+      if (song.instruments[i].name === want) return i;
+    refuse("seq-instrument", where + ": the song has no instrument " +
+           JSON.stringify(want) + "; it has " +
+           song.instruments.map(function (x) { return x.name; }).join(", "));
+  }
+  refuse("seq-instrument", where + ": instrument must be an index or a name");
+}
+
+function songFromNotes(args) {
+  const steps = args.steps == null ? 16
+    : intIn(args.steps, "steps", seqLib.STEPS_MIN, seqLib.STEPS_MAX,
+            "seq-steps");
+  const song = seqLib.newSong(steps);
+  song.name = args.name == null ? "song" : String(args.name);
+  if (args.tempo != null)
+    song.tempo = intIn(args.tempo, "tempo", seqLib.TEMPO_MIN,
+                       seqLib.TEMPO_MAX, "seq-tempo");
+  if (args.swing != null)
+    song.swing = intIn(args.swing, "swing", 0, seqLib.SWING_MAX, "seq-swing");
+  if (args.key != null)
+    song.key = intIn(args.key, "key", 0, 11, "seq-key");
+
+  if (!Array.isArray(args.notes))
+    refuse("song-input", "notes must be a list of {channel, step, note, " +
+           "length, instrument}");
+  let last = 0;
+  for (let k = 0; k < args.notes.length; k++) {
+    const n = args.notes[k], where = "notes[" + k + "]";
+    if (!n || typeof n !== "object") refuse("song-note", where + " is not an object");
+    const ch = intIn(n.channel == null ? 0 : n.channel, where + ".channel", 0,
+                     seqLib.CHANNELS - 1, "seq-channel");
+    const step = intIn(n.step, where + ".step", 0, 65535, "seq-steps");
+    let note = n.note;
+    if (typeof note === "string") note = seqLib.noteIndex(note);
+    if (!isInt(note) || note < seqLib.NOTE_MIN || note > seqLib.NOTE_MAX)
+      refuse("seq-note", where + ".note must be a note name (\"C4\") or the " +
+             "engine note " + seqLib.NOTE_MIN + ".." + seqLib.NOTE_MAX +
+             " (C1..B7)");
+    const pattern = Math.floor(step / song.steps);
+    if (pattern >= seqLib.PATTERNS_MAX)
+      refuse("seq-pattern", where + ".step " + step + " is past the " +
+             seqLib.PATTERNS_MAX + " patterns of " + song.steps + " steps");
+    while (song.patterns.length <= pattern) seqLib.addPattern(song);
+    if (pattern > last) last = pattern;
+    const at = step % song.steps;
+    const length = n.length == null ? 1
+      : intIn(n.length, where + ".length", 1,
+              Math.min(seqLib.STEPS_MAX, song.steps - at), "seq-length");
+    seqLib.setCell(song, pattern, ch, at,
+      { note: note, length: length,
+        instrument: findInstrument(song, n.instrument, where) });
+  }
+  song.order = [];
+  for (let i = 0; i <= last; i++) song.order.push(i);
+  return song;
+}
+
+function songFromDocument(args) {
+  const raw = Object.assign({}, args.song);
+  if (raw.version == null) raw.version = seqLib.VERSION;
+  if (raw.name == null) raw.name = args.name == null ? "song" : String(args.name);
+  if (raw.instruments == null) raw.instruments = seqLib.defaultInstruments();
+  if (raw.tempo == null) raw.tempo = 150;
+  if (raw.swing == null) raw.swing = 0;
+  if (raw.key == null) raw.key = 0;
+  if (raw.steps == null) raw.steps = 16;
+  try {
+    return seqLib.fromJSON(JSON.stringify(raw));
+  } catch (e) {
+    refuse(errorCode(e), errorMessage(e));
+  }
+}
+
+function toolSongWrite(args) {
+  requireToy();
+  const byNotes = args.notes != null;
+  const bySong = args.song != null;
+  if (byNotes === bySong) {
+    refuse("song-input", "pass one: notes (a step list) or song (the " +
+           "SEQUENCER's document)");
+  }
+  let song, compiled;
+  try {
+    song = byNotes ? songFromNotes(args) : songFromDocument(args);
+    compiled = seqLib.compile(song);       /* the player's module, or its code */
+  } catch (e) {
+    if (e instanceof Refusal) throw e;
+    refuse(errorCode(e), errorMessage(e));
+  }
+  const text = seqLib.toJSON(song);
+  const byName = {};
+  for (const f of session.files) byName[f.name] = f.source;
+  byName["song.json"] = text;
+  const merged = Object.keys(byName).map(function (name) {
+    return { name: name, source: byName[name] };
+  });
+  const songs = toySongs(merged);
+  session.files = merged;
+  session.songs = songs;
+  resetRun();
+  const timing = seqLib.timing(song);
+  let placed = 0;
+  for (let p = 0; p < song.patterns.length; p++) placed += seqLib.noteCount(song, p);
+  let index = -1;
+  for (let i = 0; i < songs.length; i++)
+    if (songs[i].songName === song.name) { index = i; break; }
+  const warnings = placed ? [] : ["the song has no notes: music(" + index +
+                                  ") plays silence"];
+  return {
+    ok: true,
+    file: "song.json",
+    name: song.name,
+    tempo: song.tempo,
+    swing: song.swing,
+    key: song.key,
+    steps: song.steps,
+    patterns: song.patterns.length,
+    order: song.order.slice(),
+    notes_placed: placed,
+    instruments: song.instruments.map(function (i) { return i.name; }),
+    frames: timing.framesPerOrder,
+    seconds: Number(timing.seconds.toFixed(2)),
+    files: session.files.map(function (f) { return f.name; }),
+    songs: songSummary(songs),
+    music_index: index,
+    song: JSON.parse(text),
+    warnings: warnings,
+    note: "written as song.json (the SEQUENCER's own document) and compiled " +
+          "by renderer/pce-seq.js for pce-song.js: music(" + index + ") " +
+          "plays it; toy_run's sound report says what each channel did"
+  };
 }
 
 function toolFramePng(args) {
@@ -1019,8 +1410,11 @@ function toolValidate(args) {
   }
   let report;
   try {
+    /* the validator runs the toy, so it needs the songs the toy was written
+     * for — music(0) without them is a real music-range refusal (#161) */
     report = validateLib.validate(session.source,
-                                  { chunkName: MAIN, frames: frames });
+                                  { chunkName: MAIN, frames: frames,
+                                    songs: session.songs });
   } catch (e) {
     refuse(errorCode(e), errorMessage(e));
   }
@@ -1040,7 +1434,8 @@ function toolValidate(args) {
 function toolExportPce(args) {
   requireToy();
   const report = validateLib.validate(session.source,
-                                      { chunkName: MAIN, frames: 8 });
+                                      { chunkName: MAIN, frames: 8,
+                                        songs: session.songs });
   if (!report.ok) {
     return {
       ok: false,
@@ -1147,8 +1542,9 @@ const TOOLS = [
     description: "Write a toy: a file set with main.lua required and asset " +
       "files beside it (the studio's packed-toy shape, docs/STUDIO.md §2). " +
       "Compiles main.lua with renderer/pce-il.js immediately and returns the " +
-      "IL's refusal code and file:line if it does not lower. Replaces the " +
-      "current toy and clears any run.",
+      "IL's refusal code and file:line if it does not lower, and compiles the " +
+      "song files (song.json, songs.json) the way music(index) needs them. " +
+      "Replaces the current toy and clears any run.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1171,13 +1567,43 @@ const TOOLS = [
     }
   },
   {
+    name: "toy_save",
+    description: "Save the loaded toy as the studio's own file (#160): one " +
+      "pce.studio/1 JSON envelope holding main.lua, every asset file, the " +
+      "named sources (sources.json) and the songs, written by the same " +
+      "builder renderer/studio.html's Save uses " +
+      "(renderer/pce-source.js envelopeText) — there is no second format. " +
+      "The person opens it in the studio with Open… → From file, or drops it " +
+      "on the page, and plays the toy WITH its art. The path is relative to " +
+      "the folder the server was started in; a path outside it is refused " +
+      "(save-path).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string",
+                description: "the file to write, inside the working folder; " +
+                  ".pce.json is added when the name has no .pce.json or " +
+                  ".pce.studio extension" },
+        title: { type: "string",
+                 description: "the toy's title, shown in the studio's tab " +
+                   "(default: the file's own name)" },
+        description: { type: "string", description: "optional one line" }
+      },
+      required: ["path"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "toy_run",
     description: "Run the loaded toy's main.lua for `frames` video frames " +
       "(0..frames-1) through the IL runtime, with an optional pad script, and " +
       "return the final state: registers, raster table shape, VRAM/CRAM/SAT " +
-      "digests, log lines and PSG write count. The toy's asset files are " +
-      "imported into VRAM/CRAM/SAT before init() (#117). A run is fresh and " +
-      "deterministic; t is f/60, not the clock.",
+      "digests, log lines, PSG write count and per-channel sound activity " +
+      "(notes started and the instrument each sounds with), so music() can be " +
+      "seen without hearing it. The toy's asset files are imported into " +
+      "VRAM/CRAM/SAT before init() (#117) and the song files are its " +
+      "music(index) slots (#161). A run is fresh and deterministic; t is " +
+      "f/60, not the clock.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1205,20 +1631,24 @@ const TOOLS = [
   },
   {
     name: "source_add",
-    description: "Add art to the toy (#153): a picture — a base64 PNG, or a " +
-      "hand-drawn pixel grid with its palette — becomes tiles, sprites, a " +
-      "tilesheet or a palette through the Add Source importer " +
-      "(renderer/pce-source.js importImage, #123) and is merged into the " +
-      "toy's asset files: tiles.json replaced for a background picture, " +
+    description: "Add art or a song to the toy (#153, #161): a picture — a " +
+      "base64 PNG, or a hand-drawn pixel grid with its palette — becomes " +
+      "tiles, sprites, a tilesheet or a palette through the Add Source " +
+      "importer (renderer/pce-source.js importImage, #123) and is merged into " +
+      "the toy's asset files: tiles.json replaced for a background picture, " +
       "sprites.json appended (new palette rows take the free ones), " +
-      "palettes.json merged row by row. Returns the importer's stats, the " +
-      "toy's VRAM budget and any warnings; the panels' own readers must " +
-      "accept the merged files or the toy is left alone. Clears the run.",
+      "palettes.json merged row by row. kind song takes a base64 .mid, which " +
+      "becomes song.json (importMidi) and is what music(0) plays. Returns the " +
+      "importer's stats, the toy's VRAM budget and any warnings; the panels' " +
+      "own readers must accept the merged files or the toy is left alone. " +
+      "Clears the run.",
     inputSchema: {
       type: "object",
       properties: {
         png: { type: "string",
                description: "a base64 PNG (8-bit grey, RGB, RGBA or palette)" },
+        mid: { type: "string",
+               description: "for kind song: a Standard MIDI File, base64" },
         grid: {
           type: "object",
           description: "the hand-drawn form: pixels are palette indices, " +
@@ -1236,8 +1666,8 @@ const TOOLS = [
           items: { type: "array",
                    items: { type: "integer", minimum: 0, maximum: 255 } }
         },
-        kind: { type: "string", enum: ART_KINDS, default: "bg",
-                description: "what the picture becomes" },
+        kind: { type: "string", enum: SOURCE_KINDS, default: "bg",
+                description: "what the source becomes; song takes mid" },
         name: { type: "string", description: "a label for the report" },
         dither: { type: "string", enum: sourceLib.DITHERS, default: "none" },
         alphaThreshold: { type: "integer", minimum: 0, maximum: 255,
@@ -1250,6 +1680,53 @@ const TOOLS = [
                        description: "cap the palette rows the importer may use" }
       },
       required: ["kind"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "song_write",
+    description: "Compose the toy's song (#161) with the SEQUENCER's built-in " +
+      "instruments and write it as song.json, the file music(index) plays and " +
+      "the studio's SEQUENCER edits. Two forms: notes (a step list " +
+      "[{channel, step, note, length, instrument}], note a name like \"C4\" or " +
+      "the engine note 0..83, instrument a built-in name or index) over a " +
+      "grid of `steps` columns; or song, the SEQUENCER's own document. The " +
+      "song is compiled by renderer/pce-seq.js before anything changes, so a " +
+      "refused song leaves the toy alone. Clears the run.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        notes: {
+          type: "array",
+          description: "the step list: one object per note",
+          items: {
+            type: "object",
+            properties: {
+              channel: { type: "integer", minimum: 0, maximum: 5, default: 0 },
+              step: { type: "integer", minimum: 0 },
+              note: { type: ["string", "integer"],
+                      description: "a note name (C4) or the engine note 0..83" },
+              length: { type: "integer", minimum: 1,
+                        description: "in steps (default 1)" },
+              instrument: { type: ["string", "integer"],
+                            description: "a built-in name (lead, bass, bell, " +
+                              "strings, kick, snare) or an index" }
+            },
+            required: ["step", "note"]
+          }
+        },
+        song: {
+          type: "object",
+          description: "the SEQUENCER's document: {name, tempo, swing, key, " +
+            "steps, patterns, order, instruments} (pce-seq.js VERSION)"
+        },
+        name: { type: "string", description: "the song's name" },
+        tempo: { type: "integer", description: "BPM (pce-seq.js's range)" },
+        steps: { type: "integer",
+                 description: "columns in a pattern (pce-seq.js's range)" },
+        swing: { type: "integer" },
+        key: { type: "integer" }
+      },
       additionalProperties: false
     }
   },
@@ -1369,8 +1846,10 @@ for (const t of TOOLS) TOOL_BY_NAME[t.name] = t;
 
 const HANDLERS = {
   toy_write: toolToyWrite,
+  toy_save: toolToySave,
   toy_run: toolToyRun,
   source_add: toolSourceAdd,
+  song_write: toolSongWrite,
   frame_png: toolFramePng,
   registers_get: toolRegistersGet,
   register_set: toolRegisterSet,
@@ -1384,11 +1863,15 @@ const HANDLERS = {
 const INSTRUCTIONS =
   "PCEStudio's toy engine. Write a toy with toy_write, add art with " +
   "source_add (a PNG or pixel grid becomes tiles, sprites, a tilesheet or " +
-  "a palette, merged into the toy's asset files), run it with toy_run, " +
+  "a palette, merged into the toy's asset files; a .mid becomes song.json), " +
+  "compose music with song_write or add a .mid with source_add kind song, " +
+  "run it with toy_run (its sound report says what each PSG channel played), " +
   "look with frame_png, read or poke registers with registers_get/" +
-  "register_set, check it with validate, export a .pce with export_pce, and " +
-  "read the toy language with docs. Every tool wraps the same modules the " +
-  "studio and the tests use; there is no second model.";
+  "register_set, check it with validate, save the whole toy for the studio " +
+  "with toy_save (one .pce.json the person opens with Open… → From file), " +
+  "export a .pce with export_pce, and read the toy language with docs. " +
+  "Every tool wraps the same modules the studio and the tests use; there is " +
+  "no second model.";
 
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + "\n");
