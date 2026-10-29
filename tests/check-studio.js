@@ -3880,6 +3880,473 @@ function checkStudioApi(page) {
   studio.seek(0);
 }
 
+/* ---- #92: SCANLINES as a band editor ---------------------------------- *
+ * ppu.toys' SCANLINES panel, on the PCE's line interrupt: Inspect line,
+ * Apply edits to, the mini frame, Full frame · lines 0-223, a row per band
+ * (number, name, Enabled, from-to, move up/down, duplicate, Edit, N
+ * controls, a menu) and Add band.  The bands are renderer/pce-raster.js's;
+ * what a line may cost is renderer/pce-validate.js's; the toy is written
+ * with a fenced raster(line) callback.
+ *
+ * The frame evidence is two-sided and neither side is the panel's own
+ * arithmetic: (1) the panel's preview is pce-sprites.js's compositor over
+ * the toy's state with the band table, compared against a render built here
+ * from studio.scanlineTable(); (2) after Apply to toy the toy really runs
+ * the generated raster() callback, and the runtime's own lastRaster must be
+ * the same table, line for line. */
+
+/* One table's entries, in a stable shape, for comparing two of them. */
+function rasterEntries(table) {
+  if (!table) return null;
+  const entries = (table.entries || []).slice()
+    .sort((a, b) => a.line - b.line)
+    .map((e) => ({
+      line: e.line, rcr: e.rcr,
+      bxr: e.bxr == null ? null : e.bxr,
+      byr: e.byr == null ? null : e.byr,
+      cr: e.cr == null ? null : e.cr,
+      cram: e.cram ? e.cram.map((w) => w[0] + ":" + w[1]).join(",") : null
+    }));
+  return { bxr: (table.base || {}).bxr, byr: (table.base || {}).byr,
+           cr: (table.base || {}).cr, entries: entries };
+}
+
+function checkScanlinesPanel(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const r = S.raster;
+  check(!!r && typeof r.toRaster === "function",
+        "#92: renderer/pce-raster.js loaded");
+  check(page.loaded.some((s) => /pce-raster\.js$/.test(s)),
+        "the page loads renderer/pce-raster.js");
+  check(page.loaded.some((s) => /pce-validate\.js$/.test(s)),
+        "the page loads renderer/pce-validate.js (the #32 price)");
+  if (!r || !studio.scanlines) {
+    check(false, "#92: the page has no SCANLINES editor");
+    return;
+  }
+
+  /* The price the panel shows is the validator's own. */
+  check(S.validate && S.validate.RCR && S.validate.RCR.BLANK === 123,
+        "#92: the panel reads #32's blank budget from pce-validate.js (" +
+        (S.validate && S.validate.RCR && S.validate.RCR.BLANK) + ")");
+  eq("#92: the panel quotes the validator's 123-cycle blank",
+     studio.scanlinePrice().BLANK, S.validate.RCR.BLANK);
+
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  studio.panels.select("scanlines");
+
+  /* ppu.toys' furniture, on the page */
+  check(!!page.dom.get("scn-mini") && !!page.dom.get("scn-preview") &&
+        !!page.dom.get("scn-line") && !!page.dom.get("scn-line-slider") &&
+        !!page.dom.get("scn-target") && !!page.dom.get("scn-add"),
+        "#92: the mini frame, the preview, Inspect line (number and slider), " +
+        "Apply edits to and Add band are all on the panel");
+  eq("#92: the frame note reads 'Full frame · lines 0-223'",
+     page.dom.get("scn-frame-note").textContent, "Full frame · lines 0-223");
+  check(/^0$/.test(page.dom.get("scn-line").value),
+        "#92: Inspect line starts at 0 (" + page.dom.get("scn-line").value + ")");
+
+  let st = studio.scanlines();
+  check(!!st && st.bands.length === 1,
+        "#92: a fresh toy starts on one band (got " +
+        (st ? st.bands.length : "none") + ")");
+  if (!st) return;
+  eq("#92: the one band is the full frame", st.bands[0].from + "-" + st.bands[0].to,
+     "0-223");
+  eq("#92: the full-frame band holds the frame's CR, one control",
+     st.bands[0].controls, 1);
+  check(st.bands[0].cr != null && st.bands[0].bxr === undefined,
+        "#92: it writes CR and leaves BXR/BYR to the toy's own frame()");
+  check(studio.scanlineDrawn() && page.dom.get("scn-bands").children.length === 1,
+        "#92: the band is a row on the panel");
+  check(page.dom.get("scn-target").children.length === 1,
+        "#92: Apply edits to lists the band");
+
+  /* Inspect line: the number and the slider move the same value. */
+  const slider = page.dom.get("scn-line-slider");
+  slider.value = "40";
+  for (const fn of slider.listeners.input || [])
+    fn({ target: slider, preventDefault() {}, stopPropagation() {} });
+  eq("#92: the slider sets the inspected line", studio.scanlines().inspect, 40);
+
+  /* Add band at line 32: ppu.toys' "Add band" splits the band covering it. */
+  studio.scanlineInspect(32);
+  const made = studio.scanlineAdd(null, 32);
+  check(!!made, "#92: Add band made a band at line 32 (" +
+        studio.scanlines().error + ")");
+  if (!made) return;
+  st = studio.scanlines();
+  eq("#92: the bands now split at 32",
+     st.bands.map((b) => b.from + "-" + b.to).join(","), "0-31,32-223");
+
+  /* Edit it: one control, BXR 64. */
+  studio.scanlineSet(made.id, { bxr: 64, byr: null, cr: null });
+  st = studio.scanlines();
+  const second = st.bands[1];
+  eq("#92: the new band holds one control", second.controls, 1);
+  eq("#92: BXR 64 is what the band writes", second.bxr, 64);
+  eq("#92: the band's cost is the validator's 64 cycles (1 register write)",
+     second.cycles, 29 + 35);
+  check(second.share > 0.5 && second.share < 0.53,
+        "#92: the row shows its share of the 123-cycle blank (" +
+        Math.round(second.share * 100) + "%)");
+
+  /* ---- the frame is the renderer's, twice ---------------------------- */
+  const table = studio.scanlineTable();
+  eq("#92: the table has one entry per band start", table.entries.length, 2);
+  eq("#92: band 2's entry fires at line 32",
+     table.entries.map((e) => e.line).join(","), "0,32");
+  eq("#92: the entry carries the band's BXR and the RCR it arms",
+     table.entries[1].bxr + "/$" + table.entries[1].rcr.toString(16), "64/$60");
+
+  const panelFrame = studio.scanlineFrame();
+  check(!!panelFrame, "#92: the panel has a preview frame");
+  const stLive = studio.state();
+  const direct = sprites.renderFrame({
+    vram: stLive.vram, cram: stLive.cram, sat: stLive.sat, regs: stLive.regs,
+    width: stLive.width, height: stLive.height,
+    firstScanline: stLive.firstScanline, raster: table
+  });
+  eq("#92: the panel's preview is pce-sprites.js drawing the band table",
+     diffCount(panelFrame.pixels, direct.pixels).n, 0);
+
+  /* Apply to toy, then let the toy run its own generated raster(). */
+  const changed = studio.scanlineApply();
+  eq("#92: Apply to toy writes main.lua", changed.join(","), "main.lua");
+  const src = studio.files().find((f) => f.name === "main.lua").source;
+  check(src.indexOf(r.FENCE_OPEN) >= 0 && src.indexOf(r.FENCE_CLOSE) >= 0,
+        "#92: main.lua holds the fenced SCANLINES block");
+  check(/function raster\(line\)/.test(src) &&
+        /if line == 32 then reg\("BXR", 64\) end/.test(src),
+        "#92: the generated callback writes BXR 64 at line 32");
+  const frames = studio.runFrames(2);
+  const live = studio.runtime().lastRaster;
+  check(!!live, "#92: the toy built a raster table by running");
+  /* the toy's last frame is what the panel now draws; its base is the
+   * register the previous frame's callback left (a BXR the band wrote), so
+   * the panel's table is re-read rather than the pre-run copy compared */
+  const afterRun = studio.scanlineTable();
+  eq("#92: the runtime's own table is the panel's, line for line",
+     JSON.stringify(rasterEntries(live)), JSON.stringify(rasterEntries(afterRun)));
+  eq("#92: the callback's band wrote BXR 64 on line 32, so that is the " +
+     "register the next frame latches", rasterEntries(live).bxr, 64);
+  check(frames.length === 2, "#92: the toy ran its two frames");
+
+  /* and the drawn frame is the panel's preview: the same pixels */
+  studio.panels.select("scanlines");
+  studio.seek(0);
+  studio.panels.refresh(true);
+  const shown = studio.state();
+  const drawnFrame = sprites.renderFrame({
+    vram: shown.vram, cram: shown.cram, sat: shown.sat, regs: shown.regs,
+    width: shown.width, height: shown.height,
+    firstScanline: shown.firstScanline, raster: shown.raster
+  });
+  eq("#92: the frame on the output is the panel's band table",
+     diffCount(drawnFrame.pixels, panelFrame.pixels).n, 0);
+  check(shown.entries.length === 2, "#92: the shown state carries two entries (" +
+        shown.entries.length + ")");
+
+  /* ---- refused by code past the budget ------------------------------- */
+  let code = null;
+  try { studio.scanlineSet(second.id, { bxr: 64, byr: 0, cr: 128 }); }
+  catch (e) { code = e.code; }
+  eq("#92: three register writes on one line are refused", code,
+     "raster-band-budget");
+  st = studio.scanlines();
+  check(st.bands[1].byr === undefined && st.bands[1].cr === undefined,
+        "#92: the refused edit left the band alone (byr " +
+        st.bands[1].byr + ", cr " + st.bands[1].cr + ")");
+  check(/raster-band-budget/.test(page.dom.get("scn-note").textContent),
+        "#92: the panel says which code refused it (" +
+        page.dom.get("scn-note").textContent + ")");
+
+  /* a register and two colour words: 29 + 35 + 72 = 136, over the blank */
+  code = null;
+  try { studio.scanlineSet(second.id, { bxr: 64, cram: [[1, 511], [2, 0]] }); }
+  catch (e) { code = e.code; }
+  eq("#92: a register and two colours are refused", code, "raster-band-budget");
+
+  /* three colour words: the panel's price is the validator's, on the same
+   * line, and it is past both rules */
+  const vb = S.validate.blankBudget({ entries: [
+    { line: 9, rcr: 0x49, cram: [[1, 1], [2, 2], [3, 3]] }] });
+  eq("#92: the validator prices three colour words at 137 cycles",
+     vb.lines[0].cycles, 137);
+  eq("#92: the panel's price is the same number",
+     S.raster.priceOf(0, 3).cycles, vb.lines[0].cycles);
+  check(vb.coloursOver.length === 1 && vb.over.length === 1,
+        "#92: and the validator marks that line over on both rules");
+  const overBand = S.raster.newBand({ name: "three", from: 0, to: 9,
+    cram: [[1, 1], [2, 2], [3, 3]] }, 224);
+  const overCodes = S.raster.checkList([overBand], 224).map((p) => p.code);
+  check(overCodes.indexOf("raster-band-budget") >= 0 &&
+        overCodes.indexOf("raster-band-colours") >= 0,
+        "#92: a three-colour band is refused by the budget and the colour " +
+        "rule (" + overCodes.join(",") + ")");
+  code = null;
+  try { studio.scanlineSet(second.id, { bxr: null, cram: [[1, 1], [2, 2], [3, 3]] }); }
+  catch (e) { code = e.code; }
+  eq("#92: three colour words on one line are refused by the panel",
+     code, "raster-band-budget");
+
+  /* two colour words alone are inside it */
+  studio.scanlineSet(second.id, { bxr: null, cram: [[1, 511], [2, 0]] });
+  eq("#92: two colour words fit (29 + 72 = 101 cycles)",
+     studio.scanlines().bands[1].cycles, 29 + 72);
+  studio.scanlineSet(second.id, { cram: null, bxr: 64 });
+
+  /* the inspector's colour-write controls write into the band */
+  studio.scanlineSelect(second.id);
+  page.dom.get("scn-cram-addr").value = "5";
+  page.dom.get("scn-cram-word").value = "511";
+  clickOne(page, "scn-cram-add");
+  const withCram = studio.scanlineBands().filter((b) => b.id === second.id)[0];
+  eq("#92: + colour adds a CRAM write to the selected band",
+     JSON.stringify(withCram.cram), "[[5,511]]");
+  eq("#92: and the row counts it", studio.scanlines().bands[1].controls, 2);
+  clickOne(page, "scn-cram-clear");
+  check(studio.scanlineBands().filter((b) => b.id === second.id)[0].cram ===
+        undefined, "#92: clear removes the colour writes");
+
+  /* ---- move, duplicate, remove --------------------------------------- */
+  const ids = studio.scanlines().bands.map((b) => b.id);
+  studio.scanlineMove(ids[1], "up");
+  eq("#92: move up swaps the two bands' line ranges",
+     studio.scanlines().bands.map((b) => b.from + "-" + b.to).join(","),
+     "0-191,192-223");
+  studio.scanlineMove(ids[1], "down");
+  eq("#92: and move down puts it back",
+     studio.scanlines().bands.map((b) => b.from + "-" + b.to).join(","),
+     "0-31,32-223");
+  eq("#92: duplicating a full display is refused (no free lines)",
+     studio.scanlineDuplicate(ids[0]), null);
+  check(/raster-line-full/.test(studio.scanlines().error),
+        "#92: and the refusal names the code (" +
+        studio.scanlines().error + ")");
+  studio.scanlineRemove(ids[1]);
+  eq("#92: the last band cannot be removed",
+     studio.scanlineRemove(ids[0]), null);
+  check(/raster-band-order/.test(studio.scanlines().error),
+        "#92: the last band's refusal names the code (" +
+        studio.scanlines().error + ")");
+
+  /* ---- the toy is the source of truth -------------------------------- */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  studio.scanlineInspect(64);
+  const b1 = studio.scanlineAdd(null, 64);
+  studio.scanlineSet(b1.id, { bxr: 200 });
+  studio.scanlineApply();
+  const env = studio.envelopeText();
+  studio.loadExample("raster", true);            /* a different toy */
+  studio.pause();
+  studio.openToy(env, "bands.pce.json", { apply: false, persist: false });
+  eq("#92: reopening the toy restores the bands from main.lua",
+     studio.scanlines().bands.map((b) => b.from + "-" + b.to).join(","),
+     "0-63,64-223");
+  eq("#92: and BXR 200 comes back with them",
+     studio.scanlines().bands[1].bxr, 200);
+
+  /* a toy with its own hand-written raster() is not overwritten */
+  studio.loadExample("raster", true);
+  studio.pause();
+  studio.seek(0);
+  code = null;
+  try { studio.scanlineApply(); } catch (e) { code = e.code; }
+  eq("#92: a hand-written raster() is refused, not replaced", code, "raster-hand");
+
+  /* Import reads the toy's own table back into bands */
+  studio.runFrames(2);
+  const imported = studio.scanlineImport();
+  check(imported.length > 0, "#92: Import adopts the example's own table (" +
+        imported.length + " bands, runs of lines that hold the same values)");
+  check(imported.length < 65, "#92: the import is inside the panel's 64-band " +
+        "ceiling (" + imported.length + ")");
+  const importedTable = studio.scanlineTable({ frame: 0 });
+  const toyTable = studio.runtime().lastRaster;
+  eq("#92: the imported bands rebuild the toy's first two entries",
+     JSON.stringify(rasterEntries(importedTable).entries.slice(0, 2)),
+     JSON.stringify(rasterEntries(toyTable).entries.slice(0, 2)));
+
+  /* ---- #17's effects as ready-made bands ----------------------------- */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  studio.scanlineInvalidate();
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.scanlineInspect(0);
+  const grad = studio.scanlineAdd("gradient", 0);
+  check(!!grad && grad.fx && grad.fx.kind === "gradient",
+        "#92: the Gradient ready-made band makes a gradient band");
+  const gradTable = studio.scanlineTable({ frame: 0 });
+  check(gradTable.entries.length > 20,
+        "#92: a gradient writes a colour on every line (" +
+        gradTable.entries.length + " entries)");
+  eq("#92: one colour write a line is 65 cycles, inside the blank",
+     S.raster.budget(grad).cycles, 29 + 36);
+  /* pce-editor.js (#17) draws the same gradient: the two models agree */
+  const ed = S.editor;
+  const pic = ed.newPicture();
+  ed.setGradient(pic, { palette: 0, entry: 1, from: 0x000, to: 0x1FF,
+                        line0: 0, line1: 15 });
+  const edsTable = ed.toRaster(pic, 0);
+  const mine = S.raster.toRaster([S.raster.newBand({
+    name: "g", from: 0, to: 15,
+    fx: { kind: "gradient", palette: 0, entry: 1, from: 0x000, to: 0x1FF }
+  }, 224)], { lines: 224, base: { bxr: 0, byr: 0, cr: 0 } });
+  eq("#92: the gradient is #17's gradient, colour for colour",
+     JSON.stringify(rasterEntries(mine).entries.map((e) => e.line + "=" + e.cram)),
+     JSON.stringify(rasterEntries(edsTable).entries
+       .filter((e) => e.line <= 15).map((e) => e.line + "=" + e.cram)));
+
+  const wob = studio.scanlineAdd("wobble", 32);
+  check(!!wob && wob.fx.kind === "wobble", "#92: the Wobble band");
+  eq("#92: a wobble is one BXR write a line (64 cycles)",
+     S.raster.budget(wob).cycles, 64);
+  check(studio.scanlines().problems.length === 0,
+        "#92: a gradient and a wobble are inside the budget");
+
+  /* ---- the line count and the window --------------------------------- */
+  studio.scanlineSetLines(240);
+  eq("#92: the display can be 240 lines (#67)",
+     page.dom.get("scn-frame-note").textContent, "Full frame · lines 0-239");
+  studio.scanlineSetLines(200);
+  check(/raster-lines/.test(studio.scanlines().error),
+        "#92: a third line count is refused (" + studio.scanlines().error + ")");
+  studio.scanlineSetLines(224);
+
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
+/* ---- #98: the CONSOLE panel, ppu.toys' SNES tab ---------------------- *
+ * The panel runs the real pipeline on the real Lua the editor holds:
+ * pce-il.js lowers it, pce-validate.js prices it, pce-cgen.js emits C and
+ * refuses what part A/C cannot compile.  The three inputs here are the card's
+ * three states: a clean toy (green), a toy with a known refusal at a known
+ * line (red, and the finding's link moves the editor there), and a toy whose
+ * frame costs more than the console can give (red, the frame budget finding
+ * pointing at function frame()).  Nothing is faked: every number comes from
+ * the modules through the panel's own api. */
+function checkConsolePanel(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const dom = page.dom;
+
+  /* The refusal is on line 4; reg("NOPE") is both a static range refusal
+   * (validate-range) and one the C emitter refuses (cgen-op). */
+  const REFUSAL = "g = 0\nfunction frame(t, f)\n  g = g + 1\n" +
+                  "  reg(\"NOPE\", 0)\nend\n";
+  /* 20,000 iterations costs ~2,001,250 cycles, over the validator's
+   * 8-display-frame ceiling; frame() is on line 2. */
+  const OVER = "g = 0\nfunction frame(t, f)\n" +
+               "  for i = 1, 20000 do g = g + 1 end\nend\n";
+  const CLEAN = ilExports.TOY_PALETTE;
+
+  function load(source) {
+    if (studio.activeFile() !== "main.lua") studio.selectFile("main.lua");
+    studio.setEditorText(source);
+    studio.panels.select("console");
+    studio.panels.refresh(true);
+    return studio.console();
+  }
+
+  /* ---- a clean toy is green ------------------------------------------ */
+  let rep = load(CLEAN);
+  check(!!rep, "#98: CONSOLE has a report for the palette toy");
+  eq("#98: a clean toy's banner is green", rep.banner.state, "ok");
+  eq("#98: the green banner's words", rep.banner.text,
+     "Can run on the PC Engine");
+  eq("#98: the green banner is drawn", dom.get("console-banner").textContent,
+     "Can run on the PC Engine");
+  check(dom.get("console-banner").className.indexOf("is-ok") >= 0,
+        "#98: the green banner carries the ok class (" +
+        dom.get("console-banner").className + ")");
+  eq("#98: a clean toy has no findings", rep.findings.length, 0);
+  check(/No findings/.test(dom.get("console-findings").children[0].textContent),
+        "#98: the findings list says there is nothing to fix");
+  check(rep.stats.collectionCycles > 0 &&
+        rep.stats.collectionCycles < S.validate.MODEL.FRAME_CLOCKS,
+        "#98: the clean toy has a frame time (" + rep.stats.collectionCycles +
+        " cycles)");
+  check(rep.stats.framePct > 0 && rep.stats.framePct < 1,
+        "#98: the frame time is a fraction of 119,904 (" +
+        (rep.stats.framePct * 100).toFixed(2) + "%)");
+  check(rep.stats.codeBytes > 0 && rep.stats.romBytes > 0,
+        "#98: code and ROM sizes are measured (" + rep.stats.codeBytes +
+        " B of C, " + rep.stats.romBytes + " B estimated ROM)");
+  eq("#98: the stats draw one row per figure",
+     dom.get("console-stats").children.length, 6);
+  const html = fs.readFileSync(PAGE, "utf8");
+  check(/static estimate, checked against Mednafen and ares,\s+not hardware/
+          .test(html), "#98: the honest note is on the panel");
+  check(html.indexOf("frame time · compiler findings · code size") >= 0,
+        "#98: the panel says what it is");
+
+  /* ---- a known refusal: red, with a link to its Lua line ------------- */
+  rep = load(REFUSAL);
+  eq("#98: a refused toy's banner is red", rep.banner.state, "bad");
+  check(/^Can't run on the PC Engine as written yet: \d+ problems? to fix$/
+          .test(rep.banner.text),
+        "#98: the red banner names the count (" + rep.banner.text + ")");
+  eq("#98: the red banner is drawn", dom.get("console-banner").textContent,
+     rep.banner.text);
+  check(dom.get("console-banner").className.indexOf("is-bad") >= 0,
+        "#98: the red banner carries the bad class");
+  const range = rep.findings.filter((f) => f.code === "validate-range")[0];
+  check(!!range, "#98: the validator's refusal is listed");
+  eq("#98: the range finding points at main.lua line 4", range && range.line, 4);
+  check(rep.findings.some((f) => f.code === "cgen-op"),
+        "#98: the C emitter's refusal is listed too (" +
+        rep.findings.map((f) => f.code).join(", ") + ")");
+  const links = [];
+  for (const row of dom.get("console-findings").children) {
+    for (const cell of row.children) {
+      if (cell.className === "con-line") links.push(cell);
+    }
+  }
+  const link = links.filter((e) => e.textContent === "main.lua:4")[0];
+  check(!!link, "#98: the finding draws a clickable main.lua:4 (" +
+        links.map((e) => e.textContent).join(", ") + ")");
+  /* clicking the link puts the editor's cursor on that line */
+  const line4 = REFUSAL.split("\n").slice(0, 3).join("\n").length + 1;
+  if (link) {
+    link.click();
+    eq("#98: the link moves the editor to line 4", dom.get("source").selectionStart,
+       line4);
+  }
+  check(rep.stats.collectionCycles == null,
+        "#98: a toy that never ran a frame still draws, without inventing one");
+  eq("#98: an unmeasured toy still draws its three figures",
+     dom.get("console-stats").children.length, 3);
+
+  /* ---- an over-budget frame: red, and the link is function frame() --- */
+  rep = load(OVER);
+  eq("#98: an over-budget toy's banner is red", rep.banner.state, "bad");
+  const budget = rep.findings.filter((f) => f.code === "validate-frame-budget")[0];
+  check(!!budget, "#98: the frame budget refusal is listed (" +
+        rep.findings.map((f) => f.code).join(", ") + ")");
+  check(rep.stats.collectionCycles >
+        S.validate.MODEL.HARD_FRAMES * S.validate.MODEL.FRAME_CLOCKS,
+        "#98: the over-budget frame is measured, not guessed (" +
+        rep.stats.collectionCycles + " cycles)");
+  eq("#98: the frame budget finding links to function frame()'s line",
+     budget && budget.line, 2);
+
+  /* restore the page's own state for the sections after this one */
+  studio.panels.select("screen");
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
 /* ---- main ------------------------------------------------------------- */
 async function main() {
   const started = Date.now();
@@ -3907,6 +4374,8 @@ async function main() {
   checkScreenGaps(page);
   checkPalettesPanel(page);
   checkVramPanel(page);
+  checkScanlinesPanel(page);
+  checkConsolePanel(page);
   checkStudioApi(page);
 
   let browser = "not-requested";
