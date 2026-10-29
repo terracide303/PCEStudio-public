@@ -206,38 +206,13 @@
     tagHost.appendChild(chip);
   }
 
-  /* #125: a demo toy's art is not in the repository — Dennis's 2026-10-29
-   * decision keeps the converted pack art in demo-art/<toy>/ and the deploy
-   * uploads it beside the site.  The entry carries where it is
-   * (`toy.art`), the page fetches it, and the toy runs with the picture the
-   * studio would open.  A clone served locally, or a site whose upload
-   * skipped the folder, gets null: the toy still runs, and the page says the
-   * art is missing rather than showing a black screen with no explanation. */
-  function startPlayer(files) {
-    player = gallery.player(canvas, toy.source, {
-      files: files || null,
-      onFrame(frame, index) {
-        if (index % 10 === 0 || index < 3) status(index);
-      },
-      onError(e) { showError(e); syncPlayButtons(); }
-    });
-    syncPlayButtons();
-  }
-
-  if (toy.art) {
-    gallery.loadArt(toy).then(function (files) {
-      if (!files) {
-        $("toy-error").hidden = false;
-        $("toy-error").textContent = "Demo art not uploaded: the picture is " +
-          "in demo-art/city/ beside the repo and tools/deploy.sh puts it at " +
-          "art/city/ on the site. The toy runs without it.";
-      }
-      startPlayer(files);
-      if (!qs.get("paused")) play();
-    });
-  } else {
-    startPlayer(null);
-  }
+  player = gallery.player(canvas, toy.source, {
+    songs: toy.songs,
+    onFrame(frame, index) {
+      if (index % 10 === 0 || index < 3) status(index);
+    },
+    onError(e) { showError(e); syncPlayButtons(); }
+  });
 
   /* #124: the pad keys on the focused output.  Same mapping as the studio's
    * PAD_KEYS (ppu.toys' SNES pad on the PCE's two-button pad): IJKL is the
@@ -294,7 +269,7 @@
   });
 
   if (qs.get("play")) setFull(true);
-  if (!toy.art && !qs.get("paused")) play();
+  if (!qs.get("paused")) play();
   syncPlayButtons();
 
   const toyPage = {

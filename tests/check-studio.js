@@ -82,6 +82,14 @@
  *     code.  Blind spots in docs/STUDIO.md §12: the painted canvases are not
  *     pixel-diffed (the stub records calls), no raster-table toy is
  *     exercised, and the fade's source palettes are captured constants.
+ * 13. #139: the resizable regions.  Each of the three dividers is a separator
+ *     in the markup, focusable, with its own clamp; a pointer drag moves the
+ *     region by the dragged pixels through the grid's custom properties, the
+ *     clamp stops it at the minimum, arrows move it 8 px (Shift 40) and
+ *     double-click/Home reset it, the saved sizes come back on a second page
+ *     with the same storage, and the output frame's pixel digest is the same
+ *     before and after.  The --browser driver does the same with in-page
+ *     PointerEvents and reads the regions' rectangles.
  *
  * #90 adds a VISIBILITY assertion to every example: the frame the canvas drew
  * must be a picture at the expected place (57,344 / 7,168 / 256 non-backdrop
@@ -2208,6 +2216,194 @@ function checkPasteRun(page) {
   studio.seek(0);
 }
 
+/* ---- 9b. the resizable regions (#139) --------------------------------- */
+/* The card's evidence is the --browser run, which drags each divider with
+ * in-page pointer events and reloads the page.  This is the same page code
+ * under the stub DOM: the drag arithmetic, the clamp, the keyboard contract,
+ * the reset and the per-browser save.  The element rectangles are set here
+ * because the stub DOM has no layout — getBoundingClientRect reads the
+ * element's width/height. */
+function splitDigest(pixels) {
+  let h = 2166136261;
+  for (let i = 0; i < pixels.length; i++) {
+    h ^= pixels[i] & 0xff; h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
+}
+
+function checkStudioSplits(page) {
+  const studio = page.sandbox.PCEStudio.studio;
+  const dom = page.dom;
+  const el = (id) => dom.get(id);
+  function fire(target, type, more) {
+    const list = (target.listeners && target.listeners[type]) || [];
+    for (const fn of list) fn(Object.assign(dom.fakeEvent(target), more || {}));
+    return list.length;
+  }
+  function size(id, w, h) {
+    const e = el(id); e.width = w; e.height = h;
+  }
+  /* a 1280x900 page: 800 px of left column, 480 of output, a 420 px editor
+   * over a 280 px dock, and a 180 px drawer under a 400 px picture */
+  size("studio-main", 1280, 900);
+  size("workspace", 800, 700);
+  size("code-pane", 800, 420);
+  size("output-pane", 480, 900);
+  size("bottom-body", 480, 180);
+  size("canvas-wrap", 460, 400);
+
+  const ids = ["cols", "rows", "bottom"];
+  const html = fs.readFileSync(PAGE, "utf8");
+  /* the stub DOM does not parse attributes, so the markup itself is read */
+  const tagOf = (id) => {
+    const m = new RegExp('<[a-z]+[^>]*id="' + id + '"[^>]*>').exec(html);
+    return m ? m[0] : "";
+  };
+  for (const which of ids) {
+    const div = studio.layout.splitEl(which);
+    check(!!div, "the " + which + " divider is a grid item in the page");
+    if (!div) continue;
+    const tag = tagOf(div.id);
+    check(/role="separator"/.test(tag),
+          "the " + which + " divider is a separator");
+    check(/tabindex="0"/.test(tag),
+          "the " + which + " divider is focusable (keyboard resize)");
+    check(new RegExp('aria-orientation="' +
+                     (which === "cols" ? "vertical" : "horizontal") + '"')
+          .test(tag),
+          "the " + which + " divider says which way it runs");
+    check(/aria-label="[^"]+"/.test(tag),
+          "the " + which + " divider is named for a screen reader");
+  }
+  check(studio.layout.split("cols") === null &&
+        studio.layout.split("rows") === null &&
+        studio.layout.split("bottom") === null,
+        "a fresh browser starts on the default fr split, no saved sizes");
+  check(!el("studio-main").style["--split-left"],
+        "no saved size leaves the column tracks on their fr split");
+
+  const frameBefore = splitDigest(studio.render.output().pixels);
+
+  /* --- the columns: drag right 120 px, then 60 px back ----------------- */
+  const colsEl = el("split-cols");
+  check(fire(colsEl, "pointerdown", { clientX: 500, clientY: 400 }) === 1,
+        "pointerdown on the column divider is handled");
+  fire(colsEl, "pointermove", { clientX: 620, clientY: 400 });
+  check(studio.layout.split("cols") === 920,
+        "dragging the column divider 120 px right makes the left column " +
+        "920 px (got " + studio.layout.split("cols") + ")");
+  check(el("studio-main").style["--split-left"] === "920px" &&
+        el("studio-main").style["--split-right"] === "1fr",
+        "the columns move through the grid's custom properties, not an overlay");
+  fire(colsEl, "pointermove", { clientX: 560, clientY: 400 });
+  check(studio.layout.split("cols") === 860,
+        "a pointermove back to +60 px gives 860 px (got " +
+        studio.layout.split("cols") + ")");
+  fire(colsEl, "pointerup", {});
+  check(colsEl.getAttribute("aria-valuemin") === "320" &&
+        colsEl.getAttribute("aria-valuemax") === "974",
+        "the divider announces its clamp (320..974 px, got " +
+        colsEl.getAttribute("aria-valuemin") + ".." +
+        colsEl.getAttribute("aria-valuemax") + ")");
+  const held = studio.layout.split("cols");
+  fire(colsEl, "pointermove", { clientX: 1100, clientY: 400 });
+  check(studio.layout.split("cols") === held,
+        "a pointermove after pointerup does not resize (the drag ended)");
+
+  /* --- the code pane and the dock: drag down 100 px -------------------- */
+  const rowsEl = el("split-rows");
+  fire(rowsEl, "pointerdown", { clientX: 400, clientY: 300 });
+  fire(rowsEl, "pointermove", { clientX: 400, clientY: 400 });
+  check(studio.layout.split("rows") === 520,
+        "dragging the dock divider 100 px down makes the editor 520 px " +
+        "(got " + studio.layout.split("rows") + ")");
+  check(el("workspace").style["--split-code"] === "520px",
+        "the editor's row is the px track and the dock takes the rest");
+  fire(rowsEl, "pointerup", {});
+
+  /* --- the output and the drawer: drag up 100 px ----------------------- */
+  const bottomEl = el("split-bottom");
+  fire(bottomEl, "pointerdown", { clientX: 700, clientY: 700 });
+  fire(bottomEl, "pointermove", { clientX: 700, clientY: 600 });
+  check(studio.layout.split("bottom") === 280,
+        "dragging the drawer divider 100 px up makes the markers drawer " +
+        "280 px (got " + studio.layout.split("bottom") + ")");
+  check(el("output-pane").style["--split-bottom"] === "280px",
+        "the drawer's row is the px track and the picture takes the rest");
+  fire(bottomEl, "pointerup", {});
+
+  /* --- the clamp: nothing collapses to zero ---------------------------- */
+  fire(bottomEl, "pointerdown", { clientX: 700, clientY: 700 });
+  fire(bottomEl, "pointermove", { clientX: 700, clientY: 5000 });
+  check(studio.layout.split("bottom") === 64,
+        "dragging the drawer divider far down stops at its 64 px minimum " +
+        "(got " + studio.layout.split("bottom") + ")");
+  fire(bottomEl, "pointerup", {});
+  fire(colsEl, "pointerdown", { clientX: 500, clientY: 400 });
+  fire(colsEl, "pointermove", { clientX: -5000, clientY: 400 });
+  check(studio.layout.split("cols") === 320,
+        "dragging the column divider past the left edge stops at 320 px " +
+        "(got " + studio.layout.split("cols") + ")");
+  fire(colsEl, "pointerup", {});
+
+  /* --- the keyboard: arrows move, Home resets -------------------------- */
+  const kb = el("split-rows");
+  kb.focus();
+  fire(kb, "keydown", { key: "ArrowDown", code: "ArrowDown" });
+  check(studio.layout.split("rows") === 528,
+        "ArrowDown moves the divider 8 px (520 -> " +
+        studio.layout.split("rows") + ")");
+  fire(kb, "keydown", { key: "ArrowDown", code: "ArrowDown", shiftKey: true });
+  check(studio.layout.split("rows") === 568,
+        "Shift+ArrowDown moves it 40 px (" + studio.layout.split("rows") + ")");
+  fire(kb, "keydown", { key: "Home", code: "Home" });
+  check(studio.layout.split("rows") === null &&
+        !el("workspace").style["--split-code"],
+        "Home resets the divider to the default fr split");
+
+  /* --- double-click resets -------------------------------------------- */
+  fire(el("split-cols"), "dblclick", {});
+  check(studio.layout.split("cols") === null &&
+        !el("studio-main").style["--split-left"],
+        "double-clicking the column divider resets it");
+  fire(bottomEl, "dblclick", {});
+  check(studio.layout.split("bottom") === null &&
+        !el("output-pane").style["--split-bottom"],
+        "double-clicking the drawer divider resets it");
+
+  /* --- the output still renders the same frame ------------------------- */
+  const frameAfter = splitDigest(studio.render.output().pixels);
+  check(frameAfter === frameBefore,
+        "moving all three dividers leaves the output frame identical (" +
+        frameBefore + " vs " + frameAfter + ")");
+
+  /* --- saved per browser, restored on the next page -------------------- */
+  fire(el("split-cols"), "pointerdown", { clientX: 500, clientY: 400 });
+  fire(el("split-cols"), "pointermove", { clientX: 620, clientY: 400 });
+  fire(el("split-cols"), "pointerup", {});
+  fire(el("split-rows"), "pointerdown", { clientX: 400, clientY: 300 });
+  fire(el("split-rows"), "pointermove", { clientX: 400, clientY: 380 });
+  fire(el("split-rows"), "pointerup", {});
+  fire(bottomEl, "pointerdown", { clientX: 700, clientY: 700 });
+  fire(bottomEl, "pointermove", { clientX: 700, clientY: 620 });
+  fire(bottomEl, "pointerup", {});
+  let savedRaw = "";
+  try { savedRaw = page.storage.getItem("pcestudio.layout.v1") || ""; } catch (e) {}
+  check(/"cols":\d+/.test(savedRaw) && /"rows":\d+/.test(savedRaw) &&
+        /"bottom":\d+/.test(savedRaw),
+        "the three sizes are saved in the browser under pcestudio.layout.v1 (" +
+        savedRaw + ")");
+  const again = runPage("", page.storage);
+  const restored = again.sandbox.PCEStudio.studio;
+  check(restored.layout.split("cols") === 920 &&
+        restored.layout.split("rows") === 500 &&
+        restored.layout.split("bottom") === 260,
+        "a reload restores the three sizes (got " +
+        JSON.stringify(restored.layout.split()) + ")");
+  check(again.dom.get("studio-main").style["--split-left"] === "920px",
+        "the reloaded page puts the saved px back on the grid");
+}
+
 /* ---- 8. the real headless browser (optional) --------------------------- */
 /* The #77 browser evidence needs a page that can edit, reload and read the
  * studio back. A same-origin iframe driver served over HTTP does that with
@@ -2273,6 +2469,122 @@ const DRIVER_HTML = [
   '       "the cursor line is highlighted like ppu.toys\' editor");',
   '    ck(s.editorText() === s.current().source,',
   '       "the editor\'s text is the Lua the page runs");',
+  '',
+  '    /* #139: the three dividers, dragged with in-page pointer events (no OS',
+  '     * input).  They run here, before the driver starts editing the toy, so',
+  '     * a failure further down the chain cannot hide this card\'s evidence. */',
+  '    s.seek(30); s.pause();',
+  '    function box(el) {',
+  '      var r = el.getBoundingClientRect();',
+  '      return { x: r.left, y: r.top, w: r.width, h: r.height };',
+  '    }',
+  '    function pev(kind, x, y) {',
+  '      return new a.win.PointerEvent(kind, { bubbles: true,',
+  '        cancelable: true, clientX: x, clientY: y, pointerId: 1,',
+  '        pointerType: "mouse", isPrimary: true,',
+  '        button: kind === "pointerdown" ? 0 : -1,',
+  '        buttons: kind === "pointerup" ? 0 : 1 });',
+  '    }',
+  '    function drag(id, dx, dy) {',
+  '      var el = doc.getElementById(id);',
+  '      var r = el.getBoundingClientRect();',
+  '      var x = r.left + r.width / 2, y = r.top + r.height / 2;',
+  '      el.dispatchEvent(pev("pointerdown", x, y));',
+  '      el.dispatchEvent(pev("pointermove", x + dx / 2, y + dy / 2));',
+  '      el.dispatchEvent(pev("pointermove", x + dx, y + dy));',
+  '      el.dispatchEvent(pev("pointerup", x + dx, y + dy));',
+  '    }',
+  '    var canvasEl = doc.getElementById("out");',
+  '    function digest() {',
+  '      var d = canvasEl.getContext("2d")',
+  '        .getImageData(0, 0, canvasEl.width, canvasEl.height).data;',
+  '      var h = 2166136261;',
+  '      for (var i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 16777619); }',
+  '      return h >>> 0;',
+  '    }',
+  '    var pix0 = digest();',
+  '    var ws0 = box(doc.getElementById("workspace"));',
+  '    var out0 = box(doc.getElementById("output-pane"));',
+  '    var code0 = box(doc.getElementById("code-pane"));',
+  '    var body0 = box(doc.getElementById("bottom-body"));',
+  '    ck(ws0.w > 300 && code0.h > 200 && body0.h > 40,',
+  '       "the three regions have a size to drag (" + ws0.w + ", " +',
+  '       code0.h + ", " + body0.h + ")");',
+  '',
+  '    drag("split-cols", 120, 0);',
+  '    var ws1 = box(doc.getElementById("workspace"));',
+  '    ck(Math.abs((ws1.w - ws0.w) - 120) < 3,',
+  '       "dragging the column divider 120 px right widens the code column (" +',
+  '       ws0.w + " -> " + ws1.w + ")");',
+  '    var outCol = box(doc.getElementById("output-pane"));',
+  '    ck(Math.abs((out0.w - outCol.w) - 120) < 4,',
+  '       "the output column gives up the 120 px the code column took (" +',
+  '       out0.w + " -> " + outCol.w + ")");',
+  '',
+  '    drag("split-rows", 0, 80);',
+  '    var code1 = box(doc.getElementById("code-pane"));',
+  '    ck(Math.abs((code1.h - code0.h) - 80) < 3,',
+  '       "dragging the dock divider 80 px down makes the editor taller (" +',
+  '       code0.h + " -> " + code1.h + ")");',
+  '',
+  '    var body0b = box(doc.getElementById("bottom-body"));',
+  '    drag("split-bottom", 0, -60);',
+  '    var body1 = box(doc.getElementById("bottom-body"));',
+  '    ck(Math.abs((body1.h - body0b.h) - 60) < 3,',
+  '       "dragging the drawer divider 60 px up makes the drawer taller (" +',
+  '       body0b.h + " -> " + body1.h + ", first measured " + body0.h + ")");',
+  '',
+  '    ck(digest() === pix0,',
+  '       "the output still renders the same frame after all three drags");',
+  '    var frBox = box(doc.getElementById("display-frame"));',
+  '    ck(Math.abs(frBox.w / frBox.h - 256 / 224) < 0.01,',
+  '       "the canvas keeps its 256:224 aspect in the resized column (" +',
+  '       frBox.w.toFixed(1) + "x" + frBox.h.toFixed(1) + ")");',
+  '',
+  '    var savedLayout = "";',
+  '    try { savedLayout = a.win.localStorage.getItem("pcestudio.layout.v1") || ""; }',
+  '    catch (e) {}',
+  '    ck(/"cols":\\d+/.test(savedLayout) && /"rows":\\d+/.test(savedLayout) &&',
+  '       /"bottom":\\d+/.test(savedLayout),',
+  '       "the three divider sizes are saved in the browser (" + savedLayout + ")");',
+  '',
+  '    /* a second page with the same browser profile: the sizes come back */',
+  '    var lay = await loadFrame(url);',
+  '    var ldoc = lay.win.document;',
+  '    var ws2 = box(ldoc.getElementById("workspace"));',
+  '    var code2 = box(ldoc.getElementById("code-pane"));',
+  '    var body2 = box(ldoc.getElementById("bottom-body"));',
+  '    ck(lay.studio && Math.abs(ws2.w - ws1.w) < 2 &&',
+  '       Math.abs(code2.h - code1.h) < 2 && Math.abs(body2.h - body1.h) < 2,',
+  '       "a reload restores the three sizes (" + ws1.w + "/" + code1.h + "/" +',
+  '       body1.h + " -> " + ws2.w + "/" + code2.h + "/" + body2.h + ")");',
+  '',
+  '    function dbl(id) {',
+  '      doc.getElementById(id).dispatchEvent(new a.win.MouseEvent("dblclick",',
+  '        { bubbles: true, cancelable: true }));',
+  '    }',
+  '    dbl("split-cols"); dbl("split-rows"); dbl("split-bottom");',
+  '    var ws3 = box(doc.getElementById("workspace"));',
+  '    var code3 = box(doc.getElementById("code-pane"));',
+  '    var body3 = box(doc.getElementById("bottom-body"));',
+  '    ck(Math.abs(ws3.w - ws0.w) < 2 && Math.abs(code3.h - code0.h) < 2 &&',
+  '       Math.abs(body3.h - body0.h) < 2,',
+  '       "double-clicking each divider restores the default split (" +',
+  '       ws3.w + "/" + code3.h + "/" + body3.h + ")");',
+  '',
+  '    var kdiv = doc.getElementById("split-cols");',
+  '    kdiv.focus();',
+  '    var kb0 = box(doc.getElementById("workspace")).w;',
+  '    kdiv.dispatchEvent(new a.win.KeyboardEvent("keydown", { key: "ArrowRight",',
+  '      code: "ArrowRight", bubbles: true, cancelable: true }));',
+  '    ck(Math.abs(box(doc.getElementById("workspace")).w - (kb0 + 8)) < 2,',
+  '       "ArrowRight on the focused divider moves it 8 px (" + kb0 + " -> " +',
+  '       box(doc.getElementById("workspace")).w + ")");',
+  '    kdiv.dispatchEvent(new a.win.KeyboardEvent("keydown", { key: "Home",',
+  '      code: "Home", bubbles: true, cancelable: true }));',
+  '    ck(Math.abs(box(doc.getElementById("workspace")).w - kb0) < 2,',
+  '       "Home resets the divider from the keyboard");',
+  '    s.seek(0); s.pause();',
   '',
   '    var marker = "-- autosave-marker-77";',
   '    var edited = marker + "\\n" + s.editorText();',
@@ -3718,6 +4030,180 @@ function checkAudioPanel(page) {
      studio.audioPlay(0.1).samples > 0, true);
   studio.audioStop();
   eq("#97: stopping leaves the panel not playing", studio.audio().playing, false);
+
+  /* the panel is left as it was found */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  studio.panels.select("screen");
+}
+
+/* ---- #140: the voice picker offers the song's patches AND the built-ins --
+ * ppu.toys' AUDIO dropdown is the shape (Dennis, 2026-10-29): the song's own
+ * sample first with a tick on it, a grey heading, then every built-in sample,
+ * so a patch is one pick away instead of a trip through ASSETS.  Ours lists
+ * the toy's instruments.json first, a "load into the voice" heading, and all
+ * fifteen of #99's built-ins.  Picking a built-in adds it to instruments.json
+ * (once) and loads it into the voice; Trigger plays it — the patch's own
+ * registers through pce-psg.js, at the voice's frequency, noise for a drum.
+ *
+ * NOTE: written by @design under the same arrangement as the rest of this
+ * file — rule 2's cold break by another seat is owed. */
+function checkAudioVoicePicker(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const A = S.assets;
+  const NAMES = ["piano", "bass", "lead", "strings", "organ", "bell", "flute",
+                 "pluck", "kick", "snare", "hat", "ohat", "tom", "clap",
+                 "crash"];
+  if (!A || !studio.audioChoose) {
+    check(false, "#140: the page has no AUDIO voice picker");
+    return;
+  }
+
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.panels.select("audio");
+  studio.audioSelect(0);
+
+  const instrumentsJson = () => {
+    const f = studio.files().find((x) => x.name === "instruments.json");
+    if (!f) return null;
+    try { return JSON.parse(f.source); } catch (e) { return null; }
+  };
+  const stored = () => (instrumentsJson() || { instruments: [] }).instruments;
+  const pick = page.dom.get("aud-instrument");
+  const groupOf = () => pick && pick.children
+    .find((c) => c.tagName === "OPTGROUP");
+
+  /* ---- the picker's shape before anything is picked ------------------- *
+   * A fresh toy has no instruments.json, so everything the picker offers is
+   * a built-in under the heading. */
+  eq("#140: a fresh toy carries no instruments.json", instrumentsJson(), null);
+  check(!!pick, "#140: the AUDIO panel carries the voice picker");
+  if (!groupOf()) {
+    /* nothing below can mean anything without the list, and a missing group
+     * must be a red check rather than a crash that ends the whole run */
+    check(false, "#140: … the built-ins sit under a heading");
+    return;
+  }
+  eq("#140: the heading is the card's 'load into the voice'",
+     groupOf().label, "load into the voice");
+  eq("#140: the first option is this voice's own patch",
+     pick.children[0].value, "");
+  eq("#140: all fifteen built-ins are listed, in #99's order",
+     groupOf().children.map((o) => o.textContent).join(","), NAMES.join(","));
+  eq("#140: … each carried as builtin:<id>",
+     groupOf().children.map((o) => o.value).join(","),
+     NAMES.map((n) => "builtin:" + n).join(","));
+  /* the same list through the page's evidence surface (a module whose api
+   * shadows its own list would recurse here rather than pass) */
+  eq("#140: the page's built-in list is the picker's",
+     studio.audioBuiltins().map((b) => b.id).join(","), NAMES.join(","));
+  eq("#140: … typed the way the chip makes them",
+     studio.audioBuiltins().map((b) => b.kind).join(","),
+     A.INSTRUMENTS.map((i) => i.kind).join(","));
+
+  /* ---- one pick per built-in, through the picker's own handler -------- *
+   * The DOM change handler is driven, not the API, so what is measured is
+   * the control a person clicks. */
+  const perPick = [];
+  for (const name of NAMES) {
+    const before = stored().length;
+    pick.value = "builtin:" + name;
+    const fired = fire(pick, "change");
+    const voice = studio.audio().selected;
+    perPick.push([fired, stored().length - before,
+                  voice, studio.audioLoaded(voice)]);
+  }
+  eq("#140: every pick reaches the picker's change handler",
+     perPick.map((p) => p[0]).join(","), NAMES.map(() => 1).join(","));
+  eq("#140: … and adds exactly one instrument to the toy",
+     perPick.map((p) => p[1]).join(","), NAMES.map(() => 1).join(","));
+  eq("#140: each pick is what that voice then holds",
+     perPick.map((p) => p[3]).join(","), NAMES.join(","));
+  eq("#140: a drum moves to the first voice with the noise generator " +
+     "(0-based 4, the panel's voice 5)",
+     perPick.map((p) => p[2]).join(","), "0,0,0,0,0,0,0,0,4,4,4,4,4,4,4");
+  eq("#140: the toy ends with all fifteen, each once",
+     [stored().length, new Set(stored().map((i) => i.name)).size].join(","),
+     "15,15");
+
+  /* ---- the song's instruments now come first, with the tick ----------- *
+   * ppu.toys marks the song's own entry ('✓ Sample 00 · song'); ours marks
+   * the one loaded into the selected voice. */
+  studio.audioSelect(0);
+  studio.audioChoose("piano", 0);
+  const groupAt = pick.children.findIndex((c) => c.tagName === "OPTGROUP");
+  eq("#140: the song's instruments sit above the heading",
+     groupAt, 1 + NAMES.length);
+  eq("#140: … one entry each, in the order they were added",
+     pick.children.slice(1, groupAt).map((o) => o.value).join(","),
+     NAMES.map((n) => "toy:" + n).join(","));
+  check(pick.children.slice(1, groupAt)
+         .every((o) => / · (wave|noise)$/.test(o.textContent)),
+        "#140: … each saying its kind (" + pick.children[1].textContent + ")");
+  check(pick.children[1].textContent.indexOf("✓ ") === 0,
+        "#140: the one loaded into this voice is ticked (" +
+        pick.children[1].textContent + ")");
+  eq("#140: … and the picker's value points at it", pick.value, "toy:piano");
+
+  /* ---- no duplicates: the same built-in again adds nothing ------------ */
+  const again = studio.audioChoose("piano", 0);
+  eq("#140: picking a built-in the toy already has adds nothing",
+     again.added, false);
+  eq("#140: … instruments.json still holds one piano",
+     [stored().length, stored().filter((i) => i.name === "piano").length]
+       .join(","), "15,1");
+  /* … and the entry is ASSETS' own stored shape, not the built-in object */
+  const patch = stored()[0];
+  eq("#140: the stored copy is ASSETS' own shape",
+     [patch.source, patch.kind, patch.envelope.size]
+       .join(","), "built-in,wave," + patch.envelope.data.length);
+
+  /* ---- Trigger plays it: pce-psg.js's PCM from the patch's registers -- *
+   * `audioAudition` is the function onTrigger calls, so this is Trigger's
+   * output, not a second renderer.  The voice is A4 (F = 254 → 440.4 Hz). */
+  const pitches = [];
+  for (const name of NAMES) {
+    const inst = A.byId(name);
+    studio.audioSelect(0);
+    studio.audioNote(0, "A4");
+    const got = studio.audioChoose(name, 0);
+    const aud = studio.audioAudition(got.voice);
+    const n = aud.pcm.length / 2;
+    /* the loud part: a pluck has decayed to nothing by frame 30 */
+    const level = A.rms(aud.pcm, 0, Math.floor(n * 0.25));
+    check(level.rms > 40 && level.peak > 200,
+          "#140: Trigger on " + name + " is not silent (rms " +
+          level.rms.toFixed(0) + ", peak " + level.peak + ")");
+    if (inst.kind === "wave") {
+      const hz = A.fundamental(aud.pcm, aud.sampleRate, Math.floor(n * 0.2), n);
+      /* anchored on the MIX's voice, not on the trace: the trace agreeing
+       * with itself would prove nothing about what Trigger asked for */
+      const voiceFreq = studio.audio().voices[got.voice].freq;
+      const want = A.toneHz(voiceFreq);
+      pitches.push(name + ":" + aud.freq);
+      check(aud.freq === voiceFreq && Math.abs(hz.hz - want) <= want * 0.02,
+            "#140: … at the voice's pitch, F = " + voiceFreq + " → " +
+            want.toFixed(1) + " Hz for " + name + " (trace F = " + aud.freq +
+            ", measured " + hz.hz.toFixed(1) + ")");
+      eq("#140: … with 32 R6 wave steps on the voice",
+         aud.trace.events.filter((e) => e.reg === 6).length, 32);
+    } else {
+      const r7 = aud.trace.events.filter((e) => e.reg === 7);
+      eq("#140: " + name + " is the noise generator (R7 = $80 | NF " +
+         inst.nf + ")", r7.length ? r7[0].value : null, 0x80 | inst.nf);
+      eq("#140: … so it uploads no wave",
+         aud.trace.events.filter((e) => e.reg === 6).length, 0);
+      eq("#140: … and plays on the voice it moved to",
+         aud.trace.channel, got.voice);
+    }
+  }
+  eq("#140: every melodic built-in sounds the voice's A4 (F = 254)",
+     pitches.join(","),
+     NAMES.filter((n) => A.byId(n).kind === "wave").map((n) => n + ":254")
+       .join(","));
 
   /* the panel is left as it was found */
   studio.loadExample("palette", true);
@@ -6116,24 +6602,22 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  check(data.length === 7,
-        "the gallery carries the five #29 toys, STARFALL and CITY (got " +
-        data.length + ")");
+  /* #128 added OAK WOODS, #127 CAVE and #125 CITY — three demos besides the
+   * five #29 effects and STARFALL; Browse and the studio read the same
+   * generated list */
+  check(data.length === 9,
+        "the gallery carries the five #29 toys, STARFALL, OAK WOODS, CAVE " +
+        "and CITY (got " + data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall", "city"]);
-  /* #125: CITY's picture is a third-party pack's and is NOT in the repo
-   * (Dennis, 2026-10-29; docs/DECISIONS.md) — the entry names where the site
-   * keeps it and carries no tile, palette or pattern bytes. */
-  const city = data.find((t) => t.id === "city") || {};
-  check(!!city.art && city.art.base === "art/city/" &&
-        (city.art.files || []).map((f) => f.name).join(",") ===
-          "tiles.json,palettes.json,sprites.json",
-        "#125: the CITY entry points at the site's art/city/, not at repo files");
-  check((city.files || []).map((f) => f.name).join(",") === "main.lua",
-        "#125: the CITY entry carries main.lua and no art file");
-  check(!("tiles" in city) && !("palettes" in city),
-        "#125: no converted art rides in gallery-toys.js");
+      "starfall", "oak-woods", "cave", "city"]);
+  /* #125: the committed gallery carries CITY's art-free toy — the playable
+   * file with the pack's picture is demo-art/city/main.lua and only the
+   * deploy reads it (tools/gallery.js --with-demo-art). */
+  const cityToy = data.find((t) => t.id === "city") || {};
+  check(typeof cityToy.source === "string" &&
+        (cityToy.source.match(/vram\[/g) || []).length === 0,
+        "#125: the committed CITY source has no converted art in it");
   let mismatched = [];
   for (const t of data) {
     if (t.source !== toySource(t.file)) mismatched.push(t.file);
@@ -6251,12 +6735,6 @@ function checkGallery(page) {
      "main.lua,tiles.json,palettes.json,sprites.json");
   check(studio.current().source === toySource("demo-game/main.lua"),
         "#121: … and the game's own main.lua");
-  studio.loadExample("city", true);
-  eq("#125: the studio opens CITY", studio.current().id, "city");
-  eq("#125: … with its Lua and no art file", studio.fileNames().join(","),
-     "main.lua");
-  check(studio.current().source === toySource("city/main.lua"),
-        "#125: … and the demo's own main.lua");
   studio.loadExample("palette", true);   /* leave the page on a #29 toy */
 
   const miss = runPage("?toy=no-such-toy&paused=1");
@@ -6273,12 +6751,13 @@ function checkGallery(page) {
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall", "city"]);
-  /* #125: a card whose art is fetched from the site (CITY) is blank when the
-   * fetch cannot happen — a stub DOM here, a clone served locally, or a site
-   * whose upload skipped the folder.  Every other card must have ink. */
-  check(cards.every((c) => !c.error && (c.ink > 0 || c.art)),
-        "every card drew its frame 60, or waits for the site's art (" +
+      "starfall", "oak-woods", "cave", "city"]);
+  /* #125: the committed CITY card runs the art-free toy, so it draws no
+   * picture here; the deployed gallery carries the playable file and does.
+   * Every other card must have ink. */
+  check(cards.every((c) => !c.error && (c.ink > 0 || c.id === "city")),
+        "every card drew its frame 60, except the CITY placeholder " +
+        "(art-free in the repo, playable when deployed) (" +
         cards.map((c) => c.id + " " + c.ink).join(", ") + ")");
   check(cards.every((c) => c.href === "toy.html?id=" + c.id),
         "each card links to the toy's own page");
@@ -6299,24 +6778,31 @@ function checkGallery(page) {
         "#121: the STARFALL card links to its page, the studio and its file");
 
   B.setTag("raster");
-  eq("the raster tag shows the five raster toys", B.visible(),
-     ["parallax", "sky-gradient", "road", "status-bar", "starfall"]);
+  eq("the raster tag shows the raster toys", B.visible(),
+     ["parallax", "sky-gradient", "road", "status-bar", "starfall",
+      "oak-woods"]);
   B.setTag("");
   B.setQuery("road");
   eq("the search box filters to the road", B.visible(), ["road"]);
   B.setQuery("PCEStudio");
-  eq("search by author finds all five", B.visible(), B.toys().map((t) => t.id));
+  eq("search by author finds the toys PCEStudio made", B.visible(),
+     B.toys().map((t) => t.id).filter((id) => id !== "cave"));
+  /* #127: the cave's card carries the pack's author, because the pack's
+   * licence asks for attribution — and the search can find it there */
+  B.setQuery("Will Tice");
+  eq("the CAVE card is found by the pack's author", B.visible(), ["cave"]);
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["city", "status-bar", "parallax", "palette-cycle", "road",
-      "sky-gradient", "starfall"]);
+     ["cave", "city", "status-bar", "parallax", "oak-woods", "palette-cycle",
+      "road", "sky-gradient", "starfall"]);
   B.setSort("written");
 
   const bt = runBarePage(BROWSE_PAGE, "?tag=raster");
   eq("?tag=raster opens the page filtered",
      bt.sandbox.PCEStudio.browse.visible(),
-     ["parallax", "sky-gradient", "road", "status-bar", "starfall"]);
+     ["parallax", "sky-gradient", "road", "status-bar", "starfall",
+      "oak-woods"]);
 
   /* 4. a toy's own page */
   const t = runBarePage(TOY_PAGE, "?id=road&paused=1");
@@ -6361,7 +6847,7 @@ async function checkGalleryBrowser() {
                          "pcestudio-chrome-80-" + process.pid);
   const pages = [
     { name: "browse.html", file: BROWSE_PAGE, search: "?selftest=1",
-      want: /^PASS 6 cards, each drawn at frame 60 · ink / },
+      want: /^PASS 7 cards, each drawn at frame 60 · ink / },
     { name: "toy.html?id=road", file: TOY_PAGE, search: "?id=road&selftest=1",
       want: /^PASS 60 frames · road · 256x224 · ink [1-9][0-9]* · digest / }
   ];
@@ -6415,6 +6901,7 @@ async function main() {
   checkShortcuts(page);
   checkCodeMirrorEditorText();
   checkOutputColumn(page);
+  checkStudioSplits(page);
   checkExamplesVisible(page);
   checkPasteRun(page);
   checkScreenPanel(page);
@@ -6427,6 +6914,7 @@ async function main() {
   checkConsolePanel(page);
   checkLayersPanel(page);
   checkAudioPanel(page);
+  checkAudioVoicePicker(page);
   checkSequencerPanel(page);
   checkStudioApi(page);
   checkGallery(page);

@@ -58,15 +58,19 @@ const sat = require("../renderer/pce-sat.js");
 const ed = require("../renderer/pce-editor.js");
 
 const REPO = path.join(__dirname, "..");
-const TOY = path.join(REPO, "toys", "city", "main.lua");
+/* the PLAYABLE file: the repo's toys/city/main.lua plus the generated art
+ * block (tools/city-assets.js).  It is the file tools/gallery.js
+ * --with-demo-art puts on the site, so it is the one this test plays. */
+const TOY = null;      /* set below, once ART is known */
 const DEMO_ART = process.env.PCE_DEMO_ART ||
   "/Volumes/External/agent-workshop-demo/demo-art";
 const ART = path.join(DEMO_ART, "city");
 const EVIDENCE = path.join(ART, "evidence");
-const ART_FILES = ["tiles.json", "palettes.json", "sprites.json"];
+const ART_FILES = ["tiles.json", "palettes.json", "sprites.json", "main.lua"];
 const FRAMES = 120;
 const WIDTH = 256;
 const HEIGHT = 224;
+const PLAYABLE = path.join(ART, "main.lua");
 
 let checks = 0;
 const failures = [];
@@ -81,37 +85,32 @@ function eq(name, got, want) {
 }
 function note(text) { console.log("NOTE  " + text); }
 
-/* ---- 0: the pages' route to the art, with no art needed ---------------- *
- * The gallery entry names the site's folder (`art`), and pce-gallery.js's
- * loadArt fetches it.  A fake fetch proves the wiring on any machine: the
- * three names come back in the entry's order with the response's text, and a
- * page with no fetch at all (a stub DOM in the checks) gets null rather than
- * an exception.  The real folder is exercised by parts 1-7 when it is here. */
-function checkLoadArt() {
-  const gallery = require("../renderer/pce-gallery.js");
-  const toy = { id: "city",
-                art: { base: "art/city/",
-                       files: [{ name: "tiles.json", kind: "tiles" },
-                               { name: "palettes.json", kind: "palettes" },
-                               { name: "sprites.json", kind: "sprites" }] } };
-  const asked = [];
-  const realFetch = global.fetch;
-  global.fetch = (url) => {
-    asked.push(String(url));
-    return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve("{}") });
-  };
-  return gallery.loadArt(toy).then((files) => {
-    check(asked.length === 3 && asked[0] === "../art/city/tiles.json",
-          "loadArt fetches the site's art/city/ (asked " + asked.join(", ") + ")");
-    check(!!files && files.map((f) => f.name).join(",") ===
-          "tiles.json,palettes.json,sprites.json",
-          "loadArt returns the toy host's file shape");
-    global.fetch = undefined;
-    return gallery.loadArt(toy);
-  }).then((none) => {
-    check(none === null, "loadArt with no fetch answers null, not an error");
-    global.fetch = realFetch;
-  });
+/* ---- 0: the deploy route, which needs no art on disk ------------------- *
+ * The picture reaches the site the way #127/#128's demos do: tools/gallery.js
+ * names the toy (`demoArt`) and `--with-demo-art` reads demo-art/<toy>/
+ * main.lua, so the gallery's committed copy carries the art-free toy and the
+ * deployed copy carries the playable one.  That is checkable here: the entry
+ * exists, and the committed gallery has no VRAM writes in it. */
+function checkDeployRoute() {
+  const galleryTool = require("../tools/gallery.js");
+  const meta = (galleryTool.TOYS_META || []).find((t) => t.id === "city");
+  check(!!meta, "tools/gallery.js lists the CITY demo");
+  check(!!meta && meta.demoArt === "city" && meta.file === "city/main.lua",
+        "CITY's playable source is demo-art/city/main.lua (demoArt: city)");
+  const committed = fs.readFileSync(path.join(REPO, "renderer", "gallery-toys.js"), "utf8");
+  const cityAt = committed.indexOf('"id": "city"');
+  let span = "";
+  if (cityAt >= 0) {
+    const next = committed.indexOf('"id": "', cityAt + 10);
+    span = committed.slice(cityAt, next > 0 ? next : cityAt + 4000);
+  }
+  check(cityAt >= 0, "the committed gallery carries a CITY entry");
+  /* the stub's `function art_boot() ... end` is the art-free toy; a converted
+   * picture would be thousands of `vram[...] =` and `pal(0x...)` lines */
+  const writes = (span.match(/vram\[/g) || []).length +
+                 (span.match(/pal\(0x/g) || []).length;
+  check(writes === 0, "the committed CITY entry carries no converted art (" +
+        writes + " VRAM/CRAM writes)");
 }
 
 /* ---- skip, honestly, when the art is not on this machine --------------- */
@@ -139,11 +138,14 @@ function readArt() {
     source: fs.readFileSync(path.join(ART, name), "utf8") }));
 }
 
+/* The LAST `name = ...` in the file: the generated tail comes after the
+ * repo's constants and replaces them, as Lua runs them. */
 function listed(name) {
-  const m = new RegExp("^" + name + "\\s*=\\s*(.+)$", "m")
-    .exec(fs.readFileSync(TOY, "utf8"));
-  if (!m) throw new Error("main.lua has no " + name);
-  return m[1].split("--")[0].trim();
+  const text = fs.readFileSync(PLAYABLE, "utf8");
+  const all = text.match(new RegExp("^" + name + "\\s*=\\s*(.+)$", "mg"));
+  if (!all || !all.length) throw new Error("main.lua has no " + name);
+  return all[all.length - 1].replace(new RegExp("^" + name + "\\s*=\\s*"), "")
+    .split("--")[0].trim();
 }
 function listedList(name) {
   const text = listed(name);
@@ -254,7 +256,7 @@ function scriptedPad(f) {
 }
 
 function playTogether(files, padFn, frames, keep) {
-  const source = fs.readFileSync(TOY, "utf8");
+  const source = fs.readFileSync(PLAYABLE, "utf8");
   const a = toys.create(source, { budgetMs: 250, files: files });
   const b = il.create(source, { budgetMs: 250, files: files });
   a.load();
@@ -488,8 +490,9 @@ function writeStrip(run) {
 
 function run() {
   console.log("check-city — card #125, the CITY demo");
-  /* the wiring is proved before the skip: it needs no art on disk */
-  return checkLoadArt().then(() => runWithArt());
+  /* the deploy route is proved before the skip: it needs no art on disk */
+  checkDeployRoute();
+  return Promise.resolve(runWithArt());
 }
 
 function runWithArt() {
@@ -503,11 +506,11 @@ function runWithArt() {
     console.log("\nSKIP  0 of the toy's checks — the toy's Lua is committed, " +
                 "the art is not." +
                 (checks ? " (" + checks + " page-wiring checks above did run: " +
-                 "the fetch route needs no art on disk)" : ""));
+                 "the deploy route needs no art on disk)" : ""));
     return failures.length ? 1 : 0;
   }
 
-  const source = fs.readFileSync(TOY, "utf8");
+  const source = fs.readFileSync(PLAYABLE, "utf8");
   const files = readArt();
 
   /* the page's own call: gallery.still(source, frame, files) hands the art to

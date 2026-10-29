@@ -85,39 +85,13 @@
     return n;
   }
 
-  /* A demo toy's art, fetched from beside the site.
-   *
-   * #125's CITY (and the demos after it) is a toy whose picture is NOT in the
-   * repository: Dennis's 2026-10-29 decision keeps the converted pack art in
-   * demo-art/<toy>/ and tools/deploy.sh uploads it with the toy.  The gallery
-   * entry carries `art: {base, files}` instead of the files themselves, so
-   * the page fetches them from `art/<toy>/` on the site.  A clone served
-   * locally, or a site whose upload skipped the art, gets null and the toy
-   * still runs — with no picture, which the page says out loud.
-   *
-   * Returns a Promise of the file list ({name, source} — the toy host's own
-   * shape), or of null.  No fetch (a stub DOM in a test) is not an error. */
-  function loadArt(toy) {
-    if (!toy || !toy.art || !toy.art.files) return Promise.resolve(null);
-    if (typeof fetch !== "function") return Promise.resolve(null);
-    var base = toy.art.base || ("art/" + toy.id + "/");
-    return Promise.all(toy.art.files.map(function (f) {
-      return fetch("../" + base + f.name).then(function (r) {
-        if (!r.ok) throw new Error(f.name + ": HTTP " + r.status);
-        return r.text();
-      });
-    })).then(function (texts) {
-      return toy.art.files.map(function (f, i) {
-        return { name: f.name, kind: f.kind, source: texts[i] };
-      });
-    }).catch(function () { return null; });
-  }
-
   /* Run a toy from frame 0 to `frameNo` and leave that frame on the canvas.
    * A fresh runtime, disposed afterwards: a card does not keep five Lua VMs. */
-  function still(canvas, source, frameNo, files) {
+  function still(canvas, source, frameNo, opts) {
     var last = frameNo === undefined ? THUMB_FRAME : frameNo;
-    var rt = toyRuntime.create(source, { budgetMs: 200, files: files });
+    /* opts.songs: a toy whose music(0) needs a song (OAK WOODS, #128) */
+    var rt = toyRuntime.create(source, { budgetMs: 200,
+                                        songs: (opts && opts.songs) || [] });
     try {
       rt.load();
       var frame = null;
@@ -156,7 +130,7 @@
     function start() {
       disposeRuntime();
       rt = toyRuntime.create(source, { budgetMs: opts.budgetMs || 120,
-                                       files: opts.files });
+                                       songs: opts.songs || [] });
       rt.load();
       index = 0;
       error = null;
@@ -258,7 +232,6 @@
     rawHref: rawHref,
     draw: draw,
     countInk: countInk,
-    loadArt: loadArt,
     still: still,
     player: player
   };

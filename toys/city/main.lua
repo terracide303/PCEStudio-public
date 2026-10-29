@@ -1,27 +1,29 @@
 -- main.lua — CITY, a demo made from Anokolisa's "Action Pack - CITY" (card #125).
 --
 -- WHAT THIS IS: a soldier runs along a flooded city street at night, jumps and
--- shoots.  The picture is the pack's own composed scene; the character is ten
+-- shoots.  The picture is the pack's own composed scene; the character is nine
 -- frames of the pack's character sheet.  The pack's Autor_note.txt grants
 -- commercial use and asks for credit: "all the assets here are totally free
 -- for commercial use and the like. credits are optional but appreciated."
--- The credit is in this folder's README and on the studio's About page.
+-- The credit is in this folder's README and on the Browse page.
 --
--- WHERE THE ART IS.  Not in this repository, and not in this file (Dennis,
--- 2026-10-29; docs/DECISIONS.md): the converted picture lives beside the repo
--- in demo-art/city/ as the studio's own tiles.json / palettes.json /
--- sprites.json, and the toy host imports it into VRAM/CRAM before init() runs
--- (#117).  tools/city-assets.js converts it; tools/deploy.sh uploads it with
--- this file.  A clone without that folder runs a toy with no picture — the
--- test in tests/check-city.js says so and skips.
+-- WHERE THE ART IS.  Not in this file and not in this repository (Dennis,
+-- 2026-10-29; docs/DECISIONS.md).  The playable file is
+-- demo-art/city/main.lua: this file plus a generated tail that redefines the
+-- constants below and fills art_boot() with the pack's VRAM and CRAM writes
+-- (tools/city-assets.js writes it, the way tools/cave-assets.js writes CAVE's).
+-- tools/gallery.js --with-demo-art reads that file and tools/deploy.sh uploads
+-- it as the gallery's CITY source, so the site plays the picture with no
+-- fetch and no second runtime.  A clone runs THIS file: art_boot() draws
+-- nothing, the toy still plays, and tests/check-city.js skips with a line.
 --
--- ONE BACKGROUND, THREE BANDS.  The PC Engine has one background layer and no
+-- ONE BACKGROUND, TWO BANDS.  The PC Engine has one background layer and no
 -- HDMA.  A per-line horizontal offset is made by writing BXR (VDC R07) from
 -- the RCR line interrupt — one write per band boundary, and every line after
 -- it keeps the value (toys/parallax.lua is the reference).  Here the picture's
--- top band is the skyline (slowest), the middle is the buildings, and the
--- bottom — the ledge, the wall and the water — is the near band that runs
--- with the character.
+-- far band (sky, skyline and buildings) scrolls at a third of the street's
+-- speed; the near band starts on the ledge's top line, so the seam reads as
+-- the near ledge passing in front rather than as a torn picture.
 --
 -- THE WATER IS A PALETTE.  The pack's water is three colours in background
 -- palette 1.  Rotating them among their own three CRAM entries every 8 frames
@@ -83,7 +85,14 @@ local function put_player(px, feet, left, right)
              spbg = true, cgx = true, cgy = 2})
 end
 
+-- Replaced by demo-art/city/main.lua's generated tail when the art is there.
+function art_boot()
+end
+
 function init()
+  -- the pack's picture: palettes, tiles, the BAT and the sprite patterns
+  art_boot()
+
   -- sprites ON (CR = BB | SB).  The host powers on with BB only, so a toy that
   -- forgets this draws a SAT nobody can see (docs/TOYS.md §2, card #120).
   reg("CR", 0xC0)

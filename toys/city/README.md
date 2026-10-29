@@ -24,19 +24,28 @@ but it's fine as demo on the website in PCE Studio"* (`docs/DECISIONS.md`).
 
 So this folder holds **the toy, not its picture**:
 
-| in the repo | beside the repo |
+| in the repo | beside the repo (`demo-art/city/`) |
 |---|---|
-| `main.lua` — the game | `demo-art/city/tiles.json` — 249 tiles and the BAT |
-| `README.md` — this file | `demo-art/city/palettes.json` — the VCE words |
-| `tools/city-assets.js` — the converter | `demo-art/city/sprites.json` — 19 sprite patterns |
-| | `demo-art/city/evidence/strip.png` — the test's frame strip |
+| `main.lua` — the game, with an empty `art_boot()` | `main.lua` — the same game **plus the generated art block** (the playable file) |
+| `README.md` — this file | `tiles.json` — 249 tiles and the BAT |
+| `tools/city-assets.js` — the converter | `palettes.json` — the VCE words |
+| | `sprites.json` — 19 sprite patterns |
+| | `evidence/strip.png` — the test's frame strip |
 
 `demo-art/` sits **beside** the repository
-(`/Volumes/External/agent-workshop-demo/demo-art/`), and `tools/deploy.sh`
-uploads `demo-art/city/` to `art/city/` on the site, which is where the
-gallery entry points (`renderer/pce-gallery.js`'s `loadArt`). A clone without
-that folder still builds, still lists the toy, and `tests/check-city.js`
-**skips** with a line saying so — so the suite stays green.
+(`/Volumes/External/agent-workshop-demo/demo-art/`). The join happens at
+**deploy**, the same way as CAVE (#127) and OAK WOODS (#128):
+
+```sh
+node tools/gallery.js --with-demo-art   # gallery-toys.js with the playable source
+sh tools/deploy.sh                      # uploads it, and demo-art/city/
+```
+
+so the site's toy page and Browse run the picture with no fetch and no second
+runtime, while the committed `renderer/gallery-toys.js` stays the art-free
+copy every test checks. A clone without `demo-art/` still builds, still lists
+the toy, and `tests/check-city.js` **skips** with a line saying so — so the
+suite stays green.
 
 ## Build the art
 
@@ -63,12 +72,14 @@ nothing; `--check` exits 1 if the folder is not the converter's output.
    studio's Add Source dialog runs. Tiles are deduped, every 8x8 tile gets one
    of at most 16 palettes, and the whole picture uses **21 colours, at most 8
    in a tile** — inside the VDC's 16-colour palette.
-3. Ten frames of the character sheet (`Legacy Action Pack - CHARACTER/
+3. Nine frames of the character sheet (`Legacy Action Pack - CHARACTER/
    Sheets/Full-Sheet.png`) become **32x64 sprite patterns**, the VDC's largest
    sprite: eight run frames and one aim frame, two patterns each (the frames
    are up to 40 px wide, so each is a left and a right half). The leap reuses
    run frame 7, so it costs no VRAM of its own.
-4. The three **water colours** are found, and the converter refuses if one of
+4. The picture becomes `demo-art/city/main.lua`'s generated tail: every
+   non-zero VRAM word, the BAT run-length encoded, and the VCE's own words.
+5. The three **water colours** are found, and the converter refuses if one of
    them is also used above the water line — cycling such a colour would flash
    the city.
 
@@ -84,6 +95,7 @@ Budget: 249 tiles (5,008 VRAM words) + 19 patterns (9,280 words) =
 | SAT slots 0 and 1 | the character: two 32x64 sprites with `cgx` (two strips each) and `cgy = 2` (all 64 lines) |
 | slots 2..5 | the tracer, a 16x16 pattern, six pixels a frame |
 | slots 6..63 | parked once in `init()`, not every frame — that loop alone cost the frame budget 2 frames over |
+| `art_boot()` | the repo's is empty; the deployed file's writes the picture |
 
 ## The evidence
 
@@ -111,7 +123,13 @@ node tests/check-city.js
 - **Lua == IL**, frame by frame for 120 frames: vram, cram, sat, registers,
   the raster table and the pixels;
 - **the strip** — `demo-art/city/evidence/strip.png`, eight frames, read back
-  pixel for pixel.
+  pixel for pixel;
+- **the deploy route** — `tools/gallery.js` lists CITY as a demo (`demoArt:
+  city`), and the committed `renderer/gallery-toys.js` carries the art-free
+  toy with no VRAM write in it;
+
+and the test runs the **playable** `demo-art/city/main.lua`, the file the
+deploy puts on the site — not a stand-in.
 
 **Not proven, and worth saying:**
 
