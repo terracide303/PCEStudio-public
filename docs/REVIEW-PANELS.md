@@ -117,8 +117,12 @@ output. The current check passes, so each is a real hole, not an equivalent muta
 
 ## Notes on the run
 
-- **Post-commit gate:** a fresh clone of the pushed commit ran `tests/all.sh`:
-  **36 suites PASS, 1 SKIP (`check-ares`, no screen), 0 FAIL**.
+- **Post-commit gate:** `tests/all.sh` in a fresh clone gave **36 suites PASS, 1 SKIP
+  (`check-ares`, no screen), 0 FAIL** on this review's own commit (`7653e62`), and
+  **37 PASS, 1 SKIP, 0 FAIL** on the tip when measured (`2109232`, after #80/#94 landed).
+- Origin advanced during the run (#80 and #94 landed). Every break was cloned from
+  `21e6d5e`, the commit the review started on; the document itself is rebased onto the
+  current tip and touches no code.
 - The first parallel batch's `--browser` runs are cheap and independent (each check serves on
   port 0 and uses its own profile), but two concurrent headless runs produced unrelated
   `browser driver: a dropped .lua loads (drop status pending)` flakes. The 93-L3 break was
