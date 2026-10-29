@@ -576,6 +576,62 @@ function runPage(search, storage, extra) {
            storage: sandbox.localStorage };
 }
 
+/* #80 — the Browse and toy pages are documents of their own.  This boots one
+ * the way runPage() boots the studio: the scripts its tags name, then its
+ * inline script, in the same stub DOM with the ids seeded from its markup.
+ * The canvas still draws nothing here (the stub context records calls); the
+ * --browser run is what reads pixels, and the page's own selftest is what it
+ * reads. */
+function runBarePage(file, search) {
+  const html = fs.readFileSync(file, "utf8");
+  const srcs = [];
+  const reSrc = /<script\s+src="([^"]+)"\s*><\/script>/g;
+  let m;
+  while ((m = reSrc.exec(html))) srcs.push(m[1]);
+  let inline = null;
+  const reInline = /<script>([\s\S]*?)<\/script>/g;
+  while ((m = reInline.exec(html))) inline = m[1];
+  if (!inline) throw new Error(path.basename(file) + " has no inline script");
+  if (!srcs.length) throw new Error(path.basename(file) + " names no scripts");
+  const dom = makeStubDom();
+  const reId = /<([a-zA-Z][\w-]*)\b[^>]*\bid="([^"]+)"/g;
+  let idMatch;
+  while ((idMatch = reId.exec(html))) dom.define(idMatch[2], idMatch[1]);
+  const raf = [];
+  const sandbox = {
+    console,
+    Uint8Array, Uint8ClampedArray, Array, Math, JSON, Object, String, Number,
+    parseInt, parseFloat, isNaN, Date, RegExp, Promise, Set, Map,
+    HTMLDocument: function HTMLDocument() {},
+    HTMLCanvasElement: function HTMLCanvasElement() {},
+    location: { search: search || "" },
+    requestAnimationFrame(fn) { raf.push(fn); return raf.length; },
+    cancelAnimationFrame() {},
+    setTimeout() { return 0; },
+    clearTimeout() {},
+    addEventListener() {},
+    removeEventListener() {},
+    document: dom.document,
+    URLSearchParams,
+    localStorage: makeStorage(),
+    __now: 0
+  };
+  sandbox.performance = { now: () => sandbox.__now };
+  sandbox.window = sandbox;
+  sandbox.self = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  const dir = path.dirname(file);
+  for (const src of srcs) {
+    const target = path.resolve(dir, src);
+    vm.runInContext(fs.readFileSync(target, "utf8"), sandbox,
+      { filename: path.relative(path.join(__dirname, ".."), target) });
+  }
+  vm.runInContext(inline, sandbox,
+    { filename: path.basename(file) + " <inline>" });
+  return { sandbox, dom, raf };
+}
+
 /* ---- 1. the page boots ------------------------------------------------- */
 function checkBoot(page) {
   const S = page.sandbox.PCEStudio;
@@ -5430,6 +5486,211 @@ function checkLayersPanel(page) {
   studio.seek(0);
 }
 
+/* ---- #80: the gallery, the Browse page and a toy's own page ----------- *
+ * The five example toys (#29) are toys/*.lua; renderer/gallery-toys.js is
+ * tools/gallery.js's output of them.  What this checks: the generator is
+ * current and every source is the file byte for byte; the studio's ?toy=
+ * opens one and runs it equal to the file through the runtime directly; the
+ * Browse page builds a card per toy with the two links and its filters; a
+ * toy's page shows that toy's file, and says so by code when the id is not
+ * one.  The pictures are the --browser run's (each page's selftest reads the
+ * frame it drew); the stub DOM cannot show pixels. */
+const BROWSE_PAGE = path.join(RENDERER, "browse.html");
+const TOY_PAGE = path.join(RENDERER, "toy.html");
+const TOYS_DIR = path.join(__dirname, "..", "toys");
+
+function toySource(file) {
+  return fs.readFileSync(path.join(TOYS_DIR, file), "utf8");
+}
+
+function checkGallery(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+
+  /* 1. the data is the generator's, and the generator reads toys/*.lua */
+  let out = "";
+  try {
+    out = execFileSync(process.execPath,
+      [path.join(__dirname, "..", "tools", "gallery.js"), "--check"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    check(/is the generator's output/.test(out),
+          "tools/gallery.js --check: " + out.trim());
+  } catch (e) {
+    check(false, "tools/gallery.js --check exits 0 (" +
+          String((e && (e.stderr || e.message)) || e).trim() + ")");
+  }
+  const data = (S.galleryData && S.galleryData.toys) || [];
+  check(data.length === 5,
+        "the gallery carries the five example toys (got " + data.length + ")");
+  eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
+     ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle"]);
+  let mismatched = [];
+  for (const t of data) {
+    if (t.source !== toySource(t.file)) mismatched.push(t.file);
+  }
+  check(mismatched.length === 0,
+        "every gallery source is toys/<file> byte for byte" +
+        (mismatched.length ? " (" + mismatched.join(", ") + ")" : ""));
+
+  /* 2. the studio: the gallery list, the top-bar link, and ?toy= */
+  eq("studio.gallery is the five toys", studio.gallery.map((g) => g.id),
+     data.map((t) => t.id));
+  check(studio.gallery[2].source === toySource("road.lua"),
+        "studio.gallery's road source is toys/road.lua");
+  check(/id="btn-browse"[^>]*href="browse\.html"/.test(
+          fs.readFileSync(PAGE, "utf8")),
+        "the top bar links Browse (the stub DOM does not parse static hrefs)");
+
+  const roadSrc = toySource("road.lua");
+  const q = runPage("?toy=road&paused=1");
+  const qs = q.sandbox.PCEStudio.studio;
+  eq("?toy=road is the gallery's road", qs.current().id, "road");
+  eq("?toy=road shows road.lua in the title", qs.current().name, "road.lua");
+  check(qs.current().source === roadSrc,
+        "?toy=road runs toys/road.lua byte for byte");
+
+  /* the same 40 frames as the file run through the runtime with no page */
+  const pageFrames = qs.runFrames(40, "road", "lua");
+  const rt = S.toys.create(roadSrc, { budgetMs: 120 });
+  rt.load();
+  const direct = [];
+  for (let f = 0; f < 40; f++) { rt.setPad(1, {}); direct.push(rt.frame(f)); }
+  rt.dispose();
+  let pixelsDiffer = 0, stateDiffer = 0;
+  for (let f = 0; f < pageFrames.length; f++) {
+    if (diffCount(pageFrames[f].pixels, direct[f].pixels).n) pixelsDiffer++;
+    if (diffCount(pageFrames[f].state.vram, direct[f].state.vram).n ||
+        diffCount(pageFrames[f].state.cram, direct[f].state.cram).n ||
+        diffCount(pageFrames[f].state.sat, direct[f].state.sat).n)
+      stateDiffer++;
+  }
+  check(pageFrames.length === 40 && pixelsDiffer === 0,
+        "the studio's road runs 40 frames pixel-equal to toys/road.lua (" +
+        pixelsDiffer + " differ)");
+  check(stateDiffer === 0,
+        "… with vram/cram/sat equal on every frame (" +
+        stateDiffer + " differ)");
+
+  const miss = runPage("?toy=no-such-toy&paused=1");
+  const ms = miss.sandbox.PCEStudio.studio;
+  eq("?toy=<unknown> records the miss", ms.galleryMiss(), "no-such-toy");
+  eq("?toy=<unknown> leaves the first example loaded",
+     ms.current().id, "palette");
+
+  /* 3. the Browse page */
+  const b = runBarePage(BROWSE_PAGE, "?paused=1");
+  const B = b.sandbox.PCEStudio.browse;
+  check(!!B, "browse.html exposes PCEStudio.browse");
+  const cards = B.cards();
+  eq("browse.html builds a card per toy in the toys' order",
+     cards.map((c) => c.id),
+     ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle"]);
+  check(cards.every((c) => c.ink > 0 && !c.error),
+        "every card drew its frame 60 (" +
+        cards.map((c) => c.id + " " + c.ink).join(", ") + ")");
+  check(cards.every((c) => c.href === "toy.html?id=" + c.id),
+        "each card links to the toy's own page");
+  check(cards.every((c) => c.studioHref === "studio.html?toy=" + c.id),
+        "each card's Open in Studio links to the studio with the toy");
+  check(cards.every((c) => c.rawHref === "../toys/" + c.file),
+        "each card names the toy's own file");
+
+  B.setTag("raster");
+  eq("the raster tag shows the four raster toys", B.visible(),
+     ["parallax", "sky-gradient", "road", "status-bar"]);
+  B.setTag("");
+  B.setQuery("road");
+  eq("the search box filters to the road", B.visible(), ["road"]);
+  B.setQuery("PCEStudio");
+  eq("search by author finds all five", B.visible(), B.toys().map((t) => t.id));
+  B.setQuery("");
+  B.setSort("az");
+  eq("A–Z sorts by title", B.visible(),
+     ["status-bar", "parallax", "palette-cycle", "road", "sky-gradient"]);
+  B.setSort("written");
+
+  const bt = runBarePage(BROWSE_PAGE, "?tag=raster");
+  eq("?tag=raster opens the page filtered",
+     bt.sandbox.PCEStudio.browse.visible(),
+     ["parallax", "sky-gradient", "road", "status-bar"]);
+
+  /* 4. a toy's own page */
+  const t = runBarePage(TOY_PAGE, "?id=road&paused=1");
+  const T = t.sandbox.PCEStudio.toyPage;
+  check(!!T, "toy.html exposes PCEStudio.toyPage");
+  eq("toy.html?id=road is the road", T.toy().id, "road");
+  check(T.source() === roadSrc,
+        "the toy page's source is toys/road.lua byte for byte");
+  eq("its raw-source link is the toy's file", T.rawHref(), "../toys/road.lua");
+  eq("its Open in Studio link", T.studioHref(), "studio.html?toy=road");
+  eq("its tag chips", T.toy().tags, ["3d", "raster", "palette"]);
+
+  const toyFrames = T.frames(60);
+  const toyLast = toyFrames[toyFrames.length - 1];
+  const ink = toyLast ? t.sandbox.PCEStudio.gallery.countInk(toyLast) : 0;
+  check(toyFrames.length === 60 && ink > 0,
+        "the toy page runs 60 frames and frame 60 has a picture (" + ink +
+        " pixels)");
+
+  const m = runBarePage(TOY_PAGE, "?id=not-a-toy");
+  const mt = m.sandbox.PCEStudio.toyPage;
+  const mErr = mt.error ? mt.error() : null;
+  check(!!mErr && mErr.code === "unknown-toy",
+        "an id that is not a toy is refused by code (got " +
+        JSON.stringify(mErr) + ")");
+  check(m.dom.get("toy-page").getAttribute("data-error") === "unknown-toy",
+        "the page marks the unknown id on its root");
+  eq("and it names the id it was given", mt.id, "not-a-toy");
+}
+
+/* #80's pixels: the stub DOM records drawing calls and shows nothing, so the
+ * two new pages are opened in headless Chrome and their own selftest is
+ * read.  browse.html's selftest counts every card's frame-60 ink (a toy that
+ * runs without error can still draw a flat rectangle — #90); toy.html's
+ * runs 60 frames and reports the ink and a digest. */
+async function checkGalleryBrowser() {
+  if (!fs.existsSync(CHROME)) {
+    console.log("NOT RUN  gallery browser: " + CHROME + " is not installed");
+    return "not-run";
+  }
+  const base = path.join(process.env.TMPDIR || os.tmpdir(),
+                         "pcestudio-chrome-80-" + process.pid);
+  const pages = [
+    { name: "browse.html", file: BROWSE_PAGE, search: "?selftest=1",
+      want: /^PASS 5 cards, each drawn at frame 60 · ink / },
+    { name: "toy.html?id=road", file: TOY_PAGE, search: "?id=road&selftest=1",
+      want: /^PASS 60 frames · road · 256x224 · ink [1-9][0-9]* · digest / }
+  ];
+  let pass = true;
+  for (let i = 0; i < pages.length; i++) {
+    const def = pages[i];
+    const profile = base + "-" + i;
+    let dom = "";
+    try {
+      dom = execFileSync(CHROME, [
+        "--headless=new", "--disable-gpu", "--no-sandbox",
+        "--user-data-dir=" + profile,
+        "--virtual-time-budget=30000",
+        "--dump-dom", pathToFileURL(def.file).href + def.search
+      ], { encoding: "utf8", timeout: 120000,
+           stdio: ["ignore", "pipe", "ignore"] });
+    } catch (e) {
+      check(false, "headless Chrome ran " + def.name + " (" + e.message + ")");
+      pass = false;
+    }
+    const m = dom.match(/id="selftest"[^>]*>([^<]+)</);
+    const text = m ? m[1].trim() : "";
+    const ok = def.want.test(text);
+    check(ok, "headless Chrome: " + def.name + "'s selftest (" +
+          JSON.stringify(text.slice(0, 160)) + ")");
+    if (text) console.log("      browser gallery: " + def.name + " — " +
+                          text.slice(0, 150));
+    pass = pass && ok;
+    try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) {}
+  }
+  return pass ? "pass" : "fail";
+}
+
 /* ---- main ------------------------------------------------------------- */
 async function main() {
   const started = Date.now();
@@ -5463,9 +5724,14 @@ async function main() {
   checkAudioPanel(page);
   checkSequencerPanel(page);
   checkStudioApi(page);
+  checkGallery(page);
 
   let browser = "not-requested";
-  if (process.argv.indexOf("--browser") >= 0) browser = await checkBrowser();
+  let galleryBrowser = "not-requested";
+  if (process.argv.indexOf("--browser") >= 0) {
+    browser = await checkBrowser();
+    galleryBrowser = await checkGalleryBrowser();
+  }
 
   const ms = Date.now() - started;
   if (failures.length) {
@@ -5478,6 +5744,8 @@ async function main() {
               "examples, editor/files/shortcuts, output column, every button's " +
               "handler executed (" + buttonCount + " buttons)" +
               (browser === "pass" ? ", headless Chrome: PASS 40 + driver" : "") +
+              (galleryBrowser === "pass"
+                ? ", headless Chrome: browse + toy page selftests" : "") +
               " (" + ms + " ms)");
 }
 

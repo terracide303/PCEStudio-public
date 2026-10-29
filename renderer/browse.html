@@ -1,0 +1,386 @@
+<!doctype html>
+<!-- PCEStudio — Browse (card #80): ppu.toys' gallery, with the five example
+     toys of #29 that open in the studio.
+
+     The card grid follows ppu.toys' /browse — the kicker and title, the
+     "Search by title or author" box, a tag filter, and a wall of cards with
+     the picture on top, the title, the author and tag chips under it.  The
+     card pictures are frame 60 of each toy, run here through the same
+     renderer/pce-toys.js + pce-sprites.js + pce-bg.js stack the studio and
+     the Mednafen checks use; there is no second renderer and no video blob.
+
+     The toys and their sources are renderer/gallery-toys.js, generated from
+     toys/*.lua by tools/gallery.js, so a card, a toy's own page and
+     `node tests/check-examples.js` read the same bytes.  Each card links to
+     the toy's own page and to the studio with it open.
+
+     CREDIT — ppu.toys, MIT, Copyright (c) 2026 Liora Labs; the tokens and the
+     page shape are adapted with Dennis's written permission (docs/STUDIO.md
+     §0).  No ppu.toys code is used.
+
+     Serve the repo root and open renderer/browse.html:
+         python3 -m http.server 8000
+     Query params:
+       ?tag=<tag>       filter to one tag (the card chips link this way)
+       ?q=<text>        the search box's text
+       ?sort=az         A–Z instead of the toys' written order
+       ?selftest=1      draw every card and write a PASS/FAIL line into
+                        <pre id="selftest"> and the title (the evidence runner
+                        reads it; no synthetic input) -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Browse — PCEStudio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Pixelify+Sans:wght@600&display=swap">
+<link rel="stylesheet" href="pce-gallery.css">
+</head>
+<body>
+<header class="site-head">
+  <a class="brand" href="index.html" title="PCEStudio home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">PCE<span class="brand-dot">·</span>studio</span>
+  </a>
+  <nav class="site-nav" aria-label="Site">
+    <a href="studio.html">Studio</a>
+    <a href="browse.html" class="is-on" aria-current="page">Browse</a>
+    <a href="docs.html">Docs</a>
+  </nav>
+</header>
+
+<main class="browse-page">
+  <header class="browse-heading">
+    <div>
+      <span class="kicker">Explore the archive</span>
+      <h1>Browse toys</h1>
+    </div>
+    <form class="browse-search" role="search" id="search-form">
+      <label for="toy-search">Search by title or author</label>
+      <div>
+        <input id="toy-search" type="search" autocomplete="off" value="">
+        <button type="submit">Search</button>
+      </div>
+    </form>
+  </header>
+
+  <div class="browse-toolbar">
+    <label class="browse-tag-filter">Tag
+      <select id="tag-filter" aria-label="Filter by tag">
+        <option value="">All tags</option>
+      </select>
+    </label>
+    <button type="button" class="fork-btn" id="shuffle"
+            title="Open one toy's own page at random">Play a random toy</button>
+    <span class="browse-count" id="browse-count"></span>
+    <div class="sort-tabs" aria-label="Sort toys">
+      <button type="button" class="sort-tab is-on" id="sort-written"
+              aria-pressed="true">As written</button>
+      <button type="button" class="sort-tab" id="sort-az"
+              aria-pressed="false">A–Z</button>
+    </div>
+  </div>
+
+  <div class="wall-grid" id="wall-grid"></div>
+
+  <p class="wall-note">The five example toys live in <code>toys/</code>
+    (#29): one classic PC Engine effect each, runnable through both the Lua
+    runtime and the IL. Their sources are the gallery's own
+    (<code>renderer/gallery-toys.js</code>, generated from the files).</p>
+</main>
+
+<footer class="site-foot">
+  <span>PCEStudio — little graphics toys for a real PC Engine</span>
+  <a href="studio.html">Studio</a>
+  <a href="docs.html">Docs</a>
+  <a href="../docs/EXAMPLES.md">The five toys, explained</a>
+</footer>
+
+<pre id="selftest" hidden></pre>
+
+<script src="../vendor/fengari/fengari-web.js"></script>
+<script src="pce-bg.js"></script>
+<script src="pce-sprites.js"></script>
+<script src="pce-song.js"></script>
+<script src="pce-psg.js"></script>
+<script src="pce-toyhost.js"></script>
+<script src="pce-toys.js"></script>
+<script src="gallery-toys.js"></script>
+<script src="pce-gallery.js"></script>
+<script>
+"use strict";
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const gallery = PCEStudio.gallery;
+  const TOYS = gallery.list();
+
+  const qs = (typeof URLSearchParams === "function")
+    ? new URLSearchParams(location.search) : new URLSearchParams("");
+
+  let query = qs.get("q") || "";
+  let tag = qs.get("tag") || "";
+  let sort = qs.get("sort") === "az" ? "az" : "written";
+  let cards = [];
+
+  /* ---- one card, in ppu.toys' /browse order ------------------------- */
+  function buildCard(toy) {
+    const card = document.createElement("article");
+    card.className = "toy-card";
+    card.setAttribute("data-id", toy.id);
+    card.setAttribute("data-tags", toy.tags.join(" "));
+
+    const clip = document.createElement("div");
+    clip.className = "toy-card-clip";
+    const link = document.createElement("a");
+    link.className = "toy-card-clip-link";
+    link.setAttribute("href", gallery.toyHref(toy.id));
+    link.setAttribute("aria-label", toy.title + " — open its page");
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 224;
+    link.appendChild(canvas);
+    const badge = document.createElement("span");
+    badge.className = "toy-card-badge";
+    badge.textContent = "#29 example";
+    clip.appendChild(link);
+    clip.appendChild(badge);
+
+    const meta = document.createElement("div");
+    meta.className = "toy-card-meta";
+    const text = document.createElement("div");
+    text.className = "toy-card-text";
+    const title = document.createElement("a");
+    title.className = "toy-card-title";
+    title.setAttribute("href", gallery.toyHref(toy.id));
+    title.textContent = toy.title;
+    const author = document.createElement("span");
+    author.className = "toy-card-author";
+    author.textContent = toy.author + " · " + toy.file;
+    text.appendChild(title);
+    text.appendChild(author);
+    const open = document.createElement("a");
+    open.className = "toy-card-open";
+    open.setAttribute("href", gallery.studioHref(toy.id));
+    open.textContent = "Open in Studio";
+    meta.appendChild(text);
+    meta.appendChild(open);
+
+    const tags = document.createElement("div");
+    tags.className = "toy-tags";
+    tags.setAttribute("aria-label", "Tags");
+    for (const name of toy.tags) {
+      const chip = document.createElement("a");
+      chip.className = "toy-tag";
+      chip.setAttribute("href", "browse.html?tag=" + encodeURIComponent(name));
+      chip.textContent = "#" + name;
+      tags.appendChild(chip);
+    }
+
+    card.appendChild(clip);
+    card.appendChild(meta);
+    card.appendChild(tags);
+
+    /* The picture is the toy's own frame 60, drawn by the one renderer.  A
+     * toy that will not run says so on its card rather than showing black. */
+    const entry = { toy: toy, el: card, canvas: canvas, ink: 0, frame: null,
+                    error: null, href: link.getAttribute("href"),
+                    studioHref: open.getAttribute("href") };
+    try {
+      entry.frame = gallery.still(canvas, toy.source, gallery.THUMB_FRAME);
+      entry.ink = gallery.countInk(entry.frame);
+    } catch (e) {
+      entry.error = (e && e.code ? e.code + ": " : "") +
+        ((e && e.message) || String(e));
+      const note = document.createElement("span");
+      note.className = "toy-card-badge";
+      note.style.left = "50%";
+      note.style.top = "50%";
+      note.textContent = "did not run";
+      clip.appendChild(note);
+    }
+    return entry;
+  }
+
+  function sortedCards() {
+    const list = cards.slice();
+    if (sort === "az") {
+      list.sort((a, b) => a.toy.title.localeCompare(b.toy.title));
+    }
+    return list;
+  }
+
+  function renderWall() {
+    const grid = $("wall-grid");
+    grid.innerHTML = "";
+    for (const entry of sortedCards()) grid.appendChild(entry.el);
+    /* An empty result is a line, not a blank page. */
+    let empty = $("wall-empty");
+    if (!visibleCards().length) {
+      if (!empty) {
+        empty = document.createElement("div");
+        empty.id = "wall-empty";
+        empty.className = "wall-empty";
+        empty.textContent = "No examples match that search.";
+        grid.appendChild(empty);
+      } else {
+        grid.appendChild(empty);
+      }
+    }
+    updateCount();
+  }
+
+  function matches(entry) {
+    if (tag && entry.toy.tags.indexOf(tag) < 0) return false;
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const hay = [entry.toy.title, entry.toy.author, entry.toy.id,
+                 entry.toy.file, entry.toy.tags.join(" ")]
+      .join(" ").toLowerCase();
+    return hay.indexOf(q) >= 0;
+  }
+
+  function applyFilter() {
+    for (const entry of cards) entry.el.hidden = !matches(entry);
+    let empty = $("wall-empty");
+    const none = !cards.some((e) => !e.el.hidden);
+    if (none && !empty) {
+      empty = document.createElement("div");
+      empty.id = "wall-empty";
+      empty.className = "wall-empty";
+      empty.textContent = "No examples match that search.";
+      $("wall-grid").appendChild(empty);
+    } else if (!none && empty) {
+      empty.remove();
+    }
+    updateCount();
+  }
+
+  function visibleCards() { return cards.filter((e) => !e.el.hidden); }
+
+  /* The order the wall is showing, which is what a sort changes. */
+  function visibleOrder() {
+    const grid = $("wall-grid");
+    const out = [];
+    for (const el of grid.children) {
+      if (!el.hidden && el.getAttribute("data-id"))
+        out.push(el.getAttribute("data-id"));
+    }
+    return out;
+  }
+
+  function updateCount() {
+    const shown = visibleCards().length;
+    $("browse-count").textContent = shown === TOYS.length
+      ? TOYS.length + " examples"
+      : shown + " of " + TOYS.length + " examples";
+  }
+
+  function setQuery(value) {
+    query = String(value || "");
+    const box = $("toy-search");
+    if (box && box.value !== query) box.value = query;
+    applyFilter();
+  }
+
+  function setTag(value) {
+    tag = String(value || "");
+    const select = $("tag-filter");
+    if (select && select.value !== tag) select.value = tag;
+    applyFilter();
+  }
+
+  function setSort(value) {
+    sort = value === "az" ? "az" : "written";
+    const written = $("sort-written"), az = $("sort-az");
+    if (written) {
+      written.classList.toggle("is-on", sort === "written");
+      written.setAttribute("aria-pressed", sort === "written" ? "true" : "false");
+    }
+    if (az) {
+      az.classList.toggle("is-on", sort === "az");
+      az.setAttribute("aria-pressed", sort === "az" ? "true" : "false");
+    }
+    renderWall();
+  }
+
+  /* ---- build ------------------------------------------------------- */
+  cards = TOYS.map(buildCard);
+  renderWall();
+
+  const select = $("tag-filter");
+  const tags = [];
+  for (const toy of TOYS) for (const t of toy.tags)
+    if (tags.indexOf(t) < 0) tags.push(t);
+  tags.sort();
+  for (const name of tags) {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name.charAt(0).toUpperCase() + name.slice(1);
+    select.appendChild(option);
+  }
+  $("toy-search").value = query;
+  setTag(tag);
+  if (sort === "az") setSort("az");
+
+  $("toy-search").addEventListener("input", (e) => setQuery(e.target.value));
+  $("search-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    setQuery($("toy-search").value);
+  });
+  $("tag-filter").addEventListener("change", (e) => setTag(e.target.value));
+  $("sort-written").addEventListener("click", () => setSort("written"));
+  $("sort-az").addEventListener("click", () => setSort("az"));
+  $("shuffle").addEventListener("click", () => {
+    const pool = visibleCards();
+    const pick = pool[Math.floor(Math.random() * pool.length)] ||
+      cards[Math.floor(Math.random() * cards.length)];
+    if (pick) location.href = gallery.toyHref(pick.toy.id);
+  });
+
+  /* ---- the evidence API, and the no-synthetic-input selftest --------- */
+  PCEStudio.browse = {
+    toys: () => TOYS.map((t) => ({ id: t.id, title: t.title, file: t.file,
+                                   tags: t.tags.slice() })),
+    cards: () => cards.map((e) => ({
+      id: e.toy.id, title: e.toy.title, file: e.toy.file,
+      tags: e.toy.tags.slice(), href: e.href, studioHref: e.studioHref,
+      rawHref: gallery.rawHref(e.toy),
+      frame: e.frame ? e.frame.frame : null,
+      ink: e.ink, error: e.error
+    })),
+    visible: () => visibleOrder(),
+    setQuery: setQuery,
+    setTag: setTag,
+    setSort: setSort,
+    query: () => query,
+    tag: () => tag,
+    sort: () => sort
+  };
+
+  function finishText(text) {
+    const el = $("selftest");
+    el.hidden = false;
+    el.textContent = text;
+    document.title = text.split(" ")[0] + " — Browse";
+  }
+
+  if (qs.get("selftest")) {
+    const failed = cards.filter((e) => e.error || !e.ink);
+    const detail = cards.map((e) => e.toy.id + " " + e.ink).join(", ");
+    if (cards.length !== TOYS.length) {
+      finishText("FAIL only " + cards.length + " of " + TOYS.length +
+                 " cards were built");
+    } else if (failed.length) {
+      finishText("FAIL " + failed.length + " card(s) drew nothing (" +
+                 failed.map((e) => e.toy.id + ": " +
+                   (e.error || "no pixels")).join("; ") + ")");
+    } else {
+      finishText("PASS " + cards.length + " cards, each drawn at frame " +
+                 gallery.THUMB_FRAME + " · ink " + detail);
+    }
+  }
+})();
+</script>
+</body>
+</html>

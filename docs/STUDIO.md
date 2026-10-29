@@ -99,7 +99,7 @@ pixel, not eyeballed at another scale.
 |---|---|---|
 | left | purple chip mark, `ppu.toys` | our tile mark, `PCE·studio` in Pixelify Sans (links to `renderer/index.html`) |
 | title | `untitled toy` + `saved in this browser` | the active file (`main.lua`) + `saved in this browser` / `edited — Run to apply` / `restored from this browser` |
-| right | Export to ROM (orange), Raw output, Panels ▾, gear, Docs, Save file, Open…, Sign in to publish | Run, Paste & Run, Check, Export… (orange), Panels ▾, gear, Docs, Save file, Open…, not signed in |
+| right | Export to ROM (orange), Raw output, Panels ▾, gear, Docs, Save file, Open…, Sign in to publish | Run, Paste & Run, Check, Export… (orange), Panels ▾, gear, Download for Claude, **Browse**, Docs, Save file, Open…, not signed in |
 
 Measured: both bars are 0…49 with a 1 px border at y=49. The orange primary action is the export in both;
 ours opens the honest `needs #31` dialog (§9). `Docs` opens the in-studio Docs panel (§4); `not signed in` is
@@ -969,15 +969,73 @@ claims a file it cannot make.
 
 ## 10. How examples and docs are reached
 
-* **Examples.** ppu.toys has a `/browse` gallery and `Fork` on a toy's page. Ours ships the three toys the
-  IL test and the Lua test both run — `palette-cycle.lua`, `raster-bands.lua`, `sprite-pad.lua` — in the
-  `Open…` menu, and `?demo=<id>` opens one directly. `tests/check-studio.js` asserts the page's strings are
-  the exact strings `tests/check-il.js` defines, so "the example in the studio" and "the toy in the
-  evidence" cannot drift. A gallery, publishing and accounts need a backend and are not here.
+* **Examples in the studio.** ppu.toys has a `/browse` gallery and `Fork` on a toy's page. The studio ships
+  the three toys the IL test and the Lua test both run — `palette-cycle.lua`, `raster-bands.lua`,
+  `sprite-pad.lua` — in the `Open…` menu, and `?demo=<id>` opens one directly. `tests/check-studio.js`
+  asserts the page's strings are the exact strings `tests/check-il.js` defines, so "the example in the
+  studio" and "the toy in the evidence" cannot drift.
+* **The gallery, and a toy's own page (#80).** ppu.toys' `/browse` (a wall of toy cards with a picture,
+  title, author and tag chips, and a search box) and `/t/<id>` (the picture, the title, the author, the
+  tags, `Play full screen`, `Raw output`, `Fork`, and the source under file tabs) are the reference for
+  `renderer/browse.html` and `renderer/toy.html`. The five example toys of #29 are the gallery's content;
+  the sources are `renderer/gallery-toys.js`, generated from `toys/*.lua` by `tools/gallery.js`, so a card,
+  a toy's page, the studio and `tests/check-examples.js` all read the same bytes. The studio's top bar
+  links **Browse**, and `?toy=<id>` opens a gallery toy in it. §10.1 is the mapping, the evidence and
+  what is deliberately not there.
 * **Docs.** ppu.toys has a 15-chapter field guide at `/docs`, reached from the top bar and from each
   panel's `Guide`. Ours has the same two entries: the top-bar `Docs` button and each dock panel's `Guide`
   open the #61 reference in the Docs panel (§4); `Open standalone` opens `renderer/docs.html`. The
   reference is generated from the model, so it cannot drift from the code.
+
+### 10.1 Browse, and a toy's own page (#80)
+
+| ppu.toys (measured earlier: `theirs-browse.png`, `theirs-toy.png`, `theirs-toy-play.png`; the `/browse`
+DOM was captured, see §1) | PCEStudio |
+|---|---|
+| header `ppu.toys · Studio Console Browse Docs · Sign in with Discord` | `PCE·studio · Studio Browse Docs` — the same three pages, no account |
+| kicker `EXPLORE THE ARCHIVE`, `Browse Toys`, `Search by title or author` + Search | `Explore the archive`, `Browse toys`, the same search box; `?q=` opens it filled |
+| toolbar: Tag select, `Play feed`, `All published toys`, `Newest / Popular` | Tag select, **`Play a random toy`** (opens one toy's page at random), `5 examples`, **`As written / A–Z`** |
+| a card: a looping video clip, the title, the author, a heart count, `#tag` chips | a card: **frame 60 of the toy**, drawn by the same renderer, the title, `PCEStudio · <file>`, an **`Open in Studio`** link, and the `#tag` chips which link `browse.html?tag=…` |
+| `/t/<id>`: a big player, title, author, tags, `Play full screen` (orange), heart, `Raw output`, `Fork`, `SOURCE` with file tabs and the source | `/toy.html?id=<toy>`: the same shape. `Play full screen` (orange) makes the picture the page (Esc gives the page back; `?play=1` opens straight into it), `Raw source` is the toy's own `toys/<file>`, **`Open in Studio`** is the Fork (`studio.html?toy=<id>`), and `SOURCE` shows `main.lua` |
+| `/t/<id>/play`: the picture full-bleed with an on-screen D-pad and buttons, `Pause`, `START` | `toy.html?id=<id>&play=1`: the picture full-bleed, `Pause` / `Exit full screen`; no on-screen pad is drawn — the five examples read no input (`pad` is the toy's, §5.2's keys are the studio's) |
+| heart counts, publishing, sign-in, a "Play feed" of everyone's toys | **none**: there is no backend. A heart count would be an invented number, so it is not drawn; "Fork" is opening the studio on the same file; the author is `PCEStudio` |
+
+**The data is generated, not copied.** `renderer/gallery-toys.js` is `tools/gallery.js`'s output: the
+metadata (id, file, title, tags, one-line blurb and the trick) from the tool's `TOYS_META`, the source read
+from `toys/<file>`. `node tools/gallery.js --check` exits 1 if the committed file is not that output, and
+`node tools/gallery.js --write` regenerates it. `renderer/pce-gallery.js` is the small page model over it —
+`find`, the three URLs, the player and `countInk` — and it has no second runtime: the player is
+`renderer/pce-toys.js` over the toy host, drawn by `pce-sprites.js`/`pce-bg.js`, the same stack as the
+studio and the Mednafen checks.
+
+**The studio opens a gallery toy by URL.** `?toy=road` (or any of the five ids) loads its `main.lua` from
+`gallery-toys.js`, resets the asset files to a fresh toy's, runs it, and wins over the browser's autosave.
+An id that is not one records itself in `studio.galleryMiss()` and says `No gallery toy …` rather than
+silently opening something else. The `Open…` menu lists the three IL examples and links to the gallery
+(`Browse the gallery →`); it does not swap the file set in place, so an unsaved edit is not lost unseen.
+
+**The evidence** (`tests/check-studio.js`, §11.1 item 12 and §11.2): `checkGallery` runs
+`tools/gallery.js --check`; asserts every gallery source is `toys/<file>` byte for byte; opens the studio
+at `?toy=road` and compares **40 frames** of it with the same file run through the runtime directly —
+pixels, vram, cram and sat equal on every frame — and checks `?toy=<unknown>` records the miss; boots
+`browse.html` in the stub DOM (five cards in the toys' order, each card's frame-60 ink non-zero, its
+`toy.html?id=` and `studio.html?toy=` links, and the tag/search/A–Z filters) and `toy.html?id=road`
+(source byte-equal, its two links, 60 frames with a picture) and `?id=<unknown>` (`unknown-toy` by code);
+`--browser` opens both pages in headless Chrome and reads their own selftests — `PASS 5 cards, each drawn
+at frame 60`, and `PASS 60 frames · road · 256x224 · ink 49232 · digest ef2ecf0b`. The pages are
+`$TMPDIR/pc80/ours-browse-80c.png`, `ours-toy-80b.png` and `ours-toy-play-80b.png` (1600×1000, headless
+Chrome, no synthetic input), beside the reference captures in `$TMPDIR/pcestudio-design-75/`.
+
+**Limits, stated rather than pretended.** The gallery is the five `toys/` examples, not user toys: there
+is no upload, account, publication or comment, and "Play a random toy" picks from what the page shows.
+The cards are stills at frame 60, not video clips. `Play full screen` is a page-level layout (the
+Fullscreen API needs a user gesture and is not used), and `Open in Studio` on a card is the studio's
+`?toy=` — which loses the gallery page's scroll position, as a navigation does. A toy's page shows one
+source file: these five have only `main.lua`; a toy whose assets are files would need tabs for them later.
+The toy page does not include the generated `pceglobals.lua` tab the studio has. The picture is the
+model's pixels, not a Mednafen capture; the toys' own proof against a console is `check-examples.js`'s
+(the gallery adds no emulator run). Rule 2 is owed: the checks were written with the pages, so `@review`
+owes them a cold break.
 
 ---
 
@@ -1127,6 +1185,17 @@ What it does, in order:
       three sources; the stub DOM draws the rows but no screenshot compares the panel's pixels; a live
       keystroke's debounce is not exercised (the stub's `setTimeout` never fires — the evidence calls
       `consoleRefresh()`/a panel select instead), and the browser driver has no CONSOLE case.
+16. **The gallery, the Browse page and a toy's own page (#80).** `checkGallery` (its own runner,
+    `runBarePage`, boots a page that is not the studio): `tools/gallery.js --check` passes and
+    `renderer/gallery-toys.js`'s five sources are `toys/<file>` byte for byte; `studio.gallery` is those
+    five; `?toy=road` loads `road.lua` and its **40 frames** are pixel- and state-equal to the same file
+    through `PCEStudio.toys` directly; `?toy=<unknown>` records the miss and leaves the first example.
+    `browse.html` builds five cards in the toys' order, every card's frame-60 ink is non-zero, the two
+    links per card are `toy.html?id=` and `studio.html?toy=`, `?tag=raster` and the search box filter the
+    wall, search by author finds all five, and A–Z sorts it. `toy.html?id=road` shows `road.lua`'s source,
+    its `../toys/road.lua` and `studio.html?toy=road` links, its three tag chips and 60 frames with a
+    picture; `?id=<unknown>` is refused `unknown-toy` and marks the page root. What the stub cannot show is
+    the canvas; §11.2's gallery run reads the pages' own selftests in Chrome.
 
 ### 11.2 The real browser
 
@@ -1163,6 +1232,13 @@ events to the cells (the stub can only call the model), the cell's map word must
 `getImageData` on the canvas must show `rgb 252,252,252` at the painted pixel — so the canvas really draws
 the picture, not just the model. The `2×` chip must redraw the map canvas at 512 px, and the grid checkbox's
 `change` event must turn the grid off.
+
+The **#80 gallery run** is two more command-line Chrome loads, with no synthetic input: `browse.html?selftest=1`
+reads `PASS 5 cards, each drawn at frame 60 · ink parallax 50232, sky-gradient 49152, road 49232,
+status-bar 54400, palette-cycle 52416`, and `toy.html?id=road&selftest=1` reads `PASS 60 frames · road ·
+256x224 · ink 49232 · digest ef2ecf0b`. Those ink counts are the pixels the page drew that are not the
+frame's backdrop — the same shape of check #90 added after a black screenshot passed a model check — and
+the digest is the `pce-toys.js` state the page ran, computed in the page.
 
 ### 11.3 Screenshots
 
@@ -1443,3 +1519,14 @@ comparison with their page is claimed.
   `tests/check-studio.js` covers them yet, and a cold break by another seat (rule 2) is owed: remove the
   tab, make it editable, drop the `showingGlobals` guards, break the select's seek or its reset, or reduce
   the frame box to `object-fit: contain`, and the checks must catch each.
+* **#80's gallery is a static gallery, and its pages are its own documents.** There is no backend: the
+  wall is the five `toys/` examples, "Play a random toy" picks among what the page shows, and there is no
+  heart, account, comment or publication — those would be invented numbers or dead buttons. The cards are
+  frame-60 stills, not video clips. `Play full screen` is a page layout, not the browser's Fullscreen API
+  (which needs a user gesture). A toy's page shows one source file (`main.lua`); the generated
+  `pceglobals.lua` tab and a toy's asset files are the studio's (§2.2, §3.1–§3.9), not the toy page's. The
+  gallery's pictures come from the model, not a Mednafen capture; `check-examples.js` is the toys' own
+  evidence and `check-studio.js --browser` proves the pages draw them. Rule 2 is owed for `checkGallery`
+  and `runBarePage` as well: a cold seat should break a card's link, the ?toy= precedence over autosave,
+  the byte-equality of a source, the frames' diff-0 comparison, the A–Z order, the unknown-id code, and
+  the player's RGB stride, and the check must catch each.

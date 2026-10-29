@@ -1,0 +1,296 @@
+<!doctype html>
+<!-- PCEStudio — a toy's own page (card #80): ppu.toys' /t/<id> page for the
+     five example toys of #29.
+
+     The shape follows ppu.toys' toy page — the picture on the left, and on
+     the right the title, the author, the tag chips, the primary "Play full
+     screen" action, the source file tabs and the file itself.  There is no
+     account and no sharing backend, so "Fork" is "Open in Studio" (the
+     studio loads the same file from renderer/gallery-toys.js), and a heart
+     count would be an invented number and is not drawn.
+
+     A toy runs through renderer/pce-gallery.js's player, over the same
+     renderer/pce-toys.js + pce-sprites.js + pce-bg.js stack the studio and
+     the Mednafen checks use.  The page is a route over renderer/browse.html's
+     data: ?id=<toy id>, the id the card links carry.
+
+     CREDIT — ppu.toys, MIT, Copyright (c) 2026 Liora Labs; the tokens and the
+     page shape are adapted with Dennis's written permission (docs/STUDIO.md
+     §0).  No ppu.toys code is used.
+
+     Serve the repo root and open renderer/toy.html?id=road:
+         python3 -m http.server 8000
+     Query params:
+       ?id=<toy>      the toy (parallax, sky-gradient, road, status-bar,
+                      palette-cycle); an unknown id says so on the page
+       ?paused=1      do not start playing
+       ?play=1        open in the full-screen player (Esc gives the page back)
+       ?selftest=1    run 60 frames synchronously and write a PASS/FAIL line
+                      into <pre id="selftest"> and the title -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toy — PCEStudio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Pixelify+Sans:wght@600&display=swap">
+<link rel="stylesheet" href="pce-gallery.css">
+</head>
+<body>
+<header class="site-head">
+  <a class="brand" href="index.html" title="PCEStudio home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">PCE<span class="brand-dot">·</span>studio</span>
+  </a>
+  <nav class="site-nav" aria-label="Site">
+    <a href="studio.html">Studio</a>
+    <a href="browse.html">Browse</a>
+    <a href="docs.html">Docs</a>
+  </nav>
+</header>
+
+<main class="toy-page" id="toy-page">
+  <section class="toy-stage">
+    <div class="toy-screen">
+      <canvas id="out" width="256" height="224"
+              aria-label="The toy's live picture"></canvas>
+    </div>
+    <div class="toy-transport">
+      <button type="button" class="btn" id="btn-play">Pause</button>
+      <span id="toy-status">frame 0 · 256×224</span>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="btn-exit-full" hidden>Exit full screen</button>
+    </div>
+    <div class="toy-missing" id="toy-missing" hidden>
+      <h1>No toy here</h1>
+      <p>Nothing in the gallery has the id <code id="toy-missing-id"></code>.</p>
+      <p><a class="btn" href="browse.html">Browse the five examples</a></p>
+    </div>
+    <p class="toy-error" id="toy-error" hidden></p>
+  </section>
+
+  <aside class="toy-side" id="toy-side">
+    <h1 id="toy-title"></h1>
+    <p class="toy-by">by <span id="toy-author"></span> ·
+      <code id="toy-file"></code></p>
+    <div class="toy-tags" id="toy-tags" aria-label="Tags"></div>
+    <div class="toy-actions">
+      <button type="button" class="btn btn-accent" id="btn-full"
+              title="The picture alone, on the page; Esc gives the page back">Play full screen</button>
+      <a class="btn" id="toy-raw" href="#" title="The toy's own .lua file">Raw source</a>
+      <a class="btn" id="toy-studio" href="#" title="The studio with this toy open">Open in Studio</a>
+    </div>
+    <p class="toy-blurb" id="toy-blurb"></p>
+    <p class="toy-effect" id="toy-effect"></p>
+    <div class="source-head"><span>SOURCE</span><span id="source-count"></span></div>
+    <div class="file-tabs">
+      <span class="file-tab is-on" aria-current="true">main.lua</span>
+    </div>
+    <pre class="toy-source" id="toy-source"></pre>
+  </aside>
+</main>
+
+<div class="toy-playbar">
+  <button type="button" class="btn" id="btn-play-full">Pause</button>
+  <button type="button" class="btn" id="btn-exit-full-2">Exit full screen</button>
+</div>
+
+<footer class="site-foot">
+  <span>PCEStudio — little graphics toys for a real PC Engine</span>
+  <a href="studio.html">Studio</a>
+  <a href="browse.html">Browse</a>
+  <a href="../docs/EXAMPLES.md">The five toys, explained</a>
+</footer>
+
+<pre id="selftest" hidden></pre>
+
+<script src="../vendor/fengari/fengari-web.js"></script>
+<script src="pce-bg.js"></script>
+<script src="pce-sprites.js"></script>
+<script src="pce-song.js"></script>
+<script src="pce-psg.js"></script>
+<script src="pce-toyhost.js"></script>
+<script src="pce-toys.js"></script>
+<script src="gallery-toys.js"></script>
+<script src="pce-gallery.js"></script>
+<script>
+"use strict";
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const gallery = PCEStudio.gallery;
+  const qs = (typeof URLSearchParams === "function")
+    ? new URLSearchParams(location.search) : new URLSearchParams("");
+
+  const id = qs.get("id") || "";
+  const toy = gallery.find(id);
+  const canvas = $("out");
+  let player = null;
+  let full = false;
+
+  function setFull(on) {
+    full = !!on;
+    document.body.classList.toggle("is-play", full);
+    $("btn-exit-full").hidden = !full;
+    $("btn-full").textContent = full ? "Exit full screen" : "Play full screen";
+    syncPlayButtons();
+  }
+
+  function status(frames) {
+    $("toy-status").textContent = "frame " + frames + " · " +
+      (canvas.width || 256) + "×" + (canvas.height || 224);
+  }
+
+  function syncPlayButtons() {
+    const playing = player ? player.isPlaying() : false;
+    const label = playing ? "Pause" : "Play";
+    $("btn-play").textContent = label;
+    $("btn-play-full").textContent = label;
+  }
+
+  function showError(e) {
+    const text = (e && e.code ? e.code + ": " : "") +
+      ((e && e.message) || String(e));
+    const el = $("toy-error");
+    el.hidden = false;
+    el.textContent = text;
+  }
+
+  /* ---- a toy's page, or a page that says the id is not one ---------- */
+  function missing() {
+    $("toy-missing").hidden = false;
+    $("toy-missing-id").textContent = id || "(none)";
+    $("toy-page").setAttribute("data-error", "unknown-toy");
+    $("toy-title").textContent = "No toy here";
+    $("toy-side").hidden = true;
+    document.title = "No toy — PCEStudio";
+    return { error: "unknown-toy", id: id };
+  }
+
+  if (!toy) {
+    PCEStudio.toyPage = Object.assign(missing(), {
+      id: id, toy: () => null, source: () => "",
+      rawHref: () => null, studioHref: () => null,
+      play() {}, pause() {}, isPlaying: () => false,
+      index: () => 0, frame: () => null, frames: () => [],
+      setFull: setFull, isFull: () => full,
+      error: () => ({ code: "unknown-toy",
+                      message: "no gallery toy has the id " + (id || "(none)") })
+    });
+    return;
+  }
+
+  document.title = toy.title + " — PCEStudio";
+  $("toy-title").textContent = toy.title;
+  $("toy-author").textContent = toy.author;
+  $("toy-file").textContent = toy.file;
+  $("toy-blurb").textContent = toy.blurb;
+  $("toy-effect").textContent = "The trick: " + toy.effect;
+  $("toy-raw").setAttribute("href", gallery.rawHref(toy));
+  $("toy-studio").setAttribute("href", gallery.studioHref(toy.id));
+  $("toy-source").textContent = toy.source;
+  $("source-count").textContent = "1 file · " +
+    toy.source.split("\n").length + " lines";
+
+  const tagHost = $("toy-tags");
+  for (const name of toy.tags) {
+    const chip = document.createElement("a");
+    chip.className = "toy-tag";
+    chip.setAttribute("href", "browse.html?tag=" + encodeURIComponent(name));
+    chip.textContent = "#" + name;
+    tagHost.appendChild(chip);
+  }
+
+  player = gallery.player(canvas, toy.source, {
+    onFrame(frame, index) {
+      if (index % 10 === 0 || index < 3) status(index);
+    },
+    onError(e) { showError(e); syncPlayButtons(); }
+  });
+
+  function play() { if (player) { player.play(); syncPlayButtons(); } }
+  function pause() { if (player) { player.pause(); syncPlayButtons(); } }
+
+  $("btn-play").addEventListener("click", () => {
+    if (!player) return;
+    if (player.isPlaying()) pause(); else play();
+  });
+  $("btn-play-full").addEventListener("click", () => {
+    if (!player) return;
+    if (player.isPlaying()) pause(); else play();
+  });
+  $("btn-full").addEventListener("click", () => setFull(!full));
+  $("btn-exit-full").addEventListener("click", () => setFull(false));
+  $("btn-exit-full-2").addEventListener("click", () => setFull(false));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && full) setFull(false);
+  });
+
+  if (qs.get("play")) setFull(true);
+  if (!qs.get("paused")) play();
+  syncPlayButtons();
+
+  const toyPage = {
+    id: toy.id,
+    toy: () => ({ id: toy.id, title: toy.title, file: toy.file,
+                  tags: toy.tags.slice(), blurb: toy.blurb }),
+    source: () => toy.source,
+    rawHref: () => gallery.rawHref(toy),
+    studioHref: () => gallery.studioHref(toy.id),
+    status: () => $("toy-status").textContent,
+    play: play,
+    pause: pause,
+    isPlaying: () => !!(player && player.isPlaying()),
+    index: () => (player ? player.index() : 0),
+    frame: () => (player ? player.frame() : null),
+    /* The synchronous route, for the evidence runner and the selftest. */
+    frames: (n) => (player ? player.frames(n) : []),
+    setFull: setFull,
+    isFull: () => full,
+    error: () => {
+      const e = player && player.error();
+      return e ? { code: e.code || null, message: e.message || String(e) } : null;
+    }
+  };
+  PCEStudio.toyPage = toyPage;
+
+  function finishText(text) {
+    const el = $("selftest");
+    el.hidden = false;
+    el.textContent = text;
+    document.title = text.split(" ")[0] + " — " + toy.title;
+  }
+
+  if (qs.get("selftest")) {
+    pause();
+    try {
+      const frames = toyPage.frames(60);
+      const last = frames[frames.length - 1];
+      let h = 2166136261;
+      const feed = (arr) => {
+        for (let i = 0; i < arr.length; i++) {
+          h ^= arr[i];
+          h = Math.imul(h, 16777619);
+        }
+      };
+      feed(last.pixels);
+      feed(last.state.vram);
+      feed(last.state.cram);
+      feed(last.state.sat);
+      const ink = gallery.countInk(last);
+      if (!ink) {
+        finishText("FAIL " + toy.id + " drew a flat frame at 60");
+      } else {
+        finishText("PASS " + frames.length + " frames · " + toy.id +
+          " · " + last.width + "x" + last.height + " · ink " + ink +
+          " · digest " + (h >>> 0).toString(16).padStart(8, "0"));
+      }
+    } catch (e) {
+      finishText("FAIL " + (e && e.code ? e.code + ": " : "") +
+        ((e && e.message) || e));
+    }
+  }
+})();
+</script>
+</body>
+</html>
