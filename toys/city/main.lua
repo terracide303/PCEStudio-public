@@ -32,10 +32,23 @@
 -- third of another's speed must therefore COUNT at a third of the rate, not
 -- divide a shared counter — `cam // 3` climbs 0..85 and snaps back to 0.
 -- The far band (sky, skyline, buildings, and the wall with its pipe and
--- grate) counts one line a frame; the near band is the WATER STRIP alone
--- (from the water line down) and counts two, plus the pad.  Keeping the wall
--- in the far band is the other half of #148: a pipe sliding with the water
--- reads as a mistake.
+-- grate) counts at the camera's rate, one pixel a frame; the near band is
+-- the WATER STRIP alone (from the water line down) and counts two.  Keeping
+-- the wall in the far band is the other half of #148: a pipe sliding with
+-- the water reads as a mistake.
+--
+-- THE CAMERA HAS A DEAD ZONE (#158, Dennis playing it: "animation stands
+-- still in CITY while background scrolls.  It should start scrolling when
+-- you walk and move the character.  And the character should not move
+-- further as the middle").  Nothing moves by itself: the bands count only
+-- while the soldier walks, and the pad at rest shows the idle stand against
+-- a still street.  Walking moves the soldier himself, one pixel a frame,
+-- until his body's centre reaches the screen's middle — px = MID, the pair's
+-- left edge, puts the centre px + 32 on x 128 — and from there the camera
+-- scrolls instead: the bands count at their rates above and he stays at the
+-- middle.  Walking left scrolls the camera back until cam 0, the level's
+-- start, then walks him back to px = LEFT, where he stops — no walking off
+-- the left edge, and a pad held against the edge moves nothing.
 --
 -- THE WATER IS A PALETTE.  The pack's water is three colours in background
 -- palette 1.  Rotating them among their own three CRAM entries every 8 frames
@@ -50,14 +63,17 @@
 -- THE RUN CYCLE IS THE AUTHOR'S OWN (#148, Dennis playing it: "the animation
 -- of the character is not running correctly").  The sheet's Full.gif plays
 -- frames 3,4,5,6,7,8,9,10 in that order and run.aseprite holds the same eight
--- at 100 ms each — so the run is those eight, one every four frames, at a
--- steady rate, and nothing else.  Frame 1 (the wide planted stand) is the
--- idle, shown while the pad is at rest; the leap reuses run frame 7's stride;
--- and the crouched aim (frame 35) shows only WHILE the fire key is held, so
--- the gun comes down the moment it is released.
+-- at 100 ms each — so the run is those eight at the gif's own pace, one pose
+-- every six 60 Hz frames (100 ms), six pixels of ground a pose, so the feet
+-- do not slide — and nothing else.  The run plays only while ground is
+-- covered (#158); the pad at rest shows frame 1 (the wide planted stand),
+-- the idle; the leap reuses run frame 7's stride; and the crouched aim
+-- (frame 35) shows only WHILE the fire key is held, so the gun comes down
+-- the moment it is released.
 --
 -- CONTROLS on pad[1] (studio and site: IJKL, N, M): left/right walk the
--- character across the screen, up jumps, N (I) shoots, M (II) shoots too.
+-- character across the screen to the middle and then scroll the street, up
+-- jumps, N (I) shoots, M (II) shoots too.
 
 -- The numbers the converter reports (tools/city-assets.js --report).  They are
 -- VRAM addresses, not art: `node tools/city-assets.js --check` does not read
@@ -79,6 +95,12 @@ WATER_1 = 140                                    -- the three VCE words, dark to
 WATER_2 = 287
 WATER_3 = 431
 GROUND_Y = 208                                   -- the water's surface row, display
+LEFT = 8                                         -- px's floor: the level's start — the
+                                                 --   soldier never walks off the left edge
+MID = 96                                         -- the dead zone's end: the pair's left edge;
+                                                 --   the body's centre px + 32 is the screen's
+                                                 --   middle, x 128 — from here the camera
+                                                 --   scrolls and the soldier stays (card #158)
 
 -- The bands, in display lines.  A line keeps the last BXR written, so two
 -- writes split the frame into two speeds.  The split is the water's own
@@ -93,7 +115,9 @@ WATER_WORD = {WATER_1, WATER_2, WATER_3}
 -- One 32x64 pattern pair: the frame's left and right halves.  SAT y is the
 -- display y plus 64, and a pattern's last row is its 64th, so a pair drawn at
 -- SAT y = feet rests its lowest row on feet-1: the character stands on the
--- water at GROUND_Y.
+-- water at GROUND_Y.  SAT x is the display x plus 32 (the VDC's X origin,
+-- docs.html's SAT word table — toys/cave/main.lua's sat(slot, 1, x + 32) is
+-- the same compensation), so the pair's left edge on screen is px.
 local function put_player(px, feet, left, right)
   -- A 32x64 sprite: CGY = 2 makes the VDC fetch all 64 lines (with CGY 0 it
   -- draws 16), and CGX makes each 32-wide sprite two 16-pixel strips — cells
@@ -102,9 +126,9 @@ local function put_player(px, feet, left, right)
   -- spbg: the sprite in front of the background.  The SAT's SPBG bit defaults
   -- to 0, which lets an opaque background pixel cover the sprite — and this
   -- background is opaque everywhere the character runs.
-  sprite(0, {x = px, y = feet, pattern = left, palette = 0,
+  sprite(0, {x = px + 32, y = feet, pattern = left, palette = 0,
              spbg = true, cgx = true, cgy = 2})
-  sprite(1, {x = px + 32, y = feet, pattern = right, palette = 0,
+  sprite(1, {x = px + 64, y = feet, pattern = right, palette = 0,
              spbg = true, cgx = true, cgy = 2})
 end
 
@@ -120,13 +144,15 @@ function init()
   -- forgets this draws a SAT nobody can see (docs/TOYS.md §2, card #120).
   reg("CR", 0xC0)
 
-  cam = 0               -- the near band's scroll: 0..255, wraps at the BAT
-  cam_far = 0           -- the far band's own counter, 0..255 as well
-  px = 104              -- the pair's left edge; the body's centre is px + 32
+  cam = 0               -- the camera's scroll, 0..255: the level's start to
+                        --   the BAT's wrap; 0 is the level's start clamp
+  cam_far = 0           -- the far band's own counter, the camera's rate
+  cam_near = 0          -- the near band's own counter, twice the camera's rate
+  px = LEFT             -- the pair's left edge; the body's centre is px + 32
   py = GROUND_Y         -- the feet's display row
   vy = 0                -- jump speed, pixels a frame (positive is down)
   airborne = 0
-  run_t = 0             -- run timer; the frame is run_t // 4
+  run_t = 0             -- run timer; the pose is run_t // 6, only while walking
   cooldown = 0          -- frames until the rifle can fire again
   shots = {0, 0, 0, 0}
   sx = {0, 0, 0, 0}
@@ -154,15 +180,35 @@ function fire()
 end
 
 function frame(t, f)
-  -- the street runs; the keys walk the character across the screen
+  -- the walk (card #158): nothing scrolls by itself.  The soldier walks one
+  -- pixel a frame until the middle; from there the camera scrolls instead
+  -- and he stays there.  Walking left scrolls the camera back to the
+  -- level's start (cam 0), then walks him back to the left edge.
   local move = 0
   if pad[1].left then move = -1 end
   if pad[1].right then move = 1 end
-  px = px + move * 2
-  if px < 8 then px = 8 end
-  if px > 184 then px = 184 end
-  cam = (cam + 2 + move) % 256        -- near: water, 2 px a frame + the pad
-  cam_far = (cam_far + 1) % 256       -- far: the city, 1 px a frame
+  local walking = 0    -- 1 when this frame covered ground (him or the camera)
+  if move == 1 then
+    if px < MID then
+      px = px + 1
+      walking = 1
+    else
+      cam = (cam + 1) % 256
+      cam_far = (cam_far + 1) % 256
+      cam_near = (cam_near + 2) % 256
+      walking = 1
+    end
+  elseif move == -1 then
+    if cam > 0 then
+      cam = cam - 1
+      if cam_far == 0 then cam_far = 255 else cam_far = cam_far - 1 end
+      if cam_near < 2 then cam_near = cam_near + 254 else cam_near = cam_near - 2 end
+      walking = 1
+    elseif px > LEFT then
+      px = px - 1
+      walking = 1
+    end
+  end
   reg("BYR", 0)         -- no vertical scroll: the map row is the screen row
 
   -- jump: up leaves the ground once; gravity brings it back down
@@ -203,29 +249,33 @@ function frame(t, f)
   end
 
   -- the run cycle: the author's own eight (Full.gif plays sheet frames 3..10
-  -- in order), a new one every four frames, on the ground
-  if airborne == 0 then
-    run_t = (run_t + 1) % 32
+  -- in order), a new pose every six frames of walking — the gif's own
+  -- 100 ms pace — and only while ground is covered (#158: the run frames
+  -- play only while he moves, the idle stand when he does not)
+  if airborne == 0 and walking == 1 then
+    run_t = (run_t + 1) % 48
   end
 
   -- draw: the character (two sprites), then the bullets, then the parked SAT.
   -- #148: the aim pose shows only WHILE the fire key is held — the old
   -- cooldown timer kept the gun up after the key was released, which is the
-  -- wrong animation Dennis saw.  Standing still shows the idle stand (frame
-  -- 1), walking shows the run cycle, the leap has run frame 7's stride.
+  -- wrong animation Dennis saw.  Not walking (the pad at rest, or a pad held
+  -- against the level's edge, where no ground is covered) shows the idle
+  -- stand (frame 1); walking shows the run cycle; the leap has run frame 7's
+  -- stride.
   if airborne == 1 then
     put_player(px, py, JUMP_L, JUMP_R)
   elseif pad[1].i or pad[1].ii then
     put_player(px, py, SHOOT_L, SHOOT_R)
-  elseif move == 0 then
+  elseif walking == 0 then
     put_player(px, py, IDLE_L, IDLE_R)
   else
-    local k = run_t // 4
+    local k = run_t // 6
     put_player(px, py, RUN_L[k + 1], RUN_R[k + 1])
   end
   for i = 1, 4 do
     if shots[i] == 1 then
-      sprite(1 + i, {x = sx[i], y = sy[i] + 64, pattern = BULLET, palette = 0,
+      sprite(1 + i, {x = sx[i] + 32, y = sy[i] + 64, pattern = BULLET, palette = 0,
                      spbg = true})
     else
       sprite(1 + i, {x = 0, y = 0})
@@ -238,7 +288,7 @@ function frame(t, f)
   pal(WATER_C, WATER_WORD[(step + 2) % 3 + 1])
 
   -- raster() runs after this function and needs the frame's own offsets
-  g_cam = cam
+  g_near = cam_near
   g_far = cam_far
 end
 
@@ -247,5 +297,5 @@ end
 -- value (toys/parallax.lua).
 function raster(line)
   if line == 0 then reg("BXR", g_far) end
-  if line == NEAR then reg("BXR", g_cam) end
+  if line == NEAR then reg("BXR", g_near) end
 end
