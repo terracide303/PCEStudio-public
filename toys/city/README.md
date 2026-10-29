@@ -84,13 +84,15 @@ nothing; `--check` exits 1 if the folder is not the converter's output.
    the city.
 
 Budget: 249 tiles (5,008 VRAM words) + 19 patterns (9,280 words) =
-**14,400 of 32,768 words**.
+**14,288 of 32,768 words** (the test counts the same picture from the pattern
+codes, which start on a cell boundary, and gets 14,400 — either way, under
+half the VDC's VRAM).
 
 ## What the toy does
 
 | | |
 |---|---|
-| `raster(line)` | two BXR writes a frame: line 0 the far band (a third of the scroll), line 176 the near band (the ledge, the wall and the water) at the full scroll |
+| `raster(line)` | two BXR writes a frame, each band on its OWN 0..255 counter: line 0 the far city (sky, skyline, buildings, the ledge and the wall with its pipe) at 1 px a frame, line 208 the water strip at 2 px plus the pad |
 | `pal()` every 8 frames | the water's three CRAM entries are dealt the pack's three water words; nothing else in the picture uses them |
 | SAT slots 0 and 1 | the character: two 32x64 sprites with `cgx` (two strips each) and `cgy = 2` (all 64 lines) |
 | slots 2..5 | the tracer, a 16x16 pattern, six pixels a frame |
@@ -103,7 +105,7 @@ Budget: 249 tiles (5,008 VRAM words) + 19 patterns (9,280 words) =
 node tests/check-city.js
 ```
 
-37 checks when the art is present, and a clean `SKIP` when it is not:
+42 checks when the art is present, and a clean `SKIP` when it is not:
 
 - **main.lua's numbers are the art's** — every pattern code, the tracer and the
   three water CRAM entries are rebuilt from the converted files through
@@ -118,8 +120,12 @@ node tests/check-city.js
 - **it plays** — the pad walks the character, the jump leaves the water line
   and lands back on it, a tracer flies six pixels a frame, and the water's
   entries change on every 8th frame and only then;
-- **the raster split** — two entries, the near band 1–3 px a frame and the far
-  band at most 1, and the near one is always the faster;
+- **the raster split** — two entries (lines 0 and 208), the near band 1–3 px a
+  frame and the far band at most 1, the near one always the faster, and over
+  **300 frames** each band goes round its 0..255 and comes back with no jump
+  in between (#148: a divided counter climbs to 85 and snaps back, which this
+  check catches — its own control, `g_cam // 3`, gives 2 bad steps and 0
+  wraps);
 - **Lua == IL**, frame by frame for 120 frames: vram, cram, sat, registers,
   the raster table and the pixels;
 - **the strip** — `demo-art/city/evidence/strip.png`, eight frames, read back
@@ -142,11 +148,15 @@ deploy puts on the site — not a stand-in.
   12–15 Hz toy frame — so this demo's console route is the interpreter, not
   this frame budget. Card #125 asks for the validator to accept it, and it
   does; the console frame time is a separate, unmeasured question.
-- **The scene's own seam.** The BAT is 32 cells wide, so every band wraps
-  every 256 px — the hardware's wrap, not a torn map. The near band's split is
-  the ledge's top line so the seam reads as the near ledge passing in front.
-- **No Mednafen capture.** The card asks for the Export button and a capture
-  in Mednafen; neither was done in this session. What is proven is the browser
+- **The scene's own seam.** The BAT is 32 cells wide, so each band wraps every
+  256 px — the hardware's wrap, not a torn map. The band split is the water's
+  own surface line, so the shift at the boundary reads as water moving faster
+  than the street it fills.
+- **No Mednafen capture or export.** The card asks for the Export button and a
+  capture in Mednafen; neither was done in this session — and export is blocked
+  for every full-screen picture by card #148's other half (the IL bytecode's
+  127-constant pool, `renderer/pce-ilbc.js`), which refuses CITY, CAVE, OAK
+  WOODS and MINE alike. What is proven is the browser
   runtimes and the validator, in `tests/check-city.js`.
 - **Rule 2**: this test was written by the card's own seat (@design). A cold
   break by another seat is owed before the card closes.
