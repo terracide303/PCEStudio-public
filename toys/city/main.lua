@@ -20,10 +20,19 @@
 -- ONE BACKGROUND, TWO BANDS.  The PC Engine has one background layer and no
 -- HDMA.  A per-line horizontal offset is made by writing BXR (VDC R07) from
 -- the RCR line interrupt — one write per band boundary, and every line after
--- it keeps the value (toys/parallax.lua is the reference).  Here the picture's
--- far band (sky, skyline and buildings) scrolls at a third of the street's
--- speed; the near band starts on the ledge's top line, so the seam reads as
--- the near ledge passing in front rather than as a torn picture.
+-- it keeps the value (toys/parallax.lua is the reference).
+--
+-- TWO BANDS, EACH LOOPING ON ITS OWN COUNTER (#148, Dennis playing it: "the
+-- second layer does not scroll to the end of the screen and restart, it now
+-- stops somewhere in the middle").  A band's BXR must run 0..255 and wrap
+-- there, because that is where the 32-cell BAT repeats; a band driven at a
+-- third of another's speed must therefore COUNT at a third of the rate, not
+-- divide a shared counter — `cam // 3` climbs 0..85 and snaps back to 0.
+-- The far band (sky, skyline, buildings, and the wall with its pipe and
+-- grate) counts one line a frame; the near band is the WATER STRIP alone
+-- (from the water line down) and counts two, plus the pad.  Keeping the wall
+-- in the far band is the other half of #148: a pipe sliding with the water
+-- reads as a mistake.
 --
 -- THE WATER IS A PALETTE.  The pack's water is three colours in background
 -- palette 1.  Rotating them among their own three CRAM entries every 8 frames
@@ -58,11 +67,11 @@ WATER_3 = 431
 GROUND_Y = 208                                   -- the water's surface row, display
 
 -- The bands, in display lines.  A line keeps the last BXR written, so two
--- writes split the frame into two speeds: the city behind (sky, skyline and
--- buildings) and the street in front (the ledge, the wall and the water).
--- The split is the ledge's own top line, so the seam reads as the near ledge
--- passing in front of the far city rather than as a torn picture.
-NEAR = 176       -- the near band starts on the ledge's top line
+-- writes split the frame into two speeds.  The split is the water's own
+-- surface line: everything above it (sky, skyline, buildings, the ledge and
+-- the wall with its pipe) is the far city, and the strip below is water that
+-- runs faster than the ground it sits in.
+NEAR = 208       -- the near band starts on the water's surface line
 
 -- The three water words by index, as an int array the IL reads like any other.
 WATER_WORD = {WATER_1, WATER_2, WATER_3}
@@ -97,7 +106,8 @@ function init()
   -- forgets this draws a SAT nobody can see (docs/TOYS.md §2, card #120).
   reg("CR", 0xC0)
 
-  cam = 0               -- how far the street has scrolled, pixels
+  cam = 0               -- the near band's scroll: 0..255, wraps at the BAT
+  cam_far = 0           -- the far band's own counter, 0..255 as well
   px = 104              -- the pair's left edge; the body's centre is px + 32
   py = GROUND_Y         -- the feet's display row
   vy = 0                -- jump speed, pixels a frame (positive is down)
@@ -137,7 +147,8 @@ function frame(t, f)
   px = px + move * 2
   if px < 8 then px = 8 end
   if px > 184 then px = 184 end
-  cam = (cam + 2 + move) % 256
+  cam = (cam + 2 + move) % 256        -- near: water, 2 px a frame + the pad
+  cam_far = (cam_far + 1) % 256       -- far: the city, 1 px a frame
   reg("BYR", 0)         -- no vertical scroll: the map row is the screen row
 
   -- jump: up leaves the ground once; gravity brings it back down
@@ -207,12 +218,13 @@ function frame(t, f)
 
   -- raster() runs after this function and needs the frame's own offsets
   g_cam = cam
+  g_far = cam_far
 end
 
 -- Called once per display line, after frame(): one BXR write per band.  Line 0
 -- must restate the top band, or the frame-start latch takes the last band's
 -- value (toys/parallax.lua).
 function raster(line)
-  if line == 0 then reg("BXR", g_cam // 3) end
+  if line == 0 then reg("BXR", g_far) end
   if line == NEAR then reg("BXR", g_cam) end
 end

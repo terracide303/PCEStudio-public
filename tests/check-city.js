@@ -376,7 +376,7 @@ function checkPlay(files) {
 
   /* the raster split: two bands, the near one fast, the far one a third */
   const bands = rec[rec.length - 1].bands;
-  eq("the raster table has two entries", bands.map((b) => b.line), [0, 176]);
+  eq("the raster table has two entries", bands.map((b) => b.line), [0, 208]);
   let near = [], far = [];
   for (let i = 1; i < rec.length; i++) {
     const a = rec[i - 1].bands, b = rec[i].bands;
@@ -390,6 +390,45 @@ function checkPlay(files) {
         Math.min.apply(null, near) + ".." + Math.max.apply(null, near) + ")");
   check(Math.max.apply(null, near) > Math.max.apply(null, far),
         "the near band is the faster one");
+
+  /* #148 (Dennis, playing it): "the second layer does not scroll to the end of
+   * the screen and restart, it now stops somewhere in the middle".  A band
+   * whose BXR is a divided shared counter climbs to 85 and snaps back.  This
+   * runs past both wraps — 300 frames of the near band at 2-3 px and the far
+   * band at 1 — and every step must be the band's own rate, with at least one
+   * wrap of each in the run. */
+  const longSource = fs.readFileSync(PLAYABLE, "utf8");
+  const rt = toys.create(longSource, { budgetMs: 400, files: files });
+  rt.load();
+  const seq = [];
+  for (let f = 0; f < 300; f++) {
+    rt.setPad(1, f % 2 ? { right: true } : {});
+    const g = rt.frame(f);
+    if (g.raster && g.raster.entries.length === 2)
+      seq.push([g.raster.entries[0].bxr, g.raster.entries[1].bxr]);
+  }
+  rt.dispose();
+  /* a wrap is a fall from the top of 0..255 to a small value; anything else
+   * that goes backwards (85 -> 0, the bug #148 found) is a jump */
+  let farWrap = 0, nearWrap = 0, farBad = 0, nearBad = 0;
+  const bandStep = (prev, next, rate) => {
+    const d = next - prev;
+    if (d >= 0) return d <= rate ? ["ok"] : ["bad", d];
+    return prev > 255 - rate ? ["wrap"] : ["bad", d];
+  };
+  for (let i = 1; i < seq.length; i++) {
+    const f = bandStep(seq[i - 1][0], seq[i][0], 1);
+    const n = bandStep(seq[i - 1][1], seq[i][1], 3);
+    if (f[0] === "wrap") farWrap++; else if (f[0] === "bad") farBad++;
+    if (n[0] === "wrap") nearWrap++; else if (n[0] === "bad") nearBad++;
+  }
+  check(seq.length === 300, "300 frames of the two bands were recorded");
+  check(farBad === 0 && nearBad === 0,
+        "no band jumps: every step is its own rate (far " + farBad +
+        " bad, near " + nearBad + " bad)");
+  check(farWrap >= 1 && nearWrap >= 1,
+        "each band goes round and comes back (far " + farWrap + " wraps, near " +
+        nearWrap + " wraps)");
 
   return run;
 }
