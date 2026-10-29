@@ -1,7 +1,7 @@
 {
  "bytecode": {
-  "bytes": 1100,
-  "code_bytes": 850,
+  "bytes": 1115,
+  "code_bytes": 865,
   "constants": 17,
   "data_bank": 2,
   "functions": 8,
@@ -11,30 +11,29 @@
    "init": 0,
    "raster": 2
   },
-  "sha256": "e1b59025b09aac944aa9d246be7b26b5800e66f3d885aad6c0799e0a1821c2dc"
+  "sha256": "7ab5404025a7cf796b97e9c215becb4359e0872d371d32c0f3a3129c18466efb"
  },
  "capture": {
-  "frames": 700,
-  "last_frame": "frame1199.png",
+  "frames": 645,
+  "last_frame": "frame0644.png",
   "measure": {
-   "collect_sum_ticks_7bit": 439886,
-   "collections": 102,
-   "count": 103,
-   "cycles_per_collection": 8157505.2549019605,
-   "cycles_per_frame": 5656.854368932039,
-   "cycles_per_raster_call": 36071.684050808515,
+   "collect_sum_ticks_7bit": 43274,
+   "collections": 10,
+   "count": 11,
+   "cycles_per_collection": 8235724.8,
+   "cycles_per_frame": 5678.545454545455,
+   "cycles_per_raster_call": 36296.71573380344,
    "flags": 0,
    "max_ticks": 6,
-   "mean_ticks": 5.524271844660194,
+   "mean_ticks": 5.545454545454546,
    "min_ticks": 5,
-   "raster_calls": 23067,
+   "raster_calls": 2269,
    "raster_max_ticks": 226,
-   "raster_sum_ticks": 812564,
-   "sum_ticks": 569
+   "raster_sum_ticks": 80427,
+   "sum_ticks": 61
   },
   "slend": 234,
-  "slstart": 3,
-  "trimmed": "the last 700 movie frames (the display frames near the save)"
+  "slstart": 3
  },
  "ilvm": {
   "bytes": 16384,
@@ -43,7 +42,7 @@
  "name": "toyparallax-ilvm",
  "rom": "tools/gen/toyparallax-ilvm.pce",
  "rom_bytes": 24576,
- "rom_sha256": "1187f79d9d8d3d4fb6f23a26ab06fbce0a7167898da1badd40dc072cfc832c83",
+ "rom_sha256": "fb53b96fa2d77311dde77581112a0b2b231efa6846d09db3c291e345d3f84150",
  "source": "toys/parallax.lua",
- "source_sha256": "fdb3cfd11904c6601d73fb033969863af60262711ff20ba1fec4e4cacda7f52a"
+ "source_sha256": "b22ff94879c3ca94c74fe7838b5023633a6802fc1cd97342314b174dbb213a80"
 }

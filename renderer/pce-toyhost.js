@@ -92,6 +92,10 @@
   for (var r = 0; r < REGISTERS.length; r++) ALLOWED_REGS[REGISTERS[r].name] = REGISTERS[r].max;
 
   var VRAM_WORDS = 32768;
+  /* The default MWR 0 layout's background map: 32 columns x 32 rows of 8x8
+   * cells, one VRAM word each.  Sprite pattern p starts at word p * 64, so
+   * patterns 0..15 land in the BAT and must not be used in this layout. */
+  var BAT_WORDS = (WIDTH / 8) * 32;
   var CRAM_ENTRIES = 512;
   var CRAM_WORD_MAX = 0x1FF;     /* a VCE colour: 9 bits, 3 per channel */
   var SAT_ENTRIES = 64;
@@ -108,6 +112,13 @@
   var LOG_MAX = 200;
   var PAD_COUNT = 5;             /* one 2-button pad, up to five with a multitap */
   var PAD_FIELDS = ["up", "down", "left", "right", "i", "ii", "select", "run"];
+  /* The keyboard key that presses each pad BUTTON (renderer/studio.html and
+   * renderer/toy.html's PAD_KEYS).  The two names differ where an AI is most
+   * likely to confuse them: keyboard I is Up, while pad button I is key N.
+   * The author's reference prints both, so a toy author never says "press I"
+   * without saying which I they mean. */
+  var PAD_KEYS = { up: "I", down: "K", left: "J", right: "L",
+                   i: "N", ii: "M", select: "O", run: "P" };
 
   /* ---- the timer ($0C00/$0C01, card #45) -------------------------------- */
 
@@ -202,6 +213,11 @@
   for (var sw = 0; sw < 32; sw++) SFX_WAVE.push(sw < 16 ? 31 : 0);
 
   var SOUND_API = [
+    { call: "note(name or MIDI)",
+      what: "the PSG's 12-bit F divider for a note name (Lua only) or a MIDI " +
+            "number (both runtimes); feed it to sfx()",
+      limits: "a MIDI number 0..127; the result is clamped to 0..4095, and " +
+              "the IL carries no strings so a cartridge uses the number" },
     { call: "music(index)",
       what: "plays song index from the start — the whole engine restarts, " +
             "as HuTrack's playSong does",
@@ -1024,6 +1040,7 @@
     CRAM_ENTRIES: CRAM_ENTRIES,
     CRAM_WORD_MAX: CRAM_WORD_MAX,
     VRAM_WORDS: VRAM_WORDS,
+    BAT_WORDS: BAT_WORDS,
     SAT_ENTRIES: SAT_ENTRIES,
     SAT_WORDS: SAT_WORDS,
     SAT_FIELD_RANGES: SAT_FIELD_RANGES,
@@ -1032,6 +1049,7 @@
     LOG_MAX: LOG_MAX,
     PAD_COUNT: PAD_COUNT,
     PAD_FIELDS: PAD_FIELDS,
+    PAD_KEYS: PAD_KEYS,
     /* the timer contract (#45), for the author's reference (#61) */
     TIMER_RELOAD_MAX: TIMER_RELOAD_MAX,
     TIMER_HZ: TIMER_HZ,

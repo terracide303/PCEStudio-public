@@ -1,4 +1,4 @@
--- palette-cycle.lua — water and fire by rotating palette entries (card #29).
+-- palette-cycle.lua — water and fire by rotating palette entries.
 --
 -- THE TRICK: a tilemap pixel names a palette entry, and the palette is 512
 -- words in a table the CPU can rewrite at any time.  Rotating the colours
