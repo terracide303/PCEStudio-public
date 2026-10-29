@@ -1,4 +1,13 @@
 /*
+ * PCEStudio — Copyright (C) 2026 Dennis Schauw and contributors.
+ * This file is free software: you can redistribute it and/or modify it under the terms of the GNU General
+ * Public License as published by the Free Software Foundation, either version 3 of the License, or (at your
+ * option) any later version. It is distributed WITHOUT ANY WARRANTY; see LICENSE.
+ *
+ * Derived from Mednafen (https://mednafen.github.io/), src/pce_fast/psg.cpp, GPL-2.0-or-later, and from
+ * Blip_Buffer 0.4.1 by Shay Green, LGPL-2.1-or-later; both used here under GPL-3.0-or-later.
+ */
+/*
  * pce-psg.js — PCEStudio HuC6280 PSG audio model (card #34).
  *
  * Produces the exact 16-bit stereo PCM that Mednafen 1.32.1's pce_fast

@@ -284,3 +284,13 @@ function from docs/STUDIO.md: what has a PC Engine counterpart is built (taken f
 with credit), what the PC Engine lacks (Compose, Windows) is replaced by the PCE's own thing or marked "no
 counterpart" with the reason, and PCE-only functions are added (RCR scanlines, the VCE's 512 colours, the
 wide modes, the CONSOLE budget).
+
+## 2026-10-29 — PCEStudio is GPL-3.0-or-later (Dennis)
+
+`renderer/pce-psg.js` turned out to be a line-level transcription of Mednafen's PSG core (GPL-2.0-or-later) and
+Blip_Buffer (LGPL-2.1-or-later) — against the 2026-10-27 "no emulator code copied" rule, and already public on
+pcestudio.terracides.com without a notice. Options put to Dennis: GPL, rewrite from MAME's BSD c6280, or take the
+site down. Dennis: "make it GPL 3". Both sources say "or any later version", so GPL-3.0-or-later is allowed.
+`LICENSE` is the GPL-3.0 text, README says what is under it and what keeps its own licence, `pce-psg.js` carries
+the notice and the credit. The rule stands for new code: an emulator is looked at, not copied, unless Dennis
+decides otherwise for that file.
