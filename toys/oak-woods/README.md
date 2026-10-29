@@ -129,7 +129,7 @@ The studio's **Export** refuses this game, and so does the console backend:
 `node tools/starfall-console.js /Volumes/External/agent-workshop-demo/demo-art/oak-woods/main.lua --song toys/oak-woods/song.json`
 
 > validator: ok (no error), 0 problems
-> C emitter: cgen-op, instruction `table` — BLOCKED at renderer/studio.html:3494
+> C emitter: cgen-op, instruction `table` — BLOCKED at renderer/studio.html:3499
 > 108 of 27,083 IL instructions (0.4%) are refused: table 20, tset 29, tget 24,
 > setlist 10 (#132), sprite 6 (#133), padref/padget 5 each (#134), sfx 4 (#135),
 > raster 4 (#136), music 1 (new — filed as a card)
