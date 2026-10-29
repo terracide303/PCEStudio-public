@@ -86,6 +86,26 @@ pceas4     # prints: PC Engine Assembler (, ) — this tree has no git date
 `tools/build-hutrack.sh` and `tools/capture-hutrack.sh` take `PCEAS4`
 (default `pceas4`), so the space-free symlink is only a convenience.
 
+### HuC's C compiler for #31 part B
+
+The HuC route needs the C compiler, not just the assembler. Build the same
+vendored tree's compiler (external, never run from inside the repo):
+
+```sh
+T="/Volumes/External II/pce-tools"
+cp -R "/Volumes/External II/agent-workshop-demo/PCEStudio/vendor/huc" "$T/huc-toyc"
+mkdir -p "$T/huc-toyc/bin"             # the compiler Makefile copies its target here
+make -C "$T/huc-toyc/src/huc" -j4      # produces bin/huc
+```
+
+The PCEAS the HuC build uses is the same tree's `src/mkit/as` (the 4.x one
+above), not a new download; `huc-toyc/bin` here was populated with it.
+
+`tools/build-huc.sh` takes `HUC_DIR` (default
+`/Volumes/External II/pce-tools/huc-toyc`) and expects `bin/huc` and
+`bin/pceas` there. `tests/check-il-huc.js` prints SKIP for its ROM-rebuild
+checks when the compiler is absent, and still checks the committed dumps.
+
 ## Building the hello ROM
 
 ```sh

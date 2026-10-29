@@ -11,7 +11,8 @@ raster tables, wave-editor ROMs), then every `tests/check*.js` and
 `tests/*-mutation.js`, and prints PASS / SKIP / FAIL per suite.  Exit 0 only
 if no suite failed.  A suite that exits 0 but printed a `SKIP` line (check-ares
 without the ares captures, check-hutrack without PCEAS 4.x, check-il-console
-without llvm-mos) is reported as **SKIP, not PASS**: the skipped checks are
+without llvm-mos, check-il-huc without the HuC compiler) is reported as
+**SKIP, not PASS**: the skipped checks are
 printed and the suite is named in the summary.  Logs go under `$TMPDIR` and are
 kept with `KEEP=1`.
 
@@ -23,6 +24,8 @@ node tests/check-il.js          # #31: the three #30 toys through Lua -> IL -> t
 node tests/check-il-console.js  # #31 parts A and C: the palette toy and
                                 # parallax.lua through IL -> C -> llvm-mos ->
                                 # Mednafen, frames and state vs the browser
+node tests/check-il-huc.js      # #31 part B: the same toys through IL -> C ->
+                                # HuC -> PCEAS -> Mednafen, vs the browser
 node tests/check-validate.js    # #32: the validator on the IL — the five #29
                                 # toys' budgets, the parallax cycle prediction,
                                 # over-budget toys refused, and the export gate
@@ -99,6 +102,28 @@ interrupt handler. The capture also records the per-call and per-collection
 timer sums (`raster_calls`, `cycles_per_raster_call`,
 `cycles_per_collection`, `flags`) in `meta.json`. `status-bar.lua` and #30's
 `TOY_RASTER` are measured failures, documented in `docs/IL.md` §10.4.
+
+## `check-il-huc.js` — #31 part B: the same IL through HuC
+
+The same emitter with `{target: "huc"}` writes C that vendor/huc's compiler
+accepts (16-bit `int`, no `<stdint.h>`, no attributes, no local initialiser
+lists, declarations first); `tools/toyc/huc_runtime.c` is the console side
+and `tools/toyc/huc_raster.asm` is part C's RCR handler as a bank-0 PCEAS
+file, hooked through HuC's user IRQ1 vector. `tools/build-huc.sh` compiles
+with `bin/huc` and `bin/pceas` from `HUC_DIR` (default
+`/Volumes/External II/pce-tools/huc-toyc`); `tools/capture-huc.sh` is the
+same Mednafen route and writes `tests/dumps/<name>-huc/`.
+
+`node tests/check-il-huc.js` exits 0 with 74 checks: the dialect and its
+refusals, both ROMs rebuilding to their committed sha256s (SKIP without HuC),
+the palette dump's captured frames matching the browser with a run of 8
+consecutive diff-0 frames and byte-equal vram/cram/sat, and the parallax
+dump's raster frames with a run of **20 consecutive diff-0 browser frames**.
+It reports the measured costs — palette `frame()` **102,123 cycles** (86 % of
+a video frame, which is why the runtime holds its palette writes for VBlank),
+raster call **3,728 cycles**, collection **835,048 cycles = 7.0 video
+frames** — and the ROM sizes/bank counts. The two routes side by side are
+`docs/IL.md` §12.
 
 ## `check.js` — the diff (#5, #39, #12, #40, #15)
 

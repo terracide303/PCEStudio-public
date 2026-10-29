@@ -10,6 +10,17 @@
  * never from the machine code: it is the backend half of the IL design, and
  * the IL stays the one place the toy's meaning is written down.
  *
+ * Two C dialects share the lowering (part B of #31):
+ *
+ *   target "llvm" (default)  int32_t, llvm-mos's PCE target (parts A and C)
+ *   target "huc"             int (HuC's C has no 32-bit type), the HuC
+ *                            compiler from vendor/huc, runtime huc_runtime.c
+ *
+ * The dialect changes types, attributes and the two shift helpers; it does
+ * NOT change the IL lowering or what each toy instruction means.  The
+ * default output is byte-identical to part A/C's, so their committed ROMs
+ * still rebuild.
+ *
  * Part A's scope is the card's own: #30's palette-cycling toy (init + frame,
  * no raster), through IL -> C -> llvm-mos's PCE target, measured in Mednafen.
  * Part C adds the two things the shell needs for `raster(line)`: the `reg`
@@ -64,9 +75,22 @@
 
   /* ---- operands -------------------------------------------------------- */
 
-  function constLit(k) {
+  function constLitImpl(k, huc) {
     if (!k) refuse("cgen-key", "a missing constant operand");
     if (k.t === "int") {
+      if (huc) {
+        /* HuC has no 32-bit integer type: its `int` is 16 bits (defs.h,
+         * INTSIZE 2).  A constant that does not fit is REFUSED rather than
+         * silently truncated: the toy would run a different value on the
+         * console than in the browser (docs/IL.md §11.6). */
+        var v = k.v | 0;
+        if (v < -32768 || v > 65535) {
+          refuse("cgen-width", "the constant " + v + " does not fit HuC's " +
+                 "16-bit int (-32768..65535)");
+        }
+        var w = k.v & 0xFFFF;
+        return "(" + (w >= 0x8000 ? w - 0x10000 : w) + ")";
+      }
       /* The IL's int is 32-bit wrapping; emit the bit pattern, not a
        * possibly-out-of-range decimal literal. */
       return "(int32_t)0x" + (k.v >>> 0).toString(16) + "u";
@@ -80,10 +104,10 @@
     return "0";
   }
 
-  function operand(op) {
+  function operandImpl(op, huc) {
     if (!op) return "0";
     if (op.r != null) return "r[" + op.r + "]";
-    if (op.k) return constLit(op.k);
+    if (op.k) return constLitImpl(op.k, huc);
     refuse("cgen-op", "an operand with neither a register nor a constant");
     return "0";
   }
@@ -242,6 +266,56 @@
     };
   }
 
+  /* Registers read before any write on a linear path.  The llvm-mos
+   * dialect zero-initialises the whole register file (`int32_t r[N] = { 0 }`);
+   * HuC's C has no initialiser list for a local array, so this backend emits
+   * an explicit `r[i] = 0;` for exactly those registers.  A register that is
+   * written first needs no initial value and costs nothing.  (Linear order
+   * is enough: the IL's registers are the Lua VM's, and a branch target
+   * always has its value from a path that wrote it first.) */
+  function registersReadFirst(fn, functions) {
+    var need = {};
+    var written = {};
+    var pc, j;
+    function readReg(index) {
+      if (index != null && !written[index]) need[index] = true;
+    }
+    function readOp(o) {
+      if (o && o.r != null) readReg(o.r);
+    }
+    for (j = 0; j < fn.params.length; j++) written[j] = true;
+    for (pc = 0; pc < fn.code.length; pc++) {
+      var ins = fn.code[pc];
+      var ops = [ins.a, ins.b, ins.cond, ins.callee, ins.value, ins.addr,
+                 ins.word, ins.lineArg, ins.spec, ins.i, ins.k, ins.key,
+                 ins.n, ins.pad];
+      if (ins.t === "move" || ins.t === "ret") ops.push(ins.src);
+      if (ins.args) ops = ops.concat(ins.args);
+      if (ins.values) ops = ops.concat(ins.values);
+      if (ins.t === "forprep") { readReg(ins.base); readReg(ins.base + 2); }
+      if (ins.t === "fornext") {
+        readReg(ins.base); readReg(ins.base + 1); readReg(ins.base + 2);
+      }
+      for (j = 0; j < ops.length; j++) readOp(ops[j]);
+      if (ins.t === "closure") {
+        var target = functions && functions[ins.fid];
+        var ups = target ? target.upvalues : [];
+        for (j = 0; j < ups.length; j++) {
+          if (ups[j].from === "reg") readReg(ups[j].index);
+        }
+      }
+      if (ins.t === "forprep") written[ins.base] = true;
+      else if (ins.t === "fornext") {
+        written[ins.base] = true;
+        written[ins.base + 3] = true;
+      } else if (ins.dst != null) written[ins.dst] = true;
+    }
+    var list = Object.keys(need).map(Number).sort(function (x, y) {
+      return x - y;
+    });
+    return list;
+  }
+
   function fixedIsUsed(fn) {
     var used = {};
     var i, j;
@@ -385,19 +459,30 @@
 
   /* ---- the emitter ------------------------------------------------------ */
 
-  function emitC(program) {
+  function emitC(program, options) {
+    var huc = !!(options && options.target === "huc");
     var a = analyse(program);
     var uses = validate(program, a);
     var out = [];
     var i;
     function line(s) { out.push(s); }
 
+    /* The IL's 32-bit int is the C dialect's int.  In HuC that is a 16-bit
+     * signed int; the type name is the only thing that changes here. */
+    var T = huc ? "int" : "int32_t";
+    var U = huc ? "unsigned int" : "uint32_t";
+
+    /* Dialect-aware operand helpers, shadowing the module-level ones for
+     * everything emitted by this program. */
+    var constLit = function (k) { return constLitImpl(k, huc); };
+    var operand = function (o) { return operandImpl(o, huc); };
+
     /* Two argument slots unless some function of the toy takes more (the
      * #29 examples' batfill takes four).  Keeping the two-slot signature for
      * toys that never need it is what leaves part A's palette ROM
      * byte-identical. */
     var ARGS = a.maxParams > 2 ? ["a0", "a1", "a2", "a3"] : ["a0", "a1"];
-    var SIG = ARGS.map(function (n) { return "int32_t " + n; }).join(", ");
+    var SIG = ARGS.map(function (n) { return T + " " + n; }).join(", ");
     function argOf(ins, k) {
       return ins.args[k] ? operand(ins.args[k]) : "0";
     }
@@ -418,12 +503,32 @@
                 ? ins.target : null;
         if (t != null) labels[t] = true;
       }
-      line("static int32_t il_fn_" + fid +
+      line("static " + T + " il_fn_" + fid +
            "(struct il_closure *cl, " + SIG + ") {");
-      line("  int32_t r[" + Math.max(1, fn.registers) + "] = { 0 };");
-      line("  (void)cl; " + ARGS.map(function (n) {
-        return "(void)" + n + ";";
-      }).join(" "));
+      if (huc) {
+        line("  " + T + " r[" + Math.max(1, fn.registers) + "];");
+        /* HuC has no block scoping and wants every declaration before the
+         * first statement (both measured): two `for` loops in one function
+         * cannot both declare `st`, and the declarations must precede the
+         * zero assignments below.  Name the loop temporaries after their
+         * instruction and declare them at the top. */
+        for (var q = 0; q < fn.code.length; q++) {
+          if (fn.code[q].t === "fornext") {
+            line("  " + T + " st_" + q + ";");
+            line("  " + T + " idx_" + q + ";");
+            line("  " + T + " lim_" + q + ";");
+          }
+        }
+        var zeroed = registersReadFirst(fn, a.functions);
+        for (var z = 0; z < zeroed.length; z++) {
+          line("  r[" + zeroed[z] + "] = 0;");
+        }
+      } else {
+        line("  " + T + " r[" + Math.max(1, fn.registers) + "] = { 0 };");
+        line("  (void)cl; " + ARGS.map(function (n) {
+          return "(void)" + n + ";";
+        }).join(" "));
+      }
       for (pc = 0; pc < fn.params.length; pc++) {
         line("  r[" + pc + "] = a" + pc + ";");
       }
@@ -481,13 +586,13 @@
         var expr;
         switch (ins.op) {
         case "add":
-          expr = "(int32_t)((uint32_t)" + lhs + " + (uint32_t)" + rhs + ")";
+          expr = "(" + T + ")((" + U + ")" + lhs + " + (" + U + ")" + rhs + ")";
           break;
         case "sub":
-          expr = "(int32_t)((uint32_t)" + lhs + " - (uint32_t)" + rhs + ")";
+          expr = "(" + T + ")((" + U + ")" + lhs + " - (" + U + ")" + rhs + ")";
           break;
         case "mul":
-          expr = "(int32_t)((uint32_t)" + lhs + " * (uint32_t)" + rhs + ")";
+          expr = "(" + T + ")((" + U + ")" + lhs + " * (" + U + ")" + rhs + ")";
           break;
         case "mod":
           expr = "il_lua_mod(" + lhs + ", " + rhs + ")";
@@ -496,13 +601,13 @@
           expr = "il_lua_idiv(" + lhs + ", " + rhs + ")";
           break;
         case "band":
-          expr = "(int32_t)((uint32_t)" + lhs + " & (uint32_t)" + rhs + ")";
+          expr = "(" + T + ")((" + U + ")" + lhs + " & (" + U + ")" + rhs + ")";
           break;
         case "bor":
-          expr = "(int32_t)((uint32_t)" + lhs + " | (uint32_t)" + rhs + ")";
+          expr = "(" + T + ")((" + U + ")" + lhs + " | (" + U + ")" + rhs + ")";
           break;
         case "bxor":
-          expr = "(int32_t)((uint32_t)" + lhs + " ^ (uint32_t)" + rhs + ")";
+          expr = "(" + T + ")((" + U + ")" + lhs + " ^ (" + U + ")" + rhs + ")";
           break;
         case "shl":
           expr = "il_lua_shl(" + lhs + ", " + rhs + ")";
@@ -525,9 +630,9 @@
         } else if (ins.op === "eq") {
           line("  " + d + " = (" + ca + " == " + cb + ");");
         } else if (ins.op === "lt") {
-          line("  " + d + " = (int32_t)(" + ca + " < " + cb + ");");
+          line("  " + d + " = (" + T + ")(" + ca + " < " + cb + ");");
         } else if (ins.op === "le") {
-          line("  " + d + " = (int32_t)(" + ca + " <= " + cb + ");");
+          line("  " + d + " = (" + T + ")(" + ca + " <= " + cb + ");");
         } else {
           refuse("cgen-op", "comparison " + ins.op);
         }
@@ -551,15 +656,30 @@
         line("  return " + (ins.src ? operand(ins.src) : "0") + ";");
         break;
       case "forprep":
-        line("  r[" + ins.base + "] = (int32_t)((uint32_t)r[" + ins.base +
-             "] - (uint32_t)r[" + (ins.base + 2) + "]);");
+        line("  r[" + ins.base + "] = (" + T + ")((" + U + ")r[" + ins.base +
+             "] - (" + U + ")r[" + (ins.base + 2) + "]);");
         break;
       case "fornext":
         line("  {");
-        line("    int32_t st = r[" + (ins.base + 2) + "];");
-        line("    int32_t idx = (int32_t)((uint32_t)r[" + ins.base +
-             "] + (uint32_t)st);");
-        line("    int32_t lim = r[" + (ins.base + 1) + "];");
+        if (huc) {
+          line("    st_" + pc + " = r[" + (ins.base + 2) + "];");
+          line("    idx_" + pc + " = (" + T + ")((" + U + ")r[" + ins.base +
+               "] + (" + U + ")st_" + pc + ");");
+          line("    lim_" + pc + " = r[" + (ins.base + 1) + "];");
+          line("    if ((st_" + pc + " > 0) ? (idx_" + pc + " <= lim_" + pc +
+               ") : (lim_" + pc + " <= idx_" + pc + ")) {");
+          line("      r[" + ins.base + "] = idx_" + pc + ";");
+          line("      r[" + (ins.base + 3) + "] = idx_" + pc + ";");
+          line("      goto L" + ins.target + ";");
+          line("    }");
+          line("  }");
+          break;
+        } else {
+          line("    " + T + " st = r[" + (ins.base + 2) + "];");
+          line("    " + T + " idx = (" + T + ")((" + U + ")r[" + ins.base +
+               "] + (" + U + ")st);");
+          line("    " + T + " lim = r[" + (ins.base + 1) + "];");
+        }
         line("    if ((st > 0) ? (idx <= lim) : (lim <= idx)) {");
         line("      r[" + ins.base + "] = idx;");
         line("      r[" + (ins.base + 3) + "] = idx;");
@@ -596,19 +716,26 @@
     line(" * Source " + (program.source || "@toy.lua") + "; hooks init=" +
          (program.hooks.init) + " frame=" + program.hooks.frame +
          " raster=" + (program.hooks.raster == null ? "none" : program.hooks.raster) + ".");
-    line(" * #31 console backend: init/frame and, when the toy has one, the");
-    line(" * raster(line) hook (docs/IL.md §9-§10).");
+    line(" * #31 console backend (" + (huc ? "part B: HuC, 16-bit int"
+                                            : "part A/C: llvm-mos") +
+         "): init/frame and,");
+    line(" * when the toy has one, the raster(line) hook (docs/IL.md " +
+         (huc ? "§11)." : "§9-§10)."));
     line(" */");
-    line("#include <stdint.h>");
-    line("#include \"toy_runtime.h\"");
+    if (huc) {
+      line("#include \"huc_runtime.h\"");
+    } else {
+      line("#include <stdint.h>");
+      line("#include \"toy_runtime.h\"");
+    }
     line("");
     line("#define IL_NCLOSURES " + Math.max(1, a.closureCount));
     line("#define IL_NGLOBALS " + a.globalNames.length);
     line("#define IL_NUPS " + Math.max(1, a.maxUps));
     line("");
     line("struct il_closure {");
-    line("  int16_t fid;");
-    line("  int32_t up[IL_NUPS];");
+    line(huc ? "  int fid;" : "  int16_t fid;");
+    line("  " + T + " up[IL_NUPS];");
     line("};");
     line("");
     /* These arrays must live in normal RAM (.data/.bss, $2200+), NOT in the
@@ -620,24 +747,30 @@
      * `lda ($02),y` with the pointer $003d (docs/IL.md §9).  The `volatile`
      * on il_globals stops LTO scalarising the array into two byte globals
      * in .zp.bss, which stored the wrong byte for il_globals[1]. */
-    line("static struct il_closure il_closures[IL_NCLOSURES]");
-    line("    __attribute__((section(\".bss\")));");
-    line("static volatile int32_t il_globals[IL_NGLOBALS]");
-    line("    __attribute__((section(\".data\"))) = { " +
+    if (huc) {
+      /* HuC's data goes in ordinary BaseRAM; there are no sections to
+       * choose and no LTO to defeat (docs/IL.md §11). */
+      line("static struct il_closure il_closures[IL_NCLOSURES];");
+    } else {
+      line("static struct il_closure il_closures[IL_NCLOSURES]");
+      line("    __attribute__((section(\".bss\")));");
+    }
+    line("static volatile " + T + " il_globals[IL_NGLOBALS]" +
+         (huc ? "" : "    __attribute__((section(\".data\")))") + " = { " +
          a.globalNames.map(function () { return "-1"; }).join(", ") + " };");
     line("");
     for (i = 0; i < a.functions.length; i++) {
-      line("static int32_t il_fn_" + i +
+      line("static " + T + " il_fn_" + i +
            "(struct il_closure *cl, " + SIG + ")" +
-           " __attribute__((noinline));");
+           (huc ? ";" : " __attribute__((noinline));"));
     }
-    line("static int32_t il_call(int32_t cv, " + SIG + ")" +
-         " __attribute__((noinline));");
+    line("static " + T + " il_call(" + T + " cv, " + SIG + ")" +
+         (huc ? ";" : " __attribute__((noinline));"));
     line("");
 
     /* ---- the dispatcher ----------------------------------------------- */
-    line("static int32_t il_call(int32_t cv, " + SIG + ") {");
-    line("  int16_t fid;");
+    line("static " + T + " il_call(" + T + " cv, " + SIG + ") {");
+    line(huc ? "  int fid;" : "  int16_t fid;");
     line("  if (cv < 0 || cv >= IL_NCLOSURES) return 0;");
     line("  fid = il_closures[cv].fid;");
     line("  switch (fid) {");
@@ -653,8 +786,11 @@
     /* ---- integer helpers the lowering needs -------------------------- */
     if (uses.mod) {
       line("/* Lua's `%`: the result has the divisor's sign. */");
-      line("static int32_t il_lua_mod(int32_t x, int32_t y) {");
-      line("  int32_t m = x % y;");
+      line("static " + T + " il_lua_mod(" + T + " x, " + T + " y) {");
+      /* HuC only initialises a local with a constant (measured: `int m =
+       * x % y;` fails to compile), so the dialect splits declaration and
+       * assignment. */
+      line(huc ? "  " + T + " m; m = x % y;" : "  " + T + " m = x % y;");
       line("  if (m != 0 && ((m < 0) != (y < 0))) m += y;");
       line("  return m;");
       line("}");
@@ -662,25 +798,32 @@
     }
     if (uses.idiv) {
       line("/* Lua's `//`: floor division. */");
-      line("static int32_t il_lua_idiv(int32_t x, int32_t y) {");
-      line("  int32_t q = x / y;");
-      line("  int32_t r = x % y;");
+      line("static " + T + " il_lua_idiv(" + T + " x, " + T + " y) {");
+      if (huc) {
+        line("  " + T + " q; " + T + " r;");
+        line("  q = x / y; r = x % y;");
+      } else {
+        line("  " + T + " q = x / y;");
+        line("  " + T + " r = x % y;");
+      }
       line("  if (r != 0 && ((r < 0) != (y < 0))) q--;");
       line("  return q;");
       line("}");
       line("");
     }
     if (uses.shl) {
-      line("static int32_t il_lua_shl(int32_t x, int32_t n) {");
-      line("  if (n < 0 || n >= 32) return 0;");
-      line("  return (int32_t)((uint32_t)x << n);");
+      line("static " + T + " il_lua_shl(" + T + " x, " + T + " n) {");
+      /* 32 bits in the IL; HuC's int is 16, so the shift count's limit is
+       * the dialect's width (docs/IL.md §11). */
+      line("  if (n < 0 || n >= " + (huc ? 16 : 32) + ") return 0;");
+      line("  return (" + T + ")((" + U + ")x << n);");
       line("}");
       line("");
     }
     if (uses.shr) {
-      line("static int32_t il_lua_shr(int32_t x, int32_t n) {");
-      line("  if (n < 0 || n >= 32) return 0;");
-      line("  return (int32_t)((uint32_t)x >> n);");
+      line("static " + T + " il_lua_shr(" + T + " x, " + T + " n) {");
+      line("  if (n < 0 || n >= " + (huc ? 16 : 32) + ") return 0;");
+      line("  return (" + T + ")((" + U + ")x >> n);");
       line("}");
       line("");
     }
@@ -704,7 +847,7 @@
     line("  toy_display_on();");
     line("}");
     line("");
-    line("void toy_frame(int32_t f) {");
+    line("void toy_frame(" + T + " f) {");
     line("  (void)il_call(il_globals[" + a.globalIds["frame"] + "], " +
          callArgs(["0", "f"]) + ");");
     line("}");
@@ -714,7 +857,7 @@
      * §10).  A weaker symbol than the runtime's weak stub, so its presence
      * is how main() knows the toy has a callback. */
     if (a.hookRaster != null) {
-      line("void toy_raster(int32_t line) {");
+      line("void toy_raster(" + T + " line) {");
       line("  (void)il_call(il_globals[" + a.globalIds["raster"] + "], " +
            callArgs(["line"]) + ");");
       line("}");
@@ -731,6 +874,6 @@
     /* exported for the test: the refusal codes part A can raise */
     CODES: ["cgen-op", "cgen-fixed", "cgen-cond", "cgen-global",
             "cgen-arity", "cgen-hook", "cgen-closure-loop", "cgen-key",
-            "cgen-target"]
+            "cgen-target", "cgen-width"]
   };
 });
