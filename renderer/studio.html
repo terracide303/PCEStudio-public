@@ -828,6 +828,8 @@
   /* Paste & Run (#107) sits under the button that opens it, left of the
    * action cluster so it never runs off a narrow window. */
   #paste-pop { top: 54px; left: 90px; width: 460px; max-width: 90vw; }
+  /* #145's question, under the top bar where the drop or paste was aimed. */
+  #replace-pop { top: 54px; left: 90px; width: 460px; max-width: 90vw; }
   .paste-box {
     width: 100%; min-height: 200px; box-sizing: border-box;
     background: var(--code); color: var(--text);
@@ -1739,7 +1741,13 @@
   <div class="pop-sep"></div>
   <button type="button" class="pop-item" id="open-file">From file…</button>
   <input type="file" id="file-input"
-         accept=".json,.pce.json,.lua,.txt,application/json,text/plain" hidden>
+         accept=".json,.pce.json,.pce.studio,.lua,.txt,application/json,text/plain"
+         hidden>
+  <!-- #145: ppu.toys keeps the previous toy in the person's library. This is
+       the studio's library: the toy the last drop or paste replaced, put back
+       with the same open path an envelope takes. Hidden with no slot. -->
+  <button type="button" class="pop-item" id="open-recover" hidden>Recover the
+    toy the last drop replaced</button>
 </div>
 
 <!-- Paste & Run's fallback (#107): when the browser will not hand the page the
@@ -1754,6 +1762,23 @@
             placeholder="```lua&#10;function frame(t, f) ... end&#10;```"></textarea>
   <div class="paste-row">
     <button type="button" class="btn btn-accent" id="paste-go">Paste &amp; Run</button>
+  </div>
+</div>
+
+<!-- #145: a dropped or pasted .lua starts a NEW toy. When the toy in the
+     studio has unsaved edits this asks first — and either answer keeps the
+     old toy in the recovery slot (Open… → Recover). -->
+<div class="popover" id="replace-pop" hidden role="alertdialog"
+     aria-labelledby="replace-head">
+  <div class="pop-head"><span id="replace-head">START A NEW TOY?</span>
+    <button type="button" class="pop-close" id="replace-close"
+            aria-label="Close the question">×</button></div>
+  <div class="pop-note" id="replace-note">This replaces the toy in the studio
+    with a new one. The old toy is kept in the recovery slot.</div>
+  <div class="paste-row">
+    <button type="button" class="btn" id="replace-cancel">Keep this toy</button>
+    <button type="button" class="btn btn-accent" id="replace-go">Start the
+      new toy</button>
   </div>
 </div>
 
@@ -2054,6 +2079,11 @@ const GALLERY = (((typeof PCEStudio !== "undefined" && PCEStudio.galleryData) ||
 const TOY_VERSION = "pce.studio/1";
 const TOY_KEY = "pcestudio.toy.v1";
 const TOY_KEY_LEGACY = "pcestudio.toy";
+/* #145: the toy a new .lua replaced, in its own slot. ppu.toys keeps the
+ * previous toy in the person's library ("The previous toy stays in the
+ * person's library", its new_toy tool); the studio's library is this one slot,
+ * written before any file set is replaced and recovered from Open… . */
+const RECOVER_KEY = "pcestudio.toy.replaced.v1";
 const SETTINGS_KEY = "pcestudio.settings.v1";
 /* #139: the three divider positions, in px, per browser. */
 const SPLIT_KEY = "pcestudio.layout.v1";
@@ -2391,9 +2421,16 @@ let imageW = 0, imageH = 0;
 /* The last failure, in the words the error line and CONSOLE show it (#107):
  * {code, message}. Null after a run that started. */
 let lastError = null;
-/* The last dropped file (#107): {status: "pending"|"done"|"failed", name,
- * error}. The drop is async (reading a File), so the evidence polls this. */
+/* The last dropped file (#107): {status: "pending"|"asked"|"done"|"failed",
+ * name, error}. The drop is async (reading a File), so the evidence polls
+ * this; "asked" means #145's question is on screen and waits for an answer. */
 let dropRun = { status: "idle", name: "", error: null };
+/* #145: the envelope the toy had when it was opened, loaded or saved. The
+ * envelope now differing from it is an unsaved edit — the thing the page asks
+ * about before a new .lua replaces the toy. */
+let savePoint = null;
+/* #145: {code, fileName, opts} waiting on the "start a new toy?" question. */
+let askedNewToy = null;
 
 /* The toy's file set and the editor in front of it. `current.source` stays
  * the Lua the runtime runs (main.lua); an asset edit never changes it. */
@@ -3284,15 +3321,24 @@ function bindSplits() {
 
 /* ---- popovers --------------------------------------------------------- */
 function hidePop(id) { $(id).hidden = true; }
+
+/* Every popover the top bar can open — a menu opening closes the others, and
+ * an open menu must not sit over #145's question. */
+const POPOVERS = ["panels-pop", "settings-pop", "open-pop", "paste-pop",
+                  "replace-pop"];
+
 function togglePop(id) {
   const el = $(id);
   const show = el.hidden;
-  for (const other of ["panels-pop", "settings-pop", "open-pop"]) {
+  for (const other of POPOVERS) {
     if (other !== id) $(other).hidden = true;
   }
   el.hidden = !show;
   if (id === "panels-pop") $("btn-panels").setAttribute("aria-expanded", String(show));
-  if (id === "open-pop") $("btn-open").setAttribute("aria-expanded", String(show));
+  if (id === "open-pop") {
+    $("btn-open").setAttribute("aria-expanded", String(show));
+    if (show) updateRecoverItem();
+  }
 }
 
 /* ---- the toy's files -------------------------------------------------- */
@@ -3616,6 +3662,9 @@ function loadExample(id, quiet, noApply) {
   $("doc-title").textContent = ex.name;
   updateFileTabs();
   renderAssets();
+  /* #145: an example just loaded is the point unsaved edits are measured
+   * from; a new .lua dropped now displaces nothing the person wrote. */
+  savePoint = toyEnvelopeText();
   if (noApply) return true;
   if (!applySource()) return false;
   persistToy();
@@ -3706,24 +3755,107 @@ function parseToyFile(text, fileName) {
   };
 }
 
-/* Load a toy from text. Validation happens before any state is replaced, the
- * ppu.toys pack/unpack order. */
-function openToy(text, fileName, opts) {
-  const env = parseToyFile(text, fileName);
+/* ---- #145 — the toy the last replacement displaced ----------------------
+ *
+ * ppu.toys' new_toy keeps the previous toy in the person's library; the
+ * studio's library is one browser slot. Every file set that replaces the
+ * studio's toy copies the old envelope there first, and Open… offers it back,
+ * so a dropped or pasted .lua never silently loses the toy it displaced. */
+function stashReplacedToy() {
+  if (typeof localStorage === "undefined") return false;
+  /* the page's first toy displaces nothing */
+  if (!files.length) return false;
+  try {
+    localStorage.setItem(RECOVER_KEY, toyEnvelopeText());
+    updateRecoverItem();
+    return true;
+  } catch (e) { return false; }
+}
+
+function replacedToyText() {
+  if (typeof localStorage === "undefined") return null;
+  try { return localStorage.getItem(RECOVER_KEY); } catch (e) { return null; }
+}
+
+function recoverReplacedToy() {
+  const text = replacedToyText();
+  if (!text) {
+    toast("There is no replaced toy to recover.");
+    return false;
+  }
+  try {
+    openToy(text, "recovered toy", { stash: false });
+    play();
+    hidePop("open-pop");
+    toast("Recovered the toy the last replacement kept.");
+    return true;
+  } catch (e) {
+    showError(e);
+    return false;
+  }
+}
+
+/* The Open… menu's recovery item is there exactly while a slot holds a toy. */
+function updateRecoverItem() {
+  const b = $("open-recover");
+  if (b) b.hidden = !replacedToyText();
+}
+
+/* Replace the editor's whole text as ONE CodeMirror operation, so Ctrl/Cmd+Z
+ * brings the previous source back (#107's promise, kept by #145 now that the
+ * replacement starts a new toy). It also leaves the generated pceglobals.lua
+ * view: that tab must not stay open over a new toy. */
+function setEditorTextKeepingHistory(text) {
+  if (showingGlobals) {
+    showingGlobals = false;
+    if (editor) editor.setOption("readOnly", false);
+    else if ($("source")) $("source").readOnly = false;
+  }
+  if (editor) {
+    const last = editor.lastLine();
+    editor.replaceRange(text, { line: 0, ch: 0 },
+      { line: last, ch: editor.getLine(last).length }, "+new-toy");
+  } else {
+    setEditorText(text);
+  }
+  const f = findFile(activeFile);
+  if (f) f.source = editorText();
+  current.source = mainSource();
+}
+
+/* The one path every open shares: a .pce.studio/.pce.json envelope, Open… →
+ * From file…, and #145's new toy from a single .lua. Validation happened in
+ * parseToyFile(); from here the file set is replaced.
+ *
+ *   opts.keepHistory  a drop/paste: the editor's undo stack survives, so
+ *                     Ctrl+Z has the old source
+ *   opts.play         start the play loop once the toy is applied
+ *   opts.stash:false  do not copy the displaced toy to the recovery slot
+ *                     (a restore, or recovering the slot itself)
+ *   opts.persist:false do not autosave (page restore) */
+function installToy(env, fileName, opts) {
+  const o = opts || {};
+  if (o.stash !== false) stashReplacedToy();
   files = env.files.map((f) => ({ name: f.name, kind: f.kind, source: f.source }));
-  toyTitle = env.title || String(fileName || "toy")
-    .replace(/\.(pce\.json|json|lua|txt)$/i, "");
-  toyDescription = env.description;
+  toyTitle = o.title || env.title || String(fileName || "toy")
+    .replace(/\.(pce\.json|pce\.studio|json|lua|txt)$/i, "");
+  toyDescription = env.description || "";
   current.example = null;
   activeFile = "main.lua";
   current.source = mainSource();
-  switchingFile = true;
-  setEditorText(current.source);
-  switchingFile = false;
+  if (o.keepHistory) {
+    setEditorTextKeepingHistory(current.source);
+  } else {
+    switchingFile = true;
+    setEditorText(current.source);
+    switchingFile = false;
+  }
   if (editor) editor.setOption("mode", "lua");
   $("doc-title").textContent = "main.lua";
   updateFileTabs();
   renderAssets();
+  /* a paste/drop shows the code it brought */
+  if (o.keepHistory) selectCodeTab("code");
   notifyAssetEdit("tiles.json");
   /* #94: a toy with no song.json gives the SEQUENCER a fresh song rather
    * than the previous toy's. */
@@ -3732,9 +3864,21 @@ function openToy(text, fileName, opts) {
    * adopts the band block the new toy carries (or starts one). */
   if (scanlinesApi()) scanlinesApi().invalidate();
   panelDirty = true;
-  if (!opts || opts.apply !== false) applySource();
-  if (!opts || opts.persist !== false) persistToy();
+  if (o.apply !== false) applySource();
+  if (o.persist !== false) {
+    persistToy();
+    /* #145: the toy as installed is the point unsaved edits are measured
+     * from; the editor's own autosave does not move it. */
+    savePoint = toyEnvelopeText();
+  }
+  if (o.play) play();
   return env;
+}
+
+/* Load a toy from text. Validation happens before any state is replaced, the
+ * ppu.toys pack/unpack order. */
+function openToy(text, fileName, opts) {
+  return installToy(parseToyFile(text, fileName), fileName, opts);
 }
 
 function toyFileName() {
@@ -4065,6 +4209,8 @@ function saveToyFile() {
   const name = toyFileName();
   downloadText(name, text, "application/json");
   persistToy();
+  /* #145: what is on disk now is no longer unsaved */
+  savePoint = text;
   setSaved("saved " + name);
   toast("Saved " + name + ".");
   return { name: name, text: text };
@@ -4112,6 +4258,7 @@ function loadStoredToy() {
     if (raw) {
       openToy(raw, "saved toy", { apply: false, persist: false });
       restoredFromStorage = true;
+      savePoint = toyEnvelopeText();
       setSaved("restored from this browser");
       return true;
     }
@@ -4130,6 +4277,7 @@ function loadStoredToy() {
       updateFileTabs();
       renderAssets();
       persistToy();
+      savePoint = toyEnvelopeText();
       setSaved("restored from this browser");
       return true;
     }
@@ -4305,8 +4453,9 @@ function checkToy() {
  * The chat-AI loop: the AI answers with one ```lua block, the person copies
  * the answer, presses Paste & Run, and the toy runs.  Three doors into the
  * same two functions — the clipboard, the fallback paste box, and a dropped
- * .lua / .pce.json file — and one rule: the new source is main.lua and the
- * previous source stays on CodeMirror's undo stack.
+ * .lua / .pce.studio file — and one rule: a single .lua is a NEW toy, so the
+ * new source is its main.lua and the previous source stays on CodeMirror's
+ * undo stack (#145).
  */
 const PASTE_FENCE = /```[ \t]*([A-Za-z0-9_+-]*)[^\n]*\n([\s\S]*?)```/;
 
@@ -4332,41 +4481,75 @@ function stripCodeFence(text) {
   return s;
 }
 
-/* Make `text` the toy's main.lua. CodeMirror gets one replaceRange, which is
- * one undo unit and keeps the history: Ctrl/Cmd+Z brings the old source
- * back. The stub DOM's textarea has no history; it gets setValue plus the
- * same bookkeeping the editor's change event would have done. */
-function replaceMainLua(text) {
-  const f = findFile("main.lua");
-  if (!f) throw toyRefuse("paste-no-main",
-    "this toy has no main.lua to replace — open a toy first");
-  /* the source is the editor's from here, not an example's */
-  current.example = null;
-  if (editor && activeFile !== "main.lua") {
-    /* show main.lua first; setValue clears the history, and the next change
-     * is the only one undo has to reverse */
-    selectFile("main.lua");
+/* #145 — a dropped or pasted single .lua starts a NEW toy.
+ *
+ * Before this card it replaced main.lua and kept the old toy's
+ * tiles/palettes/sprites. That was wrong twice over: the SCREEN, SPRITES and
+ * PALETTES panels draw that file set, and the toy boots from it (#117), so a
+ * game that does not overwrite all of VRAM showed the previous toy's art.
+ * ppu.toys' new_toy opens a fresh toy from the starter template and keeps the
+ * previous toy in the person's library; here the new toy's file set is what a
+ * plain .lua gets from Open… → From file… — main.lua plus the empty default
+ * tiles/palettes/sprites/waves, which carry no art — and the displaced toy
+ * goes to the recovery slot.
+ *
+ * The person's work is never lost silently: the old toy is copied to the
+ * recovery slot before anything is replaced, and if it has unsaved edits the
+ * page asks first.
+ *
+ * Returns "started", "asked" (the question is on screen and waits for the
+ * person's answer) or "failed" (the error line names why). */
+function hasUnsavedEdits() {
+  return savePoint !== null && toyEnvelopeText() !== savePoint;
+}
+
+function startNewToyFromLua(code, fileName, opts) {
+  const o = opts || {};
+  if (hasUnsavedEdits()) {
+    askToStartNewToy(code, fileName, o);
+    return "asked";
   }
-  if (editor && activeFile === "main.lua") {
-    const last = editor.lastLine();
-    editor.replaceRange(text, { line: 0, ch: 0 },
-      { line: last, ch: editor.getLine(last).length }, "+paste-run");
-    /* editor.on("change") has already mirrored it into f.source, current.source
-     * and the autosave */
-  } else {
-    if (activeFile !== "main.lua") selectFile("main.lua");
-    setEditorText(text);
-    f.source = text;
-    current.source = mainSource();
-    persistToy();
-    setSaved("pasted — Run to apply");
+  return replaceToyWithLua(code, fileName, o);
+}
+
+function replaceToyWithLua(code, fileName, o) {
+  let env;
+  try { env = parseToyFile(code, fileName); }
+  catch (e) { showError(e); return "failed"; }
+  installToy(env, fileName, { keepHistory: true, title: o.title,
+                              play: o.play !== false });
+  return lastError ? "failed" : "started";
+}
+
+/* The question before a replacement that would throw away unsaved work. The
+ * old toy is already kept when this is answered: nothing here loses it. */
+function askToStartNewToy(code, fileName, o) {
+  askedNewToy = { code: code, fileName: fileName, opts: o };
+  $("replace-note").textContent = (fileName || "the new file") +
+    " starts a new toy: its own main.lua and none of this toy's art. The toy " +
+    "in the studio has unsaved edits — it is copied to the recovery slot " +
+    "first, and Open… → Recover brings it back.";
+  for (const other of POPOVERS) {
+    $(other).hidden = true;
   }
-  activeFile = "main.lua";
-  $("doc-title").textContent = "main.lua";
-  updateFileTabs();
-  renderAssets();
-  selectCodeTab("code");
-  return text;
+  $("replace-pop").hidden = false;
+  return true;
+}
+
+/* The question's two answers: true starts the new toy, false keeps this one. */
+function answerNewToy(yes) {
+  const q = askedNewToy;
+  askedNewToy = null;
+  $("replace-pop").hidden = true;
+  if (!q) return false;
+  if (!yes) {
+    setSaved("kept this toy");
+    if (q.opts && q.opts.onAnswered) q.opts.onAnswered("kept");
+    return false;
+  }
+  const r = replaceToyWithLua(q.code, q.fileName, q.opts);
+  if (q.opts && q.opts.onAnswered) q.opts.onAnswered(r);
+  return r === "started";
 }
 
 /* Apply the editor's Lua and start it, with every failure on the error line:
@@ -4396,7 +4579,8 @@ function pasteFailed(e) {
 }
 
 /* The one Paste & Run action: text in hand, no clipboard. Returns true when
- * the toy ran. */
+ * the toy ran — or when the page is waiting on #145's question, which is also
+ * true: the paste is not refused, the person's answer is what proceeds. */
 function pasteRun(text, label) {
   let code;
   try {
@@ -4405,26 +4589,34 @@ function pasteRun(text, label) {
       throw toyRefuse("paste-empty",
         "there is no code to run: copy the AI's complete main.lua — one " +
         "```lua block — and press Paste & Run again");
-    replaceMainLua(code);
   } catch (e) {
     return pasteFailed(e);
   }
-  let ran = false;
+  let outcome;
   try {
-    ran = runToy();
+    outcome = startNewToyFromLua(code, "pasted.lua", {
+      title: "pasted toy", play: true,
+      onAnswered: (r) => { if (r === "started") toast(pasteToast(label)); }
+    });
   } catch (e) {
     return pasteFailed(e);
   }
-  if (!ran) {
+  if (outcome === "asked") return true;
+  if (outcome !== "started") {
     /* the error line already names it; put it in the log too, so the person
      * can copy it back to the AI unchanged */
     toast("Paste & Run failed — " + (lastError ? lastError.code + ": " +
       lastError.message : "see the error line"));
     return false;
   }
-  toast("Pasted " + (label || "the code") + " into main.lua and running. " +
-        "Ctrl+Z brings the old source back.");
+  toast(pasteToast(label));
   return true;
+}
+
+function pasteToast(label) {
+  return "Pasted " + (label || "the code") + " into a new toy and running. " +
+    "Ctrl+Z brings the old source back; Open… → Recover has the toy it " +
+    "replaced.";
 }
 
 /* The fallback paste box: shown when the browser gives the page no clipboard
@@ -4432,7 +4624,7 @@ function pasteRun(text, label) {
 function openPasteBox(note) {
   $("paste-note").textContent = note || ("Paste the code here, then press " +
     "Paste & Run. A surrounding ```lua fence is stripped.");
-  for (const other of ["panels-pop", "settings-pop", "open-pop"]) {
+  for (const other of POPOVERS) {
     $(other).hidden = true;
   }
   $("paste-pop").hidden = false;
@@ -4475,6 +4667,9 @@ function pasteFromClipboard() {
 function droppedFileKind(name) {
   const n = String(name || "").toLowerCase();
   if (/\.lua$/.test(n)) return "lua";
+  /* #145: the envelope's own extension (the version string is pce.studio/1,
+   * docs/STUDIO.md §3.7a) is the toy file, beside the older .pce.json. */
+  if (/\.pce\.studio$/.test(n)) return "toy";
   if (/\.pce\.json$/.test(n) || /^(toy|tiles|palettes|sprites|waves)\.json$/.test(n))
     return "toy";
   if (/\.(json|txt)$/.test(n)) return "toy";
@@ -4499,20 +4694,26 @@ function readFileText(file, cb) {
   cb(new Error("this browser cannot read a dropped file"));
 }
 
-/* A .lua is new main.lua text, the same as a paste (assets are kept); a toy
- * file is its whole envelope, the Open menu's path. Both run at once. */
+/* A .lua starts a NEW toy, the same as a paste (#145): main.lua plus the
+ * empty default asset files, never the previous toy's art. A .pce.studio /
+ * .pce.json envelope is its whole file set, the Open menu's path. Both run at
+ * once; a .lua over a toy with unsaved edits asks first and says "asked"
+ * until the person answers. */
 function dropRunFile(file) {
   const name = String(file && file.name || "dropped file");
   const kind = droppedFileKind(name);
   dropRun = { status: "pending", name: name, error: null };
   if (!kind) {
     dropRun = { status: "failed", name: name,
-                error: { code: "drop-kind", message: name + " is not a .lua " +
-                  "or a .pce.json toy file" } };
+                error: { code: "drop-kind", message: name + " is not a .lua, " +
+                  "a .pce.studio or a .pce.json toy file" } };
     showError(dropRun.error);
-    toast("Cannot run " + name + " — drop a .lua or a .pce.json toy file.");
+    toast("Cannot run " + name + " — drop a .lua, a .pce.studio or a " +
+          ".pce.json toy file.");
     return;
   }
+  const settle = (status) => { dropRun = { status: status, name: name,
+                                           error: lastError }; };
   readFileText(file, (err, text) => {
     if (err) {
       dropRun = { status: "failed", name: name,
@@ -4523,18 +4724,25 @@ function dropRunFile(file) {
     }
     try {
       if (kind === "lua") {
-        pasteRun(text, name);
+        const outcome = startNewToyFromLua(String(text), name, {
+          play: true,
+          onAnswered: (r) => { settle(r === "started" ? "done" : "kept"); }
+        });
+        settle(outcome === "started" ? "done"
+             : outcome === "asked" ? "asked" : "failed");
+        if (outcome === "started")
+          toast("Dropped " + name + " — it is a new toy, and running. " +
+                "Open… → Recover has the toy it replaced.");
       } else {
         clearError();
-        openToy(text, name);
+        openToy(String(text), name);
         play();
         toast("Opened " + name + " and running.");
+        settle(lastError ? "failed" : "done");
       }
-      dropRun = { status: lastError ? "failed" : "done", name: name,
-                  error: lastError };
     } catch (e) {
       showError(e);
-      dropRun = { status: "failed", name: name, error: lastError };
+      settle("failed");
     }
   });
 }
@@ -4649,6 +4857,12 @@ function bind() {
   $("btn-settings").addEventListener("click", () => togglePop("settings-pop"));
   $("btn-save").addEventListener("click", saveToyFile);
   $("btn-open").addEventListener("click", () => togglePop("open-pop"));
+  /* #145: the question a .lua over unsaved edits asks, and the Open menu's
+   * way back to the toy the last replacement kept. */
+  $("replace-close").addEventListener("click", () => answerNewToy(false));
+  $("replace-cancel").addEventListener("click", () => answerNewToy(false));
+  $("replace-go").addEventListener("click", () => answerNewToy(true));
+  $("open-recover").addEventListener("click", recoverReplacedToy);
   $("btn-docs").addEventListener("click", toggleDocs);
   $("btn-docs").setAttribute("aria-haspopup", "dialog");
   $("docs-close").addEventListener("click", closeDocs);
@@ -5517,6 +5731,22 @@ const studio = {
                                   message: lastError.message } : null),
   lastDrop: () => ({ status: dropRun.status, name: dropRun.name,
                      error: dropRun.error }),
+  /* #145 — a single .lua starts a NEW toy. dropFile() is the page's own drop
+   * path (the evidence hands it a file-like object); startNewToy() is the same
+   * action with the text in hand; hasUnsavedEdits() is the condition the
+   * question asks about; replaceAsk() is the question on screen and
+   * answerReplace() presses one of its buttons; recoverText()/recover() are
+   * the recovery slot and Open…'s way back to it. */
+  dropFile: dropRunFile,
+  startNewToy: (text, name) => startNewToyFromLua(String(text),
+    String(name || "pasted.lua"), { play: true }),
+  hasUnsavedEdits: () => hasUnsavedEdits(),
+  replaceAsk: () => ({ open: !$("replace-pop").hidden,
+                       note: $("replace-note").textContent,
+                       waiting: !!askedNewToy }),
+  answerReplace: answerNewToy,
+  recoverText: replacedToyText,
+  recover: recoverReplacedToy,
 
   /* #84 — the SCREEN panel's cell-map editor. The module owns these; the
    * evidence drives the same functions its DOM handlers call. */
@@ -5600,6 +5830,10 @@ const studio = {
   /* #85 — the PALETTES panel's 512-colour picker and the VRAM panel's drawn
    * map. The modules own these; the evidence drives the same functions
    * their DOM handlers call. */
+  /* #145 — the SPRITES panel's own surface, the same way SCREEN's and
+   * PALETTES' are exposed: the evidence reads what the panel draws. */
+  sprites: () => { const a = panelApi("sprites"); return a ? a.state() : null; },
+  spritesPicture: () => { const a = panelApi("sprites"); return a ? a.picture() : null; },
   palettes: () => { const a = panelApi("palettes"); return a ? a.state() : null; },
   paletteSelect: (palette, entry) => panelApi("palettes").select(palette, entry),
   paletteSetWord: (palette, entry, colour) =>

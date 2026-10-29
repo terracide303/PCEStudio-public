@@ -486,15 +486,32 @@ presses **Paste & Run** in the top bar (next to `Run`). There is no import step 
 
 | door | what it does |
 |---|---|
-| the button | `navigator.clipboard.readText()`, the answer stripped to its code, `main.lua` replaced, the toy runs |
+| the button | `navigator.clipboard.readText()`, the answer stripped to its code, a NEW toy started from it (#145), the toy runs |
 | the fallback box | shown when the page has no clipboard, the read is refused, or the clipboard is empty: the note says why, the box takes the paste, its own **Paste & Run** runs it |
-| a dropped file | a `.lua` becomes the new `main.lua` (the toy's assets are kept); a `.pce.json` toy loads its whole file set, the same as `Open… → From file…`; either way it runs at once |
+| a dropped file | a `.lua` starts a NEW toy (#145, below); a `.pce.studio` or `.pce.json` toy loads its whole file set, the same as `Open… → From file…`; either way it runs at once |
 
 **One rule, one place.** `stripCodeFence()` takes the first fenced block anywhere in the text — prose above
 and below is dropped — accepts ```lua / ```luau or a bare fence, normalises CRLF, and **keeps a leading blank
 line**: line numbers must stay the toy's, because the error line quotes them. A fence that names another
 language is `paste-language`, an opening fence with no close is `paste-fence`, and nothing to run is
 `paste-empty`.
+
+**A single `.lua` is a new toy, not a new `main.lua` (#145).** Before this card a drop or paste
+replaced `main.lua` and kept the toy's `tiles.json`/`palettes.json`/`sprites.json`. That was wrong twice
+over: the SCREEN, SPRITES and PALETTES panels draw that file set, and the toy BOOTS from it (#117), so a
+game that does not overwrite all of VRAM showed the previous toy's art. Dennis, 2026-10-29: after dragging
+a new `main.lua` in, the SCREEN panel still showed STARFALL's stars and a `pceglobals.lua` tab stayed
+open. Now the drop/paste installs the same file set `Open… → From file…` gives a plain `.lua` —
+`main.lua` plus the empty default `tiles.json`, `palettes.json`, `sprites.json`, `waves.json`, which
+carry no art — exactly what ppu.toys' `new_toy` does (a fresh toy from the starter template), and the
+generated tab is left the way any other file switch leaves it.
+
+**Nothing is lost silently.** The displaced toy is copied to a second browser slot
+(`pcestudio.toy.replaced.v1`) before any file set is replaced, and `Open… → Recover the toy the last drop
+replaced` opens it again through the same envelope path — ppu.toys' "the previous toy stays in the
+person's library", one slot of it. A toy with **unsaved edits** — the envelope differing from the last
+open, example, restore, Save or new toy — is asked about first (`#replace-pop`: **Keep this toy** /
+**Start the new toy**); either answer keeps the old toy recoverable.
 
 **The previous source is one undo away.** In a real browser the replacement is a single CodeMirror
 `replaceRange` with its own change origin, so `Ctrl/Cmd+Z` restores the old `main.lua` in one step.
@@ -507,14 +524,24 @@ share `runToy()`, which wraps the first frame too.
 
 API: `studio.paste()` (the button), `studio.pasteText(text)` (the same work with the text in hand),
 `studio.stripFence(text)`, `studio.pasteBox()` / `setPasteBoxText()` / `openPasteBox(note)`,
-`studio.lastError()` and `studio.lastDrop()` (`{status, name, error}` — a drop is async, so the evidence polls
-it). CONSOLE reads `studio.render.lastError()`.
+`studio.lastError()` and `studio.lastDrop()` (`{status, name, error}` — `pending`, `asked`, `done`,
+`kept` or `failed`; a drop is async, so the evidence polls it). #145 adds `studio.dropFile(file)`
+(the drop path with a file-like object), `studio.startNewToy(text, name)`, `studio.hasUnsavedEdits()`,
+`studio.replaceAsk()` / `answerReplace(yes)`, and `studio.recoverText()` / `recover()`. CONSOLE reads
+`studio.render.lastError()`.
 
 Evidence: `tests/check-studio.js` checks the fence rule and every refusal by code, a good paste running and
 visible (57,344 non-backdrop pixels at frame 60), and a broken one naming `main.lua line 2` in the error line
 and in CONSOLE; `--browser` stands in for `navigator.clipboard`, clicks the real button, counts the pixels,
 undoes with CodeMirror's own `undo()`, drops a real `File` through a `DragEvent`, and takes the fallback box
-when the stub refuses. The tests were written by this card's builder, so RULES rule 2 (a different seat
+when the stub refuses. #145 adds the STARFALL evidence: the suite loads STARFALL, opens the generated tab,
+drops a one-file toy through the page's own drop path, and requires the file set, SCREEN (one blank tile,
+not five), SPRITES (no sprites or patterns), PALETTES (blank) and the running toy's VRAM (0 words set) to
+be the new toy's, the generated tab closed, STARFALL in the recovery slot and recoverable from Open…; it
+then edits STARFALL, drops again and requires the question, **Keep this toy** leaving it alone and
+**Start the new toy** replacing it. Re-run against a mutated page: keeping the old asset files fails 5 of
+those checks (including VRAM, 1,422 words of STARFALL's tiles), never asking fails 5, and not copying the
+recovery slot fails 3. The tests were written by this card's builder, so RULES rule 2 (a different seat
 breaks it) is owed by @review.
 
 ### 3.5 REGISTERS as a visual editor, and the pokes (#79)
