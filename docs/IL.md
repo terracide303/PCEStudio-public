@@ -1225,17 +1225,46 @@ covers every `raster()` call. The figure includes the VBlank IRQ's few cycles
 per frame and is quantised to one tick. The per-frame maximum is clamped at
 255 ticks in the byte-wide save-state cell; the mean is not clamped.
 
-`node tests/check-ilvm.js` exits 0 with **49 checks**: the encoder is
+`node tests/check-ilvm.js` exits 0 with **50 checks**: the encoder is
 deterministic and refuses by code (table, fixed constant, five parameters,
 `clamp`); Node and a browser context build the same 24,576 B ROM; the
 committed `renderer/ilvm.bin` rebuilds byte-identically when llvm-mos is
 present (SKIP otherwise); both dumps' ROM shas match a fresh
 `tools/ilvm/emit.js` build; the palette capture's frames are diff 0 against
 the browser's run with eight consecutive browser frames present in order,
-and the save's VRAM/CRAM are the browser's; the parallax capture holds 30
-exact display frames (a run of eight in order) among the static compute
-frames, and its save is the browser's.  The check script was written by the
-seat that wrote the encoder and interpreter, so rule 2 is owed.
+its mean frame cost is above the seven-bit timer's 127-tick ceiling, and the
+save's VRAM/CRAM are the browser's; the parallax capture holds 30 exact
+display frames (a run of eight in order) among the static compute frames,
+and its save is the browser's.
+
+**Rule 2, cold-broken** (2026-10-29, a later `@design` seat on a different
+model, not the seat that wrote the suite). Eight breaks were applied one at a
+time to a scratch clone of the committed tree, each with the substitution
+asserted exactly once:
+
+| break | caught by |
+|---|---|
+| encoder constant flag `0x80` → `0x81` | the dumped ROM sha (2 FAIL) |
+| `buildToyRom` writes the bytecode one byte low | the ROM bytes (5 FAIL) |
+| `buildToyRom` stops padding with `0xFF` | the padding byte (3 FAIL) |
+| `ilvm.c` `arith` add → sub, rebuilt | the rebuilt image sha (2 FAIL) |
+| one byte flipped in the committed `ilvm.bin` | the dumped ROM sha (4 FAIL) |
+| `ilvm.c` operand boundary `0x80` → `0x7F`, rebuilt | the rebuilt image sha (2 FAIL) |
+| add → sub **plus rebuild and recapture** | the capture's frames (0 consecutive browser frames; the save's VRAM/CRAM differ) |
+| the stale seven-bit timer read **plus rebuild and recapture** | **missed**: the palette meta read 30,510 cycles/frame and its frame/save assertions passed |
+
+The last one was the §14.3 bug reintroduced: `elapsed_ticks` returned the raw
+seven-bit delta. With the palette meta rewritten to that stale read (30,720
+cycles/frame, mean 30 ticks) and the parallax dump untouched, the suite
+exited 0 with all 49 checks; rebuilt and recaptured, the palette's own frame
+and save assertions still passed at 30,510 cycles/frame. The guard is the
+palette's `minMeanTicks` (127): a frame() that spans VBlanks must
+reconstruct more than the seven-bit ceiling, and the same recapture now
+fails (`29.79 TMA ticks, need > 127`). A cold read of that new assertion is
+still owed. Also found while re-running the evidence:
+`tools/capture-ilvm.sh`'s `TRIM_FRAMES` trim piped `ls` into `head` under
+`pipefail` and could exit before `meta.json` was rewritten, leaving a
+recaptured dump beside the old measurement; it trims with a bash array now.
 
 ### 14.6 What this half refuses, and what it does not prove
 
@@ -1252,9 +1281,10 @@ Not proven:
   §10.4) and the #29 examples are untested.
 - **No real console and one emulator.** Mednafen only; no ares run of a
   bytecode ROM yet.
-- **Rule 2 is owed.** The encoder, interpreter, runtime and the check script
-  were written by the same seat; a cold break by another seat and model must
-  try the operand encoding, the loop arithmetic, the closure copies, the timer
-  reconstruction and the browser glue before this half closes.
+- **Rule 2 is done for the eight breaks §14.5 lists, and one guard is new.**
+  The operand encoding, the browser glue, the rebuilt-image sha and a
+  recaptured arithmetic break were all caught; the stale timer read was
+  missed and is now guarded by `minMeanTicks`. A cold read of that new
+  assertion by yet another seat is the remaining part.
 - **The studio's Export button is not wired.** The second half adds it; this
   half's evidence is the Node path and the browser-context byte equality.

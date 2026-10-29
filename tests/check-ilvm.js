@@ -45,7 +45,7 @@ const ILVM = path.join(ROOT, "renderer", "ilvm.bin");
 const LLVM_DEFAULT = "/Volumes/External II/pce-tools/llvm-mos/llvm-mos";
 
 const PALETTE = { name: "toypalette-ilvm", toy: "tools/toys/palette.lua",
-                  period: 8, phase: 8 };
+                  period: 8, phase: 8, minMeanTicks: 127 };
 const PARALLAX = { name: "toyparallax-ilvm", toy: "toys/parallax.lua",
                    period: 0, phase: 8 };
 
@@ -397,6 +397,17 @@ function checkMeasure(spec) {
   check(m.count > 5, spec.name + ": the TMA measured more than five frames");
   check(m.flags === 0, spec.name + ": no raster/base list overflowed");
   check(m.cycles_per_frame > 0, spec.name + ": cycles per frame is positive");
+  /* A frame() longer than one video frame is reconstructed from the TMA
+   * counter's phase at the last VBlank (§14.5).  The counter is seven bits,
+   * so a read that forgot the phase cannot exceed 127 ticks.  Rule 2's cold
+   * break re-applied exactly that stale read and recaptured: 30,510
+   * cycles/frame passed every other assertion, so this bound is the guard. */
+  if (spec.minMeanTicks) {
+    check(m.mean_ticks > spec.minMeanTicks,
+          spec.name + ": frame() spans more than one video frame (" +
+          m.mean_ticks.toFixed(2) + " TMA ticks, need > " +
+          spec.minMeanTicks + "; a 7-bit-only read cannot exceed 127)");
+  }
   console.log("      " + spec.name + ": frame() " +
               Math.round(m.cycles_per_frame) + " cycles (" +
               m.mean_ticks.toFixed(2) + " TMA ticks, min " + m.min_ticks +
