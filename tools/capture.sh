@@ -48,6 +48,18 @@
 #                                   # /3, 512 at /2 (256 at /4, the other
 #                                   # modes), read from the state's VCECR, not
 #                                   # from the scene name.
+#   tools/capture.sh 336|512 vwide  # #70: the viewer ROMs of those pictures
+#                                   # (gen/vwide336.pce, gen/vwide512.pce —
+#                                   # viewer.asm's wide-window block).  Same
+#                                   # de-scale as the wide mode; the dump is
+#                                   # tests/dumps/vwide336/ or vwide512/.
+#   tools/capture.sh 336|512 wedit  # #70: the EDITOR's wide picture
+#                                   # (gen/wedit336.pce, gen/wedit512.pce,
+#                                   # built by tests/check-editor.js --write
+#                                   # wide336|wide512).  De-scaled by the
+#                                   # saved VCE CR like every wide capture;
+#                                   # the dump is tests/dumps/wedit336/ or
+#                                   # wedit512/.
 #   tools/capture.sh flicker        # #28: the viewer ROM of sprite13, whose
 #                                   # VBlank handler rotates the SAT order
 #                                   # (gen/flicker.pce).  The last 4 recorded
@@ -121,11 +133,13 @@ case "$MODE" in
   vraster) NAME="vraster${SCENE}" ;;
   dma)    NAME="dma${SCENE}" ;;
   wide)   NAME="wide${SCENE}" ;;
+  vwide)  NAME="vwide${SCENE}" ;;
+  wedit)  NAME="wedit${SCENE}" ;;
   painted) NAME="painted" ;;
   spainted) NAME="spainted" ;;
   effect) NAME="effect1" ;;
   flicker) NAME="flicker" ;;
-  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, wide, painted, spainted, effect or flicker" >&2; exit 2 ;;
+  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, wide, vwide, wedit, painted, spainted, effect or flicker" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -158,6 +172,10 @@ elif [ "$MODE" = effect ]; then
   # #16: the editor's effect picture (gradient + wobble + parallax bands at
   # frame 5), exported through the viewer with its raster table
   node tests/check-editor.js --write effect
+elif [ "$MODE" = wedit ]; then
+  # #70: the editor's wide picture (336 or 512 dots), exported by #9's
+  # builder with config version 2 and the wide-window block
+  node tests/check-editor.js --write "wide${SCENE}"
 else
   make -C tools "gen/$NAME.pce"
 fi

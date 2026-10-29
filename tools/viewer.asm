@@ -13,6 +13,12 @@
 ;; Bank 0 is this code and never changes — #9 glues picture data into the
 ;; fixed places, so the browser's .pce is this bank plus data banks.
 ;;
+;; #70: a wide picture (VCE CR DCC != 00, so a 336- or 512-dot window) writes
+;; config version 2 and puts its VCE CR + HSR/HDR in the wide-window block
+;; at bank 1 offset $1F00.  Boot then writes those registers instead of the
+;; 256-dot constants; every other register is the same.  Version 1 pictures
+;; are byte-identical to before (#70 left the config and all offsets alone).
+;;
 ;; #16: pictures with a raster table (config byte 9 = 1) run it on the
 ;; console: an irq1 handler driven by the VDC's RCR line interrupt writes
 ;; each line's BXR/BYR/CR/colour-table values and re-arms RCR for the next
@@ -136,16 +142,6 @@ reset:
         lda #$f8
         tam1                       ; work RAM at $2000-$3fff
 
-        ; VCE CR ($0400) = $04: D1-D0 = 11, the /4 dot clock (the 256-px
-        ; picture, H6-3); D2 is set too, and the sources disagree on what it
-        ; is.  The VCE manual documents D1-D0 only (H6-3).  docs/VIDEO_MODES.md
-        ; reads bit 2 as a 262/263-line select; Charles MacDonald's measured
-        ; hardware notes read it as "blur edges" (pcetech SS6; SS7 says the
-        ; frame is 263 lines fixed).  #27 settles which.  The value is
-        ; HuDK's vce_init value.
-        lda #$04
-        sta $0400
-
         ; config + palettes live in bank 1, read through MPR2 ($4000-$5fff)
         lda #$01
         tam2
@@ -162,6 +158,25 @@ cfgcopy:
         inx
         cpx #$40                   ; 64 bytes
         bne cfgcopy
+
+        ; ---- VCE CR ($0400): the picture's dot clock (#70).  Version 2
+        ; means the wide-window block at bank 1 offset $1F00 is present
+        ; ($5F00 in this window; MPR2 is still bank 1).  It carries the
+        ; picture's VCE CR, then HSR lo/hi and HDR lo/hi (docs/ROM_LAYOUT.md).
+        ; Version 1 pictures are the /4 clock: $04 = DCC 11 (H6-3), the
+        ; HuDK vce_init value.  D2 is set in both; it is NOT PROVEN whether
+        ; it is the 262/263-line select or edge blur (docs/DECISIONS.md
+        ; 2026-10-28, card #27), and every ROM keeps it set.
+        lda $2200                  ; config version
+        cmp #$02
+        bne vce_256
+        lda $5F00                  ; wide block: the picture's VCE CR
+        sta $0400
+        bra vce_done
+vce_256:
+        lda #$04
+        sta $0400
+vce_done:
 
         ; ---- palettes: entries 0-511 (16 BG + 16 sprite palettes) from
         ; ROM $4040 (1024 bytes, bank 1).  Exactly 512 writes: the CTA is 9
@@ -213,11 +228,31 @@ palentry:
         sta $0002
         st2 #$00
         st0 #$0a
+        lda $2200                  ; #70: version 2 -> the block's HSR
+        cmp #$02
+        bne hsr_256
+        lda $5F02                  ; HSR lo (HSW)
+        sta $0002
+        lda $5F03                  ; HSR hi (HDS)
+        sta $0003
+        bra hsr_done
+hsr_256:
         st1 #$02
         st2 #$02                   ; HSR: HDS=2, HSW=2
+hsr_done:
         st0 #$0b
+        lda $2200
+        cmp #$02
+        bne hdr_256
+        lda $5F04                  ; HDR lo (HDW)
+        sta $0002
+        lda $5F05                  ; HDR hi (HDE)
+        sta $0003
+        bra hdr_done
+hdr_256:
         st1 #$1f
         st2 #$04                   ; HDR: HDW=31, HDE=4
+hdr_done:
         st0 #$0c
         st1 #$02
         st2 #$0f                   ; VPR

@@ -85,7 +85,9 @@
 
   /* The constant 256x224 register values the viewer ROM writes before it
    * shows a picture (tools/viewer.asm, the HuDK vdc_init_table sequence).
-   * Only used for a register the picture model does not carry. */
+   * Only used for a register the picture model does not carry.  #70: a wide
+   * picture carries its own HSR/HDR/VCECR, so these fallbacks are the /4
+   * clock's values only. */
   var VIEWER_FIXED_REGS = {
     HSR: 0x0202,
     HDR: 0x041F,
@@ -133,7 +135,9 @@
     if (!opts || !opts.vram || !opts.cram)
       throw new Error("pce-panels: state needs vram and cram");
     var regs = opts.regs || {};
-    var width = opts.width || 256;
+    /* #70: with no explicit width the frame follows the picture's dot clock
+     * (256 / 341 / 512 dots from the VCE CR), not a fixed 256. */
+    var width = opts.width || bg.frameWidth({ regs: regs });
     var height = opts.height || 232;
     var firstScanline = opts.firstScanline != null ? opts.firstScanline : 18;
     var satAddr = regs.DVSSR != null ? regs.DVSSR
@@ -656,22 +660,37 @@
     /* the background layer: the blanking fill when CR bit 7 (BB) is clear,
      * otherwise pce-bg.js's own per-pixel decode */
     var blanking = !(v.CR & 0x80);
+    /* #70: the display window.  A frame wider than the picture's window has
+     * border columns on either side (CRAM[0x100]), and the background's own
+     * column numbering starts at the window's left edge — the same rule
+     * pce-bg.js draws.  256-dot pictures sit at x0 = 0, so their traces are
+     * unchanged. */
+    var win = bg.displayWindow(st.opts);
+    var outside = y < win.y0 || y >= win.y1 || x < win.x0 || x >= win.x1;
     var bgDetail = null, bgIndex;
     if (blanking) {
       bgIndex = 0x100;
       bgDetail = { blanking: true, index: 0x100,
                    reason: "CR bit 7 (BB) clear: blanking-period data" };
+    } else if (outside) {
+      bgIndex = 0x100;
+      bgDetail = { border: true, index: 0x100,
+                   reason: "outside the display window: border " +
+                           "CRAM[0x100]" };
     } else {
-      bgDetail = bg.backgroundPixel(st.vram, st.geom, v.BXR, v.BG_YOffset, x);
+      bgDetail = bg.backgroundPixel(st.vram, st.geom, v.BXR, v.BG_YOffset,
+                                    x - win.x0);
       bgIndex = bgDetail.index;
     }
 
     /* the sprite layer: pce-sprites.js collects and paints the same line */
     var sprite = null, spriteIndex = null;
-    if (st.sat && (v.CR & 0x40)) {
+    if (st.sat && (v.CR & 0x40) && !outside) {
       var strips = sprites.collectStrips(st.sat, v.line);
-      if (strips.length && x < 256) {
-        var layer = sprites.paintLine(st.vram, strips);
+      if (strips.length && x < st.width) {
+        /* #70: paint the whole frame's width — the panels used to stop at
+         * 256, which dropped every sprite on a 341- or 512-dot line. */
+        var layer = sprites.paintLine(st.vram, strips, st.width);
         if (layer[x]) {
           sprite = spriteDetail(st, layer[x]);
           spriteIndex = sprite.index;

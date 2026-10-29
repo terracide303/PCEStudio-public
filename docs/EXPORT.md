@@ -53,7 +53,7 @@ An 8 KiB-banked, headerless image (`pceas -raw` output; no 512-byte header):
 | bank | content |
 |------|---------|
 | 0 | `bank0`, verbatim |
-| 1 | 64-byte config at offset 0, the 512 colour-table entries at offset `0x40`, the SAT at offset `0x440`, and — when config byte 9 = 1 — the 3856-byte raster table image at offset `0x640` (#16) |
+| 1 | 64-byte config at offset 0, the 512 colour-table entries at offset `0x40`, the SAT at offset `0x440`, the 3856-byte raster table image at offset `0x640` when config byte 9 = 1 (#16), and — when config version = 2 (#70) — the 8-byte wide-window block (VCE CR + HSR/HDR) at offset `0x1F00` |
 | 2–3 | the BAT (`width × height` words) from VRAM word 0 |
 | 4+ | the copy regions, concatenated in descriptor order |
 

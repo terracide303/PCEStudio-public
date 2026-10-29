@@ -50,7 +50,7 @@ and `tools/extract_bank0.py` refuses to write the asset if they differ.
 
 | offset | size | field |
 |--------|------|-------|
-| `0x00` | 1    | version (currently 1) |
+| `0x00` | 1    | version: 1 = the 256-dot viewer; 2 = also carries the wide-window block (#70) |
 | `0x01` | 1    | reserved (0) |
 | `0x02` | 2    | BXR (background X scroll, 10 bits) |
 | `0x04` | 2    | BYR (background Y scroll, 9 bits) |
@@ -99,6 +99,40 @@ copy regions land in that span.  The step and phase count come from
 ROM, the capture and `tests/check.js` read one rule.  The flicker code is
 assembled only into `FLICKER` builds: every other viewer ROM keeps the same
 bank 0 (the browser export and the #68 trace fixtures pin it).
+
+## Bank 1 — the wide-window block, offset `0x1F00` (`$5F00`) (#70)
+
+A picture whose VCE CR selects a non-`/4` dot clock (`DCC` bits 1-0 != 00 —
+the 336- and 512-dot modes whose renderer half #27 proved) cannot use the
+viewer's 256-dot HSR/HDR constants, so it writes config **version 2** and this
+8-byte block:
+
+| offset | size | field |
+|--------|------|-------|
+| `0x00` | 1    | the picture's VCE CR, written to `$0400` |
+| `0x01` | 1    | reserved (0) |
+| `0x02` | 2    | HSR (little-endian), written to VDC register `$0A` |
+| `0x04` | 2    | HDR (little-endian), written to VDC register `$0B` |
+| `0x06` | 2    | reserved (0) |
+
+The block sits after the raster table, which ends at `0x1550`; every version 1
+picture leaves it `0xff` padding, so **no ROM built before #70 changes a
+byte**.  Boot reads the version byte from the RAM config copy at `$2200` and,
+when it is 2, loads the block at `$5F00` through MPR2 (still bank 1 at that
+point) and writes the VCE CR and the two VDC registers; otherwise it writes
+the constants `$04`, `$0202`, `$041F`.  Everything else — BXR/BYR/MWR/CR from
+the config, VDW 240, VPR, VCR, DCR and the SAT — is the same in both modes.
+
+The builders take the wide values from the picture's own dump
+(`regs.json`'s `VCECR`/`HSR`/`HDR`), not from a width table, so a future
+window is carried the same way.  `tools/genviewer.py` (`vwide336`/`vwide512`
+specs) and `renderer/pce-rom.js` (`regs.VCECR`/`HSR`/`HDR`) both apply the
+same rule: `(VCECR & 3) != 0` is wide, anything else is version 1.  Wide and
+flicker/raster are mutually exclusive (they would share the config's
+interrupt bytes or the table space) and the builders refuse the combination.
+The editor's own pictures use the same block: `setVideoMode(pic, 256|336|512)`
+in `renderer/pce-editor.js` sets the three registers from MacDonald's display
+table (`HSR/HDW` = `0x0202`/`0x041F`, `0x0402`/`0x0429`, `0x0B02`/`0x043F`).
 
 ## Bank 1 — the raster table, offset `0x640` (`$4640`) (#16)
 
@@ -227,6 +261,10 @@ the browser must not emit them either.
 
 - Reset sets MPR2 to bank 1, copies the 64-byte config block to RAM `$2200`
   and loads the 512 colour-table entries from `$4040`.
+- #70: before the palettes load, the version byte decides the VCE CR: version
+  2 reads the wide-window block at `$5F00` and writes its VCE CR, otherwise
+  the viewer writes `$04` (the `/4` clock).  The same block supplies HSR/HDR
+  where the VDC registers are written below.
 - The VDC init writes DCR = `0x0010` (bit 4, DSR: the VRAM-SATB transfer
   auto-repeats every VBlank) and DVSSR = `$7f00` (the SAT's VRAM address;
   the high-byte write starts the first transfer at the next VBlank) —
@@ -269,6 +307,12 @@ as the formula above. The **editor** stops at 1536 tiles (the `tile-space`
 refusal in `renderer/pce-editor.js`); the exporter's layout no longer caps
 tiles at that point (card #46), so a picture from another source can use more
 banks.
+
+#70: the editor's picture also chooses the VCE dot clock
+(`setVideoMode(pic, 256|336|512)`).  The BAT stays 32×32 (`MWR = 0`) in every
+mode — the VDC wraps it every 256 dots, so a wide frame shows the picture and
+its wrapped repetition — while the picture's VCE CR and HSR/HDR ride in the
+wide-window block above; a 256-dot picture stays config version 1.
 
 A picture with sprite patterns (#13) adds a **second** region: the patterns
 are packed into 64-word VRAM cells after the tiles (first cell

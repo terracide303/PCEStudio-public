@@ -291,6 +291,22 @@ The **Download .pce** button offers whichever picture is loaded; the
 TurboGrafx checkbox (#25) offers the bit-reversed image. `?demo=1` and
 `?sprites=1` on the page report the same bytes the Node run builds.
 
+### The dot clock (#70)
+
+The Dot clock control (`setVideoMode(pic, 256|336|512)`) chooses the VCE's
+`/4`, `/3` or `/2` clock. It writes the picture's VCE CR and the HSR/HDR of
+the matching display window (`$0202`/`$041F`, `$0402`/`$0429`,
+`$0B02`/`$043F` — MacDonald's display table, `pcetech` §9), so the export
+carries config version 2 and the wide-window block (`docs/ROM_LAYOUT.md`).
+The preview is drawn at the captured frame's real width — 256, 341 (the
+336-dot window with 2 border dots left and 3 right) or 512 — by the same
+`pce-bg.js`/`pce-sprites.js` the renderer tests prove. The BAT is still
+32×32, so the wide frames show the picture and its wrapped repetition; a
+wider BAT is not part of #70. `tests/check-editor.js` renders both wide
+modes against an independent model, exports them, and (when the captures are
+present) holds `tests/dumps/wedit336` and `wedit512` to the editor's own
+VRAM/CRAM/registers and a Mednafen frame diff 0 at 341×232 and 512×232.
+
 ## Evidence (measured 2026-10-28)
 
 `node tests/check-editor.js` (exit 0; written by @design, flagged for @review
@@ -486,8 +502,13 @@ followinfo: pixel (168,92) · VDW line 92 · winner: background
   effect has not been watched. The tables at several frames are checked by
   arithmetic, not by eye.
 - **Not every picture.** One picture each; one BAT size (32×32), one scroll
-  (`BXR=BYR=0`), 32×32 mode only. `setScroll` can set BXR/BYR but the editor
-  cannot change the BAT size or the 336/512-px modes yet.
+  (`BXR=BYR=0`). `setScroll` can set BXR/BYR but the editor cannot change the
+  BAT size yet. **The 336/512-px modes are #70**: the Dot clock control
+  (`setVideoMode`) sets the picture's VCE CR and the HSR/HDR of a 336- or
+  512-dot window, the preview draws the 341- or 512-px frame at its real
+  width and the export carries the registers. The BAT stays 32 tiles wide, so
+  a wide frame shows the picture plus its wrapped repetition — the editor
+  cannot paint a wider BAT yet.
 - **Not sprite animation or flicker multiplexing.** The sprites are static;
   more than 16 strips a line is shown dropped, not multiplexed (#28).
 - **Not the exporter's 6-bank limit for extreme pictures.** Patterns and tiles

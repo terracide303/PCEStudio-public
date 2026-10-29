@@ -127,6 +127,40 @@
                                  * final value, like the #15/#16 tables */
   var MWR_32x32 = 0x00;
 
+  /* ---- #70: the three VCE dot clocks -----------------------------------
+   *
+   * CR DCC bits 1-0 pick the clock (H6-3; pcetech §6 for the /2 clock):
+   * 00 = 5.37 MHz (256-dot window), 01 = 7.16 MHz (336), 10 = 10.74 MHz
+   * (512).  `frame` is the width pce-bg.js draws — Mednafen's output with
+   * horizontal overscan off: 256, 341 (the 336-dot window sits in 341 dots
+   * with 2 left / 3 right border) or 512.  HSR/HDR are MacDonald's display
+   * table for each clock (pcetech §9): HDS 2/4/11, HSW 2, HDW $1F/$29/$3F,
+   * HDE 4 — the same values #27's userland wide scenes write.  The BAT
+   * stays 32 tiles wide in every mode; the VDC wraps it every 256 dots, so
+   * a wide frame shows the picture plus its wrapped repetition. */
+  var VIDEO_MODES = {
+    256: { width: 256, frame: 256, VCECR: 0x04, HSR: 0x0202, HDR: 0x041F },
+    336: { width: 336, frame: 341, VCECR: 0x05, HSR: 0x0402, HDR: 0x0429 },
+    512: { width: 512, frame: 512, VCECR: 0x06, HSR: 0x0B02, HDR: 0x043F }
+  };
+
+  function videoMode(pic) {
+    return VIDEO_MODES[(pic && pic.video) || 256];
+  }
+
+  function setVideoMode(pic, width) {
+    if (!VIDEO_MODES[width])
+      refuse("video-mode", "the VCE has three dot clocks: 256, 336 or 512 " +
+             "dots; " + width + " is not one of them");
+    pic.video = width;
+  }
+
+  /* The preview's pixel size: the captured frame's width for the picture's
+   * dot clock (256 / 341 / 512), the editor's 224 visible rows. */
+  function previewSize(pic) {
+    return { width: videoMode(pic).frame, height: VIEW_H };
+  }
+
   /* ---- sprites (card #13) ---------------------------------------------- */
 
   var SPRITE_PALETTES = 16;     /* CRAM entries $100-$1FF */
@@ -223,7 +257,8 @@
       raster: { gradient: null, wobble: null, bands: [] },
       spritePalettes: spritePalettes,
       spritePatterns: [],
-      sprites: []
+      sprites: [],
+      video: 256                      /* #70: VCE dot clock (256/336/512) */
     };
   }
 
@@ -973,10 +1008,11 @@
       refuse("no-renderer", "the preview needs renderer/pce-bg.js and " +
              "renderer/pce-sprites.js loaded before pce-editor.js");
     var data = toPicture(pic);
+    var size = previewSize(pic);
     var opts = {
       vram: data.vram, cram: data.cram, regs: viewRegs(pic),
       sat: data.vram.slice(SAT_ADDR * 2, SAT_ADDR * 2 + 512),
-      width: VIEW_W, height: VIEW_H
+      width: size.width, height: size.height
     };
     var raster = toRaster(pic, frame);
     if (raster) opts.raster = raster;
@@ -1073,12 +1109,14 @@
     if (pic.spritePatterns.length)
       regions.push([layout.firstCell * 4, layout.cellCount * 4]);
 
+    var mode = videoMode(pic);
     return {
       vram: vram,
       cram: cram,
       regs: { BXR: pic.scroll.BXR, BYR: pic.scroll.BYR,
               MWR: MWR_32x32,
-              CR: CR_BG_ON | (pic.sprites.length ? CR_SPRITES_ON : 0) },
+              CR: CR_BG_ON | (pic.sprites.length ? CR_SPRITES_ON : 0),
+              VCECR: mode.VCECR, HSR: mode.HSR, HDR: mode.HDR },
       regions: regions,
       width: VIEW_W,
       height: VIEW_H
@@ -1092,11 +1130,14 @@
    * the top line (its DisplayRect starts one line later), so the capture and
    * the preview line up one row apart — docs/EDITOR.md says why. */
   function viewRegs(pic) {
+    var mode = videoMode(pic);
     return {
       BXR: pic.scroll.BXR, BYR: pic.scroll.BYR,
       MWR: MWR_32x32,
       CR: CR_BG_ON | (pic.sprites.length ? CR_SPRITES_ON : 0),
-      RCRCount: 0, scanline: 18
+      RCRCount: 0, scanline: 18,
+      /* #70: the preview follows the picture's dot clock and window */
+      VCECR: mode.VCECR, HSR: mode.HSR, HDR: mode.HDR
     };
   }
 
@@ -1593,6 +1634,8 @@
     "wobble-range": "a wobble period or speed that is not an integer in range",
     "parallax-range": "a parallax band list or speed that is not valid",
     "frame-range": "a raster frame number that is not a non-negative integer",
+    "video-mode": "a dot clock that is not one of the VCE's 256, 336 or " +
+      "512-dot modes (VCE CR DCC bits 1-0)",
     "no-renderer": "renderPreview called without pce-bg.js and " +
       "pce-sprites.js loaded"
   };
@@ -1671,6 +1714,11 @@
 
     toPicture: toPicture,
     viewRegs: viewRegs,
+    /* #70: the VCE dot clock (256 / 336 / 512 dots) */
+    VIDEO_MODES: VIDEO_MODES,
+    videoMode: videoMode,
+    setVideoMode: setVideoMode,
+    previewSize: previewSize,
     validate: validate,
     stats: stats,
     demoPicture: demoPicture,

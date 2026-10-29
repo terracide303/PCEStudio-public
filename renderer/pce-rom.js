@@ -13,8 +13,12 @@
  *            extracted from the PCEAS build by `make -C tools bank0`.
  *   vram:    Uint8Array, 131072 bytes = 65536 uint16 little-endian words
  *   cram:    Uint8Array, 1024 bytes = 512 uint16 LE colour-table entries
- *   regs:    { BXR, BYR, MWR, CR } — exactly the values the config block
- *            carries (docs/ROM_LAYOUT.md, bank 1)
+ *   regs:    { BXR, BYR, MWR, CR, VCECR?, HSR?, HDR? } — exactly the values
+ *            the config block carries (docs/ROM_LAYOUT.md, bank 1).  #70: a
+ *            picture whose VCECR selects a /3 or /2 dot clock (DCC bits 1-0
+ *            != 00) writes config version 2 and the wide-window block at
+ *            bank 1 offset 0x1F00 (VCECR + HSR + HDR); a caller without a
+ *            VCECR is the pre-#70 /4 picture and writes version 1.
  *   regions: [[char0, tileCount], ...] — the picture's VRAM copy regions in
  *            descriptor order (tests/dumps/sceneN/regions.json for the
  *            sample scenes; for the #12 sprite scenes the list also carries
@@ -92,6 +96,17 @@
   var CFG_RASTER = 9;            /* 1 = the #16 raster table is present */
   var CFG_REG0 = 0x0A;
   var REG_SIZE = 4;
+  /* #70: the wide-window block.  A picture whose VCE CR selects a /3 or /2
+   * dot clock (DCC bits 1-0 != 00) is a 336- or 512-dot picture; the viewer
+   * cannot use the 256-dot HSR/HDR constants, so config version 2 says the
+   * block at bank 1 offset 0x1F00 is present.  It sits after the raster table
+   * (which ends at 0x1550) and is 0xff in every version 1 picture, so every
+   * ROM built before #70 is byte-identical.  Byte-identical to
+   * tools/genviewer.py's encoder (docs/ROM_LAYOUT.md). */
+  var WIDE_OFFSET = 0x1F00;
+  var WIDE_SIZE = 8;
+  var WIDE_VCE_CR = 0, WIDE_HSR_LO = 2, WIDE_HSR_HI = 3,
+      WIDE_HDR_LO = 4, WIDE_HDR_HI = 5;
   /* 13 descriptors fit between CFG_REG0 and the palette at 0x40:
    * (0x40 - 0x0A) / 4 = 13.  The count byte could hold 255; going past 13
    * would need a new config layout (docs/ROM_LAYOUT.md). */
@@ -328,6 +343,24 @@
     byte("MWR", mwr, 0xFF);
     byte("CR", cr, 0xFF);
 
+    /* #70: a picture is wide when its VCE CR asks for a /3 or /2 dot clock.
+     * A caller that carries no VCE register is the pre-#70 /4 picture. */
+    var vcecr = regs.VCECR != null ? regs.VCECR : 0x04;
+    byte("VCECR", vcecr, 0xFF);
+    var wide = (vcecr & 0x03) !== 0;
+    var wideHsr = regs.HSR != null ? regs.HSR : 0x0202;
+    var wideHdr = regs.HDR != null ? regs.HDR : 0x041F;
+    byte("HSR", wideHsr, 0xFFFF);
+    byte("HDR", wideHdr, 0xFFFF);
+    /* #70: the wide-window block and the #16 raster table are mutually
+     * exclusive (docs/ROM_LAYOUT.md): genviewer.py refuses the combination,
+     * and so does this builder, so the two stay comparable on every picture
+     * either can describe. */
+    if (wide && picture.raster)
+      refuse("wide-raster", "a wide picture (VCE CR DCC != 00) cannot also " +
+             "carry a raster table; the wide-window block and the table are " +
+             "mutually exclusive (docs/ROM_LAYOUT.md)");
+
     /* ---- #16: the raster table (optional).  The table owns the boot
      * colour table (baseCram — what CRAM holds before the first entry of a
      * frame, the same state the renderer applies entries to) and adds the
@@ -420,7 +453,7 @@
 
     var bank1 = BANK;
     var cfg = new Uint8Array(CONFIG_SIZE);
-    cfg[CFG_VERSION] = 1;
+    cfg[CFG_VERSION] = wide ? 2 : 1;
     u16(cfg, CFG_BXR, bxr);
     u16(cfg, CFG_BYR, byr);
     cfg[CFG_MWR] = mwr;
@@ -436,6 +469,17 @@
     rom.set(palette, bank1 + PALETTE_OFFSET);
     rom.set(sat, bank1 + SAT_OFFSET);
     if (rasterImage) rom.set(rasterImage, bank1 + RASTER_OFFSET);
+    if (wide) {
+      /* #70: the wide-window block, byte for byte what tools/genviewer.py
+       * writes: VCE CR, reserved 0, HSR lo/hi, HDR lo/hi, reserved 0,0. */
+      var wideBlock = new Uint8Array(WIDE_SIZE);
+      wideBlock[WIDE_VCE_CR] = vcecr & 0xFF;
+      wideBlock[WIDE_HSR_LO] = wideHsr & 0xFF;
+      wideBlock[WIDE_HSR_HI] = (wideHsr >> 8) & 0xFF;
+      wideBlock[WIDE_HDR_LO] = wideHdr & 0xFF;
+      wideBlock[WIDE_HDR_HI] = (wideHdr >> 8) & 0xFF;
+      rom.set(wideBlock, bank1 + WIDE_OFFSET);
+    }
 
     rom.set(bat, 2 * BANK);
     rom.set(tiles, 4 * BANK);
