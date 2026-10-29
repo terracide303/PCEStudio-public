@@ -395,7 +395,11 @@ function sectionRun(settings) {
   }
   const v = spawnSync(exe, ["--version"], { encoding: "utf8", timeout: 30000 });
   const ver = ((v.stdout || "") + (v.stderr || "")).trim();
-  check(/headless-?shell/i.test(ver) || /HeadlessShell/.test(ver),
+  /* Chrome for Testing does not spell itself the same way on every channel
+   * ("chrome-headless-shell 141…", "Google Chrome for Testing 141…"), so the
+   * accepted set is the union; the OUTPUT is printed either way, which is what
+   * makes a wording mismatch visible rather than a silent red. */
+  check(/headless|for testing|HeadlessChrome/i.test(ver),
         "the binary identifies as a headless shell (" + (ver || "no output") + ")");
 
   const before = cloneDirs();
