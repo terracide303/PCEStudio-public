@@ -1,0 +1,81 @@
+/*
+ * studio-panel-console.css — the CONSOLE panel's own styles (card #98).
+ *
+ * ppu.toys' SNES tab: a banner that says whether the toy can run, the
+ * FINDINGS with a clickable file:line, the frame/code/ROM figures and an
+ * honest note.  The colours come from the page's tokens, so both themes
+ * work; the panel keeps its own chrome here (#102's split).
+ */
+
+.con-head { margin-bottom: 6px; }
+.con-head h3 { margin: 0 0 2px; }
+.con-sub {
+  font: 11px var(--mono); color: var(--dim); margin: 0;
+  letter-spacing: 0.04em;
+}
+
+.con-banner {
+  font: 12px/1.4 var(--mono); font-weight: 600;
+  padding: 7px 10px; margin: 8px 0 10px;
+  border: 1px solid var(--line); border-radius: 3px;
+  background: var(--sunken); color: var(--text);
+}
+.con-banner.is-ok {
+  border-color: var(--green); color: var(--green);
+  background: rgba(94, 201, 122, 0.08);
+}
+.con-banner.is-bad {
+  border-color: var(--bad); color: var(--bad);
+  background: rgba(255, 93, 106, 0.08);
+}
+.con-banner.is-idle { color: var(--dim); }
+
+.con-findings-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font: 10px var(--mono); letter-spacing: 0.12em; color: var(--dim);
+  border-bottom: 1px solid var(--line); padding-bottom: 3px;
+}
+.con-findings {
+  list-style: none; margin: 0; padding: 0; max-height: 160px;
+  overflow: auto;
+}
+.con-finding {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 5px 2px; border-bottom: 1px solid var(--line);
+  font: 11px/1.45 var(--mono);
+}
+.con-finding.is-warn .con-code { color: var(--accent); }
+.con-finding.is-error .con-code { color: var(--bad); }
+.con-finding.is-none { color: var(--dim); }
+.con-line {
+  flex: none; font: 11px var(--mono); padding: 0;
+  background: none; border: 0; cursor: pointer;
+  color: var(--cyan); text-decoration: underline dotted;
+}
+.con-line:hover { color: var(--text); }
+.con-line.is-plain {
+  color: var(--faint); cursor: default; text-decoration: none;
+}
+.con-code { flex: none; color: var(--muted); }
+.con-msg { color: var(--text); min-width: 0; }
+
+.con-stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 2px 18px; margin: 10px 0 8px;
+}
+.con-row {
+  display: flex; gap: 8px; align-items: baseline;
+  font: 11px/1.5 var(--mono); padding: 1px 0;
+}
+.con-label {
+  flex: none; width: 62px; color: var(--dim); letter-spacing: 0.08em;
+}
+.con-value { color: var(--text); }
+.con-subnote {
+  display: block; color: var(--dim); font-size: 10px;
+}
+
+.con-note {
+  color: var(--dim); font: 10px/1.5 var(--mono); margin: 4px 0 10px;
+  max-width: 52rem;
+}
