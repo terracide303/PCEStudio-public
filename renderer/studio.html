@@ -47,6 +47,8 @@
        ?paused=1                      load without autoplay
        ?tab=assets                    open the ASSETS file list
        ?panel=<id>                    show a dock panel (a screenshot)
+       ?view=<grid|staff>            the SEQUENCER's view (#95): the step
+                                      grid or the staff on the same song
        ?bottom=<markers|agent>        open a bottom drawer (a screenshot)
        ?docs=<chapter>                open the Docs panel at a chapter
        ?selftest=1&frames=40          run the example headlessly, write the
@@ -1363,7 +1365,7 @@
               <button type="button" class="btn-mini" id="seq-view-grid"
                       aria-pressed="true">Grid</button>
               <button type="button" class="btn-mini" id="seq-view-staff"
-                      disabled title="The staff view is part 2 (#95)">Staff</button>
+                      title="The same song on a treble and bass staff (#95)">Staff</button>
             </div>
             <div class="seq-tools">
               <span class="seq-kicker">INSTRUMENT</span>
@@ -1391,13 +1393,21 @@
                   <option value="large">large</option>
                 </select></label>
             </div>
-            <div class="seq-gridbox">
+            <div class="seq-gridbox" id="seq-gridbox">
               <canvas id="seq-grid" width="374" height="126" tabindex="0"
                       aria-label="The step grid: six channel rows, click a cell to place or erase a note"></canvas>
             </div>
-            <div class="seq-voicesbox">
+            <div class="seq-voicesbox" id="seq-voicesbox">
               <canvas id="seq-voices" width="374" height="26"
                       aria-label="How many of the six voices sound at each step"></canvas>
+            </div>
+            <!-- #95: the same song read as music — a grand staff (treble and
+                 bass clef), the key signature, note values, accidentals and
+                 the octave marks 15mb/8vb/loco/8va/15ma.  Drawn by
+                 renderer/pce-staff.js's model; it edits nothing. -->
+            <div class="seq-staffbox" id="seq-staffbox" hidden>
+              <canvas id="seq-staff" width="374" height="142"
+                      aria-label="The song on a treble and bass staff"></canvas>
             </div>
             <div class="seq-foot">
               <span class="seq-info" id="seq-info"></span>
@@ -1782,6 +1792,10 @@
      into the tiles and palettes the panels edit, a DDA sample, or a song.
      It reads pce-psg.js (the DDA preview) and pce-seq.js (the song), above. -->
 <script src="pce-source.js"></script>
+<!-- #95: the SEQUENCER's staff view — a song spelled for a key, a clef, a
+     note value and an octave mark, drawn by the SEQUENCER panel.  It reads
+     renderer/pce-seq.js's song and changes none of it. -->
+<script src="pce-staff.js"></script>
 <script src="pce-docs.js"></script>
 <!-- #87: the generated pceglobals.lua document, built from the register,
      pad and helper tables above (the ppuglobals.lua tab ppu.toys has). -->
@@ -4459,6 +4473,13 @@ function init() {
     ? new URLSearchParams(location.search) : new URLSearchParams("");
   const panelParam = qs.get("panel");
   if (panelParam && PANELS.some((p) => p.id === panelParam)) selectPanel(panelParam);
+  /* ?view=staff opens the SEQUENCER's staff view without synthetic input, the
+   * way ?panel opens a panel (#95's screenshot). */
+  const viewParam = qs.get("view");
+  if (viewParam === "grid" || viewParam === "staff") {
+    const seqPanel = panelById("sequencer");
+    if (seqPanel && seqPanel.api && seqPanel.api.view) seqPanel.api.view(viewParam);
+  }
   /* ?bottom=agent|markers opens a drawer without synthetic input, the way
    * ?tab=assets opens the ASSETS list (#84's screenshots). */
   const bottomParam = qs.get("bottom");
