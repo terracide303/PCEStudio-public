@@ -499,7 +499,8 @@ function init()
   art_sat()
 
   -- BB (background) and SB (sprites) on.  The toy host starts at BB only
-  -- (card #120), so a toy that forgets this draws a SAT nobody can see.
+  -- (docs/TOYS.md §2, card #120), so a toy that forgets this draws a SAT
+  -- nobody can see.
   reg("CR", 0xC0)
 
   -- The status bar: line 0 freezes the scroll and darkens the backdrop; line

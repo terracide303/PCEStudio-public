@@ -1114,6 +1114,10 @@
                 <canvas id="spr-screen" width="256" height="240" tabindex="0"
                         aria-label="The picture: click a sprite to select it and drag to move it"></canvas>
                 <div class="spr-live" id="spr-live">frame: no frame yet</div>
+                <!-- #120: written by the panel on every draw.  Run shows the
+                     toy's own CR, and the host powers on at $80 (background
+                     only), so this screen can show a sprite Run cannot. -->
+                <div class="spr-sbhint" id="spr-sbhint"></div>
                 <div class="spr-note" id="spr-note">No sprites yet: click slot
                   0 to place one.</div>
               </div>
@@ -2534,7 +2538,11 @@ function rebuild() {
   const factory = current.mode === "il" ? PCEStudio.il : PCEStudio.toys;
   if (!factory) throw new Error("the " + current.mode + " runtime did not load");
   current.source = mainSource();
-  const rt = factory.create(current.source, { budgetMs: 120 });
+  /* #117: the toy's asset files are the picture the running toy boots with.
+   * Both runtimes hand `files` to the shared host (renderer/pce-toyhost.js),
+   * which imports tiles/palettes/sprites into VRAM, CRAM, the SAT and the
+   * scroll before the toy's own code runs; empty defaults import nothing. */
+  const rt = factory.create(current.source, { budgetMs: 120, files: files });
   rt.load();
   runtime = rt;
   currentFrame = -1;

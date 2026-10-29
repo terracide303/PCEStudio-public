@@ -31,6 +31,12 @@
   white-space: pre-wrap;
 }
 .spr-note { color: var(--cyan); }
+/* #120: why Run can show no sprites while the screen above shows them. */
+.spr-sbhint {
+  font: 10px/1.4 var(--mono); color: var(--dim); margin-top: 4px;
+  white-space: normal;
+}
+.spr-sbhint:empty { display: none; }
 
 #spr-slots, #spr-sheet, #spr-pattern {
   display: block; image-rendering: pixelated; background: #08090c;

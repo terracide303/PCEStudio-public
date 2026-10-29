@@ -3513,6 +3513,23 @@ function checkSpritesPanel(page) {
   check(page.dom.get("spr-grid").checked === true, "the pattern grid starts on");
   check(api.drawn(), "the panel drew its own text");
 
+  /* #120: this screen draws the toy's ASSETS (SB forced on by renderPreview)
+   * while Run draws the toy's own CR, and the host powers on at $80 — so the
+   * panel must say what the toy has to write, in the panel and in TOYS.md.
+   * Written by @design because the card names both places; rule 2's cold
+   * break is owed (the author wrote the check). */
+  const sbHint = page.dom.get("spr-sbhint");
+  check(!!sbHint && /SB/.test(sbHint.textContent) &&
+        /reg\("CR", 0xC0\)/.test(sbHint.textContent),
+        "#120: the SPRITES panel says Run needs reg(\"CR\", 0xC0) (SB) — " +
+        JSON.stringify(sbHint && sbHint.textContent));
+  const toysDoc = fs.readFileSync(path.join(__dirname, "..", "docs", "TOYS.md"),
+                                  "utf8");
+  check(/sprite layer is off until the toy sets SB/.test(toysDoc) &&
+        /reg\("CR", 0xC0\)/.test(toysDoc),
+        "#120: docs/TOYS.md §2 states the sprite layer is off until SB and " +
+        "names reg(\"CR\", 0xC0)");
+
   /* ---- place a sprite on slot 0: the SAT fills in order ---------------- */
   eq("#86: clicking slot 0 places sprite 0 (and its 16x16 pattern)",
      api.selectSlot(0), 0);
