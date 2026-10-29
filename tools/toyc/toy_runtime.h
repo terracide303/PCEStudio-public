@@ -46,4 +46,38 @@ static inline int32_t toy_rgb(int32_t r, int32_t g, int32_t b) {
                    (uint32_t)(b & 7));
 }
 
+/* ---- pads and the timer (#45) --------------------------------------------
+ *
+ * The console's own hardware paths: the 5 pads behind the Turbo Tap on the
+ * I/O port at $1000 (H8-19; the read sequence is HuDK include/joypad.s's,
+ * MIT, which follows pcetech §4), and the TMA timer at $0C00/$0C01 with its
+ * interrupt on vector $FFFA (H8-20..H8-22).  Built only into a ROM whose toy
+ * uses them, so a toy without pads or a timer carries none of this.
+ */
+
+/* pad[n].field's field as a bit in the runtime's 8-bit pad word: the 2-button
+ * pad's own order (I, II, Select, Run, Up, Right, Down, Left), pcetech §4. */
+#define TOY_PAD_II 0
+#define TOY_PAD_I 1
+#define TOY_PAD_SELECT 2
+#define TOY_PAD_RUN 3
+#define TOY_PAD_UP 4
+#define TOY_PAD_RIGHT 5
+#define TOY_PAD_DOWN 6
+#define TOY_PAD_LEFT 7
+
+/* The IL's padget: 1 while pad n's field is held, 0 otherwise.  n is 1..5. */
+int32_t toy_pad(int32_t n, int32_t field);
+
+/* The IL's sat(i, k, v): SAT entry i's word k, written through VRAM $7F00. */
+void toy_sat(int32_t i, int32_t k, int32_t v);
+
+/* The IL's timer(period, fn): write the reload register and start the timer
+ * (7-bit period; the interrupt is raised every period+1 ticks of 6,991.3 Hz,
+ * H8-20..H8-22).  toy_timer_pending() returns and clears the interrupts that
+ * happened since the last call, so the generated frame flow can run fn once
+ * per interrupt — the same figure the browser host reports. */
+void toy_timer_set(int32_t period);
+int32_t toy_timer_pending(void);
+
 #endif /* PCE_TOY_RUNTIME_H */

@@ -141,7 +141,10 @@ frames. `t` is deterministic (`f/60`), not wall-clock: a frame is reproducible.
 | `sat(i, k, v)` | a raw SAT word | i 0..63, k 0..3, v 0..65535, `sat-range` |
 | `sprite(i, spec)` | compose SAT entry i (below) | `sprite-range` |
 | `raster(line, spec)` | one raster-table entry (table form) | line 0..223, `raster-line` |
-| `pad[n].up/down/left/right/i/ii/select/run` | 2-button pad n (1..5), refreshed before `frame` | read-only booleans |
+| `pad[n].up/down/left/right/i/ii/select/run` | 2-button pad n (1..5), refreshed before `frame`. On the console the five come through the Turbo Tap on the I/O port at `$1000`: SEL selects D-pad or buttons, the inputs are inverted, and a SEL edge with CLR low advances to the next controller (HuC6280 manual H8-19; pcetech §4; the sequence is HuDK `include/joypad.inc`'s) | read-only booleans |
+| `timer(period, fn)` | start the TMA timer ($1FEC00/$1FEC01, H8-20) with reload `period`; `fn` is called once per interrupt (period+1 ticks of 6,991.3 Hz) | period 0..127, `timer-range` |
+| `timerstop()` | stop the timer (its Start/Stop flag, $1FEC01 bit 0) | none |
+| `timerirqs()` | timer interrupts since the previous `frame()` | none |
 | `rgb(r, g, b)` | a VCE word from 3-bit channels | channels are masked to 0..7 |
 | `note(name or MIDI)` | the PSG's 12-bit F for a note | `toy-error` on a bad name |
 | `music(index)` | play song `index` from the start (#71) | an index into the songs the runtime was given; none or past them is `music-range` |

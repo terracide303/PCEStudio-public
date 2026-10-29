@@ -1,0 +1,26 @@
+{
+ "pad": {
+  "frame": 1293,
+  "console": {
+   "satY": 202,
+   "satX": 186,
+   "x": 154,
+   "y": 138
+  },
+  "browser": {
+   "satY": 202,
+   "satX": 186,
+   "x": 154,
+   "y": 138
+  },
+  "equal": true
+ },
+ "timer": {
+  "frames": 607,
+  "console_irqs": 3938,
+  "console_per_frame": 6.487644151565074,
+  "browser_irqs": 3929,
+  "browser_per_frame": 6.472817133443163,
+  "arithmetic_per_frame_5991Hz_60": 6.473425925925926
+ }
+}

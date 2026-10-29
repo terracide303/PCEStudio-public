@@ -206,6 +206,7 @@ constant operand; `target` is an instruction index in the same function.
 | `vget` / `vset` | `dst`, `addr` / `addr`, `word` | `int` | read/write a VRAM word |
 | `padref` | `dst`, `n` | `int` → `pad` | `pad[n]` |
 | `padget` | `dst`, `pad`, `field` | `pad` → `bool` | `pad[n].right` etc. |
+| `timer` | `period`, `fn?` | `int`, `fn` | start the TMA timer with reload `period` (0..127) and call `fn` once per interrupt (#45); `fn` is a function value the host or the console's generated frame flow calls |
 | `builtin` | `name`, `dst?`, `args[]` | numeric helpers | `rgb clamp min max floor abs lerp ramp ramp_int sin cos sqrt note` (`note(MIDI)` returns the PSG's F; a note *name* is a string, which the IL does not carry) |
 
 **Why the toy surface has its own instructions.** A validator (#32) has to

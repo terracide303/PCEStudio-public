@@ -132,6 +132,99 @@ static void vdc_write(uint8_t reg, uint16_t value) {
   *IO_VDC_DATA_HI = (uint8_t)(value >> 8);
 }
 
+#ifdef TOY_INPUT_BUILD
+/* ---- pads and the timer (#45) ----------------------------------------
+ *
+ * The pads: a Turbo Tap's five 2-button controllers on the I/O port at
+ * $1000 (H8-19, "Port K").  The sequence is HuDK include/joypad.s's
+ * (MIT, (c) 2016-2020 MooZ), which follows pcetech §4 "I/O port":
+ *
+ *   - reset the tap's counter by holding SEL high while CLR goes 0 -> 1
+ *     (write $01, then $03);
+ *   - for each of the five controllers, set SEL=1 and read the D-pad, then
+ *     SEL=0 and read the four buttons; each 0 -> 1 edge of SEL with CLR low
+ *     advances the tap's counter to the next controller;
+ *   - wait ~9 cycles after each SEL change ("PHA PLA NOP NOP", pcetech §4);
+ *   - the inputs are inverted: a 0 bit means the switch is closed.
+ *
+ * The timer: $0C00 is the 7-bit reload register, $0C01 bit 0 the Start/Stop
+ * flag (H8-20).  The prescaler divides OSC1 by 3 then by 1024 — 6,991.3 Hz
+ * at 21.48 MHz (H8-21).  A borrow sets TIQ, reloads the downcounter and
+ * runs the timer interrupt (vector $FFFA); TIQ is acknowledged by any write
+ * to $1403 (H8-15/H8-22).  The handler only counts: the toy's callback runs
+ * from toy_frame(), through the generated il_timer_pump(), so the compiled
+ * code never re-enters itself from an interrupt.
+ */
+static uint8_t joy_pads[5];
+static volatile uint8_t joy_ready;
+static volatile uint16_t timer_irqs;
+static uint8_t toy_cr;           /* the CR the toy last asked for */
+
+static void joy_delay(void) {
+  /* HuDK's joypad_delay, include/joypad.inc, is PHA/PLA/NOP/NOP (~11 cycles;
+   * pcetech §4: "a common sequence is PHA PLA NOP NOP").  2 cycles measured
+   * as a stale read on every other frame; five NOPs give the same ~10. */
+  __asm__ volatile("nop\n\tnop\n\tnop\n\tnop\n\tnop" ::: "memory");
+}
+
+static void joy_scan(void) {
+  uint8_t i, dirs, btns;
+  /* reset the Turbo Tap to controller 1: SEL high, then CLR 0 -> 1 */
+  *IO_JOYPAD = 0x01;
+  joy_delay();
+  *IO_JOYPAD = 0x03;
+  joy_delay();
+  for (i = 0; i < 5; i++) {
+    *IO_JOYPAD = 0x01;              /* SEL=1: the D-pad on D3..D0 */
+    joy_delay();
+    dirs = *IO_JOYPAD;
+    *IO_JOYPAD = 0x00;              /* SEL=0: the four buttons */
+    joy_delay();
+    btns = *IO_JOYPAD;
+    /* D-pad to bits 4..7 (Up, Right, Down, Left), buttons to 0..3
+     * (II, I, Select, Run); inverted, so 1 means held. */
+    joy_pads[i] = (uint8_t)(~(((uint8_t)(dirs << 4) & 0xF0) |
+                              (uint8_t)(btns & 0x0F)));
+  }
+  joy_ready = 1;
+}
+
+int32_t toy_pad(int32_t n, int32_t field) {
+  if (!joy_ready || n < 1 || n > 5) return 0;
+  if (field < 0 || field > 7) return 0;
+  return (joy_pads[n - 1] >> field) & 1;
+}
+
+/* The SAT is VRAM $7F00..$7FFF (docs/ROM_LAYOUT.md); the startup set DSR so
+ * the VDC reloads SATB from there every VBlank. */
+void toy_sat(int32_t i, int32_t k, int32_t v) {
+  if (i < 0 || i > 63 || k < 0 || k > 3) return;
+  toy_vram_set(0x7F00 + i * 4 + k, v);
+}
+
+void toy_timer_set(int32_t period) {
+  *IO_TIMER_COUNTER = (uint8_t)(period & 0x7F);
+  *IO_TIMER_CONTROL = TIMER_ON;
+  pce_irq_enable(IRQ_TIMER);
+  pce_cpu_irq_enable();
+}
+
+int32_t toy_timer_pending(void) {
+  int32_t n;
+  pce_cpu_irq_disable();
+  n = (int32_t)timer_irqs;
+  timer_irqs = 0;
+  pce_cpu_irq_enable();
+  return n;
+}
+
+/* Vector $FFFA.  A write to $1403 acknowledges TIQ (H8-15). */
+__attribute__((interrupt)) void irq_timer(void) {
+  *IO_IRQ_ACK = 0;
+  timer_irqs++;
+}
+#endif /* TOY_INPUT_BUILD */
+
 #ifdef TOY_RASTER_BUILD
 static void measure_flag(uint8_t bit) {
   MEAS[MEAS_FLAGS] = (uint8_t)(MEAS[MEAS_FLAGS] | bit);
@@ -231,6 +324,11 @@ void toy_reg(int32_t which, int32_t value) {
      * (bit 2) for the RCR line interrupt the raster chain runs on.  Neither
      * changes the picture; the state comparison masks them (§10). */
     vdc_write(0x05, (uint16_t)(((v & 0xFF) | 0x0C)));
+#ifdef TOY_INPUT_BUILD
+    /* Remember the toy's CR so toy_display_on does not drop SB (sprites) or
+     * any other bit the toy asked for (#45: a sprite toy sets $C0). */
+    toy_cr = (uint8_t)(v & 0xFF);
+#endif
   }
 }
 
@@ -283,8 +381,13 @@ void toy_wait_vblank(void) {
 }
 
 void toy_display_on(void) {
-  /* CR = BB (background on) + the VBlank status bit. */
+  /* CR = BB (background on) + the VBlank status bit.  A toy that set its own
+   * CR keeps it: with sprites (#45) CR bit 6 (SB) must survive the turn-on. */
+#ifdef TOY_INPUT_BUILD
+  vdc_write(0x05, (uint16_t)(0x0088 | toy_cr));
+#else
   vdc_write(0x05, 0x0088);
+#endif
 }
 
 static uint8_t measure_t0;
@@ -589,6 +692,9 @@ int main(void) {
     int32_t f;
     for (f = 0;; f++) {
       toy_wait_vblank();
+#ifdef TOY_INPUT_BUILD
+      joy_scan();               /* the pads, once per toy frame (#45) */
+#endif
       toy_measure_begin();
       toy_frame(f);
       toy_measure_end();
@@ -618,6 +724,9 @@ int main(void) {
       uint16_t ccount;
 
       /* ---- compute: the display is idle (nothing armed) ---- */
+#ifdef TOY_INPUT_BUILD
+      joy_scan();               /* the pads, once per toy frame (#45) */
+#endif
       toy_pend_op = 0;
       toy_pend_npal = 0;
       toy_pend_nvram = 0;

@@ -63,6 +63,7 @@
       <a href="#sprites">Sprites and the SAT</a>
       <a href="#raster">Raster: changes per line</a>
       <a href="#pads">Pads</a>
+      <a href="#timer">The timer</a>
       <a href="#passwords">Passwords</a>
       <a href="#sound">Sound: the PSG</a>
       <a href="#budgets">Budgets and limits</a>
@@ -144,6 +145,21 @@ function frame(t, f)
   was_ii = pad[1].ii
 end</code></pre>
 </section>
+<section id="timer">
+<h2>The timer</h2>
+<p>The HuC6280's 7-bit interval timer is the console's only sub-frame clock (H8-20..H8-22). timer(period, fn) writes the reload register ($1FEC00) and starts it ($1FEC01 bit 0); the downcounter borrows every period+1 ticks of 6,991.3 Hz, sets TIQ and reloads, and fn is called once per interrupt. A period of 0..127 is 128 ticks at most — 143 us to 18.3 ms (H8-21).</p>
+<p>The browser host has no sub-frame clock. It accumulates whole timer ticks across frames at 6991.3 Hz and calls fn at the frame boundary, the number of interrupts that happened since the previous frame() — about 116.5 ticks per frame at 60 Hz. The console runs the same count from the real TMA timer, raised as its own interrupt (vector $FFFA), so timerirqs() reports the hardware's figure there.</p>
+<table><thead><tr><th>call</th><th>what it does</th><th>range / refusal</th></tr></thead><tbody><tr><td>timer(period, fn)</td><td>starts the TMA timer: the downcounter reloads from period, counts down once per 1024 CPU clocks (6,991.3 Hz) and, on the borrow that sets TIQ, calls fn once and reloads; a period of 0 counts as 1 tick and 127 as 128 (H8-20..H8-22, pcetech §2.2)</td><td>period 0..127; fn is called once per interrupt, at the frame boundary, (frames elapsed × 116.5) / (period+1) times</td></tr><tr><td>timerstop()</td><td>stops the timer (its Start/Stop flag, $0C01 bit 0, goes to 0)</td><td>none</td></tr><tr><td>timerirqs()</td><td>the number of timer interrupts since the previous frame() — the figure a capture's per-frame measurement reads</td><td>none</td></tr></tbody></table>
+<pre><code class="lua">local ticks = 0
+
+-- the interrupt: 17 ticks per period = 6,991.3 / 18 = 388 Hz
+timer(17, function () ticks = ticks + 1 end)
+
+function frame(t, f)
+  -- timerirqs() is what happened during the frame just ended
+  pal(0, rgb(ticks &amp; 7, 0, 0))
+end</code></pre>
+</section>
 <section id="passwords">
 <h2>Passwords</h2>
 <p>A bare HuCard has no save memory, so a toy saves with a password (Dennis, 2026-10-28). password.pack(value) turns a value into a short code starting P1 (base32 alphabet, then a check byte) and password.unpack(code) returns it; a mistyped or foreign code is password-code.</p>
@@ -180,7 +196,7 @@ end</code></pre>
 <h2>Refusal codes</h2>
 <p>A refusal is a named failure, not a silent drop: the call throws (or the page shows) an error whose code is one of these, and both runtimes use the same code for the same fault.</p>
 <h3>The toy host (both runtimes) <span class="src">renderer/pce-toyhost.js</span></h3>
-<table><thead><tr><th>code</th><th>meaning</th></tr></thead><tbody><tr><td>music-range</td><td>a song index outside the songs the runtime was given</td></tr><tr><td>no-psg</td><td>the PSG model or the song player is not loaded, so no toy can make sound</td></tr><tr><td>pad-range</td><td>a pad number outside 1..5</td></tr><tr><td>pal-range</td><td>a colour-table address or word outside 0..511</td></tr><tr><td>raster-line</td><td>a raster line outside VDW 0..223</td></tr><tr><td>raster-line-full</td><td>a second raster entry on one line, or too many colour writes on it</td></tr><tr><td>reg-forbidden</td><td>a register a toy may not touch</td></tr><tr><td>reg-range</td><td>a register value outside the VDC register's width</td></tr><tr><td>sat-range</td><td>a SAT entry outside 0..63 or a SAT word past $FFFF</td></tr><tr><td>sfx-range</td><td>an SFX channel, frequency, volume or length outside its range</td></tr><tr><td>sprite-range</td><td>a sprite field outside the SAT's range</td></tr><tr><td>vram-range</td><td>a VRAM word address outside 0..32767 or a word past $FFFF</td></tr></tbody></table>
+<table><thead><tr><th>code</th><th>meaning</th></tr></thead><tbody><tr><td>music-range</td><td>a song index outside the songs the runtime was given</td></tr><tr><td>no-psg</td><td>the PSG model or the song player is not loaded, so no toy can make sound</td></tr><tr><td>pad-range</td><td>a pad number outside 1..5</td></tr><tr><td>pal-range</td><td>a colour-table address or word outside 0..511</td></tr><tr><td>raster-line</td><td>a raster line outside VDW 0..223</td></tr><tr><td>raster-line-full</td><td>a second raster entry on one line, or too many colour writes on it</td></tr><tr><td>reg-forbidden</td><td>a register a toy may not touch</td></tr><tr><td>reg-range</td><td>a register value outside the VDC register's width</td></tr><tr><td>sat-range</td><td>a SAT entry outside 0..63 or a SAT word past $FFFF</td></tr><tr><td>sfx-range</td><td>an SFX channel, frequency, volume or length outside its range</td></tr><tr><td>sprite-range</td><td>a sprite field outside the SAT's range</td></tr><tr><td>timer-range</td><td>a timer reload value outside 0..127</td></tr><tr><td>vram-range</td><td>a VRAM word address outside 0..32767 or a word past $FFFF</td></tr></tbody></table>
 <h3>The Lua runtime <span class="src">renderer/pce-toys.js</span></h3>
 <table><thead><tr><th>code</th><th>meaning</th></tr></thead><tbody><tr><td>no-vm</td><td>the Lua VM (Fengari) is not loaded, so no toy can run</td></tr><tr><td>pal-range</td><td>a colour-table address or word outside 0..511</td></tr><tr><td>password-code</td><td>a password that is not one</td></tr><tr><td>password-value</td><td>a save value that cannot be packed</td></tr><tr><td>raster-line</td><td>a raster line outside VDW 0..223</td></tr><tr><td>raster-line-full</td><td>a second raster entry on one line, or too many colour writes on it</td></tr><tr><td>reg-forbidden</td><td>a register a toy may not touch</td></tr><tr><td>reg-range</td><td>a register value outside the VDC register's width</td></tr><tr><td>sat-range</td><td>a SAT entry outside 0..63 or a SAT word past $FFFF</td></tr><tr><td>sprite-range</td><td>a sprite field outside the SAT's range</td></tr><tr><td>toy-error</td><td>a Lua error inside the toy, naming file:line</td></tr><tr><td>toy-timeout</td><td>a toy hook past the frame's Lua budget</td></tr><tr><td>vram-range</td><td>a VRAM word address outside 0..32767 or a word past $FFFF</td></tr></tbody></table>
 <h3>The IL lowerer <span class="src">renderer/pce-il.js</span></h3>

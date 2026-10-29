@@ -36,6 +36,12 @@ EXTRA=""
 if grep -q "void toy_raster(int32_t line)" "tools/gen/$NAME.c"; then
   EXTRA="-DTOY_RASTER_BUILD"
 fi
+# Pads, the SAT and the TMA timer (#45): the runtime carries the $1000 read,
+# the $7F00 SAT write and the $0C00/$0C01 timer with its interrupt only in a
+# ROM whose toy uses them, so a toy without them stays byte-identical.
+if grep -qE "toy_pad\(|toy_timer_set\(|toy_sat\(" "tools/gen/$NAME.c"; then
+  EXTRA="$EXTRA -DTOY_INPUT_BUILD"
+fi
 
 # -Os: the ROM is 8 KiB (bank 0).  -I tools/toyc is where toy_runtime.h lives.
 "$CC" -Os $EXTRA -Itools/toyc -o "tools/gen/$NAME.pce" \

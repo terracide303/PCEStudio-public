@@ -726,6 +726,48 @@
 
     var PAD_FIELDS = host.PAD_FIELDS;
 
+    /* -- timer (#45) ---------------------------------------------------- */
+
+    /* timer(period, fn): start the TMA timer and call fn once per interrupt.
+     * The host owns the tick rate and the frame boundary (pce-toyhost.js);
+     * this runtime only holds the Lua function and calls it the number of
+     * times the host reports.  timerstop() stops it; timerirqs() is the
+     * count for the frame just ended. */
+    var timerFn = null;
+
+    setGlobalFn("timer", function (Lx) {
+      var period = intArg(Lx, 1, "a timer period", 0, 127, "timer-range");
+      var t = lua.lua_type(Lx, 2);
+      if (t !== lua.LUA_TNIL && t !== lua.LUA_TNONE &&
+          t !== lua.LUA_TFUNCTION) {
+        luaFail(Lx, "timer-range", "timer(period, fn): fn must be a function");
+      }
+      if (timerFn !== null) lauxlib.luaL_unref(L, lua.LUA_REGISTRYINDEX, timerFn);
+      timerFn = (t === lua.LUA_TFUNCTION)
+        ? lauxlib.luaL_ref(L, lua.LUA_REGISTRYINDEX) : null;
+      luaHost(Lx, function () { host.timerSet(period); });
+      return 0;
+    });
+
+    setGlobalFn("timerstop", function () {
+      luaHost(L, function () { host.timerStop(); });
+      return 0;
+    });
+
+    setGlobalFn("timerirqs", function () {
+      lua.lua_pushinteger(L, host.timerIRQs());
+      return 1;
+    });
+
+    function callTimerIrqs(n) {
+      if (timerFn === null) return;
+      for (var i = 0; i < n; i++) {
+        pushRef(timerFn);
+        var rc = lua.lua_pcall(L, 0, 0, 0);
+        if (rc !== lua.LUA_OK) throw errorFromStack(L);
+      }
+    }
+
     /* The Lua runtime exposes the pads as five tables; refresh them from the
      * host's one pad state before each frame. */
     function refreshPads() {
@@ -867,6 +909,9 @@
         host.beginFrame(f);
         try {
           withBudget(function () {
+            /* the timer's interrupts for the frame just ended land at this
+             * boundary, before the toy's own frame() */
+            callTimerIrqs(host.tickTimer(f));
             callGlobal("frame", function () {
               lua.lua_pushnumber(L, f / 60);
               lua.lua_pushinteger(L, f);

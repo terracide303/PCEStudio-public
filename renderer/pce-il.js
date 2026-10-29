@@ -210,7 +210,7 @@
    * The signatures are what the typer checks; the implementations are below
    * and docs/TOYS.md §2 is the surface both runtimes share. */
   var SURFACE = ["reg", "pal", "sat", "sprite", "raster", "print",
-                 "music", "sfx", "release"];
+                 "music", "sfx", "release", "timer"];
   var HELPERS = {
     rgb: { sig: [T.INT, T.INT, T.INT], ret: T.INT },
     min: { sig: [T.INT, T.INT], ret: T.INT, numeric: true },
@@ -1144,6 +1144,23 @@
             } else if (rc.name === "release") {
               if (ins.args.length !== 1) errs.push({ code: "il-arity", line: line, message: "release(channel) takes 1 argument" });
               else wantInt(ins.args[0], line);
+            } else if (rc.name === "timer") {
+              /* timer(period) or timer(period, fn): the TMA timer's reload
+               * value and the interrupt callback (#45). */
+              if (ins.args.length < 1 || ins.args.length > 2) {
+                errs.push({ code: "il-arity", line: line,
+                            message: "timer(period, fn) takes 1 or 2 arguments" });
+              } else {
+                wantInt(ins.args[0], line);
+                if (ins.args.length === 2) {
+                  var tmk = resolve(argTypes[1]).k;
+                  if (tmk !== "fn" && tmk !== "var" && tmk !== "nil") {
+                    errs.push({ code: "il-type", line: line,
+                                message: "timer(period, fn): fn must be a function, got a " +
+                                         typeName(argTypes[1]) });
+                  }
+                }
+              }
             }
           } else if (HELPERS[rc.name]) {
             var hs = HELPERS[rc.name];
@@ -1574,6 +1591,10 @@
                    frames: finalOperand(ins.args[3], false), line: line });
           } else if (calleeName === "release") {
             push({ t: "release", ch: finalOperand(ins.args[0], false), line: line });
+          } else if (calleeName === "timer") {
+            push({ t: "timer", period: finalOperand(ins.args[0], false),
+                   fn: ins.args.length > 1 ? finalOperand(ins.args[1], false) : null,
+                   line: line });
           }
         } else if (calleeName && HELPERS[calleeName]) {
           var pk = ins.paramKinds || [];
@@ -2113,6 +2134,15 @@
           host.release(cnt(ins.ch));
           pc++;
           break;
+        case "timer": {
+          /* the TMA timer (#45): the host owns the reload register and the
+           * tick rate; the callback is a Lua function value here. */
+          var tper = cnt(ins.period);
+          host.timerSet(tper);
+          timerCb = ins.fn ? cnt(ins.fn) : null;
+          pc++;
+          break;
+        }
         case "print": {
           var parts = [];
           for (var pi = 0; pi < ins.args.length; pi++) {
@@ -2200,6 +2230,7 @@
     var lastFrame = null;
     var lastRaster = null;
     var callbackMode = false;
+    var timerCb = null;         /* timer(period, fn)'s fn, a function value */
     var mainCell = null;
 
     function callGlobal(name, args, line) {
@@ -2231,6 +2262,12 @@
       try {
         steps = 0;
         host.beginFrame(f);
+        /* the timer's interrupts for the frame just ended, before frame() */
+        for (var ti = host.tickTimer(f); ti > 0; ti--) {
+          if (timerCb && timerCb.__fn != null) {
+            callFunction(timerCb.__fn, [], 0, timerCb.upvals);
+          }
+        }
         callGlobal("frame", [quantizeFixed(f / 60), f], 0);
         host.markBase();
         if (callbackMode) {
