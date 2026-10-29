@@ -3880,6 +3880,127 @@ function checkStudioApi(page) {
   studio.seek(0);
 }
 
+/* ---- #98: the CONSOLE panel, ppu.toys' SNES tab ---------------------- *
+ * The panel runs the real pipeline on the real Lua the editor holds:
+ * pce-il.js lowers it, pce-validate.js prices it, pce-cgen.js emits C and
+ * refuses what part A/C cannot compile.  The three inputs here are the card's
+ * three states: a clean toy (green), a toy with a known refusal at a known
+ * line (red, and the finding's link moves the editor there), and a toy whose
+ * frame costs more than the console can give (red, the frame budget finding
+ * pointing at function frame()).  Nothing is faked: every number comes from
+ * the modules through the panel's own api. */
+function checkConsolePanel(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const dom = page.dom;
+
+  /* The refusal is on line 4; reg("NOPE") is both a static range refusal
+   * (validate-range) and one the C emitter refuses (cgen-op). */
+  const REFUSAL = "g = 0\nfunction frame(t, f)\n  g = g + 1\n" +
+                  "  reg(\"NOPE\", 0)\nend\n";
+  /* 20,000 iterations costs ~2,001,250 cycles, over the validator's
+   * 8-display-frame ceiling; frame() is on line 2. */
+  const OVER = "g = 0\nfunction frame(t, f)\n" +
+               "  for i = 1, 20000 do g = g + 1 end\nend\n";
+  const CLEAN = ilExports.TOY_PALETTE;
+
+  function load(source) {
+    if (studio.activeFile() !== "main.lua") studio.selectFile("main.lua");
+    studio.setEditorText(source);
+    studio.panels.select("console");
+    studio.panels.refresh(true);
+    return studio.console();
+  }
+
+  /* ---- a clean toy is green ------------------------------------------ */
+  let rep = load(CLEAN);
+  check(!!rep, "#98: CONSOLE has a report for the palette toy");
+  eq("#98: a clean toy's banner is green", rep.banner.state, "ok");
+  eq("#98: the green banner's words", rep.banner.text,
+     "Can run on the PC Engine");
+  eq("#98: the green banner is drawn", dom.get("console-banner").textContent,
+     "Can run on the PC Engine");
+  check(dom.get("console-banner").className.indexOf("is-ok") >= 0,
+        "#98: the green banner carries the ok class (" +
+        dom.get("console-banner").className + ")");
+  eq("#98: a clean toy has no findings", rep.findings.length, 0);
+  check(/No findings/.test(dom.get("console-findings").children[0].textContent),
+        "#98: the findings list says there is nothing to fix");
+  check(rep.stats.collectionCycles > 0 &&
+        rep.stats.collectionCycles < S.validate.MODEL.FRAME_CLOCKS,
+        "#98: the clean toy has a frame time (" + rep.stats.collectionCycles +
+        " cycles)");
+  check(rep.stats.framePct > 0 && rep.stats.framePct < 1,
+        "#98: the frame time is a fraction of 119,904 (" +
+        (rep.stats.framePct * 100).toFixed(2) + "%)");
+  check(rep.stats.codeBytes > 0 && rep.stats.romBytes > 0,
+        "#98: code and ROM sizes are measured (" + rep.stats.codeBytes +
+        " B of C, " + rep.stats.romBytes + " B estimated ROM)");
+  eq("#98: the stats draw one row per figure",
+     dom.get("console-stats").children.length, 6);
+  const html = fs.readFileSync(PAGE, "utf8");
+  check(/static estimate, checked against Mednafen and ares,\s+not hardware/
+          .test(html), "#98: the honest note is on the panel");
+  check(html.indexOf("frame time · compiler findings · code size") >= 0,
+        "#98: the panel says what it is");
+
+  /* ---- a known refusal: red, with a link to its Lua line ------------- */
+  rep = load(REFUSAL);
+  eq("#98: a refused toy's banner is red", rep.banner.state, "bad");
+  check(/^Can't run on the PC Engine as written yet: \d+ problems? to fix$/
+          .test(rep.banner.text),
+        "#98: the red banner names the count (" + rep.banner.text + ")");
+  eq("#98: the red banner is drawn", dom.get("console-banner").textContent,
+     rep.banner.text);
+  check(dom.get("console-banner").className.indexOf("is-bad") >= 0,
+        "#98: the red banner carries the bad class");
+  const range = rep.findings.filter((f) => f.code === "validate-range")[0];
+  check(!!range, "#98: the validator's refusal is listed");
+  eq("#98: the range finding points at main.lua line 4", range && range.line, 4);
+  check(rep.findings.some((f) => f.code === "cgen-op"),
+        "#98: the C emitter's refusal is listed too (" +
+        rep.findings.map((f) => f.code).join(", ") + ")");
+  const links = [];
+  for (const row of dom.get("console-findings").children) {
+    for (const cell of row.children) {
+      if (cell.className === "con-line") links.push(cell);
+    }
+  }
+  const link = links.filter((e) => e.textContent === "main.lua:4")[0];
+  check(!!link, "#98: the finding draws a clickable main.lua:4 (" +
+        links.map((e) => e.textContent).join(", ") + ")");
+  /* clicking the link puts the editor's cursor on that line */
+  const line4 = REFUSAL.split("\n").slice(0, 3).join("\n").length + 1;
+  if (link) {
+    link.click();
+    eq("#98: the link moves the editor to line 4", dom.get("source").selectionStart,
+       line4);
+  }
+  check(rep.stats.collectionCycles == null,
+        "#98: a toy that never ran a frame still draws, without inventing one");
+  eq("#98: an unmeasured toy still draws its three figures",
+     dom.get("console-stats").children.length, 3);
+
+  /* ---- an over-budget frame: red, and the link is function frame() --- */
+  rep = load(OVER);
+  eq("#98: an over-budget toy's banner is red", rep.banner.state, "bad");
+  const budget = rep.findings.filter((f) => f.code === "validate-frame-budget")[0];
+  check(!!budget, "#98: the frame budget refusal is listed (" +
+        rep.findings.map((f) => f.code).join(", ") + ")");
+  check(rep.stats.collectionCycles >
+        S.validate.MODEL.HARD_FRAMES * S.validate.MODEL.FRAME_CLOCKS,
+        "#98: the over-budget frame is measured, not guessed (" +
+        rep.stats.collectionCycles + " cycles)");
+  eq("#98: the frame budget finding links to function frame()'s line",
+     budget && budget.line, 2);
+
+  /* restore the page's own state for the sections after this one */
+  studio.panels.select("screen");
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
 /* ---- main ------------------------------------------------------------- */
 async function main() {
   const started = Date.now();
@@ -3907,6 +4028,7 @@ async function main() {
   checkScreenGaps(page);
   checkPalettesPanel(page);
   checkVramPanel(page);
+  checkConsolePanel(page);
   checkStudioApi(page);
 
   let browser = "not-requested";
