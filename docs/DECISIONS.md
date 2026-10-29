@@ -306,3 +306,14 @@ not the export. The browser export takes two routes, both pure JavaScript:
    table-and-replay handler. Fast to build; slower on the console — measured against llvm-mos.
 2. **Then: a direct IL -> HuC6280 code generator in JavaScript** for speed, compared against llvm-mos's numbers.
 The validator (#32) predicts each route's frame time so the studio can say which one a toy needs.
+
+## 2026-10-29 — Demo artwork: on the website, never in the repo (Dennis)
+
+Dennis, on the demo art packs (#125 CITY, #126 TRAPMOOR, #127 CAVE, #128 OAK WOODS, #130 MINE): "About the
+artwork don't put it on the repo but it's fine as demo on the website in PCE Studio."
+So neither the raw packs nor anything converted from them (tiles, palettes, frame strips, dumps, ROMs) is
+committed. The art lives beside the repo in `/Volumes/External/agent-workshop-demo/demo-art/<toy>/`; the toy's
+Lua may be committed; `tools/deploy.sh` uploads the art with the toy so the demo plays on the site; tests that
+need the art skip with a message when it is missing, so a fresh clone stays green. This unblocks #126 (no licence
+text in the pack) and #130 (its licence forbids redistribution) — @workshop pointed out to Dennis on 2026-10-29 that
+showing the art on a public site is still a form of redistribution of the pack.
