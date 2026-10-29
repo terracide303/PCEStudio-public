@@ -146,6 +146,44 @@
       limits: "none" }
   ];
 
+  /* ---- the status register (#119) --------------------------------------- */
+
+  /* The VDC's status flags a toy may read.  They are not a second model: the
+   * host asks renderer/pce-sprites.js's status() (card #50) — the same call
+   * the SPRITES panel's line budget and the validator make — for the frame it
+   * has just drawn, so a toy's sr() cannot disagree with them.  Bit numbers
+   * are the HuC6270's (SR p. H7-4). */
+  var SR_BITS = [
+    { bit: 0, name: "CC", manual: "SR H7-4",
+      what: "sprite #0 overlapped any of sprites #1-#63: both had an opaque " +
+            "pixel at the same display column of a line. Set only while " +
+            "CR bit 0 (the CC interrupt enable) is on" },
+    { bit: 1, name: "OR", manual: "SR H7-4",
+      what: "a line asked for more than the 16 sprite strips the VDC draws. " +
+            "Set only while CR bit 1 (the OC interrupt enable) is on" },
+    { bit: 2, name: "RR", manual: "SR H7-4",
+      what: "the scanning-line counter matched RCR. Set only while CR bit 2 " +
+            "(the line interrupt enable) is on" },
+    { bit: 5, name: "VD", manual: "SR H7-4",
+      what: "the display entered vertical blanking. Set only while CR bit 3 " +
+            "(the VBlank interrupt enable) is on" }
+  ];
+
+  /* What sr() is, published by the author's reference (#61) from this one
+   * table, the way TIMER_API and SOUND_API are. */
+  var STATUS_API = [
+    { call: "sr()",
+      what: "the VDC's status register after the frame last drawn: bit 0 CC " +
+            "(sprite #0 collided), bit 1 OR (a line overflowed), bit 2 RR " +
+            "(RCR matched), bit 5 VD (vertical blanking). A bit is the " +
+            "condition AND its interrupt enable in CR (CC bit 0, OC bit 1, " +
+            "RC bit 2, VC bit 3 — CR R05 p. H7-5..H7-6). frame() reads what " +
+            "the frame before it detected, the way the CPU reads SR in " +
+            "VBlank; init() reads 0",
+      limits: "0..63; a read does not clear the bits here (the model does " +
+              "not simulate the CPU's read)" }
+  ];
+
   /* ---- sound (#71) ------------------------------------------------------ */
 
   /* The toy's sound contract, published by the author's reference (#61) from
@@ -426,6 +464,7 @@
     var frameCount = 0;
     var baseRegs = null;
     var baseCramWords = null;
+    var frameStatus = 0;       /* the SR byte of the frame last drawn (#119) */
 
     /* ---- VRAM (word addressed over the byte array the model reads) ---- */
 
@@ -897,8 +936,19 @@
 
       endFrame: function () {
         inFrame = false;
-        return buildRasterTable(baseRegs, baseCramWords);
+        var table = buildRasterTable(baseRegs, baseCramWords);
+        /* the frame's status flags (#119): the same status() the panels and
+         * the validator read, over the state the frame will be drawn from.
+         * A toy's frame() for the NEXT frame reads this — the CPU's VBlank
+         * position against the displayed frame. */
+        var sopt = host.options();
+        if (table) sopt.raster = table;
+        frameStatus = sprites.status(sopt).frame.sr;
+        return table;
       },
+
+      /* the status register after the frame last drawn (#119) */
+      status: function () { return frameStatus; },
 
       /* the model's exact input, shared (no copy) — docs cannot drift */
       options: function () {
@@ -997,6 +1047,9 @@
     SOUND_EVENTS_MAX: SOUND_EVENTS_MAX,
     SFX_WAVE: SFX_WAVE,
     SOUND_API: SOUND_API,
+    /* the status register (#119), for the author's reference (#61) */
+    SR_BITS: SR_BITS,
+    STATUS_API: STATUS_API,
     REFUSALS: {
       "reg-forbidden": "a register a toy may not touch",
       "reg-range": "a register value outside the VDC register's width",

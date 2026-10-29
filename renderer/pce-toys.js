@@ -759,6 +759,17 @@
       return 1;
     });
 
+    /* -- the VDC's status flags (#119) ---------------------------------- */
+
+    /* sr() is the status register after the frame last drawn: bit 0 CC, bit 1
+     * OR, bit 2 RR, bit 5 VD.  The host computes it with pce-sprites.js's
+     * status() (renderer/pce-toyhost.js endFrame); this runtime only hands
+     * the number to the toy, so Lua and the IL read the same byte. */
+    setGlobalFn("sr", function () {
+      lua.lua_pushinteger(L, host.status());
+      return 1;
+    });
+
     function callTimerIrqs(n) {
       if (timerFn === null) return;
       for (var i = 0; i < n; i++) {

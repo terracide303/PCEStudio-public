@@ -8,7 +8,8 @@
  *   renderer/pce-toyhost.js   the registers a toy may set and their widths,
  *                             CRAM/VRAM/SAT sizes, the SAT field ranges, the
  *                             raster line and write limits, the pads, the
- *                             refusal codes of the shared host
+ *                             status register's bits, the refusal codes of the
+ *                             shared host
  *   renderer/pce-editor.js    the picture's palettes, tile and sprite sizes,
  *                             the line budget, the editor's refusal codes
  *   renderer/pce-toys.js      the password caps (#73), the Lua frame budget,
@@ -228,6 +229,52 @@
           "function init()\n" +
           "  sprite(0, { x = 32, y = 64, pattern = 0, palette = 1 })\n" +
           "  sprite(1, { x = 80, y = 64, pattern = 0, palette = 2, hflip = true })\n" +
+          "end" }
+      ]
+    });
+
+    /* 4b. the VDC's status register (#119) -------------------------------- */
+    var srBits = host.SR_BITS;
+    var statusRows = host.STATUS_API.map(function (a) {
+      return [a.call, a.what, a.limits];
+    });
+    sections.push({
+      id: "status", title: "The VDC's status flags",
+      blocks: [
+        { type: "p", text: "The VDC records what its display found in a " +
+            "status register (SR, HuC6270 manual p. H7-4): a collision of " +
+            "sprite #0 with another sprite, more sprites on a line than it " +
+            "could draw, a line-counter match and vertical blanking. A toy " +
+            "reads the frame's flags with sr(), computed by the same model " +
+            "renderer/pce-sprites.js status() gives the SPRITES panel and the " +
+            "validator — there is no arithmetic in the toy." },
+        { type: "table",
+          headers: ["call", "what it does", "range / refusal"],
+          rows: statusRows },
+        { type: "table", tight: true,
+          headers: ["bit", "flag", "set when", "manual"],
+          rows: srBits.map(function (b) {
+            return ["$" + ("0" + (1 << b.bit).toString(16)).slice(-2).toUpperCase(),
+                    b.name, b.what, b.manual];
+          }) },
+        { type: "p", text: "sr() answers for the frame last drawn, not the one " +
+            "being built: frame() reads what the previous frame's display " +
+            "found, the way the CPU reads SR in VBlank, and init() reads 0. " +
+            "A bit is a condition AND its interrupt enable in CR " + range(0, 255) +
+            " (CC bit 0, OC bit 1, RC bit 2, VC bit 3 — CR R05 p. H7-5..H7-6), " +
+            "so a toy that wants the collision flag sets CR bit 0: " +
+            "reg(\"CR\", 0xC3) is background, sprites, CC and OC. The host does " +
+            "not clear the bits on a read; the condition is the frame's own." },
+        { type: "code", lang: "lua", text:
+          "function init()\n" +
+          "  reg(\"CR\", 0xC3)   -- BB, SB, and the CC/OC interrupt enables\n" +
+          "  sprite(0, { x = 120, y = 128, pattern = 0, palette = 1 })\n" +
+          "  sprite(1, { x = 160, y = 128, pattern = 0, palette = 2 })\n" +
+          "end\n" +
+          "\n" +
+          "function frame(t, f)\n" +
+          "  -- sprite #0 (the player) touched another sprite last frame\n" +
+          "  if sr() & 0x01 ~= 0 then print(1) end\n" +
           "end" }
       ]
     });

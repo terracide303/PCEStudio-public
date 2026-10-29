@@ -231,6 +231,10 @@
      * The Lua runtime also accepts a note name (a string); the IL carries
      * no strings, so a name is refused there and the number is the way. */
     note: { sig: [T.INT], ret: T.INT },
+    /* #119: the VDC's status register after the frame last drawn.  The host
+     * computes it (renderer/pce-toyhost.js endFrame), so the IL reads the
+     * same byte the Lua runtime's sr() does. */
+    sr: { sig: [], ret: T.INT },
     lerp: { sig: [T.INT, T.INT, T.FIXED], ret: T.FIXED },
     ramp: { sig: [T.TABLE, T.FIXED], ret: T.FIXED },
     ramp_int: { sig: [T.TABLE, T.FIXED], ret: T.INT },
@@ -2257,6 +2261,7 @@
         var f = 7159090 / (64 * 440 * Math.pow(2, (args[0] - 69) / 12));
         return Math.max(0, Math.min(4095, Math.floor(f + 0.5))) | 0;
       }
+      case "sr": return host.status() | 0;   /* #119, the host's own model */
       default:
         fail(line, "the IL has no builtin `" + name + "`");
       }

@@ -24,12 +24,15 @@
 -- and the block is rewritten; the hand-written game below it is untouched.
 -- The generator refuses to run if the markers are gone.
 --
--- WHAT IT COULD NOT USE: the card asks for the hardware's collision flags and
--- for toy sound.  A toy cannot read SR (CC/OR) at all (#119), so collisions
--- are arithmetic; and sfx() with no music() is master-muted (#113), so the
--- game's sound writes PSG events that fall silent — the README lists both.
--- The entity lists and the HUD digits are int arrays, read back with a table
--- index (#118).
+-- THE SHIP'S COLLISION IS THE VDC'S.  The ship is SAT slot 0 and loses a life
+-- when sr() reports the CC flag (sprite #0 overlapped another sprite last
+-- frame, card #119) — one read, no box arithmetic.  Bullets against drones
+-- stay arithmetic: the VDC reports only sprite #0, and #0 is the ship.
+--
+-- WHAT IT COULD NOT USE: toy sound.  sfx() with no music() is master-muted
+-- (#113), so the game's sound writes PSG events that fall silent — the README
+-- lists it.  The entity lists and the HUD digits are int arrays, read back
+-- with a table index (#118).
 --
 -- Everything between the markers is generated: do not edit it by hand.
 
@@ -400,13 +403,13 @@ end
 
 -- The SAT the SPRITES panel shows: every slot's start position.
 function art_sat()
-  sprite(0, {x = 196, y = 68, pattern = 18, palette = 1})
-  sprite(1, {x = 210, y = 68, pattern = 18, palette = 1})
-  sprite(2, {x = 224, y = 68, pattern = 18, palette = 1})
-  sprite(3, {x = 8, y = 68, pattern = 31, palette = 1})
-  sprite(4, {x = 24, y = 68, pattern = 31, palette = 1})
-  sprite(5, {x = 40, y = 68, pattern = 31, palette = 1})
-  sprite(6, {x = 120, y = 224, pattern = 28, palette = 0})
+  sprite(0, {x = 120, y = 224, pattern = 28, palette = 0})
+  sprite(1, {x = 196, y = 68, pattern = 18, palette = 1})
+  sprite(2, {x = 210, y = 68, pattern = 18, palette = 1})
+  sprite(3, {x = 224, y = 68, pattern = 18, palette = 1})
+  sprite(4, {x = 8, y = 68, pattern = 31, palette = 1})
+  sprite(5, {x = 24, y = 68, pattern = 31, palette = 1})
+  sprite(6, {x = 40, y = 68, pattern = 31, palette = 1})
   sprite(7, {x = 32, y = 104, pattern = 29, palette = 2})
   sprite(8, {x = 96, y = 112, pattern = 29, palette = 2})
   sprite(9, {x = 160, y = 104, pattern = 29, palette = 2})
@@ -426,9 +429,9 @@ end
 -- and all of these are int; see docs/IL.md §5.)
 --
 -- Sprite slots (the SAT):
---   0..2  score digits, hundreds/tens/ones   3..5  lives
---   6     player                             7..12 enemies
---   13..16 bullets
+--   0     player (the VDC's CC flag is sprite #0 against every other sprite)
+--   1..3  score digits, hundreds/tens/ones   4..6  lives
+--   7..12 enemies                            13..16 bullets
 --
 -- The pattern numbers (SHIP, ENEMY, BULLET, HEART, DIGIT table), the starting
 -- positions (START_PX, E0X0..) and the two bar colours come from the
@@ -455,9 +458,10 @@ function rnd()
   return rng
 end
 
--- A 16x16 sprite's box against another: the cell's own coordinates, no
--- hardware status register (a toy cannot read the VDC's CC/OR flags — card
--- #119 — see the README).
+-- A 16x16 sprite's box against another: the cell's own coordinates.  Used for
+-- a bullet against a drone, which the VDC cannot report (its CC flag is sprite
+-- #0 against the others, and #0 is the ship).  The ship's own collision is the
+-- hardware's: see touch_player.
 function hit(ax, ay, bx, by)
   if abs(ax - bx) < 12 then
     if abs(ay - by) < 12 then return 1 end
@@ -483,8 +487,10 @@ function init()
 
   -- BB (background) and SB (sprites) on.  The toy host starts at BB only
   -- (docs/TOYS.md §2, card #120), so a toy that forgets this draws a SAT
-  -- nobody can see.
-  reg("CR", 0xC0)
+  -- nobody can see.  Bits 0 and 1 are the CC and OC interrupt enables: the
+  -- VDC sets the status bit sr() reads only while its enable is on, so the
+  -- ship's collision is invisible without them (card #119).
+  reg("CR", 0xC3)
 
   -- The status bar: line 0 freezes the scroll and darkens the backdrop; line
   -- 24 (set every frame) releases the scroll to `scroll` and restores the
@@ -557,11 +563,12 @@ function touch_player()
   if inv > 0 then
     inv = inv - 1
   else
-    for j = 1, 6 do
-      if hit(px, py, ex[j], ey[j]) == 1 then
-        lose_life()
-        break
-      end
+    -- the VDC's own collision flag: sprite #0 (the ship) overlapped another
+    -- sprite during the frame last drawn.  frame() reads the previous
+    -- frame's display, as the CPU reads SR in VBlank, so a hit costs one
+    -- frame of latency.  CR bit 0 (CC enable) is set in init().
+    if sr() & 0x01 ~= 0 then
+      lose_life()
     end
   end
 end
@@ -580,23 +587,23 @@ function draw_hud()
   local d1 = (score // 100) % 10
   local d2 = (score // 10) % 10
   local d3 = score % 10
-  sprite(0, {x = 196, y = 68, pattern = digit_pattern(d1), palette = 1})
-  sprite(1, {x = 210, y = 68, pattern = digit_pattern(d2), palette = 1})
-  sprite(2, {x = 224, y = 68, pattern = digit_pattern(d3), palette = 1})
+  sprite(1, {x = 196, y = 68, pattern = digit_pattern(d1), palette = 1})
+  sprite(2, {x = 210, y = 68, pattern = digit_pattern(d2), palette = 1})
+  sprite(3, {x = 224, y = 68, pattern = digit_pattern(d3), palette = 1})
   if lives >= 1 then
-    sprite(3, {x = 8, y = 68, pattern = HEART, palette = 1})
-  else
-    sprite(3, {y = 0})
-  end
-  if lives >= 2 then
-    sprite(4, {x = 24, y = 68, pattern = HEART, palette = 1})
+    sprite(4, {x = 8, y = 68, pattern = HEART, palette = 1})
   else
     sprite(4, {y = 0})
   end
-  if lives >= 3 then
-    sprite(5, {x = 40, y = 68, pattern = HEART, palette = 1})
+  if lives >= 2 then
+    sprite(5, {x = 24, y = 68, pattern = HEART, palette = 1})
   else
     sprite(5, {y = 0})
+  end
+  if lives >= 3 then
+    sprite(6, {x = 40, y = 68, pattern = HEART, palette = 1})
+  else
+    sprite(6, {y = 0})
   end
 end
 
@@ -607,9 +614,9 @@ function draw_ship()
     if (inv // 4) % 2 == 0 then flash = 1 end
   end
   if flash == 1 then
-    sprite(6, {y = 0})
+    sprite(0, {y = 0})
   else
-    sprite(6, {x = px, y = py + 64, pattern = SHIP, palette = 0})
+    sprite(0, {x = px, y = py + 64, pattern = SHIP, palette = 0})
   end
 end
 

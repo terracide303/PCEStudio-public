@@ -223,13 +223,15 @@ const DUST_ROWS = [10, 11, 12, 13];
  * them).  Positions are the picture's 0..223 display coordinates; the tool
  * adds the SAT's +64 when it writes the toy. */
 const SPRITES = [
+  /* slot 0 is the player: the VDC's CC flag is sprite #0 against every other
+   * sprite, and the game reads it with sr() (card #119) */
+  { slot: "player", x: 120, y: 160, pattern: "ship", palette: 0 },
   { slot: "digit_h", x: 196, y: 4, pattern: "digit0", palette: 1 },
   { slot: "digit_t", x: 210, y: 4, pattern: "digit0", palette: 1 },
   { slot: "digit_o", x: 224, y: 4, pattern: "digit0", palette: 1 },
   { slot: "life1", x: 8, y: 4, pattern: "heart", palette: 1 },
   { slot: "life2", x: 24, y: 4, pattern: "heart", palette: 1 },
   { slot: "life3", x: 40, y: 4, pattern: "heart", palette: 1 },
-  { slot: "player", x: 120, y: 160, pattern: "ship", palette: 0 },
   { slot: "enemy0", x: 32, y: 40, pattern: "drone", palette: 2 },
   { slot: "enemy1", x: 96, y: 48, pattern: "drone", palette: 2 },
   { slot: "enemy2", x: 160, y: 40, pattern: "drone", palette: 2 },
