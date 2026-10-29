@@ -278,7 +278,8 @@ background-only in this beta.** It encodes `reg`, `pal`, `vram[]` writes,
 | --- | --- |
 | a table (`sprite()`, `sat()`, `raster(line, {…})`) | `ilbc-op` — "instruction table … has no bytecode form" |
 | `pad[1].…` | `ilbc-op` — `padref` |
-| `print`, `music`, `sfx`, `timer` beyond `rgb` | `ilbc-builtin` / `ilbc-op` |
+| `print`, `music`, `sfx`, `timer` | `ilbc-op` — the instruction, by name |
+| `note(n)` (a value builtin) | `ilbc-builtin` |
 | a fixed-point value | `ilbc-fixed` |
 
 So: **tell the person which half they have.** A picture-and-motion toy with
