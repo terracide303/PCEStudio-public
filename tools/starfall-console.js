@@ -14,7 +14,7 @@
  *   1. the CONSOLE tab's checks: pce-il.js compile, pce-validate.js budgets,
  *      pce-cgen.js emitC (the C backend, llvm-mos)
  *   2. if stage 1 reported any error, STOP: the encoder is never reached
- *      (renderer/studio.html:3499)
+ *      (renderer/studio.html:3823)
  *   3. pce-ilbc.js encode -> pce-rom.js buildToyRom over renderer/ilvm.bin
  *
  * Stage 1's cgen refuses the FIRST instruction it cannot lower, so the page
@@ -140,7 +140,7 @@ function analyse(rel, opts) {
   out.page = {
     errors: errors,
     blocked: errors > 0,
-    earlyReturn: "renderer/studio.html:3499"
+    earlyReturn: "renderer/studio.html:3823"
   };
 
   const enc = stage(() => ilbc.encode(program));
