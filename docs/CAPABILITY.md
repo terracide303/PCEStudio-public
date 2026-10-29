@@ -47,7 +47,7 @@ The two milestones Dennis asked for:
 | Code editor (CodeMirror), files, save/open, autosave, Vim, shortcuts | PROVEN | `check-studio.js` 475 checks | #77 |
 | Output column: layers, CRT, sound, markers, timeline, pad keys (IJKL) | PROVEN | `check-studio.js`; breaker gaps closed by #91 | #78 |
 | Panels in separate files (so several can be built at once) | RUNNING | | #102 |
-| SCREEN panel: map editor with tools, zoom, tiles, palette | PARTIAL | tools, zoom, map and tile sheet work; curves on BXR/BYR and dropdowns for map size and width come with #102 | #84, #102 |
+| SCREEN panel: map editor with tools, zoom, tiles, palette | PROVEN | tools, zoom, map, tile sheet, curves, map-size and width dropdowns; breaker gaps closed by #106 | #84, #102 |
 | PALETTES and VRAM panels (512-colour picker, VRAM sheet) | TODO | | #85 |
 | SPRITES panel (64 sprites, sizes, patterns) | TODO | | #86 |
 | SCANLINES panel (bands on the line interrupt) | TODO | | #92 |
@@ -75,6 +75,8 @@ The two milestones Dennis asked for:
 | A small game made only in the studio (demo-ready test) | TODO | starts when the panels and sound are in | #88 |
 | AI link part 1: an MCP server (an agent writes, runs, checks and exports toys) | RUNNING | | #36 |
 | AI link part 2: the agent skill with recipes | TODO | | #103 |
+| Guide file for chat AIs (paste into Claude) + Download button | PROVEN | `renderer/pcestudio-for-claude.md`, generated from the code; online (#105) | #105 |
+| Paste & Run in the studio | RUNNING | | #107 |
 
 ## 4. Getting it onto a console — export to `.pce`
 
@@ -83,7 +85,7 @@ The two milestones Dennis asked for:
 | Pictures (with sprites, effects, wide modes, windows) to `.pce` | PROVEN | `check-export.js` byte-equal to the assembler; `check-viewer.js` diff 0 in Mednafen | #9, #14, #16, #46, #57, #67, #70 |
 | Toys to `.pce` via llvm-mos (the yardstick, needs a native install) | PROVEN | `check-il-console.js`: 2 toys diff 0 in Mednafen, 7,417 cycles/frame | #31 A/C |
 | Toys to `.pce` via HuC (comparison) | PROVEN | `check-il-huc.js`; 14x slower than llvm-mos | #31 B/D |
-| Toys to `.pce` in the browser, route 1 (interpreter in the ROM) | RUNNING | the beta's export, nothing to install | #100 |
+| Toys to `.pce` in the browser, route 1 (interpreter in the ROM) | PARTIAL | first half: the IL as bytecode, interpreted on the console in Mednafen; the studio's Export button and raster are the second half | #100 |
 | Toys to `.pce` in the browser, route 2 (our own compiler) | TODO | for speed, after route 1 | #101 |
 | Music in the `.pce` (Furnace DMF to HuTrack) | PROVEN | `check-export-song.js`, `check-hutrack.js` | #35 |
 | Sound patches to `.pce` (wave editor) | PROVEN | `check-wave.js` | #62 |
@@ -104,7 +106,7 @@ The two milestones Dennis asked for:
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone: 28 PASS, ares SKIP | #83 |
+| Every test suite passes on a fresh clone | PARTIAL | 27 PASS, 6 FAIL after #45/#100's new captures; #108 fixing. Before: `sh tests/all.sh` on a fresh clone: 28 PASS, ares SKIP | #83 |
 | Every new test broken by a different seat (rule 2) | PROVEN | `docs/REVIEW-*.md`; each miss became a card and is closed | rule 2 |
 | Every manual read and mapped to a card | PROVEN | `docs/MANUALS.md` | #44, #55 |
 | Phase 3 read cold by a reviewer | TODO | | #33 |
