@@ -19,7 +19,7 @@ refusal from the module that owns it, every document from
 `plugin/` is a Claude Code plugin in the ppu.toys shape
 (`docs/PPU-TOYS.md` §4): `.claude-plugin/plugin.json` and one skill,
 `skills/creating-pce-toys/SKILL.md`. The skill teaches this server's tools, the
-hardware's limits, the toy API, the IL subset and five worked recipes. Install:
+hardware's limits, the toy API, the IL subset and six worked recipes. Install:
 
 ```sh
 claude mcp add pcestudio -- node "$PWD/tools/mcp/server.js"
@@ -96,10 +96,16 @@ One toy at a time, in one process:
   MCP test gets equals check-examples' Lua frame 60.
 - `toy_write` replaces the toy and clears any run. `main.lua` is required and
   is the file that runs; the other files are the studio's asset files
-  (`tiles.json`, `palettes.json`, … — the shape in `docs/STUDIO.md` §2). No
-  runtime imports the assets yet (#24), so the server stores them with the
-  toy and says so in the reply. A refused write leaves the toy that was
-  already loaded alone.
+  (`tiles.json`, `palettes.json`, `sprites.json` — the shape in
+  `docs/STUDIO.md` §2). A refused write leaves the toy that was already
+  loaded alone.
+- `source_add` turns a picture into those asset files (#153): a base64 PNG or
+  a pixel grid with a palette becomes tiles, sprites, a tilesheet or a
+  palette, merged into the toy's files, and the reply is the VRAM/CRAM
+  budget (tiles, palettes, words used, warnings).
+- `toy_run` imports the asset files into VRAM, CRAM and the SAT **before
+  `init()`**, exactly as the studio does (#117, #153) — the one importer, no
+  second model — and its reply carries the import's summary as `assets`.
 - `toy_run` starts a **fresh, deterministic** run: frame indices `0` to
   `frames-1`, `t = f/60`, not the clock. It returns the final state and its
   VRAM/CRAM/SAT digests.
@@ -144,7 +150,7 @@ Example reply:
 {"ok":true,"files":["main.lua"],"main_lua_bytes":45,"assets":[],
  "language":"pce-il","hooks":{"init":null,"frame":1,"raster":null},
  "functions":2,
- "note":"only main.lua is compiled and run; the asset files are stored with the toy (no runtime imports them yet, #24)"}
+ "note":"main.lua is compiled now; the asset files ride along and toy_run imports them into VRAM/CRAM/SAT before init() (#117, #153), so the files the panels edit are the art the toy boots inside"}
 ```
 
 A toy the IL refuses (for example `pairs`, or a syntax error) comes back with
@@ -183,10 +189,70 @@ Example reply (abridged):
 `state.regs` is the toy's own VDC state at the final frame. Full VRAM, CRAM
 and SAT are tens of kilobytes; the reply carries a SHA-256 of each so a
 client can tell runs apart without moving the buffers. `log` is the toy's
-`print()` output (the host's 200-line log).
+`print()` output (the host's 200-line log). When the toy has asset files the
+reply also carries `assets` — the #117 import's summary: the file names and
+the tiles, patterns and sprites the import placed.
 
 Refusals: `no-toy`, `frame-range`, `pad-script`, `pad-button`, and any
 runtime refusal (for example `toy-timeout`, `reg-range`) keeps its code.
+
+### `source_add(png | grid, kind, …)`
+
+Imports a picture into the toy's asset files (#153), with the studio's own
+importer (`renderer/pce-source.js`, the Add Source dialog's) — so what the
+server accepts is what the studio accepts. The new art is **merged** into
+the current files and the reply is the budget. Call it before `toy_run`;
+`toy_run` imports the merged files into VRAM, CRAM and the SAT before
+`init()`.
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `png` | string | base64 of an RGB or RGBA PNG; either this or `grid` |
+| `grid` | object | `{width 1..256, height 1..240, pixels[]}` — palette indices, `-1` transparent; either this or `png` |
+| `palette` | array of `[r,g,b]` | the grid's palette; required with `grid` |
+| `kind` | `bg` \| `sprites` \| `tilesheet` \| `palette` | what the picture becomes |
+| `name` | string | shown in the reply and the files |
+| `dither` | `none` \| `ordered` \| `diffusion`, default `none` | how non-exact colours are reduced |
+| `alphaThreshold` | 0..255, default 128 | pixels at or below this alpha are transparent |
+| `size` | `[w, h]` | sprite size for kind `sprites`; default `[16, 16]` |
+| `maxPalettes` | 1..16 | palette cap for the import |
+
+Example call:
+
+```json
+{"name":"source_add","arguments":{"kind":"sprites","name":"red-square",
+ "png":"iVBORw0KGgo…","size":[16,16]}}
+```
+
+Example reply (abridged):
+
+```json
+{"ok":true,"kind":"sprites","name":"red-square","size":{"width":16,"height":16},
+ "stats":{"tiles":1,"max_tiles":1536,"palettes":1,"max_palettes":16,
+  "colours":2,"max_tile_colours":16,"dither":"none"},
+ "files":["main.lua","palettes.json","sprites.json"],
+ "budget":{"tiles":1,"patterns":1,"sprites":1,"vram_words":1360,
+  "vram_total":32768,"vram":{"bat":1024,"tiles":16,"patterns":64,
+  "sat":256,"used":1360,"total":32768},"cram_entries":512,"sat_entries":64},
+ "warnings":[],
+ "note":"imported with the Add Source importer (renderer/pce-source.js, #123) and merged into the toy's asset files; the panels' own readers accepted the merged set; the previous run was cleared — call toy_run to see the picture"}
+```
+
+Merge rules, so a second add never silently destroys the first:
+
+- `bg` and `tilesheet` replace `tiles.json` (one BAT map per toy) and take
+  the new backdrop; `sprites` appends to `sprites.json` — patterns are
+  reindexed past the old ones, SAT entries are appended after the old
+  sprites, and their palette rows land on free rows; `palette` merges row by
+  row, incoming non-zero entries winning.
+- A refused import changes nothing: the merge is validated against the
+  hardware (`toPicture`) on a copy and committed only if it fits.
+
+Refusals: `source-kind`, `source-picture` (png and grid both or neither),
+`source-grid`, `source-size`, `source-tiles`, `source-empty`,
+`source-palettes` (no free sprite palette row), `source-sat` (past 64
+sprites), the `png-*` family from the studio's importer, and `asset-json`
+when the toy's own asset files do not parse.
 
 ### `frame_png(frame)`
 
@@ -435,17 +501,20 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
 
 - 1..600 frames per run; `frame_png` can seek to 0..599.
 - PNGs are 256×224 RGB, the toy frame (`renderer/pce-toyhost.js`).
-- A toy is one Lua file plus asset files; only `main.lua` runs (#24 imports
-  the rest later).
+- A toy is one Lua file plus asset files; `main.lua` runs and `toy_run`
+  imports the rest into VRAM, CRAM and the SAT before `init()`.
+- 1536 tiles max per picture (`source-tiles`); sprite imports hold 16 palette
+  rows and 64 SAT entries total, past which `source_add` refuses
+  (`source-palettes`, `source-sat`).
 - A `.pce` is 24 KiB: 16 KiB committed interpreter + one 8 KiB data bank. A
   bytecode-plus-assets payload past 8 KiB is refused by `toy-data-bank-full`.
 
 ## Evidence
 
 `node tests/check-mcp.js` starts `tools/mcp/server.js`, speaks MCP over
-stdio, and asserts 101 checks:
+stdio, and asserts 150 checks:
 
-- `initialize`, `ping`, and `tools/list` with all eight tools and their
+- `initialize`, `ping`, and `tools/list` with all nine tools and their
   schemas;
 - #29's parallax toy written, 60 frames run, and the PNG at frame 60 equal
   to `tests/dumps/examples/parallax.png` (check-examples' frame 60) pixel
@@ -461,6 +530,12 @@ stdio, and asserts 101 checks:
 - `export_pce` byte-equal to an independent
   `il.compile → ilbc.encode → buildToyRom` build, and identical on a second
   export;
+- the art route (#153): a base64 PNG added with `source_add` as sprites, a
+  toy that moves its SAT slot with `sat()` and enables SB, and `frame_png`
+  shows the sprite's pixels at the slot's spot (a control run without the
+  import is blank there); a second add appends, a refused add leaves the toy
+  byte-identical, and a toy with `tiles.json` renders the same frame through
+  the MCP server as through the studio host (`pictureFromFiles`), diff 0;
 - `docs` chapter list, a chapter's own numbers, and a refused unknown topic.
 
 Written by @design because the card names the file. Per workshop rule 2, a
