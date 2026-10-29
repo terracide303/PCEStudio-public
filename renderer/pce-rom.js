@@ -138,6 +138,14 @@
   var MAX_ROM_BANKS = 128;
   var MAX_TILE_BANKS = MAX_ROM_BANKS - 4;
 
+  /* #100: the IL bytecode interpreter image (renderer/ilvm.bin).  llvm-mos
+   * links it as a 16 KiB fixed ROM: physical bank 0 ($E000-$FFFF: vectors,
+   * startup, the #31 runtime) and physical bank 1 ($C000-$DFFF: the
+   * interpreter, docs/IL.md §14).  The toy's bytecode is physical bank 2,
+   * which ilvm.c maps into MPR2 ($4000-$5FFF) with TAM #$04. */
+  var ILVM_BYTES = 2 * BANK;     /* 16384 */
+  var TOY_DATA_BANK = 2;
+
   /* MWR bits 4-5: BAT width (0:32, 1:64, 2/3:128); bit 6: BAT height
    * (0:32, 1:64).  Same order as viewer.asm's bat_words table. */
   function batWords(mwr) {
@@ -580,8 +588,52 @@
     return rom;
   }
 
+  /* ---- #100: a toy as IL bytecode + the interpreter ---------------------
+   *
+   * The browser's export for route 1: no compiler, no PCEAS, no llvm-mos.
+   * `toy.bank0` is renderer/ilvm.bin (the committed 16 KiB image, loaded by
+   * the page the same way viewer-bank0.bin is); `toy.bytecode` is the
+   * container renderer/pce-ilbc.js encodes from the IL.  The result is the
+   * interpreter image followed by one data bank (physical bank 2) holding
+   * the bytecode and, after it, any assets the caller ships for a future
+   * loader.
+   *
+   * The output is a pure function of its inputs, so the Node test and the
+   * studio page produce the same bytes. */
+  function buildToyRom(toy) {
+    var bank0 = toy && toy.bank0;
+    var bytecode = toy && toy.bytecode;
+    var assets = (toy && toy.assets) || null;
+    need(bank0 && bank0.length === ILVM_BYTES,
+         "bank0 must be renderer/ilvm.bin (" + ILVM_BYTES +
+         " bytes = two physical banks), got " +
+         (bank0 ? bank0.length : "nothing"));
+    need(bytecode && bytecode.length >= 24,
+         "bytecode must be a pce-ilbc container");
+    need(bytecode[0] === 0x49 && bytecode[1] === 0x4C &&
+         bytecode[2] === 0x42 && bytecode[3] === 0x43,
+         "bytecode must start with the ILBC magic (renderer/pce-ilbc.js)");
+    need(bytecode[4] === 1, "bytecode version must be 1");
+    var dataLen = bytecode.length + (assets ? assets.length : 0);
+    if (dataLen > BANK) {
+      refuse("toy-data-bank-full", "the bytecode (" + bytecode.length +
+             " B) and assets (" + (assets ? assets.length : 0) + " B) need " +
+             dataLen + " bytes; the interpreter reads one 8 KiB data bank");
+    }
+
+    var rom = new Uint8Array(ILVM_BYTES + BANK);
+    rom.fill(0xFF);
+    rom.set(bank0, 0);
+    rom.set(bytecode, ILVM_BYTES);
+    if (assets) rom.set(assets, ILVM_BYTES + bytecode.length);
+    return rom;
+  }
+
   return {
     BANK: BANK,
+    ILVM_BYTES: ILVM_BYTES,
+    TOY_DATA_BANK: TOY_DATA_BANK,
+    buildToyRom: buildToyRom,
     MAX_REGIONS: MAX_REGIONS,
     MAX_ROM_BANKS: MAX_ROM_BANKS,
     MAX_TILE_BANKS: MAX_TILE_BANKS,
