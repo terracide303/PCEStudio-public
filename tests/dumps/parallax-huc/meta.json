@@ -1,0 +1,166 @@
+{
+ "banks": {
+  "00": {
+   "free": 1001,
+   "name": "Base Library 1",
+   "sections": [
+    {
+     "bytes": 7181,
+     "end": 64540,
+     "kind": "CODE",
+     "start": 57360
+    },
+    {
+     "bytes": 10,
+     "end": 65535,
+     "kind": "CODE",
+     "start": 65526
+    }
+   ],
+   "used": 7191
+  },
+  "01": {
+   "free": 3075,
+   "name": "Base Library 2/Font",
+   "sections": [
+    {
+     "bytes": 768,
+     "end": 25343,
+     "kind": "DATA",
+     "start": 24576
+    },
+    {
+     "bytes": 4349,
+     "end": 46076,
+     "kind": "CODE",
+     "start": 41728
+    }
+   ],
+   "used": 5117
+  },
+  "02": {
+   "free": 8184,
+   "name": "Constants",
+   "sections": [
+    {
+     "bytes": 8,
+     "end": 16391,
+     "kind": "DATA",
+     "start": 16384
+    }
+   ],
+   "used": 8
+  },
+  "03": {
+   "free": 7992,
+   "name": "User Program",
+   "sections": [
+    {
+     "bytes": 200,
+     "end": 24775,
+     "kind": "DATA",
+     "start": 24576
+    }
+   ],
+   "used": 200
+  },
+  "04": {
+   "free": 298,
+   "name": "",
+   "sections": [
+    {
+     "bytes": 7894,
+     "end": 48853,
+     "kind": "CODE",
+     "start": 40960
+    }
+   ],
+   "used": 7894
+  },
+  "05": {
+   "free": 797,
+   "name": "",
+   "sections": [
+    {
+     "bytes": 7395,
+     "end": 48354,
+     "kind": "CODE",
+     "start": 40960
+    }
+   ],
+   "used": 7395
+  },
+  "06": {
+   "free": 6469,
+   "name": "",
+   "sections": [
+    {
+     "bytes": 1723,
+     "end": 42682,
+     "kind": "CODE",
+     "start": 40960
+    }
+   ],
+   "used": 1723
+  },
+  "07": {
+   "free": 7778,
+   "name": "",
+   "sections": [
+    {
+     "bytes": 414,
+     "end": 33181,
+     "kind": "PROC",
+     "start": 32768
+    }
+   ],
+   "used": 414
+  }
+ },
+ "build_seconds": 0.188,
+ "capture": {
+  "frames": 525,
+  "last_frame": "frame0524.png",
+  "measure": {
+   "collect_sum_ticks_7bit": 4681,
+   "collections": 42,
+   "count": 42,
+   "cycles_per_collection": 835047.619047619,
+   "cycles_per_frame": 2925.714285714286,
+   "cycles_per_raster_call": 3727.891156462585,
+   "flags": 0,
+   "max_ticks": 3,
+   "mean_ticks": 2.857142857142857,
+   "min_ticks": 2,
+   "raster_calls": 9408,
+   "raster_max_ticks": 7,
+   "raster_sum_ticks": 34250,
+   "sum_ticks": 120
+  },
+  "slend": 234,
+  "slstart": 3
+ },
+ "code_bytes": 0,
+ "flags": {
+  "huc": "-S -fno-recursive",
+  "pceas": "-S"
+ },
+ "functions": {
+  "_il_fn_0": 303,
+  "_il_fn_1": 2208,
+  "_il_fn_2": 712,
+  "_il_fn_3": 2404,
+  "_il_fn_4": 180,
+  "_il_fn_5": 366,
+  "_il_fn_6": 117,
+  "_il_fn_7": 987
+ },
+ "name": "parallax",
+ "rom": "tools/gen/parallax-huc.pce",
+ "rom_bytes": 66048,
+ "rom_sha256": "babf4b575d42708e82d0ecd3e826e582f15fd549091b4d5e48809b98b83aa857",
+ "route": "huc",
+ "source": "toys/parallax.lua",
+ "source_sha256": "fdb3cfd11904c6601d73fb033969863af60262711ff20ba1fec4e4cacda7f52a",
+ "toolchain": "/Volumes/External II/pce-tools/huc-toyc"
+}

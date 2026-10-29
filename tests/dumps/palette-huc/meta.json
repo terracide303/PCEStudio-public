@@ -1,0 +1,150 @@
+{
+ "banks": {
+  "00": {
+   "free": 1001,
+   "name": "Base Library 1",
+   "sections": [
+    {
+     "bytes": 7181,
+     "end": 64540,
+     "kind": "CODE",
+     "start": 57360
+    },
+    {
+     "bytes": 10,
+     "end": 65535,
+     "kind": "CODE",
+     "start": 65526
+    }
+   ],
+   "used": 7191
+  },
+  "01": {
+   "free": 3075,
+   "name": "Base Library 2/Font",
+   "sections": [
+    {
+     "bytes": 768,
+     "end": 25343,
+     "kind": "DATA",
+     "start": 24576
+    },
+    {
+     "bytes": 4349,
+     "end": 46076,
+     "kind": "CODE",
+     "start": 41728
+    }
+   ],
+   "used": 5117
+  },
+  "02": {
+   "free": 8188,
+   "name": "Constants",
+   "sections": [
+    {
+     "bytes": 4,
+     "end": 16387,
+     "kind": "DATA",
+     "start": 16384
+    }
+   ],
+   "used": 4
+  },
+  "03": {
+   "free": 7992,
+   "name": "User Program",
+   "sections": [
+    {
+     "bytes": 200,
+     "end": 24775,
+     "kind": "DATA",
+     "start": 24576
+    }
+   ],
+   "used": 200
+  },
+  "04": {
+   "free": 159,
+   "name": "",
+   "sections": [
+    {
+     "bytes": 8033,
+     "end": 48992,
+     "kind": "CODE",
+     "start": 40960
+    }
+   ],
+   "used": 8033
+  },
+  "05": {
+   "free": 4840,
+   "name": "",
+   "sections": [
+    {
+     "bytes": 3352,
+     "end": 44311,
+     "kind": "CODE",
+     "start": 40960
+    }
+   ],
+   "used": 3352
+  },
+  "06": {
+   "free": 8048,
+   "name": "",
+   "sections": [
+    {
+     "bytes": 144,
+     "end": 32911,
+     "kind": "PROC",
+     "start": 32768
+    }
+   ],
+   "used": 144
+  }
+ },
+ "build_seconds": 0.171,
+ "capture": {
+  "frames": 525,
+  "last_frame": "frame0524.png",
+  "measure": {
+   "collect_sum_ticks_7bit": 0,
+   "collections": 0,
+   "count": 473,
+   "cycles_per_collection": null,
+   "cycles_per_frame": 102122.89217758985,
+   "cycles_per_raster_call": null,
+   "flags": 0,
+   "max_ticks": 102,
+   "mean_ticks": 99.72938689217759,
+   "min_ticks": 94,
+   "raster_calls": 0,
+   "raster_max_ticks": 0,
+   "raster_sum_ticks": 0,
+   "sum_ticks": 47172
+  },
+  "slend": 234,
+  "slstart": 3
+ },
+ "code_bytes": 0,
+ "flags": {
+  "huc": "-S -fno-recursive",
+  "pceas": "-S"
+ },
+ "functions": {
+  "_il_fn_0": 154,
+  "_il_fn_1": 2159,
+  "_il_fn_2": 666,
+  "_il_fn_3": 269,
+  "_il_fn_4": 574
+ },
+ "name": "palette",
+ "rom": "tools/gen/palette-huc.pce",
+ "rom_bytes": 57856,
+ "rom_sha256": "34768af238f5a9adf913283e914e887b6d8513cd68f8fad6d28927ec4530ae0c",
+ "route": "huc",
+ "source": "tools/toys/palette.lua",
+ "source_sha256": "458df4060eb9111db60241a0e1fac6a8f193c21a1543fa3d69899d4e7d8c7204",
+ "toolchain": "/Volumes/External II/pce-tools/huc-toyc"
+}

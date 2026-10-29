@@ -206,8 +206,8 @@ What is left on #35: that cycle model (for sample equality), the export path
 page that plays a DMF, and sound in toys (#30). Both checkers were written by
 the builder — @review owes them a cold break (rule 2). `docs/HUTRACK.md`.
 
-**#31: the IL half, part A and part C of the console half are done; the card
-is not.**
+**#31: the IL half and all four parts of the console half (A, B, C, D) are
+done; the card waits on rule 2's cold breaks.**
 `docs/IL.md` defines PCEStudio's typed IL; `renderer/pce-il.js` lowers the #30
 Lua subset to it (through Fengari's own parser, not a second one) and a
 reference interpreter runs it over `renderer/pce-toyhost.js`, the host the Lua
@@ -237,11 +237,25 @@ the palette ROM still rebuilds byte-identically. Measured: frame() 1,204
 cycles, one raster call 1,510, one collection 338,757, flags 0.
 `toys/status-bar.lua` and #30's `TOY_RASTER` do **not** match yet (status-bar's
 bar is right but its playfield is four lines out; TOY_RASTER differs across
-the picture) and are recorded as not proven. NOT done: part B (HuC), part D
-(the measured llvm-mos vs HuC vs direct comparison), sprites/pads, a browser
-page for the IL, strings/passwords/`note`, table reads; recursion and repeated
-closure sites are unguarded; rule 2 cold breaks are owed for both test files.
-`docs/IL.md` §9 and §10 have the measurements and the findings.
+the picture) and are recorded as not proven. **Part B** runs the same IL
+through `renderer/pce-cgen.js`'s HuC dialect into vendor/huc's own compiler
+and PCEAS (`tools/build-huc.sh`, `tools/toyc/huc_runtime.c`,
+`tools/toyc/huc_raster.asm` — part C's RCR handler as bank-0 PCEAS, hooked
+through HuC's user IRQ1 vector). `node tests/check-il-huc.js` exits 0 with 74
+checks: both ROMs rebuild byte-identically (57,856 B / 66,048 B, 7/8 banks),
+the palette toy gives a run of 8 consecutive diff-0 frames with byte-equal
+vram/cram/sat, and `raster()` gives **20 consecutive diff-0 frames** and a
+byte-equal state. Measured: palette `frame()` **102,123 cycles** (86% of a
+video frame — its palette writes are held for VBlank because HuC is too slow
+to finish in the blank), raster call **3,728**, collection **835,048 = 7.0
+video frames** (~4.8 Hz). **Part D** is `docs/IL.md` §12's measured table
+(IL functions 1.6–2.1× larger, frame() 2.4–13.8× slower, one bank vs 7–8,
+llvm-mos stays the export route) plus the paragraph for ppu.toys' author.
+NOT done: sprites/pads, a browser page for the IL, strings/passwords/`note`,
+table reads; recursion and repeated closure sites are unguarded; the HuC
+dialect truncates to 16 bits and does not yet refuse a wider value; rule 2
+cold breaks are owed for all three test files. `docs/IL.md` §9–§12 have the
+measurements and the findings.
 
 ## Next action
 

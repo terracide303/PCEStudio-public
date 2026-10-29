@@ -9,7 +9,9 @@ and what is refused. The pipeline is the one ppu.toys' author described
 toy.lua --(Fengari's parser, the browser's own Lua)--> Lua 5.3 bytecode
         --(renderer/pce-il.js, the lowerer)---------->  PCEStudio IL
         --(#32: analysis)--------------------------->  HuC6280 code
-        --(renderer/pce-cgen.js, parts A + C, §9/§10)  C -> llvm-mos -> .pce
+        --(renderer/pce-cgen.js, parts A-C, §9-§11)
+                                        C -> llvm-mos -> .pce
+                                        C -> HuC -> PCEAS -> .pce
 ```
 
 The IL is where the validator (#32) counts cycles per frame, sprites per
@@ -20,7 +22,10 @@ the browser runtime (`#30`). Part A of the console half (§9) delivered the
 first backend: the palette toy through the same IL → C → llvm-mos → a HuCard
 ROM → Mednafen. Part C (§10) adds `raster(line)` on the console: a
 compile-ahead table replayed by a hand-written RCR handler, with the compiled
-callback's measured cost saying why it is not the handler.
+callback's measured cost saying why it is not the handler. Part B (§11) runs
+the **same IL through the same C emitter in a HuC dialect** into vendor/huc's
+own compiler and PCEAS, both toys again matching the browser in Mednafen;
+part D (§12) puts the two routes' measured numbers side by side.
 
 - `docs/IL.md` — this file: the instructions, the types, the lowering table,
   the refusals, and parts A and C of the backend.
@@ -35,15 +40,19 @@ callback's measured cost saying why it is not the handler.
 - `renderer/pce-toyhost.js` — the toy's hardware host, extracted so both front
   ends use one copy (the surface, the ranges, the raster table, the pads, the
   frame flow).
-- `renderer/pce-cgen.js` — `emitC(program)` → C (refusals by code; `reg`,
-  int globals and the raster hook added by part C).
-- `tools/toyc/toy_runtime.c` — the console runtime: VDC/VCE setup, the frame
-  flow, the raster table and its hand-written RCR handler.
+- `renderer/pce-cgen.js` — `emitC(program, {target})` → C (refusals by code;
+  `reg`, int globals and the raster hook added by part C; target `"llvm"`
+  default, `"huc"` the part B dialect).
+- `tools/toyc/toy_runtime.c` — the llvm-mos console runtime: VDC/VCE setup,
+  the frame flow, the raster table and its hand-written RCR handler.
 - `tools/build-toyc.sh` — Lua toy → IL → C → `mos-pce-clang -Os` → `.pce`.
-- `tools/capture-toy.sh` — build, run in Mednafen, harvest the state, every
-  frame and the timer measurements.
+- `tools/toyc/huc_runtime.c`, `huc_raster.asm`, `tools/build-huc.sh` — the
+  same contract through HuC and PCEAS (part B, §11).
+- `tools/capture-toy.sh`, `tools/capture-huc.sh` — build, run in Mednafen,
+  harvest the state, every frame and the timer measurements.
 - `tests/check-il.js` — the IL half's evidence (§8).
 - `tests/check-il-console.js` — parts A and C's evidence (§9.3, §10.3).
+- `tests/check-il-huc.js` — part B's evidence (§11.4).
 
 ---
 
@@ -754,17 +763,251 @@ while the display runs).
 
 ---
 
-## 11. Not proven, and the next half
+## 11. Part B of the console half: the same IL through HuC
 
-- **Parts A and C of the machine code exist; B and D do not.** The palette
-  toy runs on the console through IL → C → llvm-mos (§9), and
-  `toys/parallax.lua`'s `raster()` runs through the table and RCR chain
-  (§10). Sprites and pads are still refused, `status-bar.lua` and #30's
-  `TOY_RASTER` do not match (§10.4), and the **HuC route, the direct
-  HuC6280 generator and their measured comparison (parts B and D) are the
-  card's next parts**. No backend choice is baked into the IL: the types,
-  the explicit surface instructions and the line info are the parts every
-  backend reads.
+Part A answered "can the IL become machine code at all" with llvm-mos. Part B
+answers the card's other question: the **same IL through HuC** — vendor/huc's
+own C compiler and PCEAS (`vendor/huc/VENDORED.md`), built as an external
+tool under `/Volumes/External II/pce-tools/huc-toyc` — on the same two toys,
+compared with the browser the same way. The front end and every IL→C rule are
+shared; only the C dialect and the runtime are different.
+
+### The pieces
+
+| file | what it is |
+|---|---|
+| `renderer/pce-cgen.js` | the emitter gains `emitC(program, {target: "huc"})`. The default (`"llvm"`) output is byte-identical to parts A/C, so their committed ROMs still rebuild. |
+| `tools/build-huc.sh` | toy → IL → HuC C → one translation unit → `huc -S` → PCEAS with the handler → `<name>-huc.pce` + a JSON report (sha, banks, section bytes, function bytes, build seconds). |
+| `tools/toyc/huc_runtime.c/.h` | the console side in HuC C: VDC/VCE setup, zeroed VRAM/CRAM/SAT, the toy surface (`toy_pal`, `toy_reg`, `toy_vram_set`, `toy_rgb`), the frame flow and the TMA timer sums. |
+| `tools/toyc/huc_raster.asm` | part C's replay handler, verbatim in behaviour, as a PCEAS file in bank 0 (see §11.2). |
+| `tools/capture-huc.sh` | the capture route of `tools/capture-toy.sh`: Mednafen's command line, every video frame, the autosave, `mcs-extract --ram`. |
+| `tests/check-il-huc.js` | part B's evidence (§11.4). |
+
+### 11.1 What HuC's C cannot express, found by compiling
+
+Each of these was a compile error or a wrong picture before the emitter
+changed; the dialect is the minimum that compiles and keeps the IL's meaning.
+
+1. **There is no 32-bit type at all.** HuC's `int` is 16 bits (`src/huc/defs.h`,
+   `INTSIZE 2`); `int32_t`, `uint32_t` and `int16_t` do not exist. The emitter
+   emits `int`, and an int constant is truncated to its low 16 bits (signed
+   decimal) at emission — exact for both toys, whose values are far below
+   65536. The shift helpers test the dialect's width (`n >= 16 → 0`).
+2. **A local array cannot be initialised** (`int r[4] = { 0 };` is "cannot
+   parse initializer"). The IL's reference interpreter starts every register
+   at 0, so the emitter runs a linear read-before-write pass per function and
+   emits `r[i] = 0;` for exactly those registers. The two toys need it (the
+   palette toy's first frame does), so the pass is exercised, not assumed.
+3. **No block scope, and declarations must precede statements.** Two `for`
+   loops in one function cannot both declare `st` ("already defined"), and a
+   declaration after a statement is not a declaration. Loop temporaries are
+   named after their instruction (`st_43`) and hoisted to the top of the
+   function.
+4. **No `__attribute__`, no sections, no `noinline`.** Part A's two llvm-mos
+   workarounds (the pointer-to-`.zp.bss` and the LTO-scalarised globals,
+   §9.5) simply do not exist here: the arrays are ordinary BaseRAM objects
+   and HuC does not optimise them away.
+5. **One C file per compile.** HuC has no separate compilation for user code;
+   `tools/build-huc.sh` concatenates the generated C and the runtime into one
+   translation unit. HuC's `huc.h` also has **no include guard**, so it is
+   included exactly once from that unit.
+6. **A quoted `#include` is resolved against the current directory, not the C
+   file's directory**, so the compile runs in `tools/gen` where the header is
+   copied.
+
+### 11.2 The runtime, and part C's handler reused
+
+`huc_raster.asm` is part C's handler (§10.2) as a standalone file: same op
+byte (bit 0 BXR, 1 BYR, 2 CR, 3/4 colour words), same order (BXR first, colour
+words after the registers, RCR re-armed last), same nine-bit RCR carry. What
+had to change is where it lives and how it is entered:
+
+- It is placed with `.bank 0` **after HuC's startup and base library**, so
+  PCEAS appends it to bank 0's free tail ($FC1C in the committed palette
+  build ends the startup); bank 0 is always mapped, so the handler runs
+  whatever bank the C main loop is in. There is no fixed `.org` to collide
+  with a library change — the assembler decides, and an overflow is a loud
+  build error.
+- HuC's own IRQ1 entry is `irq1: bbs1 <irq_m,user_irq1`, i.e. it jumps
+  through `irq1_jmp` ($2202) **before saving registers**. So the handler saves
+  A/X/Y itself, reads $0000 to acknowledge, and owns every VDC interrupt.
+  Installation is three instructions (`_huc_irq_install`): write the handler's
+  address to $2202 and set bit 1 of `irq_m` ($20F5).
+- The tables are ordinary C arrays (`volatile char toy_r_op[256]`, …). They
+  are not page-aligned, so an `lda abs,X` may cross a page and cost one extra
+  cycle; part C's page alignment was a cycle-budget choice, not a correctness
+  one.
+
+**The palette toy had to borrow part C's deferred base.** HuC's `frame()` for
+the palette toy measures **102,123 cycles**, 86 % of a 60 Hz video frame.
+Writing 15 palette entries that slowly during the display paints a visible
+split down the picture (measured: a band of the previous frame's colours at
+the top; the direct part A flow is 7,417 cycles and lands in the blank). The
+runtime therefore runs `frame()` while the display shows the last frame
+(`MODE_BASE`, capturing the ~15 colour words), waits for VBlank, and applies
+them there — part C's mechanism, extended to the non-raster toy. The captured
+pictures then match the browser exactly (§11.4).
+
+### 11.3 Measurements
+
+Both toys, both routes, same capture route and timer:
+
+| | palette (HuC) | parallax (HuC) |
+|---|---|---|
+| ROM image | **57,856 B** (7 HuCARD banks) | **66,048 B** (8 banks) |
+| CODE bytes (all banks) | 22,925 | 28,552 |
+| the toy's IL functions | **3,822 B** (fn0..fn4: 154/2,159/666/269/574) | **7,277 B** (fn0..fn7: 303/2,208/712/2,404/180/366/117/987) |
+| `frame()` | **102,123 cycles** | **2,926 cycles** |
+| one `raster()` call | — | **3,728 cycles** |
+| one 224-call collection | — | **835,048 cycles = 7.00 video frames** |
+| toy frame rate | one per video frame | one per ~12.5 video frames (~**4.8 Hz**) |
+| build (emit + huc + pceas, wall) | ≈ 0.22 s | ≈ 0.24 s |
+
+The HuC card is 7–8 banks because HuC's startup and base libraries alone fill
+banks 0 and 1; user code spills into 8 KiB banks. The IL functions are 2.1×
+(palette) and 1.6× (parallax) llvm-mos's, and `frame()` 13.8× and 2.4× slower
+— Small-C's stack-based code, no register allocation, one helper call per
+operation. The raster callback is 2.5× slower than llvm-mos's, which pushes
+the collection from 2.84 to 7.0 video frames.
+
+### 11.4 Evidence
+
+`node tests/check-il-huc.js` exits 0 with **74 checks**:
+
+- the HuC dialect: deterministic; no `int32_t`/`uint32_t`/`<stdint.h>`/
+  `__attribute__`; `int f` entry points; loop temporaries hoisted; zero stores
+  exactly where a register can be read first; the default dialect still
+  emits llvm-mos's `int32_t` C; the refusals still come back by code
+  (`cgen-op`, `cgen-fixed`, `cgen-hook`, `cgen-arity`).
+- the ROMs rebuild **byte-identically** to the committed dumps
+  (`tools/gen/palette-huc.pce`, `parallax-huc.pce`; shas in the dumps'
+  `meta.json`) — without HuC the rebuild prints SKIP, the PCEAS/llvm rule.
+- **the palette toy is the browser's**: 32 captured frames match, with a run
+  of 8 consecutive browser frames each a full pixel **diff 0** across the
+  colour cycle; vram/cram/sat are byte-equal to the browser's at the matched
+  frame.
+- **`raster()` is the browser's**: 20 captured frames match and form a run of
+  **20 consecutive browser frames**, each diff 0; vram/cram/sat byte-equal;
+  BYR/MWR equal; CR is the browser's with only VC/RC set (as part C); the
+  console-side flags byte is 0 (no list overflow, no `vset` from a callback).
+- the timer measurements are read from the save's RAM and reported (the
+  numbers of §11.3).
+
+### 11.5 Four facts this part paid for
+
+1. **VCE colour data is at $0404/$0405, not $0403.** The first run showed a
+   solid backdrop while VRAM was already byte-equal to the browser's: the
+   runtime wrote the colour **address** high byte where the colour **data**
+   belonged. CRAM, not VRAM, was the tell.
+2. **The palette split.** §11.2's deferred base exists because the direct
+   flow at 102,123 cycles visibly paints the previous palette down the top of
+   the frame; the browser model has no mid-frame palette timing, so the
+   pictures could never match without holding the writes to VBlank.
+3. **`peek` passes its argument in AX.** Declaring it with HuC's `#pragma
+   fastcall peek(word __bx)` makes the compiler call the undefined `_peek.1`;
+   an ordinary declaration compiles to `__ldwi addr / call _peek`, which is
+   what `huc_misc.asm`'s `_peek` expects.
+4. **`.bank 0` appends.** PCEAS keeps a location counter per bank, so a second
+   input file that switches to bank 0 lands after the startup/library instead
+   of overwriting it (measured: `_huc_irq1` at $FC24 in the palette build).
+
+### 11.6 What part B refuses, and what it does not prove
+
+The **same** IL constructs are refused as in parts A/C, by the same codes —
+the dialect does not widen the subset. It narrows it in one way:
+
+- **16-bit values only.** A constant outside −32768..65535 is refused
+  `cgen-width` rather than truncated. A value in 32768..65535 keeps its
+  16-bit bit pattern (both toys build words up to 0xFFFF) but a *comparison*,
+  `//` or `%` on it runs signed in HuC where the IL's 32-bit int is positive
+  — the toys never compare those words, and the emitter does not yet refuse
+  such a comparison. Computed values can also overflow 16 bits silently;
+  neither toy does.
+
+Not proven:
+
+- **Two toys.** Sprites, pads, tables, strings, `note`, fixed point and the
+  five #29 examples are still refused or untested on this route.
+- **The rate is 4.8 Hz on the raster toy**, so part B is a feasibility and
+  cost result, not a 60 Hz route.
+- **Mednafen is the only witness**, as for parts A/C; no console, no ares.
+- **The interrupt path is part C's behaviour, not a second measurement**: the
+  handler's own cost is counted from the source (64 cycles to the BXR store,
+  §10.2) and is the same code.
+- **Rule 2 is owed.** The test and the runtime were written by the same seat;
+  a cold break of the dialect, the bank-0 placement, the IRQ hook and the
+  deferred base is required before the card's console half closes.
+
+---
+
+## 12. Part D: the routes side by side
+
+The card asked for one table on the same two toys, measured, not estimated.
+Every number below is from the committed captures (`tests/dumps/toypalette`,
+`toyparallax`, `palette-huc`, `parallax-huc`) and the two build reports.
+
+| | llvm-mos (parts A/C) | HuC (part B) |
+|---|---|---|
+| palette ROM | **8,192 B**, one fixed bank | **57,856 B**, 7 banks |
+| palette code size | `.text` 2,725 + `.rodata` 10 | CODE 22,925 (incl. HuC startup/library) |
+| palette toy IL functions | **1,784 B** (+ `il_call` 230) | **3,822 B** |
+| palette `frame()` | **7,417 cycles** (6 % of a frame) | **102,123 cycles** (86 %) |
+| palette flow | direct in VBlank | deferred base (§11.2) |
+| parallax ROM | **8,192 B**, one fixed bank | **66,048 B**, 8 banks |
+| parallax code size | `.text` 7,325 + `early_start` 825 + vector 10 | CODE 28,552 |
+| parallax toy IL functions | **4,541 B** | **7,277 B** |
+| parallax `frame()` | **1,204 cycles** | **2,926 cycles** |
+| one `raster()` call | **1,510 cycles** | **3,728 cycles** |
+| one 224-call collection | **338,757 cycles** (2.84 frames) | **835,048 cycles** (7.00 frames) |
+| toy frame rate (raster) | one per ~5 video frames (~12 Hz) | one per ~12.5 (~4.8 Hz) |
+| build wall time (both toys) | 0.41–0.44 s | 0.22–0.24 s |
+| what it cannot compile | fixed point, sprites, pads, tables, strings, >4 parameters, a closure that escapes; 32-bit ints are exact | all of the above, **and any value wider than 16 bits**; the same refusal codes |
+| picture vs browser | diff 0, 8 (palette) and 40 (raster) frames | diff 0, 8 and 20 frames |
+
+**What the table says.** llvm-mos is a modern optimising compiler and HuC is
+Small-C: the IL functions are 1.6–2.1× larger under HuC, `frame()` is 2.4×
+slower on the raster toy and **13.8×** slower on the palette loop (whose
+per-iteration work is a few arithmetic operations — exactly where Small-C's
+one-helper-call-per-operation shows), a `raster()` call is 2.5× slower, and
+the RCR chain therefore takes 7 video frames instead of 2.84. The ROM cannot
+stay in one bank with HuC: its startup and base libraries fill two banks
+before the toy's code starts, so the card is 7–8 banks. HuC builds faster
+(0.22 s vs 0.41 s) and its C is the more familiar language, but it wins on no
+measured axis that matters to a toy. **The llvm-mos route stays the one the
+console export uses**; the HuC route is proven as a second witness that the
+IL is backend-independent — the same IL, the same refusals, the same
+pictures — and as the measured answer to "what would HuC cost?".
+
+### The paragraph for ppu.toys' author
+
+> The toy's Lua lowers to one small typed IL (init/frame/raster explicit,
+> ints, bools, fixed point) and every analysis and both back ends work on
+> that IL, as you suggested. For the PC Engine we compiled the same IL two
+> ways. Through llvm-mos's PCE target, the palette toy's `frame()` is 7,417
+> cycles (6 % of a frame) and the parallax toy's `raster()` callback 1,510
+> cycles, with 8 KiB ROMs. Through HuC — the maintained pce-devel C compiler,
+> Small-C under the hood — the same toys are correct pixel for pixel in
+> Mednafen, but the IL functions are ~2× larger, `frame()` is 2.4–13.8×
+> slower, a `raster()` call 2.5×, and HuC's runtime libraries push the card
+> from 1 bank to 7–8. The interesting part for you is that nothing in the IL
+> had to change: the only backend-specific work was the C dialect
+> (16-bit int, no initialiser lists) and the RCR handler, which is the same
+> hand-written table replay in both. If your IL has a typed, explicit-hook
+> shape, a second backend is a dialect plus a runtime, not a rewrite.
+
+---
+
+## 13. Not proven, and the next half
+
+- **All four parts of the console half exist; not every toy.** The palette
+  toy runs through IL → C → llvm-mos (§9) and through the same IL → C → HuC
+  (§11), and `toys/parallax.lua`'s `raster()` runs on both routes through
+  the table and RCR chain (§10, §11.2); §12 measures them side by side.
+  Sprites and pads are still refused, `status-bar.lua` and #30's
+  `TOY_RASTER` do not match (§10.4), and a direct HuC6280 generator was not
+  built — the card's part D asked for llvm-mos vs HuC, which is what §12
+  has. No backend choice is baked into the IL: the types, the explicit
+  surface instructions and the line info are the parts every backend reads.
 - **No browser page for the IL yet.** The interpreter runs in Node and in a
   browser via the same UMD pattern; `renderer/toys.html` still runs the
   Fengari path. Wiring a "compile to IL" run into the page is worth doing when

@@ -2,7 +2,10 @@
 /*
  * tools/toyc/emit.js — Lua toy in, generated C out (#31 part A).
  *
- *   node tools/toyc/emit.js toy.lua out.c
+ *   node tools/toyc/emit.js toy.lua out.c [llvm|huc]
+ *
+ * The third argument picks the C dialect: `llvm` (default, parts A/C) or
+ * `huc` (part B, the HuC compiler's 16-bit C).
  *
  * Compiles the toy with renderer/pce-il.js (Fengari's parser, the same front
  * end the browser runs), validates the IL with renderer/pce-validate.js
@@ -23,8 +26,13 @@ const validate = require("../../renderer/pce-validate.js");
 
 const srcPath = process.argv[2];
 const outPath = process.argv[3];
+const target = process.argv[4] || "llvm";
 if (!srcPath || !outPath) {
-  console.error("usage: node tools/toyc/emit.js TOY.lua OUT.c");
+  console.error("usage: node tools/toyc/emit.js TOY.lua OUT.c [llvm|huc]");
+  process.exit(2);
+}
+if (target !== "llvm" && target !== "huc") {
+  console.error("emit failed: unknown C dialect `" + target + "`");
   process.exit(2);
 }
 
@@ -40,7 +48,7 @@ try {
                   ": " + (first ? first.message : "the toy failed"));
     process.exit(1);
   }
-  fs.writeFileSync(outPath, cgen.emitC(program));
+  fs.writeFileSync(outPath, cgen.emitC(program, { target: target }));
 } catch (e) {
   const code = e && (e.code || e.name) || "error";
   console.error("emit failed: " + code + ": " + (e && e.message));
