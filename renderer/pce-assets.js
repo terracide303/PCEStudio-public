@@ -21,6 +21,14 @@
  *          and 6 (the only two with the generator, R7).  Every wave below is
  *          generated here from a harmonic series — no sample, no wavetable
  *          and no code is copied from anywhere.
+ *   sources (card #156) — the same list ppu.toys shows: the art as NAMED
+ *          sources, not pixels buried in code.  sources.json names each
+ *          source with the ranges it owns in the panels' three asset files
+ *          (tiles.json, palettes.json, sprites.json — the same documents
+ *          pce-screen.js and pce-sat.js parse); sources() reads it with the
+ *          panels' own models, so the placement it reports is the placement
+ *          the #117 importer puts into VRAM and CRAM, and each entry's
+ *          preview is drawn from the files' own pixels and palettes.
  *
  * Playing one for the evidence goes through renderer/pce-psg.js, the
  * sample-exact Mednafen model (#34): traceFor() writes the same registers a
@@ -39,17 +47,28 @@
  *   asset-duplicate an instrument the toy already has
  *   asset-name      a name that is not a flat identifier
  *
+ * #156's sources add:
+ *   source-json     a sources.json that is not a JSON object
+ *   source-shape    the wrong document (no "sources" array, a bad entry)
+ *   source-kind     a kind the studio does not know
+ *   no-import       sources name picture files, but the panels' models are
+ *                   not loaded, so the placement cannot be computed
+ *
  * Dual use: CommonJS in Node (tests/check-assets.js) and a browser global
  * (renderer/studio.html) via the same UMD wrapper as pce-wave.js.
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./pce-psg.js"));
+    module.exports = factory(require("./pce-psg.js"),
+                             function () { return require("./pce-editor.js"); },
+                             function () { return require("./pce-sat.js"); });
   } else {
     root.PCEStudio = root.PCEStudio || {};
-    root.PCEStudio.assets = factory(root.PCEStudio.psg);
+    root.PCEStudio.assets = factory(root.PCEStudio.psg,
+      function () { return root.PCEStudio.editor; },
+      function () { return root.PCEStudio.sat; });
   }
-})(typeof self !== "undefined" ? self : this, function (psg) {
+})(typeof self !== "undefined" ? self : this, function (psg, editorDep, satDep) {
   "use strict";
 
   var CLOCK = 7159090;              /* PSG clock, pce-psg.js */
@@ -380,6 +399,10 @@
    *   map     pce-panels.vramMap(state), or null — the #26 regions
    *   report  renderer/pce-validate.js's report, or null
    *   files   the toy's files ({name, source}[])
+   *   sources sources(files), or null — #156: when a toy carries named
+   *           sources, the VRAM and CRAM parts are the sources' own ranges
+   *           (each with its first word/entry, so the panel can colour the
+   *           fill per source) plus the rest as "other"
    */
   function bars(input) {
     input = input || {};
@@ -387,6 +410,7 @@
     var map = input.map || null;
     var report = input.report || null;
     var files = input.files || [];
+    var sources = input.sources || null;
     var out = [];
 
     /* VRAM: every word a region claims, free space excluded. */
@@ -401,8 +425,28 @@
         kinds[seg.kind] += seg.words;
         vramUsed += seg.words;
       }
-      for (i = 0; i < order.length; i++)
-        vramParts.push({ label: order[i], used: kinds[order[i]] });
+      if (sources && sources.length) {
+        /* the sources' own ranges, and whatever they do not claim */
+        var claimed = 0;
+        for (i = 0; i < sources.length; i++) {
+          var src = sources[i];
+          var words = 0;
+          for (var g = 0; g < src.vram.segments.length; g++)
+            words += src.vram.segments[g].count;
+          if (!words) continue;
+          vramParts.push({ label: src.name, used: words,
+                           first: src.vram.segments[0].first,
+                           segments: src.vram.segments, source: true });
+          claimed += words;
+        }
+        var rest = vramUsed - claimed;
+        if (rest > 0)
+          vramParts.push({ label: "other", used: rest, first: 0,
+                           segments: [], source: false });
+      } else {
+        for (i = 0; i < order.length; i++)
+          vramParts.push({ label: order[i], used: kinds[order[i]] });
+      }
     }
     out.push({
       id: "vram", label: "VRAM", unit: "words",
@@ -424,11 +468,33 @@
         if (i < BG_ENTRIES) bg++; else spr++;
       }
     }
+    var cramParts;
+    if (sources && sources.length) {
+      cramParts = [];
+      var cramClaimed = 0;
+      for (i = 0; i < sources.length; i++) {
+        var cs = sources[i];
+        var entries = 0;
+        for (g = 0; g < cs.cram.segments.length; g++)
+          entries += cs.cram.segments[g].count;
+        if (!entries) continue;
+        cramParts.push({ label: cs.name, used: entries,
+                         first: cs.cram.segments[0].first,
+                         segments: cs.cram.segments, source: true });
+        cramClaimed += entries;
+      }
+      var cramRest = bg + spr - cramClaimed;
+      if (cramRest > 0)
+        cramParts.push({ label: "other", used: cramRest, first: 0,
+                         segments: [], source: false });
+    } else {
+      cramParts = [{ label: "BG", used: bg }, { label: "sprites", used: spr }];
+    }
     out.push({
       id: "cram", label: "CRAM", unit: "colours",
       used: bg + spr, cap: CRAM_ENTRIES,
       hex: "512", measured: !!(st && st.cram),
-      parts: [{ label: "BG", used: bg }, { label: "sprites", used: spr }],
+      parts: cramParts,
       note: "512 entries: 256 background, 256 sprites"
     });
 
@@ -456,6 +522,313 @@
         : "check the toy to measure its ROM"
     });
     return out;
+  }
+
+  /* ---- the toy's named sources (card #156) -------------------------------
+   * sources.json names the toy's art the way ppu.toys does: each entry is a
+   * name, a kind, and the ranges it owns inside the panels' three asset
+   * documents — tiles.json's chars, palettes.json's rows, sprites.json's
+   * patterns and SAT slots.  The studio lists them instead of pixels buried
+   * in main.lua, and each one's "…" opens the tile/pattern grid with its
+   * palette, drawn from the files' own pixels — so the preview IS the art,
+   * not a re-render of it.
+   *
+   * Placement is the importer's (#117, pce-editor.js toPicture): a tile at
+   * word char*16, the BAT at words 0..1023, a sprite pattern at
+   * patternLayout's cell (a cell is 64 words; codes[] per pattern), the SAT
+   * at SAT_ADDR + slot*4, and a palette row in 16 CRAM entries — background
+   * rows from entry 0, sprite rows from entry 256.  sources() asks the
+   * panels' own picture model (pce-sat.js pictureFromFiles, the same call
+   * the importer makes) for the pattern cells, so the ranges it reports are
+   * the words the toy's VRAM holds after the import.
+   *
+   * A range the files no longer hold is dropped with a NOTE, not refused:
+   * the studio stays honest about what remains, but a toy whose art has
+   * moved still opens.
+   */
+  var SOURCE_KINDS = { bg: 1, sprites: 1, tilesheet: 1, palette: 1 };
+  var SOURCE_COLS = 16;            /* tiles per preview row, like a sheet */
+  var SPATTERN_COLS = 8;           /* sprite patterns per preview row */
+  var PALETTE_ROWS = 16;           /* background and sprites each hold 16 */
+
+  function fmt(n) {
+    var s = String(n), out = "";
+    for (var i = 0; i < s.length; i++) {
+      if (i && (s.length - i) % 3 === 0) out += ",";
+      out += s[i];
+    }
+    return out;
+  }
+
+  function hex(n) { return "0x" + n.toString(16); }
+
+  /* The VCE's 9-bit colour as RGB 0..252, the arithmetic pce-source.js uses
+   * for its importer previews (one model, so the ASSETS preview and the
+   * importer's agree pixel for pixel). */
+  function rgbOf(word) {
+    var c = word & 0x1FF;
+    return [((c >> 3) & 7) * 36, ((c >> 6) & 7) * 36, (c & 7) * 36];
+  }
+
+  function parseDoc(text, name) {
+    var doc;
+    try { doc = JSON.parse(text); }
+    catch (e) { refuse("source-json", name + " is not JSON: " + e.message); }
+    if (!doc || typeof doc !== "object")
+      refuse("source-shape", name + " needs an object");
+    return doc;
+  }
+
+  /* A range check: {first, count} that lies inside max, {none} when the entry
+   * claims no slots (count 0 — e.g. a source whose sprites the toy places by
+   * code), or a drop note. */
+  function rangeOk(r, name, max) {
+    if (!r || !isInt(r.first) || !isInt(r.count) || r.first < 0 || r.count < 0)
+      return { drop: true, note: name + ": a range needs a first and a count" };
+    if (r.count === 0) return { none: true };
+    if (r.first + r.count > max)
+      return { drop: true, note: name + ": " + r.first + "+" + r.count +
+               " runs past " + max + " — dropped" };
+    return { first: r.first, count: r.count };
+  }
+
+  function sources(files) {
+    var text = fileText(files, "sources.json");
+    if (!text) return { sources: [], notes: [] };
+    var doc = parseDoc(text, "sources.json");
+    if (!Array.isArray(doc.sources))
+      refuse("source-shape", "sources.json needs a \"sources\" array");
+    var list = doc.sources;
+    var notes = [], out = [];
+
+    /* the documents, loaded only when an entry names them */
+    var tilesDoc = null, palsDoc = null, spritesDoc = null;
+    var edMod = null, codes = null;
+
+    function docFor(name, name2) {
+      var d = parseDoc(fileText(files, name), name2 || name);
+      return d;
+    }
+
+    for (var s = 0; s < list.length; s++) {
+      var raw = list[s];
+      if (!raw || typeof raw !== "object")
+        refuse("source-shape", "sources.json entry " + s + " is not an object");
+      if (typeof raw.name !== "string" || !/^[A-Za-z0-9 _.-]+$/.test(raw.name))
+        refuse("source-shape", "a source needs a name (entry " + s + ")");
+      if (!SOURCE_KINDS[raw.kind])
+        refuse("source-kind", raw.name + ": kind \"" + raw.kind +
+               "\" is not one of bg, sprites, tilesheet, palette");
+      if (!raw.tiles && !raw.map && !raw.patterns && !raw.sprites && !raw.palettes)
+        refuse("source-shape", raw.name + ": an entry needs a range " +
+               "(tiles, map, patterns, sprites, palettes)");
+
+      var vram = { segments: [] }, cram = { segments: [] };
+      var preview = null;
+
+      /* tiles (and the BAT a background owns) */
+      if (raw.tiles) {
+        if (!tilesDoc) tilesDoc = docFor("tiles.json");
+        var tiles = Array.isArray(tilesDoc.tiles) ? tilesDoc.tiles : [];
+        var tr = rangeOk(raw.tiles, raw.name, tiles.length);
+        if (tr.none) { /* claims no tiles */ }
+        else if (tr.drop) notes.push(tr.note);
+        else {
+          var firstChar = tiles[tr.first].char;
+          var lastTile = tiles[tr.first + tr.count - 1];
+          if (!isInt(firstChar) || !lastTile || !isInt(lastTile.char))
+            notes.push(raw.name + ": its tiles carry no character codes — dropped");
+          else
+            vram.segments.push({ what: "tiles", first: firstChar * 16,
+                                 count: (lastTile.char + 1 - firstChar) * 16 });
+        }
+      }
+      if (raw.map)
+        vram.segments.push({ what: "map", first: 0, count: 1024 });
+
+      /* sprite patterns and SAT slots: the panels' picture model decides the
+       * cells, exactly as the importer places them */
+      if (raw.patterns || raw.sprites) {
+        if (!spritesDoc) spritesDoc = docFor("sprites.json");
+        if (!edMod) {
+          var e = typeof editorDep === "function" ? editorDep() : editorDep;
+          var satM = typeof satDep === "function" ? satDep() : satDep;
+          if (!e || !satM || !e.patternLayout || !satM.pictureFromFiles)
+            refuse("no-import", raw.name + ": its placement needs the panels' " +
+                   "picture model (pce-editor.js + pce-sat.js)");
+          edMod = e;
+          codes = edMod.patternLayout(satM.pictureFromFiles(files)).codes;
+        }
+        var patterns = Array.isArray(spritesDoc.patterns)
+          ? spritesDoc.patterns : [];
+        if (raw.patterns) {
+          var pr = rangeOk(raw.patterns, raw.name, patterns.length);
+          if (pr.none) { /* claims no patterns */ }
+          else if (pr.drop) notes.push(pr.note);
+          else {
+            var last = pr.first + pr.count - 1;
+            var w = patterns[last].width, h = patterns[last].height;
+            var cells = (w / 16) * (h / 16);
+            vram.segments.push({ what: "patterns",
+                                 first: codes[pr.first] * 64,
+                                 count: (codes[last] + cells - codes[pr.first]) * 64 });
+          }
+        }
+        if (raw.sprites) {
+          var sr = rangeOk(raw.sprites, raw.name, edMod.MAX_SPRITES);
+          if (sr.none) { /* claims no SAT slots */ }
+          else if (sr.drop) notes.push(sr.note);
+          else
+            vram.segments.push({ what: "sat",
+                                 first: edMod.SAT_ADDR + sr.first * 4,
+                                 count: sr.count * 4 });
+        }
+      }
+
+      /* the palette rows, in CRAM entries: background rows from 0, sprite
+       * rows from 256 (the VCE's split) */
+      if (raw.palettes) {
+        var side = raw.palettes.side === "spr" ? "spr"
+          : raw.palettes.side === "bg" ? "bg" : null;
+        if (!side)
+          refuse("source-shape", raw.name + ": palettes.side is \"bg\" or \"spr\"");
+        var palR = rangeOk(raw.palettes, raw.name, PALETTE_ROWS);
+        if (palR.none) { /* claims no rows */ }
+        else if (palR.drop) notes.push(palR.note);
+        else
+          cram.segments.push({ what: "palettes", side: side,
+                               first: (side === "bg" ? 0 : 256) + palR.first * 16,
+                               count: palR.count * 16 });
+      }
+
+      if (!vram.segments.length && !cram.segments.length) {
+        notes.push(raw.name + ": none of its ranges fit the files — dropped");
+        continue;
+      }
+
+      /* the preview: the source's own cells and the palette rows they use,
+       * read from the files, laid out as a sheet */
+      if (raw.kind === "sprites" && raw.patterns && spritesDoc) {
+        var pr2 = rangeOk(raw.patterns, raw.name, patterns.length);
+        if (pr2.drop) notes.push(pr2.note);
+        else if (!pr2.none) {
+          var sprites = Array.isArray(spritesDoc.sprites) ? spritesDoc.sprites : [];
+          var fallback = raw.palettes && isInt(raw.palettes.first)
+            ? raw.palettes.first : 0;
+          preview = { cellW: 16, cellH: 16, cols: SPATTERN_COLS,
+                      cells: [], palettes: [] };
+          for (var p = pr2.first; p < pr2.first + pr2.count; p++) {
+            var pat = patterns[p];
+            var palRow = fallback;
+            for (var q = 0; q < sprites.length; q++)
+              if (sprites[q] && sprites[q].pattern === p && isInt(sprites[q].palette)) {
+                palRow = sprites[q].palette; break;
+              }
+            preview.cells.push({
+              cell: codes[p], palette: palRow,
+              w: pat.width, h: pat.height,
+              x: (p - pr2.first) % SPATTERN_COLS * 32,
+              y: Math.floor((p - pr2.first) / SPATTERN_COLS) * 64,
+              pixels: pat.pixels
+            });
+          }
+        }
+      } else if (raw.tiles && tilesDoc) {
+        var tr2 = rangeOk(raw.tiles, raw.name, tiles.length);
+        if (tr2.drop) notes.push(tr2.note);
+        else if (!tr2.none) {
+          preview = { cellW: 8, cellH: 8, cols: SOURCE_COLS,
+                      cells: [], palettes: [] };
+          for (var t = tr2.first; t < tr2.first + tr2.count; t++) {
+            var tile = tiles[t];
+            if (!tile || !Array.isArray(tile.pixels)) {
+              notes.push(raw.name + ": tile " + t + " is missing — preview cut short");
+              break;
+            }
+            preview.cells.push({
+              char: tile.char, palette: tile.palette, w: 8, h: 8,
+              x: (t - tr2.first) % SOURCE_COLS * 8,
+              y: Math.floor((t - tr2.first) / SOURCE_COLS) * 8,
+              pixels: tile.pixels
+            });
+          }
+        }
+      }
+      if (preview && preview.cells.length) {
+        /* the rows the cells use, in entry order, plus the rows the entry
+         * claims, as the palette strip under the grid */
+        var side2 = raw.kind === "sprites" ? "spr" : "bg";
+        if (!palsDoc) palsDoc = docFor("palettes.json");
+        var rowsDoc = side2 === "bg" ? palsDoc.background : palsDoc.sprites;
+        rowsDoc = Array.isArray(rowsDoc) ? rowsDoc : [];
+        var used = {};
+        for (var c = 0; c < preview.cells.length; c++)
+          used[preview.cells[c].palette] = 1;
+        if (raw.palettes && isInt(raw.palettes.first) && isInt(raw.palettes.count))
+          for (var r = raw.palettes.first;
+               r < raw.palettes.first + raw.palettes.count; r++)
+            used[r] = 1;
+        var rowKeys = Object.keys(used);
+        for (var k = 0; k < rowKeys.length; k++) {
+          var row = +rowKeys[k];
+          var words = rowsDoc[row];
+          if (!Array.isArray(words) || words.length !== 16) {
+            notes.push(raw.name + ": palette row " + row +
+                       " is not in palettes.json — strip skips it");
+            continue;
+          }
+          preview.palettes.push({ side: side2, row: row, words: words });
+        }
+      }
+
+      var words = 0, colours = 0, bits = [];
+      for (var g = 0; g < vram.segments.length; g++) {
+        words += vram.segments[g].count;
+        var seg = vram.segments[g];
+        bits.push("VRAM " + hex(seg.first) + "-" + hex(seg.first + seg.count - 1) +
+                  " " + seg.what);
+      }
+      for (g = 0; g < cram.segments.length; g++) {
+        colours += cram.segments[g].count;
+        seg = cram.segments[g];
+        bits.push("CRAM " + seg.first + "-" + (seg.first + seg.count - 1));
+      }
+      var size = [];
+      if (words) size.push(fmt(words) + " words");
+      if (colours) size.push(fmt(colours) + " colours");
+      out.push({
+        name: raw.name, kind: raw.kind,
+        size: size.length ? size.join(" · ") : "no ranges",
+        placement: bits.join(" · "),
+        vram: vram, cram: cram, preview: preview
+      });
+    }
+    /* a range can be dropped by both the segment pass and the preview pass */
+    var seen = {}, uniq = [];
+    for (var n = 0; n < notes.length; n++) {
+      if (seen[notes[n]]) continue;
+      seen[notes[n]] = 1;
+      uniq.push(notes[n]);
+    }
+    return { sources: out, notes: uniq };
+  }
+
+  /* Add Source (#123) records what it wrote: the entry replaces one of the
+   * same name, or joins the list.  The ranges are the caller's — the
+   * importer's files are replaced wholesale, so a re-import starts at 0. */
+  function mergeSource(text, entry) {
+    var doc = text ? parseDoc(text, "sources.json") : { version: 1, sources: [] };
+    if (!Array.isArray(doc.sources))
+      refuse("source-shape", "sources.json needs a \"sources\" array");
+    if (!entry || typeof entry.name !== "string" ||
+        !/^[A-Za-z0-9 _.-]+$/.test(entry.name))
+      refuse("source-shape", "a source needs a name");
+    var found = -1;
+    for (var i = 0; i < doc.sources.length; i++)
+      if (doc.sources[i] && doc.sources[i].name === entry.name) found = i;
+    if (found < 0) doc.sources.push(entry);
+    else doc.sources[found] = entry;
+    return { doc: doc, text: JSON.stringify(doc, null, 2) + "\n" };
   }
 
   /* ---- the toy's instrument list (instruments.json) ---------------------
@@ -673,7 +1046,11 @@
       "asset-noise": "noise off channels 5-6, or NF outside 0..31",
       "asset-duplicate": "an entry the toy already has",
       "asset-name": "a name that is not a flat identifier",
-      "note-name": "a note that is not C4 / A#3 / ..."
+      "note-name": "a note that is not C4 / A#3 / ...",
+      "source-json": "a sources.json that is not JSON",
+      "source-shape": "a sources.json of the wrong shape",
+      "source-kind": "a kind the studio does not know",
+      "no-import": "placement needing pce-editor.js + pce-sat.js, not loaded"
     },
 
     byId: byId,
@@ -691,6 +1068,10 @@
     fundamental: fundamental,
 
     bars: bars,
+    sources: sources,
+    mergeSource: mergeSource,
+    rgbOf: rgbOf,
+    SOURCE_KINDS: SOURCE_KINDS,
     emptyInstruments: emptyInstruments,
     parseInstruments: parseInstruments,
     checkInstrument: checkInstrument,

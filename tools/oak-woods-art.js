@@ -20,7 +20,13 @@
  * the studio's Add Source button runs.  Nothing here re-implements it: this
  * tool composes the pack's layers into the one background the PCE shows, cuts
  * the character sheet into the sprite sizes the VDC draws, calls importImage
- * for each, and writes the result as the vram[]/pal() writes a toy can make.
+ * for each, and writes the art the way the studio keeps it (card #156):
+ * tiles.json, palettes.json and sprites.json beside the playable main.lua,
+ * plus sources.json naming the three sources with their ranges.  The #117
+ * importer puts that picture into VRAM, CRAM and the SAT before the toy
+ * runs, so main.lua's generated block holds only the numbers the game needs
+ * — the importer's own placement, read back through
+ * renderer/pce-editor.js's patternLayout, never recomputed here.
  *
  *   node tools/oak-woods-art.js            import, write demo-art/oak-woods/
  *   node tools/oak-woods-art.js --check    exit 1 if that folder is stale
@@ -28,7 +34,8 @@
  *
  * The pack path defaults to Dennis's download and can be overridden with
  * OAK_WOODS_PACK.  If the pack AND the written folder are both absent, --check
- * says SKIP and exits 0, so a fresh clone stays green.
+ * says SKIP and exits 0, so a fresh clone stays green.  --check compares
+ * every file the tool writes, not just main.lua.
  */
 "use strict";
 
@@ -356,67 +363,109 @@ function composeProps(packDir) {
   return img;
 }
 
-/* ---- the picture as Lua ------------------------------------------------ */
+/* ---- the art as the studio's files (#156) --------------------------------
+ * One background import and two sprite imports become the ONE picture the
+ * #117 importer loads: tiles.json from the background, palettes.json with
+ * the background's rows and the two imports' sprite rows, sprites.json with
+ * the player's then the props' patterns.  The toy drives the SAT itself, so
+ * sprites.json carries no sprites: an empty SAT at boot is the toy's own
+ * parked state.  sources.json names the three sources with the ranges below,
+ * the same shape the studio's ASSETS pane reads (renderer/pce-assets.js).
+ *
+ * The placement is the importer's, never this tool's: the merged files go
+ * through renderer/pce-sat.js's pictureFromFiles and
+ * renderer/pce-editor.js's patternLayout — the exact code the host runs —
+ * and the resulting cells are baked into main.lua's block as PLY, ROCK and
+ * SIGNP. */
 
-function hex16(w) { return "0x" + (w & 0xFFFF).toString(16).toUpperCase().padStart(4, "0"); }
+function docText(doc) { return JSON.stringify(doc, null, 2) + "\n"; }
 
-function tileWords(tile) {
-  const out = [];
-  for (let y = 0; y < 8; y++) {
-    let lo = 0, hi = 0, lo2 = 0, hi2 = 0;
-    for (let x = 0; x < 8; x++) {
-      const v = tile.pixels[y * 8 + x], bit = 7 - x;
-      if (v & 1) lo |= 1 << bit;
-      if (v & 2) hi |= 1 << bit;
-      if (v & 4) lo2 |= 1 << bit;
-      if (v & 8) hi2 |= 1 << bit;
-    }
-    out.push(lo | (hi << 8), lo2 | (hi2 << 8));
-  }
-  const words = [];
-  for (let y = 0; y < 8; y++) words.push(out[y * 2]);
-  for (let y = 0; y < 8; y++) words.push(out[y * 2 + 1]);
-  return words;
+function mergedDocs(bgRes, charRes, propsRes) {
+  const bgPal = JSON.parse(bgRes.files["palettes.json"]);
+  const spriteRows = charRes.palettes.concat(propsRes.palettes);
+  while (spriteRows.length < 16) spriteRows.push(new Array(16).fill(0));
+  const nChar = charRes.palettes.length, nProps = propsRes.palettes.length;
+  const palDoc = { version: 1, backdrop: bgRes.backdrop,
+                   background: bgPal.background, sprites: spriteRows };
+  const sprDoc = { version: 1,
+                   patterns: charRes.patterns.concat(propsRes.patterns),
+                   sprites: [] };
+  const sources = [
+    { name: "forest", kind: "bg",
+      tiles: { first: 0, count: bgRes.stats.tiles }, map: true,
+      palettes: { side: "bg", first: 0, count: bgRes.stats.palettes } },
+    { name: "player", kind: "sprites",
+      patterns: { first: 0, count: charRes.patterns.length },
+      sprites: { first: 0, count: 1 },
+      palettes: { side: "spr", first: 0, count: nChar } },
+    { name: "props", kind: "sprites",
+      patterns: { first: charRes.patterns.length, count: propsRes.patterns.length },
+      sprites: { first: 1, count: 5 },
+      palettes: { side: "spr", first: nChar, count: nProps } },
+  ];
+  return {
+    tilesText: bgRes.files["tiles.json"],
+    palettesText: docText(palDoc),
+    spritesText: docText(sprDoc),
+    sourcesText: docText({ version: 1, sources: sources }),
+    nBg: bgRes.stats.palettes, nChar: nChar, nProps: nProps,
+    tilesCount: bgRes.stats.tiles,
+    patternCount: charRes.patterns.length + propsRes.patterns.length,
+  };
 }
 
-/* One 16x16 sub-cell of a pattern, as the VDC's four planes. */
-function cellWords(pattern, col, row, cell, words) {
-  for (let k = 0; k < 4; k++) for (let r = 0; r < 16; r++) {
-    let w = 0;
-    for (let x = 0; x < 16; x++)
-      if (pattern.pixels[(row * 16 + r) * pattern.width + (col * 16 + x)] & (1 << k))
-        w |= 1 << (15 - x);
-    if (w) words.push({ addr: cell * 64 + k * 16 + r, word: w });
-  }
+/* the importer's own placement of the merged picture: the cells each pattern
+ * lands at, read through the same code the host runs at boot (#117) */
+function placement(docs) {
+  const satM = require("../renderer/pce-sat.js");
+  const edM = require("../renderer/pce-editor.js");
+  const files = [
+    { name: "tiles.json", source: docs.tilesText },
+    { name: "palettes.json", source: docs.palettesText },
+    { name: "sprites.json", source: docs.spritesText },
+  ];
+  const pic = satM.pictureFromFiles(files);
+  const layout = edM.patternLayout(pic);
+  edM.toPicture(pic);   /* refuse here, as the host would, if it cannot fit */
+  return layout;
 }
 
-function luaBlock(bg, bgRes, charRes, propsRes, layout) {
+/* ---- the block the playable main.lua carries ---------------------------- */
+
+function luaBlock(built) {
+  const d = built.docs, codes = built.codes;
   const L = [];
   const push = (s) => L.push(s);
   push(OPEN + " — generated by tools/oak-woods-art.js; do not edit");
   push("-- Oak Woods v1.0 by Brullov (brullov.art), imported by the #123");
-  push("-- importer (renderer/pce-source.js) into VRAM and CRAM.  The pack and");
-  push("-- this block are NOT in the repository (docs/DECISIONS.md, 2026-10-29):");
-  push("-- the playable file is demo-art/oak-woods/main.lua, beside the repo.");
-  push("-- " + bgRes.stats.tiles + " background tiles, " + bgRes.stats.palettes +
-       " background palettes, " + charRes.patterns.length + " player frames,");
-  push("-- " + propsRes.patterns.length + " prop patterns.");
-
+  push("-- importer (renderer/pce-source.js) into tiles.json, palettes.json,");
+  push("-- sprites.json and sources.json beside this file — NOT in the");
+  push("-- repository (docs/DECISIONS.md, 2026-10-29).  The #117 importer");
+  push("-- puts the picture into VRAM, CRAM and the SAT before init() runs,");
+  push("-- so art_boot() has nothing to do; the numbers below are the");
+  push("-- importer's own placement, read back through pce-editor.js's");
+  push("-- patternLayout.");
+  push("-- " + d.tilesCount + " background tiles, " + d.nBg + " background" +
+       " palettes, " + d.patternCount + " sprite patterns in " +
+       (d.nChar + d.nProps) + " sprite palettes.");
+  const nPat = built.charRes.patterns.length;   /* player patterns */
+  const nChar = d.nChar;                        /* sprite palette rows */
   push("");
-  push("PLY = {" + charRes.sprites.map((s) => layout.charBase + s.pattern * 8).join(", ") + "}");
-  push("PLY_PAL = {" + charRes.sprites.map((s) => s.palette).join(", ") + "}");
-  push("ROCK = {" + [0, 1].map((i) => layout.propBase + i * 4).join(", ") + "}");
-  push("ROCK_PAL = {" + [0, 1].map((i) => propsRes.sprites[i].palette + layout.charPalettes).join(", ") + "}");
-  push("SIGNP = " + (layout.propBase + 8));
-  push("SIGN_PAL = " + (propsRes.sprites[2].palette + layout.charPalettes));
+  push("PLY = {" + codes.slice(0, nPat).join(", ") + "}");
+  push("PLY_PAL = {" + built.charRes.sprites.map((s) => s.palette).join(", ") + "}");
+  push("ROCK = {" + codes.slice(nPat, nPat + 2).join(", ") + "}");
+  push("ROCK_PAL = {" + built.propsRes.sprites.slice(0, 2)
+    .map((s) => s.palette + nChar).join(", ") + "}");
+  push("SIGNP = " + codes[nPat + 2]);
+  push("SIGN_PAL = " + (built.propsRes.sprites[2].palette + nChar));
 
   /* the digit tiles: cells 1..10 of the glyph row (row 28) */
   /* the importer's tiles[] is indexed by char - $40, not by char */
-  const tileAt = (ch) => bgRes.tiles[ch - 0x40];
+  const tileAt = (ch) => built.bgRes.tiles[ch - 0x40];
   const digitChars = [], digitPal = [];
   for (let d = 0; d < 10; d++) {
     const cell = 28 * 32 + 1 + d;
-    const ch = bgRes.map[cell];
+    const ch = built.bgRes.map[cell];
     digitChars.push(ch);
     digitPal.push(tileAt(ch).palette);
   }
@@ -427,75 +476,15 @@ function luaBlock(bg, bgRes, charRes, propsRes, layout) {
   push("GROUND = " + GROUND);
   push("START_X = 96");
   push("SKY_LINE = 24");
-  push("MAIN_LINE = " + bg.cut);
+  push("MAIN_LINE = " + built.bgImg.cut);
   push("LEVEL_LEN = 1440");
   push("GOAL_X = 1400");
   push("ROCK_X = {240, 520, 900, 1240}");
 
   push("");
   push("function art_boot()");
-  push("  -- the VCE: every background palette's colour 0 is the shared backdrop");
-  for (let p = 0; p < bgRes.palettes.length; p++)
-    for (let e = 0; e < 16; e++)
-      push("  pal(" + (p * 16 + e) + ", " + bgRes.palettes[p][e] + ")");
-  for (let p = bgRes.palettes.length; p < 16; p++)
-    push("  pal(" + (p * 16) + ", " + bgRes.backdrop + ")   -- palette " + p + "'s colour 0");
-
-  push("  -- the VCE: the sprite palettes at CRAM $100");
-  let base = 0;
-  const spriteRows = [];
-  for (const row of charRes.palettes) spriteRows.push(row);
-  for (const row of propsRes.palettes) spriteRows.push(row);
-  for (let p = 0; p < spriteRows.length; p++)
-    for (let e = 1; e < 16; e++)
-      if (spriteRows[p][e])
-        push("  pal(" + (256 + p * 16 + e) + ", " + spriteRows[p][e] + ")");
-
-  push("  -- the background tiles: character $nn at word char*16");
-  for (const t of bgRes.tiles) {
-    const words = tileWords(t);
-    let any = false;
-    for (let y = 0; y < 16; y++) if (words[y]) any = true;
-    if (!any) continue;
-    push("  -- tile $" + t.char.toString(16));
-    for (let y = 0; y < 16; y++)
-      if (words[y]) push("  vram[" + (t.char * 16 + y) + "] = " + hex16(words[y]));
-  }
-
-  push("  -- the BAT at word 0, runs of one cell");
-  for (let row = 0; row < 32; row++) {
-    const cells = [];
-    for (let col = 0; col < 32; col++) {
-      const ch = bgRes.map[row * 32 + col];
-      const pal = tileAt(ch).palette;
-      cells.push((ch & 0xFFF) | ((pal & 0xF) << 12));
-    }
-    let col = 0;
-    while (col < 32) {
-      let end = col;
-      while (end + 1 < 32 && cells[end + 1] === cells[col]) end++;
-      if (end > col)
-        push("  for c = " + col + ", " + end + " do vram[" + (row * 32) +
-             " + c] = " + hex16(cells[col]) + " end");
-      else
-        push("  vram[" + (row * 32 + col) + "] = " + hex16(cells[col]));
-      col = end + 1;
-    }
-  }
-
-  push("  -- the sprite patterns at their packed cells");
-  const emitPattern = (res, i, cell, w, h) => {
-    const words = [];
-    for (let r = 0; r < h / 16; r++) for (let c = 0; c < w / 16; c++)
-      cellWords(res.patterns[i], c, r, cell + c + 2 * r, words);
-    push("  -- pattern " + i + " (cell " + cell + ")");
-    for (const wd of words) push("  vram[" + wd.addr + "] = " + hex16(wd.word));
-  };
-  for (let i = 0; i < charRes.patterns.length; i++)
-    emitPattern(charRes, i, layout.charBase + i * 8, 32, 64);
-  for (let i = 0; i < propsRes.patterns.length; i++)
-    emitPattern(propsRes, i, layout.propBase + i * 4, 32, 32);
-
+  push("  -- the picture is #117's import: tiles, palettes and sprite patterns");
+  push("  -- are already in VRAM, CRAM and the SAT when this runs");
   push("end");
   push(CLOSE + " — do not edit above this line");
   return L.join("\n") + "\n";
@@ -528,28 +517,23 @@ function build(opts) {
                                                alphaThreshold: 128, dither: "none",
                                                maxPalettes: 6 });
 
-  const nTiles = bgRes.tiles.length;
-  const charBase = 16 + Math.ceil(nTiles * 16 / 64);
-  const alignedCharBase = Math.ceil(charBase / 8) * 8;
-  const propBase = alignedCharBase + charRes.patterns.length * 8;
-  const layout = {
-    nTiles: nTiles,
-    charBase: alignedCharBase,
-    propBase: propBase,
-    charPalettes: charRes.palettes.length,
+  const docs = mergedDocs(bgRes, charRes, propsRes);
+  const layout = placement(docs);
+  const codes = layout.codes;
+  const vram = {
+    bat: 1024, tiles: docs.tilesCount * 16,
+    sprites: layout.cellCount * 64,
+    spriteBase: layout.firstCell * 64,
+    end: layout.endCell * 64,
+    total: Math.max(1024 + docs.tilesCount * 16, layout.endCell * 64),
   };
-  const spriteWords = (charRes.patterns.length * 8 + propsRes.patterns.length * 4) * 64;
-  const tileWordsTotal = nTiles * 16;
-  layout.vram = { bat: 1024, tiles: tileWordsTotal,
-                  sprites: spriteWords,
-                  spriteBase: alignedCharBase * 64,
-                  end: alignedCharBase * 64 + spriteWords,
-                  total: Math.max(1024 + tileWordsTotal, alignedCharBase * 64 + spriteWords) };
 
-  const block = luaBlock(bgImg, bgRes, charRes, propsRes, layout);
-  return { dir, layers, bgImg, bgRes, charImg, charRes, propsImg, propsRes,
-           bandedImg: composeBandedBackground(layers),
-           layout, block };
+  const built = { dir, layers, bgImg, bgRes, charImg, charRes, propsImg, propsRes,
+                  docs, codes, layout,
+                  bandedImg: composeBandedBackground(layers),
+                  vram };
+  built.block = luaBlock(built);
+  return built;
 }
 
 /* ---- writing ----------------------------------------------------------- */
@@ -668,14 +652,17 @@ fit to the nearest of the 15 — the only place the art is lossy, and it is the
 #123 importer's own fitting, not a hand edit.
 `;
 
-function writeAll(built) {
-  fs.mkdirSync(OUT, { recursive: true });
-  const source = fs.readFileSync(TOY, "utf8");
-  const playable = splice(source, built.block);
-  fs.writeFileSync(path.join(OUT, "main.lua"), playable);
-  fs.writeFileSync(path.join(OUT, "background.png"), pngOf(built.bgImg));
-  fs.writeFileSync(path.join(OUT, "character.png"), pngOf(built.charImg));
-  fs.writeFileSync(path.join(OUT, "props.png"), pngOf(built.propsImg));
+/* Every file the tool writes, for writeAll and --check alike. */
+function outputs(built) {
+  const out = {};
+  out["main.lua"] = splice(fs.readFileSync(TOY, "utf8"), built.block);
+  out["tiles.json"] = built.docs.tilesText;
+  out["palettes.json"] = built.docs.palettesText;
+  out["sprites.json"] = built.docs.spritesText;
+  out["sources.json"] = built.docs.sourcesText;
+  out["background.png"] = pngOf(built.bgImg);
+  out["character.png"] = pngOf(built.charImg);
+  out["props.png"] = pngOf(built.propsImg);
   const report = {
     pack: "oak_woods_v1.0.zip",
     credit: "Oak Woods v1.0 by Brullov (brullov.art)",
@@ -686,23 +673,37 @@ function writeAll(built) {
     windows: { far: built.bgImg.windows.far, mid: built.bgImg.windows.mid,
                ground: built.bgImg.windows.ground },
     skyCut: built.bgImg.cut,
-    vram: built.layout.vram,
+    placement: { codes: built.codes, firstCell: built.layout.firstCell,
+                 endCell: built.layout.endCell },
+    vram: built.vram,
+    sources: JSON.parse(built.docs.sourcesText).sources,
     warnings: [].concat(built.bgRes.warnings, built.charRes.warnings,
                         built.propsRes.warnings),
     ground: GROUND,
   };
-  fs.writeFileSync(path.join(OUT, "art.json"), JSON.stringify(report, null, 2) + "\n");
-  fs.writeFileSync(path.join(OUT, "README.md"),
+  out["art.json"] = JSON.stringify(report, null, 2) + "\n";
+  out["README.md"] =
     "# OAK WOODS — the demo's art (card #128)\n\n" +
     "This folder is the pack's art, converted for the PC Engine by\n" +
     "`tools/oak-woods-art.js` through the #123 importer. It is **not in the\n" +
-    "repository** (docs/DECISIONS.md, 2026-10-29). `main.lua` here is the\n" +
-    "playable file: toys/oak-woods/main.lua with its placeholder picture\n" +
-    "replaced by the pack's tiles, palettes and sprite patterns.\n\n" +
+    "repository** (docs/DECISIONS.md, 2026-10-29).  The art is the studio's\n" +
+    "own file shapes (card #156): `tiles.json`, `palettes.json` and\n" +
+    "`sprites.json` are the picture the #117 importer loads before the toy\n" +
+    "runs, `sources.json` names the three sources for the studio's ASSETS\n" +
+    "pane, and `main.lua` is the playable file — toys/oak-woods/main.lua with\n" +
+    "its placeholder picture replaced by a block of the importer's placement\n" +
+    "numbers (no VRAM or CRAM writes; the import is the art).\n\n" +
     "## Licence\n\n" + LICENCE + "\n## Fit\n\n" + FIT + "\n" +
     "## Tools\n\n```sh\nnode tools/oak-woods-art.js           # rebuild this folder\n" +
-    "node tools/oak-woods-art.js --check   # is it current?\n```\n");
-  return playable;
+    "node tools/oak-woods-art.js --check   # is it current?\n```\n";
+  return out;
+}
+
+function writeAll(built) {
+  fs.mkdirSync(OUT, { recursive: true });
+  for (const name of Object.keys(outputs(built)))
+    fs.writeFileSync(path.join(OUT, name), outputs(built)[name]);
+  return outputs(built)["main.lua"];
 }
 
 /* ---- main -------------------------------------------------------------- */
@@ -721,21 +722,26 @@ function main(argv) {
     }
     const built = build({ pack });
     if (built.skip) { console.log("SKIP  " + built.skip); return 0; }
-    const want = splice(fs.readFileSync(TOY, "utf8"), built.block);
-    const have = fs.readFileSync(playablePath, "utf8");
-    if (want !== have) {
-      console.log("FAIL  demo-art/oak-woods/main.lua is not what " +
-                  "tools/oak-woods-art.js writes (re-run it)");
-      return 1;
+    let bad = 0;
+    for (const name of Object.keys(outputs(built))) {
+      const want = outputs(built)[name];
+      const file = path.join(OUT, name);
+      if (!fs.existsSync(file) || fs.readFileSync(file).toString() !== String(want)) {
+        bad++;
+        console.log("FAIL  demo-art/oak-woods/" + name + " is not what " +
+                    "tools/oak-woods-art.js writes (re-run it)");
+      }
     }
-    console.log("PASS  demo-art/oak-woods/main.lua is the tool's output");
+    if (bad) return 1;
+    console.log("PASS  demo-art/oak-woods is the tool's output (" +
+                Object.keys(outputs(built)).length + " files)");
     return 0;
   }
 
   const built = build({ pack });
   if (built.skip) { console.error(built.skip); return 1; }
   writeAll(built);
-  const v = built.layout.vram;
+  const v = built.vram;
   console.log("wrote " + OUT);
   console.log("  background " + built.bgRes.stats.tiles + " tiles, " +
               built.bgRes.stats.palettes + " palettes, max " +
@@ -745,6 +751,9 @@ function main(argv) {
   console.log("  sky strip cut at line " + built.bgImg.cut);
   console.log("  props " + built.propsRes.patterns.length + " patterns (32x32), " +
               built.propsRes.stats.palettes + " palettes");
+  console.log("  patterns at cells " + built.layout.firstCell + "-" +
+              (built.layout.endCell - 1) + " (the #117 importer's placement)");
+  console.log("  sources.json: forest (bg), player (sprites), props (sprites)");
   console.log("  VRAM words: BAT 1024 + tiles " + v.tiles + " + sprites " +
               v.sprites + " = " + v.total + " of 32768");
   for (const w of [].concat(built.bgRes.warnings, built.charRes.warnings,
@@ -753,5 +762,6 @@ function main(argv) {
 }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
-module.exports = { build, splice, composeBackground, composeBandedBackground, composeCharacter,
+module.exports = { build, splice, mergedDocs, placement, outputs,
+                   composeBackground, composeBandedBackground, composeCharacter,
                    composeProps, edgeClean, rowUniform, seamCost, GROUND, BAND };

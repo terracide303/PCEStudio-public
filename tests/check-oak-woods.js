@@ -31,6 +31,13 @@
  *      demo game whose sound is audible — card #113's symptom is absent).
  *   7. THE PICTURES are written to demo-art/oak-woods/dumps/ and read back
  *      pixel for pixel.
+ *   8. THE ART IS NAMED SOURCES (card #156).  main.lua is the game code and
+ *      the importer's placement block, under 20 KB; sources.json's ranges
+ *      match the files beside it; and the studio's own model
+ *      (renderer/pce-assets.js) previews each source with cells that are
+ *      byte-identical to the VRAM the #117 importer wrote after one frame.
+ *      Both runtimes play with the files, the way the studio and the site
+ *      hand them over.
  *
  * WHAT IT DOES NOT PROVE:
  *   - Nothing runs on the console: the Export cannot carry a game yet
@@ -93,6 +100,12 @@ if (!fs.existsSync(GAME)) {
 
 const source = fs.readFileSync(GAME, "utf8");
 const song = JSON.parse(fs.readFileSync(SONG, "utf8"));
+
+/* #156: the art is the studio's files, not Lua pokes.  Both runtimes play
+ * with them, the way the site and the studio do. */
+const ART_FILES = ["tiles.json", "palettes.json", "sprites.json"].map((n) => ({
+  name: n, source: fs.readFileSync(path.join(ART, n), "utf8") }));
+const SOURCES = JSON.parse(fs.readFileSync(path.join(ART, "sources.json"), "utf8"));
 
 /* the generated block's own constants, so the checks read the same numbers
  * the toy does rather than a copy of them */
@@ -167,8 +180,8 @@ function scriptedPad(f) {
 }
 
 function playTogether(padFn, frames, keep) {
-  const a = toys.create(source, { budgetMs: 400, songs: [song] });
-  const b = il.create(source, { budgetMs: 400, songs: [song] });
+  const a = toys.create(source, { budgetMs: 400, songs: [song], files: ART_FILES });
+  const b = il.create(source, { budgetMs: 400, songs: [song], files: ART_FILES });
   a.load();
   b.load();
   const diffs = [];
@@ -415,7 +428,7 @@ function longPad(f) {
 }
 
 function checkDepth() {
-  const rt = toys.create(source, { budgetMs: 400, songs: [song] });
+  const rt = toys.create(source, { budgetMs: 400, songs: [song], files: ART_FILES });
   rt.load();
   let worst = 0, worstAt = -1, used = 0;
   for (let f = 0; f < 3600; f++) {
@@ -451,7 +464,7 @@ function bgPixelRgb(state, x, y) {
   return [(v >> 3) & 7, (v >> 6) & 7, v & 7];
 }
 function checkSeam() {
-  const rt = toys.create(source, { budgetMs: 400, songs: [song] });
+  const rt = toys.create(source, { budgetMs: 400, songs: [song], files: ART_FILES });
   rt.load();
   const g = rt.frame(0);
   rt.dispose();
@@ -495,6 +508,117 @@ function checkCut() {
         "(lines " + old.edges.join(", ") + "): clean = " + JSON.stringify(oldClean));
 }
 
+/* ---- 9: card #156 — the art is named sources, not pokes ----------------- *
+ * The studio's own model (renderer/pce-assets.js) reads the four files; its
+ * preview of each source is compared with the VRAM the importer wrote after
+ * one frame, so the ASSETS pane's preview is proven to be the running
+ * picture.  The encoders here are the editor's arithmetic (the tile words
+ * and writeSpritePattern of renderer/pce-editor.js). */
+function tileWord(tile, y, plane2) {
+  let lo = 0, hi = 0;
+  for (let x = 0; x < 8; x++) {
+    const v = tile.pixels[y * 8 + x], bit = 7 - x;
+    if (plane2) { if (v & 4) lo |= 1 << bit; if (v & 8) hi |= 1 << bit; }
+    else { if (v & 1) lo |= 1 << bit; if (v & 2) hi |= 1 << bit; }
+  }
+  return lo | (hi << 8);
+}
+function cellWord(pat, half, block, row, k) {
+  let w = 0;
+  for (let x = 0; x < 16; x++)
+    if (pat.pixels[(block * 16 + row) * pat.width + half * 16 + x] & (1 << k))
+      w |= 1 << (15 - x);
+  return w;
+}
+function patternVramOk(wordAt, pat, base) {
+  const halves = pat.width === 32 ? 2 : 1;
+  for (let b = 0; b < pat.height / 16; b++)
+    for (let half = 0; half < halves; half++)
+      for (let k = 0; k < 4; k++)
+        for (let r = 0; r < 16; r++)
+          if (wordAt((base + b * 2 + half) * 64 + k * 16 + r) !==
+              cellWord(pat, half, b, r, k)) return false;
+  return true;
+}
+
+function checkSources() {
+  check(fs.statSync(GAME).size < 20000,
+        "main.lua is the game code plus the placement block, not the art (" +
+        fs.statSync(GAME).size + " bytes < 20 KB)");
+
+  /* the studio's model reads the files and names the sources */
+  const A = require("../renderer/pce-assets.js");
+  const files = ART_FILES.concat([{ name: "sources.json", source:
+    fs.readFileSync(path.join(ART, "sources.json"), "utf8") }]);
+  const sres = A.sources(files);
+  eq("the studio's model names the three sources",
+     sres.sources.map((s) => s.name), ["forest", "player", "props"]);
+  eq("... and every range is live (no stale or missing rows)", sres.notes, []);
+
+  /* the ranges sources.json claims match the files it sits beside */
+  const tiles = JSON.parse(ART_FILES[0].source);
+  const pals = JSON.parse(ART_FILES[1].source);
+  const sprs = JSON.parse(ART_FILES[2].source);
+  const forest = SOURCES.sources[0], player = SOURCES.sources[1],
+        props = SOURCES.sources[2];
+  eq("forest's tile range is the file's tiles",
+     [forest.tiles.first, forest.tiles.count], [0, tiles.tiles.length]);
+  check(forest.map === true && forest.palettes.side === "bg",
+        "forest claims the BAT and the background palette rows");
+  eq("player's pattern range is the first patterns",
+     [player.patterns.first, player.patterns.count], [0, 8]);
+  eq("props' pattern range follows it",
+     [props.patterns.first, props.patterns.count], [8, 3]);
+  check(player.sprites.first === 0 && player.sprites.count === 1 &&
+        props.sprites.first === 1 && props.sprites.count === 5,
+        "the SAT ranges are the toy's own slots (0 the player, 1..5 the " +
+        "sign and rocks)");
+  const rows = pals.sprites.filter((r) => r.some((w) => w));
+  eq("the two sprite palette rows the sources claim exist", rows.length, 2);
+
+  /* the previews are the running picture: one frame, then compare */
+  const rt = toys.create(source, { budgetMs: 400, songs: [song], files: ART_FILES });
+  rt.load();
+  const g = rt.frame(0);
+  rt.dispose();
+  const wordAt = (addr) => g.state.vram[addr * 2] | (g.state.vram[addr * 2 + 1] << 8);
+
+  const forestPrev = sres.sources[0].preview;
+  for (const cell of forestPrev.cells) {
+    const tile = tiles.tiles[cell.char - 0x40];
+    check(JSON.stringify(tile.pixels) === JSON.stringify(cell.pixels),
+          "forest's preview tile $" + cell.char.toString(16) + " is the " +
+          "file's tile");
+    let ok = true;
+    for (let y = 0; y < 8; y++)
+      if (wordAt(cell.char * 16 + y) !== tileWord(tile, y, false) ||
+          wordAt(cell.char * 16 + 8 + y) !== tileWord(tile, y, true)) ok = false;
+    check(ok, "... and its VRAM words are the importer's (" +
+          tiles.tiles.length + " tiles compared)");
+  }
+
+  const baked = { PLY: intArray("PLY"), ROCK: intArray("ROCK"),
+                  SIGNP: Number(constOf("SIGNP")) };
+  const spritePrev = (s, n, cells) => {
+    eq("the " + s + " preview's cells are the importer's placement",
+       cells.map((c) => c.cell), baked[n]);
+    const base = s === "player" ? 0 : 8;
+    cells.forEach((c, i) => {
+      const pat = sprs.patterns[base + i];
+      check(JSON.stringify(pat.pixels) === JSON.stringify(c.pixels),
+            "the " + s + " preview's pattern " + i + " is the file's");
+      check(patternVramOk(wordAt, pat, c.cell),
+            "... and pattern " + i + "'s VRAM cells are the importer's");
+    });
+  };
+  spritePrev("player", "PLY", sres.sources[1].preview.cells);
+  spritePrev("props", "ROCK", sres.sources[2].preview.cells.slice(0, 2));
+  const signCell = sres.sources[2].preview.cells[2];
+  eq("the sign's preview cell is SIGNP", signCell.cell, baked.SIGNP);
+  check(patternVramOk(wordAt, sprs.patterns[10], signCell.cell),
+        "the sign's VRAM cells are the importer's");
+}
+
 /* a strip of four scroll positions for Dennis */
 function checkScrollStrip() {
   const at = [0, 150, 300, 450];  /* four scroll positions: 0, 300, 600, 900 px */
@@ -514,7 +638,7 @@ function checkScrollStrip() {
         "scroll-strip.png (frames " + at.join(", ") + ") reads back pixel for pixel");
 }
 function playTogetherLua(padFn, frames, keep) {
-  const a = toys.create(source, { budgetMs: 400, songs: [song] });
+  const a = toys.create(source, { budgetMs: 400, songs: [song], files: ART_FILES });
   a.load();
   const kept = new Map();
   for (let f = 0; f < frames; f++) {
@@ -536,6 +660,7 @@ checkPictures(run);
 checkDepth();
 checkSeam();
 checkCut();
+checkSources();
 checkScrollStrip();
 
 if (failures.length) {
@@ -544,4 +669,5 @@ if (failures.length) {
 }
 console.log("PASS  " + checks + " checks · " + FRAMES + " frames · " +
             "Lua == IL · score " + WIN_SCORE + " at the sign · " +
+            "named sources preview the importer's VRAM · " +
             "art in demo-art/oak-woods");

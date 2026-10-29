@@ -4,10 +4,29 @@
  *
  * THE ART RULE (docs/DECISIONS.md, 2026-10-29, Dennis): the demo art packs are
  * shown on the website and are never committed.  So this tool writes NOTHING
- * inside the repository: the converted picture — the tiles, the palettes, the
- * sprite patterns and the Lua block the toy draws them with — goes to
- * ../demo-art/cave/, beside the repo.  The toy's own Lua is committed and
- * carries a plain-wood stub, so a fresh clone still runs and its test skips.
+ * inside the repository: the converted picture goes to ../demo-art/cave/,
+ * beside the repo.  The toy's own Lua is committed and carries a plain-rock
+ * stub, so a fresh clone still runs and its test skips.
+ *
+ * WHAT IT WRITES, TWO WAYS (card #156):
+ *
+ *  - the SITE's playable toy: main.lua — the repository's toy plus a
+ *    constants-only tail (PATTERN_CELL and the glow numbers, read back from
+ *    the importer's own placement) — and the picture as the studio's named
+ *    files: tiles.json, palettes.json, sprites.json and sources.json.  The
+ *    #117 importer loads the three picture files into VRAM, CRAM and the SAT
+ *    before init(), so the toy's art functions have nothing to do, and
+ *    sources.json names the picture's sources for the studio's ASSETS list
+ *    ("cave", the background; "creatures", the sprites).
+ *    tools/gallery.js --with-demo-art reads these files beside main.lua, and
+ *    tools/deploy.sh uploads them as the gallery's CAVE sources.
+ *
+ *  - the CONSOLE build: cave-console.lua — the same toy with the pad and
+ *    sat() lines cut (route 1 cannot read the pad, card #134) — plus
+ *    art.lua, the same picture as VRAM/CRAM pokes, appended.  A real VDC
+ *    DMAs the SAT from $7F00, which the pokes write.  art.lua carries the
+ *    same constants the playable tail carries, so the two routes cannot
+ *    drift.
  *
  * WHAT IT CONVERTS, AND WITH WHAT: renderer/pce-source.js, the studio's Add
  * Source importer (#123).  The scene is composed from the pack's own tiles
@@ -561,11 +580,18 @@ function writeArt(picture, sheet, outDir, docScene, preview, match) {
   const palOf = {};
   for (const t of picture.tiles) palOf[t.char] = t.palette;
   const glow = glowEntry(picture.palettes);
+  /* the three glow words, one computation for BOTH routes: art.lua's pokes
+   * and the playable's constants tail must agree on every number */
+  const glowWords = { pal: glow.pal, entry: glow.entry, base: glow.word,
+                      hot: Math.min(0x1FF, glow.word + 0x49),
+                      cold: Math.max(0, glow.word - 0x49) };
   /* The sprite patterns go in the first 4-char-aligned cell AFTER the last
    * tile.  (pce-source.js packs them from cell 16 for the SPRITES panel,
    * which is char $40 — the first tile the BG import also starts at, so a
    * toy that draws both would overwrite one with the other; the console has
-   * one VRAM and the toy has to place them.) */
+   * one VRAM and the toy has to place them.)  It is also where the #117
+   * importer's patternLayout places the merged files' 16x16 patterns —
+   * the two routes share one number, and writeArt refuses if they drift. */
   const patternCell = Math.ceil((FIRST_CHAR + picture.tiles.length) / 4);
   const spritePals = [];
   for (let s = 0; s < sheet.palettes.length; s++) {
@@ -594,12 +620,13 @@ function writeArt(picture, sheet, outDir, docScene, preview, match) {
   L.push("");
   L.push("PATTERN_CELL = " + patternCell + "   -- the sprites' pattern codes " +
          "start here");
-  L.push("GLOW_PAL = " + glow.pal);
-  L.push("GLOW_ENTRY = " + glow.entry);
-  L.push("GLOW_BASE = " + hex(glow.word, 3) + "   -- the pack's own warm colour");
-  L.push("GLOW_HOT = " + hex(Math.min(0x1FF, glow.word + 0x49), 3) +
+  L.push("GLOW_PAL = " + glowWords.pal);
+  L.push("GLOW_ENTRY = " + glowWords.entry);
+  L.push("GLOW_BASE = " + hex(glowWords.base, 3) +
+         "   -- the pack's own warm colour");
+  L.push("GLOW_HOT = " + hex(glowWords.hot, 3) +
          "   -- the same hue, r and g a notch up");
-  L.push("GLOW_COLD = " + hex(Math.max(0, glow.word - 0x49), 3) +
+  L.push("GLOW_COLD = " + hex(glowWords.cold, 3) +
          "   -- and a notch down: the cave breathes");
   L.push("");
   L.push("function art_boot()");
@@ -636,15 +663,26 @@ function writeArt(picture, sheet, outDir, docScene, preview, match) {
   L.push("-- <<< PCEStudio demo art");
   const lua = L.join("\n") + "\n";
 
+  /* the SITE's playable and its files (card #156): one merged picture, named
+   * sources.  The importer's placement of the merged files is the one number
+   * the toy bakes in — and the three 16x16 creatures must land on three
+   * CONSECUTIVE cells, because the toy's b1p/b2p arithmetic is
+   * PATTERN_CELL + 0/1/2 (its satput draws CGY 0, one cell a pattern). */
+  const docs = mergedDocs(picture, sheet);
+  const layout = placement(docs);
+  for (let p = 0; p < sheet.patterns.length; p++)
+    if (layout.codes[p] !== patternCell + p)
+      throw new Error("the importer places creature pattern " + p + " at " +
+        "cell " + layout.codes[p] + ", not " + (patternCell + p) + " — the " +
+        "toy's PATTERN_CELL + 0/1/2 arithmetic needs three consecutive cells");
   const files = {
     "art.lua": lua,
-    "main.lua": playable(lua),
-    "tiles.json": picture.files["tiles.json"],
-    "palettes.json": picture.files["palettes.json"],
-    "sprites.json": sheet.files["sprites.json"]
+    "main.lua": playableFile(glowWords, layout.codes[0]),
+    "tiles.json": docs.tilesText,
+    "palettes.json": docs.palettesText,
+    "sprites.json": docs.spritesText,
+    "sources.json": docs.sourcesText
   };
-  /* the sprite patterns' palettes are the sprites.json's; the background's
-   * are palettes.json's — one file each, as the panels write them */
 
   if (!outDir) return { files: files, console: consoleBuild(lua), match: match };
   fs.mkdirSync(outDir, { recursive: true });
@@ -665,13 +703,97 @@ function writeArt(picture, sheet, outDir, docScene, preview, match) {
            out: outDir, match: match };
 }
 
-/* The playable toy: the repository's main.lua with the art appended, which is
- * how the page runs it and what tools/gallery.js's --with-demo-art reads
- * (demo-art/cave/main.lua).  It is built from the repo file rather than from
- * art.lua alone so the two can never drift. */
-function playable(artLua) {
+/* ---- the site's files (card #156) ---------------------------------------
+ * One merged picture, as the #117 importer loads it: the background's
+ * tiles.json and palette rows, the creatures' sprite palette rows folded
+ * into palettes.json, the three 16x16 patterns with an EMPTY boot SAT (the
+ * toy drives the SAT itself every frame — its satput writes the four words),
+ * and sources.json naming the two sources the studio's ASSETS list shows.
+ *
+ * The placement is the importer's, never this tool's: the merged files go
+ * through renderer/pce-sat.js's pictureFromFiles and renderer/pce-editor.js's
+ * patternLayout — the exact code the host runs — and the resulting first cell
+ * is baked into main.lua's tail as PATTERN_CELL. */
+
+function docText(doc) { return JSON.stringify(doc, null, 2) + "\n"; }
+
+function mergedDocs(picture, sheet) {
+  const bgPal = JSON.parse(picture.files["palettes.json"]);
+  const spriteRows = sheet.palettes.slice();
+  while (spriteRows.length < 16) spriteRows.push(new Array(16).fill(0));
+  const palDoc = { version: 1, backdrop: picture.backdrop,
+                   background: bgPal.background, sprites: spriteRows };
+  const sprDoc = { version: 1, patterns: sheet.patterns, sprites: [] };
+  const sources = [
+    { name: "cave", kind: "bg",
+      tiles: { first: 0, count: picture.stats.tiles }, map: true,
+      palettes: { side: "bg", first: 0, count: picture.stats.palettes } },
+    { name: "creatures", kind: "sprites",
+      patterns: { first: 0, count: sheet.patterns.length },
+      sprites: { first: 0, count: 5 },
+      palettes: { side: "spr", first: 0, count: sheet.palettes.length } },
+  ];
+  return {
+    tilesText: picture.files["tiles.json"],
+    palettesText: docText(palDoc),
+    spritesText: docText(sprDoc),
+    sourcesText: docText({ version: 1, sources: sources }),
+  };
+}
+
+/* the importer's own placement of the merged picture: the cells each pattern
+ * lands at, read through the same code the host runs at boot (#117) */
+function placement(docs) {
+  const satM = require("../renderer/pce-sat.js");
+  const edM = require("../renderer/pce-editor.js");
+  const files = [
+    { name: "tiles.json", source: docs.tilesText },
+    { name: "palettes.json", source: docs.palettesText },
+    { name: "sprites.json", source: docs.spritesText },
+  ];
+  const pic = satM.pictureFromFiles(files);
+  const layout = edM.patternLayout(pic);
+  edM.toPicture(pic);   /* refuse here, as the host would, if it cannot fit */
+  return layout;
+}
+
+/* The site's playable toy: the repository's main.lua with a constants-only
+ * tail appended (which is what demo-art/cave/main.lua is and what
+ * tools/gallery.js's --with-demo-art reads).  The #117 importer puts the
+ * picture into VRAM, CRAM and the SAT before init() runs, so the four art
+ * functions — which art.lua's pokes still fill for the console route — have
+ * nothing to do here.  Built from the repo file rather than from a copy, so
+ * the two can never drift. */
+function playableFile(glowWords, codes0) {
   const toy = fs.readFileSync(path.join(ROOT, "toys", "cave", "main.lua"), "utf8");
-  return toy + "\n" + artLua;
+  const L = [];
+  L.push("-- >>> PCEStudio demo constants for toys/cave — generated by " +
+         "tools/cave-assets.js; do not edit.");
+  L.push("-- The picture is in tiles.json, palettes.json, sprites.json and " +
+         "sources.json beside this file — NOT in the repository " +
+         "(docs/DECISIONS.md, 2026-10-29).");
+  L.push("-- The #117 importer loads the three picture files into VRAM, CRAM " +
+         "and the SAT before init() runs, so the art functions below have");
+  L.push("-- nothing to do.  The numbers are the importer's own placement, " +
+         "read back through pce-editor.js's patternLayout, and the same " +
+         "glow words art.lua carries for the console route.");
+  L.push("");
+  L.push("PATTERN_CELL = " + codes0 + "   -- the importer's first creature cell");
+  L.push("GLOW_PAL = " + glowWords.pal);
+  L.push("GLOW_ENTRY = " + glowWords.entry);
+  L.push("GLOW_BASE = " + hex(glowWords.base, 3) +
+         "   -- the pack's own warm colour");
+  L.push("GLOW_HOT = " + hex(glowWords.hot, 3) +
+         "   -- the same hue, r and g a notch up");
+  L.push("GLOW_COLD = " + hex(glowWords.cold, 3) +
+         "   -- and a notch down: the cave breathes");
+  L.push("");
+  L.push("function art_boot() end     -- the picture is #117's import:");
+  L.push("function art_board() end    -- tiles, palettes and sprite patterns");
+  L.push("function art_map() end      -- are already in VRAM, CRAM and the SAT");
+  L.push("function art_patterns() end -- when these run");
+  L.push("-- <<< PCEStudio demo constants");
+  return toy + "\n" + L.join("\n") + "\n";
 }
 
 /* ---- the console build --------------------------------------------------
@@ -846,6 +968,7 @@ function routeOne(consoleSource) {
   }
 }
 
-module.exports = { composeScene, composeSprites, build, SPRITE_ART };
+module.exports = { composeScene, composeSprites, build, mergedDocs, placement,
+                   playableFile, SPRITE_ART };
 
 if (require.main === module) main(process.argv.slice(2));

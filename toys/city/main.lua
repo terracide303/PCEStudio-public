@@ -8,14 +8,17 @@
 -- The credit is in this folder's README and on the Browse page.
 --
 -- WHERE THE ART IS.  Not in this file and not in this repository (Dennis,
--- 2026-10-29; docs/DECISIONS.md).  The playable file is
--- demo-art/city/main.lua: this file plus a generated tail that redefines the
--- constants below and fills art_boot() with the pack's VRAM and CRAM writes
--- (tools/city-assets.js writes it, the way tools/cave-assets.js writes CAVE's).
--- tools/gallery.js --with-demo-art reads that file and tools/deploy.sh uploads
--- it as the gallery's CITY source, so the site plays the picture with no
--- fetch and no second runtime.  A clone runs THIS file: art_boot() draws
--- nothing, the toy still plays, and tests/check-city.js skips with a line.
+-- 2026-10-29; docs/DECISIONS.md).  The art is the studio's own files (card
+-- #156): demo-art/city/ holds tiles.json, palettes.json, sprites.json and
+-- sources.json, which the #117 importer loads before init(); the playable
+-- file is demo-art/city/main.lua — this file plus a generated tail that
+-- replaces the constants below with the importer's placement numbers
+-- (tools/city-assets.js writes it, the way tools/cave-assets.js writes
+-- CAVE's).  tools/gallery.js --with-demo-art reads that file with the JSON
+-- files and tools/deploy.sh uploads them as the gallery's CITY sources, so
+-- the site plays the picture with no fetch and no second runtime.  A clone
+-- runs THIS file: art_boot() draws nothing, the toy still plays, and
+-- tests/check-city.js skips with a line.
 --
 -- ONE BACKGROUND, TWO BANDS.  The PC Engine has one background layer and no
 -- HDMA.  A per-line horizontal offset is made by writing BXR (VDC R07) from

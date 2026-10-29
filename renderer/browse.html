@@ -116,6 +116,10 @@
 <script src="pce-sprites.js"></script>
 <script src="pce-song.js"></script>
 <script src="pce-psg.js"></script>
+<!-- the picture models the #117 importer needs for a toy with asset files -->
+<script src="pce-editor.js"></script>
+<script src="pce-screen.js"></script>
+<script src="pce-sat.js"></script>
 <script src="pce-toyhost.js"></script>
 <script src="pce-toys.js"></script>
 <script src="gallery-toys.js"></script>
@@ -200,7 +204,7 @@
                     studioHref: open.getAttribute("href") };
     try {
       entry.frame = gallery.still(canvas, toy.source, gallery.THUMB_FRAME,
-                                  { songs: toy.songs });
+                                  { songs: toy.songs, files: toy.files });
       entry.ink = gallery.countInk(entry.frame);
     } catch (e) {
       entry.error = (e && e.code ? e.code + ": " : "") +

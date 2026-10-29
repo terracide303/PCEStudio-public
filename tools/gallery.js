@@ -170,7 +170,8 @@ const TOYS_META = [
 ];
 
 /* #128: where the uncommitted art lives (docs/DECISIONS.md).  Only
- * `--with-demo-art` reads it; the committed gallery and `--check` never do. */
+ * `--with-demo-art` reads it — the playable main.lua and the picture files
+ * beside it (card #156); the committed gallery and `--check` never do. */
 const DEMO_ART = process.env.DEMO_ART ||
   "/Volumes/External/agent-workshop-demo/demo-art";
 
@@ -187,9 +188,11 @@ function readFile(file, id) {
 function readToy(meta, withDemoArt) {
   const file = path.join(TOYS, meta.file);
   let source = readFile(file, meta.id);
+  let demoDir = null;
   if (withDemoArt && meta.demoArt) {
     /* the playable file: the same toy with the pack's art in its block */
-    source = readFile(path.join(DEMO_ART, meta.demoArt, "main.lua"), meta.id);
+    demoDir = path.join(DEMO_ART, meta.demoArt);
+    source = readFile(path.join(demoDir, "main.lua"), meta.id);
   }
   const toy = {
     id: meta.id,
@@ -205,7 +208,19 @@ function readToy(meta, withDemoArt) {
   if (meta.song) {
     toy.songs = [JSON.parse(readFile(path.join(TOYS, meta.song), meta.id))];
   }
-  if (meta.files) {
+  if (demoDir) {
+    /* #156: the demo's art is the studio's named files beside the playable —
+     * tiles, palettes and sprite patterns (the #117 importer's three) plus
+     * sources.json, the names the studio's ASSETS list shows.  The entry is
+     * a folder, in the envelope's order: main.lua first. */
+    const DEMO_FILES = ["main.lua", "tiles.json", "palettes.json",
+                        "sprites.json", "sources.json"];
+    toy.files = DEMO_FILES.map((name) => ({
+      name: name,
+      kind: name === "main.lua" ? "lua" : name.replace(/\.json$/, ""),
+      source: readFile(path.join(demoDir, name), meta.id)
+    }));
+  } else if (meta.files) {
     const dir = path.dirname(file);
     toy.files = meta.files.map((f) => ({
       name: f.name,

@@ -38,14 +38,16 @@
  *   node tools/city-assets.js --check           exit 1 if demo-art/city is not this output
  *
  * WHAT IT WRITES, and how the site plays it.  The deploy is the only place the
- * repo and the art are joined (the #127/#128 shape): the playable toy is
- * `demo-art/city/main.lua` — this repository's toys/city/main.lua with a
- * generated tail that redefines the toy's pattern constants and fills
- * art_boot() with the picture's own VRAM/CRAM writes.  tools/gallery.js
- * --with-demo-art reads that file and tools/deploy.sh uploads it as the
- * gallery's CITY source, so the toy page and Browse run it with no fetch and
- * no second runtime.  The three JSON files are the same picture in the
- * studio's panel shape, for `--check` and for opening in the studio.
+ * repo and the art are joined (the #127/#128 shape): the art is the studio's
+ * own files (card #156) — tiles.json, palettes.json, sprites.json and
+ * sources.json beside the playable toy, loaded by the #117 importer before
+ * init().  `demo-art/city/main.lua` is this repository's toys/city/main.lua
+ * plus a generated tail that carries only the numbers the toy reads (pattern
+ * codes, the water's CRAM entries); art_boot() stays empty.  tools/gallery.js
+ * --with-demo-art reads that file with the JSON files and tools/deploy.sh
+ * uploads the folder, so the toy page and Browse run it with no fetch and no
+ * second runtime.  The JSON files are the same picture the studio's panels
+ * and ASSETS pane open.
  *
  * The pack must be EXTRACTED first, into an empty folder of its own, and the
  * folder passed with --pack (or $PCE_CITY_PACK):
@@ -261,11 +263,32 @@ function build(pack) {
   };
 
   const patterns = spr.patterns.concat(bullet.patterns);
+  /* #156: the sources the studio's ASSETS pane names.  The ranges are the
+   * files' own: the street's tiles and BAT, the character's twenty patterns
+   * on SAT slots 0-1 (the toy's own slots), the tracer on the shot slots
+   * 2-5, and the palette rows each actually uses. */
+  const sources = {
+    version: 1,
+    sources: [
+      { name: "street", kind: "bg",
+        tiles: { first: 0, count: bg.tiles.length }, map: true,
+        palettes: { side: "bg", first: 0, count: bg.palettes.length } },
+      { name: "hero", kind: "sprites",
+        patterns: { first: 0, count: spr.patterns.length },
+        sprites: { first: 0, count: 2 },
+        palettes: { side: "spr", first: 0, count: spr.palettes.length } },
+      { name: "shot", kind: "sprites",
+        patterns: { first: spr.patterns.length, count: 1 },
+        sprites: { first: 2, count: 4 },
+        palettes: { side: "spr", first: bullet.sprites[0].palette, count: 1 } },
+    ]
+  };
   const files = {
     "tiles.json": bg.files["tiles.json"],
     "palettes.json": JSON.stringify(palettes, null, 2) + "\n",
     "sprites.json": JSON.stringify({ version: 1, patterns: patterns,
-                                     sprites: [] }, null, 2) + "\n"
+                                     sprites: [] }, null, 2) + "\n",
+    "sources.json": JSON.stringify(sources, null, 2) + "\n"
   };
 
   /* The panel files, read back through the model the toy host uses, so the
@@ -364,18 +387,14 @@ const REPO_TOY = path.join(__dirname, "..", "toys", "city", "main.lua");
 const TAIL_MARK = "PCEStudio demo art for toys/city";
 
 /* The generated tail.  It comes AFTER the repo file in the same Lua chunk, so
- * its assignments and its art_boot() replace the stub's before init() runs —
- * the same shape tools/cave-assets.js writes for #127.  Only NON-ZERO words
- * are written: the VDC's VRAM powers on clear, and a line per zero would
- * triple the file for nothing. */
+ * its assignments replace the stub's before init() runs — the same shape
+ * tools/cave-assets.js writes for #127.  The picture itself is the asset
+ * files (card #156): the #117 importer loads tiles.json, palettes.json and
+ * sprites.json before the toy runs, so art_boot() has nothing to write and
+ * the tail is only the numbers the toy reads. */
 function playableToy(r) {
   const template = fs.readFileSync(REPO_TOY, "utf8");
   const c = constants(r);
-  const pic = r.pic;
-  const data = ed.toPicture(pic);
-  const vram = data.vram, cram = data.cram;   /* both Uint8Array, LE words */
-  const word = (buf, i) => buf[i * 2] | (buf[i * 2 + 1] << 8);
-  const hex = (v) => "0x" + v.toString(16).toUpperCase().padStart(3, "0");
 
   const lines = [];
   lines.push("");
@@ -390,7 +409,8 @@ function playableToy(r) {
   lines.push("-- reads it.  A clone runs toys/city/main.lua, whose art_boot() draws nothing.");
   lines.push("-- " + r.stats.tiles + " tiles from 0x40, " + r.stats.palettes +
              " background palettes, " + r.stats.patterns + " sprite patterns, " +
-             r.stats.vramWords + " VRAM words.");
+             r.stats.vramWords + " VRAM words, all in the files beside this one —");
+  lines.push("-- the #117 importer loads them before init(), so art_boot() is empty.");
   lines.push("");
   lines.push("RUN_L = {" + c.run.map((p) => p[0]).join(", ") + "}");
   lines.push("RUN_R = {" + c.run.map((p) => p[1]).join(", ") + "}");
@@ -410,44 +430,13 @@ function playableToy(r) {
   lines.push("WATER_WORD = {WATER_1, WATER_2, WATER_3}");
   lines.push("");
   lines.push("function art_boot()");
-  /* the VCE: the backdrop, then every palette word the picture uses */
-  const cramPairs = [];
-  for (let i = 0; i < 512; i++) {
-    const w = word(cram, i);
-    if (w || i === 0) cramPairs.push("  pal(" + hex(i) + ", " + hex(w) + ")");
-  }
-  lines.push("  -- the VCE: " + cramPairs.length + " words, background and sprite palettes");
-  lines.push.apply(lines, cramPairs);
-  /* the BAT: run-length on equal cells, the way demo-game-assets writes it */
-  const bat = [];
-  for (let i = 0; i < 32 * 32; i++) bat.push(word(vram, i));
-  let runStart = 0;
-  for (let i = 1; i <= bat.length; i++) {
-    if (i === bat.length || bat[i] !== bat[runStart]) {
-      const v = hex(bat[runStart]);
-      if (v !== "0x000") {
-        if (i - runStart === 1) lines.push("  vram[" + runStart + "] = " + v);
-        else lines.push("  for i = " + runStart + ", " + (i - 1) +
-                        " do vram[i] = " + v + " end");
-      }
-      runStart = i;
-    }
-  }
-  /* the tiles and the patterns: one line per non-zero word */
-  let tileLines = 0, patternLines = 0;
-  const firstPatternWord = (c.run[0][0]) * 64;
-  for (let i = 32 * 32; i < 32768; i++) {
-    const w = word(vram, i);
-    if (!w) continue;
-    lines.push("  vram[" + i + "] = " + hex(w));
-    if (i < firstPatternWord) tileLines++; else patternLines++;
-  }
+  lines.push("  -- the picture is #117's import: tiles, palettes and sprite patterns");
+  lines.push("  -- are already in VRAM, CRAM and the SAT when this runs");
   lines.push("end");
   lines.push("-- <<< " + TAIL_MARK + " — end of the generated block");
   lines.push("");
   return { text: template.replace(/\s*$/, "\n") + lines.join("\n"),
-           tileLines: tileLines, patternLines: patternLines,
-           cramLines: cramPairs.length };
+           tileLines: 0, patternLines: 0, cramLines: 0 };
 }
 
 /* ---- what main.lua must hold -------------------------------------------- */
@@ -598,7 +587,8 @@ function manifest(r) {
     "| `tiles.json` | the background: " + r.stats.tiles + " deduped 8x8 tiles and the 32x32 BAT |\n" +
     "| `palettes.json` | the VCE words: backdrop, 16 background rows, 16 sprite rows |\n" +
     "| `sprites.json` | " + r.stats.patterns + " sprite patterns (32x64 the character, 16x16 the tracer) |\n" +
-    "| `main.lua` | the PLAYABLE toy: toys/city/main.lua plus the generated art block (tools/gallery.js --with-demo-art reads this one) |\n" +
+    "| `sources.json` | the three named sources for the studio's ASSETS pane: street (bg), hero (sprites), shot (sprites) |\n" +
+    "| `main.lua` | the PLAYABLE toy: toys/city/main.lua plus the generated placement numbers (tools/gallery.js --with-demo-art reads this one with the files) |\n" +
     "| `MANIFEST.md` | this file |\n\n" +
     "## How it was made\n\n" +
     "`node tools/city-assets.js --pack \"<the extracted pack>\"` — the #123\n" +

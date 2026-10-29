@@ -6,10 +6,12 @@
  *
  * WHAT IT RUNS: the demo through BOTH runtimes — the Lua one
  * (renderer/pce-toys.js over Fengari) and the IL one (renderer/pce-il.js) —
- * for 120 frames, with the pack's converted picture appended exactly as the
- * website appends it (demo-art/cave/art.lua).  Every frame must agree
- * exactly: vram, cram, sat, the four register values, the raster table, and
- * the pixels.
+ * for 120 frames, exactly as the website runs it (card #156): the playable
+ * demo-art/cave/main.lua — the repository's toy plus a constants-only tail —
+ * with the picture loaded from demo-art/cave's tiles.json, palettes.json
+ * and sprites.json by the #117 importer.  Every frame must agree exactly:
+ * vram, cram, sat, the four register values, the raster table, and the
+ * pixels.
  *
  * THE ART IS NOT IN THE REPO (docs/DECISIONS.md, 2026-10-29).  Without
  * demo-art/cave/art.lua — a fresh clone — this test prints one SKIP line and
@@ -47,6 +49,14 @@
  *     entries move between frames.
  *   - BUDGETS: the #50 sprite budget per line (at most 16 strips, no OR, no
  *     CC) and the #30 Lua frame budget.
+ *   - THE ART IS NAMED SOURCES (card #156).  main.lua is the game code and a
+ *     constants-only tail — no pokes, no pal() — whose numbers are the
+ *     importer's own placement read back through pce-editor.js's
+ *     patternLayout; the studio's model names the two sources, "cave" and
+ *     "creatures", and its preview of each is proven to be the running
+ *     picture (the VRAM the importer wrote after one frame).  art.lua stays
+ *     beside it for the console route only (cave-console.lua), and the glow
+ *     words it carries must be the tail's.
  *
  * The frame pictures go to demo-art/cave/frames/, the preview/frame
  * side-by-side to demo-art/cave/evidence/side-by-side.png — beside the art
@@ -67,13 +77,21 @@ const src = require(path.join(ROOT, "renderer", "pce-source.js"));
 const ART_DIR = process.env.PCE_CAVE_ART ||
   "/Volumes/External/agent-workshop-demo/demo-art/cave";
 const ART = path.join(ART_DIR, "art.lua");
-/* The playable file — the repository's toy with the art appended, which is
- * exactly what demo-art/cave/main.lua is and what the site runs.  Also the
- * mutation probe's door: point PCE_CAVE_TOY at a broken copy and the checks
- * below must fail (see the header's "not proven"). */
+/* The playable file — the repository's toy with a constants-only tail
+ * appended, which is exactly what demo-art/cave/main.lua is and what the
+ * site runs (card #156).  Also the mutation probe's door: point PCE_CAVE_TOY
+ * at a broken copy and the checks below must fail (see the header's "not
+ * proven"). */
 const PLAY = path.join(ART_DIR, "main.lua");
 const TOY = process.env.PCE_CAVE_TOY ||
   path.join(ROOT, "toys", "cave", "main.lua");
+/* The picture as the #117 importer loads it, exactly what the site runs
+ * beside the playable: the three picture files plus sources.json, which
+ * names the sources for the studio's ASSETS list. */
+const ART_FILES = ["tiles.json", "palettes.json", "sprites.json"].map((n) => ({
+  name: n, source: fs.readFileSync(path.join(ART_DIR, n), "utf8") }));
+const SOURCES = JSON.parse(fs.readFileSync(path.join(ART_DIR, "sources.json"),
+                                           "utf8"));
 const FRAMES = 120;
 const PNG_FRAME = 60;
 const LUA_BUDGET_MS = 100;          /* renderer/pce-toys.js DEFAULT_BUDGET_MS */
@@ -204,17 +222,28 @@ const artSource = fs.readFileSync(ART, "utf8");
 const source = fs.readFileSync(PLAY, "utf8");
 
 console.log("== cave: the art on this machine is " + ART_DIR);
+const tail = source.slice(toySource.length + 1);   /* the generated constants */
 if (!process.env.PCE_CAVE_TOY) {
-  /* the playable file is the repository's toy plus the art, byte for byte:
-   * the site must not be playing something the repo's toy does not say */
-  check(source === toySource + "\n" + artSource,
-        "demo-art/cave/main.lua is toys/cave/main.lua with art.lua appended");
+  check(source.slice(0, toySource.length) === toySource &&
+        source[toySource.length] === "\n",
+        "demo-art/cave/main.lua is toys/cave/main.lua plus a generated tail");
+  /* the playable is the game code, not the art: no pokes, no pal() — the
+   * picture is #117's import of the files beside it (card #156) */
+  check(!/vram\[/.test(tail) && !/pal\(/.test(tail) &&
+        !/rgb\(/.test(tail),
+        "the playable's tail is constants only — the picture is the files'");
+  check(/function art_boot\(\) end/.test(tail) &&
+        /function art_board\(\) end/.test(tail) &&
+        /function art_map\(\) end/.test(tail) &&
+        /function art_patterns\(\) end/.test(tail),
+        "the four art functions init() calls are no-ops in the playable " +
+        "(the import already drew the picture)");
 }
 check(/Will Tice/.test(artSource),
-      "the converted block carries the pack's credit (Will Tice)");
+      "the console block carries the pack's credit (Will Tice)");
 
-const luaRT = toys.create(source);
-const ilRT = il.create(source);
+const luaRT = toys.create(source, { files: ART_FILES });
+const ilRT = il.create(source, { files: ART_FILES });
 luaRT.load();
 ilRT.load();
 check(luaRT.initialized === true, "the Lua runtime loaded");
@@ -341,6 +370,20 @@ const base = Number((/^GLOW_BASE = (0x[0-9A-F]+)/m.exec(artSource) || [])[1]);
 const hot = Number((/^GLOW_HOT = (0x[0-9A-F]+)/m.exec(artSource) || [])[1]);
 check(Number.isInteger(glowPal) && Number.isInteger(glowEntry),
       "GLOW: the art block names a palette entry to cycle");
+
+/* The playable's tail carries the same five glow numbers as the console's
+ * art.lua — one computation in the tool, two routes, and the tail is what
+ * the runtime actually read. */
+for (const name of ["GLOW_PAL", "GLOW_ENTRY", "GLOW_COLD", "GLOW_BASE",
+                    "GLOW_HOT"]) {
+  const re = (n) => n === "GLOW_PAL" || n === "GLOW_ENTRY"
+    ? new RegExp("^" + n + " = (\\d+)", "m")
+    : new RegExp("^" + n + " = (0x[0-9A-F]+)", "m");
+  const inTail = Number((re(name).exec(tail) || [])[1]);
+  const inArt = Number((re(name).exec(artSource) || [])[1]);
+  check(inTail === inArt && Number.isFinite(inTail),
+        "GLOW: the playable's " + name + " is the console's (" + inTail + ")");
+}
 const at = glowPal * 16 + glowEntry;
 eq("GLOW: frame 0 holds the cold word", cramWord(keep[0].state.cram, at), cold);
 eq("GLOW: frame 6 holds the pack's own word", cramWord(keep[6].state.cram, at),
@@ -525,7 +568,7 @@ function checkTheLoop() {
    * band's own top is a jump (the bug #148 found in CITY) */
   const tops = [127, 255, 511, 1023, 1022];
   const rates = [1, 1, 2, 4, 8];
-  const rt = toys.create(source, { budgetMs: 400 });
+  const rt = toys.create(source, { budgetMs: 400, files: ART_FILES });
   rt.load();
   const seq = [];
   for (let f = 0; f < 300; f++) {
@@ -551,6 +594,123 @@ function checkTheLoop() {
   check(wraps.every((w) => w >= 1),
         "THE LOOP: each band goes round and comes back (wraps " +
         wraps.join(",") + ")");
+}
+
+/* ---- 9: card #156 — the art is named sources, not pokes ----------------- *
+ * The studio's own model (renderer/pce-assets.js) reads the four files; its
+ * preview of each source is compared with the VRAM the importer wrote after
+ * one frame, so the ASSETS pane's preview is proven to be the running
+ * picture.  The encoders here are the editor's arithmetic (the tile words
+ * and writeSpritePattern of renderer/pce-editor.js). */
+function tileWord(tile, y, plane2) {
+  let lo = 0, hi = 0;
+  for (let x = 0; x < 8; x++) {
+    const v = tile.pixels[y * 8 + x], bit = 7 - x;
+    if (plane2) { if (v & 4) lo |= 1 << bit; if (v & 8) hi |= 1 << bit; }
+    else { if (v & 1) lo |= 1 << bit; if (v & 2) hi |= 1 << bit; }
+  }
+  return lo | (hi << 8);
+}
+function cellWord(pat, half, block, row, k) {
+  let w = 0;
+  for (let x = 0; x < 16; x++)
+    if (pat.pixels[(block * 16 + row) * pat.width + half * 16 + x] & (1 << k))
+      w |= 1 << (15 - x);
+  return w;
+}
+function patternVramOk(wordAt, pat, base) {
+  const halves = pat.width === 32 ? 2 : 1;
+  for (let b = 0; b < pat.height / 16; b++)
+    for (let half = 0; half < halves; half++)
+      for (let k = 0; k < 4; k++)
+        for (let r = 0; r < 16; r++)
+          if (wordAt((base + b * 2 + half) * 64 + k * 16 + r) !==
+              cellWord(pat, half, b, r, k)) return false;
+  return true;
+}
+
+function checkSources() {
+  check(fs.statSync(PLAY).size < 20000,
+        "main.lua is the game code plus the constants tail, not the art (" +
+        fs.statSync(PLAY).size + " bytes < 20 KB)");
+
+  /* the studio's model reads the files and names the sources */
+  const A = require("../renderer/pce-assets.js");
+  const files = ART_FILES.concat([{ name: "sources.json", source:
+    fs.readFileSync(path.join(ART_DIR, "sources.json"), "utf8") }]);
+  const sres = A.sources(files);
+  eq("the studio's model names the two sources",
+     sres.sources.map((s) => s.name), ["cave", "creatures"]);
+  eq("... and every range is live (no stale or missing rows)", sres.notes, []);
+
+  /* the ranges sources.json claims match the files it sits beside */
+  const tiles = JSON.parse(ART_FILES[0].source);
+  const pals = JSON.parse(ART_FILES[1].source);
+  const sprs = JSON.parse(ART_FILES[2].source);
+  const cave = SOURCES.sources[0], creatures = SOURCES.sources[1];
+  eq("cave's tile range is the file's tiles",
+     [cave.tiles.first, cave.tiles.count], [0, tiles.tiles.length]);
+  check(cave.map === true && cave.palettes.side === "bg",
+        "cave claims the BAT and the background palette rows");
+  eq("creatures' pattern range is the file's patterns",
+     [creatures.patterns.first, creatures.patterns.count], [0, 3]);
+  check(creatures.sprites.first === 0 && creatures.sprites.count === 5,
+        "creatures claims the toy's own SAT slots (0 and 1 the bats, 2..4 " +
+        "the embers)");
+  const rows = pals.sprites.filter((r) => r.some((w) => w));
+  eq("the one sprite palette row the sources claim exists", rows.length, 1);
+
+  /* the previews are the running picture: one frame, then compare */
+  const rt = toys.create(source, { budgetMs: 400, files: ART_FILES });
+  rt.load();
+  const g = rt.frame(0);
+  rt.dispose();
+  const wordAt = (addr) => g.state.vram[addr * 2] | (g.state.vram[addr * 2 + 1] << 8);
+
+  const cells = sres.sources[0].preview.cells;
+  check(cells.length === tiles.tiles.length &&
+        cells.every((c) => {
+          const t = tiles.tiles[c.char - 0x40];
+          return t && JSON.stringify(t.pixels) === JSON.stringify(c.pixels);
+        }),
+        "cave's preview is the file's " + tiles.tiles.length + " tiles, " +
+        "pixel for pixel");
+  let vramOk = true, badChar = null;
+  for (const cell of cells) {
+    const tile = tiles.tiles[cell.char - 0x40];
+    for (let y = 0; y < 8; y++)
+      if (wordAt(cell.char * 16 + y) !== tileWord(tile, y, false) ||
+          wordAt(cell.char * 16 + 8 + y) !== tileWord(tile, y, true)) {
+        vramOk = false; badChar = cell.char;
+      }
+  }
+  check(vramOk, "cave's preview tiles' VRAM words are the importer's (" +
+        tiles.tiles.length + " tiles compared, first bad $" +
+        (badChar === null ? "none" : badChar.toString(16)) + ")");
+
+  /* the placement: the importer's own, and the toy's tail names it */
+  const satM = require("../renderer/pce-sat.js");
+  const edM = require("../renderer/pce-editor.js");
+  const codes = edM.patternLayout(satM.pictureFromFiles(ART_FILES)).codes;
+  const patternCell = Number((/^PATTERN_CELL = (\d+)/m.exec(tail) || [])[1]);
+  check(Number.isInteger(patternCell) && patternCell === codes[0],
+        "PATTERN_CELL is the importer's first creature cell (" + patternCell +
+        " = " + codes[0] + ")");
+  for (let p = 0; p < 3; p++)
+    check(codes[p] === patternCell + p,
+          "creature pattern " + p + " is one cell after the last (16x16 " +
+          "CGY 0 — the toy's PATTERN_CELL + 0/1/2 arithmetic)");
+
+  const spritePrev = sres.sources[1].preview;
+  eq("the creatures preview's cells are the importer's placement",
+     spritePrev.cells.map((c) => c.cell), codes.slice(0, 3));
+  spritePrev.cells.forEach((c, i) => {
+    const pat = sprs.patterns[i];
+    check(JSON.stringify(pat.pixels) === JSON.stringify(c.pixels),
+          "the creatures preview's pattern " + i + " is the file's");
+    check(patternVramOk(wordAt, pat, c.cell),
+          "... and pattern " + i + "'s VRAM cells are the importer's");
+  });
 }
 
 /* ---- the evidence side-by-side ------------------------------------------ */
@@ -612,6 +772,7 @@ function writeSideBySide() {
 checkThePicture();
 checkTheRock();
 checkTheLoop();
+checkSources();
 writeSideBySide();
 
 const outDir = path.join(ART_DIR, "frames");

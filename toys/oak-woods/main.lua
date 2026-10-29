@@ -27,8 +27,12 @@
 -- and everything converted from it live beside the repo in
 -- /Volumes/External/agent-workshop-demo/demo-art/oak-woods/ (docs/DECISIONS.md,
 -- 2026-10-29).  tools/oak-woods-art.js imports the pack through the #123
--- importer (renderer/pce-source.js), writes the block below the two markers
--- and writes the playable file into demo-art/.  Between the markers here is a
+-- importer (renderer/pce-source.js) and writes the art the way the studio
+-- keeps it (card #156): tiles.json, palettes.json, sprites.json and
+-- sources.json beside the playable main.lua.  The #117 importer puts that
+-- picture into VRAM, CRAM and the SAT before init(), so the block between the
+-- markers below is replaced by just the numbers the game reads — the
+-- importer's own placement, never hand-edited.  Between the markers here is a
 -- PLACEHOLDER picture drawn by this file alone, so a fresh clone still runs
 -- and the gallery still has a card; run the tool to put the pack's art in.
 --

@@ -10,13 +10,20 @@
 --
 -- THE ART IS NOT IN THIS FILE, AND NOT IN THE REPO (docs/DECISIONS.md,
 -- 2026-10-29, Dennis: "About the artwork don't put it on the repo but it's
--- fine as demo on the website").  The converted picture — tiles, palettes,
--- sprite patterns, the BAT — is written by tools/cave-assets.js to
--- ../demo-art/cave/art.lua, beside the repo, and the page appends that file
--- to this one before running the toy (tools/gallery.js --art-dir, which
--- tools/deploy.sh uses).  Without it this file still runs: the stubs below
--- paint a plain rock backdrop, so a fresh clone is never a black screen and
--- the test that needs the real art skips.
+-- fine as demo on the website").  The art is the studio's own files (card
+-- #156): demo-art/cave/ holds tiles.json, palettes.json, sprites.json and
+-- sources.json, which the #117 importer loads before init(); the playable
+-- file is demo-art/cave/main.lua — this file plus a generated tail that
+-- replaces the constants below with the importer's placement numbers
+-- (tools/cave-assets.js writes it, the way tools/oak-woods-art.js writes
+-- OAK WOODS's).  tools/gallery.js --with-demo-art reads that file with the
+-- JSON files and tools/deploy.sh uploads them as the gallery's CAVE
+-- sources, so the site plays the picture with no fetch and no second
+-- runtime.  The console route (route 1) keeps the pokes: the tool also
+-- writes cave-console.lua — this file with the pad and sat() lines cut,
+-- plus art.lua appended, the same picture as VRAM/CRAM pokes.  A clone
+-- runs THIS file: the stubs below paint a plain rock backdrop, so a fresh
+-- clone is never a black screen and the test that needs the real art skips.
 --
 -- credits: "Retro Pixel Cave" tileset by Will Tice, unTied Games
 --   (untiedgames.itch.io).  Its licence, license.txt in the pack:

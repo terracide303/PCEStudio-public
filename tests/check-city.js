@@ -44,6 +44,11 @@
  *      run cycle in order, one jump, one shot — is written to
  *      demo-art/city/evidence/strip.png (never into the repo), its cells are
  *      proved to be those poses, and it is read back pixel for pixel.
+ *   9. THE ART IS NAMED SOURCES (card #156).  sources.json's ranges match the
+ *      files beside it; the studio's own model (renderer/pce-assets.js)
+ *      previews each source with the importer's placement — the same codes
+ *      main.lua's tail carries — and the street preview's tiles are the
+ *      file's tiles.
  *
  * Rule 2: this file was written by the card's own seat (@design), so a cold
  * break by another seat is owed before the card closes.
@@ -585,6 +590,47 @@ function writeStrip(files) {
         (picks.length - 1) + " differ from the first)");
 }
 
+/* ---- 8: card #156 — the art is named sources, not pokes ---------------- */
+
+function checkSources(files) {
+  const A = require("../renderer/pce-assets.js");
+  const sres = A.sources(files.concat([{ name: "sources.json", source:
+    fs.readFileSync(path.join(ART, "sources.json"), "utf8") }]));
+  eq("the studio's model names the three sources",
+     sres.sources.map((s) => s.name), ["street", "hero", "shot"]);
+  eq("... and every range is live", sres.notes, []);
+
+  const srcs = JSON.parse(fs.readFileSync(path.join(ART, "sources.json"), "utf8"))
+    .sources;
+  const tilesDoc = JSON.parse(files[0].source);
+  eq("street's tile range is the file's tiles",
+     [srcs[0].tiles.first, srcs[0].tiles.count], [0, tilesDoc.tiles.length]);
+  eq("hero's pattern range is the character's twenty",
+     [srcs[1].patterns.first, srcs[1].patterns.count], [0, 20]);
+  eq("shot's pattern range is the tracer",
+     [srcs[2].patterns.first, srcs[2].patterns.count], [20, 1]);
+  check(srcs[1].sprites.first === 0 && srcs[1].sprites.count === 2 &&
+        srcs[2].sprites.first === 2 && srcs[2].sprites.count === 4,
+        "the SAT ranges are the toy's own slots (0-1 the character, " +
+        "2-5 the shots)");
+
+  /* the previews are the running picture: their cells are the importer's
+   * placement (the same codes main.lua's tail carries — check 1 above) and
+   * the street's preview tiles are the file's tiles */
+  const pic = sat.pictureFromFiles(files);
+  const codes = ed.patternLayout(pic).codes;
+  eq("the hero preview's cells are the importer's placement",
+     sres.sources[1].preview.cells.map((c) => c.cell), codes.slice(0, 20));
+  eq("the shot preview's cell is the importer's placement",
+     sres.sources[2].preview.cells.map((c) => c.cell), [codes[20]]);
+  const street = sres.sources[0].preview;
+  check(street.cells.every((cell) =>
+          JSON.stringify(tilesDoc.tiles[cell.char - 0x40].pixels) ===
+          JSON.stringify(cell.pixels)),
+        "the street preview's tiles are the file's (" + street.cells.length +
+        " tiles)");
+}
+
 /* ---- main --------------------------------------------------------------- */
 
 function run() {
@@ -616,12 +662,13 @@ function runWithArt() {
    * the runtime the same way toy.html and Browse do, so a picture here is the
    * one the site draws (no canvas in Node; the frame is what is checked) */
   const gallery = require("../renderer/pce-gallery.js");
-  const thumb = gallery.still(null, source, 60, files);
+  const thumb = gallery.still(null, source, 60, { files: files });
   check(thumb && gallery.countInk(thumb) > 1000,
         "gallery.still with the site's art draws a picture (frame 60, " +
         (thumb ? gallery.countInk(thumb) : 0) + " non-background pixels)");
 
   checkNumbersAreTheArts(files);
+  checkSources(files);
   checkBudgets(source);
   checkPlay(files);
   writeStrip(files);
