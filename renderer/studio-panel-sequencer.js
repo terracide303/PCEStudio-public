@@ -42,6 +42,8 @@
     id: "sequencer",
     register: function (studio) {
       var sq = P.seq;
+      var A = P.assets;               /* the toy's instrument patches (#122) */
+      var INSTRUMENTS_CAP = 16;       /* pce-seq.js INSTRUMENTS_MAX */
       var songObj = null;            /* the live song object */
       var seen = null;               /* the song.json text it was read from */
       var loaded = false;
@@ -71,6 +73,57 @@
         return f ? f.source : null;
       }
 
+      /* ---- #122: the toy's own instruments are in the palette ------------
+       * The card: an instrument added to the toy through ASSETS has to be
+       * paintable here and heard on playback.  The song's instrument list is
+       * what the grid paints into and what pce-seq.js compiles, so the toy's
+       * patches are folded into it: a name the song already has takes the
+       * toy's current patch, a new one is appended, and the copy that lands
+       * in song.json travels with the song.  The pce-assets shape
+       * ({envelope:{size,loop,data}}) becomes the song's ({env}) —
+       * pce-assets says loop === size for "hold the last value", and the
+       * song's one-shot is 0xff, the same sound. */
+      function toyInstruments() {
+        if (!A || typeof A.parseInstruments !== "function") return [];
+        var f = studio.toy.file("instruments.json");
+        if (!f || !f.source) return [];
+        try { return A.parseInstruments(f.source).instruments || []; }
+        catch (e) { return []; }
+      }
+
+      function seqInstrument(t) {
+        if (t.kind !== "wave" && t.kind !== "noise") return null;
+        var env = t.envelope || {};
+        var data = Array.isArray(env.data) && env.data.length
+          ? env.data.slice(0, 32) : [31];
+        var size = data.length;
+        var loop = env.loop;
+        if (loop === undefined || loop === null || loop >= size) loop = 0xff;
+        var out = { name: t.name, kind: t.kind,
+                    env: { size: size, loop: loop, data: data } };
+        if (t.kind === "wave") {
+          if (!Array.isArray(t.wave) || t.wave.length < 32) return null;
+          out.wave = t.wave.slice(0, 32);
+        } else {
+          out.nf = t.nf;
+        }
+        return out;
+      }
+
+      function mergeToyInstruments(s) {
+        var list = toyInstruments();
+        for (var i = 0; i < list.length; i++) {
+          var ins = seqInstrument(list[i]);
+          if (!ins) continue;
+          var at = -1;
+          for (var j = 0; j < s.instruments.length; j++)
+            if (s.instruments[j].name === ins.name) { at = j; break; }
+          if (at >= 0) s.instruments[at] = ins;
+          else if (s.instruments.length < INSTRUMENTS_CAP) s.instruments.push(ins);
+        }
+        return s;
+      }
+
       function state() {
         var text = assetText();
         if (songObj && text === seen) return songObj;
@@ -80,7 +133,7 @@
           loaded = true;
           error = "";
           seen = null;
-          return songObj;
+          return mergeToyInstruments(songObj);
         }
         try {
           songObj = sq.fromJSON(text);
@@ -93,6 +146,7 @@
           songObj = songObj || sq.demoSong();
         }
         seen = text;
+        mergeToyInstruments(songObj);
         if (pattern >= songObj.patterns.length) pattern = 0;
         return songObj;
       }
@@ -433,6 +487,13 @@
                      envelope: i.env.data.slice() };
           });
         },
+        /* #122: what the toy's own instruments.json adds to the palette,
+         * apart from the song's own voices. */
+        toyInstruments: function () {
+          return toyInstruments().map(function (i) {
+            return { name: i.name, kind: i.kind, nf: i.nf || null };
+          });
+        },
         brush: function () {
           return { instrument: brush.instrument, note: brush.note,
                    length: brush.length, eraser: brush.eraser,
@@ -588,7 +649,9 @@
         studio.toast("The staff view is part 2 (#95); the grid is the same song.");
       });
       studio.toy.onAssetEdit(function (name) {
-        if (name === FILE) api.invalidate();
+        /* #122: an instrument added to (or removed from) the toy changes the
+         * palette, so both files invalidate the song. */
+        if (name === FILE || name === "instruments.json") api.invalidate();
       });
 
       studio.panels.register({
