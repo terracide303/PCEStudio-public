@@ -49,9 +49,10 @@ upload "$DEST" "$index" >/dev/null
 
 total=0
 for d in $(echo "$files" | xargs -n1 dirname | sort -u); do
-  p=""; for part in $(echo "$d" | tr '/' ' '); do p="${p:+$p/}$part"; mkd "$DEST/$p"; done
-  group=$(echo "$files" | awk -v d="$d" -F/ '{ f=$0; sub("/[^/]*$","",f); if (f==d) print $0 }')
-  upload "$DEST/$d" $group >/dev/null
+  p=""; [ "$d" = "." ] || for part in $(echo "$d" | tr '/' ' '); do p="${p:+$p/}$part"; mkd "$DEST/$p"; done
+  group=$(echo "$files" | awk -v d="$d" '{ f=$0; if (index(f,"/")==0) f="."; else sub("/[^/]*$","",f); if (f==d) print $0 }')
+  target="$DEST/$d"; [ "$d" = "." ] && target="$DEST"
+  upload "$target" $group >/dev/null
   total=$((total + $(echo "$group" | wc -l)))
 done
 echo "uploaded $total files + index.html to $DEST"
