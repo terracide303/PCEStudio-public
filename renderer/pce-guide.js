@@ -305,13 +305,16 @@ function guide() {
         "~/.claude/skills/creating-pce-toys"),
       p("The server needs Node and nothing else: no npm install, no " +
         "compiler. The link is the skill that ships beside it (SKILL.md and " +
-        "five worked recipes). Skills load when a session starts, so start a " +
+        "six worked recipes). Skills load when a session starts, so start a " +
         "new Claude Code session after this."),
       h3("The tools"),
       table(["tool", "what it does"], [
         ["toy_write", "replace the session's toy: a file set whose main.lua runs"],
         ["toy_run", "run it frame by frame, with an optional pad script; " +
                     "returns registers, the raster shape and VRAM/CRAM/SAT hashes"],
+        ["source_add", "turn a PNG or a pixel grid with a palette into the " +
+                       "toy's tiles, sprites, a tilesheet or a palette, before " +
+                       "toy_run; returns the VRAM/CRAM budget"],
         ["frame_png", "the picture at a frame, as a PNG you can look at"],
         ["validate", "check it against the hardware's limits, with file:line " +
                      "findings"],
@@ -322,8 +325,13 @@ function guide() {
       ]),
       p("Work the loop the skill teaches: docs(topic) for the API (do not " +
         "guess names), toy_write, toy_run, frame_png to look, validate, " +
-        "export_pce. A toy that runs without errors does not mean it looks " +
-        "right: look at the frame."),
+        "export_pce. Add art with source_add before toy_run: a base64 PNG or " +
+        "a pixel grid with its palette becomes the toy's tiles, sprites, a " +
+        "tilesheet or a palette, merged into its asset files, and the reply " +
+        "is the VRAM/CRAM budget — toy_run imports those files into VRAM, " +
+        "CRAM and the SAT before init(), exactly as the studio does. A toy " +
+        "that runs without errors does not mean it looks right: look at the " +
+        "frame."),
       p("No tools at all? Ignore this section. Sections 1 to 11 are the " +
         "paste-and-run route and work the same.")
     ]

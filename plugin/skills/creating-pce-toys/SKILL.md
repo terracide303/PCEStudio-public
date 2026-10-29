@@ -46,16 +46,24 @@ Or in `.mcp.json` at the repository root:
 2. **`toy_write`** with `{files:[{name:"main.lua", source:...}]}`. It compiles
    immediately and returns a refusal with `file:line` if the Lua is outside
    the subset (see below). A refused write leaves the previous toy loaded.
-3. **`toy_run`** for frames (1..600, deterministic: frame `f`, `t = f/60`).
+3. **`source_add`** to give the toy art: a base64 PNG or a pixel grid with its
+   palette (kind `bg`, `sprites`, `tilesheet` or `palette`), run through the
+   Add Source importer and **merged into the toy's asset files** — `toy_run`
+   imports them into VRAM/CRAM/SAT before `init()`, so the toy boots inside
+   its art. The reply's budget report tells you the tiles, palettes and VRAM
+   words used; stay inside the VRAM row above. The import already places
+   sprites in the SAT (slots 0..) with their code and palette, so the toy
+   moves them with `sat(i, 0, y)` / `sat(i, 1, x)` — recipe 6 shows it.
+4. **`toy_run`** for frames (1..600, deterministic: frame `f`, `t = f/60`).
    Pass a `pad` script to hold buttons: `[{from,to,pad,buttons:["left"]}]`,
    buttons `up down left right i ii select run`, pads 1..5.
-4. **`frame_png`** and **LOOK AT IT.** A clean run is not a good picture. Plan
+5. **`frame_png`** and **LOOK AT IT.** A clean run is not a good picture. Plan
    on three passes: draw it, look, name what is wrong, change one thing.
    `frame_png` is 256x224 RGB; seek any frame 0..599 deterministically.
-5. **`validate`** before every export. It reports; an `error` code refuses.
-6. **Fix one finding, re-run.** Each finding carries `file:line` when the
+6. **`validate`** before every export. It reports; an `error` code refuses.
+7. **Fix one finding, re-run.** Each finding carries `file:line` when the
    validator can place it, and `line:null` when it cannot — do not invent one.
-7. **`export_pce`** builds the `.pce` through the browser route (IL → bytecode
+8. **`export_pce`** builds the `.pce` through the browser route (IL → bytecode
    → ROM over the committed interpreter). The validator runs first.
 
 Write in visible increments — backdrop, then a layer, then motion, then sound —
@@ -259,6 +267,42 @@ this is an error and, on a real console, an invisible bug.
 
 Teaches: read the code and the line, change one thing, check again.
 
+### 6. A sprite from a PNG — `recipes/06-add-a-sprite-from-a-png.lua`
+
+`source_add` turns a picture into the toy's asset files. The picture is a
+base64 PNG, or a **pixel grid with its palette** — indices into the palette,
+`-1` transparent — which is the hand-drawn form. The recipe's own picture
+lives on its `-- GRID` line; `tests/check-skill.js` parses that line and
+adds it, exactly as you would:
+
+```json
+{ "kind": "sprites", "name": "square",
+  "grid": { "width": 16, "height": 16, "pixels": [0, 0, 0, /* … 256 indices */ ] },
+  "palette": [[252, 0, 0], [252, 252, 252]] }
+```
+
+`toy_run` then imports `palettes.json` and `sprites.json` into CRAM and VRAM
+**before `init()`**, and the import places each sprite in a SAT slot with its
+pattern code and palette already set. The toy moves the slot on screen — no
+code to memorise:
+
+```lua
+function init()
+  reg("CR", 0xC0)              -- SB (sprites) + BB (background) on
+  pal(0, rgb(0, 0, 7))         -- the sky: CRAM entry 0, blue
+  sat(0, 0, 100)               -- SAT Y 100 -> display row 36
+  sat(0, 1, 100)               -- SAT X 100 -> display column 68
+end
+```
+
+A second `source_add` appends its patterns and takes the free palette rows,
+so the sprites already placed keep their colours; the budget report tells you
+how much of the 32,768-word VRAM the toy's picture now occupies. A refused
+add leaves the toy alone.
+
+Teaches: art as files the panels edit, the import before `init()`, and
+placing imported sprites by moving the SAT slot the import made.
+
 ## Before you export
 
 - `validate` returns `ok` with **no findings**. A `validate-slow-frame` warning
@@ -289,7 +333,7 @@ sprites and the pad runs in the studio and validates, and cannot be exported
 yet; a background toy (tiles, palettes, `reg`, the `raster(line)` callback)
 exports. The exported `.pce` is 16 KiB of interpreter plus one 8 KiB data bank;
 a payload past 8 KiB is refused by `toy-data-bank-full`. Every recipe here uses
-sprites or tables, so `export_pce` refuses all five with `ilbc-op` — that is
+sprites or tables, so `export_pce` refuses all six with `ilbc-op` — that is
 tested, not a guess.
 
 ## What this does not model

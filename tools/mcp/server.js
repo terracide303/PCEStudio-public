@@ -34,6 +34,17 @@
  * The override never touches the toy's source or its simulation, so an
  * agent's poke is reversible and cannot compound (docs/PPU-TOYS.md §4).
  *
+ * ART (#153): a toy's asset files (tiles.json, palettes.json, sprites.json)
+ * are imported into VRAM/CRAM/SAT before init() exactly as the studio does —
+ * toy_run passes them to renderer/pce-il.js, whose host runs the #117
+ * importer (renderer/pce-toyhost.js over pce-sat.js's pictureFromFiles and
+ * pce-editor.js's toPicture), so the files the panels edit are the art a toy
+ * boots inside.  source_add makes new art from a picture: a base64 PNG or a
+ * pixel grid with its palette, run through the Add Source importer
+ * (renderer/pce-source.js importImage, #123) and merged into the toy's asset
+ * files, with the budget report back.  There is no second art model in this
+ * file.
+ *
  * stdout carries JSON-RPC only; logs go to stderr.  Nothing in this file
  * calls a compiler or an emulator: export_pce is #100's browser route
  * (renderer/pce-il.js -> renderer/pce-ilbc.js -> renderer/pce-rom.js's
@@ -60,6 +71,9 @@ const sprites = require(path.join(ROOT, "renderer", "pce-sprites.js"));
 const toyhost = require(path.join(ROOT, "renderer", "pce-toyhost.js"));
 const panels = require(path.join(ROOT, "renderer", "pce-panels.js"));
 const psg = require(path.join(ROOT, "renderer", "pce-psg.js"));
+const sourceLib = require(path.join(ROOT, "renderer", "pce-source.js"));
+const satLib = require(path.join(ROOT, "renderer", "pce-sat.js"));
+const editorLib = require(path.join(ROOT, "renderer", "pce-editor.js"));
 
 const SERVER_INFO = { name: "pcestudio", version: "0.1.0" };
 const DEFAULT_PROTOCOL = "2025-06-18";
@@ -217,8 +231,9 @@ function encodePng(rgb, width, height) {
 
 /* Same shape and guards as the studio's packed toy (#99): a list of
  * {name, source}, flat safe names, no duplicates, main.lua required.  The
- * asset files are kept with the toy but no runtime imports them yet (#24),
- * so only main.lua is compiled and run. */
+ * asset files (tiles.json, palettes.json, sprites.json) are imported into
+ * VRAM/CRAM/SAT by toy_run before init() (#117, #153), and source_add
+ * merges new art into them. */
 function normaliseFiles(raw) {
   let list;
   if (Array.isArray(raw)) list = raw;
@@ -314,7 +329,10 @@ function runFresh(frames, pad) {
   session.pad = pad;
   let rt;
   try {
-    rt = il.create(session.source, { chunkName: MAIN });
+    /* The asset files ride along (#117, #153): the IL host's createHost
+     * imports them into VRAM/CRAM/SAT before load() runs top-level + init(),
+     * exactly as the studio's host does (renderer/pce-toyhost.js). */
+    rt = il.create(session.source, { chunkName: MAIN, files: session.files });
     rt.load();
   } catch (e) {
     throw e;
@@ -413,6 +431,7 @@ function stateReport(rt, last) {
       cram_sha256: u8Hash(st.cram),
       sat_sha256: u8Hash(st.sat)
     },
+    assets: rt.assets || null,
     log: (rt.log || []).slice(),
     sound_writes: rt.sound && rt.sound.events ? rt.sound.events.length : 0,
     overrides: Object.assign({}, session.overrides)
@@ -609,8 +628,9 @@ function toolToyWrite(args) {
     language: program.lang,
     hooks: program.hooks,
     functions: program.functions.length,
-    note: "only main.lua is compiled and run; the asset files are stored " +
-          "with the toy (no runtime imports them yet, #24)"
+    note: "main.lua is compiled now; the asset files ride along and toy_run " +
+          "imports them into VRAM/CRAM/SAT before init() (#117, #153), so " +
+          "the files the panels edit are the art the toy boots inside"
   };
 }
 
@@ -623,6 +643,277 @@ function toolToyRun(args) {
     return runFresh(frames, pad);
   } catch (e) {
     throw new Refusal(errorCode(e), errorMessage(e));
+  }
+}
+
+/* ---- source_add (#153): a picture merged into the toy's asset files ----- *
+ * The Add Source dialog's importer (renderer/pce-source.js importImage,
+ * #123) runs on the picture, and its files are MERGED into the toy's set:
+ *   - tiles.json is replaced for a background picture or tilesheet (one BAT
+ *     map per toy);
+ *   - sprites.json appends: patterns are reindexed past the ones already
+ *     there, SAT entries follow the existing sprites, and the picture's
+ *     palette rows take the FREE rows so the sprites already placed keep
+ *     their colours (source-palettes when the 16 rows are full,
+ *     source-sat when the merge would place more than 64 sprites);
+ *   - palettes.json merges row by row: a row the picture left all-zero
+ *     keeps the old row, and the backdrop follows the replaced picture.
+ * The merge runs on a COPY and is committed only after the panels' own
+ * readers accept the whole set — pce-sat.js's pictureFromFiles and
+ * pce-editor.js's toPicture, the same path toy_run imports with — so a
+ * refused add leaves the toy alone.  An accepted add clears the run: the
+ * files changed, the frames are stale. */
+
+const ART_KINDS = ["bg", "sprites", "tilesheet", "palette"];
+
+/* The hand-drawn form: a pixel grid of palette indices (-1 transparent)
+ * with the palette as [r, g, b] triples, turned into the same RGBA image a
+ * PNG decode gives, so the one importer runs on both. */
+function gridImage(args) {
+  const grid = args.grid;
+  if (!grid || typeof grid !== "object")
+    refuse("source-grid", "grid needs {width, height, pixels} and a palette");
+  const palette = args.palette;
+  if (!Array.isArray(palette) || !palette.length)
+    refuse("source-grid", "the grid needs a palette: a list of [r, g, b]");
+  const width = intIn(grid.width, "grid.width", 1, 256, "source-grid");
+  const height = intIn(grid.height, "grid.height", 1, 240, "source-grid");
+  if (!Array.isArray(grid.pixels) || grid.pixels.length !== width * height)
+    refuse("source-grid", "grid.pixels must hold width*height entries (" +
+           width * height + "), got " +
+           (Array.isArray(grid.pixels) ? grid.pixels.length : "none"));
+  const rows = [];
+  for (let i = 0; i < palette.length; i++) {
+    const c = palette[i];
+    if (!Array.isArray(c) || c.length !== 3)
+      refuse("source-grid", "palette[" + i + "] must be [r, g, b]");
+    rows.push([intIn(c[0], "palette[" + i + "].r", 0, 255, "source-grid"),
+               intIn(c[1], "palette[" + i + "].g", 0, 255, "source-grid"),
+               intIn(c[2], "palette[" + i + "].b", 0, 255, "source-grid")]);
+  }
+  const rgba = new Uint8Array(width * height * 4);
+  for (let i = 0; i < grid.pixels.length; i++) {
+    const idx = grid.pixels[i];
+    if (!isInt(idx) || idx < -1 || idx >= rows.length)
+      refuse("source-grid", "pixels[" + i + "] is " + JSON.stringify(idx) +
+             " but the palette has " + rows.length + " entries (use -1 for " +
+             "transparent)");
+    const o = i * 4;
+    if (idx === -1) continue;              /* alpha stays 0: transparent */
+    rgba[o] = rows[idx][0]; rgba[o + 1] = rows[idx][1];
+    rgba[o + 2] = rows[idx][2]; rgba[o + 3] = 255;
+  }
+  return { width: width, height: height, rgba: rgba };
+}
+
+function pngImage(args) {
+  let bytes;
+  try {
+    bytes = Buffer.from(String(args.png), "base64");
+  } catch (e) {
+    refuse("png-base64", "png is not base64");
+  }
+  return sourceLib.decodePng(bytes, function (data) {
+    return zlib.inflateSync(data);
+  });
+}
+
+function padRow16(row) {
+  const out = new Array(16);
+  for (let e = 0; e < 16; e++) out[e] = row && row[e] !== undefined ? row[e] : 0;
+  return out;
+}
+function rowUsed(row) {
+  return Array.isArray(row) && row.some(function (w) { return !!w; });
+}
+
+/* The picture's non-zero sprite palette rows land in the old doc's free
+ * (all-zero) rows, so the sprites already placed keep their colours.
+ * Returns doc-relative row index -> absolute row index. */
+function spriteRowRemap(oldPal, newPal) {
+  const free = [];
+  for (let i = 0; i < 16; i++) if (!rowUsed((oldPal.sprites || [])[i])) free.push(i);
+  const remap = {};
+  let k = 0;
+  for (let i = 0; i < 16; i++) {
+    if (!rowUsed((newPal.sprites || [])[i])) continue;
+    if (k >= free.length)
+      refuse("source-palettes", "the toy's sprite palettes hold " +
+             (16 - free.length) + " rows and the picture needs another; " +
+             "the 16 rows are full");
+    remap[i] = free[k++];
+  }
+  return remap;
+}
+
+/* One importImage result's files, merged into the toy's file set.  Works on
+ * a copy of the list; the session is only touched after pictureBudget
+ * accepts the merged set. */
+function mergeFiles(result, current) {
+  const byName = {};
+  for (const f of current) byName[f.name] = f.source;
+  const parse = function (name) {
+    try { return JSON.parse(byName[name]); }
+    catch (e) { refuse("asset-json", name + " is not JSON: " + e.message); }
+  };
+  const newPal = JSON.parse(result.files["palettes.json"]);
+  const oldPal = byName["palettes.json"] == null
+    ? { version: 1, backdrop: 0, background: [], sprites: [] }
+    : parse("palettes.json");
+  let remap = {};
+
+  if (result.kind === "bg" || result.kind === "tilesheet") {
+    byName["tiles.json"] = result.files["tiles.json"];
+  }
+
+  if (result.kind === "sprites") {
+    const doc = JSON.parse(result.files["sprites.json"]);
+    const oldDoc = byName["sprites.json"] == null
+      ? { version: 1, patterns: [], sprites: [] }
+      : parse("sprites.json");
+    const base = (oldDoc.patterns || []).length;
+    remap = spriteRowRemap(oldPal, newPal);
+    const patterns = (oldDoc.patterns || []).concat(doc.patterns);
+    const sprites = (oldDoc.sprites || []).concat(doc.sprites.map(function (s) {
+      const out = Object.assign({}, s);
+      out.pattern = base + s.pattern;
+      if (remap[s.palette] !== undefined) out.palette = remap[s.palette];
+      return out;
+    }));
+    if (sprites.length > toyhost.SAT_ENTRIES)
+      refuse("source-sat", "the merged toy would place " + sprites.length +
+             " sprites; the SAT holds " + toyhost.SAT_ENTRIES);
+    byName["sprites.json"] = JSON.stringify(
+      { version: 1, patterns: patterns, sprites: sprites }, null, 2) + "\n";
+  }
+
+  const spriteRows = [];
+  for (let i = 0; i < 16; i++) {
+    spriteRows.push(padRow16((oldPal.sprites || [])[i]));
+  }
+  for (const i of Object.keys(remap)) {
+    spriteRows[remap[i]] = padRow16(newPal.sprites[i]);
+  }
+  const bgRows = [];
+  if (result.kind === "sprites") {
+    for (let i = 0; i < 16; i++) {
+      bgRows.push(padRow16((oldPal.background || [])[i]));
+    }
+  } else {
+    for (let i = 0; i < 16; i++) {
+      const inc = (newPal.background || [])[i];
+      bgRows.push(rowUsed(inc) ? padRow16(inc)
+                               : padRow16((oldPal.background || [])[i]));
+    }
+  }
+  byName["palettes.json"] = JSON.stringify({
+    version: 1,
+    backdrop: (result.kind === "bg" || result.kind === "tilesheet")
+      ? newPal.backdrop
+      : (result.kind === "sprites"
+          ? (oldPal.backdrop || 0)
+          : (newPal.backdrop || oldPal.backdrop || 0)),
+    background: bgRows,
+    sprites: spriteRows
+  }, null, 2) + "\n";
+
+  return Object.keys(byName).map(function (name) {
+    return { name: name, source: byName[name] };
+  });
+}
+
+/* The merged set as the panels read it, and the words the picture occupies
+ * in VRAM — pce-sat.js + pce-editor.js, the same path toy_run imports with,
+ * so the report is the run's truth and a set the panels cannot read is
+ * refused here before the toy changes. */
+function pictureBudget(files) {
+  let pic, data;
+  try {
+    pic = satLib.pictureFromFiles(files);
+    data = editorLib.toPicture(pic);
+  } catch (e) {
+    refuse(errorCode(e), errorMessage(e));
+  }
+  const layout = editorLib.patternLayout(pic);
+  let usedTiles = 0;
+  for (let c = editorLib.FIRST_CHAR; c < pic.nextChar; c++) {
+    if (pic.tiles[c]) usedTiles++;
+  }
+  const bat = editorLib.BAT_W * editorLib.BAT_H;
+  const tiles = usedTiles * 16;
+  const patterns = layout.cellCount * 64;
+  const sat = pic.sprites.length ? 256 : 0;
+  return {
+    tiles: usedTiles,
+    patterns: pic.spritePatterns.length,
+    sprites: pic.sprites.length,
+    vram: { bat: bat, tiles: tiles, patterns: patterns, sat: sat,
+            used: bat + tiles + patterns + sat,
+            total: toyhost.VRAM_WORDS },
+    regs: data.regs
+  };
+}
+
+function toolSourceAdd(args) {
+  requireToy();
+  const kind = args.kind;
+  if (typeof kind !== "string" || ART_KINDS.indexOf(kind) < 0) {
+    refuse("source-kind", "kind must be " + ART_KINDS.join(", "));
+  }
+  if ((args.png == null) === (args.grid == null)) {
+    refuse("source-picture", "pass one picture: png (base64) or grid " +
+           "{width, height, pixels} with its palette");
+  }
+  const name = args.name == null ? kind : String(args.name);
+  try {
+    const img = args.png != null ? pngImage(args) : gridImage(args);
+    const result = sourceLib.importImage(img, {
+      kind: kind, name: name,
+      dither: args.dither, alphaThreshold: args.alphaThreshold,
+      size: args.size, maxPalettes: args.maxPalettes
+    });
+    const merged = mergeFiles(result, session.files);
+    const budget = pictureBudget(merged);
+    session.files = merged;
+    resetRun();                /* the files changed: the frames are stale */
+    const warnings = result.warnings.slice();
+    if (budget.sprites >= toyhost.SAT_ENTRIES)
+      warnings.push("the toy now places all " + toyhost.SAT_ENTRIES +
+                    " sprites the SAT holds");
+    return {
+      ok: true,
+      kind: result.kind,
+      name: result.name,
+      size: { width: result.width, height: result.height },
+      stats: {
+        tiles: result.stats.tiles,
+        max_tiles: result.stats.maxTiles,
+        palettes: result.stats.palettes,
+        max_palettes: result.stats.maxPalettes,
+        colours: result.stats.colours,
+        max_tile_colours: result.stats.maxTileColours,
+        dither: result.stats.dither
+      },
+      files: session.files.map(function (f) { return f.name; }),
+      budget: {
+        tiles: budget.tiles,
+        patterns: budget.patterns,
+        sprites: budget.sprites,
+        vram_words: budget.vram.used,
+        vram_total: budget.vram.total,
+        vram: budget.vram,
+        cram_entries: toyhost.CRAM_ENTRIES,
+        sat_entries: toyhost.SAT_ENTRIES
+      },
+      warnings: warnings,
+      note: "imported with the Add Source importer (renderer/pce-source.js, " +
+            "#123) and merged into the toy's asset files; the panels' own " +
+            "readers accepted the merged set; the previous run was cleared — " +
+            "call toy_run to see the picture"
+    };
+  } catch (e) {
+    if (e instanceof Refusal) throw e;
+    refuse(errorCode(e), errorMessage(e));
   }
 }
 
@@ -884,7 +1175,8 @@ const TOOLS = [
     description: "Run the loaded toy's main.lua for `frames` video frames " +
       "(0..frames-1) through the IL runtime, with an optional pad script, and " +
       "return the final state: registers, raster table shape, VRAM/CRAM/SAT " +
-      "digests, log lines and PSG write count. A run is fresh and " +
+      "digests, log lines and PSG write count. The toy's asset files are " +
+      "imported into VRAM/CRAM/SAT before init() (#117). A run is fresh and " +
       "deterministic; t is f/60, not the clock.",
     inputSchema: {
       type: "object",
@@ -908,6 +1200,56 @@ const TOOLS = [
           }
         }
       },
+      additionalProperties: false
+    }
+  },
+  {
+    name: "source_add",
+    description: "Add art to the toy (#153): a picture — a base64 PNG, or a " +
+      "hand-drawn pixel grid with its palette — becomes tiles, sprites, a " +
+      "tilesheet or a palette through the Add Source importer " +
+      "(renderer/pce-source.js importImage, #123) and is merged into the " +
+      "toy's asset files: tiles.json replaced for a background picture, " +
+      "sprites.json appended (new palette rows take the free ones), " +
+      "palettes.json merged row by row. Returns the importer's stats, the " +
+      "toy's VRAM budget and any warnings; the panels' own readers must " +
+      "accept the merged files or the toy is left alone. Clears the run.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        png: { type: "string",
+               description: "a base64 PNG (8-bit grey, RGB, RGBA or palette)" },
+        grid: {
+          type: "object",
+          description: "the hand-drawn form: pixels are palette indices, " +
+            "-1 is transparent",
+          properties: {
+            width: { type: "integer", minimum: 1, maximum: 256 },
+            height: { type: "integer", minimum: 1, maximum: 240 },
+            pixels: { type: "array", items: { type: "integer" } }
+          },
+          required: ["width", "height", "pixels"]
+        },
+        palette: {
+          type: "array",
+          description: "the grid's palette: a list of [r, g, b] (0..255)",
+          items: { type: "array",
+                   items: { type: "integer", minimum: 0, maximum: 255 } }
+        },
+        kind: { type: "string", enum: ART_KINDS, default: "bg",
+                description: "what the picture becomes" },
+        name: { type: "string", description: "a label for the report" },
+        dither: { type: "string", enum: sourceLib.DITHERS, default: "none" },
+        alphaThreshold: { type: "integer", minimum: 0, maximum: 255,
+                          default: 128 },
+        size: { type: "array",
+                description: "the pattern size for kind sprites (16x16, " +
+                  "32x16, 16x32, 32x32, 16x64 or 32x64)",
+                items: { type: "integer" } },
+        maxPalettes: { type: "integer", minimum: 1, maximum: 16,
+                       description: "cap the palette rows the importer may use" }
+      },
+      required: ["kind"],
       additionalProperties: false
     }
   },
@@ -1028,6 +1370,7 @@ for (const t of TOOLS) TOOL_BY_NAME[t.name] = t;
 const HANDLERS = {
   toy_write: toolToyWrite,
   toy_run: toolToyRun,
+  source_add: toolSourceAdd,
   frame_png: toolFramePng,
   registers_get: toolRegistersGet,
   register_set: toolRegisterSet,
@@ -1039,7 +1382,9 @@ const HANDLERS = {
 /* ---- MCP: JSON-RPC 2.0 over stdio, one message per line --------------- */
 
 const INSTRUCTIONS =
-  "PCEStudio's toy engine. Write a toy with toy_write, run it with toy_run, " +
+  "PCEStudio's toy engine. Write a toy with toy_write, add art with " +
+  "source_add (a PNG or pixel grid becomes tiles, sprites, a tilesheet or " +
+  "a palette, merged into the toy's asset files), run it with toy_run, " +
   "look with frame_png, read or poke registers with registers_get/" +
   "register_set, check it with validate, export a .pce with export_pce, and " +
   "read the toy language with docs. Every tool wraps the same modules the " +
