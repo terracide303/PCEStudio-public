@@ -14,7 +14,9 @@
  *      renderer/pce-toyhost.js, renderer/pce-editor.js and
  *      renderer/pce-validate.js — a number typed into the skill cannot pass.
  *   3. Every MCP tool SKILL.md tells the agent to call is one tools/list
- *      publishes.
+ *      publishes, and the loop's last step is the hand-off (#160): SKILL.md
+ *      says to finish with toy_save and to tell the person Open… → From
+ *      file.
  *   4. Every recipe is run THROUGH tools/mcp/server.js, over stdio, as an
  *      agent would: toy_write compiles it, toy_run runs 60 frames, frame_png
  *      is VISIBLE (more than 1,000 pixels that are not CRAM[0], counted from
@@ -352,11 +354,18 @@ function firstLuaBlock(text) {
     const list = await client.request("tools/list", {});
     const tools = (list.result.tools || []).map((t) => t.name);
     for (const tool of ["toy_write", "toy_run", "source_add", "song_write",
-                        "frame_png", "validate", "export_pce", "docs"]) {
+                        "frame_png", "validate", "toy_save", "export_pce",
+                        "docs"]) {
       contains("SKILL.md tells the agent about " + tool, skillText, tool);
       check(tools.indexOf(tool) >= 0,
             "the server publishes the tool " + tool + " that SKILL.md names");
     }
+    /* #160: the loop's last step is the hand-off, and it is in the words the
+     * person's studio uses */
+    contains("SKILL.md says to finish with toy_save", skillText,
+             "Finish with `toy_save`");
+    contains("SKILL.md tells the agent what to say to the person", skillText,
+             "Open… → From file");
 
     /* 4 and 5 — every fixed recipe, through the server */
     for (const name of FIXED) {
