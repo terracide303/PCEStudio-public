@@ -728,6 +728,20 @@
     return { pcm: pcm, sampleRate: SAMPLE_RATE, frames: count };
   }
 
+  /* #97 — the mixer's level meter reads the PSG's own attenuation rather than
+   * inventing a scale: the SCALE_TAB reductions GetVL sums (psg.cpp:190) and
+   * the 2^(-vl/4) the output stage scales by (buildDbTable; 31 is off).  A
+   * panel that showed a level computed some other way could not be compared
+   * with the PCM this file renders, so this is exported and the AUDIO panel
+   * uses it. */
+  var LEVEL = {
+    scale: SCALE_TAB,
+    gain: function (vl) { return vl >= 0x1F ? 0 : Math.pow(2, -vl / 4); },
+    db: function (vl) {
+      return vl >= 0x1F ? -Infinity : -vl * 5 * Math.log10(2);
+    }
+  };
+
   return {
     render: render,
     CLOCK: CLOCK,
@@ -736,6 +750,7 @@
     REGISTERS: REGISTERS,
     CHANNELS: CHANNELS,
     WAVE_STEPS: WAVE_STEPS,
-    WAVE_MAX: WAVE_MAX
+    WAVE_MAX: WAVE_MAX,
+    LEVEL: LEVEL
   };
 });
