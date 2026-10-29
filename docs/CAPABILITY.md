@@ -26,9 +26,9 @@ The two milestones Dennis asked for:
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Background (VDC + VCE): tiles, map, scroll, 512 colours | PROVEN | `tests/check.js`: every picture diff 0 against Mednafen; `renderer-mutation.js` catches the review's 10 breaks | #5, #38, #39 |
+| Background (VDC + VCE): tiles, map, scroll, 512 colours | PROVEN | `tests/check.js`: every picture diff 0 against Mednafen; `renderer-mutation.js` catches the review's 10 breaks | #5, #6, #11, #38, #39, #51 |
 | Sprites: 64, sizes 16x16-32x64, 16 palettes, priority, 16 per line | PROVEN | `check.js` sprite scenes; breaker 24/24 after #40; `check-viewer.js` | #12, #40, #42 |
-| Scanline effects (raster table: scroll, layers, colours per line) | PROVEN | `check.js` raster1-13 diff 0, effects visible; breaker gaps closed | #15, #43, #68 |
+| Scanline effects (raster table: scroll, layers, colours per line) | PROVEN | `check.js` raster1-13 diff 0, effects visible; breaker gaps closed | #15, #43, #64, #68, #69 |
 | Display window and border (224/240 lines, narrow windows) | PROVEN | `check.js` scenes 11-14, every border pixel | #48, #67 |
 | Wide screens 256 / 341 / 512 px | PROVEN | `check.js` wide336, wide512, wide512b | #27, #70, #76 |
 | VRAM-to-VRAM copy (DMA) | PROVEN | `check-dma.js` 5 captures word for word | #49, #76 |
@@ -46,12 +46,12 @@ The two milestones Dennis asked for:
 | Studio page laid out like ppu.toys, online at pcestudio.terracides.com | PROVEN | `check-studio.js --browser`; screenshots compared by @workshop | #75 |
 | Code editor (CodeMirror), files, save/open, autosave, Vim, shortcuts | PROVEN | `check-studio.js` 475 checks | #77 |
 | Output column: layers, CRT, sound, markers, timeline, pad keys (IJKL) | PROVEN | `check-studio.js`; breaker gaps closed by #91 | #78 |
-| Panels in separate files (so several can be built at once) | RUNNING | | #102 |
+| Panels in separate files (so several can be built at once) | PROVEN | `check-studio.js`: every panel registers from its own module; the API is in `docs/STUDIO.md` | #102 |
 | SCREEN panel: map editor with tools, zoom, tiles, palette | PROVEN | tools, zoom, map, tile sheet, curves, map-size and width dropdowns; breaker gaps closed by #106 | #84, #102 |
-| PALETTES and VRAM panels (512-colour picker, VRAM sheet) | TODO | | #85 |
-| SPRITES panel (64 sprites, sizes, patterns) | TODO | | #86 |
-| SCANLINES panel (bands on the line interrupt) | TODO | | #92 |
-| REGISTERS panel (every register, bit by bit, editable) | TODO | | #79 |
+| PALETTES and VRAM panels (512-colour picker, VRAM sheet) | PROVEN | `check-studio.js` checkPalettesPanel/checkVramPanel: 512 swatches, the picker's words and a drawn VRAM sheet | #85 |
+| SPRITES panel (64 sprites, sizes, patterns) | PROVEN | `check-studio.js` checkSpritesPanel: slots, sizes, pattern tools, per-line budget | #86 |
+| SCANLINES panel (bands on the line interrupt) | RUNNING | | #92 |
+| REGISTERS panel (every register, bit by bit, editable) | PROVEN | `check-pokes.js`: hex/decimal/bits, keyframes, undo/redo, written back into the toy; `check-studio.js` | #79 |
 | LAYERS panel (stacking, priority, palette fades) | TODO | | #93 |
 | AUDIO panel (the 6 voices live) | TODO | | #97 |
 | CONSOLE panel ("can this run on a real PC Engine?") | TODO | | #98 |
@@ -60,30 +60,30 @@ The two milestones Dennis asked for:
 | Browse: a gallery of the example toys | TODO | | #80 |
 | Debug panels and follow a pixel (the earlier text panels) | PROVEN | `check-panels.js` 36592 checks; breaker gaps closed | #26, #56 |
 | Docs (the reference, generated from the code) | PROVEN | `check-docs.js` | #61 |
-| Older separate editors: pictures, sprites, effects (`editor.html`) | PROVEN | `check-editor.js`: painted pictures diff 0 in Mednafen | #10, #13, #17 |
+| Older separate editors: pictures, sprites, effects (`editor.html`) | PROVEN | `check-editor.js`: painted pictures diff 0 in Mednafen; breaker gaps closed by #52 | #10, #13, #17, #52 |
 
 ## 3. Toys — small programs in Lua
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Toys run live in the browser (`init`, `frame`, `raster`, pads, passwords) | PROVEN | `check-toys.js`; every example shows a visible picture (#90) | #30, #73, #74, #90 |
+| Toys run live in the browser (`init`, `frame`, `raster`, pads, passwords) | PROVEN | `check-toys.js`; every example shows a visible picture (#90); breaker gaps closed by #81/#82 | #30, #73, #74, #81, #82, #90 |
 | Five example toys (parallax, sky, road, status bar, palette cycling) | PROVEN | `check-examples.js` 120 frames each | #29 |
 | Sound in toys (a song and sound effects) | PARTIAL | song + SFX through HuTrack's channel hand-off; effects, arpeggio and samples still to do | #71 |
-| Pads 1-5 and the timer, browser and console | RUNNING | | #45 |
+| Pads 1-5 and the timer, browser and console | PROVEN | `check-toys.js` pads/timer; Mednafen input-movie captures in `tests/dumps/pads` (no synthetic input) | #45 |
 | The IL (our intermediate language) | PROVEN | `check-il.js` 973 checks, Lua == IL | #31 |
 | The checker: frame time, sprites per line, memory | PROVEN | `check-validate.js`; breaker gaps closed by #89 | #32 |
 | A small game made only in the studio (demo-ready test) | TODO | starts when the panels and sound are in | #88 |
-| AI link part 1: an MCP server (an agent writes, runs, checks and exports toys) | RUNNING | | #36 |
+| AI link part 1: an MCP server (an agent writes, runs, checks and exports toys) | PROVEN | `check-mcp.js` 101 checks over stdio: write, run, PNG, register poke, validator refusal, export; rule 2's cold break still owed | #36 |
 | AI link part 2: the agent skill with recipes | TODO | | #103 |
 | Guide file for chat AIs (paste into Claude) + Download button | PROVEN | `renderer/pcestudio-for-claude.md`, generated from the code; online (#105) | #105 |
-| Paste & Run in the studio | RUNNING | | #107 |
+| Paste & Run in the studio | PROVEN | `check-studio.js --browser` 992 checks: clipboard, dropped file, undo, fallback box; rule 2 owed | #107 |
 
 ## 4. Getting it onto a console — export to `.pce`
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Pictures (with sprites, effects, wide modes, windows) to `.pce` | PROVEN | `check-export.js` byte-equal to the assembler; `check-viewer.js` diff 0 in Mednafen | #9, #14, #16, #46, #57, #67, #70 |
-| Toys to `.pce` via llvm-mos (the yardstick, needs a native install) | PROVEN | `check-il-console.js`: 2 toys diff 0 in Mednafen, 7,417 cycles/frame | #31 A/C |
+| Pictures (with sprites, effects, wide modes, windows) to `.pce` | PROVEN | `check-export.js` byte-equal to the assembler; `check-viewer.js` diff 0 in Mednafen | #7, #8, #9, #14, #16, #46, #57, #58, #60, #67, #70 |
+| Toys to `.pce` via llvm-mos (the yardstick, needs a native install) | PARTIAL | `check-il-console.js` measured 2 toys diff 0 in Mednafen, 7,417 cycles/frame; the suite is red today on palette.lua vs TOY_PALETTE and a cgen pad refusal — #108 | #31 A/C |
 | Toys to `.pce` via HuC (comparison) | PROVEN | `check-il-huc.js`; 14x slower than llvm-mos | #31 B/D |
 | Toys to `.pce` in the browser, route 1 (interpreter in the ROM) | PARTIAL | first half: the IL as bytecode, interpreted on the console in Mednafen; the studio's Export button and raster are the second half | #100 |
 | Toys to `.pce` in the browser, route 2 (our own compiler) | TODO | for speed, after route 1 | #101 |
@@ -106,9 +106,11 @@ The two milestones Dennis asked for:
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Every test suite passes on a fresh clone | PARTIAL | 27 PASS, 6 FAIL after #45/#100's new captures; #108 fixing. Before: `sh tests/all.sh` on a fresh clone: 28 PASS, ares SKIP | #83 |
+| Every test suite passes on a fresh clone | PARTIAL | 28 PASS, 6 FAIL (`check`, `check-il-console`, `check-review-fixes`, `check-status`, `raster-mutation`, `renderer-mutation`), 1 SKIP (`check-ares`) on a fresh clone at 4656c76; #108 fixing. Before: 28 PASS, ares SKIP (#83) | #83, #108, #109 |
 | Every new test broken by a different seat (rule 2) | PROVEN | `docs/REVIEW-*.md`; each miss became a card and is closed | rule 2 |
 | Every manual read and mapped to a card | PROVEN | `docs/MANUALS.md` | #44, #55 |
+| The ground surveyed, the lessons learned, the goal and the rules written down | PROVEN | `docs/SURVEY.md`, `docs/PPU-TOYS.md`, `docs/SPEC.md`, `docs/RETROSPECTIVE.md`, `RULES.md` rule 2 | #1, #2, #4, #53 |
+| A skill from the survey installed and confirmed loaded | WAITING | the survey found none to install; revisit when a card pays for a PCE lesson | #3 |
 | Phase 3 read cold by a reviewer | TODO | | #33 |
 
 ## 7. Later — not in the beta
