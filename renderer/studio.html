@@ -2731,13 +2731,22 @@ function seek(target) {
   return currentFrame;
 }
 
+/* #144: a step from the play loop is PLAYBACK, not a scrub, so it has no end.
+ * ppu.toys' Studio was read to settle it (its served Studio bundle,
+ * assets/App-DUnSytDh.js, fetched 2026-10-29): its clock is free-running —
+ * `step()` advances by elapsed time with no length check, `Length` is only
+ * the scrubber's `max`, the slider shows `min(frame, Length)` and the readout
+ * keeps the real frame number — so a game plays until Stop. Ours does the
+ * same for the same reason: a platformer froze at frame 299 (t=4.98 s) with
+ * nothing on screen saying why. Length still bounds every seek (`seek()`
+ * below), so the scrubber saturates at the last frame while the counter keeps
+ * rising, and Check and Export keep their fixed frame counts (they run
+ * `runFrames()`, not this). */
 function stepForward() {
-  if (currentFrame >= lengthFrames - 1) { pause(); return; }
   if (!runtime) rebuild();
   padLog[currentFrame + 1] = Object.assign({}, heldPad);
   const frame = runFrame(currentFrame + 1);
   updateClock(frame);
-  if (currentFrame >= lengthFrames - 1) pause();
   if (currentFrame % 6 === 0) refreshPanels();
 }
 
@@ -2780,8 +2789,9 @@ function updateClock(frame) {
   $("btn-addmarker").textContent = "Add marker at frame " + shown;
 }
 
-/* The scrubber's length is the toy clock's horizon: 1..3600 frames, the
- * slider's max follows it, and nothing can sit past the last frame. */
+/* The scrubber's length is the toy clock's HORIZON, not its end: 1..3600
+ * frames, the slider's max follows it, and no seek can land past the last
+ * frame — but playback runs on past it until Stop (#144, stepForward). */
 function setLength(n) {
   n = Math.round(Number(n));
   if (!isFinite(n)) n = lengthFrames;
@@ -2814,7 +2824,9 @@ function tick(now) {
 
 function play() {
   if (!runtime && !applySource()) return;
-  if (currentFrame >= lengthFrames - 1) seek(0);
+  /* #144: only a playhead parked on the last frame (where a scrub can put it)
+   * restarts from 0; one that has played past Length resumes where it is. */
+  if (currentFrame === lengthFrames - 1) seek(0);
   playing = true;
   lastTick = 0;
   fpsStarted = 0;
