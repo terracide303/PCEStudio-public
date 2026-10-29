@@ -318,7 +318,9 @@ const OLD_CHECK_SRC = preFixSource(CHECK_SRC,
  * #68 adds raster11 and vraster11 for 77; #27 adds the two wide-mode frames
  * (wide336 at 341x232, wide512 at 512x232) for 79; #76 adds 7 more (dma4,
  * dma5, sprite14-17, wide512b); #70 adds 4 more (the viewer ROMs vwide336/
- * vwide512 and the editor's wide pictures wedit336/wedit512) for 96 —
+ * vwide512 and the editor's wide pictures wedit336/wedit512) for 96; #67
+ * adds 5 more (the viewer ROMs of the four #48 window scenes and the
+ * editor's own 224-line/224-dot picture, config version 3) for 101 —
  * but a count alone would let
  * one scene drop out while another silently took its place, so the set is
  * checked name by name.  #68 adds raster11 (the frame counter + two CRAM
@@ -360,6 +362,9 @@ const EXPECTED_SCENES = [
   /* #70: the viewer ROMs of those pictures (config version 2 + the
    * wide-window block) and the editor's own 336/512-dot pictures */
   "vwide336", "vwide512", "wedit336", "wedit512",
+  /* #67: the viewer ROMs of the four #48 window scenes (config version 3 +
+   * the five window registers) and the editor's 224-line/224-dot picture */
+  "viewer11", "viewer12", "viewer13", "viewer14", "wwindow",
   /* #76: REVIEW-48-50's four misses — dma4/dma5 (one DMA step bit alone),
    * sprite14/15 (16 and 17 strips on a line), sprite16/17 (transparent vs
    * opaque sprite-0 overlap) and wide512b (VCE CR $07, DCC=11) */

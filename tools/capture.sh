@@ -40,6 +40,10 @@
 #                                   # (gen/effect1.pce, built by
 #                                   # tests/check-editor.js --write effect;
 #                                   # the dump gains raster.json)
+#   tools/capture.sh window         # #67: the editor's display-window
+#                                   # picture — 224 lines, 224-dot HDW
+#                                   # (gen/wwindow.pce, built by
+#                                   # tests/check-editor.js --write window)
 #   tools/capture.sh 336|512 wide   # #27: the wide-mode ROMs
 #                                   # (gen/wide336.pce, gen/wide512.pce — the
 #                                   # /3 and /2 dot clocks).  The capture is
@@ -114,6 +118,8 @@ elif [ "$SCENE" = spainted ]; then
   MODE=spainted
 elif [ "$SCENE" = effect ]; then
   MODE=effect
+elif [ "$SCENE" = window ]; then
+  MODE=window
 elif [ "$SCENE" = flicker ]; then
   MODE=flicker
 else
@@ -138,8 +144,9 @@ case "$MODE" in
   painted) NAME="painted" ;;
   spainted) NAME="spainted" ;;
   effect) NAME="effect1" ;;
+  window) NAME="wwindow" ;;
   flicker) NAME="flicker" ;;
-  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, wide, vwide, wedit, painted, spainted, effect or flicker" >&2; exit 2 ;;
+  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, wide, vwide, wedit, painted, spainted, effect, window or flicker" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
@@ -172,6 +179,10 @@ elif [ "$MODE" = effect ]; then
   # #16: the editor's effect picture (gradient + wobble + parallax bands at
   # frame 5), exported through the viewer with its raster table
   node tests/check-editor.js --write effect
+elif [ "$MODE" = window ]; then
+  # #67: the editor's display-window picture — 224 lines, 224-dot HDW — with
+  # the five window registers in config version 3's block
+  node tests/check-editor.js --write window
 elif [ "$MODE" = wedit ]; then
   # #70: the editor's wide picture (336 or 512 dots), exported by #9's
   # builder with config version 2 and the wide-window block

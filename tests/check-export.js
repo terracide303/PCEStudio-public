@@ -152,7 +152,12 @@ const PAIRS = [1, 2, 3].map((n) => ({ dump: `scene${n}`, pceas: `viewer${n}.pce`
   /* #70: the wide pictures — the browser export writes config version 2 and
    * the wide-window block (VCE CR + HSR/HDR) exactly as genviewer.py does. */
   .concat([{ dump: "wide336", pceas: "vwide336.pce" },
-           { dump: "wide512", pceas: "vwide512.pce" }]);
+           { dump: "wide512", pceas: "vwide512.pce" }])
+  /* #67: the display-window pictures — the browser export writes config
+   * version 3 and the five window registers (HSR/HDR/VPR/VDR/VCR) exactly
+   * as genviewer.py does. */
+  .concat([11, 12, 13, 14].map((n) => ({ dump: `scene${n}`,
+                                         pceas: `viewer${n}.pce` })));
 
 /* #57: the HuCard decodes physical banks $00-$7F = 128 banks of 8 KiB =
  * 1 MB (sgxtech.txt "HuC6280 memory map"; pcetech.txt §3 "Memory map";

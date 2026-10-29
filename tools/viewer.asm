@@ -19,6 +19,13 @@
 ;; 256-dot constants; every other register is the same.  Version 1 pictures
 ;; are byte-identical to before (#70 left the config and all offsets alone).
 ;;
+;; #67: a picture whose display window differs from the viewer's 256x240
+;; constants — a 224-line picture, a narrower HDW — writes config version 3
+;; and its window block carries all five registers: HSR/HDR at $5F02/$5F04
+;; and VPR/VDR/VCR at $5F06/$5F08/$5F0A.  Boot writes them before the
+;; display is enabled (below), so the same viewer code shows every window
+;; the renderer's #48 model was proven against (tests/dumps/scene11-14).
+;;
 ;; #16: pictures with a raster table (config byte 9 = 1) run it on the
 ;; console: an irq1 handler driven by the VDC's RCR line interrupt writes
 ;; each line's BXR/BYR/CR/colour-table values and re-arms RCR for the next
@@ -168,9 +175,9 @@ cfgcopy:
         ; it is the 262/263-line select or edge blur (docs/DECISIONS.md
         ; 2026-10-28, card #27), and every ROM keeps it set.
         lda $2200                  ; config version
-        cmp #$02
-        bne vce_256
-        lda $5F00                  ; wide block: the picture's VCE CR
+        cmp #$02                   ; version >= 2 carries the VCE CR
+        bcc vce_256
+        lda $5F00                  ; window block: the picture's VCE CR
         sta $0400
         bra vce_done
 vce_256:
@@ -228,9 +235,9 @@ palentry:
         sta $0002
         st2 #$00
         st0 #$0a
-        lda $2200                  ; #70: version 2 -> the block's HSR
+        lda $2200                  ; #70: version >= 2 -> the block's HSR
         cmp #$02
-        bne hsr_256
+        bcc hsr_256
         lda $5F02                  ; HSR lo (HSW)
         sta $0002
         lda $5F03                  ; HSR hi (HDS)
@@ -243,7 +250,7 @@ hsr_done:
         st0 #$0b
         lda $2200
         cmp #$02
-        bne hdr_256
+        bcc hdr_256
         lda $5F04                  ; HDR lo (HDW)
         sta $0002
         lda $5F05                  ; HDR hi (HDE)
@@ -253,15 +260,50 @@ hdr_256:
         st1 #$1f
         st2 #$04                   ; HDR: HDW=31, HDE=4
 hdr_done:
+
+        ; ---- #67: VPR/VDR/VCR.  Config version 3 carries all five window
+        ; registers in the block: VPR at $5F06, VDR at $5F08, VCR at $5F0A
+        ; (docs/ROM_LAYOUT.md).  Version 1 and 2 pictures keep the viewer's
+        ; 256x240 constants: VDS=15/VSW=2, VDW=239 (240 lines), VCR=$0c.
         st0 #$0c
+        lda $2200
+        cmp #$03
+        bne vpr_240
+        lda $5F06                  ; VPR lo (VSW)
+        sta $0002
+        lda $5F07                  ; VPR hi (VDS)
+        sta $0003
+        bra vpr_done
+vpr_240:
         st1 #$02
-        st2 #$0f                   ; VPR
+        st2 #$0f                   ; VPR: VDS=15, VSW=2
+vpr_done:
         st0 #$0d
+        lda $2200
+        cmp #$03
+        bne vdr_240
+        lda $5F08                  ; VDR lo (VDW)
+        sta $0002
+        lda $5F09                  ; VDR hi (VDW bit 8)
+        sta $0003
+        bra vdr_done
+vdr_240:
         st1 #$ef
         st2 #$00                   ; VDW: 240 display lines
+vdr_done:
         st0 #$0e
+        lda $2200
+        cmp #$03
+        bne vcr_240
+        lda $5F0a                  ; VCR
+        sta $0002
+        lda $5F0b
+        sta $0003
+        bra vcr_done
+vcr_240:
         st1 #$0c
         st2 #$00                   ; VCR
+vcr_done:
         st0 #$0f
         st1 #$10
         st2 #$00                   ; DCR: bit 4 (DSR) = VRAM-SATB transfer

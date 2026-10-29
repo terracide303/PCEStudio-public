@@ -18,7 +18,10 @@ RASTERS := 1 2 3 4 5 6 7 8 9 10
 # #46's >80 KB picture: a 64x64 BAT plus a full 32 KiB tile set plus 160
 # sprite-pattern cells = 11 banks / 88 KiB, the first viewer whose copy
 # regions cross more than one MPR2 bank.
-VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,1 2 3 7 10))
+# #67: viewers 11-14 are #48's display-window scenes (224 lines, a shifted
+# window, a narrower HDW, a short picture) — their config carries the five
+# window registers (version 3).
+VIEWERS := $(addprefix gen/viewer,$(addsuffix .pce,1 2 3 7 10 11 12 13 14))
 SPRITE_ROMS := $(addprefix gen/sprite,$(addsuffix .pce,$(SPRITES))) \
                $(addprefix gen/sprite,$(addsuffix .pce,14 15 16 17))
 # #76's four status fixtures (sprite14-17) are deliberately NOT in SPRITES:

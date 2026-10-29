@@ -167,8 +167,12 @@ function diffPixels(got, ref, name) {
          `${ref.width * ref.height * 3} bytes\n` + samples.map((s) => `  ${s}`).join("\n");
 }
 
-const VDC_REGS = ["MWR", "BXR", "BYR", "CR", "VSR", "VDR", "HSR", "HDR",
-                  "VCECR", "DCR", "SATB"];
+/* #67: VSR is the save state's field for the VDC's R0C (VPR: VDS/VSW);
+ * VCR joins the compared registers with the window block, and the frame diff
+ * is what proves HSR/HDR/VPR/VDR — but comparing all five directly is the
+ * cheap witness that the viewer wrote the picture's registers. */
+const VDC_REGS = ["MWR", "BXR", "BYR", "CR", "VSR", "VDR", "VCR", "HSR",
+                  "HDR", "VCECR", "DCR", "SATB"];
 
 /* The shared #15/#16 raster-table check (tests/check.js uses the same
  * witnesses on the scene dumps). */

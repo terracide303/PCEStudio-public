@@ -38,7 +38,7 @@ scenes.
 | bank | content |
 |------|---------|
 | 0    | viewer code and vectors (constant — the browser copies it verbatim) |
-| 1    | config block (64 B at `$4000`) + the 512 colour-table entries (`$4040`) + the SAT (`$4440`) + the raster table image (3856 B at `$4640`, #16 — only when config byte `0x09` = 1) |
+| 1    | config block (64 B at `$4000`) + the 512 colour-table entries (`$4040`) + the SAT (`$4440`) + the raster table image (3856 B at `$4640`, #16 — only when config byte `0x09` = 1) + the window block (8 B at `$5F00` when config version = 2, 16 B when version = 3 — #70/#67) |
 | 2–3  | the BAT: `width × height` words, starting at bank 2 offset 0 |
 | 4–127 | the copy regions: the tile regions (and for the sprite scenes the SG pattern block) concatenated in descriptor order |
 
@@ -54,7 +54,7 @@ and `tools/extract_bank0.py` refuses to write the asset if they differ.
 
 | offset | size | field |
 |--------|------|-------|
-| `0x00` | 1    | version: 1 = the 256-dot viewer; 2 = also carries the wide-window block (#70) |
+| `0x00` | 1    | version: 1 = the 256-dot viewer; 2 = also carries the wide-window block (#70); 3 = the window block also carries VPR/VDR/VCR (#67) |
 | `0x01` | 1    | reserved (0) |
 | `0x02` | 2    | BXR (background X scroll, 10 bits) |
 | `0x04` | 2    | BYR (background Y scroll, 9 bits) |
@@ -104,12 +104,13 @@ ROM, the capture and `tests/check.js` read one rule.  The flicker code is
 assembled only into `FLICKER` builds: every other viewer ROM keeps the same
 bank 0 (the browser export and the #68 trace fixtures pin it).
 
-## Bank 1 — the wide-window block, offset `0x1F00` (`$5F00`) (#70)
+## Bank 1 — the window block, offset `0x1F00` (`$5F00`) (#70, #67)
 
-A picture whose VCE CR selects a non-`/4` dot clock (`DCC` bits 1-0 != 00 —
-the 336- and 512-dot modes whose renderer half #27 proved) cannot use the
-viewer's 256-dot HSR/HDR constants, so it writes config **version 2** and this
-8-byte block:
+A picture whose display window differs from the viewer's own constants — the
+256-dot `/4` clock's `HSR $0202`, `HDR $041F`, `VPR $0F02`, `VDR $00EF` (240
+lines) and `VCR $000C` — writes config **version 2** (a wide `/3` or `/2`
+dot clock, `DCC` bits 1-0 != 00, from #70 and #27) or **version 3** (any
+other window: a 224-line picture, a narrower HDW — #67), and this block:
 
 | offset | size | field |
 |--------|------|-------|
@@ -117,26 +118,49 @@ viewer's 256-dot HSR/HDR constants, so it writes config **version 2** and this
 | `0x01` | 1    | reserved (0) |
 | `0x02` | 2    | HSR (little-endian), written to VDC register `$0A` |
 | `0x04` | 2    | HDR (little-endian), written to VDC register `$0B` |
-| `0x06` | 2    | reserved (0) |
+| `0x06` | 2    | VPR (little-endian), written to VDC register `$0C` — version 3 only |
+| `0x08` | 2    | VDR (little-endian), written to VDC register `$0D` — version 3 only |
+| `0x0A` | 2    | VCR (little-endian), written to VDC register `$0E` — version 3 only |
+| `0x0C` | 4    | reserved (0) |
+
+Version 2's block is the first 8 bytes only (its bytes `0x06`-`0x07` are the
+version 3 VPR field and stay 0 in a version 2 ROM; the rest of the region is
+`0xff` padding).  Version 3 carries **all five window registers**, so
+`viewer.asm` writes a picture's HSR/HDR/VPR/VDR/VCR instead of its
+constants: the 224-line scene (`VDR $00DF`), the shifted window (`VPR
+$1B02`), the 224-dot HDW (`HSR $0402`, `HDR $041B`) and the short picture
+(`VDR $00C7`, `VCR $002C`) of `tests/dumps/scene11`-`scene14` are the
+witnesses (`tools/genviewer.py`'s `viewer11`-`viewer14`, `tests/check-viewer.js`
+diff 0).  The register field widths are the VDC manual's (HSR p. H7-9, HDR
+p. H7-9, VPR/VDR/VCR p. H7-10/H7-11); the builders refuse a value past them
+with `window-range`.
 
 The block sits after the raster table, which ends at `0x1550`; every version 1
 picture leaves it `0xff` padding, so **no ROM built before #70 changes a
 byte**.  Boot reads the version byte from the RAM config copy at `$2200` and,
-when it is 2, loads the block at `$5F00` through MPR2 (still bank 1 at that
-point) and writes the VCE CR and the two VDC registers; otherwise it writes
-the constants `$04`, `$0202`, `$041F`.  Everything else — BXR/BYR/MWR/CR from
-the config, VDW 240, VPR, VCR, DCR and the SAT — is the same in both modes.
+when it is 2 or 3, loads the block at `$5F00` through MPR2 (still bank 1 at
+that point) and writes the VCE CR, HSR and HDR; version 3 also writes VPR,
+VDR and VCR.  Otherwise it writes the constants `$04`, `$0202`, `$041F`,
+`$0F02`, `$00EF`, `$000C`.  BXR/BYR/MWR/CR from the config, DCR and the SAT
+are the same in every version.
 
-The builders take the wide values from the picture's own dump
-(`regs.json`'s `VCECR`/`HSR`/`HDR`), not from a width table, so a future
-window is carried the same way.  `tools/genviewer.py` (`vwide336`/`vwide512`
-specs) and `renderer/pce-rom.js` (`regs.VCECR`/`HSR`/`HDR`) both apply the
-same rule: `(VCECR & 3) != 0` is wide, anything else is version 1.  Wide and
-flicker/raster are mutually exclusive (they would share the config's
-interrupt bytes or the table space) and the builders refuse the combination.
-The editor's own pictures use the same block: `setVideoMode(pic, 256|336|512)`
-in `renderer/pce-editor.js` sets the three registers from MacDonald's display
-table (`HSR/HDW` = `0x0202`/`0x041F`, `0x0402`/`0x0429`, `0x0B02`/`0x043F`).
+The builders take the values from the picture's own dump (`regs.json`'s
+`VCECR`/`HSR`/`HDR`/`VSR`/`VDR`/`VCR`; the save state names the VDC's R0C,
+VPR, "VSR"), not from a width table, so a future window is carried the same
+way.  `tools/genviewer.py` (`window_registers`) and `renderer/pce-rom.js`
+(`regs.HSR`/`HDR`/`VPR`, falling back to `VSR`/`VDR`/`VCR`) apply the same
+rule: a non-`/4` clock is version 2 when its vertical window is the standard
+one; a changed HSR/HDR on the `/4` clock, or a changed VPR/VDR/VCR on any
+clock, is version 3; everything else is version 1.  Wide and flicker/raster
+are mutually exclusive (they would share the config's interrupt bytes or the
+table space) and the builders refuse the combination; a version 3 window
+block does not overlap the table, so a non-wide window picture may also run
+one.  The editor's own pictures use the same block: `setVideoMode(pic,
+256|336|512)` in `renderer/pce-editor.js` sets the three registers from
+MacDonald's display table (`HSR/HDW` = `0x0202`/`0x041F`,
+`0x0402`/`0x0429`, `0x0B02`/`0x043F`), and `setWindow(pic, {lines, width})`
+sets a 224/240-line and 256/224-dot window (the 224-dot one is
+`HSR $0402`/`HDR $041B`, 16 px of border each side).
 
 ## Bank 1 — the raster table, offset `0x640` (`$4640`) (#16)
 
@@ -315,10 +339,11 @@ that reads it; that is its own card, and it is not this one.
 
 - Reset sets MPR2 to bank 1, copies the 64-byte config block to RAM `$2200`
   and loads the 512 colour-table entries from `$4040`.
-- #70: before the palettes load, the version byte decides the VCE CR: version
-  2 reads the wide-window block at `$5F00` and writes its VCE CR, otherwise
-  the viewer writes `$04` (the `/4` clock).  The same block supplies HSR/HDR
-  where the VDC registers are written below.
+- #70/#67: before the palettes load, the version byte decides the VCE CR:
+  version 2 or 3 reads the window block at `$5F00` and writes its VCE CR,
+  otherwise the viewer writes `$04` (the `/4` clock).  The same block
+  supplies HSR/HDR where the VDC registers are written below; version 3 also
+  supplies VPR, VDR and VCR (a 224-line or narrowed window).
 - The VDC init writes DCR = `0x0010` (bit 4, DSR: the VRAM-SATB transfer
   auto-repeats every VBlank) and DVSSR = `$7f00` (the SAT's VRAM address;
   the high-byte write starts the first transfer at the next VBlank) —
@@ -366,7 +391,11 @@ banks.
 (`setVideoMode(pic, 256|336|512)`).  The BAT stays 32×32 (`MWR = 0`) in every
 mode — the VDC wraps it every 256 dots, so a wide frame shows the picture and
 its wrapped repetition — while the picture's VCE CR and HSR/HDR ride in the
-wide-window block above; a 256-dot picture stays config version 1.
+window block above; a 256-dot picture with the viewer's 240-line window stays
+config version 1.  #67: the editor also chooses the display window
+(`setWindow(pic, {lines: 224|240, width: 256|224})`); a width of 224 dots is
+`HSR $0402`/`HDR $041B` (16 px of border each side), a height of 224 lines is
+`VDR $00DF`, and either exports config version 3 with all five registers.
 
 A picture with sprite patterns (#13) adds a **second** region: the patterns
 are packed into 64-word VRAM cells after the tiles (first cell

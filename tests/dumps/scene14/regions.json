@@ -1,0 +1,4 @@
+{
+  "comment": "#67: scene14 is scene1's picture with only the window registers changed (tools/genroms.py SCENES 11-14), so its copy regions are scene1's: [char0, tile count] in descriptor order.",
+  "tile_regions": [[64, 32], [3840, 16]]
+}
