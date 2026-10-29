@@ -1,8 +1,12 @@
 # toys/oak-woods — OAK WOODS (card #128)
 
 A small forest runner made with the studio's toys, the #123 importer and the
-Oak Woods art pack.  The player runs right; three tree bands slide past at a
-quarter, a half and the full speed (the RCR line interrupt rewriting `BXR`);
+Oak Woods art pack.  The player runs right; the forest has two speeds and no
+cut tree (card #150): far and mid trees and the floor are one looping picture at
+the ground's speed, and a sky strip above the crowns runs at half of it (the RCR
+line interrupt rewriting `BXR`, one entry at `SKY_LINE`, one at `MAIN_LINE`, a row
+where the picture is one flat colour).  Front-trunk sprites were tried and removed
+(Dennis: "remove the weird poles");
 rocks roll in on the ground and cost a life; the sign ends the run.  The top
 24 lines are a status bar held still by the split, with TIME counting down and
 SCORE rising by one for every rock passed.  IJKL dodges, N (or M) jumps,

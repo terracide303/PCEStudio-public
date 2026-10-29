@@ -1,13 +1,26 @@
 -- main.lua — OAK WOODS, a small forest runner (card #128).
 --
--- THE GAME: the player runs right through a forest.  The far trees, the mid
--- trees and the near trunks are three BXR bands written by the RCR line
--- interrupt (the callback form of raster()), so they slide past at a quarter,
--- a half and the full speed while the ground moves with the near trunks.
--- Rocks roll in on the ground: jump them with I (or II) and dodge with
--- left/right.  Reach the sign to win.  The top 24 lines are a status bar held
--- still by the split; TIME counts down and SCORE rises by one for every rock
--- passed.  Three lives, a song and four effects.
+-- THE GAME: the player runs right through a forest.  Rocks roll in on the
+-- ground: jump them with I (or II) and dodge with left/right.  Reach the sign
+-- to win.  The top 24 lines are a status bar held still by the split; TIME
+-- counts down and SCORE rises by one for every rock passed.  Three lives, a
+-- song and four effects.
+--
+-- THE DEPTH (card #150; Dennis, playing the first build: "oakwood is 3
+-- layers but it's very weird, the trees are cut").  The PCE has ONE
+-- background, and the first build cut it into three horizontal bands, so a
+-- tree crossing a band edge was sliced.  Now there are two speeds and no
+-- cut tree:
+--   * the far and mid trees and the forest floor are ONE composite picture
+--     that loops at the BAT's 256 px, scrolling with the ground (2 px a frame,
+--     the speed the rocks and the sign move at);
+--   * the sky strip above the crowns is a separate raster band (a BXR write at
+--     SKY_LINE, another at MAIN_LINE) on its OWN counter, one pixel a frame.
+--     MAIN_LINE is a row where the composite is a flat colour, so no tree
+--     crosses it;
+-- Each band is on its own counter (as CITY's, #148: a divided shared counter
+-- would snap).  Front-trunk sprites were tried and removed (Dennis: "remove
+-- the weird poles"): the background alone is the depth.
 --
 -- THE ART IS NOT IN THIS FILE'S REPOSITORY.  The pack is Oak Woods v1.0 by
 -- Brullov (brullov.art), used under the licence Dennis purchased; the raw pack
@@ -39,9 +52,8 @@ DIGIT_CHARS = {65, 65, 65, 65, 65, 65, 65, 65, 65, 65}
 DIGIT_PAL = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 HUD_TIME = {33, 34, 35}
 HUD_SCORE = {52, 53, 54}
-FAR_LINE = 24
-MID_LINE = 72
-NEAR_LINE = 128
+SKY_LINE = 24
+MAIN_LINE = 63
 LEVEL_LEN = 1440
 GOAL_X = 1400
 ROCK_X = {240, 520, 900, 1240}
@@ -87,6 +99,7 @@ end
 -- Sprite slots: 0 the player (sprite #0 for the VDC's own collision flag),
 -- 1 the sign, 2..5 the rocks.
 
+
 -- One frame of the runner: the run cycle is six frames, the jump and the fall
 -- one each; the idle pair is unused because the world never stops.
 function player_pattern()
@@ -106,7 +119,7 @@ function hurt()
   if lives <= 0 then state = 2 end
 end
 
--- The rocks roll with the near trunks, so their screen x is their world x
+-- The rocks roll with the ground, so their screen x is their world x
 -- minus the scroll.  A rock already passed the player scores one point.
 function move_rocks()
   for i = 1, 4 do
@@ -155,20 +168,19 @@ function reset()
   state = 0
   inv = 60
   passed = {0, 0, 0, 0}
+  sky = 0
   music(0)
 end
 
--- The parallax: one raster-table entry at each band's first line, and the
--- register holds to the next entry (the RCR interrupt fires once a line, so
--- three entries a frame is the whole cost).  Lines 0..23 have no entry, so
--- they keep the base BXR 0 and the status bar never moves.
+-- The raster split: one table entry at each band's first line, and the
+-- register holds to the next entry.  Line 0 puts the bar back at 0 (the
+-- register holds last frame's last value until an entry writes it, so
+-- without this the bar would scroll), the sky strip has its own counter and
+-- the composite below MAIN_LINE runs with the ground.
 function bands()
-  -- line 0 puts the bar back at 0: the register holds last frame's near-band
-  -- value until an entry writes it, so without this line the bar would scroll
   raster(0, {bxr = 0})
-  raster(FAR_LINE, {bxr = (scroll // 4) % 256})
-  raster(MID_LINE, {bxr = (scroll // 2) % 256})
-  raster(NEAR_LINE, {bxr = scroll % 256})
+  raster(SKY_LINE, {bxr = sky})
+  raster(MAIN_LINE, {bxr = scroll % 256})
 end
 
 function init()
@@ -187,7 +199,10 @@ function frame(t, f)
   end
 
   -- the world runs right at two pixels a frame; the level ends at the sign
-  if scroll < LEVEL_LEN then scroll = scroll + 2 end
+  if scroll < LEVEL_LEN then
+    scroll = scroll + 2
+    sky = (sky + 1) % 256
+  end
   bands()
   if timeleft > 0 then timeleft = timeleft - 1 end
   if timeleft <= 0 then state = 2 end

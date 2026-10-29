@@ -108,9 +108,8 @@ const DIGIT_CHARS = intArray("DIGIT_CHARS");
 const HUD_TIME = intArray("HUD_TIME");
 const HUD_SCORE = intArray("HUD_SCORE");
 const GROUND = Number(constOf("GROUND"));
-const FAR_LINE = Number(constOf("FAR_LINE"));
-const MID_LINE = Number(constOf("MID_LINE"));
-const NEAR_LINE = Number(constOf("NEAR_LINE"));
+const SKY_LINE = Number(constOf("SKY_LINE"));
+const MAIN_LINE = Number(constOf("MAIN_LINE"));
 
 function batCell(state, cell) {
   return state.vram[cell * 2] | (state.vram[cell * 2 + 1] << 8);
@@ -200,7 +199,6 @@ function playTogether(padFn, frames, keep) {
        * carries no raster entries — an empty table, not a crash */
       raster: ga.raster ? ga.raster.entries.map((e) => ({ line: e.line, bxr: e.bxr })) : [],
       labels: [33, 34, 35, 36, 49, 50, 51, 52, 53].map((c) => batCell(ga.state, c)),
-      play: FAR_LINE + 1 < 32 ? batCell(ga.state, FAR_LINE * 32 + 8) : 0,
       playerY: ga.state.sat[0] | (ga.state.sat[1] << 8),
       playerX: ga.state.sat[2] | (ga.state.sat[3] << 8),
     });
@@ -246,21 +244,34 @@ function checkPlay() {
         "with no jump the run ends early (the HUD freezes), so the rocks are " +
         "a real hazard");
 
-  /* the split: line 0 holds BXR 0, the three bands move at 1/4, 1/2 and full */
+  /* the split (#150): line 0 holds BXR 0, the sky strip runs at half the
+   * composite's speed on its own counter */
   const f = r[Math.floor(r.length * 0.3)];
   const lines = f.raster.map((e) => e.line);
-  eq("the raster table's lines", lines, [0, FAR_LINE, MID_LINE, NEAR_LINE]);
+  eq("the raster table's lines", lines, [0, SKY_LINE, MAIN_LINE]);
   eq("line 0 keeps the bar still", f.raster[0].bxr, 0);
-  check(f.raster[3].bxr !== 0, "the near band's BXR moves with the run");
-  check(f.raster[1].bxr !== f.raster[3].bxr,
-        "the far band and the near band move at different speeds (" +
-        f.raster[1].bxr + " vs " + f.raster[3].bxr + ")");
+  check(f.raster[2].bxr !== 0, "the composite's BXR moves with the run");
+  check(f.raster[1].bxr !== f.raster[2].bxr,
+        "the sky strip and the composite move at different speeds (" +
+        f.raster[1].bxr + " vs " + f.raster[2].bxr + ")");
+  let skyStep = 0, mainStep = 0, skyBad = 0, mainBad = 0;
+  for (let i = 1; i < r.length; i++) {
+    if (!r[i].raster.length || !r[i - 1].raster.length) continue;
+    const ds = (r[i].raster[1].bxr - r[i - 1].raster[1].bxr + 256) % 256;
+    const dm = (r[i].raster[2].bxr - r[i - 1].raster[2].bxr + 256) % 256;
+    if (ds !== 1) skyBad++;
+    if (dm !== 2) mainBad++;
+    skyStep += ds; mainStep += dm;
+  }
+  check(skyBad === 0 && mainBad === 0,
+        "every step is the band's own rate: the strip 1 px, the composite 2 px " +
+        "(" + skyBad + " + " + mainBad + " off)");
   /* the bar's label cells are the same in every frame: the six digit cells
    * change on purpose, the labels must not */
   check(r.every((x) => JSON.stringify(x.labels) === JSON.stringify(r[0].labels)),
         "the status bar's labels are the same cells on every frame (the HUD " +
         "redraws its six digit cells only)");
-  check(r.some((x) => x.raster.length && x.raster[3].bxr !== 0),
+  check(r.some((x) => x.raster.length && x.raster[2].bxr !== 0),
         "the playfield's BXR moves with the run (the BAT itself is fixed)");
 
   /* 6: the song is audible */
@@ -374,6 +385,147 @@ function checkPictures(run) {
         "strip.png reads back pixel for pixel");
 }
 
+/* ---- 8: card #150 — depth without cut trees ---------------------------- */
+
+/* SAT bytes -> sprites: word 0 y (screen y + 64), word 3 attr: bit 8 CGX
+ * (32 wide), bits 12-13 CGY (16/32/-/64 tall).  A strip is 16 px wide. */
+function stripsPerLine(sat) {
+  const lines = new Uint8Array(256);
+  for (let i = 0; i < 64; i++) {
+    const y = (sat[i * 8] | (sat[i * 8 + 1] << 8)) & 0x3FF;
+    const attr = sat[i * 8 + 6] | (sat[i * 8 + 7] << 8);
+    const h = [16, 32, 32, 64][(attr >> 12) & 3];
+    const strips = (attr & 0x100) ? 2 : 1;
+    for (let k = 0; k < h; k++) {
+      const line = y - 64 + k;
+      if (line >= 0 && line < 224) lines[line] += strips;
+    }
+  }
+  return lines;
+}
+
+/* the scripted pad over several levels: jump each rock, and press Run on the
+ * level's last frame so the run starts again (the sign has ended it by then) */
+const LEVEL = 760;
+function longPad(f) {
+  const t = f % LEVEL, p = {};
+  for (const j of JUMPS) if (t >= j && t < j + 3) p.i = true;
+  if (t === LEVEL - 1) p.run = true;
+  return p;
+}
+
+function checkDepth() {
+  const rt = toys.create(source, { budgetMs: 400, songs: [song] });
+  rt.load();
+  let worst = 0, worstAt = -1, used = 0;
+  for (let f = 0; f < 3600; f++) {
+    rt.setPad(1, longPad(f));
+    const g = rt.frame(f);
+    const lines = stripsPerLine(g.state.sat);
+    for (let y = 0; y < 224; y++)
+      if (lines[y] > worst) { worst = lines[y]; worstAt = f + ":" + y; }
+    for (let i = 6; i < 64; i++)
+      if (((g.state.sat[i * 8] | (g.state.sat[i * 8 + 1] << 8)) & 0x3FF) !== 0) used++;
+  }
+  rt.dispose();
+  check(worst <= 16, "no sprite line exceeds 16 strips over 3,600 frames of the " +
+        "scripted pad (busiest: " + worst + " at frame:line " + worstAt + ")");
+  check(used === 0, "the sprites are the player, the sign and the rocks only: " +
+        "SAT slots 6..63 are never used (#150: the front-trunk sprites are gone)");
+  console.log("  sprites: busiest line " + worst + " of 16 strips (player, sign, rocks)");
+}
+
+/* the seam, read off the rendered picture: the BAT is 32 cells wide (MWR) so
+ * the picture repeats at 256 px; and the step across x=255 -> x=0 must be no
+ * bigger than the picture's own typical step between neighbouring columns */
+function bgPixelRgb(state, x, y) {
+  const cell = batCell(state, (y >> 3) * 32 + ((x >> 3) & 31));
+  const ch = cell & 0xFFF, pal = cell >> 12;
+  const base = ch * 16, r = y & 7, bit = 7 - (x & 7);
+  const w = (i) => state.vram[(base + i) * 2] | (state.vram[(base + i) * 2 + 1] << 8);
+  const lo = w(r), hi = w(r + 8);
+  const idx = ((lo >> bit) & 1) | (((lo >> (8 + bit)) & 1) << 1) |
+              (((hi >> bit) & 1) << 2) | (((hi >> (8 + bit)) & 1) << 3);
+  const c = idx === 0 ? 0 : pal * 16 + idx;
+  const v = state.cram[c * 2] | (state.cram[c * 2 + 1] << 8);
+  return [(v >> 3) & 7, (v >> 6) & 7, v & 7];
+}
+function checkSeam() {
+  const rt = toys.create(source, { budgetMs: 400, songs: [song] });
+  rt.load();
+  const g = rt.frame(0);
+  rt.dispose();
+  check((g.state.regs.MWR & 0x30) === 0,
+        "MWR says a 32-cell BAT, so the picture loops at 256 px");
+  let across = 0, within = 0, n = 0;
+  const d = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+  for (let y = MAIN_LINE; y < 224; y++) {
+    across += d(bgPixelRgb(g.state, 255, y), bgPixelRgb(g.state, 0, y));
+    for (let x = 0; x < 255; x++) { within += d(bgPixelRgb(g.state, x, y), bgPixelRgb(g.state, x + 1, y)); n++; }
+  }
+  const typical = within / 255;
+  check(across <= typical,
+        "the loop's seam (x=255 -> 0) is no harsher than the picture's own " +
+        "column steps (seam " + across + ", a typical step " + typical.toFixed(0) +
+        " per column over " + (224 - MAIN_LINE) + " rows)");
+  /* x and x + loop are the same BAT cell: the toy never shifts the picture by
+   * anything but BXR, so a column and the one 256 px on are identical */
+  let same = true;
+  for (let y = MAIN_LINE; y < 224 && same; y += 7)
+    for (let x = 0; x < 256; x += 5)
+      if (d(bgPixelRgb(g.state, x, y), bgPixelRgb(g.state, x + 256, y)) !== 0) { same = false; break; }
+  check(same, "columns at x and x + 256 are identical (the wrap is the BAT's)");
+}
+
+/* the card's control: no tree crosses a band edge.  The edge is clean where
+ * the rows on both sides are one colour across the width.  #128's banded build
+ * fails that at both its edges; this build's one cut passes. */
+function checkCut() {
+  const tool = require("../tools/oak-woods-art.js");
+  const built = tool.build({});
+  if (built.skip) { note("the pack is not here: the banded control is skipped (" + built.skip + ")"); return; }
+  const cut = built.bgImg.cut;
+  check(cut === MAIN_LINE, "the toy's MAIN_LINE (" + MAIN_LINE + ") is the tool's cut (" + cut + ")");
+  check(tool.edgeClean(built.bgImg, cut),
+        "the new build's one split (line " + cut + ") has a flat row on both sides: no tree crosses it");
+  const old = built.bandedImg;
+  const oldClean = old.edges.map((y) => tool.edgeClean(old, y));
+  check(oldClean.every((c) => !c),
+        "the CONTROL, #128's banded build, is cut through trees at both its band edges " +
+        "(lines " + old.edges.join(", ") + "): clean = " + JSON.stringify(oldClean));
+}
+
+/* a strip of four scroll positions for Dennis */
+function checkScrollStrip() {
+  const at = [0, 150, 300, 450];  /* four scroll positions: 0, 300, 600, 900 px */
+  const run = playTogetherLua(scriptedPad, 460, at);
+  const W = 256 * 2, H = 224 * 2, grid = new Uint8Array(W * H * 3);
+  at.forEach((f, i) => {
+    const px = run.get(f);
+    const cx = (i % 2) * 256, cy = Math.floor(i / 2) * 224;
+    for (let y = 0; y < 224; y++) for (let x = 0; x < 256; x++) {
+      const o = (y * 256 + x) * 3, dd = ((cy + y) * W + cx + x) * 3;
+      grid[dd] = px[o]; grid[dd + 1] = px[o + 1]; grid[dd + 2] = px[o + 2];
+    }
+  });
+  const file = path.join(DUMPS, "scroll-strip.png");
+  fs.writeFileSync(file, encodePng(grid, W, H));
+  check(Buffer.from(decodePng(fs.readFileSync(file)).pixels).equals(Buffer.from(grid)),
+        "scroll-strip.png (frames " + at.join(", ") + ") reads back pixel for pixel");
+}
+function playTogetherLua(padFn, frames, keep) {
+  const a = toys.create(source, { budgetMs: 400, songs: [song] });
+  a.load();
+  const kept = new Map();
+  for (let f = 0; f < frames; f++) {
+    a.setPad(1, padFn(f));
+    const g = a.frame(f);
+    if (keep.includes(f)) kept.set(f, Uint8Array.from(g.pixels));
+  }
+  a.dispose();
+  return kept;
+}
+
 /* ---- run ---------------------------------------------------------------- */
 
 console.log("== OAK WOODS (#128), " + GAME);
@@ -381,6 +533,10 @@ checkTool();
 checkBudgets();
 const run = checkPlay();
 checkPictures(run);
+checkDepth();
+checkSeam();
+checkCut();
+checkScrollStrip();
 
 if (failures.length) {
   console.log("FAIL  " + failures.length + " of " + checks + " checks");

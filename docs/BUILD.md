@@ -10,8 +10,8 @@ working examples use. It is a **build tool, not part of PCEStudio**: per
 so its source and binary are not vendored in this repository.
 
 **Installed here:** `pceas` 3.23 (`52a556a`, 2018-05-28) at
-`/Volumes/External II/pce-tools/bin/pceas`, linked from `~/.local/bin/pceas`
-(on `PATH`). Tools live on External II: the internal disk has no room.
+`/Volumes/External/pce-tools/bin/pceas`, linked from `~/.local/bin/pceas`
+(on `PATH`). Tools live on the External volume: the internal disk has no room.
 
 ### Installing it (reproducible)
 
@@ -19,9 +19,9 @@ The upstream repository has no releases, so build it from source outside the
 project tree:
 
 ```sh
-T="/Volumes/External II/pce-tools"; mkdir -p "$T/bin" && cd "$T"
-git clone https://github.com/uli/huc.git huc-src
-cd huc-src
+T="/Volumes/External/pce-tools"; mkdir -p "$T/bin" && cd "$T"
+git clone https://github.com/uli/huc.git pceas3-src
+cd pceas3-src
 git checkout 52a556a0556abb67a12889ca7047366a8cb2f59e
 mkdir -p bin
 make -C src/mkit/as \
@@ -70,17 +70,14 @@ PCEAS 3.23 cannot assemble HuDK sources — they use `.define` and expect an
 
 HuTrack's engine does not assemble with 3.23 (dotted labels starting with a
 digit, and macro `.if` expressions over `<label`; see
-[`HUTRACK.md`](HUTRACK.md)). `vendor/huc` is HuC mainline and its
-`src/mkit/as` builds a 4.x PCEAS. Build it outside the repo, as with the 3.23
-tool:
+[`HUTRACK.md`](HUTRACK.md)). HuC mainline's `src/mkit/as` builds a 4.x PCEAS.
+The same fetch as the HuC section below — one command:
 
 ```sh
-T="/Volumes/External II/pce-tools"
-cp -R "/Volumes/External II/agent-workshop-demo/PCEStudio/vendor/huc" "$T/huc4-src"
-mkdir -p "$T/huc4-src/bin"      # the assembler Makefile copies its targets here
-make -C "$T/huc4-src/src/mkit/as" -j4
-ln -sf "$T/huc4-src/bin/pceas" "$HOME/.local/bin/pceas4"
-pceas4     # prints: PC Engine Assembler (, ) — this tree has no git date
+tools/build-huc.sh --toolchain      # fetches HuC mainline at the pinned commit
+                                    # and builds bin/huc and bin/pceas
+ln -sf /Volumes/External/pce-tools/huc-src/bin/pceas "$HOME/.local/bin/pceas4"
+pceas4     # prints: PC Engine Assembler (v4.10.574.g54f5c73, …)
 ```
 
 `tools/build-hutrack.sh` and `tools/capture-hutrack.sh` take `PCEAS4`
@@ -88,23 +85,29 @@ pceas4     # prints: PC Engine Assembler (, ) — this tree has no git date
 
 ### HuC's C compiler for #31 part B
 
-The HuC route needs the C compiler, not just the assembler. Build the same
-vendored tree's compiler (external, never run from inside the repo):
+The HuC route needs the C compiler, not just the assembler. HuC is **not
+vendored** — its licence is mixed and unsettled
+([`PUBLIC-CHECK.md`](PUBLIC-CHECK.md) F1) — so `tools/build-huc.sh`
+downloads it itself: on first use it clones `pce-devel/huc` at the pinned
+commit `54f5c73606c1e7142e8095c727cab2767e2b3cb3` (the revision the vendored
+record pins) into an external tools folder and builds it there, **never
+inside the repo**:
 
 ```sh
-T="/Volumes/External II/pce-tools"
-cp -R "/Volumes/External II/agent-workshop-demo/PCEStudio/vendor/huc" "$T/huc-toyc"
-mkdir -p "$T/huc-toyc/bin"             # the compiler Makefile copies its target here
-make -C "$T/huc-toyc/src/huc" -j4      # produces bin/huc
+tools/build-huc.sh --toolchain
+# → clones + builds /Volumes/External/pce-tools/huc-src (default; override with
+#   HUC_DIR=/path/to/huc-src), leaving bin/huc and bin/pceas (the compiler
+#   Makefile copies its target to bin/, the assembler's the same)
 ```
 
-The PCEAS the HuC build uses is the same tree's `src/mkit/as` (the 4.x one
-above), not a new download; `huc-toyc/bin` here was populated with it.
-
 `tools/build-huc.sh` takes `HUC_DIR` (default
-`/Volumes/External II/pce-tools/huc-toyc`) and expects `bin/huc` and
-`bin/pceas` there. `tests/check-il-huc.js` prints SKIP for its ROM-rebuild
-checks when the compiler is absent, and still checks the committed dumps.
+`/Volumes/External/pce-tools/huc-src`), fetches and builds `bin/huc` and
+`bin/pceas` itself when they are missing, and refuses a `HUC_DIR` inside the
+repo, one that holds a different clone, or one whose checkout is not the
+pinned commit. `tests/check-il-huc.js` prints SKIP for its ROM-rebuild
+checks when the toolchain is absent, and still checks the committed dumps; a
+grep check in the same suite proves nothing in `tools/`, `tests/` or
+`renderer/` references the vendored copy.
 
 ## Building the hello ROM
 

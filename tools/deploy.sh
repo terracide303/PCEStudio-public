@@ -5,7 +5,9 @@
 #   sh tools/deploy.sh --dry                    list what would be uploaded
 #
 # Only the web part goes up: renderer/, toys/ and the browser libraries the pages load.
-# LICENSE (GPL-3.0) goes up with it. NOT tools/, tests/, docs/ or vendor/huc (its licence is not settled, docs/DECISIONS.md).
+# The MCP server pack (tools/gen/pcestudio-mcp.zip, built here by tools/mcp-pack.sh, never
+# committed) goes up too, at the site root, so a tester's Claude Code can drive PCEStudio.
+# LICENSE (GPL-3.0) goes up with it. NOT tools/, tests/, docs/ or the vendored HuC copy (its licence is not settled, docs/DECISIONS.md).
 # Uploads go through cPanel's Fileman API over HTTPS: plain FTP to this host refused some files
 # (451) and timed out on others, 2026-10-29. The password comes from the environment only.
 set -eu
@@ -19,7 +21,16 @@ files=$( { find renderer -type f \( -name '*.html' -o -name '*.js' -o -name '*.c
            find vendor/codemirror vendor/fengari vendor/ppu-toys -type f;
            echo LICENSE; } | grep -v '/\.' | sort )
 
-if [ "${1:-}" = "--dry" ]; then echo "$files"; echo "$(echo "$files" | wc -l | tr -d ' ') files"; exit 0; fi
+# The MCP server as a download (#142; restored by #154 — merge 4b3c1a4 dropped
+# this block and the site kept linking a zip that was never uploaded). A
+# stranger cannot clone this private repo, so the guide points at
+# pcestudio-mcp.zip on the site. It is built by tools/mcp-pack.sh into
+# tools/gen/ (gitignored, never committed) and goes to the site root beside
+# the guide. tests/check-deploy-pack.js fails if --dry stops listing it.
+PACK=tools/gen/pcestudio-mcp.zip
+sh tools/mcp-pack.sh "$PACK" >/dev/null
+
+if [ "${1:-}" = "--dry" ]; then echo "$files"; echo "$PACK"; echo "$(echo "$files" | wc -l | tr -d ' ') files + pcestudio-mcp.zip"; exit 0; fi
 : "${PCE_CP_PASS:?set PCE_CP_PASS (never put it in a file)}"
 
 jar=$(mktemp); trap 'rm -f "$jar"' EXIT
@@ -48,6 +59,9 @@ index=$(mktemp -d)/index.html
 printf '<!doctype html><meta charset="utf-8"><title>PCEStudio</title>\n<meta http-equiv="refresh" content="0; url=renderer/studio.html">\n<a href="renderer/studio.html">PCEStudio</a>\n<p><a href="pcestudio-for-claude.md">PCEStudio for Claude</a> — the guide to paste into a chat AI.</p>\n' > "$index"
 upload "$DEST" "$index" >/dev/null
 upload "$DEST" renderer/pcestudio-for-claude.md >/dev/null
+# The MCP server pack (#142) sits at the site root: .../pcestudio-mcp.zip,
+# the URL the guide and README.txt give a tester.
+upload "$DEST" "$PACK" >/dev/null
 
 total=0
 for d in $(echo "$files" | xargs -n1 dirname | sort -u); do

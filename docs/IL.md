@@ -23,8 +23,9 @@ first backend: the palette toy through the same IL → C → llvm-mos → a HuCa
 ROM → Mednafen. Part C (§10) adds `raster(line)` on the console: a
 compile-ahead table replayed by a hand-written RCR handler, with the compiled
 callback's measured cost saying why it is not the handler. Part B (§11) runs
-the **same IL through the same C emitter in a HuC dialect** into vendor/huc's
-own compiler and PCEAS, both toys again matching the browser in Mednafen;
+the **same IL through the same C emitter in a HuC dialect** into HuC's
+own compiler and PCEAS (fetched and built by `tools/build-huc.sh`,
+`docs/BUILD.md`), both toys again matching the browser in Mednafen;
 part D (§12) puts the two routes' measured numbers side by side.
 
 - `docs/IL.md` — this file: the instructions, the types, the lowering table,
@@ -605,7 +606,7 @@ Not proven, written down:
   author) remain.
 - **No comparison of routes yet.** llvm-mos is the first route, not the
   chosen one; the note in `docs/PLAN.md` still requires measuring it against
-  vendor/huc and a direct generator on the same toy.
+  the HuC route and a direct generator on the same toy.
 - **Recursion is not guarded.** The dispatcher is a C call; a recursive toy
   would recurse on the console. The palette toy has no recursion, and a
   general backend must bound it.
@@ -804,9 +805,10 @@ while the display runs).
 ## 11. Part B of the console half: the same IL through HuC
 
 Part A answered "can the IL become machine code at all" with llvm-mos. Part B
-answers the card's other question: the **same IL through HuC** — vendor/huc's
-own C compiler and PCEAS (`vendor/huc/VENDORED.md`), built as an external
-tool under `/Volumes/External II/pce-tools/huc-toyc` — on the same two toys,
+answers the card's other question: the **same IL through HuC** — HuC
+mainline's own C compiler and PCEAS (`pce-devel/huc`, the commit PCEStudio
+pins: `54f5c736`), fetched and built by `tools/build-huc.sh` as an external
+tool under `/Volumes/External/pce-tools/huc-src` — on the same two toys,
 compared with the browser the same way. The front end and every IL→C rule are
 shared; only the C dialect and the runtime are different.
 

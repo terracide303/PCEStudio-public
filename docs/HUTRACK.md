@@ -76,7 +76,7 @@ The converter needs Python with `numpy`, `resampy`, `numba` and `llvmlite`
 itself needs only PCEAS 4.
 
 ```sh
-# once: build PCEAS 4.x from vendor/huc (see BUILD.md) and expose it as pceas4
+# once: fetch and build PCEAS 4.x (tools/build-huc.sh --toolchain, see BUILD.md) and expose it as pceas4
 tools/build-hutrack.sh                     # assembles the committed song
 PCEAS4=pceas4 tools/capture-hutrack.sh     # rebuild + Mednafen recording
 node tests/check-hutrack.js                # vendor manifest, fixtures, ROM, WAV
@@ -101,8 +101,9 @@ python3 tools/genhutrack.py --song 2       # song 2 (tests/dumps/hutrack2)
 HuTrack's engine uses dotted labels that begin with a digit
 (`HuTrackEngine.7khz.IRQ`) in `lda #<label`, and its `MOVE.b` macro's
 `.if` expressions contain `<label`; PCEAS 3.23 reports "Syntax error in
-expression" on both. `vendor/huc`'s `src/mkit/as` (HuC mainline
-`54f5c736`) assembles them unchanged. `docs/BUILD.md` has the commands.
+expression" on both. HuC mainline `54f5c736`'s `src/mkit/as` (fetched by
+`tools/build-huc.sh`) assembles them unchanged. `docs/BUILD.md` has the
+commands.
 
 ## The browser player (step 2)
 
