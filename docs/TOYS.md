@@ -157,6 +157,17 @@ fields: `x` and `y` 0..1023 (SAT X 32 / Y 64 is the display's top-left),
 `hflip`, `vflip` — composed into the four SAT words exactly as
 `renderer/pce-sprites.js` reads them (SAT Y 64 = display row 0).
 
+**A sprite pattern is not a background tile.** The BAT addresses a tile as 16
+words (`vram[char*16 + row]`, two bitplanes per word); the SAT addresses a
+sprite pattern as a 64-word cell — **pattern `p` starts at word `p*64`, plane
+`n` is `p*64 + n*16 + row` for rows 0..15, and bit 15 of a plane word is the
+strip's left pixel** (HuC6270 manual 2.4; `renderer/pce-sprites.js`
+`stripWords`/`stripPixel`). Writing `vram[p*16 + row]` for a sprite leaves the
+pattern the SAT reads empty, so the sprite is invisible even though the toy
+wrote "a pattern". The studio's `sprite-pad.lua` example writes through a
+`putsprite(pattern, fn)` helper with that layout, the way its background
+examples use `puttile`; copy it beside the toy (#90).
+
 Lua helpers (adapted from ppu.toys — see §4): `clamp`, `lerp`, `ease`, `ramp`,
 `ramp_int`, `lerp_color`, `ramp_color`, `rgb`, and the flat `min`, `max`,
 `floor`, `sin`, `cos`, `abs`, `sqrt`, `pi`.

@@ -21,6 +21,11 @@
  *         toys draw no sprites, so the numbers are 0 — the check is here so
  *         a toy that later grows sprites cannot close the card past budget.
  *
+ * #90 adds a VISIBILITY assertion to every example: frame 60 must be a
+ * picture, not the backdrop — more than half its pixels are not CRAM[0] and
+ * each box the effect is meant to fill holds its own count (effectVisible).
+ * Two runtimes and two states can agree on a black screen; this cannot.
+ *
  * Finally each toy must actually show its effect at frame 60:
  *
  *   - the frame's PNG is written to tests/dumps/examples/<name>.png and read
@@ -97,11 +102,17 @@ function samePixels(name, got, want) {
 /* ---- the toys ---------------------------------------------------------- */
 
 const TOYS = [
-  { name: "parallax", file: "parallax.lua", form: true },
-  { name: "sky-gradient", file: "sky-gradient.lua", form: true },
-  { name: "road", file: "road.lua", form: true },
-  { name: "status-bar", file: "status-bar.lua", form: true },
-  { name: "palette-cycle", file: "palette-cycle.lua", form: false },
+  { name: "parallax", file: "parallax.lua", form: true,
+    visible: [[0, 0, 256, 56, 8000], [0, 56, 256, 112, 8000],
+              [0, 112, 256, 168, 8000], [0, 168, 256, 224, 8000]] },
+  { name: "sky-gradient", file: "sky-gradient.lua", form: true,
+    visible: [[0, 112, 256, 224, 20000]] },
+  { name: "road", file: "road.lua", form: true,
+    visible: [[0, 112, 256, 224, 15000]] },
+  { name: "status-bar", file: "status-bar.lua", form: true,
+    visible: [[0, 0, 256, 24, 4000]] },
+  { name: "palette-cycle", file: "palette-cycle.lua", form: false,
+    visible: [[0, 5, 256, 108, 15000], [0, 120, 256, 220, 15000]] },
 ];
 
 /* ---- pixels and palettes ----------------------------------------------- */
@@ -278,6 +289,46 @@ function checkILIdentity() {
         (budget && budget.message || "it did not stop"));
 }
 
+/* ---- #90 VISIBILITY: every example shows its picture -------------------- *
+ * This suite compares two runtimes and two states, and both can agree on a
+ * black screen — the studio's sprite example did, while every comparison
+ * passed (#90).  So each example's frame 60 is also read for its picture:
+ * more than half the frame is not the backdrop (CRAM[0], the colour a
+ * background pixel of colour 0 shows), and every box the effect is meant to
+ * fill holds its own count.  Measured in the pixels, from the Lua runtime's
+ * frame; the IL frame is compared with it byte for byte above. */
+function countVisible(img, cram, box) {
+  const bg = cramRgb(cram, 0);
+  let n = 0;
+  for (let y = box[1]; y < box[3] && y < img.height; y++) {
+    for (let x = box[0]; x < box[2] && x < img.width; x++) {
+      const i = (y * img.width + x) * 3;
+      if (img.pixels[i] === bg[0] && img.pixels[i + 1] === bg[1] &&
+          img.pixels[i + 2] === bg[2]) continue;
+      n++;
+    }
+  }
+  return n;
+}
+
+function effectVisible(spec, stats) {
+  const frame = stats.frame60;
+  const whole = countVisible(frame, frame.state.cram,
+                             [0, 0, frame.width, frame.height]);
+  check(whole > frame.width * frame.height / 2,
+        spec.name + " VISIBILITY: frame " + PNG_FRAME + " is a picture, not " +
+        "the backdrop (" + whole + " of " + (frame.width * frame.height) +
+        " pixels)");
+  for (const box of spec.visible) {
+    const n = countVisible(frame, frame.state.cram, box);
+    check(n >= box[4],
+          spec.name + " VISIBILITY: the picture fills its place (" + n +
+          " pixels at " + JSON.stringify(box.slice(0, 4)) + ", at least " +
+          box[4] + ")");
+  }
+  return whole;
+}
+
 /* ---- the run ----------------------------------------------------------- */
 
 function runToy(spec) {
@@ -344,6 +395,7 @@ function runToy(spec) {
 
   const stats = { name: spec.name, worstMs: worstMs, maxStrips: maxStrips,
                   frame0: keep[0], frame1: keep[1], frame60: keep[PNG_FRAME] };
+  stats.visible = effectVisible(spec, stats);
   spec.effect(stats);
   writePng(spec, keep[PNG_FRAME]);
   return stats;
@@ -534,7 +586,8 @@ console.log("");
 for (const r of rows) {
   console.log("  " + r.name.padEnd(14) + " 120 frames  worst Lua frame " +
               String(r.worstMs).padStart(3) + " ms  sprite strips/line " +
-              r.maxStrips + "  dumps/examples/" + r.name + ".png");
+              r.maxStrips + "  " + String(r.visible).padStart(5) +
+              " visible px  dumps/examples/" + r.name + ".png");
 }
 console.log("");
 if (failures.length) {

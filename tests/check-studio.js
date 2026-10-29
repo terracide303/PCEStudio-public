@@ -72,6 +72,12 @@
  *     returns and what the page runs, through a stand-in that models
  *     CodeMirror's non-syncing textarea.
  *
+ * #90 adds a VISIBILITY assertion to every example: the frame the canvas drew
+ * must be a picture at the expected place (57,344 / 7,168 / 256 non-backdrop
+ * pixels), and the sprite example's block must move one column a frame while
+ * the pad-right key is held — driven through the page's key handler and
+ * studio.stepForward, never by writing state behind the page's back.
+ *
  * Not measured here: layout and CSS (a screenshot is the evidence, under
  * $TMPDIR and described in docs/STUDIO.md), a real canvas's pixels (the stub
  * context records nothing), the toy compiler/export (#31, second half of
@@ -116,7 +122,7 @@ function readIlToys() {
   if (setup == null || palette == null || raster == null || sprite == null)
     throw new Error("tests/check-il.js no longer defines SETUP and the three toys");
   return { SETUP: setup, TOY_PALETTE: setup + palette,
-           TOY_RASTER: setup + raster, TOY_SPRITE: sprite };
+           TOY_RASTER: setup + raster, TOY_SPRITE: setup + sprite };
 }
 
 const ilExports = readIlToys();
@@ -1237,25 +1243,6 @@ function pixelDiffCount(a, b) {
   return n;
 }
 
-/* A working 16×16 sprite for the Sprite layer check. The page's own
- * sprite-pad.lua writes its pattern at 0x100*16 words, but the renderer's
- * SAT pattern code p addresses cell p at p*64 words (pce-sprites.js
- * stripWords), so that example draws no sprite. This fixture puts the plane
- * where the renderer reads it, with the same SAT values the page's example
- * uses, and runs through the page's own editor → Run path. */
-const SPRITE_TOY = [
-  "function init()",
-  "  for row = 0, 15 do vram[0x100 * 64 + row] = 0xFFFF end",
-  "  pal(0x101, rgb(7, 7, 0))",
-  "  reg(\"CR\", 0xC0)",
-  "  sx, sy = 32, 64",
-  "end",
-  "function frame(t, f)",
-  "  sprite(0, { x = sx, y = sy, pattern = 0x100, palette = 0 })",
-  "end",
-  ""
-].join("\n");
-
 function runEditorSource(studio, source) {
   studio.selectFile("main.lua");
   studio.setEditorText(source);
@@ -1323,8 +1310,17 @@ function checkOutputColumn(page) {
   check(studio.state().regs.CR === 0x80,
         "BG on restores CR bit 7 the toy wrote");
 
-  /* -- Layers: sprites through CR bit 6 (SB) -- */
-  runEditorSource(studio, SPRITE_TOY);
+  /* -- Layers: sprites through CR bit 6 (SB) -- *
+   * The page's own sprite-pad.lua (no fixture: #90 fixed it, and this is
+   * the example whose picture the screenshot must show).  At frame 0 no
+   * pad is held, so its solid 16×16 block stands at display (112,96): SAT
+   * X 32 / Y 64 is the top-left corner, and the toy starts at X 144 / Y 160
+   * (pce-sprites.js; SPR_X / SPR_Y below are that place). */
+  studio.loadExample("sprite", true);
+  studio.pause();
+  studio.seek(0);
+  check(page.dom.get("doc-title").textContent === "sprite-pad.lua",
+        "the Sprite layer check runs the page's own sprite-pad.lua");
   const spriteOn = studio.output();
   const sprOffPixels = renderMasked(page, 0x40);
   studio.setLayer("sprites", false);
@@ -1340,7 +1336,8 @@ function checkOutputColumn(page) {
       const changed = spriteOn.pixels[i] !== studio.output().pixels[i] ||
         spriteOn.pixels[i + 1] !== studio.output().pixels[i + 1] ||
         spriteOn.pixels[i + 2] !== studio.output().pixels[i + 2];
-      if (changed && (x >= 16 || y >= 16)) outside++;
+      if (changed && (x < SPR_X || x > SPR_X + 15 ||
+                      y < SPR_Y || y > SPR_Y + 15)) outside++;
     }
   }
   check(outside === 0, "no pixel outside the sprite's 16×16 box changed (" +
@@ -1493,6 +1490,149 @@ function checkOutputColumn(page) {
   studio.setLayer("bg", true);
   studio.setLayer("sprites", true);
   studio.setLength(300);
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
+/* ---- 7b. #90: every example's picture is visible, in the page's pixels --- *
+ * Found by a headless screenshot of ?demo=sprite: the screen was entirely
+ * black, while check-toys was green — the toy wrote its pattern at the BAT's
+ * address and the state comparison agreed with itself.  These are the
+ * assertions a black screen cannot pass, measured on the frame the canvas
+ * drew (studio.output()), not in the toy's words.
+ *
+ * The pad is driven through the page's own controls: the canvas key handler
+ * holds our pad, and studio.stepForward is the play loop's own step — the one
+ * place the held pad reaches the toy (padLog).  Nothing writes state behind
+ * the page's back. */
+/* sprite-pad.lua's block at frame 0: SAT X 32 / Y 64 is display (0,0)
+ * (pce-sprites.js) and the toy starts at sx, sy = 144, 160. */
+const SPR_X = 112;
+const SPR_Y = 96;
+
+function cramRgb(cram, addr) {
+  const v = cram[addr * 2] | (cram[addr * 2 + 1] << 8);
+  return [36 * ((v >> 3) & 7), 36 * ((v >> 6) & 7), 36 * (v & 7)];
+}
+
+/* Pixels inside box = [x0, y0, x1, y1) that are not the backdrop (CRAM[0],
+ * the colour a background colour 0 shows; a 256x224 frame has no CRAM[$100]
+ * border pixels), and their bounding box (null when none). */
+function visibleBox(img, cram, box) {
+  const bg = cramRgb(cram, 0);
+  let n = 0, minX = img.width, minY = img.height, maxX = -1, maxY = -1;
+  for (let y = box[1]; y < box[3] && y < img.height; y++) {
+    for (let x = box[0]; x < box[2] && x < img.width; x++) {
+      const i = (y * img.width + x) * 3;
+      if (img.pixels[i] === bg[0] && img.pixels[i + 1] === bg[1] &&
+          img.pixels[i + 2] === bg[2]) continue;
+      n++;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  return { n: n, box: n ? [minX, minY, maxX, maxY] : null };
+}
+
+function exampleCram(studio) {
+  return studio.runtime().last.state.cram;
+}
+
+function checkExamplesVisible(page) {
+  const studio = page.sandbox.PCEStudio.studio;
+  const canvas = page.dom.get("out");
+  const key = (type, code, k) => {
+    for (const fn of canvas.listeners[type] || []) {
+      fn({ code: code, key: k, target: canvas,
+           preventDefault() {}, stopPropagation() {} });
+    }
+  };
+
+  /* -- each example shows its picture -- */
+  const expect = [
+    /* id, frame, box, least non-backdrop pixels */
+    ["palette", 60, [0, 0, 256, 224], 50000],   /* the tiled field */
+    ["raster", 30, [0, 0, 256, 224], 3000],     /* the colour-15 diagonals */
+    ["sprite", 0, [SPR_X, SPR_Y, SPR_X + 16, SPR_Y + 16], 256],  /* block */
+  ];
+  const counts = [];
+  for (const [id, f, box, k] of expect) {
+    studio.loadExample(id, true);
+    studio.pause();
+    studio.seek(0);
+    studio.seek(f);
+    check(studio.current().frame === f,
+          id + " VISIBILITY: the page is on frame " + f);
+    const vis = visibleBox(studio.output(), exampleCram(studio), box);
+    counts.push(id + " f" + f + " " + vis.n);
+    check(vis.n >= k,
+          id + " VISIBILITY: frame " + f + " shows its picture at the " +
+          "expected place (" + vis.n + " non-backdrop pixels in " +
+          JSON.stringify(box) + ", at least " + k + ")");
+    if (id === "sprite") {
+      eq("sprite VISIBILITY: the block is the whole 16x16 box at " +
+         "(" + SPR_X + "," + SPR_Y + ")", vis.box,
+         [SPR_X, SPR_Y, SPR_X + 15, SPR_Y + 15]);
+    }
+  }
+
+  /* -- the sprite answers the pad, in the pixels -- *
+   * The block is solid, so the frame's non-backdrop pixels are it: ten
+   * frames of right move it ten columns, ten frames of left bring it back. */
+  studio.loadExample("sprite", true);
+  studio.pause();
+  studio.seek(0);
+  const spriteBox = () => visibleBox(studio.output(), exampleCram(studio),
+                                     [0, 0, 256, 224]);
+  const start = spriteBox();
+  eq("sprite VISIBILITY: frame 0's block stands at (" + SPR_X + "," + SPR_Y +
+     ")", start.box, [SPR_X, SPR_Y, SPR_X + 15, SPR_Y + 15]);
+
+  key("keydown", "KeyL", "l");
+  check(studio.pad().right === true, "holding L holds pad right");
+  let right = [];
+  for (let i = 0; i < 10; i++) {
+    studio.stepForward();
+    right.push(spriteBox());
+  }
+  check(studio.current().frame === 10,
+        "ten steps run ten frames (frame " + studio.current().frame + ")");
+  check(right.every((v) => v.n === 256),
+        "sprite VISIBILITY: every frame of the move shows all 256 block " +
+        "pixels (" + right.map((v) => v.n).join(",") + ")");
+  let byOne = true;
+  for (let i = 0; i < 10; i++) {
+    const want = i + 1;
+    if (!right[i].box || right[i].box[0] !== SPR_X + want ||
+        right[i].box[1] !== SPR_Y) {
+      byOne = false;
+    }
+  }
+  check(byOne, "sprite VISIBILITY: ten frames of right move the block right " +
+        "one column a frame (x = " + right.map((v) => (v.box || [])[0])
+                                           .join(",") + ")");
+  key("keyup", "KeyL", "");
+
+  key("keydown", "KeyJ", "j");
+  let left = [];
+  for (let i = 0; i < 10; i++) {
+    studio.stepForward();
+    left.push(spriteBox());
+  }
+  const back = left[left.length - 1];
+  eq("sprite VISIBILITY: ten frames of left bring the block back to (" +
+     SPR_X + "," + SPR_Y + ")", back.box,
+     [SPR_X, SPR_Y, SPR_X + 15, SPR_Y + 15]);
+  key("keyup", "KeyJ", "");
+
+  console.log("      VISIBILITY: " + counts.join("  ·  ") +
+              " non-backdrop pixels at the expected place; the sprite moves " +
+              "with the pad key");
+
+  /* Leave the page as the other checks expect it. */
   studio.loadExample("palette", true);
   studio.pause();
   studio.seek(0);
@@ -1866,6 +2006,7 @@ async function main() {
   checkShortcuts(page);
   checkCodeMirrorEditorText();
   checkOutputColumn(page);
+  checkExamplesVisible(page);
 
   let browser = "not-requested";
   if (process.argv.indexOf("--browser") >= 0) browser = await checkBrowser();

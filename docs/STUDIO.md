@@ -447,10 +447,8 @@ What it does, in order:
     * **BG** on `palette-cycle`: `BG off` equals the renderer with CR bit 7 clear, byte diff 0; it changes
       **every one of the 57,344 pixels** (BB blanks the whole background to CRAM[$100]) and the live
       `state().regs.CR` is `$00`. `BG on` restores the frame and CR `$80`.
-    * **SPR** through the page's editor (`Run`): a 16×16 solid sprite fixture (the page's own
-      `sprite-pad.lua` puts its pattern at `0x100*16` words, which the renderer's cell addressing does not
-      read — a separate fixture bug, not a layer one) shows exactly **256 changed pixels**, all inside the
-      sprite's 16×16 box and none outside; CR goes `$C0 → $80`.
+    * **SPR** on the page's own `sprite-pad.lua` (no fixture since #90): `SPR off` changes exactly **256
+      pixels**, all inside the 16×16 block at display (112,96) and none outside; CR goes `$C0 → $80`.
     * **View only**: the same blank frame with the live CR still `$80`, across a seek; leaving the mode
       applies the hidden layer to CR, and showing it restores the bit.
     * **resolution**: `resolutionFor(VCE CR 0/1/2/3)` reads `256×224 / 341×224 / 512×224 / 512×224` from
@@ -570,11 +568,16 @@ scanlines are visible); no pixel comparison with ppu.toys is claimed.
   `pce-toyhost.js` fixes the frame at 256×224. `resolutionFor()` proves the label reads the renderer's own
   256/341/512 table, and `present()`/`paint()` resize the canvas when a frame of another width arrives, but
   no such frame has been rendered.
-* **The page's `sprite-pad.lua` example draws no sprite.** It writes its pattern at `0x100*16` words, while
-  `pce-sprites.js` addresses SAT pattern `p` at cell `p*64` words, so the example's sprite is transparent;
-  `check-toys.js` passes because its hand-built expected state copies the same address. That is a pre-existing
-  example/test gap, outside this card's studio files; #78's SPR evidence uses a fixture run through the
-  page's editor instead. A card should fix the example and its expectation together.
+* **Every example is proved visible (#90).** A screenshot of `?demo=sprite` was entirely black while
+  `check-toys` passed: the example wrote its pattern at `0x100*16` words (the BAT's tile layout) while
+  `pce-sprites.js` reads SAT pattern `p` at cell `p*64` words with plane `n` at `p*64 + n*16`, so the sprite
+  was transparent, and the hand-built expected state copied the same wrong address. The example now writes
+  through `putsprite`, whose layout is the hardware's (HuC6270 manual 2.4), and `check-studio` measures the
+  frame the canvas drew: `palette` 57,344 non-backdrop pixels, `raster` 7,168 (its colour-15 diagonals; its
+  colour 1 is CRAM[1], which no example writes), `sprite` 256 inside the 16×16 box at (112,96) — and ten
+  frames of the pad-right key move that box one column a frame, ten of pad-left bring it back. `check-toys`
+  and `check-examples` carry the same assertion for their examples. The three assertions fail on the old
+  example (measured: 0 non-backdrop pixels; the mutant is in #90's evidence).
 * **Rule 2.** `tests/check-studio.js` was written by the seat that built the page and extended for #77 and
   #78 by the same seat. A cold break by another seat is owed before this closes the card: break the layout, the
   example list, the frame flow, a panel, a button, the docs wiring (remove a chapter, break the raw
