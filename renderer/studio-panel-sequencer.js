@@ -181,11 +181,16 @@
           var label = (ch + 1) + (ch >= 4 ? " nz" : " wv");
           g.fillStyle = ch >= 4 ? "#ff9540" : "#5fc9e8";
           g.fillText(label, 2, y + 13);
+          /* the empty cells first, so a note's length fill is not painted
+           * over by the next step's cell (a note lasts length steps) */
+          for (step = 0; step < s.steps; step++) {
+            x = LABEL + step * cw;
+            g.fillStyle = step % 4 === 0 ? "#1a2130" : "#121722";
+            g.fillRect(x + 1, y + 1, cw - 2, ROW - 2);
+          }
           for (step = 0; step < s.steps; step++) {
             x = LABEL + step * cw;
             var cell = cells[ch][step];
-            g.fillStyle = step % 4 === 0 ? "#1a2130" : "#121722";
-            g.fillRect(x + 1, y + 1, cw - 2, ROW - 2);
             if (!cell) continue;
             var ins = s.instruments[cell.instrument];
             var noise = ins.kind === "noise";
