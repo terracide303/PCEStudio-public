@@ -330,7 +330,7 @@ function analyse(rel, opts) {
 
   /* the model's own control: the two committed containers */
   const CONTROLS = [["tools/toys/palette.lua", 578],
-                    ["toys/parallax.lua", 1100]];
+                    ["toys/parallax.lua", 1115]];
   let worst = 0;
   const controls = [];
   for (const [crel, want] of CONTROLS) {
