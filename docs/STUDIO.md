@@ -159,7 +159,7 @@ and our scrubber row is much shorter than their timeline block, so our drawer st
 | `CRT` | toggles the canvas's scanline overlay (`.canvas-wrap.crt::after`, ppu.toys' look in CSS, not a shader) | page CSS |
 | `SND` | the honest state: `pce-psg.js` exists and is checked, but toys have no sound surface (#71), so the chip never claims a sound is playing | card #71 |
 | resolution | `renderer/pce-bg.js`'s own `DOT_CLOCK` / `frameWidth`: 256 / 341 / 512 dots for VCE CR DCC `00` / `01` / `10` (#27). The live toy host is fixed at 256×224, so it reads `256×224`; the mapping is the renderer's, and the label's tooltip names the dot clock | `pce-bg.js` |
-| counter / length | the scrubber's max is `Length − 1`; a seek clamps to it, a shortened length moves the playhead inside it, and playback stops on the last frame | page |
+| counter / length | the scrubber's max is `Length − 1` and a seek clamps to it; a shortened length moves a paused playhead inside it. **Playback has no end** (#144): `▶` runs past `Length` until Stop/Pause, the slider saturates at the last frame and the clock's `frame N` keeps rising — ppu.toys' behaviour, see below | page |
 | markers | `Add marker at frame N` records the current frame; each marker is a button that pauses and seeks to it | page |
 | Go to marker | a select above the scrubber listing every marker as `frame N · 0.12s`; choosing one pauses and seeks, then the select falls back to `Choose marker…` so the same marker can be chosen again; disabled with no markers | page, ppu.toys' `.timeline-controls` |
 | pad keys | with the canvas focused: IJKL = D-pad, N/M = I/II, O = Select, P = Run (pad 1). The page-wide Space/R shortcuts do not consume them | page, §5.2 |
@@ -169,6 +169,23 @@ and our scrubber row is much shorter than their timeline block, so our drawer st
 comparison; the dock has nine PCE panels rather than eleven SNES panels (§3); `Lua / IL` replaces
 `Lua / Cart` because the compiler's IR exists (#31) and machine code does not; `Length` is frames because our
 toy clock is `t = f/60` and a seek replays deterministically.
+
+**Playing past `Length` (#144).** The card offered two ways to stop Run freezing at the last frame — keep
+playing past `Length` (scrubber saturating, counter rising), or a `no end` Length that is the default — and
+said to follow ppu.toys and write down which. **It follows ppu.toys: play has no end; `Length` bounds
+scrubbing only.** Read from their served Studio (assets/App-DUnSytDh.js, fetched 2026-10-29):
+`step()` advances a free-running clock (`{t, f}`) by elapsed time and has no length check anywhere;
+their `Length` control (seconds, min 1) writes only `settings.end`, which is the scrubber's
+`max`, the scale of the loop/marker overlay and the `time <= Length` filter for markers; the slider's
+`value` is `Math.min(frame, Length)` while the readout prints the real `t` and `frame`; `−1`/`+1` pause and
+seek by one frame without a length bound. That is a decision from a source, not our reasoning — the other
+option would have made Run behave differently from the Studio Dennis compared ours to. Consequences here:
+`stepForward()` (the play loop's step) no longer pauses at `lengthFrames − 1`; `seek()` is untouched, so the
+scrubber, the `−1`/`+1` buttons, Ctrl+`,`/Ctrl+`.` and every API seek still clamp to `Length − 1`;
+`play()` restarts from 0 only when the playhead is parked on the last frame; `Check`, `Export` and the
+tests are unaffected because they run `runFrames(count)` rather than the live clock. `tests/check-studio.js`
+plays a toy through the page's own rAF loop past 400 frames at `Length` 300 and asserts the counter and
+`isPlaying()`.
 
 **The output is scaled like theirs (#87).** ppu.toys puts the canvas in a `.display` box whose
 `.display-frame` is `width: min(100cqw, calc(100cqh * 8 / 7))` with `aspect-ratio: 8 / 7`, the canvas
@@ -985,7 +1002,7 @@ The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel u
 | ↑ / ↓ (REGISTERS table) | move between rows |
 | Settings → Editor keys → Vim | CodeMirror's Vim keymap, off by default and remembered in the browser |
 | Settings → Line numbers | CodeMirror's gutter, on by default |
-| transport | play/pause, stop, −1, +1, frame slider, `Length` in frames (1…3600) |
+| transport | play/pause, stop, −1, +1, frame slider, `Length` in frames (1…3600); `▶` plays past `Length` until Stop (#144) |
 | `Layers` → `BG` / `SPR` | hide the background (CR bit 7, BB) or the sprites (CR bit 6, SB) in the live VDC and redraw; the picture is the renderer's own CR gating |
 | `Layers` → `View only` | the same toggles without a register write: mask the picture only, leave the toy's state and panels alone |
 | `CRT` | scanline overlay on the canvas |
@@ -1306,7 +1323,10 @@ What it does, in order:
       toy host is fixed at 256×224).
     * **markers** add once at the current frame, sort, and a marker button pauses and seeks to its frame;
       **Length** sets the slider's max to `n−1`, clamps 1…3600, moves the playhead inside a shortened range,
-      and a seek past the end lands on the last frame.
+      and a seek past the end lands on the last frame. **Playback has no end (#144)**: 420 frames through the
+      page's own `requestAnimationFrame` loop at `Length` 300 leave `currentFrame()` past 400 and
+      `isPlaying()` true, the slider on `299` and the clock reading `frame 4xx`; Stop returns to frame 0 and
+      a seek still clamps. The control (a page whose `stepForward()` still pauses at `Length − 1`) fails it.
     * **CRT** toggles the canvas's `.crt` class and its `aria-pressed`, and the page's CSS really is the
       repeating scanline gradient; **SND** stays unpressed, names #71 in its tooltip and toast, and never
       claims a sound; all eight pad keys (IJKL/NM/OP) hold and release their `pad[1]` field while the canvas
