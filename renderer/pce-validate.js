@@ -125,6 +125,37 @@
 
   var HOOK_CYCLES = 1156;                    /* one compiled hook call */
 
+  /* ---- route 1: the IL interpreter on the console (#115) ----------------
+   * The studio's Export button builds route 1 (renderer/pce-ilbc.js +
+   * renderer/ilvm.bin), not the compiled route this table prices.  Two
+   * calibrated toys give the interpreter's cost against this file's own
+   * estimates, both measured by tools/capture-ilvm.sh and recorded in
+   * docs/IL.md §14.5:
+   *
+   *   tools/toys/palette.lua  238,988 cycles / 7,445   = 32.10x (no raster)
+   *   toys/parallax.lua     8,157,505 cycles / 314,443 = 25.94x (raster)
+   *
+   * The factor is measured/estimate, not measured/measured, so applying it
+   * to this model's collection for another toy projects the same way.  The
+   * two shapes differ because a raster collection is 224 interpreter calls
+   * (fixed call cost) rather than a long run of opcodes.  The status-bar
+   * capture (#115) is held out: 3,763,919 measured against a 275,268
+   * estimate projected at 25.94 would be 7,140,000, so the raster factor
+   * overestimates that toy by 1.9x — conservative for the 60 Hz question.
+   * This is a static estimate, labelled as one wherever it is shown. */
+  var ROUTE1 = {
+    NO_RASTER: 32.10,
+    RASTER: 25.94,
+    PALETTE_ESTIMATE: 7445,
+    PALETTE_MEASURED: 238988,
+    PARALLAX_ESTIMATE: 314443,
+    PARALLAX_MEASURED: 8157505,
+    STATUS_ESTIMATE: 275268,
+    STATUS_MEASURED: 3763919,
+    NOTE: "route 1 (the IL interpreter in renderer/ilvm.bin) measured on " +
+          "Mednafen by tools/capture-ilvm.sh; docs/IL.md §14.5"
+  };
+
   function cyclesOf(ins) {
     var t = ins.t;
     if (t === "arith" && MODIFIER_OPS[ins.op]) return OP_CYCLES[ins.op];
@@ -521,11 +552,27 @@
         "part C's replay cannot apply it"));
     }
 
+    /* #115: the same toy through route 1, the interpreter the Export button
+     * builds.  Per toy, because the collection is this toy's; the factor is
+     * the measured one for the toy's hook shape. */
+    var route1Factor = lastRaster.length ? ROUTE1.RASTER : ROUTE1.NO_RASTER;
+    var route1Collection = Math.round(collection * route1Factor);
+    var route1 = {
+      shape: lastRaster.length ? "raster" : "no raster",
+      factor: route1Factor,
+      collectionCycles: route1Collection,
+      ratio60: route1Collection / FRAME_CLOCKS,
+      hz: route1Collection > 0 ? 60 * FRAME_CLOCKS / route1Collection : 60,
+      meets60: route1Collection <= FRAME_CLOCKS,
+      note: ROUTE1.NOTE
+    };
+
     var budgets = {
       frames: run.frameSums.map(function (c, k) {
         return { frame: k, frameCycles: c,
                  rasterCycles: run.rasterSums[k] || [] };
       }),
+      route1: route1,
       frameCycles: lastFrame,
       rasterMean: rasterMean,
       rasterWorst: rasterWorst,
@@ -575,6 +622,7 @@
     TOLERANCE: TOLERANCE,
     OP_CYCLES: OP_CYCLES,
     OP_BYTES: OP_BYTES,
+    ROUTE1: ROUTE1,
     cyclesOf: cyclesOf,
     bytesOf: bytesOf
   };
