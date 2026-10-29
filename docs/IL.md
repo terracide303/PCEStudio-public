@@ -1025,3 +1025,235 @@ pictures — and as the measured answer to "what would HuC cost?".
 - **The wall.** The interpreter is a JS reference, not a performance model:
   `toy-timeout` counts IL instructions, not console cycles. Pricing the IL is
   #32 — `renderer/pce-validate.js` and `docs/VALIDATE.md`.
+
+---
+
+## 14. Route 1: the IL as bytecode, interpreted on the console (#100)
+
+Parts A–D answer "what does compiling the IL cost". Route 1 asks a different
+question: can the **browser export a working ROM with no compiler at all** —
+the toy's IL encoded as bytecode, plus an interpreter we build once and commit?
+This half delivers the encoding, the interpreter, the browser glue, and the
+two named toys measured in Mednafen. The studio's Export button is the second
+half.
+
+```
+toy.lua --(pce-il.js)--> IL --(pce-ilbc.js)--> bytecode --(pce-rom.js)--> .pce
+                                                            + renderer/ilvm.bin
+```
+
+### 14.1 The container
+
+`renderer/pce-ilbc.js` encodes a `pce-il` version 1 program into one container
+that fits in a single 8 KiB data bank. All offsets are byte offsets from the
+start of the container. Little-endian.
+
+| offset | size | field |
+|---|---|---|
+| 0 | 4 | `"ILBC"` |
+| 4 | 1 | version (1) |
+| 5 | 1 | flags — bit 0: the toy has a `raster()` callback |
+| 6 | 1 | `init` slot (0xFF = none) |
+| 7 | 1 | `frame` slot |
+| 8 | 1 | `raster` slot |
+| 9 | 1 | function count |
+| 10 | 1 | global count |
+| 11 | 1 | constant count |
+| 12 | 2 | function table offset |
+| 14 | 2 | upvalue descriptor table offset |
+| 16 | 2 | constant table offset |
+| 18 | 2 | global name table offset |
+| 20 | 2 | first instruction |
+| 22 | 2 | one past the last instruction |
+
+A **function entry** (10 bytes, one per function id in order) is
+`codeOff u16, codeEnd u16, upOff u16, nregs u8, nparams u8, nups u8, reserved
+u8`. Each **upvalue descriptor** is `kind u8, index u8`: 0 captures the
+parent register, 1 the parent's upvalue, 2 is `_ENV` (a name, never a value).
+A **constant** is `type u8` (0 int, 1 bool, 2 string, 3 nil) then four
+little-endian bytes for an int, one for a bool, `length u8 + bytes` for a
+string, nothing for nil. A **global** is `length u8 + bytes`; instructions use
+the global's index, so no name is compared at run time.
+
+An **operand byte** is `0x00..0x7F` a register, `0x80..0xFE` constant
+`byte & 0x7F` (at most 127 constants), `0xFF` none. Jump targets are absolute
+container offsets, patched after the layout is known.
+
+| op | instruction | bytes after the opcode |
+|---|---|---|
+| 01 | `const` | `dst:r k:u8` |
+| 02 | `move` | `dst:r src:op` |
+| 03 | `getglobal` | `dst:r g:u8` |
+| 04 | `setglobal` | `g:u8 src:op` |
+| 05 | `getupval` | `dst:r idx:u8` |
+| 06 | `setupval` | `idx:u8 src:op` |
+| 07 | `closure` | `dst:r fid:u8` |
+| 08 | `call` | `dst:op callee:op n:u8 args[n]:op` |
+| 09 | `ret` | `src:op` |
+| 0A | `jmp` | `target:u16` |
+| 0B | `br` | `cond:op when:u8 target:u16` |
+| 0C | `forprep` | `base:u8` |
+| 0D | `fornext` | `base:u8 target:u16` |
+| 0E | `arith` | `op:u8 dst:r a:op b:op` |
+| 0F | `unm` | `dst:r a:op` |
+| 10 | `bnot` | `dst:r a:op` |
+| 12 | `cmp` | `op:u8 dst:r a:op b:op` |
+| 13 | `builtin` | `id:u8 dst:r n:u8 args[n]:op` |
+| 14 | `pal` | `addr:op word:op` |
+| 15 | `reg` | `regid:u8 value:op` |
+| 16 | `vset` | `addr:op word:op` |
+| 17 | `vget` | reserved; the encoder refuses it in this half |
+
+`arith` ops are 0 add, 1 sub, 2 mul, 3 mod, 4 idiv, 5 band, 6 bor, 7 bxor,
+8 shl, 9 shr; `cmp` ops are 0 eq, 1 lt, 2 le; `reg` ids are 0 BXR, 1 BYR,
+2 CR; builtin 0 is `rgb` (the only one the interpreter implements).
+
+The hooks are **global slots**, not function ids: the chunk stores a closure
+in `init`, `frame` or `raster`, and the runtime calls whatever is there —
+exactly what the C backend's `toy_boot`/`toy_frame` do (§9.1).
+
+The encoder **refuses by code rather than guessing**, with the same spirit as
+`pce-cgen.js`: `ilbc-op` (tables, sprites, pads, `print`, `music`, `vget`,
+`not`, …), `ilbc-fixed` (fixed-point arithmetic or constants),
+`ilbc-builtin` (a builtin other than `rgb`), `ilbc-arity` (more than four
+parameters or arguments), `ilbc-range` (more than 127 constants, 128
+registers or 32 globals), `ilbc-jump`, `ilbc-key`, `ilbc-program`.
+
+### 14.2 The interpreter image (`renderer/ilvm.bin`)
+
+`tools/ilvm/ilvm.c` is the bytecode loop; `tools/ilvm/ilvm_runtime.c` is
+`tools/toyc/toy_runtime.c` — the VDC/VCE setup, the zeroed VRAM/CRAM/SAT, the
+RCR table replay, the TMA timer — with the frame flow adjusted for an
+interpreted toy (§14.3). Both are built **once** by `tools/ilvm/build.sh`:
+
+```
+mos-pce-clang -Os -Wl,--defsym,__rom_bank0=0xc000 \
+                    -Wl,--defsym,__rom_bank0_size=0x4000 ...
+```
+
+llvm-mos's PCE platform places a fixed ROM of up to 48 KiB at `$C000-$FFFF`
+(MPR2–MPR7; `__start_bank_6` is 1 for a 16 KiB fixed image, so crt0 sets
+MPR6). The image is **two physical banks**:
+
+- bank 0 (`$E000-$FFFF`): vectors, crt0, the runtime;
+- bank 1 (`$C000-$DFFF`): the interpreter (`exec` 6,010 B of the 16 KiB).
+
+The toy's container is **physical bank 2**, and `ilvm.c` maps it into the
+MPR2 window (`$4000-$5FFF`) with `TAM #$04` at boot. The image is committed
+as `renderer/ilvm.bin` (16,384 B, sha256 in `tools/gen/ilvm.json`), like
+`renderer/viewer-bank0.bin`; the browser never invokes a compiler.
+
+Register-file semantics mirror `pce-cgen.js`: 32-bit wrapping `add/sub/mul`,
+Lua's floor `%` and `//`, shifts out of range 0, Lua truthiness for `br`,
+`forprep` subtracts the step and `fornext` adds it and compares with the
+step's sign. A call is C recursion over a bytecode function (the toys' trees
+are shallow); closures are 32 slots of `{fid, up[6]}`, allocated round-robin,
+with upvalues copied at creation (the toys have no `setupval`, as part A
+assumed).
+
+Measured sizes: the image is 16,384 B (the linker fills the fixed region),
+`.bss` 5,607 B; `exec` 6,012 B, `main` 2,321 B, `toy_frame` 198 B.
+
+### 14.3 The console frame flow
+
+A compiled `frame()` is 7,417 cycles and lands in the VBlank. An interpreted
+one is **238,988 cycles** (measured, below): it runs for two video frames. The
+runtime therefore defers a no-raster toy's writes exactly as part B's HuC
+runtime does for the palette toy (§11.2): `frame(f)` runs in `MODE_BASE`
+during the display, and its palette/VRAM/register writes are applied in the
+next VBlank. The picture sequence is the browser's, one frame later.
+
+The loop is paced by the VBlank IRQ's counter, not by polling the status
+register: the measurement reconstructs a multi-frame `frame()` from that
+counter, and one reader of the status keeps both uses exact. The first version
+took the counter before `frame()`, so a frame spanning several VBlanks left it
+stale and the base was applied **mid-display** — measured as a palette change
+at captured row 177. Re-reading the counter before each wait fixed it; the
+captured run afterwards has no torn frames.
+
+The toy's own `raster()` path is unchanged from #31 part C: the interpreter's
+224 calls fill the line table, the hand-written RCR handler replays it, and
+one toy frame is a collection plus a displayed frame. The interpreter makes
+each call slower, so the rate drops (measured below), but the picture is the
+browser's.
+
+### 14.4 The browser glue
+
+`renderer/pce-rom.js`'s new `buildToyRom({bank0, bytecode, assets})` is a pure
+function: it validates the 16 KiB image, the `ILBC` magic and the data-bank
+size, and returns `bank0 + one 8 KiB bank` (bytecode at offset 16,384,
+optional assets after it, `0xFF` padding). The page loads `ilvm.bin` the way
+it loads `viewer-bank0.bin`. Node and a browser context (`self`, no `module`)
+build the same bytes — tested byte for byte.
+
+### 14.5 Evidence
+
+`tools/ilvm/emit.js` is the browser's code path in Node: `pce-il.js` →
+`pce-ilbc.js` → `pce-rom.js`, **no compiler**. `tools/capture-ilvm.sh` builds
+that way and runs the result in Mednafen with `tools/capture-toy.sh`'s command
+line, crop and timer read.
+
+| | palette (`tools/toys/palette.lua`) | parallax (`toys/parallax.lua`) |
+|---|---|---|
+| ROM | 24,576 B (3 physical banks) | 24,576 B |
+| bytecode | 578 B | 1,100 B |
+| code bytes in the container | 405 | 850 |
+| `frame()` | **238,988 cycles** (2.0 video frames) | **5,657 cycles** (0.05 frames) |
+| one `raster()` call | — | **36,072 cycles** |
+| one 224-call collection | — | **8,157,505 cycles** (68.4 frames) |
+| toy frame rate | one per ~3 video frames (~20 Hz) | one per ~69 video frames (~0.87 Hz) |
+| picture vs browser | diff 0 | diff 0 |
+
+Set beside §12's compiled numbers, the interpreter costs **32x** the compiled
+palette `frame()` (238,988 vs 7,417 cycles), **4.7x** the compiled parallax
+`frame()` (5,657 vs 1,204), **24x** a compiled `raster()` call (36,072 vs
+1,510) and **24x** the collection (8,157,505 vs 338,757), which puts the
+raster toy at 0.87 Hz against the compiled route's ~12 Hz.  The bytecode is
+578 B (palette) and 1,100 B (parallax) against 1,784 B and 4,541 B of
+compiled IL functions.  Route 1 trades that speed for a ROM the browser can
+build with no compiler; route 2 (#101) is the direct generator that keeps
+the speed.
+
+The timer measurement is VBlank-aware. The TMA counter is seven bits, so a
+delta past 128 ticks (131,072 CPU clocks) wraps: the first run read the real
+~240,000-cycle frame as 30 ticks. The VBlank IRQ now records the timer value
+at each VBlank, so the measurement knows the phase within the 116.5-tick
+(119,318 CPU clock) frame: elapsed = frames x 116.5 + (phase at end - phase
+at start). A bracket that spans no VBlank is exact as measured, and that
+covers every `raster()` call. The figure includes the VBlank IRQ's few cycles
+per frame and is quantised to one tick. The per-frame maximum is clamped at
+255 ticks in the byte-wide save-state cell; the mean is not clamped.
+
+`node tests/check-ilvm.js` exits 0 with **49 checks**: the encoder is
+deterministic and refuses by code (table, fixed constant, five parameters,
+`clamp`); Node and a browser context build the same 24,576 B ROM; the
+committed `renderer/ilvm.bin` rebuilds byte-identically when llvm-mos is
+present (SKIP otherwise); both dumps' ROM shas match a fresh
+`tools/ilvm/emit.js` build; the palette capture's frames are diff 0 against
+the browser's run with eight consecutive browser frames present in order,
+and the save's VRAM/CRAM are the browser's; the parallax capture holds 30
+exact display frames (a run of eight in order) among the static compute
+frames, and its save is the browser's.  The check script was written by the
+seat that wrote the encoder and interpreter, so rule 2 is owed.
+
+### 14.6 What this half refuses, and what it does not prove
+
+The interpreter implements the instruction set above and nothing else; the
+encoder refuses the rest, so no ROM silently runs a different toy. In
+particular vget, `not`, tables, sprites, pads, `print`, music/SFX, fixed point
+and the other builtins are not in route 1 yet.
+
+Not proven:
+
+- **Two toys.** The palette toy (no callback) and `parallax.lua` (one register
+  write on four lines) are the evidence. #30's third toy (sprites + pad),
+  `status-bar.lua` (its compiled route was already four lines out of phase,
+  §10.4) and the #29 examples are untested.
+- **No real console and one emulator.** Mednafen only; no ares run of a
+  bytecode ROM yet.
+- **Rule 2 is owed.** The encoder, interpreter, runtime and the check script
+  were written by the same seat; a cold break by another seat and model must
+  try the operand encoding, the loop arithmetic, the closure copies, the timer
+  reconstruction and the browser glue before this half closes.
+- **The studio's Export button is not wired.** The second half adds it; this
+  half's evidence is the Node path and the browser-context byte equality.
