@@ -1199,6 +1199,37 @@
              stats: { files: doc.files.length } };
   }
 
+  /* ---- the studio's Save, as one function (#160) -------------------------
+   * Save writes the studio's whole file set into ONE pce.studio/1 envelope
+   * (docs/STUDIO.md §"Save"): {version, title, description, files, sources},
+   * two-space JSON and a last newline.  The studio's toyEnvelope() and the
+   * MCP server's toy_save BOTH build their file with this function, so a toy
+   * saved from Claude Code is byte for byte the file the studio's Save
+   * writes — there is no second format to keep in step.
+   *
+   * `sources` is the ppu.toys field for binary sources (card #24) and stays
+   * empty: the toy's art travels as the text asset files (tiles.json,
+   * palettes.json, sprites.json) and their names in sources.json, which are
+   * files like any other here. */
+  function envelope(title, description, files) {
+    var list = Array.isArray(files) ? files : [];
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      out.push({ name: list[i].name, source: list[i].source });
+    }
+    return {
+      version: "pce.studio/1",
+      title: title == null ? "" : String(title),
+      description: description == null ? "" : String(description),
+      files: out,
+      sources: []
+    };
+  }
+
+  function envelopeText(title, description, files) {
+    return JSON.stringify(envelope(title, description, files), null, 2) + "\n";
+  }
+
   /* Which kind a dropped file is: the importer's own front door, so the
    * dialog's kind dropdown defaults to what the file can be. */
   function kindOf(name, bytes) {
@@ -1263,6 +1294,8 @@
     importWav: importWav,
     importMidi: importMidi,
     importStudio: importStudio,
+    envelope: envelope,
+    envelopeText: envelopeText,
     kindOf: kindOf,
 
     palettePlan: palettePlan,

@@ -160,8 +160,10 @@ Copy-Item -Recurse plugin\skills\creating-pce-toys `
       a value on the current run without changing the code.</td></tr>
     <tr><td><code>export_pce</code></td><td>Builds a <code>.pce</code> ROM (default: your temp folder,
       <code>pce-mcp/&lt;name&gt;.pce</code>, or the path you give).</td></tr>
-    <tr><td><code>toy_save</code> <span class="soon">coming</span></td><td>Saves the whole toy (code, art, songs) as one
-      <code>.pce.json</code> that the studio opens.</td></tr>
+    <tr><td><code>toy_save</code></td><td>Saves the whole toy — <code>main.lua</code>, the art
+      <code>source_add</code> made, the named sources and the songs — as one <code>.pce.json</code> in the studio's
+      own format, inside the folder you started it in. You open that file with <b>Open… → From file…</b>
+      (section 9).</td></tr>
   </table>
 
   <h2 id="examples">6. Worked examples</h2>
@@ -231,13 +233,19 @@ function frame(t, f) end</code></pre>
 
   <h2 id="studio">9. From Claude Code to the studio</h2>
   <ul>
-    <li><b>Code only</b> (art drawn in code): ask Claude to write <code>main.lua</code> to a file, then drag it into
-    the <a href="studio.html">studio</a> or use <b>Paste &amp; Run</b>.</li>
-    <li><b>Code and art</b>: <code>toy_save</code> <span class="soon">coming</span> writes one
-    <code>.pce.json</code> that you open with <b>Open… → From file…</b>. Until then, ask Claude to write the toy's
-    files as a <code>pce.studio/1</code> file: <code>{"version": "pce.studio/1", "title": "…", "files": [{"name":
-    "main.lua", "source": "…"}, {"name": "tiles.json", "source": "…"}, …]}</code>, saved as
-    <code>&lt;name&gt;.pce.json</code>.</li>
+    <li><b>Code and art — the usual way</b>: ask Claude to finish with <b><code>toy_save</code></b>. It writes
+    ONE <code>&lt;name&gt;.pce.json</code> holding <code>main.lua</code>, the art <code>source_add</code> made
+    (<code>tiles.json</code>, <code>palettes.json</code>, <code>sprites.json</code>), the named sources and the
+    songs — the same file the studio's own <b>Save</b> writes, byte for byte. Then open the
+    <a href="studio.html">studio</a> and press <b>Open… → From file…</b> (or drop the file on the page): the game
+    plays with its art, and the ASSETS panel lists the pictures by name. Ask Claude to save before it exports, too:
+    a game that can't export yet still opens and plays in the studio.</li>
+    <li><b>Code only</b> (art drawn in code, no <code>source_add</code>): ask Claude to write <code>main.lua</code>
+    to a file, then drag it into the studio or use <b>Paste &amp; Run</b>. A plain <code>.lua</code> starts a new toy
+    with no art, which is why the art route above is the one to use when there is any art.</li>
+    <li>Claude writes inside the folder you started it in; a <code>toy_save</code> path outside that folder is
+    refused with <code>save-path</code>. If the file isn't where you expect, ask for the reply's
+    <code>path</code>.</li>
     <li><b>A ROM</b>: <code>export_pce</code> writes a <code>.pce</code> for an emulator (Mednafen, Ares, …) or a flash
     cart.</li>
   </ul>
@@ -270,7 +278,8 @@ function frame(t, f) end</code></pre>
   <ul>
     <li><b>Export</b>: games that use Lua tables, <code>sprite()</code>, the pad or <code>sfx()</code> don't export
     to <code>.pce</code> yet. They run in the studio and through the server.</li>
-    <li><b>Songs through the server</b> and <b><code>toy_save</code></b> are being built (sections 8 and 9).</li>
+    <li><b>Songs through the server</b> are being built (section 8); a song already in a toy's file set is carried
+    by <code>toy_save</code> all the same.</li>
     <li><b>Real hardware</b>: exports are checked in an emulator only.</li>
     <li><b>Linux and Windows</b> haven't been tested yet (section 1).</li>
   </ul>
