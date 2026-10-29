@@ -574,7 +574,7 @@ function manifest(r) {
       r.picks.join(", ") + ", two 32x64 sprite patterns each (left and right half). " +
       "The run cycle is the author's own: Full.gif plays frames 3..10 in that " +
       "order and run.aseprite holds the same eight at 100 ms, so the toy runs " +
-      "them at one every four frames; frame 1 is the idle stand and 35 the aim " +
+      "them at one every six frames; frame 1 is the idle stand and 35 the aim " +
       "(shown only while the fire key is held).\n\n" +
     "The pack's `Autor_note.txt`, quoted in full for the first three lines:\n\n" +
     "> all the assets here are totally free for commercial use and the like.\n" +

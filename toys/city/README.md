@@ -2,10 +2,11 @@
 
 A demo made from **Action Pack - CITY** by **Anokolisa**
 (https://www.patreon.com/Anokolisa). A soldier runs a flooded city street at
-night; up jumps, N fires, left/right walk him across the screen. The street
-scrolls under him, the water cycles its colours, and the pack's own scene is
-the one background — split into two BXR bands by the raster callback, because
-the PC Engine has one background layer and no HDMA.
+night; up jumps, N fires, left/right walk him across the screen to the
+middle — then the street scrolls under him while he stays there. The water
+cycles its colours, and the pack's own scene is the one background — split
+into two BXR bands by the raster callback, because the PC Engine has one
+background layer and no HDMA.
 
 ## The licence, and where the art lives
 
@@ -72,29 +73,42 @@ nothing; `--check` exits 1 if the folder is not the converter's output.
    studio's Add Source dialog runs. Tiles are deduped, every 8x8 tile gets one
    of at most 16 palettes, and the whole picture uses **21 colours, at most 8
    in a tile** — inside the VDC's 16-colour palette.
-3. Nine frames of the character sheet (`Legacy Action Pack - CHARACTER/
+3. Ten frames of the character sheet (`Legacy Action Pack - CHARACTER/
    Sheets/Full-Sheet.png`) become **32x64 sprite patterns**, the VDC's largest
-   sprite: eight run frames and one aim frame, two patterns each (the frames
-   are up to 40 px wide, so each is a left and a right half). The leap reuses
-   run frame 7, so it costs no VRAM of its own.
+   sprite: the eight run frames (the sheet's own 3..10, `Full.gif`'s order),
+   the idle stand (frame 1) and the crouched aim (frame 35), two patterns each
+   (the frames are up to 40 px wide, so each is a left and a right half). The
+   leap reuses run frame 7, so it costs no VRAM of its own.
 4. The picture becomes `demo-art/city/main.lua`'s generated tail: every
    non-zero VRAM word, the BAT run-length encoded, and the VCE's own words.
 5. The three **water colours** are found, and the converter refuses if one of
    them is also used above the water line — cycling such a colour would flash
    the city.
 
-Budget: 249 tiles (5,008 VRAM words) + 19 patterns (9,280 words) =
-**14,288 of 32,768 words** (the test counts the same picture from the pattern
-codes, which start on a cell boundary, and gets 14,400 — either way, under
+Budget: 249 tiles (5,008 VRAM words) + 21 patterns (10,304 words) =
+**15,312 of 32,768 words** (the test counts the same picture from the pattern
+codes, which start on a cell boundary, and gets 15,424 — either way, under
 half the VDC's VRAM).
 
 ## What the toy does
 
+The camera has a **dead zone** (card #158, Dennis playing it: "animation
+stands still in CITY while background scrolls.  It should start scrolling
+when you walk and move the character.  And the character should not move
+further as the middle").  Nothing moves by itself.  The soldier walks one
+pixel a frame until his body's centre reaches the screen's middle — px 96,
+the pair's left edge, puts the centre px + 32 on x 128 — and from there the
+camera scrolls instead and he stays.  Walking left scrolls the camera back
+to cam 0, the level's start, then walks him back to px 8 and stops: no
+walking off the left edge.  The run cycle turns only while ground is
+covered, a pose every six 60 Hz frames — `Full.gif`'s own 100 ms pace — so
+the feet never slide; a still soldier shows the idle stand.
+
 | | |
 |---|---|
-| `raster(line)` | two BXR writes a frame, each band on its OWN 0..255 counter: line 0 the far city (sky, skyline, buildings, the ledge and the wall with its pipe) at 1 px a frame, line 208 the water strip at 2 px plus the pad |
+| `raster(line)` | two BXR writes a frame, each band on its OWN 0..255 counter, both 0 until he walks: while he walks on screen the bands do not move, once he is at the middle line 0's far city (sky, skyline, buildings, the ledge and the wall with its pipe) counts 1 px a frame and line 208's water strip 2 |
 | `pal()` every 8 frames | the water's three CRAM entries are dealt the pack's three water words; nothing else in the picture uses them |
-| SAT slots 0 and 1 | the character: two 32x64 sprites with `cgx` (two strips each) and `cgy = 2` (all 64 lines) |
+| SAT slots 0 and 1 | the character: two 32x64 sprites with `cgx` (two strips each) and `cgy = 2` (all 64 lines), at SAT x px + 32 (SAT X 32 is display column 0, the same +32 compensation as toys/cave's `sat(slot, 1, x + 32)`) |
 | slots 2..5 | the tracer, a 16x16 pattern, six pixels a frame |
 | slots 6..63 | parked once in `init()`, not every frame — that loop alone cost the frame budget 2 frames over |
 | `art_boot()` | the repo's is empty; the deployed file's writes the picture |
@@ -105,14 +119,14 @@ half the VDC's VRAM).
 node tests/check-city.js
 ```
 
-45 checks when the art is present, and a clean `SKIP` when it is not:
+79 checks when the art is present, and a clean `SKIP` when it is not:
 
 - **main.lua's numbers are the art's** — every pattern code, the tracer and the
   three water CRAM entries are rebuilt from the converted files through
   `sat.pictureFromFiles` + `ed.patternLayout`, and the toy's constants must
   equal them;
 - **the validator's budgets** — `renderer/pce-validate.js` accepts the toy,
-  `frame()` alone is 4,661 cycles of a 119,318-cycle 60 Hz frame, no line asks
+  `frame()` alone is 4,276 cycles of a 119,318-cycle 60 Hz frame, no line asks
   for more than the VDC's 16 strips (the busiest asks for 4), and the art fits
   VRAM;
 - **it is visible** — every frame has at least 20,000 of its 57,344 pixels
@@ -120,16 +134,25 @@ node tests/check-city.js
 - **it plays** — the pad walks the character, the jump leaves the water line
   and lands back on it, a tracer flies six pixels a frame, and the water's
   entries change on every 8th frame and only then;
-- **the raster split** — two entries (lines 0 and 208), the near band 1–3 px a
-  frame and the far band at most 1, the near one always the faster, and over
-  **300 frames** each band goes round its 0..255 and comes back with no jump
-  in between (#148: a divided counter climbs to 85 and snaps back, which this
-  check catches — its own control, `g_cam // 3`, gives 2 bad steps and 0
-  wraps);
-- **Lua == IL**, frame by frame for 120 frames: vram, cram, sat, registers,
-  the raster table and the pixels;
-- **the strip** — `demo-art/city/evidence/strip.png`, eight frames, read back
-  pixel for pixel;
+- **the walk is card #158's** — the card's own scripted pad (hold L 300
+  frames, release 60, hold J 120) and its three claims: BXR does not change
+  while no direction is held and the idle stand shows; player x rises a
+  pixel a frame to the middle (px 96, the body's centre on the screen's
+  middle x 128) then stays while BXR rises — the far band a pixel a frame,
+  the near band two; and the animation frame changes only while moving, a
+  new run pose every six frames of walking, the pack gif's own 100 ms pace.
+  The walk back: the camera scrolls back to the level's start and clamps
+  there, then he walks back to the left edge and stops, and each band still
+  goes round its 0..255 with no jump (#148: a divided counter climbs to 85
+  and snaps back, which this check catches);
+- **Lua == IL**, frame by frame — the evidence's 480 frames, the gameplay's
+  120 and the strip's 160: vram, cram, sat, registers, the raster table and
+  the pixels;
+- **the strip** — `demo-art/city/evidence/strip.png`, four steps: the idle
+  stand at the start, a step while walking, the middle, and the street
+  scrolled at the middle — read back pixel for pixel, the street proved
+  still until the last cell, and the soldier's body proved on the screen's
+  middle x 128 by the differing pixels' centre;
 - **the deploy route** — `tools/gallery.js` lists CITY as a demo (`demoArt:
   city`), and the committed `renderer/gallery-toys.js` carries the art-free
   toy with no VRAM write in it;
