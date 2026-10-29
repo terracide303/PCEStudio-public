@@ -48,8 +48,20 @@
  *      exactly the frame an independent il.create(source, {files}) +
  *      pce-sprites run renders (diff 0), and toy_run reports the #117
  *      import summary.
+ *  11. `toy_save` (#160): the loaded toy — main.lua, the art source_add
+ *      made, the named source in sources.json — written as ONE
+ *      pce.studio/1 envelope, the studio's own Save format (its key order,
+ *      its two-space text and last newline); the studio's own open path
+ *      (renderer/pce-source.js importStudio, then the host's import) reads
+ *      the file and draws the frame the MCP run drew, diff 0; a control
+ *      saved without the source opens and draws the sky where the saved toy
+ *      draws its sprite.  A path outside the working folder (a relative
+ *      climb or an absolute one) is refused with save-path and nothing is
+ *      written; a second server started in another folder with nothing set
+ *      saves into that folder, so the fence is the process's own.
  *
- * The test writes its .pce files under $TMPDIR, never into the repository.
+ * The test writes its .pce and .pce.json files under $TMPDIR (the server's
+ * working folder is PCE_MCP_WORKDIR under it), never into the repository.
  *
  * Written by @design because the card names this file.  Rule 2: a cold break
  * by another seat is owed before the card closes.
@@ -69,12 +81,17 @@ const il = require("../renderer/pce-il.js");
 const ilbc = require("../renderer/pce-ilbc.js");
 const romLib = require("../renderer/pce-rom.js");
 const sprites = require("../renderer/pce-sprites.js");
+const sourceLib = require("../renderer/pce-source.js");
 
 const ROOT = path.join(__dirname, "..");
 const SERVER = path.join(ROOT, "tools", "mcp", "server.js");
 const TOY_DIR = path.join(ROOT, "toys");
 const EXAMPLES = path.join(ROOT, "tests", "dumps", "examples");
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "pcestudio-mcp-"));
+/* toy_save's working folder for this run: the server is started with
+ * PCE_MCP_WORKDIR pointing here, so nothing is written into the checkout */
+const WORK = path.join(TMP, "work");
+fs.mkdirSync(WORK, { recursive: true });
 
 let checks = 0;
 const failures = [];
@@ -422,7 +439,8 @@ function checkerCell(cells, x, y) {
 
 (async function main() {
   const proc = spawn(process.execPath, [SERVER], {
-    cwd: ROOT, stdio: ["pipe", "pipe", "pipe"]
+    cwd: ROOT, stdio: ["pipe", "pipe", "pipe"],
+    env: Object.assign({}, process.env, { PCE_MCP_WORKDIR: WORK })
   });
   const client = new Client(proc);
   let ok = false;
@@ -451,9 +469,9 @@ function checkerCell(cells, x, y) {
     check(!list.error, "tools/list answers without a JSON-RPC error");
     const tools = list.result.tools || [];
     const names = tools.map((t) => t.name).sort();
-    eq("tools/list lists exactly the card's nine tools", names, [
+    eq("tools/list lists exactly the card's ten tools", names, [
       "docs", "export_pce", "frame_png", "register_set", "registers_get",
-      "source_add", "toy_run", "toy_write", "validate"
+      "source_add", "toy_run", "toy_save", "toy_write", "validate"
     ]);
     for (const t of tools) {
       const schema = t.inputSchema;
@@ -472,6 +490,9 @@ function checkerCell(cells, x, y) {
     eq("source_add requires kind",
        list.result.tools.filter((t) => t.name === "source_add")[0]
            .inputSchema.required, ["kind"]);
+    eq("toy_save requires path",
+       list.result.tools.filter((t) => t.name === "toy_save")[0]
+           .inputSchema.required, ["path"]);
     eq("source_add's kinds are the card's four",
        list.result.tools.filter((t) => t.name === "source_add")[0]
            .inputSchema.properties.kind.enum,
@@ -866,6 +887,162 @@ function checkerCell(cells, x, y) {
     eq("the next cell draws the other tile",
        pixelOf(checkerImg, 12, 4), checkerColour(12, 4));
 
+    /* 11 — toy_save (#160): the studio's own file, with the art inside -----
+     * The toy is the sprite-mover with its named source (sources.json,
+     * #156) written beside it; the art comes from source_add.  toy_save
+     * must hand over ONE pce.studio/1 envelope holding all three, and the
+     * studio's own open path (renderer/pce-source.js importStudio, then the
+     * host's import) must draw the frame the MCP run drew. */
+    const savedMain = movedSpriteToy();
+    const namedSources = JSON.stringify({
+      version: 1,
+      sources: [{ name: "red-square", kind: "sprites",
+                  patterns: { first: 0, count: 1 },
+                  sprites: { first: 0, count: 1 },
+                  palettes: { side: "spr", first: 0, count: 1 } }]
+    }, null, 2) + "\n";
+    const saveToy = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: savedMain },
+              { name: "sources.json", source: namedSources }]
+    });
+    check(!saveToy.isError && saveToy.body.ok,
+          "the toy to save writes, with its named source");
+    const saveAdd = await client.call("source_add", {
+      kind: "sprites", name: "red-square", png: redPng
+    });
+    check(!saveAdd.isError && saveAdd.body.ok,
+          "its sprite is added before the save");
+    const saveRun = await client.call("toy_run", { frames: 1 });
+    check(!saveRun.isError && saveRun.body.ok, "the toy runs before the save");
+    const mcpPng = imageOf(await client.call("frame_png", { frame: 0 }));
+    eq("the MCP run draws the sprite before the save",
+       pixelOf(mcpPng, 68, 36), [252, 0, 0]);
+
+    const saved = await client.call("toy_save", { path: "red-toy.pce.json" });
+    check(!saved.isError && saved.body.ok, "toy_save writes the toy");
+    const savedPath = path.join(WORK, "red-toy.pce.json");
+    eq("the reply names the file inside the working folder",
+       saved.body.path, savedPath);
+    check(fs.existsSync(savedPath), "the saved file is on disk");
+    const savedText = fs.existsSync(savedPath)
+      ? fs.readFileSync(savedPath, "utf8") : "";
+    eq("the reply's byte count is the file's", saved.body.bytes,
+       Buffer.byteLength(savedText));
+    let envDoc = null;
+    try { envDoc = JSON.parse(savedText); } catch (e) { envDoc = null; }
+    check(envDoc != null, "the saved file is JSON");
+    eq("it is one pce.studio/1 envelope, not a second format",
+       envDoc && envDoc.version, "pce.studio/1");
+    eq("the envelope's keys are the studio's, in the studio's own order",
+       envDoc && Object.keys(envDoc),
+       ["version", "title", "description", "files", "sources"]);
+    eq("binary sources stay empty, as the studio's Save writes them",
+       envDoc && envDoc.sources, []);
+    eq("the title comes from the file's own name", envDoc && envDoc.title,
+       "red-toy");
+    eq("every file is in the envelope — art, named source, code",
+       envDoc && envDoc.files.map((f) => f.name).sort(),
+       ["main.lua", "palettes.json", "sources.json", "sprites.json"]);
+    eq("main.lua travels byte for byte",
+       envDoc && envDoc.files.filter((f) => f.name === "main.lua")[0].source,
+       savedMain);
+    eq("sources.json travels byte for byte",
+       envDoc && envDoc.files.filter((f) => f.name === "sources.json")[0].source,
+       namedSources);
+    eq("the text is the studio's own serialisation of that object",
+       savedText,
+       JSON.stringify({ version: "pce.studio/1", title: "red-toy",
+                        description: "", files: envDoc && envDoc.files,
+                        sources: [] }, null, 2) + "\n");
+
+    /* the studio's open path, headless: importStudio reads the envelope and
+     * the host imports its files before init() */
+    const opened = sourceLib.importStudio(savedText);
+    eq("the studio's open path reads the envelope as a toy",
+       opened.kind, "studio");
+    eq("and every file the save wrote is in it",
+       opened.files.map((f) => f.name).sort(),
+       ["main.lua", "palettes.json", "sources.json", "sprites.json"]);
+    const studioFrame = independentArtFrames(opened.files, 1, {});
+    sameImage("the studio's open path draws the MCP run's frame (diff 0)",
+              studioFrame, mcpPng);
+    eq("the opened toy's sprite pixel is the PNG's red",
+       pixelOf(studioFrame, 68, 36), [252, 0, 0]);
+
+    /* the control: the same toy saved WITHOUT the art — the studio opens a
+     * file with no sprite where the saved one draws its own */
+    const bareWrite = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: savedMain }]
+    });
+    check(!bareWrite.isError && bareWrite.body.ok, "the control toy writes");
+    const bareSave = await client.call("toy_save", { path: "bare-toy.pce.json" });
+    check(!bareSave.isError && bareSave.body.ok, "the control toy saves");
+    const bareOpen = sourceLib.importStudio(
+      fs.readFileSync(path.join(WORK, "bare-toy.pce.json"), "utf8"));
+    eq("the control's file carries main.lua and no art",
+       bareOpen.files.map((f) => f.name), ["main.lua"]);
+    const bareFrame = independentArtFrames(bareOpen.files, 1, {});
+    eq("the control renders the sky where the saved toy draws its sprite",
+       pixelOf(bareFrame, 68, 36), [0, 0, 252]);
+    check(diffCount(bareFrame.pixels, mcpPng.pixels).n > 0,
+          "the control's frame is not the saved toy's frame");
+
+    /* the extension the studio's Open offers: a bare name gets .pce.json */
+    const bareName = await client.call("toy_save", { path: "named-toy" });
+    check(!bareName.isError && bareName.body.ok,
+          "a path without the extension saves");
+    eq("the file is named .pce.json", bareName.body.path,
+       path.join(WORK, "named-toy.pce.json"));
+    check(fs.existsSync(path.join(WORK, "named-toy.pce.json")),
+          "and it is on disk under that name");
+
+    /* the working folder is the fence: nothing outside it */
+    const outside = await client.call("toy_save", { path: "../escape.pce.json" });
+    check(outside.isError, "a path outside the working folder is refused");
+    eq("the refusal is save-path", outside.body.code, "save-path");
+    check(!fs.existsSync(path.join(TMP, "escape.pce.json")),
+          "and nothing was written outside the folder");
+    const absolute = await client.call("toy_save", {
+      path: path.join(os.tmpdir(), "pce-mcp-escape.pce.json")
+    });
+    check(absolute.isError && absolute.body.code === "save-path",
+          "an absolute path outside the working folder is refused too");
+    check(!fs.existsSync(path.join(os.tmpdir(), "pce-mcp-escape.pce.json")),
+          "and that file was not written either");
+
+    /* With nothing naming a folder, it is the one the server was started
+     * in — Claude Code starts it in the person's project folder. */
+    const work2 = path.join(TMP, "work2");
+    fs.mkdirSync(work2, { recursive: true });
+    const proc2 = spawn(process.execPath, [SERVER], {
+      cwd: work2, stdio: ["pipe", "pipe", "pipe"]
+    });
+    const client2 = new Client(proc2);
+    try {
+      await client2.request("initialize", {
+        protocolVersion: "2024-11-05", capabilities: {}
+      });
+      client2.notify("notifications/initialized");
+      const wrote2 = await client2.call("toy_write", {
+        files: [{ name: "main.lua", source: savedMain }]
+      });
+      check(!wrote2.isError && wrote2.body.ok, "a second server writes the toy");
+      const defaultSave = await client2.call("toy_save", { path: "here.pce.json" });
+      check(!defaultSave.isError && defaultSave.body.ok,
+            "the default folder is the server's own and saves there");
+      eq("the file lands in the folder the server was started in",
+         defaultSave.body.path, path.join(work2, "here.pce.json"));
+      check(fs.existsSync(path.join(work2, "here.pce.json")),
+            "the file is in that folder");
+      const defaultOut = await client2.call("toy_save", {
+        path: "../outside.pce.json"
+      });
+      check(defaultOut.isError && defaultOut.body.code === "save-path",
+            "and outside the default folder is refused too");
+    } finally {
+      client2.close();
+    }
+
     ok = true;
   } catch (e) {
     check(false, "the run threw: " + (e && e.stack || e));
@@ -885,8 +1062,10 @@ function checkerCell(cells, x, y) {
               "tools/list and tools/call over stdio; parallax frame 60 is " +
               "check-examples' PNG; a BXR poke is the renderer's own picture; " +
               "the validator refuses an over-budget toy with file:line; " +
-              "export_pce is the #100 build byte for byte; and source_add's " +
+              "export_pce is the #100 build byte for byte; source_add's " +
               "PNG reaches VRAM as sprites while tiles.json renders through " +
-              "MCP exactly as through the studio host");
+              "MCP exactly as through the studio host; and toy_save's one " +
+              "pce.studio/1 envelope opens through the studio's own " +
+              "importStudio to the same frame, its art included");
   process.exit(0);
 })();
