@@ -54,8 +54,9 @@
  *     pce-sprites.renderFrame with the bit cleared, and the exact changed-pixel
  *     counts), View only masking the picture without a register write, the
  *     resolution label over 256/341/512, markers that seek, the scrubber's
- *     length (clamp, max, playhead), the CRT overlay, SND's honest #71 state,
- *     and all eight pad keys on the focused output.
+ *     length (clamp, max, playhead — and #144: ▶ plays past Length, through
+ *     the page's own rAF loop, until Stop), the CRT overlay, SND's honest
+ *     #71 state, and all eight pad keys on the focused output.
  * 10. --browser (optional): the real page is loaded in headless Google
  *     Chrome with ?selftest=1&frames=40; the DOM must say PASS 40 frames and
  *     its frame-39 digest must equal the one computed here from check-toys'
@@ -1899,6 +1900,89 @@ end
   studio.setLayerViewOnly(false);
   studio.setLayer("bg", true);
   studio.setLayer("sprites", true);
+  studio.setLength(300);
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
+/* ---- 9b. #144: ▶ plays past Length, until Stop ------------------------ *
+ * Dennis's platformer froze at frame 299 (t=4.98 s) with nothing on screen
+ * saying why: the play loop's step paused at lengthFrames - 1. It is fixed
+ * by following ppu.toys' Studio, whose clock is free and whose Length is
+ * only the scrubber's max (docs/STUDIO.md §2.3, "Playing past Length"), so
+ * the two things a person watches are the two things asserted here: the
+ * clock's frame counter keeps rising and ▶ is still running, while the
+ * scrubber saturates at Length - 1.
+ *
+ * Nothing here calls stepForward(): the page's own requestAnimationFrame
+ * queue is pumped with 60 Hz timestamps, so what runs is the loop the ▶
+ * button starts.  The control that must fail on this check is a page whose
+ * stepForward() still has the old `pause()` at lengthFrames - 1. */
+function checkPlayPastLength(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const clock = page.dom.get("clock");
+  const seek = page.dom.get("seek");
+
+  /* The emptiest toy there is: the frame index is the whole measurement. */
+  runEditorSource(studio, "function frame(t, f) end\n");
+  studio.setLength(300);
+  studio.seek(0);
+  /* Ctrl+Enter in runEditorSource queued a tick; ▶ queues its own. */
+  page.raf.length = 0;
+
+  clickOne(page, "btn-play");
+  check(studio.isPlaying() === true && page.raf.length >= 1,
+        "#144: ▶ starts the play loop (one pending rAF tick)");
+
+  const pump = (n) => {
+    for (let i = 0; i < n; i++) {
+      page.sandbox.__now += 1000 / 60;
+      const due = page.raf.splice(0);
+      for (const fn of due) fn(page.sandbox.__now);
+    }
+  };
+  pump(420);
+
+  const frame = studio.current().frame;
+  const clockText = clock.textContent;
+  check(frame > 400, "#144: ▶ runs past Length — " + frame +
+        " frames at Length 300 (it used to pause at 299)");
+  check(studio.isPlaying() === true,
+        "#144: the play loop is still running at frame " + frame);
+  check(seek.value === "299",
+        "#144: the scrubber saturates at Length − 1 (" + seek.value + ")");
+  check(/frame 4\d\d/.test(clockText),
+        "#144: the clock's frame counter keeps rising (" + clockText + ")");
+
+  /* Pausing and playing again past Length resumes; it does not restart. */
+  clickOne(page, "btn-play");
+  check(studio.isPlaying() === false && studio.current().frame > 400,
+        "#144: ⏸ pauses where the clock is (frame " +
+        studio.current().frame + ")");
+  clickOne(page, "btn-play");
+  check(studio.isPlaying() === true && studio.current().frame > 400,
+        "#144: ▶ past Length resumes, it does not jump back to 0 (frame " +
+        studio.current().frame + ")");
+  clickOne(page, "btn-stop");
+  check(studio.isPlaying() === false && studio.current().frame === 0,
+        "■ stops the play loop and returns to frame 0 (frame " +
+        studio.current().frame + ")");
+
+  /* Length still bounds a scrub, and ▶ parked on the last frame restarts. */
+  studio.seek(310);
+  check(studio.current().frame === 299,
+        "#144: a seek past Length still clamps to the last frame (frame " +
+        studio.current().frame + ")");
+  page.raf.length = 0;
+  clickOne(page, "btn-play");
+  check(studio.isPlaying() === true && studio.current().frame === 0,
+        "▶ at the last frame restarts from 0 (frame " +
+        studio.current().frame + ")");
+  clickOne(page, "btn-stop");
+
+  /* Leave the page as the other checks expect it. */
   studio.setLength(300);
   studio.loadExample("palette", true);
   studio.pause();
@@ -6568,6 +6652,7 @@ async function main() {
   checkShortcuts(page);
   checkCodeMirrorEditorText();
   checkOutputColumn(page);
+  checkPlayPastLength(page);
   checkExamplesVisible(page);
   checkPasteRun(page);
   checkScreenPanel(page);
