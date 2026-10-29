@@ -305,16 +305,20 @@ function guide() {
         "~/.claude/skills/creating-pce-toys"),
       p("The server needs Node and nothing else: no npm install, no " +
         "compiler. The link is the skill that ships beside it (SKILL.md and " +
-        "six worked recipes). Skills load when a session starts, so start a " +
+        "seven worked recipes). Skills load when a session starts, so start a " +
         "new Claude Code session after this."),
       h3("The tools"),
       table(["tool", "what it does"], [
         ["toy_write", "replace the session's toy: a file set whose main.lua runs"],
         ["toy_run", "run it frame by frame, with an optional pad script; " +
-                    "returns registers, the raster shape and VRAM/CRAM/SAT hashes"],
+                    "returns registers, the raster shape, VRAM/CRAM/SAT hashes " +
+                    "and what each PSG channel played"],
         ["source_add", "turn a PNG or a pixel grid with a palette into the " +
-                       "toy's tiles, sprites, a tilesheet or a palette, before " +
-                       "toy_run; returns the VRAM/CRAM budget"],
+                       "toy's tiles, sprites, a tilesheet or a palette, or a " +
+                       ".mid into its song.json, before toy_run; returns the " +
+                       "VRAM/CRAM budget"],
+        ["song_write", "compose the toy's song.json from a step list with the " +
+                       "SEQUENCER's built-in instruments; music(0) plays it"],
         ["frame_png", "the picture at a frame, as a PNG you can look at"],
         ["validate", "check it against the hardware's limits, with file:line " +
                      "findings"],
@@ -331,7 +335,10 @@ function guide() {
         "a pixel grid with its palette becomes the toy's tiles, sprites, a " +
         "tilesheet or a palette, merged into its asset files, and the reply " +
         "is the VRAM/CRAM budget — toy_run imports those files into VRAM, " +
-        "CRAM and the SAT before init(), exactly as the studio does. A toy " +
+        "CRAM and the SAT before init(), exactly as the studio does. Add " +
+        "music with song_write (or source_add kind song for a .mid): it " +
+        "writes song.json and music(0) plays it, while toy_run's sound report " +
+        "says what started on each channel. A toy " +
         "that runs without errors does not mean it looks right: look at the " +
         "frame."),
       p("**Finish with toy_save.** It writes one .pce.json holding every file " +
