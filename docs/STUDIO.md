@@ -166,7 +166,7 @@ Scanlines, Registers, SNES. Ours keeps the strip's place and shape and gives eac
 
 | ppu.toys panel | `studio.html` tab | what it shows | source |
 |---|---|---|---|
-| Backgrounds | **SCREEN** | VDW line, BXR/BYR/CR/BG_YOffset, BAT size from MWR, frame; click the output to follow a pixel (layer, BAT word, char, palette, tile row/col, or sprite) | `pce-panels.js` `lineValues`, `followPixel` |
+| Backgrounds | **SCREEN** | **a visual editor (#84)**: the BAT drawn as a 32×32 cell map with ppu.toys' tool row (select, pencil, rect, fill, erase, move), the `#` grid, zoom Fit/1×/2×/4×, a visible-screen outline and the footer; beside it the Characters column (tile, char base, the selected tile's 16-colour strip, the tile sheet, an 8×8 tile editor) and the Map column (map base, map size/MWR, tile size, BXR/BYR with −/+). It edits `tiles.json` and `palettes.json`. Below it the live summary and the follow-a-pixel readout still come from the frame | `renderer/pce-screen.js`, `pce-panels.js` `lineValues`, `followPixel` |
 | VRAM | **VRAM** | all 32768 words as a map: BAT, tiles, sprite patterns, SAT at `$7F00`, free space; segment table | `pce-panels.js` `vramMap` |
 | CGRAM | **PALETTES** | the VCE's 512 colours as 32 palettes of 16; entry 0 dashed (the shared backdrop); each swatch's tooltip is its CRAM address and 9-bit word | `pce-panels.js` `vcePalettes` |
 | Sprites | **SPRITES** | the 64-entry SAT: Y, X, pattern, palette, size, SPBG/flips, the 64-word cells | `pce-panels.js` `satTable` |
@@ -187,6 +187,44 @@ and `THE CHIP` (the eight panels), with `Reset to default`, like ppu.toys' menu.
 A panel's **`Guide`** button opens the Docs panel at that panel's chapter: SCREEN → registers, VRAM → the
 toy, PALETTES → palettes, SPRITES → sprites, AUDIO → sound, SCANLINES → raster, REGISTERS → registers,
 CONSOLE → budgets.
+
+### 3.1 SCREEN as a visual editor (#84, part A)
+
+ppu.toys' BACKGROUNDS panel is the working example: the layer is not a table of numbers but a map you
+draw on. `renderer/pce-screen.js` is the PCE counterpart's model, and `renderer/studio.html` wires it to
+the panel. It reuses `renderer/pce-editor.js`'s picture rather than a second editor: every edit is that
+module's own call (`paintMapCell`, `paintTileIndex`, `newTile`, `setPaletteColour`, `setScroll`), so the
+refusals are the editor's (`17th-colour`, `not-in-palette`, `tile-space`, `map-range`, …), and the canvas is
+`pce-bg.js` drawing `toPicture()` — the same renderer as the output column. There is no second picture.
+
+| ppu.toys (BACKGROUNDS, measured 2026-10-29) | `studio.html`'s SCREEN panel |
+|---|---|
+| BG1–BG4, Mode, 4bpp, Visible | **one background** (the VDC has one; a BG2 is #21's SuperGrafx), no mode/bpp (always 4bpp); the map size is shown instead: `32 × 32` and `MWR $00` |
+| tool icons: select (key S), pencil, rect, bucket fill (F), erase, move | `Select S · Pencil P · Rect R · Fill F · Erase E · Move M`; the same six behaviours |
+| `#` grid | the `grid` checkbox (and `#` while the map has focus) |
+| Fit / 1× / 2× / 4× | the same four; 1× is a 256-px map canvas, Fit uses the dock's width and height |
+| the map as a cell grid, the visible screen outlined | the 32×32 BAT drawn from its tiles, a cell grid, and a faint white outline at `BYR` over the picture's window height |
+| Characters: char base, tile range, palette strip, tile sheet | tile `$nn`, its VRAM address (`tile × 16` words), the tile count, the tile's 16 colours (click one to paint with it), the tile sheet (click a tile), and an 8×8 tile editor |
+| Map: map base, map size, tile size, HOFS/VOFS with −/+ and a curve button, Mosaic | map base `$0000` (read-only), map size, tile size `8 × 8` (read-only), BXR/BYR with −/+; no Mosaic (no PCE counterpart) |
+| footer `32 x 32 cells - faint white = visible screen` | `32 × 32 cells · faint white = visible screen`, plus the selection's size and origin |
+| — | the live frame summary and the follow-a-pixel readout (#26) stay below the editor |
+
+**What it edits is the toy's assets, not the running frame.** The tiles and the BAT live in `tiles.json`
+(the map's 1024 character words and its BXR/BYR), the colours in `palettes.json`; every edit writes them and
+autosaves the toy, so Save/Open carry the picture (#77's envelope). The canvas therefore shows the picture
+these assets make. A toy still writes its own VRAM/CRAM with `vram[]`/`pal()` until #24's importer reads
+the files into a running toy, and the panel says so under the Map column.
+
+**Refusals.** The module adds only the file-shape ones — `asset-json` (not JSON), `asset-shape` (a tile or
+palette of the wrong length), `map-size` (a map that is not the 32×32 BAT, including any other MWR code),
+`no-tile` (a map naming a character the file does not hold) — and otherwise lets `pce-editor.js` refuse,
+so a value the VDC cannot show cannot be stored by either front end (see [`EDITOR.md`](EDITOR.md)'s table).
+
+**Part A's limits, stated rather than pretended.** The map is the 32×32 BAT (MWR `$00`), the size the toy
+host's 256×224 frame uses and the size `pce-editor.js`'s picture model holds; the VDC's other MWR sizes
+(64×32 … 128×64) are part B and a `tiles.json` asking for one refuses with `map-size`. The BXR/BYR curve
+buttons (keyframes, undo/redo) are #79's; a mosaic has no PCE counterpart; the palette *entries* are edited
+in the PALETTES panel (#85), not here.
 
 ---
 
@@ -304,7 +342,7 @@ ppu.toys keeps beside its Lua:
 
 | file | shape | what it is |
 |---|---|---|
-| `tiles.json` | `{version, tiles: [{char, palette, pixels}]}` | 8×8 tiles, 4-bit colour numbers, keyed by VCHAR |
+| `tiles.json` | `{version, tiles: [{char, palette, pixels}], map: {mwr, bxr, byr, cells}}` | 8×8 tiles, 4-bit colour numbers, keyed by VCHAR — and since #84 the BAT that names them (`cells`, the 32×32 map's 1024 character words) with its scroll |
 | `palettes.json` | `{version, backdrop, background[][] , sprites[][]}` | the VCE's 32 palettes of 16 words |
 | `sprites.json` | `{version, sprites: [{x, y, pattern, palette, …}]}` | the SAT |
 | `waves.json` | `{version, channels: [{wave[32], freq, al, balance}]}` | the PSG's channels |
@@ -395,8 +433,8 @@ claims a file it cannot make.
 `node tests/check-studio.js` (written by `@design`; flagged for `@review` cold, rule 2):
 
 ```
-PASS  485 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
-      every button's handler executed (88 buttons) (… ms)
+PASS  588 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
+      every button's handler executed (103 buttons) (… ms)
 ```
 
 What it does, in order:
@@ -461,6 +499,23 @@ What it does, in order:
       repeating scanline gradient; **SND** stays unpressed, names #71 in its tooltip and toast, and never
       claims a sound; all eight pad keys (IJKL/NM/OP) hold and release their `pad[1]` field while the canvas
       is focused, and the page-wide shortcuts leave them alone.
+11. **The SCREEN panel's cell-map editor (#84).** The tool row is exactly `select/pencil/rect/fill/erase/
+    move` and the zoom row `fit/1x/2x/4x`; the page builds a button for each, the grid starts on, and the
+    footer reads `32 × 32 cells`. Then each tool is driven through the page's own calls and the toy's asset
+    files are read back: `+ tile` makes `$41`; the tile pencil paints pixel (2,3) of it as colour 5 and
+    `tiles.json` holds it; a pencil click paints cell (3,4) with `$41`, the map word in `tiles.json` names
+    it, and **exactly one frame pixel** changes (`rgb 252,252,252` at (26,35) — palette 0 entry 5 is `$1FF`);
+    a pencil drag paints 0…5 with no gaps; a rect fills its 4×3 block and no other cell; fill turns all 1024
+    cells; erase paints the blank tile; move carries a tile and blanks its source; select commits
+    (1,1)–(4,3) and the footer counts `4 × 3 = 12 cells`. The zoom chips draw 256/512/1024-px map canvases,
+    the grid checkbox toggles, a palette swatch picks the colour, the tile sheet selects the clicked tile,
+    the tile editor paints the pixel under the pointer, and BXR/BYR + shift the frame exactly one pixel
+    (pixel (0,40) after = pixel (1,40) before). The assets round-trip through the toy: Save, reopen, same
+    BAT and scroll. `tiles.json`'s text is `pce-screen.js`'s own `tilesText()` of the picture, not a second
+    copy. Refusals by code: `colour-index` (colour 16), `tool-range`, `map-size` (MWR `$10` names part B),
+    `no-tile` (a map word with no tile; a missing tile to select).
+    * The stub DOM has no canvas pixels, so the same panel is proved in the browser (11.2) and in the
+      screenshot (11.3); the stub proves the model, the files and the frame.
 
 ### 11.2 The real browser
 
@@ -469,8 +524,8 @@ What it does, in order:
 ```
 browser: PASS 40 frames · palette · frame 39 · 256x224 · pixels 172032 · digest f45fd1c2
 browser docs: docs-panel open, #61 reference + ppu.toys layout
-browser driver: 32 checks, 0 failed
-PASS  522 checks, … every button's handler executed (88 buttons), headless Chrome says PASS 40 (… ms)
+browser driver: 38 checks, 0 failed
+PASS  631 checks, … every button's handler executed (103 buttons), headless Chrome says PASS 40 (… ms)
 ```
 
 The first run is `?selftest=1&frames=40&example=palette`: the page runs 40 frames, and an FNV-1a digest of
@@ -489,6 +544,14 @@ Vim sets CodeMirror's `keyMap` to `vim` and is written to `localStorage`; Space,
 iframe is reloaded** (`location.reload()`) and a fresh tab is opened with the same profile — both restore
 the edited main.lua and `tiles.json` from autosave (`restored from this browser`), with CodeMirror mounted
 again.
+
+The driver's last block is **#84 in a real browser**: after a fresh example, `+ tile` and the tile pencil
+paint a white pixel, then a real `MouseEvent` (`mousedown`/`mousemove`/`mouseup`) is dispatched on the
+`#scr-map` canvas at the coordinates of cells (3,4) and a 3×3 drag. The page's own listeners must map those
+events to the cells (the stub can only call the model), the cell's map word must change, and
+`getImageData` on the canvas must show `rgb 252,252,252` at the painted pixel — so the canvas really draws
+the picture, not just the model. The `2×` chip must redraw the map canvas at 512 px, and the grid checkbox's
+`change` event must turn the grid off.
 
 ### 11.3 Screenshots
 
@@ -528,6 +591,22 @@ the four `BG1`–`BG4` and `OBJ` checkboxes behind `Layers`, the same idea on th
 our 1600×1000 capture on its own. The underlying pixels are the renderer's (the raster bands and the CRT
 scanlines are visible); no pixel comparison with ppu.toys is claimed.
 
+**#84's SCREEN pair.** `$TMPDIR/pcestudio-design-84/side-by-side-screen-84.png` (3200×1000: theirs left,
+ours right) is `https://ppu.toys/studio` at 1600×1000 beside our studio at the same size with the SCREEN
+panel drawn on. Theirs is the default toy: `BACKGROUNDS` with BG1–BG4, Mode `1`, `4bpp`, Visible, the six
+tool icons and `Select · key S`, `#`, `Fit 1× 2× 4×`, an empty checkered map, `Char base 0x0000` with the
+`0-255` range, `tile 0`, `- pal 0` and the tile sheet, and the footer `32 x 32 cells - faint white =
+visible screen`. Ours: one background layer (no BG2–4), no mode/bpp but the map size `32 × 32 (MWR $00)`,
+the same six tools as `Select S · Pencil P · Rect R · Fill F · Erase E · Move M`, the `grid` checkbox and
+`FIT 1× 2× 4×` in the same corner, the BAT drawn as a 32×32 cell grid with the faint visible-screen
+outline, the Characters column (tile `$42`, char base `$420`, the 16-colour strip, the 4-tile sheet, the
+8×8 tile editor), the Map column (map base `$0000`, map size, tile size, BXR/BYR `− +`) and the footer
+`32 × 32 cells · faint white = visible screen · selected · 6 × 4 = 24 cells · (6,6)`. The picture in ours
+is a small scene drawn entirely through the panel's own tools by a scratch driver (`$TMPDIR/pce84/`), never
+in the repo; theirs is empty because ppu.toys' default toy has no art. Captured by headless Chrome's
+command line only, no synthetic input. `ours-screen.png` is our 1600×1000 capture on its own; `theirs-
+backgrounds.png` is theirs.
+
 ---
 
 ## 12. Not proven, and what comes next
@@ -558,8 +637,21 @@ scanlines are visible); no pixel comparison with ppu.toys is claimed.
 * **The textarea fallback is what the stub exercises.** CodeMirror is skipped where the DOM cannot host it;
   the browser driver is the evidence for CodeMirror itself, so a change that breaks only CodeMirror still
   fails the suite, but a change to the fallback alone is caught only in the stub.
-* **Panels are read-only.** ppu.toys' panels are editors with pokes and keyframes; ours reads the toy's own
-  state. The panel code (#26) already exposes the values an editor would write through.
+* **Only SCREEN is an editor so far.** ppu.toys' panels are all editors with pokes and keyframes; ours
+  reads the toy's own state in VRAM/PALETTES/SPRITES/SCANLINES/REGISTERS. #84 made SCREEN an editor of the
+  toy's *assets* (§3.1); PALETTES (#85), SPRITES (#86) and the keyframed register pokes (#79) are next.
+* **The SCREEN panel's map is the 32×32 BAT.** MWR `$00` is what the toy host's 256×224 frame and
+  `pce-editor.js`'s picture model hold; the VDC's 64×32 … 128×64 maps refuse with `map-size` and are
+  part B. The BXR/BYR curve buttons are #79's keyframes, there is no undo, and a mosaic has no PCE
+  counterpart, so neither is built.
+* **The SCREEN panel edits assets, and no toy reads them yet.** Drawing into the map changes
+  `tiles.json`/`palettes.json` and the panel's own rendered picture; it cannot change a running toy's
+  frame until #24's importer reads the files into VRAM/CRAM. The panel says so, and its canvas never
+  claims otherwise.
+* **Rule 2 for #84.** `tests/check-studio.js`'s #84 block was written by the seat that built the panel
+  (the card names the file), so a cold break is owed: break a tool, the zoom, the grid, the asset
+  write (`syncFiles`), the rendered frame, a refusal code, or the panel's controls, and the check must
+  catch each. Another seat's break, not the builder's.
 * **The output column's controls are proved in the stub, not by a real click.** #78's layer/marker/length
   checks drive `PCEStudio.studio` and the page's own handlers; the real DOM's checkbox events and the
   popover's appearance are judged by the screenshot (§11.3), not by a browser-driver check. The pixels are

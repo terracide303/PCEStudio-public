@@ -394,6 +394,18 @@ function makeStubDom() {
       getContext() { return stubContext(); },
       setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b; }
     };
+    /* A created element with an id is findable by getElementById, as in a
+     * real document — the dock tabs and #84's tool/zoom buttons are built
+     * dynamically and the evidence clicks them by id. */
+    let elId = String(id || "");
+    Object.defineProperty(el, "id", {
+      get() { return elId; },
+      set(value) {
+        elId = String(value || "");
+        if (elId) byId.set(elId, el);
+      }
+    });
+    if (elId) byId.set(elId, el);
     Object.defineProperty(el, "firstChild", {
       get() { return this.children.length ? this.children[0] : null; }
     });
@@ -1925,6 +1937,64 @@ const DRIVER_HTML = [
   '      ck(s2.editorText() === edited && s2.current().source === edited,',
   '         "a fresh tab restores the autosaved toy too");',
   '    }',
+  '    /* #84: the SCREEN panel\'s cell map in a real browser — a real mouse',
+  '     * event on the canvas, the canvas\'s own pixels, and the zoom chips.',
+  '     * The reload above replaced the iframe\'s document, so read it again. */',
+  '    var cs = reloaded || s;',
+  '    var cdoc = a.win.document;',
+  '    cs.loadExample("palette", true);',
+  '    var palFile = cs.files().filter(function (f) {',
+  '      return f.name === "palettes.json"; })[0];',
+  '    var palDoc = JSON.parse(palFile.source);',
+  '    palDoc.background = palDoc.background || [];',
+  '    palDoc.background[0] = new Array(16).fill(0);',
+  '    palDoc.background[0][5] = 0x1FF;',
+  '    cs.selectFile("palettes.json");',
+  '    cs.setEditorText(JSON.stringify(palDoc));',
+  '    cs.selectFile("main.lua");',
+  '    cs.screenNewTile();',
+  '    cs.screenSelectColour(5);',
+  '    cs.screenPaintTilePixel(2, 3);',
+  '    var map = cdoc.getElementById("scr-map");',
+  '    function mapEvent(kind, cx, cy) {',
+  '      map.dispatchEvent(new a.win.MouseEvent(kind, {',
+  '        clientX: cx, clientY: cy, bubbles: true, cancelable: true }));',
+  '    }',
+  '    function mapScale() { return map.width / 256; }',
+  '    var r0 = map.getBoundingClientRect();',
+  '    function cellX(cx) { return r0.left + (cx * 8 + 4) * mapScale(); }',
+  '    function cellY(cy) { return r0.top + (cy * 8 + 4) * mapScale(); }',
+  '    ck(map.width >= 256 && map.height >= 256,',
+  '       "the map canvas is drawn in the browser (" + map.width + "x" +',
+  '       map.height + ")");',
+  '    cs.screenSetTool("pencil");',
+  '    mapEvent("mousedown", cellX(3), cellY(4));',
+  '    mapEvent("mouseup", cellX(3), cellY(4));',
+  '    ck(cs.screen().cell(3, 4) === 0x41,',
+  '       "a real mouse event paints the cell under the pointer");',
+  '    var mg = map.getContext("2d");',
+  '    var mp = mg.getImageData((3 * 8 + 2) * mapScale(),',
+  '                             (4 * 8 + 3) * mapScale(), 1, 1).data;',
+  '    ck(mp[0] === 252 && mp[1] === 252 && mp[2] === 252,',
+  '       "the canvas shows the painted pixel (rgb " + mp[0] + "," + mp[1] +',
+  '       "," + mp[2] + ")");',
+  '    cs.screenSetTool("rect");',
+  '    mapEvent("mousedown", cellX(6), cellY(6));',
+  '    mapEvent("mousemove", cellX(8), cellY(8));',
+  '    mapEvent("mouseup", cellX(8), cellY(8));',
+  '    var block = 0;',
+  '    for (var yy = 6; yy <= 8; yy++)',
+  '      for (var xx = 6; xx <= 8; xx++)',
+  '        if (cs.screen().cell(xx, yy) === 0x41) block++;',
+  '    ck(block === 9, "a real drag fills a 3x3 rect (" + block + " cells)");',
+  '    cdoc.getElementById("scr-zoom-2x").click();',
+  '    ck(map.width === 512 && cs.screen().zoom === "2x",',
+  '       "the 2x chip redraws the map at 512 px in the browser");',
+  '    cdoc.getElementById("scr-zoom-fit").click();',
+  '    var grid = cdoc.getElementById("scr-grid");',
+  '    grid.checked = false;',
+  '    grid.dispatchEvent(new a.win.Event("change", { bubbles: true }));',
+  '    ck(cs.screen().grid === false, "the grid checkbox works in the browser");',
   '    done();',
   '  })().catch(function (e) {',
   '    ck(false, "driver threw: " + (e && e.message ? e.message : e));',
@@ -2095,6 +2165,288 @@ async function checkBrowser() {
   return /^PASS 40 frames/.test(text) && driver === "pass" ? "pass" : "fail";
 }
 
+/* ---- 11. #84: the SCREEN panel's cell-map editor ---------------------- */
+
+function framePixel(frame, x, y) {
+  const o = (y * frame.width + x) * 3;
+  return [frame.pixels[o], frame.pixels[o + 1], frame.pixels[o + 2]];
+}
+
+/* An event at a chosen point of an element, in the stub DOM's own shape. */
+function pointerAt(el, clientX, clientY) {
+  return { type: "mousedown", target: el, currentTarget: el,
+           preventDefault() {}, stopPropagation() {},
+           clientX: clientX, clientY: clientY, key: "", code: "",
+           ctrlKey: false, metaKey: false, shiftKey: false, altKey: false };
+}
+
+function mapCells(studio) {
+  const out = [];
+  for (let y = 0; y < 32; y++)
+    for (let x = 0; x < 32; x++) out.push(studio.screen().cell(x, y));
+  return out;
+}
+
+function countChar(cells, char) {
+  let n = 0;
+  for (const c of cells) if (c === char) n++;
+  return n;
+}
+
+function checkScreenPanel(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const sc = S.screen;
+  check(!!sc && typeof sc.session === "function",
+        "#84: renderer/pce-screen.js loaded");
+  check(page.loaded.some((s) => /pce-screen\.js$/.test(s)),
+        "the page loads renderer/pce-screen.js");
+  if (!sc || !studio.screen) { check(false, "#84: the page has no screen editor"); return; }
+
+  /* the ppu.toys row: six tools, four zooms, the grid, the footers */
+  eq("the tool row", sc.TOOLS.map((t) => t.id),
+     ["select", "pencil", "rect", "fill", "erase", "move"]);
+  eq("the zoom row", sc.ZOOMS, ["fit", "1x", "2x", "4x"]);
+  for (const t of sc.TOOLS)
+    check(!!page.dom.get("scr-tool-" + t.id), "tool " + t.id + " has a button");
+  for (const z of sc.ZOOMS)
+    check(!!page.dom.get("scr-zoom-" + z), "zoom " + z + " has a button");
+  check(page.dom.get("scr-grid").checked === true, "the cell grid starts on");
+  check(/32 × 32 cells/.test(page.dom.get("scr-foot").textContent),
+        "the footer says 32 × 32 cells");
+  check(/visible screen/.test(page.dom.get("scr-foot").textContent),
+        "the footer names the visible screen");
+  check(/Select first cell/.test(page.dom.get("scr-pick").textContent),
+        "the pick line starts on 'Select first cell'");
+  check(!!page.dom.get("scr-map") && !!page.dom.get("scr-tiles") &&
+        !!page.dom.get("scr-tileedit"),
+        "the map, the tile sheet and the tile editor are all on the panel");
+
+  let st = studio.screen();
+  check(!!st, "the panel has a session over the toy's assets");
+  if (!st) return;
+  check(st.tiles === 1, "a fresh toy's assets hold one tile (got " +
+        st.tiles + ")");
+  check(st.mapSize.width === 32 && st.mapSize.height === 32 &&
+        st.mapSize.mwr === 0,
+        "the map is the 32×32 BAT, MWR $00");
+  check(st.error === "", "the fresh assets load without an error (" +
+        st.error + ")");
+
+  /* palette 0 colour 5 = white ($1FF), so one painted pixel is visible */
+  studio.selectFile("palettes.json");
+  const pal = JSON.parse(studio.files().find((f) =>
+    f.name === "palettes.json").source);
+  pal.background = pal.background || [];
+  pal.background[0] = new Array(16).fill(0);
+  pal.background[0][5] = 0x1FF;
+  studio.setEditorText(JSON.stringify(pal));
+  studio.selectFile("main.lua");
+
+  /* + tile, then the tile pencil paints one pixel of it */
+  studio.screenNewTile();
+  st = studio.screen();
+  check(st.tiles === 2 && st.tile === 0x41,
+        "the + tile button makes tile $41 and selects it");
+  studio.screenSelectColour(5);
+  check(studio.screen().colour === 5, "the palette strip picks colour 5");
+  const beforePaint = studio.screenFrame();
+  check(studio.screenPaintTilePixel(2, 3) === 1,
+        "the tile pencil writes the tile into tiles.json");
+  let tiles = JSON.parse(studio.files().find((f) => f.name === "tiles.json").source);
+  const tile41 = tiles.tiles.find((t) => t.char === 0x41);
+  check(!!tile41 && tile41.pixels[3 * 8 + 2] === 5,
+        "tiles.json holds the painted pixel (tile $41, pixel 2,3 = 5)");
+
+  /* pencil: one cell, and exactly one frame pixel changes */
+  studio.screenSetTool("pencil");
+  studio.screenClick(3, 4);
+  check(studio.screen().cell(3, 4) === 0x41,
+        "the pencil paints the selected tile into cell (3,4)");
+  tiles = JSON.parse(studio.files().find((f) => f.name === "tiles.json").source);
+  check(tiles.map.cells[4 * 32 + 3] === 0x41,
+        "tiles.json's map names the tile at (3,4)");
+  const afterPaint = studio.screenFrame();
+  check(diffCount(beforePaint.pixels, afterPaint.pixels).n === 3,
+        "exactly one frame pixel changed, one colour byte each (" +
+        diffCount(beforePaint.pixels, afterPaint.pixels).n + " bytes)");
+  eq("the frame pixel is palette 0's colour 5",
+     framePixel(afterPaint, 3 * 8 + 2, 4 * 8 + 3), [252, 252, 252]);
+  check(studio.files().find((f) => f.name === "tiles.json").source ===
+        sc.tilesText(studio.screenPicture()),
+        "tiles.json is the picture's own text, not a second copy");
+
+  /* pencil drag paints every cell between the endpoints */
+  studio.screenPress(0, 5);
+  studio.screenDrag(5, 5);
+  studio.screenRelease(5, 5);
+  let row = [];
+  for (let x = 0; x <= 5; x++) row.push(studio.screen().cell(x, 5));
+  eq("a pencil drag paints the line, no gaps",
+     row.join(","), "65,65,65,65,65,65");
+
+  /* rect: a 4x3 block */
+  studio.screenSetTool("rect");
+  studio.screenPress(2, 2);
+  studio.screenDrag(5, 4);
+  studio.screenRelease(5, 4);
+  let cells = mapCells(studio);
+  let block = 0;
+  for (let y = 2; y <= 4; y++)
+    for (let x = 2; x <= 5; x++) if (studio.screen().cell(x, y) === 0x41) block++;
+  check(block === 12, "the rect fills its 4×3 block (got " + block + ")");
+  check(countChar(cells, 0x41) === 12 + 6,
+        "the rect changed only its own cells (" + countChar(cells, 0x41) +
+        " of 1024 are $41)");
+
+  /* fill: the connected $40 region becomes the selected tile */
+  studio.screenSelectChar(0x41);
+  studio.screenSetTool("fill");
+  studio.screenClick(25, 25);
+  cells = mapCells(studio);
+  check(countChar(cells, 0x41) === 1024,
+        "the bucket fills the connected region (" + countChar(cells, 0x41) +
+        " of 1024 cells)");
+
+  /* erase: back to the blank tile */
+  studio.screenSetTool("erase");
+  studio.screenClick(3, 3);
+  check(studio.screen().cell(3, 3) === 0x40,
+        "erase paints the blank tile of the cell's palette");
+
+  /* move: a cell's tile moves, the source goes blank */
+  studio.screenSetTool("pencil");
+  studio.screenClick(7, 7);
+  studio.screenSetTool("move");
+  studio.screenPress(7, 7);
+  studio.screenDrag(9, 9);
+  studio.screenRelease(9, 9);
+  check(studio.screen().cell(9, 9) === 0x41 &&
+        studio.screen().cell(7, 7) !== 0x41,
+        "move takes the tile with it and blanks the source");
+
+  /* select: a rectangle, and the footer counts it */
+  studio.screenSetTool("select");
+  studio.screenPress(1, 1);
+  studio.screenDrag(4, 3);
+  studio.screenRelease(4, 3);
+  eq("select commits the rectangle", studio.screen().selection,
+     { x0: 1, y0: 1, x1: 4, y1: 3 });
+  check(/4 × 3 = 12 cells/.test(page.dom.get("scr-pick").textContent),
+        "the pick line counts the selection");
+
+  /* the zoom row changes the canvas: 1x/2x/4x/Fit */
+  clickOne(page, "scr-zoom-2x");
+  check(studio.screen().zoom === "2x", "the 2× chip sets the zoom");
+  check(studio.screenCanvas().map === 512, "2× draws a 512-px map canvas");
+  clickOne(page, "scr-zoom-4x");
+  check(studio.screenCanvas().map === 1024, "4× draws a 1024-px map canvas");
+  clickOne(page, "scr-zoom-1x");
+  check(studio.screenCanvas().map === 256, "1× is the 256-px map");
+  clickOne(page, "scr-zoom-fit");
+  check(studio.screen().zoom === "fit" &&
+        studio.screenCanvas().map >= 256, "Fit fills the panel");
+
+  /* the grid checkbox */
+  const gridBox = page.dom.get("scr-grid");
+  gridBox.checked = false;
+  for (const fn of gridBox.listeners.change || [])
+    fn(page.dom.fakeEvent(gridBox));
+  check(studio.screen().grid === false, "the grid checkbox turns the grid off");
+  gridBox.checked = true;
+  for (const fn of gridBox.listeners.change || [])
+    fn(page.dom.fakeEvent(gridBox));
+  check(studio.screen().grid === true, "and back on");
+
+  /* the palette strip and the tile sheet are clickable */
+  const strip = page.dom.get("scr-palette");
+  check(strip.children.length === 16, "the palette strip has 16 colours");
+  strip.children[7].click();
+  check(studio.screen().colour === 7, "clicking a swatch picks that colour");
+  const tilesCanvas = page.dom.get("scr-tiles");
+  const trect = tilesCanvas.getBoundingClientRect();
+  const tev = pointerAt(tilesCanvas, trect.left + 12, trect.top + 4);
+  for (const fn of tilesCanvas.listeners.click || []) fn(tev);
+  check(studio.screen().tile === 0x41, "the tile sheet selects the clicked tile");
+
+  /* the tile editor paints a pixel of the selected tile */
+  const te = page.dom.get("scr-tileedit");
+  const erect = te.getBoundingClientRect();
+  const eev = pointerAt(te,
+    erect.left + (2.5 / 8) * (erect.width || 64),
+    erect.top + (3.5 / 8) * (erect.height || 64));
+  for (const fn of te.listeners.mousedown || []) fn(eev);
+  const tileNow = JSON.parse(studio.files().find((f) =>
+    f.name === "tiles.json").source).tiles.find((t) => t.char === 0x41);
+  check(!!tileNow && tileNow.pixels[3 * 8 + 2] === studio.screen().colour,
+        "the tile editor paints the pixel under the pointer (" +
+        (tileNow ? tileNow.pixels[3 * 8 + 2] : "none") + ")");
+
+  /* BXR/BYR: the map scrolls and the frame shifts exactly one pixel */
+  const beforeBxr = studio.screenFrame();
+  clickOne(page, "scr-bxr-up");
+  check(studio.screen().scroll.BXR === 1, "BXR + moves the scroll to 1");
+  const afterBxr = studio.screenFrame();
+  eq("BXR 1 shifts the frame one pixel left",
+     framePixel(afterBxr, 0, 40), framePixel(beforeBxr, 1, 40));
+  const beforeByr = studio.screenFrame();
+  clickOne(page, "scr-byr-up");
+  check(studio.screen().scroll.BYR === 1, "BYR + moves the scroll to 1");
+  const afterByr = studio.screenFrame();
+  eq("BYR 1 shifts the frame one pixel up",
+     framePixel(afterByr, 40, 0), framePixel(beforeByr, 40, 1));
+  tiles = JSON.parse(studio.files().find((f) => f.name === "tiles.json").source);
+  check(tiles.map.bxr === 1 && tiles.map.byr === 1,
+        "tiles.json carries the scroll with the BAT");
+
+  /* the assets are the toy's: save, reopen, same picture */
+  const mapBefore = mapCells(studio);
+  const env = studio.envelopeText();
+  studio.openToy(env, "roundtrip.pce.json", { apply: false, persist: false });
+  eq("reopening the toy restores the BAT", mapCells(studio).join(),
+     mapBefore.join());
+  check(studio.screen().scroll.BXR === 1 && studio.screen().scroll.BYR === 1,
+        "reopening the toy restores BXR/BYR");
+
+  /* the refusals are pce-editor.js's and the panel's own */
+  const fresh = S.editor.newPicture();
+  const sess = sc.session(fresh);
+  let code = null;
+  try { sc.selectColour(sess, 16); } catch (e) { code = e.code; }
+  eq("a 17th colour number is refused", code, "colour-index");
+  code = null;
+  try { sc.setTool(sess, "nope"); } catch (e) { code = e.code; }
+  eq("an unknown tool is refused", code, "tool-range");
+  code = null;
+  try {
+    sc.pictureFromFiles([{ name: "tiles.json",
+      source: JSON.stringify({ version: 1, tiles: [],
+        map: { mwr: 16, cells: [] } }) }]);
+  } catch (e) { code = e.code; }
+  eq("a wider MWR map names part B rather than pretending", code, "map-size");
+  code = null;
+  try {
+    sc.pictureFromFiles([{ name: "tiles.json",
+      source: JSON.stringify({ version: 1, tiles: [],
+        map: { mwr: 0, cells: new Array(1024).fill(0x41) } }) }]);
+  } catch (e) { code = e.code; }
+  eq("a map naming a tile the file does not hold is refused", code, "no-tile");
+  code = null;
+  try { sc.selectTile(sess, 0x7FF); } catch (e) { code = e.code; }
+  eq("selecting a missing tile is refused", code, "no-tile");
+
+  /* and the module's own text round-trips */
+  const one = sc.pictureFromFiles([{ name: "tiles.json",
+    source: JSON.stringify({ version: 1, tiles: [] }) }]);
+  const text = sc.tilesText(one);
+  const back = sc.pictureFromFiles([{ name: "tiles.json", source: text }]);
+  eq("tiles.json round-trips byte for byte", sc.tilesText(back), text);
+
+  /* leave the page on a clean example */
+  studio.loadExample("palette", true);
+  studio.pause();
+}
+
 /* ---- main ------------------------------------------------------------- */
 async function main() {
   const started = Date.now();
@@ -2115,6 +2467,7 @@ async function main() {
   checkCodeMirrorEditorText();
   checkOutputColumn(page);
   checkExamplesVisible(page);
+  checkScreenPanel(page);
 
   let browser = "not-requested";
   if (process.argv.indexOf("--browser") >= 0) browser = await checkBrowser();

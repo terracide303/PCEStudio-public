@@ -340,6 +340,72 @@
   .psw.entry0 { border: 1px dashed #89909c; }
   .hint { color: var(--dim); font-size: 12px; }
 
+  /* ---------- the SCREEN panel's cell-map editor (#84) ---------- */
+  .scr-tools {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 0 0 8px; padding: 0 0 8px; border-bottom: 1px solid var(--line2);
+  }
+  .scr-toolrow, .scr-zoomrow { display: flex; gap: 2px; }
+  .scr-tool, .scr-zoom {
+    background: var(--chipbg); border: 1px solid var(--line2);
+    color: var(--text2); font: 500 10px var(--mono); letter-spacing: 0.06em;
+    padding: 4px 7px; border-radius: 4px; cursor: pointer;
+  }
+  .scr-tool:hover, .scr-zoom:hover { background: var(--hover); color: var(--text); }
+  .scr-tool.is-on, .scr-zoom.is-on {
+    background: var(--raised); border-color: var(--accent, #5fc9e8);
+    color: var(--text);
+  }
+  .scr-tool kbd {
+    font: 9px var(--mono); color: var(--muted); margin-left: 4px;
+  }
+  .scr-tool.is-on kbd { color: var(--accent, #5fc9e8); }
+  .scr-check {
+    color: var(--muted); font: 11px var(--mono); display: flex;
+    align-items: center; gap: 4px;
+  }
+  .scr-zoomlabel { color: var(--dim); font: 10px var(--mono);
+    letter-spacing: 0.1em; text-transform: uppercase; }
+  .scr-cols {
+    display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap;
+  }
+  .scr-mapcol { min-width: 0; }
+  #scr-map {
+    display: block; width: 256px; height: 256px;
+    image-rendering: pixelated; background: #08090c;
+    border: 1px solid var(--line); cursor: crosshair;
+  }
+  #scr-map:focus { outline: 1px solid var(--accent, #5fc9e8); }
+  .scr-foot, .scr-pick {
+    color: var(--dim); font: 10px var(--mono); margin-top: 4px;
+    white-space: pre-wrap;
+  }
+  .scr-pick { color: var(--cyan); }
+  .scr-side { display: flex; flex-direction: column; gap: 5px; }
+  .scr-head {
+    font: 700 10px var(--mono); letter-spacing: 0.1em; color: var(--muted);
+    text-transform: uppercase; margin-top: 2px;
+  }
+  .scr-line { color: var(--text2); font: 11px var(--mono);
+    display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+  .scr-line b { color: var(--text); font-weight: 600; }
+  .scr-hint { color: var(--dim); font: 10px/1.4 var(--mono); max-width: 16rem; }
+  .scr-palette { display: flex; gap: 1px; }
+  .scr-palette .sw {
+    width: 13px; height: 13px; box-sizing: border-box; cursor: pointer;
+    border: 1px solid var(--line2);
+  }
+  .scr-palette .sw.entry0 { border: 1px dashed #89909c; }
+  .scr-palette .sw.is-on { border-color: var(--text); }
+  #scr-tiles {
+    width: 256px; height: 64px; image-rendering: pixelated;
+    background: #08090c; border: 1px solid var(--line); cursor: pointer;
+  }
+  #scr-tileedit {
+    width: 64px; height: 64px; image-rendering: pixelated;
+    background: #08090c; border: 1px solid var(--line); cursor: crosshair;
+  }
+
   /* ---------- output column ---------- */
   .output-pane {
     display: grid;
@@ -657,6 +723,65 @@
         </div>
         <div class="dock-body" id="dock-body">
           <div class="panel" id="panel-screen" data-panel="screen">
+            <!-- #84: the BAT as a cell map, like ppu.toys' BACKGROUNDS.
+                 The tools, the grid and the zoom are the ppu.toys row; the
+                 map is the PCE's one background layer (MWR $00, 32x32),
+                 drawn from the toy's asset files. -->
+            <div class="scr-tools">
+              <div class="scr-toolrow" id="scr-tools" role="toolbar"
+                   aria-label="Screen tools"></div>
+              <label class="scr-check" title="#: the cell grid (ppu.toys' key)">
+                <input type="checkbox" id="scr-grid" checked> grid</label>
+              <span class="scr-zoomlabel">zoom</span>
+              <div class="scr-zoomrow" id="scr-zooms" role="group"
+                   aria-label="Zoom"></div>
+            </div>
+            <div class="scr-cols">
+              <div class="scr-mapcol">
+                <canvas id="scr-map" width="256" height="256" tabindex="0"
+                        aria-label="Background map, 32 by 32 cells"></canvas>
+                <div class="scr-foot" id="scr-foot">32 × 32 cells · faint
+                  white = visible screen</div>
+                <div class="scr-pick" id="scr-pick">Click or drag to select ·
+                  Select first cell</div>
+              </div>
+              <div class="scr-side">
+                <div class="scr-head">Characters</div>
+                <div class="scr-line">tile <code id="scr-tile">$40</code> ·
+                  <span id="scr-tilerange">1 tile</span></div>
+                <div class="scr-line">char base <code id="scr-charbase">$400</code>
+                  (tile × 16 words)</div>
+                <div class="scr-line">palette <b id="scr-palno">0</b></div>
+                <div class="scr-palette" id="scr-palette"
+                     aria-label="The selected tile's 16 colours"></div>
+                <canvas id="scr-tiles" width="256" height="64"
+                        aria-label="Tile sheet: click a tile to select it"></canvas>
+                <div class="scr-line">
+                  <canvas id="scr-tileedit" width="64" height="64"
+                          aria-label="The selected tile, 8 by 8, eight times"></canvas>
+                  <button type="button" class="btn-mini" id="scr-newtile">+ tile</button>
+                </div>
+                <div class="scr-head">Map</div>
+                <div class="scr-line">map base <code>$0000</code></div>
+                <div class="scr-line">map size <code id="scr-mapsize">32 × 32</code>
+                  (MWR <code id="scr-mwr">$00</code>)</div>
+                <div class="scr-line">tile size <code>8 × 8</code></div>
+                <div class="scr-line">BXR
+                  <button type="button" class="btn-mini" id="scr-bxr-down"
+                          title="BXR −">−</button>
+                  <b id="scr-bxr">0</b>
+                  <button type="button" class="btn-mini" id="scr-bxr-up"
+                          title="BXR +">+</button></div>
+                <div class="scr-line">BYR
+                  <button type="button" class="btn-mini" id="scr-byr-down"
+                          title="BYR −">−</button>
+                  <b id="scr-byr">0</b>
+                  <button type="button" class="btn-mini" id="scr-byr-up"
+                          title="BYR +">+</button></div>
+                <div class="scr-hint">The picture these assets make; a toy
+                  writes its own VRAM until the importer (#24/#71).</div>
+              </div>
+            </div>
             <div class="summary" id="screen-summary"></div>
             <div class="follow" id="follow-info">Click the output to follow a
               pixel: the layer that won, its BAT entry or sprite, and the
@@ -875,6 +1000,7 @@
 <script src="pce-il.js"></script>
 <script src="pce-panels.js"></script>
 <script src="pce-editor.js"></script>
+<script src="pce-screen.js"></script>
 <script src="pce-psg.js"></script>
 <script src="pce-docs.js"></script>
 <script>
@@ -1721,7 +1847,605 @@ function hex(v, width) {
   return "$" + (v == null ? "-" : v.toString(16).toUpperCase().padStart(width, "0"));
 }
 
+/* ---- the SCREEN panel's cell-map editor (#84) -------------------------
+ *
+ * ppu.toys' BACKGROUNDS panel is the working example: the background layer
+ * drawn as a map of cells, a tool row (select, pencil, rect, fill, erase,
+ * move), a grid, a zoom, and the tile sheet and palette strip beside it.
+ * The model is renderer/pce-screen.js over pce-editor.js's picture; the
+ * pixels come from pce-bg.js through ed.renderPreview, so the canvas cannot
+ * show a picture the VDC could not.  What it edits is the toy's assets —
+ * tiles.json holds the tiles and the BAT (and its BXR/BYR), palettes.json the
+ * colours — not the running frame: a toy still writes its own VRAM/CRAM until
+ * #24's importer exists, and the panel says so. */
+let screenPic = null;
+let screenSess = null;
+let screenError = "";
+let screenDirty = true;
+
+function screenReady() {
+  return !!(PCEStudio.screen && PCEStudio.editor);
+}
+
+/* The next draw rebuilds the picture from the asset files (a different toy,
+ * or an asset edited in the code editor). */
+function screenInvalidate() {
+  screenPic = null;
+  screenSess = null;
+  screenDirty = true;
+}
+
+function screenState() {
+  if (screenPic && screenSess) return { pic: screenPic, sess: screenSess };
+  if (!screenReady()) return null;
+  try {
+    screenPic = PCEStudio.screen.pictureFromFiles(files);
+    screenError = "";
+  } catch (e) {
+    screenError = (e.code ? e.code + ": " : "") + e.message;
+    screenPic = PCEStudio.editor.newPicture();
+  }
+  screenSess = PCEStudio.screen.session(screenPic);
+  screenDirty = true;
+  return { pic: screenPic, sess: screenSess };
+}
+
+function screenEntryColour(pic, palette, index) {
+  return index === 0 ? pic.backdrop : pic.palettes[palette][index];
+}
+
+function screenCss(colour) {
+  const c = PCEStudio.editor.colourChannels(colour);
+  return "rgb(" + (c.r * 36) + "," + (c.g * 36) + "," + (c.b * 36) + ")";
+}
+
+/* Every edit lands in the asset files the toy saves (the #77 envelope); the
+ * code editor shows the file if it is the one open. */
+function screenCommit() {
+  if (!screenPic || !PCEStudio.screen) return [];
+  let changed = [];
+  try { changed = PCEStudio.screen.syncFiles(screenPic, files); }
+  catch (e) { screenFail(e); return []; }
+  if (!changed.length) { screenDirty = true; drawScreenEditor(); return []; }
+  if (changed.indexOf(activeFile) >= 0) {
+    const f = findFile(activeFile);
+    if (f) { switchingFile = true; setEditorText(f.source); switchingFile = false; }
+  }
+  persistToy();
+  setSaved("saved in this browser");
+  panelDirty = true;
+  screenDirty = true;
+  drawScreenEditor();
+  if (!$("assets-pane").hidden) renderAssets();
+  return changed;
+}
+
+function screenFail(e) {
+  screenError = (e && e.code ? e.code + ": " : "") + (e && e.message ? e.message : e);
+  const el = $("scr-pick");
+  if (el) el.textContent = screenError;
+  toast(screenError);
+}
+
+/* The zoom's scale: 1x is one screen pixel per map pixel (a 256-px map),
+ * Fit fills the panel's map column, and the label is what the chip says. */
+function screenScale() {
+  const sess = screenSess;
+  const zoom = sess ? sess.zoom : "fit";
+  if (zoom === "fit") {
+    const body = $("dock-body");
+    const availW = (body && body.clientWidth ? body.clientWidth : 780) - 300;
+    const availH = (body && body.clientHeight ? body.clientHeight : 400) - 70;
+    return Math.max(1, Math.min(3,
+      Math.min(Math.floor(availW / 256) || 1, Math.floor(availH / 256) || 1)));
+  }
+  return Number(String(zoom).replace("x", "")) || 1;
+}
+
+/* ---- the map canvas --------------------------------------------------- */
+const SCR_MAP_PX = 256;          /* 32 cells x 8 pixels */
+
+function screenDrawMap() {
+  const st = screenState();
+  const canvas = $("scr-map");
+  if (!st || !canvas) return;
+  const pic = st.pic, sess = st.sess;
+  const scale = screenScale();
+  canvas.width = SCR_MAP_PX * scale;
+  canvas.height = SCR_MAP_PX * scale;
+  canvas.style.width = canvas.width + "px";
+  canvas.style.height = canvas.height + "px";
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  /* The map at 1x, then scaled: 65536 fillRects would be slow, one
+   * putImageData then drawImage is not. */
+  let off = null, octx = null;
+  try {
+    off = document.createElement("canvas");
+    off.width = SCR_MAP_PX; off.height = SCR_MAP_PX;
+    octx = off.getContext("2d");
+  } catch (e) { off = null; }
+  if (octx) {
+    const img = octx.createImageData(SCR_MAP_PX, SCR_MAP_PX);
+    for (let my = 0; my < PCEStudio.screen.ROWS; my++) {
+      for (let mx = 0; mx < PCEStudio.screen.COLS; mx++) {
+        const char = PCEStudio.editor.mapCell(pic, mx, my);
+        const tile = pic.tiles[char];
+        const palette = tile ? tile.palette : 0;
+        for (let y = 0; y < 8; y++) {
+          for (let x = 0; x < 8; x++) {
+            const v = tile ? tile.pixels[y * 8 + x] : 0;
+            const c = PCEStudio.editor.colourChannels(
+              screenEntryColour(pic, palette, v));
+            const o = ((my * 8 + y) * SCR_MAP_PX + mx * 8 + x) * 4;
+            img.data[o] = c.r * 36; img.data[o + 1] = c.g * 36;
+            img.data[o + 2] = c.b * 36; img.data[o + 3] = 255;
+          }
+        }
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+  } else {
+    ctx.fillStyle = "#08090c";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+
+  /* The cell grid, ppu.toys' "#". */
+  if (sess.grid) {
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= PCEStudio.screen.COLS; i++) {
+      const at = Math.round(i * 8 * scale) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(at, 0); ctx.lineTo(at, canvas.height);
+      ctx.stroke();
+    }
+    for (let j = 0; j <= PCEStudio.screen.ROWS; j++) {
+      const at = Math.round(j * 8 * scale) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, at); ctx.lineTo(canvas.width, at);
+      ctx.stroke();
+    }
+  }
+
+  /* The visible screen: the display window over the map, from BXR/BYR.  The
+   * window is 256 dots wide (the map's full width, so only its vertical
+   * offset shows) and the picture's own height. */
+  const lines = screenWindowLines();
+  const win = screenWinLines(pic);
+  const y0 = ((pic.scroll.BYR % SCR_MAP_PX) + SCR_MAP_PX) % SCR_MAP_PX;
+  const height = Math.min(lines, SCR_MAP_PX - y0);
+  ctx.strokeStyle = "rgba(255,255,255,0.55)";
+  ctx.beginPath();
+  ctx.rect(0.5, y0 * scale + 0.5, canvas.width - 1, height * scale - 1);
+  ctx.stroke();
+  if (y0 + lines > SCR_MAP_PX) {
+    ctx.beginPath();
+    ctx.rect(0.5, 0.5, canvas.width - 1,
+             (y0 + lines - SCR_MAP_PX) * scale - 1);
+    ctx.stroke();
+  }
+  if (win && win.width !== 256)
+    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+
+  /* The selection and any drag in progress. */
+  const r = sess.dragRect || sess.selection;
+  if (r) {
+    ctx.strokeStyle = sess.dragRect ? "rgba(95,201,232,0.9)" :
+                                      "rgba(95,201,232,0.55)";
+    ctx.setLineDash(sess.dragRect ? [4, 3] : []);
+    ctx.strokeRect(r.x0 * 8 * scale + 0.5, r.y0 * 8 * scale + 0.5,
+                   (r.x1 - r.x0 + 1) * 8 * scale - 1,
+                   (r.y1 - r.y0 + 1) * 8 * scale - 1);
+    ctx.setLineDash([]);
+  }
+}
+
+function screenWindowLines() {
+  const pic = screenPic || {};
+  try {
+    const win = PCEStudio.editor.windowOf
+      ? PCEStudio.editor.windowOf(pic) : null;
+    return win && win.lines ? win.lines : 224;
+  } catch (e) { return 224; }
+}
+
+function screenWinLines(pic) {
+  try {
+    return PCEStudio.editor.windowOf(pic);
+  } catch (e) { return null; }
+}
+
+/* ---- the tile sheet, the tile and the palette strip -------------------- */
+const SCR_TILES_PER_ROW = 32;
+
+function screenDrawTiles() {
+  const st = screenState();
+  const canvas = $("scr-tiles");
+  if (!st || !canvas) return;
+  const sheet = PCEStudio.screen.tileSheet(st.pic);
+  const rows = Math.max(1, Math.ceil(sheet.length / SCR_TILES_PER_ROW));
+  canvas.width = 256;
+  canvas.height = rows * 8;
+  canvas.style.width = "256px";
+  canvas.style.height = Math.max(16, canvas.height) + "px";
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  try {
+    const img = ctx.createImageData(256, canvas.height);
+    for (let i = 0; i < sheet.length; i++) {
+      const cell = sheet[i];
+      const tile = st.pic.tiles[cell.char];
+      const tx = (i % SCR_TILES_PER_ROW) * 8;
+      const ty = Math.floor(i / SCR_TILES_PER_ROW) * 8;
+      for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+          const v = tile.pixels[y * 8 + x];
+          const c = PCEStudio.editor.colourChannels(
+            screenEntryColour(st.pic, cell.palette, v));
+          const o = ((ty + y) * 256 + tx + x) * 4;
+          img.data[o] = c.r * 36; img.data[o + 1] = c.g * 36;
+          img.data[o + 2] = c.b * 36; img.data[o + 3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const at = sheet.findIndex((c) => c.char === st.sess.tile);
+    if (at >= 0) {
+      ctx.strokeStyle = "rgba(255,149,64,0.95)";
+      ctx.strokeRect((at % SCR_TILES_PER_ROW) * 8 + 0.5,
+                     Math.floor(at / SCR_TILES_PER_ROW) * 8 + 0.5, 7, 7);
+    }
+  } catch (e) { /* a canvas that cannot draw still leaves the sheet clickable */ }
+}
+
+function screenDrawTileEdit() {
+  const st = screenState();
+  const canvas = $("scr-tileedit");
+  if (!st || !canvas) return;
+  const tile = st.pic.tiles[st.sess.tile];
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const SCALE = 8;
+  for (let y = 0; y < 8; y++) {
+    for (let x = 0; x < 8; x++) {
+      const v = tile ? tile.pixels[y * 8 + x] : 0;
+      ctx.fillStyle = screenCss(screenEntryColour(st.pic,
+        tile ? tile.palette : 0, v));
+      ctx.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);
+    }
+  }
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  for (let i = 1; i < 8; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * SCALE + 0.5, 0); ctx.lineTo(i * SCALE + 0.5, 64);
+    ctx.moveTo(0, i * SCALE + 0.5); ctx.lineTo(64, i * SCALE + 0.5);
+    ctx.stroke();
+  }
+}
+
+function screenDrawPalette() {
+  const st = screenState();
+  const host = $("scr-palette");
+  if (!st || !host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+  const palette = PCEStudio.screen.tilePalette(st.sess, st.sess.tile);
+  for (let e = 0; e < PCEStudio.editor.ENTRIES; e++) {
+    const sw = document.createElement("span");
+    sw.className = "sw" + (e === 0 ? " entry0" : "") +
+      (e === st.sess.colour ? " is-on" : "");
+    sw.style.background = screenCss(screenEntryColour(st.pic, palette, e));
+    sw.title = "colour " + e + (e === 0 ? " (the shared backdrop)" : "");
+    sw.addEventListener("click", () => {
+      try {
+        PCEStudio.screen.selectColour(st.sess, e);
+        screenDirty = true;
+        drawScreenEditor();
+      } catch (err) { screenFail(err); }
+    });
+    host.appendChild(sw);
+  }
+  if ($("scr-palno")) $("scr-palno").textContent = String(palette);
+}
+
+/* ---- the tool row, the zoom and the footers --------------------------- */
+function screenToolButtons() {
+  const host = $("scr-tools");
+  if (!host || host.children.length || !PCEStudio.screen) return;
+  for (const tool of PCEStudio.screen.TOOLS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.id = "scr-tool-" + tool.id;
+    b.className = "scr-tool";
+    b.title = tool.title;
+    const label = document.createElement("span");
+    label.textContent = tool.label;
+    b.appendChild(label);
+    const k = document.createElement("kbd");
+    k.textContent = tool.key;
+    b.appendChild(k);
+    b.addEventListener("click", () => screenSetTool(tool.id));
+    host.appendChild(b);
+  }
+}
+
+function screenZoomButtons() {
+  const host = $("scr-zooms");
+  if (!host || host.children.length || !PCEStudio.screen) return;
+  for (const zoom of PCEStudio.screen.ZOOMS) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.id = "scr-zoom-" + zoom;
+    b.className = "scr-zoom";
+    b.textContent = zoom === "fit" ? "FIT" : zoom.toUpperCase().replace("X", "×");
+    b.title = "Zoom " + (zoom === "fit" ? "to the panel" : zoom);
+    b.addEventListener("click", () => screenSetZoom(zoom));
+    host.appendChild(b);
+  }
+}
+
+function screenSetTool(id) {
+  const st = screenState();
+  if (!st) return;
+  try {
+    PCEStudio.screen.setTool(st.sess, id);
+    screenDirty = true;
+    drawScreenEditor();
+  } catch (e) { screenFail(e); }
+}
+
+function screenSetZoom(id) {
+  const st = screenState();
+  if (!st) return;
+  try {
+    PCEStudio.screen.setZoom(st.sess, id);
+    screenDirty = true;
+    drawScreenEditor();
+  } catch (e) { screenFail(e); }
+}
+
+function screenToggleGrid(on) {
+  const st = screenState();
+  if (!st) return;
+  PCEStudio.screen.toggleGrid(st.sess, on);
+  screenDirty = true;
+  drawScreenEditor();
+}
+
+function screenSelectChar(char) {
+  const st = screenState();
+  if (!st) return;
+  try {
+    PCEStudio.screen.selectTile(st.sess, char);
+    screenDirty = true;
+    drawScreenEditor();
+  } catch (e) { screenFail(e); }
+}
+
+function screenNewTile() {
+  const st = screenState();
+  if (!st) return;
+  try {
+    const char = PCEStudio.editor.newTile(st.pic,
+      PCEStudio.screen.tilePalette(st.sess, st.sess.tile));
+    PCEStudio.screen.selectTile(st.sess, char);
+    screenCommit();
+  } catch (e) { screenFail(e); }
+}
+
+function screenScroll(dx, dy) {
+  const st = screenState();
+  if (!st) return;
+  try {
+    PCEStudio.editor.setScroll(st.pic, {
+      BXR: st.pic.scroll.BXR + dx, BYR: st.pic.scroll.BYR + dy
+    });
+    screenCommit();
+  } catch (e) { screenFail(e); }
+}
+
+/* One place that draws all of it, gated so the play loop's per-frame panel
+ * refresh does not repaint 65,536 pixels. */
+function drawScreenEditor(force) {
+  if (!screenReady()) return;
+  if (!force && !screenDirty) { screenDrawFoot(); return; }
+  const st = screenState();
+  if (!st) return;
+  screenDirty = false;
+  screenToolButtons();
+  screenZoomButtons();
+  if ($("scr-grid")) $("scr-grid").checked = st.sess.grid;
+  for (const tool of PCEStudio.screen.TOOLS) {
+    const b = $("scr-tool-" + tool.id);
+    if (b) b.classList.toggle("is-on", st.sess.tool === tool.id);
+  }
+  for (const zoom of PCEStudio.screen.ZOOMS) {
+    const b = $("scr-zoom-" + zoom);
+    if (b) b.classList.toggle("is-on", st.sess.zoom === zoom);
+  }
+  screenDrawMap();
+  screenDrawTiles();
+  screenDrawTileEdit();
+  screenDrawPalette();
+  const sheet = PCEStudio.screen.tileSheet(st.pic);
+  if ($("scr-tile")) {
+    $("scr-tile").textContent = "$" +
+      st.sess.tile.toString(16).toUpperCase();
+  }
+  if ($("scr-tilerange")) {
+    $("scr-tilerange").textContent = sheet.length +
+      (sheet.length === 1 ? " tile" : " tiles");
+  }
+  if ($("scr-charbase")) {
+    $("scr-charbase").textContent = "$" +
+      (st.sess.tile * 16).toString(16).toUpperCase();
+  }
+  if ($("scr-bxr")) $("scr-bxr").textContent = String(st.pic.scroll.BXR);
+  if ($("scr-byr")) $("scr-byr").textContent = String(st.pic.scroll.BYR);
+  if ($("scr-mapsize")) {
+    const size = PCEStudio.screen.readMapSize(st.pic);
+    $("scr-mapsize").textContent = size.width + " × " + size.height;
+    $("scr-mwr").textContent = "$" + size.mwr.toString(16).toUpperCase()
+      .padStart(2, "0");
+  }
+  screenDrawFoot();
+}
+
+function screenDrawFoot() {
+  const st = screenSess && screenPic ? { pic: screenPic, sess: screenSess } : null;
+  const foot = $("scr-foot"), pick = $("scr-pick");
+  if (foot) {
+    foot.textContent = "32 × 32 cells · faint white = visible screen";
+  }
+  if (!pick) return;
+  if (screenError) { pick.textContent = screenError; return; }
+  if (!st) { pick.textContent = "Click or drag to select · Select first cell"; return; }
+  const r = st.sess.dragRect || st.sess.selection;
+  if (r) {
+    const n = PCEStudio.screen.cellCount(r);
+    pick.textContent = (st.sess.dragRect ? "dragging · " : "selected · ") +
+      (r.x1 - r.x0 + 1) + " × " + (r.y1 - r.y0 + 1) + " = " + n + " cell" +
+      (n === 1 ? "" : "s") + " · (" + r.x0 + "," + r.y0 + ")";
+  } else {
+    pick.textContent = "Click or drag to select · Select first cell";
+  }
+}
+
+/* ---- the pointer and the keys ---------------------------------------- */
+function screenCellAt(ev, elem) {
+  const r = elem.getBoundingClientRect();
+  const w = r.width || elem.width || 256;
+  const h = r.height || elem.height || 256;
+  const x = Math.floor((ev.clientX - r.left) * PCEStudio.screen.COLS / w);
+  const y = Math.floor((ev.clientY - r.top) * PCEStudio.screen.ROWS / h);
+  return PCEStudio.screen.clampCell(x, y);
+}
+
+/* press/drag/release from a DOM event, or from the evidence with a plain
+ * {clientX, clientY} over the element's rect. */
+function screenPointer(kind, ev, elem) {
+  const st = screenState();
+  if (!st || !elem) return 0;
+  let n = 0;
+  try {
+    const cell = screenCellAt(ev, elem);
+    if (kind === "press") n = PCEStudio.screen.press(st.sess, cell.x, cell.y);
+    else if (kind === "drag") n = PCEStudio.screen.drag(st.sess, cell.x, cell.y);
+    else if (kind === "release") n = PCEStudio.screen.release(st.sess, cell.x, cell.y);
+    if (n) screenCommit();
+    else { screenDirty = true; drawScreenEditor(); }
+  } catch (e) { screenFail(e); }
+  return n;
+}
+
+function screenTileAt(ev, elem) {
+  const st = screenState();
+  if (!st) return 0;
+  const r = elem.getBoundingClientRect();
+  const w = r.width || elem.width || 256;
+  const h = r.height || elem.height || 8;
+  const col = Math.floor((ev.clientX - r.left) * SCR_TILES_PER_ROW / w);
+  const row = Math.floor((ev.clientY - r.top) *
+                         (elem.height || 8) / (h * 8));
+  const sheet = PCEStudio.screen.tileSheet(st.pic);
+  const at = row * SCR_TILES_PER_ROW + col;
+  if (at < 0 || at >= sheet.length) return 0;
+  screenSelectChar(sheet[at].char);
+  return sheet[at].char;
+}
+
+function screenTilePixelAt(ev, elem) {
+  const st = screenState();
+  if (!st) return 0;
+  const r = elem.getBoundingClientRect();
+  const w = r.width || 64, h = r.height || 64;
+  const x = Math.floor((ev.clientX - r.left) * 8 / w);
+  const y = Math.floor((ev.clientY - r.top) * 8 / h);
+  try {
+    PCEStudio.screen.paintTilePixel(st.sess,
+      Math.max(0, Math.min(7, x)), Math.max(0, Math.min(7, y)));
+    screenCommit();
+    return 1;
+  } catch (e) { screenFail(e); return 0; }
+}
+
+/* press/drag/release at cell coordinates — the same calls the DOM handlers
+ * make, for the evidence. */
+function screenPressRelease(kind, x, y) {
+  const st = screenState();
+  if (!st) return 0;
+  let n = 0;
+  try {
+    const cell = PCEStudio.screen.clampCell(x, y);
+    if (kind === "press") n = PCEStudio.screen.press(st.sess, cell.x, cell.y);
+    else if (kind === "drag") n = PCEStudio.screen.drag(st.sess, cell.x, cell.y);
+    else n = PCEStudio.screen.release(st.sess, cell.x, cell.y);
+    if (n) screenCommit();
+    else { screenDirty = true; drawScreenEditor(); }
+  } catch (e) { screenFail(e); }
+  return n;
+}
+
+function screenKey(ev) {
+  const st = screenState();
+  if (!st) return false;
+  const key = ev.key ? ev.key.toLowerCase() : "";
+  const tool = PCEStudio.screen.TOOLS.find((t) => t.key.toLowerCase() === key);
+  if (tool) { screenSetTool(tool.id); return true; }
+  if (key === "#") { screenToggleGrid(); return true; }
+  return false;
+}
+
+function bindScreenEditor() {
+  if (!screenReady()) return;
+  const map = $("scr-map");
+  if (map) {
+    map.addEventListener("mousedown", (ev) => {
+      screenPointer("press", ev, map); ev.preventDefault();
+    });
+    map.addEventListener("mousemove", (ev) => {
+      if (screenSess && screenSess.dragging) screenPointer("drag", ev, map);
+    });
+    map.addEventListener("mouseup", (ev) => {
+      screenPointer("release", ev, map); ev.preventDefault();
+    });
+    map.addEventListener("mouseleave", (ev) => {
+      if (screenSess && screenSess.dragging) screenPointer("release", ev, map);
+    });
+    map.addEventListener("keydown", (ev) => {
+      /* The map's own keys stop here: R would otherwise also restart the toy
+       * through the page-wide shortcut. */
+      if (screenKey(ev)) { ev.preventDefault(); ev.stopPropagation(); }
+    });
+  }
+  const tiles = $("scr-tiles");
+  if (tiles) tiles.addEventListener("click", (ev) => screenTileAt(ev, tiles));
+  const tileedit = $("scr-tileedit");
+  if (tileedit) {
+    tileedit.addEventListener("mousedown", (ev) => {
+      screenTilePixelAt(ev, tileedit); ev.preventDefault();
+    });
+  }
+  if ($("scr-grid")) $("scr-grid").addEventListener("change", () =>
+    screenToggleGrid($("scr-grid").checked));
+  if ($("scr-newtile")) $("scr-newtile").addEventListener("click", screenNewTile);
+  if ($("scr-bxr-down")) $("scr-bxr-down").addEventListener("click", () => screenScroll(-1, 0));
+  if ($("scr-bxr-up")) $("scr-bxr-up").addEventListener("click", () => screenScroll(1, 0));
+  if ($("scr-byr-down")) $("scr-byr-down").addEventListener("click", () => screenScroll(0, -1));
+  if ($("scr-byr-up")) $("scr-byr-up").addEventListener("click", () => screenScroll(0, 1));
+}
+
 function drawScreen(st) {
+  drawScreenEditor();
+  if (!st) {
+    if ($("screen-summary")) {
+      $("screen-summary").textContent = screenError || "no frame yet";
+    }
+    return;
+  }
   const line = panelLine(st);
   const v = PCEStudio.panels.lineValues(st, line);
   $("screen-summary").textContent =
@@ -1890,7 +2614,9 @@ function refreshPanels(force) {
   if (!force && !panelDirty) return;
   panelDirty = false;
   const st = stateNow();
-  if (!st) return;
+  /* #84: the SCREEN panel's cell map is the toy's assets, not the running
+   * frame, so it draws before a toy has run too. */
+  if (!st) { if (activePanel === "screen") drawScreen(null); return; }
   $("inspect-line").textContent = "line " + panelLine(st) + " · full frame";
   if (activePanel === "screen") drawScreen(st);
   else if (activePanel === "vram") drawVram(st);
@@ -2134,6 +2860,12 @@ function onEditorChange() {
   current.source = mainSource();
   setSaved("edited — Run to apply");
   persistToy();
+  /* #84: an asset file edited by hand is what the SCREEN panel draws next. */
+  if (f && (f.name === "tiles.json" || f.name === "palettes.json")) {
+    screenInvalidate();
+    panelDirty = true;
+    if (activePanel === "screen") refreshPanels(true);
+  }
   if (!$("assets-pane").hidden) renderAssets();
 }
 
@@ -2263,6 +2995,8 @@ function loadExample(id, quiet, noApply) {
   switchingFile = true;
   setEditorText(ex.source);
   switchingFile = false;
+  screenInvalidate();
+  panelDirty = true;
   if (editor) editor.setOption("mode", "lua");
   $("doc-title").textContent = ex.name;
   updateFileTabs();
@@ -2373,6 +3107,8 @@ function openToy(text, fileName, opts) {
   $("doc-title").textContent = "main.lua";
   updateFileTabs();
   renderAssets();
+  screenInvalidate();
+  panelDirty = true;
   if (!opts || opts.apply !== false) applySource();
   if (!opts || opts.persist !== false) persistToy();
   return env;
@@ -2648,6 +3384,8 @@ function buildExamplesMenu() {
 }
 
 function bind() {
+  /* #84: the SCREEN panel's map, tile sheet and palette strip */
+  bindScreenEditor();
   /* top bar */
   $("btn-run").addEventListener("click", () => {
     if (!applySource()) return;
@@ -2970,6 +3708,11 @@ PCEStudio.studio = {
     drawGutter();
     persistToy();
     setSaved("edited — Run to apply");
+    /* #84: text set through this path is an asset edit too */
+    if (activeFile === "tiles.json" || activeFile === "palettes.json") {
+      screenInvalidate();
+      panelDirty = true;
+    }
   },
   editorKind: () => editor ? "codemirror" : "textarea",
   isPlaying: () => playing,
@@ -3008,7 +3751,68 @@ PCEStudio.studio = {
   saveToy: saveToyFile,
   openToy: openToy,
   parseToy: parseToyFile,
-  handleShortcut: handleShortcut
+  handleShortcut: handleShortcut,
+
+  /* #84 — the SCREEN panel's cell-map editor.  The evidence drives the page's
+   * own tools here (the same functions the DOM handlers call), and reads the
+   * picture the assets make; there is no second copy. */
+  screen: () => {
+    const st = screenState();
+    if (!st) return null;
+    return {
+      tool: st.sess.tool, zoom: st.sess.zoom, grid: st.sess.grid,
+      tile: st.sess.tile, colour: st.sess.colour,
+      palette: PCEStudio.screen.tilePalette(st.sess, st.sess.tile),
+      selection: st.sess.selection,
+      scroll: { BXR: st.pic.scroll.BXR, BYR: st.pic.scroll.BYR },
+      tiles: PCEStudio.screen.tileSheet(st.pic).length,
+      mapSize: PCEStudio.screen.readMapSize(st.pic),
+      error: screenError,
+      cell: (x, y) => PCEStudio.editor.mapCell(st.pic, x, y),
+      pixels: () => PCEStudio.editor.tilePixels(st.pic, st.sess.tile),
+      colours: () => PCEStudio.editor.paletteColours(st.pic,
+        PCEStudio.screen.tilePalette(st.sess, st.sess.tile))
+    };
+  },
+  screenSession: () => screenState() && screenState().sess,
+  screenPicture: () => screenState() && screenState().pic,
+  screenFrame: () => {
+    const st = screenState();
+    return st ? PCEStudio.screen.frame(st.pic) : null;
+  },
+  screenSetTool: screenSetTool,
+  screenSetZoom: screenSetZoom,
+  screenToggleGrid: screenToggleGrid,
+  screenSelectChar: screenSelectChar,
+  screenSelectColour: (n) => {
+    const st = screenState();
+    PCEStudio.screen.selectColour(st.sess, n);
+    screenDirty = true; drawScreenEditor();
+    return st.sess.colour;
+  },
+  screenNewTile: screenNewTile,
+  screenScroll: screenScroll,
+  screenPaintTilePixel: (x, y) => {
+    const st = screenState();
+    PCEStudio.screen.paintTilePixel(st.sess, x, y);
+    return screenCommit().length;
+  },
+  screenPress: (x, y) => screenPressRelease("press", x, y),
+  screenDrag: (x, y) => screenPressRelease("drag", x, y),
+  screenRelease: (x, y) => screenPressRelease("release", x, y),
+  screenClick: (x, y) => {
+    let n = screenPressRelease("press", x, y);
+    n += screenPressRelease("release", x, y);
+    return n;
+  },
+  screenCellAt: (x, y) => screenState() &&
+    PCEStudio.screen.clampCell(x, y),
+  /* the DOM path: a {clientX, clientY} over an element's rect */
+  screenPointer: (kind, ev, elem) => screenPointer(kind, ev,
+    elem || $("scr-map")),
+  screenCanvas: () => ({ map: $("scr-map").width,
+                         tiles: $("scr-tiles").height }),
+  screenDrawn: () => !!$("scr-foot") && !!$("scr-foot").textContent
 };
 
 init();
