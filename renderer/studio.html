@@ -5311,6 +5311,16 @@ const studio = {
   audioSaveMix: () => panelApi("audio").saveMix(),
   audioLoadSaved: () => panelApi("audio").loadSaved(),
   audioReleaseAll: () => panelApi("audio").releaseAll(),
+  /* #140: the voice picker's two lists, the pick itself, and what Trigger
+   * plays — the module owns these; the evidence drives the same functions
+   * the panel's DOM handlers call. */
+  audioInstruments: () => panelApi("audio").instruments(),
+  audioBuiltins: () => panelApi("audio").builtins(),
+  audioChoose: (name, voice) => panelApi("audio").choose(name, voice),
+  audioLoaded: (i) => panelApi("audio").loaded(i),
+  audioAudition: (i) => panelApi("audio").audition(i),
+  audioPreview: (name, note, frames) =>
+    panelApi("audio").preview(name, note, frames),
   audioText: () => panelApi("audio").text()
 };
 
