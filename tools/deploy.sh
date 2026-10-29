@@ -5,8 +5,6 @@
 #   sh tools/deploy.sh --dry                    list what would be uploaded
 #
 # Only the web part goes up: renderer/, toys/ and the browser libraries the pages load.
-# The MCP server pack (tools/gen/pcestudio-mcp.zip, built here by tools/mcp-pack.sh, never
-# committed) goes up too, at the site root, so a tester's Claude Code can drive PCEStudio.
 # LICENSE (GPL-3.0) goes up with it. NOT tools/, tests/, docs/ or vendor/huc (its licence is not settled, docs/DECISIONS.md).
 # Uploads go through cPanel's Fileman API over HTTPS: plain FTP to this host refused some files
 # (451) and timed out on others, 2026-10-29. The password comes from the environment only.
@@ -21,14 +19,7 @@ files=$( { find renderer -type f \( -name '*.html' -o -name '*.js' -o -name '*.c
            find vendor/codemirror vendor/fengari vendor/ppu-toys -type f;
            echo LICENSE; } | grep -v '/\.' | sort )
 
-# The MCP server as a download (#142): a stranger cannot clone this private
-# repo, so the guide points at pcestudio-mcp.zip on the site. It is built by
-# tools/mcp-pack.sh into tools/gen/ (gitignored, never committed) and goes to
-# the site root beside the guide.
-PACK=tools/gen/pcestudio-mcp.zip
-sh tools/mcp-pack.sh "$PACK" >/dev/null
-
-if [ "${1:-}" = "--dry" ]; then echo "$files"; echo "$PACK"; echo "$(echo "$files" | wc -l | tr -d ' ') files + pcestudio-mcp.zip"; exit 0; fi
+if [ "${1:-}" = "--dry" ]; then echo "$files"; echo "$(echo "$files" | wc -l | tr -d ' ') files"; exit 0; fi
 : "${PCE_CP_PASS:?set PCE_CP_PASS (never put it in a file)}"
 
 jar=$(mktemp); trap 'rm -f "$jar"' EXIT
@@ -57,9 +48,6 @@ index=$(mktemp -d)/index.html
 printf '<!doctype html><meta charset="utf-8"><title>PCEStudio</title>\n<meta http-equiv="refresh" content="0; url=renderer/studio.html">\n<a href="renderer/studio.html">PCEStudio</a>\n<p><a href="pcestudio-for-claude.md">PCEStudio for Claude</a> — the guide to paste into a chat AI.</p>\n' > "$index"
 upload "$DEST" "$index" >/dev/null
 upload "$DEST" renderer/pcestudio-for-claude.md >/dev/null
-# The MCP server pack (#142) sits at the site root: .../pcestudio-mcp.zip,
-# the URL the guide and README.txt give a tester.
-upload "$DEST" "$PACK" >/dev/null
 
 total=0
 for d in $(echo "$files" | xargs -n1 dirname | sort -u); do
@@ -69,30 +57,36 @@ for d in $(echo "$files" | xargs -n1 dirname | sort -u); do
   upload "$target" $group >/dev/null
   total=$((total + $(echo "$group" | wc -l)))
 done
-
-# ---- the demo art (#128), which is NEVER in the repository ----------------
-# Dennis, 2026-10-29: the pack's art may be shown on the site but not
-# committed (docs/DECISIONS.md).  So the playable toy and its pictures live
-# beside the repo in demo-art/<toy>/; this uploads them, and makes the site's
-# gallery carry the playable source instead of the repo's placeholder.
+# ---- the demo art (#127, #128), which is NEVER in the repository ----------
+# Dennis, 2026-10-29: the packs' art may be shown on the site but not
+# committed (docs/DECISIONS.md).  Each demo's playable toy and its converted
+# picture live beside the repo in demo-art/<toy>/; this uploads them, and
+# makes the site's gallery carry the playable source instead of the repo's
+# placeholder.  The repo's own renderer/gallery-toys.js stays the art-free
+# copy the tests check — this is the only place the two are joined.
 DEMO_ART="${DEMO_ART:-/Volumes/External/agent-workshop-demo/demo-art}"
-if [ -f "$DEMO_ART/oak-woods/main.lua" ]; then
-  echo "demo art: $DEMO_ART/oak-woods"
-  # the generated gallery module, with the pack's art in oak-woods' source
-  stage=$(mktemp -d)
+demo_toys=""
+for toy in oak-woods cave; do
+  [ -f "$DEMO_ART/$toy/main.lua" ] && demo_toys="$demo_toys $toy"
+done
+if [ -n "$demo_toys" ]; then
+  stage=$(mktemp -d "${TMPDIR:-/tmp}/pce-deploy-XXXXXX")
   node tools/gallery.js --with-demo-art > "$stage/gallery-toys.js"
   upload "$DEST/renderer" "$stage/gallery-toys.js" >/dev/null
   total=$((total + 1))
-  # the art folder, and the playable main.lua where the toy page's Raw source
-  # and the gallery's ../toys/ link point
-  mkd "$DEST"; mkd "$DEST/demo-art"; mkd "$DEST/demo-art/oak-woods"
-  art=$(find "$DEMO_ART/oak-woods" -type f ! -name '.*' | sort)
-  upload "$DEST/demo-art/oak-woods" $art >/dev/null
-  total=$((total + $(echo "$art" | wc -l)))
-  upload "$DEST/toys/oak-woods" "$DEMO_ART/oak-woods/main.lua" >/dev/null
-  total=$((total + 1))
   rm -rf "$stage"
+  for toy in $demo_toys; do
+    echo "demo art: $DEMO_ART/$toy"
+    # the art folder, and the playable main.lua where the toy page's Raw
+    # source and the gallery's ../toys/ link point
+    mkd "$DEST"; mkd "$DEST/demo-art"; mkd "$DEST/demo-art/$toy"; mkd "$DEST/toys/$toy"
+    art=$(find "$DEMO_ART/$toy" -type f ! -name '.*' | sort)
+    upload "$DEST/demo-art/$toy" $art >/dev/null
+    total=$((total + $(echo "$art" | wc -l)))
+    upload "$DEST/toys/$toy" "$DEMO_ART/$toy/main.lua" >/dev/null
+    total=$((total + 1))
+  done
 else
-  echo "demo art: no $DEMO_ART/oak-woods/main.lua — the site keeps the placeholder"
+  echo "demo art: none beside $DEMO_ART — the site keeps the placeholders"
 fi
 echo "uploaded $total files + index.html to $DEST"
