@@ -95,7 +95,7 @@ Two first-hit aborts sit between the page and the truth:
 1. `pce-cgen.js:489` refuses the **first** IL instruction it cannot lower and
    throws. STARFALL's first is the `table` for the `DIGIT` digit-code array at
    `main.lua:47`.
-2. That error sets `errors > 0`, and `renderer/studio.html:3465` returns
+2. That error sets `errors > 0`, and `renderer/studio.html:3494` returns
    before the encoder is ever called — so the page never reports what
    `pce-ilbc.js` (route 1, the backend the Export actually uses) would say.
    Asked directly, `pce-ilbc.js` refuses with `ilbc-op: instruction table

@@ -14,7 +14,7 @@
  *   1. the CONSOLE tab's checks: pce-il.js compile, pce-validate.js budgets,
  *      pce-cgen.js emitC (the C backend, llvm-mos)
  *   2. if stage 1 reported any error, STOP: the encoder is never reached
- *      (renderer/studio.html:3465)
+ *      (renderer/studio.html:3494)
  *   3. pce-ilbc.js encode -> pce-rom.js buildToyRom over renderer/ilvm.bin
  *
  * Stage 1's cgen refuses the FIRST instruction it cannot lower, so the page
@@ -97,7 +97,7 @@ console.log("   C emitter: " + (cgenR.ok ? "lowered " + cgenR.value.length +
 const errors = (report ? report.problems.filter((p) =>
   p.severity !== "warn").length : 1) + (cgenR.ok ? 0 : 1);
 console.log("   page verdict: " + (errors
-  ? "BLOCKED (" + errors + " error) - renderer/studio.html:3465 returns here, " +
+  ? "BLOCKED (" + errors + " error) - renderer/studio.html:3494 returns here, " +
     "so pce-ilbc.js is never run"
   : "proceeds to the encoder"));
 console.log("");
