@@ -22,11 +22,18 @@
         chapter: "budgets",
         gloss: "The PC Engine's frame budget and where the compiler stands (#31).",
         draw: function (st) {
-          if (!st || !P.panels) return;
+          if (!P.panels) return;
           var count = 0;
-          var sat = P.panels.satTable(st);
-          for (var i = 0; i < sat.length; i++) if (!sat[i].empty) count++;
+          if (st) {
+            var sat = P.panels.satTable(st);
+            for (var i = 0; i < sat.length; i++) if (!sat[i].empty) count++;
+          }
           var runtime = studio.render.runtime();
+          /* #107: the last failure in the error line's own words, so a person
+           * can copy one line back to the chat AI that wrote the code. A toy
+           * that did not compile has no state, so this line draws without
+           * one — that is exactly when it matters. */
+          var err = studio.render.lastError ? studio.render.lastError() : null;
           studio.$("console-table").textContent =
             "PC Engine frame: 119904 CPU cycles (7.16 MHz, 60 Hz)\n" +
             "per-line trigger: RCR interrupt (no HDMA)\n" +
@@ -35,7 +42,9 @@
               "IL interpreter (#31)" : "Fengari Lua 5.3") + "\n" +
             "frames run this session: " + (runtime ? runtime.frameCount : 0) +
             "\ncompiler: IL only — machine code is #31's next half\n" +
-            "export: second half of #75";
+            "export: second half of #75\n" +
+            "last error: " + (err ? err.code + ": " + err.message :
+                                     "none this session");
         }
       });
     }

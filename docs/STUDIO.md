@@ -99,7 +99,7 @@ pixel, not eyeballed at another scale.
 |---|---|---|
 | left | purple chip mark, `ppu.toys` | our tile mark, `PCE·studio` in Pixelify Sans (links to `renderer/index.html`) |
 | title | `untitled toy` + `saved in this browser` | the active file (`main.lua`) + `saved in this browser` / `edited — Run to apply` / `restored from this browser` |
-| right | Export to ROM (orange), Raw output, Panels ▾, gear, Docs, Save file, Open…, Sign in to publish | Run, Check, Export… (orange), Panels ▾, gear, Docs, Save file, Open…, not signed in |
+| right | Export to ROM (orange), Raw output, Panels ▾, gear, Docs, Save file, Open…, Sign in to publish | Run, Paste & Run, Check, Export… (orange), Panels ▾, gear, Docs, Save file, Open…, not signed in |
 
 Measured: both bars are 0…49 with a 1 px border at y=49. The orange primary action is the export in both;
 ours opens the honest `needs #31` dialog (§9). `Docs` opens the in-studio Docs panel (§4); `not signed in` is
@@ -379,6 +379,44 @@ Chrome, no synthetic input); the PALETTES one shows the example's `palettes.json
 the artwork the toy writes with `pal()` is not in the file until #24/#71, and the panel says so rather
 than showing the frame's colours as if they were the asset.
 
+### 3.5 Paste & Run (#107)
+
+The loop this exists for: a chat AI answers with one fenced Lua block, the person copies the answer and
+presses **Paste & Run** in the top bar (next to `Run`). There is no import step in between.
+
+| door | what it does |
+|---|---|
+| the button | `navigator.clipboard.readText()`, the answer stripped to its code, `main.lua` replaced, the toy runs |
+| the fallback box | shown when the page has no clipboard, the read is refused, or the clipboard is empty: the note says why, the box takes the paste, its own **Paste & Run** runs it |
+| a dropped file | a `.lua` becomes the new `main.lua` (the toy's assets are kept); a `.pce.json` toy loads its whole file set, the same as `Open… → From file…`; either way it runs at once |
+
+**One rule, one place.** `stripCodeFence()` takes the first fenced block anywhere in the text — prose above
+and below is dropped — accepts ```lua / ```luau or a bare fence, normalises CRLF, and **keeps a leading blank
+line**: line numbers must stay the toy's, because the error line quotes them. A fence that names another
+language is `paste-language`, an opening fence with no close is `paste-fence`, and nothing to run is
+`paste-empty`.
+
+**The previous source is one undo away.** In a real browser the replacement is a single CodeMirror
+`replaceRange` with its own change origin, so `Ctrl/Cmd+Z` restores the old `main.lua` in one step.
+
+**When it fails, the line says where.** `showError()` reports `code: main.lua line N: …` on the output
+column's error line, cleared by the next run that starts, and CONSOLE repeats it on a `last error:` line. The
+runtime loads the chunk as `toy.lua`, and the studio renames the location to the file tab the person is
+looking at. Compile errors, `init()` errors and an error in frame 0 all land there: `Run` and `Paste & Run`
+share `runToy()`, which wraps the first frame too.
+
+API: `studio.paste()` (the button), `studio.pasteText(text)` (the same work with the text in hand),
+`studio.stripFence(text)`, `studio.pasteBox()` / `setPasteBoxText()` / `openPasteBox(note)`,
+`studio.lastError()` and `studio.lastDrop()` (`{status, name, error}` — a drop is async, so the evidence polls
+it). CONSOLE reads `studio.render.lastError()`.
+
+Evidence: `tests/check-studio.js` checks the fence rule and every refusal by code, a good paste running and
+visible (57,344 non-backdrop pixels at frame 60), and a broken one naming `main.lua line 2` in the error line
+and in CONSOLE; `--browser` stands in for `navigator.clipboard`, clicks the real button, counts the pixels,
+undoes with CodeMirror's own `undo()`, drops a real `File` through a `DragEvent`, and takes the fallback box
+when the stub refuses. The tests were written by this card's builder, so RULES rule 2 (a different seat
+breaks it) is owed by @review.
+
 ## 4. The Docs panel (the generated #61 reference)
 
 The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel under the top bar:
@@ -587,7 +625,7 @@ claims a file it cannot make.
 
 ```
 PASS  822 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
-      editor/files/shortcuts, output column, every button's handler executed (115 buttons) (… ms)
+      editor/files/shortcuts, output column, every button's handler executed (120 buttons) (… ms)
 ```
 
 What it does, in order:
@@ -609,7 +647,7 @@ What it does, in order:
    on all 40, frame numbers and 256×224 dimensions intact; a second 40-frame run is byte-identical.
 5. Runs the same 40 frames through the page's Lua/IL switch for all three examples: state, raster table and
    pixels equal, so the IL path is exercised through the studio, not just imported.
-6. Clicks **every button** the page builds (115 at this revision: top bar, Docs/close/Guide, code tabs, file
+6. Clicks **every button** the page builds (120 at this revision: top bar, Docs/close/Guide, code tabs, file
    tabs, asset `Edit` buttons, dock tabs, the SCREEN tools/zooms and its two curve buttons, the SPRITES tools/zooms/picker/slots, transport,
    layers/CRT/SND, settings, open, export, and every dynamically built panel-menu and example entry),
    asserts each has a click handler and none throws;
