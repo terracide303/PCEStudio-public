@@ -2577,6 +2577,420 @@ function checkScreenPanel(page) {
   studio.pause();
 }
 
+/* ---- 11b. #86: the SPRITES panel's visual editor ---------------------- *
+ * The card closes on: the 64 sprites drawn, one selected and moved on the
+ * screen, its pattern edited with #84's tools.  Everything below is driven
+ * through the panel's own api object (the module the registry holds), over
+ * the live stub page, and every frame assertion is the editor's own
+ * renderPreview — there is no second picture to disagree with. */
+
+const SPR_WHITE = 0x1FF;   /* (g=7,r=7,b=7): the editor's white, check-studio's */
+const SPR_RED = 0x038;     /* (g=0,r=7,b=0) */
+
+function setAssetFile(studio, name, text) {
+  studio.selectFile(name);
+  studio.setEditorText(text);
+  studio.selectFile("main.lua");
+}
+
+function assetText(studio, name) {
+  const f = studio.files().find((x) => x.name === name);
+  return f ? f.source : null;
+}
+
+function spritePanel(page) {
+  const def = page.sandbox.PCEStudio.studio.panels.get("sprites");
+  return (def && def.api) || null;
+}
+
+/* A fresh asset set for the sprite panel: no tiles, no BAT (the editor's own
+ * blank picture), the palettes the checks paint with, no sprites. */
+function resetSpriteAssets(studio) {
+  setAssetFile(studio, "tiles.json", JSON.stringify({ version: 1, tiles: [] }));
+  const pal = { version: 1, backdrop: 0,
+                background: new Array(16).fill(0).map(() => new Array(16).fill(0)),
+                sprites: new Array(16).fill(0).map(() => new Array(16).fill(0)) };
+  pal.background[0][5] = SPR_RED;
+  pal.sprites[0][5] = SPR_WHITE;
+  setAssetFile(studio, "palettes.json", JSON.stringify(pal));
+  setAssetFile(studio, "sprites.json", JSON.stringify({ version: 1, sprites: [] }));
+}
+
+function countPixel(frame, x, y) {
+  return framePixel(frame, x, y).join(",");
+}
+
+function countNonBlack(frame) {
+  let n = 0;
+  for (let i = 0; i < frame.pixels.length; i += 3)
+    if (frame.pixels[i] || frame.pixels[i + 1] || frame.pixels[i + 2]) n++;
+  return n;
+}
+
+function checkSpritesPanel(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const sat = S.sat;
+  const ed = S.editor;
+
+  check(!!sat && typeof sat.session === "function",
+        "#86: renderer/pce-sat.js loaded");
+  check(page.loaded.some((s) => /pce-sat\.js$/.test(s)),
+        "the page loads renderer/pce-sat.js");
+  const api = spritePanel(page);
+  check(!!api, "#86: the sprites panel has an api for the evidence");
+  if (!sat || !api) { check(false, "#86: the page has no sprite editor"); return; }
+
+  /* The panel is the module's: its tab, its Guide chapter, its own buttons. */
+  const def = studio.panels.get("sprites");
+  check(def.label === "SPRITES" && def.chapter === "sprites" &&
+        typeof def.draw === "function",
+        "#86: the SPRITES panel registers its label, chapter and draw");
+  eq("the pattern tools are #84's six, one array",
+     sat.TOOLS, S.screen.TOOLS);
+  for (const t of sat.TOOLS)
+    check(!!page.dom.get("spr-tool-" + t.id),
+          "sprite tool " + t.id + " has a button");
+  for (const z of sat.ZOOMS)
+    check(!!page.dom.get("spr-zoom-" + z), "sprite zoom " + z + " has a button");
+  for (const id of ["spr-screen", "spr-slots", "spr-pattern", "spr-sheet",
+                    "spr-palette", "spr-prev", "spr-next", "spr-release",
+                    "spr-park", "spr-clear", "spr-newpattern", "spr-x-up",
+                    "spr-y-up", "spr-hflip", "spr-vflip", "spr-priority"])
+    check(!!page.dom.get(id), "#86: the panel has " + id);
+
+  /* Open the panel on a fresh asset set. */
+  studio.panels.select("sprites");
+  resetSpriteAssets(studio);
+  studio.panels.dirty();
+  studio.panels.refresh(true);
+
+  let st = api.state();
+  check(!!st, "#86: the panel has a session over the toy's assets");
+  if (!st) return;
+  eq("#86: the header starts at SAT 0/64",
+     page.dom.get("spr-count").textContent, "SAT 0/64");
+  check(/0\/16 sprites/.test(page.dom.get("spr-line").textContent),
+        "the per-line header starts at 0/16 sprites (" +
+        page.dom.get("spr-line").textContent + ")");
+  check(page.dom.get("spr-grid").checked === true, "the pattern grid starts on");
+  check(api.drawn(), "the panel drew its own text");
+
+  /* ---- place a sprite on slot 0: the SAT fills in order ---------------- */
+  eq("#86: clicking slot 0 places sprite 0 (and its 16x16 pattern)",
+     api.selectSlot(0), 0);
+  st = api.state();
+  eq("the header counts it", page.dom.get("spr-count").textContent, "SAT 1/64");
+  let doc = JSON.parse(assetText(studio, "sprites.json"));
+  check(doc.sprites.length === 1 && doc.sprites[0].x === 112 &&
+        doc.sprites[0].y === 96 && doc.sprites[0].pattern === 0,
+        "sprites.json holds the placed sprite (112,96) pattern 0");
+  check(Array.isArray(doc.patterns) && doc.patterns.length === 1 &&
+        doc.patterns[0].width === 16 && doc.patterns[0].height === 16 &&
+        doc.patterns[0].pixels.length === 256,
+        "sprites.json holds its 16x16 pattern with 256 colour numbers");
+  check(!("tiles" in doc), "sprites.json carries the SAT, not the BAT");
+
+  /* ---- the pencil paints the pattern, and the frame shows it ----------- */
+  api.setTool("pencil");
+  api.selectColour(5);
+  eq("the pencil click reports one changed pixel", api.click(2, 3), 1);
+  st = api.state();
+  eq("the pattern pixel is colour number 5", st.pixel(2, 3), 5);
+  doc = JSON.parse(assetText(studio, "sprites.json"));
+  eq("sprites.json holds it (pixel 3*16+2)", doc.patterns[0].pixels[3 * 16 + 2], 5);
+  let frame = api.frame();
+  eq("the frame's pixel at the sprite's (2,3) is sprite palette 0 colour 5",
+     countPixel(frame, 112 + 2, 96 + 3), "252,252,252");
+  eq("the frame's neighbour is untouched", countPixel(frame, 112 + 3, 96 + 3),
+     "0,0,0");
+  check(countNonBlack(frame) === 1,
+        "exactly one pixel of the picture is the sprite (" +
+        countNonBlack(frame) + ")");
+
+  /* rect fills a block, in pattern pixels */
+  api.setTool("rect");
+  api.press(0, 0);
+  api.drag(3, 2);
+  api.release(3, 2);
+  st = api.state();
+  let block = 0;
+  for (let y = 0; y <= 2; y++)
+    for (let x = 0; x <= 3; x++) if (st.pixel(x, y) === 5) block++;
+  check(block === 12, "the rect fills its 4×3 block of pixels (" + block + ")");
+
+  /* fill stops at a different colour: the island is colour 0 inside colour 5 */
+  api.setTool("pencil");
+  api.click(6, 6);                 /* one 5 in the middle of 0s */
+  api.setTool("fill");
+  api.click(10, 10);               /* floods the 0 region, not the island */
+  st = api.state();
+  eq("the bucket fills the connected 0 region", st.pixel(0, 15), 5);
+  eq("…and stops at a different colour", st.pixel(6, 6), 5);
+
+  /* erase paints colour 0 (transparent) */
+  api.setTool("erase");
+  api.click(2, 3);
+  st = api.state();
+  eq("erase paints colour 0", st.pixel(2, 3), 0);
+
+  /* move carries a block */
+  api.setTool("select");
+  api.press(6, 6); api.drag(6, 6); api.release(6, 6);
+  api.setTool("move");
+  api.press(6, 6); api.drag(6, 8); api.release(6, 8);
+  st = api.state();
+  eq("the move left its source blank", st.pixel(6, 6), 0);
+  eq("the move carried the pixel", st.pixel(6, 8), 5);
+
+  /* ---- select on the screen and move it -------------------------------- */
+  resetSpriteAssets(studio);
+  studio.panels.dirty(); studio.panels.refresh(true);
+  api.selectSlot(0);
+  api.setTool("pencil"); api.selectColour(5);
+  api.press(0, 0); api.release(0, 0);          /* one lit pixel at (112,96) */
+  eq("the panel selects the sprite under the point",
+     api.screenPress(112, 96), 0);
+  eq("the drag moves it", api.screenDrag(122, 106), 1);
+  api.screenRelease();
+  st = api.state();
+  eq("sprite 0 is at (122,106)", st.spriteAt(0).x + "," + st.spriteAt(0).y,
+     "122,106");
+  frame = api.frame();
+  eq("the frame's lit pixel moved with it", countPixel(frame, 122, 106),
+     "252,252,252");
+  eq("…and the old place is empty", countPixel(frame, 112, 96), "0,0,0");
+
+  /* release position puts it back where the file had it */
+  const back = api.releasePosition();
+  st = api.state();
+  check(!!back && st.spriteAt(0).x === 112 && st.spriteAt(0).y === 96,
+        "release position puts the sprite back where it was read from (" +
+        (back && back.x) + "," + (back && back.y) + ")");
+
+  /* the − / + buttons move the selected sprite one pixel */
+  api.selectSlot(0);
+  api.nudge("x", 1); api.nudge("y", -1);
+  st = api.state();
+  eq("X + moves one column", st.spriteAt(0).x, 113);
+  eq("Y − moves one row", st.spriteAt(0).y, 95);
+  frame = api.frame();
+  eq("the frame follows the nudge", countPixel(frame, 113, 95),
+     "252,252,252");
+
+  /* ---- the flips -------------------------------------------------------- */
+  api.setTool("pencil");
+  api.press(0, 0); api.release(0, 0);      /* a pixel at the pattern's corner */
+  const plain = api.frame();
+  api.setField("hflip", 1);
+  const flipped = api.frame();
+  eq("HFLIP mirrors the pixel to the right edge",
+     countPixel(flipped, 113 + 15, 95), "252,252,252");
+  eq("…and the corner is blank", countPixel(flipped, 113, 95),
+     countPixel(plain, 113 + 15, 95));
+  api.setField("hflip", 0);
+  eq("clearing HFLIP restores the picture", countPixel(api.frame(), 113, 95),
+     "252,252,252");
+
+  /* ---- off-screen: the VDC has no per-sprite off switch ---------------- */
+  const litBox = countNonBlack(api.frame());
+  api.park();
+  st = api.state();
+  check(st.parked === true && st.spriteAt(0).y === sat.PARK_ROW,
+        "#86: 'off-screen' parks the sprite at display row " + sat.PARK_ROW);
+  check(countNonBlack(api.frame()) === 0,
+        "…and the frame draws none of it (" + countNonBlack(api.frame()) + " px)");
+  check(litBox > 0, "the sprite was visible before it was parked (" + litBox +
+        " px)");
+  doc = JSON.parse(assetText(studio, "sprites.json"));
+  check(doc.sprites[0].parked === 1 && doc.sprites[0].y === 0,
+        "sprites.json records it as parked, not as y 240 in the x/y range");
+  eq("Y − brings a parked sprite back to the last line", api.nudge("y", -1).y,
+     ed.VIEW_H - 1);
+
+  /* ---- clear a slot, and the SAT's order ------------------------------- */
+  api.selectSlot(0);
+  api.clearSlot();
+  st = api.state();
+  eq("clear slot removes it from the SAT", st.count, 0);
+  doc = JSON.parse(assetText(studio, "sprites.json"));
+  eq("…and from sprites.json", doc.sprites.length, 0);
+  eq("the empty slot after the placed ones places a sprite",
+     api.selectSlot(0), 0);
+  eq("…and the file has it", JSON.parse(assetText(studio, "sprites.json"))
+     .sprites.length, 1);
+  const sess = api.session();
+  let code = null;
+  try { sat.selectSlot(sess, 9); } catch (e) { code = e.code; }
+  eq("a gap in the SAT is refused, not invented", code, "sprite-gap");
+  code = null;
+  try { sat.selectSlot(sess, 64); } catch (e) { code = e.code; }
+  eq("a 65th slot does not exist", code, "sprite-range");
+
+  /* ---- size is per sprite: a 32x16 pattern is two strips --------------- */
+  resetSpriteAssets(studio);
+  studio.panels.dirty(); studio.panels.refresh(true);
+  api.selectSlot(0);
+  api.selectColour(5);
+  const pattern2 = api.newPattern();          /* 32x16 by the picker's value */
+  check(pattern2 === 1, "the size picker's + pattern makes pattern 1");
+  api.setField("pattern", 1);
+  st = api.state();
+  eq("the sprite's size is its pattern's", st.size.width + "x" + st.size.height,
+     "16x16");
+  /* the picker's value is the first option until the page sets it */
+  page.dom.get("spr-newsize").value = "32x16";
+  const wide = api.newPattern();
+  api.setField("pattern", wide);
+  st = api.state();
+  eq("a 32x16 pattern gives a 32x16 sprite",
+     st.size.width + "x" + st.size.height, "32x16");
+  api.press(0, 0); api.release(0, 0);
+  api.setTool("rect"); api.press(0, 0); api.drag(31, 15); api.release(31, 15);
+  st = api.state();
+  const line = sat.lineStatus(api.picture(), 96);
+  eq("the 32-px sprite asks for two strips on its line", line.strips, 2);
+  check(page.dom.get("spr-sprsize").textContent === "32 × 16",
+        "the panel names the sprite's own size (" +
+        page.dom.get("spr-sprsize").textContent + ")");
+
+  /* ---- SPBG: in front of the BG, or behind it -------------------------- */
+  setAssetFile(studio, "tiles.json", JSON.stringify({
+    version: 1,
+    tiles: [{ char: 0x40, palette: 0, pixels: new Array(64).fill(5) }]
+  }));
+  studio.panels.dirty(); studio.panels.refresh(true);
+  api.selectSlot(0);
+  api.setField("priority", 1);
+  frame = api.frame();
+  eq("SPBG 1 draws the sprite over an opaque BG pixel",
+     countPixel(frame, 112, 96), "252,252,252");
+  api.setField("priority", 0);
+  frame = api.frame();
+  eq("SPBG 0 hides it behind the BG's colour 5", countPixel(frame, 112, 96),
+     "252,0,0");
+
+  /* ---- overflow: a 17th strip on a line -------------------------------- */
+  resetSpriteAssets(studio);
+  studio.panels.dirty(); studio.panels.refresh(true);
+  api.selectSlot(0);
+  api.setTool("pencil"); api.selectColour(5);
+  api.press(0, 0); api.release(0, 0);
+  for (let i = 1; i < 17; i++) {
+    const n = api.selectSlot(i);
+    if (n < 0) break;
+    api.setField("y", 96);
+  }
+  st = api.state();
+  eq("seventeen sprites are in the SAT", st.count, 17);
+  const busy = sat.lineStatus(api.picture(), 96);
+  check(busy.requested === 17 && busy.strips === 16 && busy.overflow,
+        "line 96 asks for 17 strips and the VDC keeps 16 (asked " +
+        busy.requested + ", kept " + busy.strips + ")");
+  check(/\d+ line\(s\) over|nothing dropped/.test(
+          page.dom.get("spr-line").textContent),
+        "the per-line header reports the drop (" +
+        page.dom.get("spr-line").textContent + ")");
+  check(st.slots.some((s) => s.dropped > 0),
+        "the slot grid marks the sprite whose strip was dropped");
+
+  /* ---- refusals: the editor's own codes -------------------------------- */
+  const s3 = api.session();
+  code = null;
+  try { sat.setField(s3, "x", 256); } catch (e) { code = e.code; }
+  eq("x 256 is off the picture", code, "sprite-range");
+  code = null;
+  try { sat.setField(s3, "palette", 16); } catch (e) { code = e.code; }
+  eq("a 17th sprite palette is refused", code, "17th-sprite-palette");
+  code = null;
+  try { sat.setField(s3, "nonsense", 1); } catch (e) { code = e.code; }
+  eq("an unknown sprite field is refused", code, "sprite-field");
+  code = null;
+  try { sat.selectColour(s3, 16); } catch (e) { code = e.code; }
+  eq("a 17th colour number is refused", code, "colour-index");
+  api.setTool("pencil"); api.selectColour(4);
+  api.press(99, 99); api.release(99, 99);
+  eq("a press outside a 16x16 pattern clamps to its corner",
+     api.state().pixel(15, 15), 4);
+
+  /* ---- the asset file's refusals --------------------------------------- */
+  code = null;
+  try {
+    sat.pictureFromFiles([{ name: "sprites.json", source: "{not json" }]);
+  } catch (e) { code = e.code; }
+  eq("a sprites.json that is not JSON is refused", code, "asset-json");
+  code = null;
+  try {
+    sat.pictureFromFiles([{ name: "sprites.json", source: JSON.stringify({
+      version: 1, patterns: [{ width: 24, height: 24, pixels: [] }] }) }]);
+  } catch (e) { code = e.code; }
+  eq("a pattern size the VDC cannot draw is refused", code, "sprite-size");
+  code = null;
+  try {
+    sat.pictureFromFiles([{ name: "sprites.json", source: JSON.stringify({
+      version: 1, patterns: [{ width: 16, height: 16,
+                               pixels: new Array(256).fill(16) }] }) }]);
+  } catch (e) { code = e.code; }
+  eq("a 17th colour number in the file is refused", code, "17th-colour");
+  code = null;
+  try {
+    sat.pictureFromFiles([{ name: "sprites.json", source: JSON.stringify({
+      version: 1, sprites: new Array(65).fill({ x: 0, y: 0, pattern: 0 }) }) }]);
+  } catch (e) { code = e.code; }
+  eq("a file with 65 sprites is refused", code, "65th-sprite");
+
+  /* ---- sprites.json round-trips byte for byte --------------------------- */
+  const one = sat.pictureFromFiles([
+    { name: "sprites.json", source: assetText(studio, "sprites.json") }
+  ]);
+  const text = sat.spritesText(one);
+  const again = sat.pictureFromFiles([{ name: "sprites.json", source: text }]);
+  eq("sprites.json round-trips byte for byte", sat.spritesText(again), text);
+
+  /* ---- the panel does not touch the SCREEN panel's file ---------------- */
+  resetSpriteAssets(studio);
+  studio.panels.dirty(); studio.panels.refresh(true);
+  const tilesBefore = assetText(studio, "tiles.json");
+  api.selectSlot(0);
+  api.setTool("pencil");
+  api.click(1, 1);
+  eq("a sprite edit leaves tiles.json alone", assetText(studio, "tiles.json"),
+     tilesBefore);
+  check(assetText(studio, "sprites.json") !==
+        '{\n  "version": 1,\n  "sprites": []\n}\n',
+        "…and writes sprites.json");
+
+  /* ---- the canvas, and a real DOM event over the pattern --------------- */
+  const sizes = api.canvas();
+  check(sizes.screen > 0 && sizes.slots === 192 && sizes.sheet === 256 &&
+        sizes.pattern > 0,
+        "the screen, the slot grid, the sheet and the pattern canvas drew (" +
+        JSON.stringify(sizes) + ")");
+  api.setTool("pencil");
+  api.selectColour(3);
+  const patternEl = page.dom.get("spr-pattern");
+  const before = api.state().pixel(0, 0);
+  api.pointer("press", pointerAt(patternEl, 1, 1), patternEl);
+  api.pointer("release", pointerAt(patternEl, 1, 1), patternEl);
+  check(api.state().pixel(0, 0) === 3 && before !== 3,
+        "a real pointer event on the pattern canvas paints pixel (0,0)");
+
+  /* the live frame's SAT line is the page's, not the picture's */
+  studio.loadExample("sprite", true);
+  studio.pause();
+  studio.panels.select("sprites");
+  studio.panels.refresh(true);
+  check(/^frame: line \d+ · \d+\/64 sprites in range/.test(
+          page.dom.get("spr-live").textContent),
+        "the panel reads the live frame's SAT too (" +
+        page.dom.get("spr-live").textContent + ")");
+
+  /* leave the page on a clean example */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.panels.select("screen");
+}
+
 /* ---- #102: every panel is its own module ------------------------------ *
  * The page only loads the ten modules; each one registers itself (its tab,
  * its Panels-menu entry, its Guide chapter and its draw) through the studio
@@ -2896,6 +3310,7 @@ async function main() {
   checkOutputColumn(page);
   checkExamplesVisible(page);
   checkScreenPanel(page);
+  checkSpritesPanel(page);
   checkPanelModules(page);
   checkScreenGaps(page);
   checkStudioApi(page);

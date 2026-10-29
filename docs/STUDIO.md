@@ -169,7 +169,7 @@ Scanlines, Registers, SNES. Ours keeps the strip's place and shape and gives eac
 | Backgrounds | **SCREEN** | **a visual editor (#84)**: the BAT drawn as a 32×32 cell map with ppu.toys' tool row (select, pencil, rect, fill, erase, move), the `#` grid, zoom Fit/1×/2×/4×, a visible-screen outline and the footer; beside it the Characters column (tile, char base, the selected tile's 16-colour strip, the tile sheet, an 8×8 tile editor) and the Map column (map base, map size/MWR, tile size, BXR/BYR with −/+). It edits `tiles.json` and `palettes.json`. Below it the live summary and the follow-a-pixel readout still come from the frame | `renderer/pce-screen.js`, `pce-panels.js` `lineValues`, `followPixel` |
 | VRAM | **VRAM** | all 32768 words as a map: BAT, tiles, sprite patterns, SAT at `$7F00`, free space; segment table | `pce-panels.js` `vramMap` |
 | CGRAM | **PALETTES** | the VCE's 512 colours as 32 palettes of 16; entry 0 dashed (the shared backdrop); each swatch's tooltip is its CRAM address and 9-bit word | `pce-panels.js` `vcePalettes` |
-| Sprites | **SPRITES** | the 64-entry SAT: Y, X, pattern, palette, size, SPBG/flips, the 64-word cells | `pce-panels.js` `satTable` |
+| Sprites | **SPRITES** | **a visual editor (#86)**: the 64 SAT slots drawn as a grid, the screen with the selected sprite outlined and numbered, a picker (slot with ‹ ›, X/Y with −/+, pattern, palette, SPBG priority, H/V, size read from the pattern), *release position*, *off-screen* and *clear slot*, the sprite palette strip, and a pattern sheet whose selected pattern is drawn with the same six tools as SCREEN at pixel granularity. The per-line header is #50's model (`n/16 strips · n/256 px`, the overflow shown). It edits `sprites.json` and the sprite palettes in `palettes.json` | `renderer/pce-sat.js`, `renderer/pce-editor.js` `renderPreview` |
 | Audio | **AUDIO** | the honest state: `pce-psg.js` exists and is checked; toys have no sound surface yet (#71) | — |
 | Sequencer | *(none yet)* | the tracker lives in `renderer/pce-hutrack.js`; a toy-facing sequencer is a later card | — |
 | Compose | *(none)* | **no PCE counterpart**: the HuC6270 has one background layer plus sprites and the HuC6260 has no sub-screen, colour math or blending | — |
@@ -269,6 +269,7 @@ implementation):
 | `toy.current()` / `.mode()` / `.source()` | the toy on the page: its example id/name, `"lua"` or `"il"`, the Lua that runs |
 | `toy.files()` / `.file(name)` / `.activeFile()` / `.mainSource()` | the toy's asset files (**the live array**, as the ASSET tab sees it) and the editor's current file |
 | `toy.writeAssets(pic)` | writes a `pce-screen.js` picture into `tiles.json`/`palettes.json`, follows in the open editor, autosaves; returns the changed names, throws the model's refusal |
+| `toy.writeSpritesAssets(pic)` | the same write for `pce-sat.js`'s picture (#86): `sprites.json` and the sprite palettes — deliberately **not** `tiles.json` |
 | `toy.persist()` / `.saved(text)` / `.refreshAssets()` | the page's own autosave, status line and ASSETS list |
 | `toy.onAssetEdit(fn)` | subscribe to "an asset file changed" (a hand edit, a new example, an opened toy) — SCREEN invalidates its picture |
 | `render.state()` / `.currentFrame()` / `.panelLine(st)` / `.hex(v, w)` / `.runtime()` | the frame the panels read, the followed line, and the formatter |
@@ -286,6 +287,43 @@ that the ten register in order, that the dock and the Panels menu are built from
 the output, the transport and the API; a panel keeps its own state and drawing.
 
 ---
+
+### 3.3 SPRITES as a visual editor (#86, part C)
+
+ppu.toys' SPRITES panel is the working example: the objects are slots you select, the screen shows the
+selected one, and the sheet beside them is drawn on. The PCE counterpart is the VDC's SAT — 64 entries
+(HuC6270 manual 2.4), each with a position, a pattern code, one of 16 sprite palettes and the SPBG/flip
+bits, and with its own size from CGX/CGY. `renderer/pce-sat.js` is the model and
+`renderer/studio-panel-sprites.js` is the panel (its CSS is `renderer/studio-panel-sprites.css`, so the
+page's style block holds nothing of it). Every edit is `renderer/pce-editor.js`'s own call — `addSprite`,
+`setSprite` (new in #86), `parkSprite` (new), `removeSprite`, `newSpritePattern`, `paintSpriteIndex` — so
+the refusals are the editor's. The screen, the pattern sheet and the pattern canvas are all
+`pce-editor.js`'s `renderPreview`; there is no second picture.
+
+| ppu.toys (SPRITES, from the card's reading of it) | `studio.html`'s SPRITES panel |
+|---|---|
+| header `OAM n/128 · max N spr / N til` | `SAT n/64`, and #50's per-line model: `line L · n/16 sprites · n/256 px`, with `n line(s) over` when a line's strips are dropped |
+| `Line L · n/32 in range · n/34 slivers` | the same figures for the busiest line of the asset picture, and — when a toy is running — the frame's own SAT at the followed line (`frame: line L · n/64 sprites in range · n/16 strips · OVERFLOW`) |
+| the screen with the selected object labelled | the picture, the selected sprite outlined and numbered; a press selects the sprite under the point and a drag moves it |
+| a grid of all object slots | the 64 slots as an 8×8 grid: placed slots filled, parked ones amber, a dropped strip red, the selected one ringed; click an empty slot to place the next sprite |
+| Size pair + Char base | **size is per sprite**, from its pattern's CGX/CGY (the six sizes the VDC draws), shown read-only; *pattern* is the sprite's pattern code (word 2 >> 1) and *cell* is `pattern × 64` words — the address pce-sprites.js reads |
+| object picker with prev/next and `Release position` | `‹ ›` step through the slots (and can place the next); **release position** puts the selected sprite back where it was when the panel read `sprites.json` (this panel edits the asset, not a live override, so that is what "the panel's position stops applying" means here) |
+| a preview | the screen, the pattern canvas and the sprite palette strip |
+| X, Y, Tile, Pal, Pri with −/+ | X and Y with −/+ (clamped to the picture's edges), *pattern* and *pal* as selects, *priority* as in front of / behind the BG (SPBG) |
+| checkboxes on, large, H, V | **no `on`**: the SAT has no enable bit, so *off-screen* moves the sprite to display row 240 (past the 224- and 240-line display windows; SAT Y 304) and *clear slot* removes the entry — an all-zero entry is what the hardware shows as nothing. **No `large`**: the size is the pattern's. H and V are HFLIP and VFLIP |
+| a Characters sheet with a tile range | the pattern sheet (every pattern at its own size, ringed when selected), `+ pattern` making one of the six sizes, and a pattern canvas drawn with SCREEN's six tools at pixel granularity (select, pencil, rect, fill, erase, move), the `#` grid and the zoom |
+| — | the sprite palettes as a 16-colour strip (entry 0 is transparent and dashed); the palette *entries* are edited in PALETTES (#85) |
+
+**What it edits is the toy's assets.** The patterns and the SAT live in `sprites.json`, the sprite
+palettes in `palettes.json`; every edit writes them and autosaves the toy, and the panel does **not**
+rewrite `tiles.json` — that file is SCREEN's, and a sprite edit that rewrote it would be a background
+edit. A toy still writes its own VRAM/SAT until the importer (#24/#71), and the panel says so.
+
+**Refusals.** The panel lets `pce-editor.js` refuse (65th-sprite, sprite-range, sprite-pattern-range,
+17th-sprite-palette, sprite-flag-range, sprite-pattern-vram, 17th-colour) and adds only the file and
+SAT-order ones: `asset-json`, `asset-shape`, `sprite-size`, `65th-sprite` for a file past 64 entries,
+`sprite-gap` (the SAT is filled in order: placing slot 5 with 0-4 empty would need the hardware to skip
+them), `no-sprite`, `no-pattern`, `no-position`.
 
 ## 4. The Docs panel (the generated #61 reference)
 
@@ -405,7 +443,7 @@ ppu.toys keeps beside its Lua:
 |---|---|---|
 | `tiles.json` | `{version, tiles: [{char, palette, pixels}], map: {mwr, bxr, byr, cells}}` | 8×8 tiles, 4-bit colour numbers, keyed by VCHAR — and since #84 the BAT that names them (`cells`, the 32×32 map's 1024 character words) with its scroll |
 | `palettes.json` | `{version, backdrop, background[][] , sprites[][]}` | the VCE's 32 palettes of 16 words |
-| `sprites.json` | `{version, sprites: [{x, y, pattern, palette, …}]}` | the SAT |
+| `sprites.json` | `{version, patterns: [{width, height, pixels[]}], sprites: [{x, y, pattern, palette, priority, hflip, vflip}]}` | the sprite patterns (4-bit colour numbers, pixel 0 transparent) and the SAT; a parked sprite is `{parked: 1, y: 0}` (#86) |
 | `waves.json` | `{version, channels: [{wave[32], freq, al, balance}]}` | the PSG's channels |
 
 The shapes follow `renderer/pce-editor.js`'s picture and `renderer/pce-wave.js`'s document. The importer
@@ -494,8 +532,8 @@ claims a file it cannot make.
 `node tests/check-studio.js` (written by `@design`; flagged for `@review` cold, rule 2):
 
 ```
-PASS  691 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
-      editor/files/shortcuts, output column, every button's handler executed (105 buttons) (… ms)
+PASS  822 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
+      editor/files/shortcuts, output column, every button's handler executed (115 buttons) (… ms)
 ```
 
 What it does, in order:
@@ -517,8 +555,8 @@ What it does, in order:
    on all 40, frame numbers and 256×224 dimensions intact; a second 40-frame run is byte-identical.
 5. Runs the same 40 frames through the page's Lua/IL switch for all three examples: state, raster table and
    pixels equal, so the IL path is exercised through the studio, not just imported.
-6. Clicks **every button** the page builds (105 at this revision: top bar, Docs/close/Guide, code tabs, file
-   tabs, asset `Edit` buttons, dock tabs, the SCREEN tools/zooms and its two curve buttons, transport,
+6. Clicks **every button** the page builds (115 at this revision: top bar, Docs/close/Guide, code tabs, file
+   tabs, asset `Edit` buttons, dock tabs, the SCREEN tools/zooms and its two curve buttons, the SPRITES tools/zooms/picker/slots, transport,
    layers/CRT/SND, settings, open, export, and every dynamically built panel-menu and example entry),
    asserts each has a click handler and none throws;
    then exercises the source box, scrubber and length control, and shows `Check` uses the source box's
@@ -595,6 +633,30 @@ What it does, in order:
     back. The screen-width picker lists 256/336/512, and 336 draws the VCE's **341**-dot frame and 512 a
     512-dot one, `tiles.json` carries `video`, save/reopen keeps it, `$30` is refused as `map-size` and
     320 as `video-mode`.
+14. **The SPRITES panel's visual editor (#86).** The panel's api is the registry's (`sprites`), the pattern
+    tools are `pce-screen.js`'s own six (one array, not a copy), and every button the module builds is on the
+    page. Then, through the panel's own calls and with `sprites.json` read back each time: slot 0 places
+    sprite 0 and its 16×16 pattern and the header reads `SAT 1/64`; the pencil paints pattern pixel (2,3)
+    colour 5, `sprites.json` holds it and **exactly one frame pixel** is the sprite (`252,252,252` at
+    (114,99), sprite palette 0 entry 5 = `$1FF`); a rect fills a 4×3 block; the bucket floods the connected
+    0s and stops at a different colour; erase paints colour 0; move carries a pixel and blanks its source;
+    a press on the screen selects the sprite under the point and a drag moves it (the frame's lit pixel
+    moves with it and the old place is empty); *release position* puts it back where the file had it;
+    X/Y −/+ move it one column/row; HFLIP mirrors the pattern's corner pixel to the sprite's other edge and
+    clearing it restores the picture; *off-screen* parks it at display row 240 and the frame draws none of
+    it (0 lit pixels), `sprites.json` records `parked: 1`, and Y − brings it back to row 223; *clear slot*
+    removes it from the SAT and the file; a gap (`slot 9` with one sprite) is refused `sprite-gap` and slot
+    64 `sprite-range`. Size is per sprite: a `32×16` pattern makes a `32×16` sprite and its line asks for
+    two strips. SPBG: priority 1 draws it over an opaque BG pixel, priority 0 hides it behind the BG's
+    colour 5. Seventeen sprites on one line ask for 17 strips, the VDC keeps 16, the header says lines are
+    over and the slot grid marks the dropped one. Refusals by code from the editor and the file:
+    `sprite-range` (x 256), `17th-sprite-palette`, `sprite-field`, `colour-index`, `asset-json`,
+    `sprite-size`, `17th-colour`, `65th-sprite`. `sprites.json` round-trips byte for byte, and a sprite
+    edit **leaves `tiles.json` alone** (it is SCREEN's file). A real `MouseEvent`-shaped pointer over the
+    pattern canvas paints pixel (0,0); with the `sprite-pad` example running, the panel's second line is the
+    *frame's* SAT at the followed line, not the asset picture's.
+    * The stub DOM has no canvas pixels, so the drawn screen/sheet/pattern are proved only to be sized and
+      drawn; the frames above are `pce-editor.js`'s `renderPreview`, the same renderer as the output.
 
 ### 11.2 The real browser
 
@@ -727,10 +789,20 @@ dock's Map column — is the two curve buttons and the two pickers, and nothing 
 * **The textarea fallback is what the stub exercises.** CodeMirror is skipped where the DOM cannot host it;
   the browser driver is the evidence for CodeMirror itself, so a change that breaks only CodeMirror still
   fails the suite, but a change to the fallback alone is caught only in the stub.
-* **Only SCREEN is an editor so far.** ppu.toys' panels are all editors with pokes and keyframes; ours
-  reads the toy's own state in VRAM/PALETTES/SPRITES/SCANLINES/REGISTERS. #84 made SCREEN an editor of the
-  toy's *assets* (§3.1); PALETTES (#85), SPRITES (#86) and the keyframed register pokes (#79) are next.
+* **Only SCREEN and SPRITES are editors so far.** ppu.toys' panels are all editors with pokes and
+  keyframes; ours reads the toy's own state in VRAM/PALETTES/SCANLINES/REGISTERS. #84 made SCREEN an editor
+  of the toy's *assets* (§3.1) and #86 did the same for SPRITES (§3.3); PALETTES (#85) and the keyframed
+  register pokes (#79) are next.
   #102 puts each panel in its own file and the API in §3.2, so those cards can run in parallel.
+* **The SPRITES panel (#86) is not proved by a cold break.** Its checks in `tests/check-studio.js` were
+  written by the builder, so rule 2 is owed: another seat, another model, breaks the model, the panel and
+  the file round-trip and the checks must catch every break. Also not proven: the stub DOM draws no canvas
+  pixels, so the screen, slot grid, sheet and pattern canvas are only sized and driven, never pixel-compared
+  against a golden image; there is no browser-driver case yet for a real mouse drag on `#spr-screen` (the
+  §11.2 driver covers the SCREEN map only); the "off-screen" position (display row 240) is the model's
+  reading of the 224/240-line window with no capture behind it; `sprites.json` is an asset file no importer
+  reads yet, so a toy cannot show these sprites in a running frame until #24/#71; and the per-line header is
+  `pce-editor.js`'s budget over that picture, not a Mednafen measurement.
 * **The SCREEN panel's map is the 32×32 BAT.** MWR `$00` is what the toy host's 256×224 frame and
   `pce-editor.js`'s picture model hold; the map-size picker lists the VDC's 64×32 … 128×64 sizes, but
   choosing one refuses with `map-size` and snaps back — part B, not silently stored. The BXR/BYR curve

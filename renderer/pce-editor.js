@@ -678,6 +678,76 @@
     return pic.sprites.length - 1;
   }
 
+  /* Change one placed sprite's fields (#86's panel selects a sprite and moves
+   * it on the screen).  Every field is checked exactly as addSprite checks
+   * it, so a value the VDC cannot show cannot be stored by either front end;
+   * an unknown field name is refused rather than silently ignored. */
+  var SPRITE_FIELDS = ["x", "y", "pattern", "palette", "priority",
+                       "hflip", "vflip"];
+
+  function setSprite(pic, index, changes) {
+    if (!isInt(index) || index < 0 || index >= pic.sprites.length)
+      refuse("sprite-range", "sprite " + index + " does not exist");
+    var s = pic.sprites[index];
+    changes = changes || {};
+    for (var key in changes) {
+      if (!Object.prototype.hasOwnProperty.call(changes, key)) continue;
+      if (SPRITE_FIELDS.indexOf(key) < 0)
+        refuse("sprite-field", "a sprite has " + SPRITE_FIELDS.join(", ") +
+               "; " + key + " is not one of them");
+    }
+    if (changes.pattern !== undefined) {
+      var p = changes.pattern;
+      if (!isInt(p) || p < 0 || p >= pic.spritePatterns.length)
+        refuse("sprite-pattern-range", "sprite pattern " + p +
+               " does not exist");
+    }
+    if (changes.x !== undefined)
+      checkInt("x", changes.x, 0, VIEW_W - 1, "sprite-range");
+    if (changes.y !== undefined)
+      checkInt("y", changes.y, 0, VIEW_H - 1, "sprite-range");
+    if (changes.palette !== undefined) {
+      if (isInt(changes.palette) && changes.palette === SPRITE_PALETTES)
+        refuse("17th-sprite-palette", "the VDC has " + SPRITE_PALETTES +
+               " sprite palettes; palette " + changes.palette +
+               " is the 17th");
+      checkInt("sprite palette", changes.palette, 0, SPRITE_PALETTES - 1,
+               "sprite-palette-range");
+    }
+    if (changes.priority !== undefined)
+      checkInt("priority", changes.priority, 0, 1, "sprite-flag-range");
+    if (changes.hflip !== undefined)
+      checkInt("hflip", changes.hflip, 0, 1, "sprite-flag-range");
+    if (changes.vflip !== undefined)
+      checkInt("vflip", changes.vflip, 0, 1, "sprite-flag-range");
+    for (var field in changes)
+      if (Object.prototype.hasOwnProperty.call(changes, field))
+        s[field] = changes[field];
+    return s;
+  }
+
+  /* The VDC has no per-sprite on/off bit: a sprite is not drawn when its
+   * whole body is outside the display window, and the SAT's Y is 10 bits, so
+   * the way to switch one off is to move it past the last display line.  A
+   * display window is 224 or 240 lines (windowOf), so display row 240 is
+   * outside both — the SAT word is Y 240 + 64 = 304, still inside the 10-bit
+   * field.  The picture's own x/y range (0..VIEW_W-1, 0..VIEW_H-1) is what a
+   * panel can set directly; this is the one edit that deliberately leaves it,
+   * which is why it is its own function rather than a wider range. */
+  var PARK_ROW = 240;
+
+  function parkSprite(pic, index) {
+    if (!isInt(index) || index < 0 || index >= pic.sprites.length)
+      refuse("sprite-range", "sprite " + index + " does not exist");
+    pic.sprites[index].y = PARK_ROW;
+    return pic.sprites[index];
+  }
+
+  function spriteParked(pic, index) {
+    if (!isInt(index) || index < 0 || index >= pic.sprites.length) return false;
+    return pic.sprites[index].y >= PARK_ROW;
+  }
+
   function removeSprite(pic, index) {
     if (!isInt(index) || index < 0 || index >= pic.sprites.length)
       refuse("sprite-range", "sprite " + index + " does not exist");
@@ -1704,6 +1774,8 @@
       (SPRITE_ENTRIES - 1),
     "sprite-flag-range": "a sprite flag (priority, hflip, vflip) that is " +
       "not 0 or 1",
+    "sprite-field": "a field name that is not on a placed sprite: the SAT " +
+      "entry's own x, y, pattern, palette, priority, hflip and vflip",
     "register-range": "a VDC register value outside its width (BXR " +
       "10 bits, BYR 9, a wobble amplitude past the BXR swing)",
     "line-range": "a display line outside 0.." + RASTER_LINE_MAX +
@@ -1779,6 +1851,11 @@
     setSpritePaletteColour: setSpritePaletteColour,
     spritePaletteColours: spritePaletteColours,
     addSprite: addSprite,
+    setSprite: setSprite,
+    parkSprite: parkSprite,
+    spriteParked: spriteParked,
+    PARK_ROW: PARK_ROW,
+    SPRITE_FIELDS: SPRITE_FIELDS,
     removeSprite: removeSprite,
     clearSprites: clearSprites,
     spriteLineBudget: spriteLineBudget,

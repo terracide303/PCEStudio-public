@@ -65,6 +65,8 @@
      styles. The scripts are loaded by the bootstrap before the page's own
      scripts, and only when the DOM can host CodeMirror (#77). -->
 <link rel="stylesheet" href="../vendor/codemirror/lib/codemirror.css">
+<!-- #86: the SPRITES panel's own styles, beside its module (#102's split) -->
+<link rel="stylesheet" href="studio-panel-sprites.css">
 <style>
   :root {
     /* ppu.toys' design tokens, adapted (source URL in the credit block). */
@@ -827,7 +829,97 @@
               carries its CRAM address and 9-bit word.</p>
           </div>
           <div class="panel" id="panel-sprites" data-panel="sprites" hidden>
-            <pre class="table" id="sat-table"></pre>
+            <!-- #86: the SAT as a visual editor, like ppu.toys' SPRITES.
+                 The 64 slots, the screen with the selected sprite labelled,
+                 the picker's fields, the flips and the pattern sheet; the
+                 pattern is drawn with the same six tools as SCREEN (#84).
+                 The model is renderer/pce-sat.js, the panel module
+                 studio-panel-sprites.js; the picture is the toy's assets
+                 (sprites.json + palettes.json), drawn by pce-editor.js's
+                 renderPreview — the same renderer as the output column. -->
+            <div class="scr-tools">
+              <div class="scr-toolrow" id="spr-tools" role="toolbar"
+                   aria-label="Sprite pattern tools"></div>
+              <label class="scr-check" title="#: the pattern's pixel grid">
+                <input type="checkbox" id="spr-grid" checked> grid</label>
+              <span class="scr-zoomlabel">zoom</span>
+              <div class="scr-zoomrow" id="spr-zooms" role="group"
+                   aria-label="Zoom"></div>
+            </div>
+            <div class="spr-cols">
+              <div class="spr-main">
+                <div class="spr-headline"><b id="spr-count">SAT 0/64</b>
+                  <span id="spr-line">line 0 · 0/16 sprites · 0/256 px</span></div>
+                <canvas id="spr-screen" width="256" height="240" tabindex="0"
+                        aria-label="The picture: click a sprite to select it and drag to move it"></canvas>
+                <div class="spr-live" id="spr-live">frame: no frame yet</div>
+                <div class="spr-note" id="spr-note">No sprites yet: click slot
+                  0 to place one.</div>
+              </div>
+              <div class="spr-side">
+                <div class="scr-head">Objects</div>
+                <div class="scr-line">slot <b id="spr-slot">—</b>
+                  <button type="button" class="btn-mini" id="spr-prev"
+                          title="Previous slot">‹</button>
+                  <button type="button" class="btn-mini" id="spr-next"
+                          title="Next slot">›</button>
+                  <button type="button" class="btn-mini" id="spr-release"
+                          title="Release position: put the sprite back where it was when the panel read the file">release position</button></div>
+                <div class="scr-line">X
+                  <button type="button" class="btn-mini" id="spr-x-down"
+                          title="X −">−</button>
+                  <b id="spr-x">0</b>
+                  <button type="button" class="btn-mini" id="spr-x-up"
+                          title="X +">+</button></div>
+                <div class="scr-line">Y
+                  <button type="button" class="btn-mini" id="spr-y-down"
+                          title="Y −">−</button>
+                  <b id="spr-y">0</b>
+                  <button type="button" class="btn-mini" id="spr-y-up"
+                          title="Y +">+</button></div>
+                <div class="scr-line">pattern
+                  <select id="spr-patpick" aria-label="The sprite's pattern"
+                          title="The pattern this sprite draws; its size is the sprite's size"></select></div>
+                <div class="scr-line">pal
+                  <select id="spr-palpick" aria-label="The sprite's palette"
+                          title="CRAM $100-$1FF is the 16 sprite palettes"></select></div>
+                <div class="scr-line">priority
+                  <select id="spr-priority" aria-label="SPBG priority"
+                          title="SPBG: in front of the background, or behind it (colour 0 of the BG still shows the sprite)">
+                    <option value="1">in front of the BG</option>
+                    <option value="0">behind the BG</option></select></div>
+                <div class="scr-line">
+                  <label class="scr-check" title="HFLIP: mirror the 16-px strips">
+                    <input type="checkbox" id="spr-hflip"> H</label>
+                  <label class="scr-check" title="VFLIP: mirror the rows">
+                    <input type="checkbox" id="spr-vflip"> V</label></div>
+                <div class="scr-line">size <b id="spr-sprsize">—</b>
+                  <span class="scr-hint">CGX/CGY: the pattern decides it, per sprite</span></div>
+                <div class="scr-line">
+                  <button type="button" class="btn-mini" id="spr-park"
+                          title="The VDC has no per-sprite off switch: move it past the display window">off-screen</button>
+                  <button type="button" class="btn-mini" id="spr-clear"
+                          title="Remove this slot from the SAT (an all-zero entry)">clear slot</button></div>
+                <div class="scr-line">cell <code id="spr-cell">—</code>
+                  <span class="scr-hint">pattern × 64 words</span></div>
+                <div class="scr-head">Slots</div>
+                <canvas id="spr-slots" width="192" height="192"
+                        aria-label="The SAT's 64 slots: click one to select it"></canvas>
+                <div class="scr-head">Characters</div>
+                <div class="scr-line">pattern <b id="spr-pattern">—</b>
+                  <select id="spr-newsize" aria-label="A new pattern's size"></select>
+                  <button type="button" class="btn-mini" id="spr-newpattern"
+                          title="Add a pattern of this size">+ pattern</button></div>
+                <canvas id="spr-pattern" width="128" height="128" tabindex="0"
+                        aria-label="The selected sprite pattern: draw with the tool row"></canvas>
+                <div class="spr-palette" id="spr-palette"
+                     aria-label="The sprite palette's 16 colours"></div>
+                <canvas id="spr-sheet" width="256" height="32"
+                        aria-label="The pattern sheet: click a pattern to select it"></canvas>
+                <div class="scr-hint">The picture these assets make; a toy
+                  writes its own VRAM/SAT until the importer (#24/#71).</div>
+              </div>
+            </div>
           </div>
           <div class="panel" id="panel-audio" data-panel="audio" hidden>
             <h3>THE PSG IS ITS OWN CARD</h3>
@@ -1027,6 +1119,7 @@
 <script src="pce-panels.js"></script>
 <script src="pce-editor.js"></script>
 <script src="pce-screen.js"></script>
+<script src="pce-sat.js"></script>
 <script src="pce-psg.js"></script>
 <script src="pce-docs.js"></script>
 <!-- #102: every panel is its own module. Each file registers one panel — its
@@ -3087,10 +3180,14 @@ function applyPokes(opts, frame) {
 
 /* The asset write-back: the panel's picture is written into the toy's files
  * (the #77 envelope), the open editor follows, and the toy autosaves.  The
- * SCREEN panel is the caller; a refusal is thrown for it to show. */
-function writeAssets(pic) {
+ * SCREEN panel is the caller; a refusal is thrown for it to show.
+ * writeSpritesAssets is the same write for the SPRITES panel's picture (#86):
+ * that picture is the same editor picture, but its files are sprites.json
+ * and the sprite palettes — it must not rewrite tiles.json, which belongs to
+ * the SCREEN panel. */
+function writeAssetsWith(model, pic) {
   let changed = [];
-  try { changed = PCEStudio.screen.syncFiles(pic, files); }
+  try { changed = model.syncFiles(pic, files); }
   catch (e) { throw e; }
   if (!changed.length) return [];
   if (changed.indexOf(activeFile) >= 0) {
@@ -3106,6 +3203,15 @@ function writeAssets(pic) {
   panelDirty = true;
   if (!$("assets-pane").hidden) renderAssets();
   return changed;
+}
+
+function writeAssets(pic) {
+  return writeAssetsWith(PCEStudio.screen, pic);
+}
+
+function writeSpritesAssets(pic) {
+  if (!PCEStudio.sat) return [];
+  return writeAssetsWith(PCEStudio.sat, pic);
 }
 
 function registerPanelModules() {
@@ -3154,6 +3260,7 @@ const studio = {
     activeFile: () => activeFile,
     mainSource: mainSource,
     writeAssets: writeAssets,
+    writeSpritesAssets: writeSpritesAssets,
     persist: persistToy,
     saved: setSaved,
     refreshAssets: renderAssets,
