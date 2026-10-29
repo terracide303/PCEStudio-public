@@ -133,6 +133,24 @@ const TOYS_META = [
       "an ember cross the dark. IJKL scrolls it by hand.",
     effect: "five BXR bands + a palette cycle",
     demoArt: "cave"
+  },
+  /* #125: the same shape again.  The repo's city/main.lua is the game with an
+   * empty art_boot(); the playable file — the same game plus the pack's
+   * converted picture — is demo-art/city/main.lua (tools/city-assets.js writes
+   * it) and only a --with-demo-art build reads it.  Anokolisa's note asks for
+   * credit rather than requiring it; it is here anyway. */
+  {
+    id: "city",
+    file: "city/main.lua",
+    title: "CITY",
+    author: "PCEStudio · art by Anokolisa",
+    badge: "#125 demo",
+    tags: ["demo", "parallax", "palette", "sprites", "playable"],
+    blurb: "A flooded city street at night: the pack's own scene is the one " +
+      "background, split into two BXR bands by the raster callback while the " +
+      "water cycles its palette. IJKL walks and jumps, N fires.",
+    effect: "one background, two bands",
+    demoArt: "city"
   }
 ];
 
