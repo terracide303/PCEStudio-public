@@ -19,10 +19,14 @@
  * Refusals: the host's codes (reg-range, ...) come back through the IL path
  * exactly as through the Lua path, and the IL's own refusals (il-op,
  * il-method, il-for-in, il-vararg, il-multret, il-string, il-mixed,
- * il-int-range, il-fixed-range, il-type, il-cond, il-table-read,
- * il-pad-write, il-key, il-reg-name, il-surface-shadow, il-unsupported,
- * il-undefined, il-env, il-arity, il-syntax) are asserted by code with the
- * source line in the message.
+ * il-int-range, il-fixed-range, il-type, il-cond, il-pad-write, il-key,
+ * il-reg-name, il-surface-shadow, il-unsupported, il-undefined, il-env,
+ * il-arity, il-syntax) are asserted by code with the source line in the
+ * message.
+ *
+ * A fifth toy (#118) reads tables back: an array of numbers, an array of
+ * entity tables, a string-keyed field and a table captured as an upvalue.
+ * Its Lua run and its IL run are compared frame by frame like the others.
  *
  * Written by @design because the card names this file. Per workshop rule 2 a
  * cold break by another seat is owed before this closes the card.
@@ -227,7 +231,8 @@ function checkToys() {
             : { up: true });
   }
   const pC = compareToys("sprite", TOY_SPRITE, pads);
-  return { pA, pB, pC };
+  const pD = compareToys("table", TOY_TABLE);
+  return { pA, pB, pC, pD };
 }
 
 /* A fourth toy, beyond the card's three: the constructs the lowering is
@@ -259,6 +264,48 @@ function frame(t, f)
   vram[6] = ((0 - 7) // 3) & 0xFFFF
 end
 `;
+
+/* #118: a toy keeps its state in tables and reads it back.  The card's close
+ * is "a toy that reads a[1] runs in the Lua runtime and is accepted by the
+ * IL"; this is that toy, compared the same way as the other four.
+ *
+ *   a    an array of four ints: setlist, integer-key tset and tget in a loop
+ *   e    an array of entity tables: e[i].x is a table read then a field read
+ *   r    a string-keyed field: r.x, typed by its use
+ *   hidden  a table captured as an upvalue: the read goes through a
+ *        lowering-allocated scratch register (the IL has no upvalue operand) */
+const TOY_TABLE = `
+local hidden = {11, 12, 0}
+function init()
+  a = {0, 0, 0, 0}
+  a[1] = 3
+  a[2] = 5
+  a[3] = a[1] + a[2]
+  r = {x = 7}
+  e = {{x = 2, y = 3}, {x = 4, y = 5}}
+end
+function frame(t, f)
+  local s = 0
+  for i = 1, 2 do s = s + e[i].x + e[i].y end
+  for i = 1, 4 do s = s + a[i] end
+  a[4] = a[3] + r.x + hidden[1]
+  vram[0] = a[4]
+  vram[1] = s
+end
+`;
+
+function checkTableRead() {
+  const program = il.compile(TOY_TABLE);
+  const frame = program.functions[program.hooks.frame];
+  const reads = frame.code.filter(function (i) { return i.t === "tget"; });
+  check(reads.length >= 4, "table: the reads lowered to `tget` (" +
+        reads.length + " in frame)");
+  check(frame.code.some(function (i) { return i.t === "getupval"; }),
+        "table: a captured table is loaded from its upvalue before the read");
+  const table = program.functions[program.hooks.init].code.filter(
+    function (i) { return i.t === "table"; });
+  check(table.length >= 4, "table: each table constructor is a `table` op");
+}
 
 function checkBreadth() {
   const luaRT = toys.create(TOY_BREADTH, { budgetMs: 250 });
@@ -498,8 +545,8 @@ function init() local x = 1e9 end`, "il-fixed-range");
 function init() local x = 1 x() end`, "il-type");
   refusal("a condition with no value", `
 function init() local s = "x" if s then end end`, "il-cond");
-  refusal("reading a toy-built table", `
-function init() local t = { a = 1 } local y = t.a end`, "il-table-read");
+  refusal("a table key of a function", `
+function init() local t = {} local f = function() end local y = t[f] end`, "il-key");
   refusal("writing a pad", `
 function init() pad[1].right = true end`, "il-pad-write");
   refusal("a pad field that is not a constant", `
@@ -523,10 +570,10 @@ function init( end`, "il-syntax");
 
   /* the lines are in the messages, not just the codes */
   try {
-    il.compile("\nfunction init()\n  local t = {} local y = t.a\nend");
-    check(false, "il-table-read report was expected");
+    il.compile("\nfunction init()\n  local t = {} local p = pad[1] local y = t[p]\nend");
+    check(false, "an il-key report was expected");
   } catch (e) {
-    check(e.code === "il-table-read" && /line 3/.test(e.message),
+    check(e.code === "il-key" && /line 3/.test(e.message),
           "an IL refusal names the source line (" + e.message + ")");
   }
 }
@@ -549,6 +596,7 @@ function checkNotProven() {
 function main() {
   const programs = checkToys();
   checkBreadth();
+  checkTableRead();
   checkStructure(programs);
   checkHelpers();
   checkHostRefusals();
@@ -559,7 +607,7 @@ function main() {
     console.log("FAIL  " + failures.length + " of " + checks + " checks failed");
     process.exit(1);
   }
-  console.log("PASS  " + checks + " checks, 3 toys x " + FRAMES +
+  console.log("PASS  " + checks + " checks, 4 toys x " + FRAMES +
               " frames + a breadth toy IL == Fengari (state, raster, pixels), " +
               "the IL's structure and both refusal sets");
 }
