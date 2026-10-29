@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Beta testers' guide
+    url: https://pcestudio.terracides.com/renderer/testers.html
+    about: How to test, the keys, and what does not work yet. Please read it before reporting.
