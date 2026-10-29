@@ -57,4 +57,30 @@ for d in $(echo "$files" | xargs -n1 dirname | sort -u); do
   upload "$target" $group >/dev/null
   total=$((total + $(echo "$group" | wc -l)))
 done
+
+# ---- the demo art (#128), which is NEVER in the repository ----------------
+# Dennis, 2026-10-29: the pack's art may be shown on the site but not
+# committed (docs/DECISIONS.md).  So the playable toy and its pictures live
+# beside the repo in demo-art/<toy>/; this uploads them, and makes the site's
+# gallery carry the playable source instead of the repo's placeholder.
+DEMO_ART="${DEMO_ART:-/Volumes/External/agent-workshop-demo/demo-art}"
+if [ -f "$DEMO_ART/oak-woods/main.lua" ]; then
+  echo "demo art: $DEMO_ART/oak-woods"
+  # the generated gallery module, with the pack's art in oak-woods' source
+  stage=$(mktemp -d)
+  node tools/gallery.js --with-demo-art > "$stage/gallery-toys.js"
+  upload "$DEST/renderer" "$stage/gallery-toys.js" >/dev/null
+  total=$((total + 1))
+  # the art folder, and the playable main.lua where the toy page's Raw source
+  # and the gallery's ../toys/ link point
+  mkd "$DEST"; mkd "$DEST/demo-art"; mkd "$DEST/demo-art/oak-woods"
+  art=$(find "$DEMO_ART/oak-woods" -type f ! -name '.*' | sort)
+  upload "$DEST/demo-art/oak-woods" $art >/dev/null
+  total=$((total + $(echo "$art" | wc -l)))
+  upload "$DEST/toys/oak-woods" "$DEMO_ART/oak-woods/main.lua" >/dev/null
+  total=$((total + 1))
+  rm -rf "$stage"
+else
+  echo "demo art: no $DEMO_ART/oak-woods/main.lua — the site keeps the placeholder"
+fi
 echo "uploaded $total files + index.html to $DEST"
