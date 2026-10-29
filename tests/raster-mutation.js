@@ -205,8 +205,13 @@ const NOT_PICTURES = (() => {
     console.error("ERROR: check.js's NOT_PICTURES declaration not found");
     process.exit(2);
   }
-  return new Set([...body[1].matchAll(/^\s{2}([A-Za-z0-9_]+):/gm)]
-    .map((m) => m[1]));
+  /* The keys are either bare identifiers or quoted: #108's palette-huc,
+   * toypalette-ilvm and friends carry hyphens, so a bare [A-Za-z0-9_]+
+   * pattern would read "palette-huc" as no name and leave the dump in this
+   * script's universe, turning the baseline red for a non-renderer reason. */
+  return new Set([...body[1].matchAll(
+    /^\s{2}(?:"([A-Za-z0-9_-]+)"|([A-Za-z0-9_-]+)):/gm)]
+    .map((m) => m[1] || m[2]));
 })();
 if (NOT_PICTURES.size === 0) {
   console.error("ERROR: check.js's NOT_PICTURES parsed to no names");
