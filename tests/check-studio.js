@@ -65,6 +65,12 @@
  *     numbers, active line), save/reopen, Vim, the real DOM shortcuts and
  *     autosave across a reload. Without the flag the suite still covers 1-8
  *     in the stub DOM.
+ * 11. #89 (REVIEW-31C S02/S04/S06): every file's source is in the save
+ *     envelope and comes back after reopen (five of five, not two); Ctrl+S
+ *     starts a real .pce.json download, not only an autosave; and a mounted
+ *     CodeMirror's text — not the stale textarea — is what editorText()
+ *     returns and what the page runs, through a stand-in that models
+ *     CodeMirror's non-syncing textarea.
  *
  * Not measured here: layout and CSS (a screenshot is the evidence, under
  * $TMPDIR and described in docs/STUDIO.md), a real canvas's pixels (the stub
@@ -464,7 +470,7 @@ function pageParts() {
   return { srcs, inline };
 }
 
-function runPage(search, storage) {
+function runPage(search, storage, extra) {
   const parts = pageParts();
   if (!parts.inline) throw new Error("studio.html has no inline script");
   if (!parts.srcs.length) throw new Error("studio.html names no scripts");
@@ -495,6 +501,10 @@ function runPage(search, storage) {
     __now: 0
   };
   sandbox.performance = { now: () => sandbox.__now };
+  /* #89 / S06: a fake window.CodeMirror, so a page whose real DOM cannot host
+   * the vendored editor still mounts one.  It must be in the sandbox before
+   * the page's inline script runs (mountEditor is called from init()). */
+  if (extra) for (const k of Object.keys(extra)) sandbox[k] = extra[k];
   sandbox.window = sandbox;
   sandbox.self = sandbox;
   sandbox.globalThis = sandbox;
@@ -896,7 +906,13 @@ function checkFiles(page) {
   check(studio.editorText() === edited && studio.activeFile() === "main.lua",
         "switching back restores main.lua's editor text");
 
-  /* Save and reopen: one JSON envelope, byte-identical both ways. */
+  /* Save and reopen: one JSON envelope, byte-identical both ways.  #89 /
+   * S02: the review dropped palettes.json's source and the suite stayed
+   * green, because only main.lua's and tiles.json's sources were compared
+   * (and save/reopen lost the same text on both sides).  Snapshot all five
+   * files first and compare every one. */
+  const filesBefore = studio.files().map((f) => ({ name: f.name,
+                                                   source: f.source }));
   const saved = studio.saveToy();
   check(/\.pce\.json$/.test(saved.name),
         "Save file names a .pce.json envelope (got " + saved.name + ")");
@@ -910,9 +926,16 @@ function checkFiles(page) {
         "the envelope carries every file in order, main.lua first");
   check(!!env && Array.isArray(env.sources) && env.sources.length === 0,
         "the envelope keeps ppu.toys' sources slot (empty until #24)");
-  check(!!env && env.files[0].source === edited &&
-        env.files.find((f) => f.name === "tiles.json").source === assetText,
-        "the envelope's sources are the editor's exact texts");
+  {
+    const envFiles = (env && Array.isArray(env.files) ? env.files : [])
+      .map((f) => ({ name: f.name, source: f.source }));
+    const wrong = filesBefore.filter((f, i) => !envFiles[i] ||
+      envFiles[i].name !== f.name || envFiles[i].source !== f.source);
+    check(filesBefore.length === 5 && wrong.length === 0,
+          "the envelope carries every file's source exactly (five of five)" +
+          (wrong.length ? "; wrong: " + wrong.map((f) => f.name).join(", ") +
+           " (envelope has " + envFiles.length + " files)" : ""));
+  }
   const before = studio.envelopeText();
   studio.loadExample("raster", true);           /* move away from the toy */
   studio.openToy(saved.text, saved.name);
@@ -921,9 +944,16 @@ function checkFiles(page) {
   check(before === after, "reopening does not rewrite the toy silently");
   check(studio.editorText() === edited && studio.current().source === edited,
         "reopening restores the editor and the Lua that runs");
-  check(studio.files().length === 5 &&
-        studio.files().find((f) => f.name === "tiles.json").source === assetText,
-        "reopening restores the asset files too");
+  {
+    const reopened = studio.files().map((f) => ({ name: f.name,
+                                                  source: f.source }));
+    const wrong = filesBefore.filter((f, i) => !reopened[i] ||
+      reopened[i].name !== f.name || reopened[i].source !== f.source);
+    check(reopened.length === 5 && wrong.length === 0,
+          "reopening restores every asset file's bytes (five of five)" +
+          (wrong.length ? "; wrong: " + wrong.map((f) => f.name).join(", ")
+           : ""));
+  }
 
   /* Autosave is the whole toy, not one string. Run a second page against the
    * same storage: that is a reload for the page's purposes. */
@@ -972,6 +1002,73 @@ function checkFiles(page) {
   studio.pause();
 }
 
+/* ---- 6b. the CodeMirror editorText path (#89 / S06) -------------------- */
+/* The stub DOM has no window.CodeMirror, so the default run only exercises
+ * the textarea fallback — which is exactly why the review's S06 break
+ * (editorText() always reading the stale textarea) passed.  This page mounts
+ * a stand-in that behaves like CodeMirror where it matters: fromTextArea
+ * takes the textarea's text once, the textarea is NOT kept in sync, and an
+ * edit arrives through the change handler. */
+function fakeCodeMirror() {
+  function CM() {
+    throw new Error("fake CodeMirror: the page only calls fromTextArea");
+  }
+  CM.fromTextArea = function (textarea) {
+    return {
+      opts: {},
+      text: String((textarea && textarea.value) || ""),
+      handlers: {},
+      getValue() { return this.text; },
+      setValue(v) { this.text = String(v == null ? "" : v); },
+      getOption(name) { return this.opts[name]; },
+      setOption(name, value) { this.opts[name] = value; },
+      on(name, fn) {
+        (this.handlers[name] = this.handlers[name] || []).push(fn);
+      },
+      focus() {},
+      refresh() {},
+      /* a keystroke that replaces the buffer and fires "change" */
+      type(text) {
+        this.text = String(text);
+        for (const fn of (this.handlers.change || []).slice()) fn(this);
+      },
+      somethingSelected() { return false; },
+      replaceSelection() {},
+      indentSelection() {}
+    };
+  };
+  return CM;
+}
+
+function checkCodeMirrorEditorText() {
+  const page = runPage("?paused=1", makeStorage(),
+                       { CodeMirror: fakeCodeMirror() });
+  const studio = page.sandbox.PCEStudio.studio;
+  check(studio.editorKind() === "codemirror",
+        "the stub can mount a CodeMirror stand-in (got " +
+        studio.editorKind() + ")");
+  const cm = studio.codeMirror();
+  check(!!cm, "the page holds the mounted editor instance");
+  if (!cm) return;
+
+  /* The stand-in took the textarea's text once at mount.  From here the
+   * textarea is stale, as CodeMirror leaves it. */
+  const typed = studio.editorText() + "\n-- typed in codemirror-77\n";
+  page.dom.get("source").value = "-- stale textarea text\n";
+  cm.type(typed);
+
+  check(studio.editorText() === typed,
+        "editorText() is CodeMirror's text, not the stale textarea's (" +
+        JSON.stringify(String(studio.editorText()).slice(0, 40)) + ")");
+  check(studio.current().source === typed,
+        "the Lua the page runs is CodeMirror's text");
+  const main = studio.files().find((f) => f.name === "main.lua");
+  check(!!main && main.source === typed,
+        "the CodeMirror edit lands in main.lua");
+  check(page.dom.get("source").value === "-- stale textarea text\n",
+        "the stand-in leaves the textarea stale (as CodeMirror does)");
+}
+
 /* ---- 7. every PCE shortcut of docs/STUDIO.md §5 ------------------------ */
 function checkShortcuts(page) {
   const studio = page.sandbox.PCEStudio.studio;
@@ -1017,14 +1114,54 @@ function checkShortcuts(page) {
         "Cmd+, is a page shortcut");
   check(studio.current().frame === 3, "Ctrl/Cmd+, steps one frame back");
 
-  /* Ctrl/Cmd+S saves the toy envelope, not just main.lua. */
+  /* Ctrl/Cmd+S saves the toy envelope, not just main.lua.  #89 / S04: the
+   * review rebound the shortcut to autosave only (persistToy), and the
+   * storage assertion below still passed — persistToy writes the same
+   * envelope.  The shortcut must reach the FILE path, so watch the anchor
+   * downloadText() creates and the file it would save. */
   studio.setEditorText(studio.editorText() + "\n-- saved by shortcut\n");
-  check(shortcut(studio, { key: "s", ctrlKey: true }) === true,
-        "Ctrl+S is a page shortcut");
+  const downloads = [];
+  const anchorDoc = page.dom.document;
+  const makeAnchor = anchorDoc.createElement;
+  anchorDoc.createElement = function (tag) {
+    const el = makeAnchor.call(anchorDoc, tag);
+    if (String(tag).toLowerCase() === "a") {
+      const click = el.click;
+      el.click = function () {
+        downloads.push({ download: el.download, href: el.href });
+        return click.call(el);
+      };
+    }
+    return el;
+  };
+  try {
+    check(shortcut(studio, { key: "s", ctrlKey: true }) === true,
+          "Ctrl+S is a page shortcut");
+  } finally {
+    anchorDoc.createElement = makeAnchor;
+  }
+  eq("Ctrl+S starts exactly one download", downloads.length, 1);
+  check(downloads.length === 1 && /\.pce\.json$/.test(String(downloads[0].download)),
+        "Ctrl+S downloads a .pce.json file (got " +
+        (downloads[0] ? downloads[0].download : "no download") + ")");
+  let filePayload = null;
+  if (downloads.length === 1 &&
+      /^data:application\/json[^,]*,/.test(String(downloads[0].href))) {
+    try {
+      filePayload = decodeURIComponent(
+        String(downloads[0].href).replace(/^data:[^,]*,/, ""));
+    } catch (e) { /* checked below */ }
+  }
+  check(!!filePayload && filePayload.indexOf("-- saved by shortcut") >= 0 &&
+        /"files"/.test(filePayload),
+        "the downloaded file is the toy envelope with the edit in it");
+  check(/^saved .*\.pce\.json$/.test(page.dom.get("saved").textContent),
+        "Ctrl+S says which file it saved (got " +
+        JSON.stringify(page.dom.get("saved").textContent) + ")");
   const storedToy = storage.getItem("pcestudio.toy.v1") || "";
   check(storedToy.indexOf("-- saved by shortcut") >= 0 &&
         /"files"/.test(storedToy),
-        "Ctrl+S saves the whole toy envelope");
+        "Ctrl+S also autosaves the whole toy envelope");
 
   /* Escape closes whatever is open. */
   page.dom.get("open-pop").hidden = false;
@@ -1727,6 +1864,7 @@ async function main() {
   checkButtons(page);
   checkFiles(page);
   checkShortcuts(page);
+  checkCodeMirrorEditorText();
   checkOutputColumn(page);
 
   let browser = "not-requested";
