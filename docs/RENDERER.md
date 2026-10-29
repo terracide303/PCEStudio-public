@@ -904,10 +904,17 @@ display window since #48 is modelled from HSR/HDR/VPR/VDR/VCR and proven on
 four 5.37 MHz captures (scenes 11-14) and the two wide ones; the horizontal
 absolute alignment is Mednafen's output geometry per clock (`xs[1]`), and a
 sprite on a narrowed window is model-only (both labelled in the window
-section above).  The **viewer and the editor still do one width only** —
-`viewer.asm`, `genviewer.py`, `pce-rom.js` and the editor's picture model
-write the 256-dot registers and a 256-px preview; a picture wider than 256
-runs in the renderer and not yet on a console (card #70).  Raster writes are modelled at **line boundaries only**, and
+section above).  **All four of `viewer.asm`, `genviewer.py`, `pce-rom.js` and
+the editor write the picture's own VCE CR and wide window since #70** — a
+version 2 config carries the wide-window block (`docs/ROM_LAYOUT.md`), the
+viewer ROM of `wide336`/`wide512` diffed 0 at 341×232 and 512×232 in
+Mednafen (`tests/check-viewer.js`), the editor's exported 336- and 512-dot
+pictures were captured at their real widths (`tests/dumps/wedit336`,
+`wedit512`, `tests/check-editor.js`), and the panels follow a pixel past the
+old 256-px edge (`tests/check-panels.js`, `vwide512`).  The editor's BAT is
+still 32 tiles wide in every mode, so a wide picture repeats horizontally;
+that (and rule 2's cold break) is what the wide evidence does not cover.
+Raster writes are modelled at **line boundaries only**, and
 the pieces the evidence does not cover are written down, not hidden:
 
 - A VCE colour-table write during a line's active display shows the new

@@ -116,10 +116,15 @@
  *   node tests/check-editor.js --write sprite  # write tools/gen/spainted.pce
  *   node tests/check-editor.js --write effect  # write tools/gen/effect1.pce
  *                                              # + tools/gen/effect1.raster.json
+ *   node tests/check-editor.js --write wide336 # write tools/gen/wedit336.pce
+ *   node tests/check-editor.js --write wide512 # write tools/gen/wedit512.pce
+ *                                              # (#70: the editor's wide pictures)
  *
  *   tools/capture.sh painted    # builds + captures the background picture
  *   tools/capture.sh spainted   # builds + captures the sprite scene
  *   tools/capture.sh effect     # builds + captures the effect picture
+ *   tools/capture.sh 336 wedit  # builds + captures the 336-dot wide picture
+ *   tools/capture.sh 512 wedit  # builds + captures the 512-dot wide picture
  *
  * Exit 0 only if everything above holds.
  *
@@ -148,6 +153,9 @@ const BANK0 = path.join(HERE, "..", "renderer", "viewer-bank0.bin");
 const CAPTURE = path.join(HERE, "dumps", "painted");
 const SPRITE_CAPTURE = path.join(HERE, "dumps", "spainted");
 const EFFECT_CAPTURE = path.join(HERE, "dumps", "effect1");
+/* #70: the wide pictures' captures (tools/capture.sh 336|512 wedit) */
+const WIDE_CAPTURES = { 336: path.join(HERE, "dumps", "wedit336"),
+                        512: path.join(HERE, "dumps", "wedit512") };
 const SAT_BYTE = 0x7F00 * 2;   /* the SAT at VRAM word $7F00 */
 const EDITOR_SRC = fs.readFileSync(
   path.join(HERE, "..", "renderer", "pce-editor.js"), "utf8");
@@ -238,6 +246,88 @@ function modelFrame(pic) {
     }
   }
   return { width: W, height: H, pixels: px };
+}
+
+/* #70: the wide preview recomputed from the editor's own data.  The window
+ * is the VDC's: the display starts (HDS+1)*8 dots after hsync and is
+ * (HDW+1)*8 wide; the absolute alignment inside Mednafen's output is
+ * xs[1] = {24, 38, 96} for the three clocks (#27, pce-bg.js DOT_CLOCK).
+ * Outside the window the VCE shows CRAM[0x100] (the editor leaves its sprite
+ * palettes black, so that is colour 0).  Inside it the 32x32 BAT wraps every
+ * 256 dots, exactly as the console does with a 32-tile BAT. */
+function modelWideFrame(pic, mode) {
+  const W = mode.frame, H = ed.VIEW_H;
+  const hAlign = { 256: 24, 336: 38, 512: 96 }[mode.width];
+  const hds = mode.HSR >> 8, hdw = mode.HDR & 0x7F;
+  const x0 = (hds + 1) * 8 - hAlign;
+  const x1 = x0 + (hdw + 1) * 8;
+  const border = pic.spritePalettes[0][0];   /* CRAM[0x100] */
+  const px = new Uint8Array(W * H * 3);
+  const put = (o, colour) => {
+    px[o] = 36 * ((colour >> 3) & 7);
+    px[o + 1] = 36 * ((colour >> 6) & 7);
+    px[o + 2] = 36 * (colour & 7);
+  };
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 3;
+      if (x < x0 || x >= x1) { put(o, border); continue; }
+      const col = x - x0;                    /* BXR = 0 in the editor */
+      const char = ed.mapCell(pic, (col >> 3) & (ed.BAT_W - 1),
+                              (y >> 3) & (ed.BAT_H - 1));
+      const tile = pic.tiles[char];
+      const v = tile.pixels[(y & 7) * 8 + (col & 7)];
+      put(o, v === 0 ? pic.backdrop : pic.palettes[tile.palette][v]);
+    }
+  }
+  return { width: W, height: H, pixels: px };
+}
+
+/* #70: a 336- or 512-dot picture.  Three independent witnesses: the editor's
+ * registers, pce-bg.js's preview against modelWideFrame(), and the exported
+ * ROM's version-2 config + wide-window block. */
+function checkWidePicture(pic, width) {
+  const problems = [];
+  ed.setVideoMode(pic, width);
+  const mode = ed.videoMode(pic);
+  const size = ed.previewSize(pic);
+  if (size.width !== mode.frame || size.height !== ed.VIEW_H)
+    problems.push(`previewSize ${size.width}x${size.height}, expected ` +
+                  `${mode.frame}x${ed.VIEW_H}`);
+
+  const data = ed.toPicture(pic);
+  for (const r of ["VCECR", "HSR", "HDR"])
+    if (data.regs[r] !== mode[r])
+      problems.push(`toPicture ${r}=${data.regs[r]}, the mode says ${mode[r]}`);
+
+  const preview = ed.renderPreview(pic, 0);
+  if (preview.width !== mode.frame)
+    problems.push(`the preview drew ${preview.width} px, expected ${mode.frame}`);
+  const model = modelWideFrame(pic, mode);
+  const p = diffPixels(preview, model, `${width}-dot preview vs model`);
+  if (p) problems.push(p);
+
+  /* the window is visible in the preview: its border columns are CRAM[0x100]
+   * and its interior is not */
+  const border = pic.spritePalettes[0][0];
+  const br = [36 * ((border >> 3) & 7), 36 * ((border >> 6) & 7),
+              36 * (border & 7)];
+  const hds = mode.HSR >> 8, hdw = mode.HDR & 0x7F;
+  const hAlign = { 256: 24, 336: 38, 512: 96 }[width];
+  const x0 = (hds + 1) * 8 - hAlign, x1 = x0 + (hdw + 1) * 8;
+  let borderPx = 0;
+  for (let x = 0; x < mode.frame; x++) {
+    if (x >= x0 && x < x1) continue;
+    if (!samePixel(pixelAt(preview, x, 100), br)) {
+      problems.push(`border column ${x} is not CRAM[0x100]`);
+      break;
+    }
+    borderPx++;
+  }
+  if (borderPx !== Math.max(0, x0) + Math.max(0, mode.frame - x1))
+    problems.push(`${borderPx} border column(s), the window leaves ` +
+                  `${Math.max(0, x0) + Math.max(0, mode.frame - x1)}`);
+  return { problems, mode, data, preview };
 }
 
 /* The sprite scene recomputed from the editor's own model — independently of
@@ -631,7 +721,11 @@ function checkExport(data, romBytes, bank0) {
    * SAT at 0x440 (card #14) */
   const cfg = romBytes.subarray(BANK, BANK + 64);
   const u16 = (b, o) => b[o] | (b[o + 1] << 8);
-  if (cfg[0] !== 1) problems.push("config version is not 1");
+  /* #70: a picture on a /3 or /2 dot clock is config version 2 and carries
+   * the wide-window block at bank 1 offset 0x1F00. */
+  const wide = (data.regs.VCECR & 3) !== 0;
+  if (cfg[0] !== (wide ? 2 : 1))
+    problems.push(`config version is ${cfg[0]}, expected ${wide ? 2 : 1}`);
   if (u16(cfg, 2) !== data.regs.BXR) problems.push("config BXR differs");
   if (u16(cfg, 4) !== data.regs.BYR) problems.push("config BYR differs");
   if (cfg[6] !== data.regs.MWR) problems.push("config MWR differs");
@@ -652,6 +746,24 @@ function checkExport(data, romBytes, bank0) {
   if (!Buffer.from(romBytes.subarray(satAt, satAt + 512))
         .equals(Buffer.from(data.vram.subarray(0xFE00, 0xFE00 + 512))))
     problems.push("the ROM's SAT is not the editor's VRAM words $7f00..");
+
+  /* #70: the wide-window block, byte for byte what tools/genviewer.py
+   * writes (VCE CR, 0, HSR lo/hi, HDR lo/hi, 0, 0). */
+  if (wide) {
+    const at = BANK + 0x1F00;
+    const block = romBytes.subarray(at, at + 8);
+    if (block[0] !== data.regs.VCECR) problems.push("wide block VCE CR differs");
+    if (u16(block, 2) !== data.regs.HSR) problems.push("wide block HSR differs");
+    if (u16(block, 4) !== data.regs.HDR) problems.push("wide block HDR differs");
+    for (const i of [1, 6, 7])
+      if (block[i] !== 0) problems.push(`wide block byte ${i} is not 0`);
+  } else {
+    /* a 256-dot picture leaves the block as padding, so old ROMs are
+     * byte-identical to before #70 */
+    for (let i = 0; i < 8; i++)
+      if (romBytes[BANK + 0x1F00 + i] !== 0xFF)
+        problems.push(`a 256-dot ROM's wide block is not 0xff padding`);
+  }
 
   /* banks 2-3: the BAT */
   const batAt = 2 * BANK;
@@ -697,7 +809,7 @@ function checkCapture(pic, data, sprite, captureDir) {
     problems.push("captured VRAM is not the editor's VRAM");
   if (!cram.equals(Buffer.from(data.cram)))
     problems.push("captured CRAM is not the editor's 512 colour-table entries");
-  for (const r of ["MWR", "BXR", "BYR", "CR"])
+  for (const r of ["MWR", "BXR", "BYR", "CR", "VCECR", "HSR", "HDR"])
     if (regs[r] !== data.regs[r])
       problems.push(`captured ${r}=${regs[r]}, the editor wrote ${data.regs[r]}`);
 
@@ -714,9 +826,11 @@ function checkCapture(pic, data, sprite, captureDir) {
   }
 
   /* the frame: the renderer drawing the EDITOR's picture, with the capture's
-   * own scanline calibration (the capture starts one VDW line in) */
+   * own scanline calibration (the capture starts one VDW line in).  #70: the
+   * frame's width follows the capture's own VCE CR (256 / 341 / 512). */
+  const width = bg.frameWidth({ regs });
   const opts = { vram: data.vram, cram: data.cram, regs,
-                 width: 256, height: 232 };
+                 width, height: 232 };
   if (sprite) opts.sat = sat;
   const drawn = sprite ? sprites.renderFrame(opts) : bg.renderFrame(opts);
   const png = decodePng(fs.readFileSync(path.join(dir, "mednafen.png")));
@@ -727,17 +841,17 @@ function checkCapture(pic, data, sprite, captureDir) {
    * editor's rows 1..223 (the capture crops the first VDW line) */
   const previewOpts = {
     vram: data.vram, cram: data.cram, regs: ed.viewRegs(pic),
-    width: 256, height: 224
+    width: width, height: 224
   };
   if (sprite) previewOpts.sat = sat;
   const preview = sprite ? sprites.renderFrame(previewOpts)
                          : bg.renderFrame(previewOpts);
   let shiftedDiffs = 0;
   for (let y = 0; y < 223; y++)
-    for (let x = 0; x < 256; x++)
+    for (let x = 0; x < width; x++)
       for (let k = 0; k < 3; k++)
-        if (preview.pixels[((y + 1) * 256 + x) * 3 + k] !==
-            png.pixels[(y * 256 + x) * 3 + k]) shiftedDiffs++;
+        if (preview.pixels[((y + 1) * width + x) * 3 + k] !==
+            png.pixels[(y * png.width + x) * 3 + k]) shiftedDiffs++;
   if (shiftedDiffs !== 0)
     problems.push(`preview vs capture rows 1..223: ${shiftedDiffs} differing ` +
                   `bytes (the capture should be the preview one row up)`);
@@ -1562,6 +1676,26 @@ function checkPageWiring(label) {
         JSON.stringify(after) + ", expected " + JSON.stringify(want) +
         ": the handler does not clear " + own + " and only " + own);
   }
+  /* #70: the Dot clock control is wired to setVideoMode, and it moves the
+   * preview's width with the picture's clock. */
+  const changes = element("video").listeners.change || [];
+  if (changes.length !== 1) {
+    P.push(label + ": editor.html registers " + changes.length +
+      " change handler(s) on #video, expected exactly 1");
+  } else {
+    try {
+      element("video").value = "512";
+      changes[0]();
+      const mode = JSON.parse(vm.runInContext(
+        "JSON.stringify({ video: pic.video," +
+        " frame: ed.previewSize(pic).width })", sandbox));
+      if (mode.video !== 512 || mode.frame !== 512)
+        P.push(label + ": the #video handler left " + JSON.stringify(mode) +
+          ", expected the picture on the 512-dot clock and a 512-px preview");
+    } catch (e) {
+      P.push(label + ": #video: the change handler threw (" + e.message + ")");
+    }
+  }
   return P;
 }
 
@@ -1571,7 +1705,9 @@ function main() {
   const write = argv.indexOf("--write") >= 0;
   const writeSprite = write && argv.indexOf("sprite") >= 0;
   const writeEffect = write && argv.indexOf("effect") >= 0;
-  const writeBg = write && !writeSprite && !writeEffect;
+  const writeWide = write && (argv.indexOf("wide336") >= 0 ||
+                              argv.indexOf("wide512") >= 0);
+  const writeBg = write && !writeSprite && !writeEffect && !writeWide;
   let failed = 0;
   const out = (s) => console.log(s);
   const fail = (s) => { out(s); failed++; };
@@ -1653,6 +1789,27 @@ function main() {
            `image at bank 1 offset $640 decodes back to all ` +
            `${effectRaster.entries.length} entries of the editor's table`);
 
+  /* 3c. #70: the wide pictures — the editor's registers, the preview vs the
+   * model, and the exported ROM's version-2 config + wide-window block. */
+  const wide = {};
+  for (const w of [336, 512]) {
+    const wpic = ed.demoPicture();
+    const check = checkWidePicture(wpic, w);
+    if (check.problems.length) { check.problems.forEach(fail); continue; }
+    const wrom = rom.buildRom({
+      bank0, vram: check.data.vram, cram: check.data.cram,
+      regs: check.data.regs, regions: check.data.regions
+    });
+    const wexp = checkExport(check.data, wrom, bank0);
+    if (wexp.length) { wexp.forEach(fail); continue; }
+    wide[w] = { pic: wpic, data: check.data, rom: wrom, mode: check.mode };
+    out(`wide ${w} dots: VCE CR $${check.mode.VCECR.toString(16)}, ` +
+        `HSR $${check.mode.HSR.toString(16)}, HDR $${check.mode.HDR.toString(16)}, ` +
+        `preview ${check.mode.frame}x${ed.VIEW_H} == the model; export ` +
+        `${wrom.length} bytes, sha256 ${sha256(wrom).slice(0, 16)}… ` +
+        `(config version 2 + the wide-window block)`);
+  }
+
   if (writeBg) {
     fs.mkdirSync(GEN, { recursive: true });
     const out2 = path.join(GEN, "painted.pce");
@@ -1675,6 +1832,18 @@ function main() {
                      JSON.stringify(effectRaster, null, 1));
     out(`wrote ${path.relative(HERE, out2)} (${effectRom.length} bytes) and ` +
         `gen/effect1.raster.json — run: tools/capture.sh effect`);
+  }
+  if (writeWide) {
+    fs.mkdirSync(GEN, { recursive: true });
+    const w = argv.indexOf("wide512") >= 0 ? 512 : 336;
+    if (!wide[w]) {
+      out(`wide ${w}: the export did not build, so no ROM was written`);
+    } else {
+      const at = path.join(GEN, `wedit${w}.pce`);
+      fs.writeFileSync(at, wide[w].rom);
+      out(`wrote ${path.relative(HERE, at)} (${wide[w].rom.length} bytes) — ` +
+          `run: tools/capture.sh ${w} wedit`);
+    }
   }
 
   /* 6. the effect editor (#17) */
@@ -1720,20 +1889,32 @@ function main() {
   const sameBytes = Buffer.from(grom).equals(Buffer.from(romBytes)) &&
                     Buffer.from(gsrom).equals(Buffer.from(spriteRom)) &&
                     Buffer.from(geffectRom).equals(Buffer.from(effectRom));
-  if (gref.problems.length || !sameBytes || geffProblems.length)
+  /* #70: the browser-global editor knows the wide mode too */
+  const gwpic = globalEditor.demoPicture();
+  globalEditor.setVideoMode(gwpic, 512);
+  const gwdata = globalEditor.toPicture(gwpic);
+  const gwrom = rom.buildRom({
+    bank0, vram: gwdata.vram, cram: gwdata.cram,
+    regs: gwdata.regs, regions: gwdata.regions
+  });
+  const sameWide = !wide[512] ||
+                   Buffer.from(gwrom).equals(Buffer.from(wide[512].rom));
+  if (gref.problems.length || !sameBytes || !sameWide || geffProblems.length)
     fail(`browser-global branch: ${gref.problems.concat(geffProblems).join("; ") ||
          "same refusals, different bytes"}`);
   else out(`browser-global branch: same ${gref.count}/${gref.count} ` +
            `refusals, ${geffRef.count}/${geffRef.count} effect refusals, ` +
            `same effect tables and previews, same ${grom.length}, ` +
-           `${gsrom.length} and ${geffectRom.length} bytes`);
+           `${gsrom.length}, ${geffectRom.length} and ${gwrom.length} bytes ` +
+           `(the last a 512-dot picture)`);
 
   /* 7. the page's own Remove buttons (#52) */
   const pageProblems = checkPageWiring("page");
   if (pageProblems.length) pageProblems.forEach(fail);
   else out(`page: renderer/editor.html executed in a stub DOM — ` +
            `#cleargrad, #clearwob and #clearbands each clear their own ` +
-           `effect and leave the other two`);
+           `effect and leave the other two, and the #video Dot clock ` +
+           `control puts the picture on the 512-dot clock (512-px preview)`);
 
   /* 4. the captures */
   const haveCapture = fs.existsSync(path.join(CAPTURE, "mednafen.png"));
@@ -1781,13 +1962,34 @@ function main() {
              `frame equals the patched table (diff 0)`);
   }
 
+  /* #70: the wide pictures' captures (tools/capture.sh 336|512 wedit) */
+  let haveWideCaptures = true;
+  for (const w of [336, 512]) {
+    const dir = WIDE_CAPTURES[w];
+    const have = fs.existsSync(path.join(dir, "mednafen.png"));
+    if (!have) {
+      out(`wide ${w} capture: not present — run tools/capture.sh ${w} wedit ` +
+          `once the ROM is written`);
+      haveWideCaptures = false;
+      if (!write) failed++;
+      continue;
+    }
+    if (!wide[w]) { failed++; continue; }
+    const problems = checkCapture(wide[w].pic, wide[w].data, false, dir);
+    if (problems.length) problems.forEach(fail);
+    else out(`wide ${w} capture: tests/dumps/wedit${w} is the editor's ` +
+             `VRAM/CRAM/regs and Mednafen's ${wide[w].mode.frame}x232 frame ` +
+             `equals the editor's picture (diff 0)`);
+  }
+
   out(failed === 0
-    ? (haveCapture && haveSpriteCapture && haveEffectCapture
-      ? "PASS: the editor paints tiles and sprites, writes #15's raster " +
-        "table for the three scanline effects and previews it through " +
-        "pce-bg.js/pce-sprites.js, refuses what the VDC cannot show, " +
-        "exports #9's ROM — and the effect picture's table runs on the " +
-        "viewer, so Mednafen shows all three pictures"
+    ? (haveCapture && haveSpriteCapture && haveEffectCapture &&
+       haveWideCaptures
+      ? "PASS: the editor paints tiles, sprites and wide (336/512-dot " +
+        "window) pictures, writes #15's raster table for the three scanline " +
+        "effects and previews it through pce-bg.js/pce-sprites.js, refuses " +
+        "what the VDC cannot show, exports #9's ROM — and the effect and " +
+        "wide pictures run on the viewer, so Mednafen shows all of them"
       : "PASS: the editor paints tiles and sprites, writes #15's raster " +
         "table for the three scanline effects and previews it through " +
         "pce-bg.js/pce-sprites.js, refuses what the VDC cannot show and " +

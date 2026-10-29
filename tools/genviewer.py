@@ -85,6 +85,29 @@ PALETTE_OFFSET = 0x40          # 512 words, LE (entries 0-511)
 SAT_OFFSET = 0x440             # 256 words, LE (64 SAT entries x 4) — #14
 SAT_ADDR = 0x7F00              # the SAT's VRAM word address (DVSSR)
 
+# ---- #70: the wide-window block (docs/ROM_LAYOUT.md)
+# A picture whose VCE CR selects a non-/4 dot clock (DCC bits 1-0 != 00) is
+# a 336- or 512-dot picture: the viewer cannot use the 256-dot HSR/HDR
+# constants, so config version 2 says the block at bank 1 offset 0x1F00 is
+# present.  The block sits after the raster table (which ends at 0x1550) and
+# is 0xFF padding in every version 1 picture, so no existing ROM changes.
+# viewer.asm reads it at $5F00 through MPR2 before any data bank is mapped.
+WIDE_OFFSET = 0x1F00
+WIDE_VCE_CR = 0
+WIDE_HSR_LO = 2
+WIDE_HSR_HI = 3
+WIDE_HDR_LO = 4
+WIDE_HDR_HI = 5
+WIDE_SIZE = 8
+
+
+def is_wide(regs):
+    """A picture is wide when its VCE CR asks for a /3 or /2 dot clock
+    (DCC bits 1-0 != 00; H6-3 and pcetech §6/§9).  The 256-dot /4 clock is
+    every picture before #70."""
+    return (int(regs.get("VCECR", 0x04)) & 0x03) != 0
+
+
 # 128 banks = 1 MB is the HuCard's decode ($00-$7F: sgxtech.txt "HuC6280
 # memory map"; pcetech.txt §3 "Memory map"; hes spec [MEMORY MAP] ROM
 # 0x000000-0x0FFFFF; docs/MANUALS.md §15.1 GAP 4) as well as PCEAS 3.23's
@@ -222,6 +245,11 @@ def build(spec):
         name = spec
         dumpdir = os.path.join(HERE, "..", "tests", "dumps",
                                f"raster{spec[len('vraster'):]}")
+    elif spec.startswith("vwide"):
+        # #70: the viewer ROMs of #27's wide pictures (336 and 512 dots).
+        name = spec
+        dumpdir = os.path.join(HERE, "..", "tests", "dumps",
+                               f"wide{spec[len('vwide'):]}")
     else:
         name = f"viewer{spec}"
         dumpdir = os.path.join(HERE, "..", "tests", "dumps", f"scene{spec}")
@@ -251,6 +279,13 @@ def build(spec):
         bxr, byr, mwr, cr = regs["BXR"], regs["BYR"], regs["MWR"], regs["CR"]
         palette_words = None
     words = bat_words(mwr)
+
+    # #70: a 336- or 512-dot picture carries its VCE CR and the HSR/HDR of
+    # its window in the wide-window block (docs/ROM_LAYOUT.md).  #27's wide
+    # dumps record both the live registers and the latched *_cache fields;
+    # the live HSR/HDR are what the scene ROM wrote and the *_cache values
+    # agree (the viewer writes the same registers before enabling display).
+    wide = is_wide(regs)
 
     regions = []
     for char0, count in load_regions(dumpdir):
@@ -287,9 +322,13 @@ def build(spec):
                     f"flicker: region words {dest}..{dest + count} overlap "
                     f"the rotated SAT copies {copy_lo}..{SAT_ADDR + 0xff}")
 
-    # config block
+    # config block.  Version 2 = the wide-window block is present (#70); a
+    # wide and a flicker picture are mutually exclusive (the flicker bytes
+    # $3E/$3F stay 0), and a raster table never comes with a wide window.
+    assert not (wide and flicker), "wide and flicker are mutually exclusive"
+    assert not (wide and raster), "wide and raster are mutually exclusive"
     cfg = bytearray(CONFIG_SIZE)
-    cfg[CFG_VERSION] = 1
+    cfg[CFG_VERSION] = 2 if wide else 1
     cfg[CFG_BXR:CFG_BXR + 2] = struct.pack("<H", bxr)
     cfg[CFG_BYR:CFG_BYR + 2] = struct.pack("<H", byr)
     cfg[CFG_MWR] = mwr
@@ -303,6 +342,20 @@ def build(spec):
         off = CFG_REG0 + r * REG_SIZE
         cfg[off:off + 2] = struct.pack("<H", dest)
         cfg[off + 2:off + 4] = struct.pack("<H", count)
+
+    # #70: the wide-window block (bank 1 offset 0x1F00) — the picture's VCE
+    # CR and the HSR/HDR its window needs.  The values come from the dump's
+    # own registers, not from a width table, so a future window is carried
+    # the same way.
+    wide_block = None
+    if wide:
+        wide_block = bytearray(WIDE_SIZE)
+        wide_block[WIDE_VCE_CR] = int(regs["VCECR"]) & 0xFF
+        hsr, hdr = int(regs["HSR"]) & 0xFFFF, int(regs["HDR"]) & 0xFFFF
+        wide_block[WIDE_HSR_LO] = hsr & 0xFF
+        wide_block[WIDE_HSR_HI] = (hsr >> 8) & 0xFF
+        wide_block[WIDE_HDR_LO] = hdr & 0xFF
+        wide_block[WIDE_HDR_HI] = (hdr >> 8) & 0xFF
 
     # palette: VCE entries 0-511 (the 16 BG palettes and the 16 sprite
     # palettes the picture uses).  A raster picture's boot colour table is
@@ -350,6 +403,9 @@ def build(spec):
             f.write(raster_bin)
         shutil.copyfile(os.path.join(OUT, f"raster{name[7:]}.raster.json"),
                         os.path.join(OUT, f"{name}.raster.json"))
+    if wide:
+        with open(os.path.join(outdir, "wide.bin"), "wb") as f:
+            f.write(wide_block)
 
     # the asm: viewer.asm (bank 0) + the data banks at the fixed places.
     # BAT and tiles are split into 8 KiB banks so the .incbins never spill
@@ -395,6 +451,11 @@ def build(spec):
         .org $4640
         .incbin "{rel}/raster.bin"
 """)
+    if wide:
+        banks.append(f"""\
+        .org ${0x4000 + WIDE_OFFSET:04x}
+        .incbin "{rel}/wide.bin"
+""")
     for i in range(bat_banks):
         banks.append(f"""\
         .data
@@ -425,6 +486,9 @@ def build(spec):
     if flicker:
         raster_note = (f", flicker step {flicker['step']} x "
                        f"{flicker['phases']} phases")
+    if wide:
+        raster_note += (f", wide window VCE CR=${wide_block[WIDE_VCE_CR]:02x}"
+                        f" HSR=${regs['HSR']:04x} HDR=${regs['HDR']:04x}")
     print(f"wrote {rel}/{{config,palette,bat,tiles,sat}}.bin and "
           f"gen/{name}.asm "
           f"(BXR={bxr}, BYR={byr}, MWR=${mwr:02x}, CR=${cr:02x}, "
@@ -438,13 +502,15 @@ def main():
     # window); 10 -> viewer10 (#46: the >80 KB picture — a 64x64 BAT plus a
     # 32 KiB tile set plus 160 sprite-pattern cells = 11 banks / 88 KB);
     # vsprite1..vsprite12 -> the viewer ROMs of the sprite scenes;
-    # vraster1..vraster10 -> the viewer ROMs of the #15 raster scenes (#16).
+    # vraster1..vraster10 -> the viewer ROMs of the #15 raster scenes (#16);
+    # vwide336/vwide512 -> the viewer ROMs of #27's wide pictures (#70).
     valid = [str(i) for i in (1, 2, 3, 7, 10)] + \
         [f"vsprite{i}" for i in range(1, 14)] + \
-        [f"vraster{i}" for i in range(1, 11)] + ["flicker"]
+        [f"vraster{i}" for i in range(1, 11)] + \
+        ["vwide336", "vwide512", "flicker"]
     if len(sys.argv) != 2 or sys.argv[1] not in valid:
         print(f"usage: {sys.argv[0]} 1|2|3|7|10|vsprite1..vsprite13|"
-              f"vraster1..vraster10|flicker",
+              f"vraster1..vraster10|vwide336|vwide512|flicker",
               file=sys.stderr)
         return 2
     os.makedirs(OUT, exist_ok=True)

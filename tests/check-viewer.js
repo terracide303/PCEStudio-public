@@ -168,7 +168,7 @@ function diffPixels(got, ref, name) {
 }
 
 const VDC_REGS = ["MWR", "BXR", "BYR", "CR", "VSR", "VDR", "HSR", "HDR",
-                  "DCR", "SATB"];
+                  "VCECR", "DCR", "SATB"];
 
 /* The shared #15/#16 raster-table check (tests/check.js uses the same
  * witnesses on the scene dumps). */
@@ -179,13 +179,16 @@ const { checkRaster } = require("./check-raster");
  * of a sprite scene, captured in Mednafen — REVIEW-14's J-gap),
  * vrasterN -> rasterN (#16: the #15 scene whose table the viewer runs).
  * effect1 has no scene — it is the editor's own picture (null: skip the
- * scene comparisons). */
+ * scene comparisons).
+ * #70: vwide336/vwide512 -> wide336/wide512 (the viewer's wide-window block
+ * carries the picture's VCE CR + HSR/HDR; the frame is 341 or 512 dots). */
 function sceneDir(dir) {
   const name = path.basename(dir);
   if (name === "effect1") return null;
   const scene = name.replace(/^vsprite/, "sprite")
                     .replace(/^bsprite/, "sprite")
                     .replace(/^vraster/, "raster")
+                    .replace(/^vwide/, "wide")
                     .replace(/^(?:viewer|browser)/, "scene");
   return path.join(path.dirname(dir), scene);
 }
@@ -217,7 +220,8 @@ function checkViewer(dir) {
     if (checkRaster(name, raster, vregs, vcram, vdwLine0).length) {
       problems.push(`${name}: raster.json does not match the save state`);
     }
-    const opts = { vram: vvram, cram: vcram, regs: vregs, width: 256,
+    const opts = { vram: vvram, cram: vcram, regs: vregs,
+                   width: bg.frameWidth({ regs: vregs }),
                    height: 232, firstScanline, raster };
     got = hasVsat
       ? sprites.renderFrame(Object.assign({ sat: fs.readFileSync(vsatPath) },
@@ -229,7 +233,7 @@ function checkViewer(dir) {
     const sregs = JSON.parse(fs.readFileSync(path.join(scenedir, "regs.json"), "utf8"));
     const ssatPath = path.join(scenedir, "sat.bin");
     const opts = { vram: svram, cram: scram, regs: sregs,
-                   width: 256, height: 232 };
+                   width: bg.frameWidth({ regs: sregs }), height: 232 };
     if (fs.existsSync(ssatPath)) opts.sat = fs.readFileSync(ssatPath);
     got = fs.existsSync(ssatPath)
       ? sprites.renderFrame(opts) : bg.renderFrame(opts);
@@ -474,7 +478,7 @@ function main() {
     return 2;
   }
   const dirs = fs.readdirSync(dumps).filter((d) => {
-    if (!/^(?:viewer|browser)[0-9]+$|^(?:vsprite|bsprite)[0-9]+$|^vraster[0-9]+$|^effect1$/.test(d)) {
+    if (!/^(?:viewer|browser)[0-9]+$|^(?:vsprite|bsprite)[0-9]+$|^vraster[0-9]+$|^vwide(?:336|512)$|^effect1$/.test(d)) {
       return false;
     }
     const scenedir = sceneDir(path.join(dumps, d));

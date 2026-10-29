@@ -40,6 +40,10 @@ DMAROMS := $(addprefix gen/dma,$(addsuffix .pce,1 2 3 4 5))
 # /3 and /2 dot clocks with the 336- and 512-dot display windows.  #76 adds
 # wide512b: wide512 at VCE CR $07 (DCC=11, the folded /2 clock).
 WIDEROMS := gen/wide336.pce gen/wide512.pce gen/wide512b.pce
+# #70: the viewer ROMs of those wide pictures (gen/vwide336.pce,
+# gen/vwide512.pce) — the picture data laid out by genviewer.py with the
+# wide-window block that carries the VCE CR + HSR/HDR.
+VWIDEROMS := gen/vwide336.pce gen/vwide512.pce
 # #28: the flicker viewer ROM — viewer.asm's flicker rotation (assembled
 # with FLICKER defined, so the shared bank 0 the browser export and the #68
 # trace fixtures pin is unchanged), driven by sprite13's picture data and
@@ -56,7 +60,7 @@ WAVEROMS := $(addprefix gen/wave,$(addsuffix .pce,1 2 3))
 # them directly (loadRasterScene), so they stay in `all` and are kept.
 RASTER_TABLES := $(addprefix gen/raster,$(addsuffix .raster.json,$(RASTERS)))
 
-all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS) $(DMAROMS) $(WIDEROMS) $(FLICKER_ROM) $(WAVEROMS) $(RASTER_TABLES)
+all: hello.pce $(addprefix gen/scene,$(addsuffix .pce,$(SCENES))) $(VIEWERS) $(SPRITE_ROMS) $(VSPRITES) $(RASTER_ROMS) $(VRASTERS) $(DMAROMS) $(WIDEROMS) $(VWIDEROMS) $(FLICKER_ROM) $(WAVEROMS) $(RASTER_TABLES)
 
 hello.pce: hello.asm
 	$(PCEAS) -raw -o $@ $<
@@ -140,6 +144,16 @@ gen/raster%.raster.json: genroms.py
 gen/vraster%.pce: gen/vraster%.asm viewer.asm
 	$(PCEAS) -raw -o $@ $<
 
+# #70: the viewer ROMs of #27's wide pictures (336 and 512 dots).  The dump's
+# VCE CR + HSR/HDR ride in the wide-window block (config version 2); the
+# picture data is the same route as the other viewers.
+gen/vwide%.asm: genviewer.py ../tests/dumps/wide%/regions.json
+	mkdir -p gen
+	$(PYTHON) -I genviewer.py vwide$*
+
+gen/vwide%.pce: gen/vwide%.asm viewer.asm
+	$(PCEAS) -raw -o $@ $<
+
 # #28: the flicker viewer ROM.  genviewer.py writes gen/flicker.asm with
 # `FLICKER = 1` before viewer.asm's include; the config carries step/phases.
 gen/sprite13.flicker.json: genroms.py
@@ -172,8 +186,8 @@ gen/wave%.pce: gen/wave%.asm
 # (extract_bank0.py).
 bank0: ../renderer/viewer-bank0.bin
 
-../renderer/viewer-bank0.bin: extract_bank0.py $(VIEWERS) $(VSPRITES) $(VRASTERS)
-	$(PYTHON) -I extract_bank0.py $@ $(VIEWERS) $(VSPRITES) $(VRASTERS)
+../renderer/viewer-bank0.bin: extract_bank0.py $(VIEWERS) $(VSPRITES) $(VRASTERS) $(VWIDEROMS)
+	$(PYTHON) -I extract_bank0.py $@ $(VIEWERS) $(VSPRITES) $(VRASTERS) $(VWIDEROMS)
 
 # #35's export: tools/hutrack.asm's banks $00-$0F (startup, MAIN, the HuTrack
 # engine and its tables) are the same in every music ROM, so the browser

@@ -185,6 +185,12 @@ function loadDump(name) {
   if (fs.existsSync(path.join(dir, "regions.json")))
     d.regions = JSON.parse(
       fs.readFileSync(path.join(dir, "regions.json"), "utf8")).tile_regions;
+  /* #70: the frame is as wide as the VCE dot clock makes it.  Derived from
+   * the raw register here (DCC bits 1-0: 00 /4 = 256, 01 /3 = 341, 10/11
+   * /2 = 512 — the widths Mednafen outputs with horizontal overscan off),
+   * not from pce-bg.js, so the check does not lean on the code under test. */
+  const vcecr = regs.VCECR != null ? regs.VCECR : 0x04;
+  const dc = (vcecr & 2) ? 2 : (vcecr & 1);
   d.opts = {
     vram: d.vram,
     cram: d.cram,
@@ -192,7 +198,7 @@ function loadDump(name) {
     regs: d.regs,
     raster: d.raster || undefined,
     firstScanline,
-    width: 256,
+    width: [256, 341, 512][dc],
     height: 232,
     regions: d.regions || undefined
   };
@@ -292,12 +298,40 @@ function independentModel(opts) {
     });
   }
   return { opts, regs, width, height, vdwLine0, geom, sat, vram: opts.vram,
-           entries, rows };
+           entries, rows, win: displayWindowOf(regs, vdwLine0) };
 }
 
-function independentBackground(m, row, x) {
+/* #70: the VDC's display window, re-derived from raw registers.  Horizontal:
+ * (HDS+1)*8 dots after hsync for (HDW+1)*8 dots, placed in the output at
+ * Mednafen's per-clock offset xs[1] = {24, 38, 96} (#27).  Vertical: VDW+1
+ * lines from vdwLine0, entered at VDW line 0.  A picture with no HSR/HDR is
+ * the canonical 256-dot /4 window (x0 = 0). */
+function displayWindowOf(regs, vdwLine0) {
+  const vcecr = regs.VCECR != null ? regs.VCECR : 0x04;
+  const dc = (vcecr & 2) ? 2 : (vcecr & 1);
+  const hAlign = [24, 38, 96][dc];
+  const hds = regs.HDS_cache != null ? regs.HDS_cache
+            : regs.HSR != null ? (regs.HSR >> 8) & 0x7F : 2;
+  const hdw = regs.HDW_cache != null ? regs.HDW_cache
+            : regs.HDR != null ? regs.HDR & 0x7F : 31;
+  const vdw = regs.VDW_cache != null ? regs.VDW_cache
+            : regs.VDR != null ? regs.VDR & 0x1FF : 0xEF;
+  const x0 = (hds + 1) * 8 - hAlign;
+  return { x0: x0, x1: x0 + (hdw + 1) * 8,
+           y0: -vdwLine0, y1: vdw - vdwLine0 + 1 };
+}
+
+function independentBackground(m, row, x, y) {
   if (!(row.cr & 0x80))
     return { blanking: true, index: 0x100 };
+  /* #70: outside the display window the VCE shows CRAM[0x100] — the same
+   * rule as CR blanking, and what a 336-dot window leaves in a 341-dot
+   * frame.  Inside it the background's column numbering starts at the
+   * window's left edge. */
+  const w = m.win;
+  if (y < w.y0 || y >= w.y1 || x < w.x0 || x >= w.x1)
+    return { border: true, index: 0x100 };
+  x -= w.x0;
   const g = m.geom;
   const col = (row.bxr + x) & 7;
   const batIndex = (((row.bxr + x) >> 3) & g.wmask) |
@@ -479,8 +513,11 @@ function independentSprite(m, vdwLine, x) {
 function independentFollow(m, x, y) {
   const row = m.rows[y];
   if (!row) throw new Error(`row ${y} outside the independent model`);
-  const bg = independentBackground(m, row, x);
-  const sprite = (row.cr & 0x40) ? independentSprite(m, row.line, x) : null;
+  const bg = independentBackground(m, row, x, y);
+  const inWin = y >= m.win.y0 && y < m.win.y1 &&
+                x >= m.win.x0 && x < m.win.x1;
+  const sprite = (row.cr & 0x40) && inWin
+    ? independentSprite(m, row.line, x) : null;
   let layer = bg.blanking ? "blanking" : "background";
   let index = bg.index;
   if (sprite && (sprite.spbg || (bg.index & 0xF) === 0)) {
@@ -500,6 +537,12 @@ function independentFollow(m, x, y) {
 
 function chosenPixels(m, maxY) {
   const xs = [0, 1, 7, 31, 32, 63, 64, 100, 127, 128, 191, 224, 255];
+  /* #70: a frame wider than 256 gets columns past the old 256-px edge — the
+   * place the panels used to stop following at. */
+  if (m.width > 256) {
+    for (const x of [256, 300, 336, 340, 400, 511])
+      if (x < m.width) xs.push(x);
+  }
   const ys = [0, 1, 7, 8, 17, 33, 64, 100, 150, 199, 223, 231];
   const out = [];
   for (const y of ys) {
@@ -522,7 +565,7 @@ function chosenPixels(m, maxY) {
       const row = sy - m.vdwLine0;
       if (row < 0 || row > maxY) continue;
       for (const sx of xsAt) {
-        if (sx >= 0 && sx < 256) out.push([sx, row]);
+        if (sx >= 0 && sx < m.width) out.push([sx, row]);
       }
     }
   }
@@ -581,7 +624,7 @@ function checkFollow(m, name, png, wantAtLeast) {
              `expected ${wv.name} ${wv.value} (${wv.source})`);
       }
     }
-    if (!want.background.blanking) {
+    if (!want.background.blanking && !want.background.border) {
       const gb = got.background || {};
       ok(`${where} BAT word`, gb.batWord, want.background.batWord);
       ok(`${where} BAT index`, gb.batIndex, want.background.batIndex);
@@ -598,7 +641,11 @@ function checkFollow(m, name, png, wantAtLeast) {
       ok(`${where} beyond VRAM`, gb.beyondVram,
          want.background.char >= 0x800);
     } else {
-      ok(`${where} blanking`, got.background && got.background.blanking, true);
+      const gb = got.background || {};
+      if (want.background.blanking)
+        ok(`${where} blanking`, gb.blanking, true);
+      else
+        ok(`${where} border`, gb.border, true);
     }
     if (want.sprite) {
       const gs = got.sprite || {};
@@ -1073,7 +1120,12 @@ function main() {
     { name: "raster5", layers: { sprite: true } },
     { name: "painted" },
     { name: "scene4" },
-    { name: "scene9" }
+    { name: "scene9" },
+    /* #70: frames wider than 256 dots — the viewer's 512-dot picture (with
+     * sprites past column 256) and the editor's 336-dot one.  The panels used
+     * to stop the sprite layer and the chosen pixels at 256. */
+    { name: "vwide512", layers: { sprite: true } },
+    { name: "wedit336" }
   ];
   let pixelTotal = 0, satTotal = 0;
   for (const spec of dumps) {
