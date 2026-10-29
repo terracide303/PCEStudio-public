@@ -1,69 +1,120 @@
-# What works, how we know, and when it was last true
+# Where PCEStudio stands — what works, what is being built, what is left
 
-**One row per part. Update it in the same commit that changes the part.** The workshop page's
-Progress tab is drawn from these tables.
+**One row per thing a user can do or rely on.** The workshop page's Progress tab is drawn from these tables.
+Update the row in the same commit as the work. Reorganised 2026-10-29 (Dennis: "make it clearer where we stand
+and what needs to be done").
 
 **Status words:**
 
-- **PROVEN** — measured, with the measurement named.
+- **PROVEN** — works, and a named test shows it (in Mednafen, and on a fresh clone).
+- **PARTIAL** — part of it works (the row says which part); the rest is the card named.
+- **RUNNING** — a seat is building it now.
+- **TODO** — on the board, not started.
+- **WAITING** — blocked on someone or something outside (named in the row).
 - **NOT PROVEN** — built, but the check that would prove it cannot be run here (named in the row).
-- **WAITING** — built and proven in software; the hardware check waits for Dennis.
-- **UNTESTED** — not built yet, or never exercised.
+- **LATER** — an idea card, not part of the beta.
+
+The two milestones Dennis asked for:
+
+- **Alpha** = pictures, sprites, scanline effects, export to `.pce`, on the console.
+- **Demo-ready / beta** = a small game can be made in the browser studio alone (#88), and exported to `.pce`
+  in the browser with nothing to install (#100).
 
 ---
 
-## Phase 1 — A picture on a real PC Engine
+## 1. The PC Engine model — what the browser draws and plays
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Background renderer (VDC + VCE) | PROVEN | `node tests/check.js`: 30 pictures diff 0 against Mednafen 1.32.1 captures | #5, #38, #39 — `renderer/pce-bg.js` |
-| Renderer test catches breaks | PROVEN | `node tests/renderer-mutation.js`: all 10 review breaks detected | #6, #39 |
-| PCEAS assembler | PROVEN | `make -C tools` builds `hello.pce` (sha256 9be7ead2…), red screen in Mednafen | #7 — `docs/BUILD.md` |
-| Viewer ROM in Mednafen | PROVEN | `node tests/check-viewer.js`: viewer1/2/3 frame diff 0 against the renderer | #8 — `tools/gen/viewer*.pce` |
-| Viewer ROM in a second emulator (ares) | PROVEN | `node tests/check-ares.js`: viewer1/2/3 + painted, 0/59392 pixels differ from the renderer and Mednafen at the 3-bit colour (ares scales 8-bit levels slightly differently; manual page H6-6 missing). Not yet broken by another seat; sprite scenes not covered | #41 — `docs/ARES.md` |
-| Viewer ROM in a third emulator (web) | NOT PROVEN | by eye only: Dennis ran `viewer1/2/3.pce` on emulationonline.com, 2026-10-28. Tile layout matches Mednafen on all three; viewer1 and viewer3 colours look the same, but viewer2 shows mint green and purple where Mednafen shows cyan (0,216,216) and blue (0,0,216). Settled by #41: ares shows viewer2's cyan/blue like Mednafen, so the web emulator mixes up colour channels | #8, #41 |
-| Viewer ROM on real hardware | NOT PROVEN | not run on a real console: Dennis closed #8 on two emulators (2026-10-28). First real-console check comes with #16 (scanline timing). The list now also carries the two things Mednafen cannot settle: B4 (REVIEW-16's byte order inside a register write pair — the emulator latches the bytes independently) and the frame-counter/two-CRAM-word step, whose second write the pristine handler lands one pixel late (measured; `docs/REVIEW-16.md` #68 appendix) | #8, #16, #68 |
-| Browser `.pce` export | PROVEN | `node tests/check-export.js`: 3 scenes byte-equal to PCEAS | #9 — `renderer/pce-rom.js` |
-| ROMs past 80 KB (MPR banks) | PROVEN | `node tests/check-export.js`: 16 scenes byte-equal to PCEAS incl. a >80 KB picture; the cap is the HuCard's 1 MB (128 banks), not the CPU's 2 MB; exactly 1 MB passes the guard, 1 MB + 1 bank is refused `rom-too-big` (#57). A picture is bounded below that: 108 banks (864 KiB) is the 13-descriptor config's ceiling and 12 banks (98,304 B) a picture whose regions do not overlap (#58, `docs/ROM_LAYOUT.md` §The size ceiling) | #46, #57, #58 |
-| TurboGrafx (bit-reversed) export | NOT PROVEN | `node tests/check-us-card.js` passes; no TurboGrafx-16 here to run it on | #25 |
-| Editor (tiles, palettes, map) | PROVEN | `node tests/check-editor.js`: 12/12 background refusals (21/21 with #13's sprite refusals), painted picture diff 0 in Mednafen | #10 — `renderer/editor.html` |
-| Phase 1 read cold | PROVEN | `docs/REVIEW.md`, 12 findings, all fixed by #38/#39 | #11 |
+| Background (VDC + VCE): tiles, map, scroll, 512 colours | PROVEN | `tests/check.js`: every picture diff 0 against Mednafen; `renderer-mutation.js` catches the review's 10 breaks | #5, #38, #39 |
+| Sprites: 64, sizes 16x16-32x64, 16 palettes, priority, 16 per line | PROVEN | `check.js` sprite scenes; breaker 24/24 after #40; `check-viewer.js` | #12, #40, #42 |
+| Scanline effects (raster table: scroll, layers, colours per line) | PROVEN | `check.js` raster1-13 diff 0, effects visible; breaker gaps closed | #15, #43, #68 |
+| Display window and border (224/240 lines, narrow windows) | PROVEN | `check.js` scenes 11-14, every border pixel | #48, #67 |
+| Wide screens 256 / 341 / 512 px | PROVEN | `check.js` wide336, wide512, wide512b | #27, #70, #76 |
+| VRAM-to-VRAM copy (DMA) | PROVEN | `check-dma.js` 5 captures word for word | #49, #76 |
+| Status flags: sprite overflow, collision, VBlank | PROVEN | `check-status.js` | #50, #76 |
+| Flicker: more than 16 sprites on a line | PARTIAL | viewer + renderer proven (`check.js` flicker, 4 frames); the editor/toy option is still to do | #28 |
+| Sound chip (PSG): 6 voices, noise, LFO, samples (DDA) | PROVEN | `check-psg.js` 11 recordings sample for sample; `psg-mutation.js` 15/15. Derived from Mednafen, so the project is GPL-3.0 | #34, #63 |
+| Second emulator agrees (ares) | PARTIAL | pictures 1-3 + painted proven (`check-ares.js`); the newer ROMs need a re-capture with the screen unlocked | #41 |
+| Real PC Engine | WAITING | Dennis: one run of `tools/gen/vraster5.pce` on the PC Engine or MiSTer | #16 |
+| TurboGrafx (US) image | NOT PROVEN | bit-reversed export passes `check-us-card.js`; no TurboGrafx here | #25 |
 
-## Phase 2 — The PC Engine's own tricks
-
-| Part | Status | How we know | Where |
-|---|---|---|---|
-| Sprites in the renderer | PROVEN | `node tests/check.js`: 11 sprite scenes diff 0; breaker's 24 mutants all detected | #12, #40 — `renderer/pce-sprites.js` |
-| Viewer loads sprites (SATB DMA) | PROVEN | `node tests/check-viewer.js`: 17 captures (viewer1-3, browser1-3, vsprite1-11) diff 0 against the renderer, VRAM/CRAM/SATB equal the scene dumps; vsprite3's missing red half (found by Dennis) fixed. Breaker: 16 of 19 caught; the gaps closed by #42 (A2 and the bank remap now caught) | #14, #42 |
-| Sprite editor + SATB in export | PROVEN | `node tests/check-editor.js`: 21/21 refusals, a sprite picture painted through the editor exported and captured in Mednafen (`tests/dumps/spainted`) diff 0 | #13 |
-| Effect editor (gradient, wobble, parallax) | PROVEN | `node tests/check-editor.js`: the three effects give the hand-computed raster table and the renderer previews it; refusals with codes. Export waits for #16. Breaker running | #17 |
-| Display window and border (renderer) | PROVEN | `node tests/check.js`: scenes 11-14 (224 lines, shifted, narrow with border, short VDW) diff 0 incl. every border pixel; the viewer/editor half is the #67 row below | #48 |
-| Display window in the viewer and the editor | PROVEN (Mednafen only) | The viewer ROMs of scenes 11-14 (`viewer11`-`viewer14`) diff 0 with HSR/HDR/VPR (the save state's VSR)/VDR/VCR compared register-for-register (`node tests/check-viewer.js`, 41 captures): config version 3's window block carries all five registers and `viewer.asm` writes them before CR enables the display; `node tests/check-export.js` is byte-for-byte equal to PCEAS on scene11-14 (32 scenes) and the #68 trace fixtures were re-recorded on the new bank 0. The editor's `setWindow(pic, {lines: 224|240, width: 256|224})` pictures preview through `pce-bg.js` (the 224-dot window shows its 16-px side border) and export config version 3; `tests/dumps/wwindow` (built by `check-editor.js --write window`, captured by `tools/capture.sh window`) is the editor's VRAM/CRAM and all five registers, and Mednafen's 256×232 frame is diff 0 — the border columns and the rows under the 224-line window included (`node tests/check-editor.js`). Not proven: Mednafen is the only witness (no console/ares run); the 224-line picture's vertical border is shown in the capture, not in the preview (the preview is the window); and RULES.md rule 2's cold break by a different seat is owed | #67 — `viewer.asm`, `tools/genviewer.py`, `renderer/pce-rom.js`, `pce-editor.js`, `editor.html` |
-| VRAM-to-VRAM DMA | PROVEN | `node tests/check-dma.js`: 3 Mednafen captures (forward, decrementing, overlapping) match the model's VRAM word for word, frames diff 0 | #49 |
-| VDC status flags (overflow, collision, VBlank) | PROVEN | `node tests/check-status.js`: 82 checks on 70 dumps, computed independently from the SAT and patterns; Mednafen is the only witness | #50 |
-| VRAM-to-VRAM DMA (SOUR/DESR/LENR, DCR) | PROVEN (Mednafen only) | `node tests/check-dma.js`: 3 Mednafen captures — forward, decrementing, overlapping — the model's VRAM equals the capture **word for word** (32768/32768), post-transfer SOUR/DESR/LENR and the DVC-gated DV bit equal the save state, and the frame rendered from the base picture + descriptor is diff 0; `check.js` is 75 pictures incl. dma1-3. The overlapping capture also rules out a memmove copy (448 words). Not proven: the overrun rule (sources disagree; unreachable in these ROMs), the upper 32K words, real hardware; picture-configured DMA in the viewer/editor is the split card | #49 — `renderer/pce-vram.js` |
-| Debug panels and follow a pixel | PROVEN | `node tests/check-panels.js`: 36592 checks and 1320 follow-a-pixel traces on eight dumps against an independent bytes-only computation. Breaker (REVIEW-26): 20 of 25 caught; the five misses — VCE RGB, SAT X/Y, 32-wide cells, row-0 `vdc` block, second-plane `tileWord` — are now caught by #56 (each re-run DETECTED). Not proven: the eight dumps carry no flipped sprite and no SPBG=0 sprite over an opaque background | #26, #56 |
-| Scanline effects in the renderer | PROVEN | `node tests/check.js`: raster1-5 (status bar, BXR wobble, BYR split, colour gradient, CR on/off) diff 0 against Mednafen, 47 pictures in all (46 when #15 closed; #13 added spainted). Not proven: VCE writes mid-line, real-hardware IRQ latency. DeepSeek did this Opus card. Breaker: 16 of 20 caught; #43 closed the 3 misses with raster6-10, structured pictures where each effect is visible | #15 — `docs/RENDERER.md` |
-| Scanline effects in the viewer (RCR) | PROVEN | Mednafen: `node tests/check.js` and `check-viewer.js` incl. vraster1-11 diff 0 against the renderer. Breaker (REVIEW-16): 17 breaks, 14 caught, 2 misses, 1 no-op; #68 closes the two misses — B14 by a VDC trace from reset (first RCR match 0x42 vs 0x41, with a committed control the check must reject) and B15 by raster11/vraster11 (frame counter + two CRAM words — `cram entry 496: table 11 != state 0`), and gives B9/B16/B17 loud witnesses (49,938 / 101,874 / 381 bytes vs 350 / 0 / 5). B4 stays NO-OP on the emulator: both bytes land before the line boundary and Mednafen latches them independently — on the real-console list with #16. Not yet: the ares re-capture (needs an unlocked screen), one real-console run (Dennis), and the measured one-pixel-late second write of a counter table, which a visible fixture cannot pass | #16, #68 — `docs/REVIEW-16.md` |
-| Wide modes in the renderer (256/341/512-dot frames) | PROVEN (Mednafen only) | `node tests/check.js`: `wide336` (341x232) and `wide512` (512x232) diff 0, plus all 77 earlier pictures; the frame's width comes from the saved VCE CR (DCC bits 1-0) and the window's line/alignment from the same clock; Mednafen is the only witness (no second emulator, no console). Builder's mutants (width 256, one line length, one alignment, sprite clip at 256, DCC as bit 0) each fail the run; a cold break by another seat is owed. | #27 — `renderer/pce-bg.js`, `pce-sprites.js`, `tools/genroms.py` |
-| Wide modes in the viewer and the editor | PROVEN (Mednafen only) | The viewer ROM of `wide336`/`wide512` (`vwide336`/`vwide512`) diffed 0 at 341×232 and 512×232 (`node tests/check-viewer.js`, 37 captures): config version 2's wide-window block carries the picture's VCE CR + HSR/HDR and `viewer.asm` writes them. `node tests/check-export.js` is byte-for-byte equal to PCEAS on both wide scenes. The editor's `setVideoMode(256/336/512)` pictures preview at the real width against an independent model, and their exported ROMs captured in Mednafen show the same picture: `tests/dumps/wedit336` (341×232) and `wedit512` (512×232), `node tests/check-editor.js`. `node tests/check-panels.js` follows pixels past 256 on a 512-dot frame (`vwide512`, 165 sprite pixels beyond it). Not proven: Mednafen is the only witness (no console/ares run); the editor's BAT stays 32 tiles wide, so wide frames repeat horizontally; and RULES.md rule 2's cold break by a different seat is owed. | #70 — `viewer.asm`, `tools/genviewer.py`, `renderer/pce-rom.js`, `pce-editor.js`, `pce-panels.js` |
-
-## Phases 3–6
+## 2. Making things in the browser — the studio
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Toys live in the browser (Lua via Fengari) | PROVEN | `node tests/check-toys.js`: 718 checks — 3 toys × 40 frames byte-equal to hand-built state and diff 0 through the model; refusals by code; ppu.toys' ramps.lua/kit.lua adapted with credit. Breaker: 9 of 14 → #74; password cap bug → #73 | #30 |
-| The IL (Lua subset → our typed IL, reference interpreter) | PROVEN (against the Lua runtime) | `node tests/check-il.js`: 973 checks — the three #30 toys through Lua → IL → interpreter give byte-equal vram/cram/sat/regs, identical raster tables and diff-0 pixels to the Fengari run for 40 frames each; the hooks and instruction set asserted; 11 host refusals and 20 IL refusals by code. Not yet broken by another seat | #31 — `renderer/pce-il.js`, `docs/IL.md` |
-| The compiler to the console, part A: IL → C → llvm-mos → Mednafen | PROVEN (one toy, Mednafen only) | `node tests/check-il-console.js`: 47 checks — #30's palette toy through the IL → C (`renderer/pce-cgen.js`) → llvm-mos → an 8 KiB ROM; the ROM rebuilds byte-identically (sha256 c6296524…); of 149 recorded frames the last 8 are diff 0 in order against the browser's frames 5..12 with exactly one alignment; vram/cram/sat byte-equal at the aligned frame and BXR/BYR/MWR equal (CR differs only in the VBlank-status bit 3); measured with the TMA timer at 7.243 ticks × 1024 = **7,417 cycles/frame** (~6.2% of a 60 Hz frame), used .text 2,725 B + .rodata 10 B of the bank. Eight cgen-* refusals by code. NOT proven: any other toy, `raster()`, sprites, pads; the HuC/direct routes and their comparison; recursion, repeated closure sites, real hardware; rule 2 cold break owed | #31 part A — `renderer/pce-cgen.js`, `tools/toyc/`, `docs/IL.md` §9 |
-| The compiler to the console, part C: `raster()` on the console | PROVEN (one toy, Mednafen only) | `node tests/check-il-console.js`: 116 checks for A+C — `toys/parallax.lua` through the IL → C (`renderer/pce-cgen.js` now lowers `reg`, int globals and the raster hook) → llvm-mos → an 8 KiB ROM whose RCR chain replays a per-line table built by the toy's 224 `raster()` calls; the ROM rebuilds byte-identically; **40 consecutive display frames diff 0** against the browser's f135..f174 (one every five captured frames: the collection is 2.84 video frames, so the toy runs at ~12–15 Hz), vram/cram/sat byte-equal, BYR/MWR equal, CR = browser + bits 2/3. Measured: one raster call **1,510 cycles** (39,268 calls over the run) versus the ~123-cycle blank, so the compiled callback is not the interrupt handler; frame() 1,204 cycles; collection 338,757 cycles; flags 0 (no list overflow, no `vset` from raster). The palette ROM from part A still rebuilds byte-identically. NOT proven: `toys/status-bar.lua` (bar right, playfield 4 lines out) and #30's `TOY_RASTER` (whole picture differs) do not match; sprites/pads; the rate; Mednafen is the only witness; rule 2 cold break owed | #31 part C — `renderer/pce-cgen.js`, `tools/toyc/toy_runtime.c`, `docs/IL.md` §10 |
-| The toy validator on the IL | PROVEN as an estimate (calibrated on two Mednafen measurements) | `node tests/check-validate.js`: 143 checks — the five #29 toys pass with their budgets printed; the cycle model is calibrated on part A's palette frame (7,417) and part C's parallax `frame()` (1,204), and its held-out parallax `raster()` prediction (1,398) is within the stated 15% of the TMA's 1,510 (−7.4%); a 20,000-statement frame() is refused `validate-frame-budget`, 17 sprites on a line `validate-sprite-line` (16, the 256-px boundary, passes), an estimated ROM past 1 MB `validate-rom`, and an out-of-range `reg` the host's `reg-range` — all four also refused by `tools/toyc/emit.js` with exit 1. NOT proven: a per-op table from the manual timings' shape with a two-point scale, not a per-op disassembly; ROM ±2× per function; `road.lua`'s 135-cycle replay step is warned, not refused; sprites/VRAM patterns only via the 17-sprite fixture; rule 2 cold break owed | #32 — `renderer/pce-validate.js`, `docs/VALIDATE.md` |
-| The compiler to the console, part B: the same IL → C → HuC → Mednafen | PROVEN (two toys, Mednafen only) | `node tests/check-il-huc.js`: 74 checks — `renderer/pce-cgen.js` with `{target:"huc"}` emits C that vendor/huc's compiler accepts; `tools/build-huc.sh` rebuilds both ROMs to their committed sha256s (57,856 B / 66,048 B, 7/8 banks); the palette toy's frames match the browser with a run of 8 consecutive diff-0 frames and byte-equal vram/cram/sat, and the parallax toy's `raster()` with a run of **20 consecutive diff-0 frames**; measured palette `frame()` **102,123 cycles** (86 % of a video frame — the runtime holds its palette writes for VBlank), raster call 3,728, collection 835,048 = 7.0 video frames (4.8 Hz). NOT proven: 16-bit values only (no refusal yet for wider), sprites/pads/tables, the rate, Mednafen only, rule 2 cold break owed | #31 part B — `renderer/pce-cgen.js`, `tools/toyc/huc_runtime.c`, `huc_raster.asm`, `docs/IL.md` §11 |
-| Part D: llvm-mos vs HuC on the same toys, measured | PROVEN as a comparison | `docs/IL.md` §12: the two committed captures and build reports — IL functions 1.6–2.1× larger, `frame()` 2.4–13.8× slower, raster call 2.5× slower, 1 bank vs 7–8; llvm-mos stays the export route. A direct HuC6280 generator was not built (the card's part D asked for llvm-mos vs HuC). The one-paragraph summary for ppu.toys' author is in §12 | #31 part D — `docs/IL.md` §12 |
-| The checker on the IL (frame time, budgets) | PROVEN | `node tests/check-validate.js`: 143 checks; the 5 example toys pass with budgets printed; over-budget toys refused by code; predicted raster() cost within 7.4% of the console measurement; the export refuses a toy that fails | #32 |
-| Studio editor and files (CodeMirror, save/open, autosave, Vim, shortcuts) | PROVEN | `node tests/check-studio.js --browser`: 475 checks | #77 |
-| Fresh clone runs every suite | PROVEN | `sh tests/all.sh` on a fresh clone of 9b68ba9: 28 suites PASS, check-ares SKIP (needs ares captures) | #83 |
-| Sound chip (PSG) in the browser | PROVEN (against Mednafen) | `node tests/check-psg.js`: 11 Mednafen recordings (tone, chord, balance, volume, noise, all three LFO modes via wave3, DDA, 12-bit frequency, R7 on ch3, DDA exit) matched sample for sample. `node tests/psg-mutation.js`: all 15 of REVIEW-34's breaks DETECTED (M10 by check-wave.js/wave3), control NO-OP. Noise generator: Mednafen and MAME's c6280 use the same LFSR taps (two emulators); real console unmeasured | #34, #63 — `docs/PSG.md` |
-| Wave editor (32-step waves, 6 channels) | PROVEN | `node tests/check-wave.js`: 3 patches exported byte-equal to PCEAS and recorded in Mednafen, sample for sample | #62 |
-| Music (Furnace → HuTrack) | PROVEN | console: `check-hutrack.js` (HuTrack plays our DMF in Mednafen); browser: `check-dmf.js` (same notes, not sample-exact); export: `check-export-song.js` (song + HuTrack byte-identical to PCEAS, 2 songs). Breaker: 10 of 13, the 3 misses closed by #72. Effects/DDA/SFX → #71 | #35 |
-| AI link (MCP server, describe-it) | UNTESTED | | #36, #24 |
-| Photo import, data export, public release | UNTESTED | | #18–#20, #37 |
+| Studio page laid out like ppu.toys, online at pcestudio.terracides.com | PROVEN | `check-studio.js --browser`; screenshots compared by @workshop | #75 |
+| Code editor (CodeMirror), files, save/open, autosave, Vim, shortcuts | PROVEN | `check-studio.js` 475 checks | #77 |
+| Output column: layers, CRT, sound, markers, timeline, pad keys (IJKL) | PROVEN | `check-studio.js`; breaker gaps closed by #91 | #78 |
+| Panels in separate files (so several can be built at once) | RUNNING | | #102 |
+| SCREEN panel: map editor with tools, zoom, tiles, palette | PARTIAL | tools, zoom, map and tile sheet work; curves on BXR/BYR and dropdowns for map size and width come with #102 | #84, #102 |
+| PALETTES and VRAM panels (512-colour picker, VRAM sheet) | TODO | | #85 |
+| SPRITES panel (64 sprites, sizes, patterns) | TODO | | #86 |
+| SCANLINES panel (bands on the line interrupt) | TODO | | #92 |
+| REGISTERS panel (every register, bit by bit, editable) | TODO | | #79 |
+| LAYERS panel (stacking, priority, palette fades) | TODO | | #93 |
+| AUDIO panel (the 6 voices live) | TODO | | #97 |
+| CONSOLE panel ("can this run on a real PC Engine?") | TODO | | #98 |
+| ASSETS: memory bars, sheets, songs, 15 built-in instruments | TODO | | #99 |
+| Details: DISPLAY tab, light theme, Raw output, Guide links, Panels menu | TODO | | #87 |
+| Browse: a gallery of the example toys | TODO | | #80 |
+| Debug panels and follow a pixel (the earlier text panels) | PROVEN | `check-panels.js` 36592 checks; breaker gaps closed | #26, #56 |
+| Docs (the reference, generated from the code) | PROVEN | `check-docs.js` | #61 |
+| Older separate editors: pictures, sprites, effects (`editor.html`) | PROVEN | `check-editor.js`: painted pictures diff 0 in Mednafen | #10, #13, #17 |
+
+## 3. Toys — small programs in Lua
+
+| Part | Status | How we know | Where |
+|---|---|---|---|
+| Toys run live in the browser (`init`, `frame`, `raster`, pads, passwords) | PROVEN | `check-toys.js`; every example shows a visible picture (#90) | #30, #73, #74, #90 |
+| Five example toys (parallax, sky, road, status bar, palette cycling) | PROVEN | `check-examples.js` 120 frames each | #29 |
+| Sound in toys (a song and sound effects) | PARTIAL | song + SFX through HuTrack's channel hand-off; effects, arpeggio and samples still to do | #71 |
+| Pads 1-5 and the timer, browser and console | RUNNING | | #45 |
+| The IL (our intermediate language) | PROVEN | `check-il.js` 973 checks, Lua == IL | #31 |
+| The checker: frame time, sprites per line, memory | PROVEN | `check-validate.js`; breaker gaps closed by #89 | #32 |
+| A small game made only in the studio (demo-ready test) | TODO | starts when the panels and sound are in | #88 |
+
+## 4. Getting it onto a console — export to `.pce`
+
+| Part | Status | How we know | Where |
+|---|---|---|---|
+| Pictures (with sprites, effects, wide modes, windows) to `.pce` | PROVEN | `check-export.js` byte-equal to the assembler; `check-viewer.js` diff 0 in Mednafen | #9, #14, #16, #46, #57, #67, #70 |
+| Toys to `.pce` via llvm-mos (the yardstick, needs a native install) | PROVEN | `check-il-console.js`: 2 toys diff 0 in Mednafen, 7,417 cycles/frame | #31 A/C |
+| Toys to `.pce` via HuC (comparison) | PROVEN | `check-il-huc.js`; 14x slower than llvm-mos | #31 B/D |
+| Toys to `.pce` in the browser, route 1 (interpreter in the ROM) | RUNNING | the beta's export, nothing to install | #100 |
+| Toys to `.pce` in the browser, route 2 (our own compiler) | TODO | for speed, after route 1 | #101 |
+| Music in the `.pce` (Furnace DMF to HuTrack) | PROVEN | `check-export-song.js`, `check-hutrack.js` | #35 |
+| Sound patches to `.pce` (wave editor) | PROVEN | `check-wave.js` | #62 |
+| Assembler from the vendored HuC | TODO | | #54 |
+
+## 5. Music
+
+| Part | Status | How we know | Where |
+|---|---|---|---|
+| Furnace songs (DMF) play in the browser and on the console | PROVEN | `check-dmf.js`, `check-hutrack.js`, `music-mutation.js` | #35, #72 |
+| Wave editor (32-step waves, 6 channels) | PROVEN | `check-wave.js` | #62 |
+| SEQUENCER in the studio: step grid | TODO | | #94 |
+| SEQUENCER: staff view | TODO | | #95 |
+| SEQUENCER: songs saved as DMF for HuTrack and Furnace | TODO | | #96 |
+| HuVGM as a second music route | WAITING | turboxray's release, or access to his private repo | #65 |
+
+## 6. Quality — how we keep it honest
+
+| Part | Status | How we know | Where |
+|---|---|---|---|
+| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone: 28 PASS, ares SKIP | #83 |
+| Every new test broken by a different seat (rule 2) | PROVEN | `docs/REVIEW-*.md`; each miss became a card and is closed | rule 2 |
+| Every manual read and mapped to a card | PROVEN | `docs/MANUALS.md` | #44, #55 |
+| Phase 3 read cold by a reviewer | TODO | | #33 |
+
+## 7. Later — not in the beta
+
+| Part | Status | How we know | Where |
+|---|---|---|---|
+| AI link: an MCP server and the studio's AGENT panel | LATER | | #36 |
+| Describe it, get it (a sentence becomes a picture) | LATER | | #24 |
+| Publish a toy, play other people's, sign in | LATER | needs a server | #37 |
+| A photo becomes a PCE picture | LATER | | #18 |
+| Raw tiles / HuC include export | LATER | | #19 |
+| Public release of the repo | LATER | HuC's licence must be settled first | #20 |
+| SuperGrafx, CD-ROM, animation, SF2 mapper, 4-colour modes, level scripts | LATER | | #21, #22, #23, #59, #47, #66 |
