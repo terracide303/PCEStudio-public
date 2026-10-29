@@ -83,6 +83,14 @@
  *     code.  Blind spots in docs/STUDIO.md §12: the painted canvases are not
  *     pixel-diffed (the stub records calls), no raster-table toy is
  *     exercised, and the fade's source palettes are captured constants.
+ * 13. #139: the resizable regions.  Each of the three dividers is a separator
+ *     in the markup, focusable, with its own clamp; a pointer drag moves the
+ *     region by the dragged pixels through the grid's custom properties, the
+ *     clamp stops it at the minimum, arrows move it 8 px (Shift 40) and
+ *     double-click/Home reset it, the saved sizes come back on a second page
+ *     with the same storage, and the output frame's pixel digest is the same
+ *     before and after.  The --browser driver does the same with in-page
+ *     PointerEvents and reads the regions' rectangles.
  *
  * #90 adds a VISIBILITY assertion to every example: the frame the canvas drew
  * must be a picture at the expected place (57,344 / 7,168 / 256 non-backdrop
@@ -2292,6 +2300,194 @@ function checkPasteRun(page) {
   studio.seek(0);
 }
 
+/* ---- 9b. the resizable regions (#139) --------------------------------- */
+/* The card's evidence is the --browser run, which drags each divider with
+ * in-page pointer events and reloads the page.  This is the same page code
+ * under the stub DOM: the drag arithmetic, the clamp, the keyboard contract,
+ * the reset and the per-browser save.  The element rectangles are set here
+ * because the stub DOM has no layout — getBoundingClientRect reads the
+ * element's width/height. */
+function splitDigest(pixels) {
+  let h = 2166136261;
+  for (let i = 0; i < pixels.length; i++) {
+    h ^= pixels[i] & 0xff; h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
+}
+
+function checkStudioSplits(page) {
+  const studio = page.sandbox.PCEStudio.studio;
+  const dom = page.dom;
+  const el = (id) => dom.get(id);
+  function fire(target, type, more) {
+    const list = (target.listeners && target.listeners[type]) || [];
+    for (const fn of list) fn(Object.assign(dom.fakeEvent(target), more || {}));
+    return list.length;
+  }
+  function size(id, w, h) {
+    const e = el(id); e.width = w; e.height = h;
+  }
+  /* a 1280x900 page: 800 px of left column, 480 of output, a 420 px editor
+   * over a 280 px dock, and a 180 px drawer under a 400 px picture */
+  size("studio-main", 1280, 900);
+  size("workspace", 800, 700);
+  size("code-pane", 800, 420);
+  size("output-pane", 480, 900);
+  size("bottom-body", 480, 180);
+  size("canvas-wrap", 460, 400);
+
+  const ids = ["cols", "rows", "bottom"];
+  const html = fs.readFileSync(PAGE, "utf8");
+  /* the stub DOM does not parse attributes, so the markup itself is read */
+  const tagOf = (id) => {
+    const m = new RegExp('<[a-z]+[^>]*id="' + id + '"[^>]*>').exec(html);
+    return m ? m[0] : "";
+  };
+  for (const which of ids) {
+    const div = studio.layout.splitEl(which);
+    check(!!div, "the " + which + " divider is a grid item in the page");
+    if (!div) continue;
+    const tag = tagOf(div.id);
+    check(/role="separator"/.test(tag),
+          "the " + which + " divider is a separator");
+    check(/tabindex="0"/.test(tag),
+          "the " + which + " divider is focusable (keyboard resize)");
+    check(new RegExp('aria-orientation="' +
+                     (which === "cols" ? "vertical" : "horizontal") + '"')
+          .test(tag),
+          "the " + which + " divider says which way it runs");
+    check(/aria-label="[^"]+"/.test(tag),
+          "the " + which + " divider is named for a screen reader");
+  }
+  check(studio.layout.split("cols") === null &&
+        studio.layout.split("rows") === null &&
+        studio.layout.split("bottom") === null,
+        "a fresh browser starts on the default fr split, no saved sizes");
+  check(!el("studio-main").style["--split-left"],
+        "no saved size leaves the column tracks on their fr split");
+
+  const frameBefore = splitDigest(studio.render.output().pixels);
+
+  /* --- the columns: drag right 120 px, then 60 px back ----------------- */
+  const colsEl = el("split-cols");
+  check(fire(colsEl, "pointerdown", { clientX: 500, clientY: 400 }) === 1,
+        "pointerdown on the column divider is handled");
+  fire(colsEl, "pointermove", { clientX: 620, clientY: 400 });
+  check(studio.layout.split("cols") === 920,
+        "dragging the column divider 120 px right makes the left column " +
+        "920 px (got " + studio.layout.split("cols") + ")");
+  check(el("studio-main").style["--split-left"] === "920px" &&
+        el("studio-main").style["--split-right"] === "1fr",
+        "the columns move through the grid's custom properties, not an overlay");
+  fire(colsEl, "pointermove", { clientX: 560, clientY: 400 });
+  check(studio.layout.split("cols") === 860,
+        "a pointermove back to +60 px gives 860 px (got " +
+        studio.layout.split("cols") + ")");
+  fire(colsEl, "pointerup", {});
+  check(colsEl.getAttribute("aria-valuemin") === "320" &&
+        colsEl.getAttribute("aria-valuemax") === "974",
+        "the divider announces its clamp (320..974 px, got " +
+        colsEl.getAttribute("aria-valuemin") + ".." +
+        colsEl.getAttribute("aria-valuemax") + ")");
+  const held = studio.layout.split("cols");
+  fire(colsEl, "pointermove", { clientX: 1100, clientY: 400 });
+  check(studio.layout.split("cols") === held,
+        "a pointermove after pointerup does not resize (the drag ended)");
+
+  /* --- the code pane and the dock: drag down 100 px -------------------- */
+  const rowsEl = el("split-rows");
+  fire(rowsEl, "pointerdown", { clientX: 400, clientY: 300 });
+  fire(rowsEl, "pointermove", { clientX: 400, clientY: 400 });
+  check(studio.layout.split("rows") === 520,
+        "dragging the dock divider 100 px down makes the editor 520 px " +
+        "(got " + studio.layout.split("rows") + ")");
+  check(el("workspace").style["--split-code"] === "520px",
+        "the editor's row is the px track and the dock takes the rest");
+  fire(rowsEl, "pointerup", {});
+
+  /* --- the output and the drawer: drag up 100 px ----------------------- */
+  const bottomEl = el("split-bottom");
+  fire(bottomEl, "pointerdown", { clientX: 700, clientY: 700 });
+  fire(bottomEl, "pointermove", { clientX: 700, clientY: 600 });
+  check(studio.layout.split("bottom") === 280,
+        "dragging the drawer divider 100 px up makes the markers drawer " +
+        "280 px (got " + studio.layout.split("bottom") + ")");
+  check(el("output-pane").style["--split-bottom"] === "280px",
+        "the drawer's row is the px track and the picture takes the rest");
+  fire(bottomEl, "pointerup", {});
+
+  /* --- the clamp: nothing collapses to zero ---------------------------- */
+  fire(bottomEl, "pointerdown", { clientX: 700, clientY: 700 });
+  fire(bottomEl, "pointermove", { clientX: 700, clientY: 5000 });
+  check(studio.layout.split("bottom") === 64,
+        "dragging the drawer divider far down stops at its 64 px minimum " +
+        "(got " + studio.layout.split("bottom") + ")");
+  fire(bottomEl, "pointerup", {});
+  fire(colsEl, "pointerdown", { clientX: 500, clientY: 400 });
+  fire(colsEl, "pointermove", { clientX: -5000, clientY: 400 });
+  check(studio.layout.split("cols") === 320,
+        "dragging the column divider past the left edge stops at 320 px " +
+        "(got " + studio.layout.split("cols") + ")");
+  fire(colsEl, "pointerup", {});
+
+  /* --- the keyboard: arrows move, Home resets -------------------------- */
+  const kb = el("split-rows");
+  kb.focus();
+  fire(kb, "keydown", { key: "ArrowDown", code: "ArrowDown" });
+  check(studio.layout.split("rows") === 528,
+        "ArrowDown moves the divider 8 px (520 -> " +
+        studio.layout.split("rows") + ")");
+  fire(kb, "keydown", { key: "ArrowDown", code: "ArrowDown", shiftKey: true });
+  check(studio.layout.split("rows") === 568,
+        "Shift+ArrowDown moves it 40 px (" + studio.layout.split("rows") + ")");
+  fire(kb, "keydown", { key: "Home", code: "Home" });
+  check(studio.layout.split("rows") === null &&
+        !el("workspace").style["--split-code"],
+        "Home resets the divider to the default fr split");
+
+  /* --- double-click resets -------------------------------------------- */
+  fire(el("split-cols"), "dblclick", {});
+  check(studio.layout.split("cols") === null &&
+        !el("studio-main").style["--split-left"],
+        "double-clicking the column divider resets it");
+  fire(bottomEl, "dblclick", {});
+  check(studio.layout.split("bottom") === null &&
+        !el("output-pane").style["--split-bottom"],
+        "double-clicking the drawer divider resets it");
+
+  /* --- the output still renders the same frame ------------------------- */
+  const frameAfter = splitDigest(studio.render.output().pixels);
+  check(frameAfter === frameBefore,
+        "moving all three dividers leaves the output frame identical (" +
+        frameBefore + " vs " + frameAfter + ")");
+
+  /* --- saved per browser, restored on the next page -------------------- */
+  fire(el("split-cols"), "pointerdown", { clientX: 500, clientY: 400 });
+  fire(el("split-cols"), "pointermove", { clientX: 620, clientY: 400 });
+  fire(el("split-cols"), "pointerup", {});
+  fire(el("split-rows"), "pointerdown", { clientX: 400, clientY: 300 });
+  fire(el("split-rows"), "pointermove", { clientX: 400, clientY: 380 });
+  fire(el("split-rows"), "pointerup", {});
+  fire(bottomEl, "pointerdown", { clientX: 700, clientY: 700 });
+  fire(bottomEl, "pointermove", { clientX: 700, clientY: 620 });
+  fire(bottomEl, "pointerup", {});
+  let savedRaw = "";
+  try { savedRaw = page.storage.getItem("pcestudio.layout.v1") || ""; } catch (e) {}
+  check(/"cols":\d+/.test(savedRaw) && /"rows":\d+/.test(savedRaw) &&
+        /"bottom":\d+/.test(savedRaw),
+        "the three sizes are saved in the browser under pcestudio.layout.v1 (" +
+        savedRaw + ")");
+  const again = runPage("", page.storage);
+  const restored = again.sandbox.PCEStudio.studio;
+  check(restored.layout.split("cols") === 920 &&
+        restored.layout.split("rows") === 500 &&
+        restored.layout.split("bottom") === 260,
+        "a reload restores the three sizes (got " +
+        JSON.stringify(restored.layout.split()) + ")");
+  check(again.dom.get("studio-main").style["--split-left"] === "920px",
+        "the reloaded page puts the saved px back on the grid");
+}
+
 /* ---- 8. the real headless browser (optional) --------------------------- */
 /* The #77 browser evidence needs a page that can edit, reload and read the
  * studio back. A same-origin iframe driver served over HTTP does that with
@@ -2357,6 +2553,122 @@ const DRIVER_HTML = [
   '       "the cursor line is highlighted like ppu.toys\' editor");',
   '    ck(s.editorText() === s.current().source,',
   '       "the editor\'s text is the Lua the page runs");',
+  '',
+  '    /* #139: the three dividers, dragged with in-page pointer events (no OS',
+  '     * input).  They run here, before the driver starts editing the toy, so',
+  '     * a failure further down the chain cannot hide this card\'s evidence. */',
+  '    s.seek(30); s.pause();',
+  '    function box(el) {',
+  '      var r = el.getBoundingClientRect();',
+  '      return { x: r.left, y: r.top, w: r.width, h: r.height };',
+  '    }',
+  '    function pev(kind, x, y) {',
+  '      return new a.win.PointerEvent(kind, { bubbles: true,',
+  '        cancelable: true, clientX: x, clientY: y, pointerId: 1,',
+  '        pointerType: "mouse", isPrimary: true,',
+  '        button: kind === "pointerdown" ? 0 : -1,',
+  '        buttons: kind === "pointerup" ? 0 : 1 });',
+  '    }',
+  '    function drag(id, dx, dy) {',
+  '      var el = doc.getElementById(id);',
+  '      var r = el.getBoundingClientRect();',
+  '      var x = r.left + r.width / 2, y = r.top + r.height / 2;',
+  '      el.dispatchEvent(pev("pointerdown", x, y));',
+  '      el.dispatchEvent(pev("pointermove", x + dx / 2, y + dy / 2));',
+  '      el.dispatchEvent(pev("pointermove", x + dx, y + dy));',
+  '      el.dispatchEvent(pev("pointerup", x + dx, y + dy));',
+  '    }',
+  '    var canvasEl = doc.getElementById("out");',
+  '    function digest() {',
+  '      var d = canvasEl.getContext("2d")',
+  '        .getImageData(0, 0, canvasEl.width, canvasEl.height).data;',
+  '      var h = 2166136261;',
+  '      for (var i = 0; i < d.length; i++) { h ^= d[i]; h = Math.imul(h, 16777619); }',
+  '      return h >>> 0;',
+  '    }',
+  '    var pix0 = digest();',
+  '    var ws0 = box(doc.getElementById("workspace"));',
+  '    var out0 = box(doc.getElementById("output-pane"));',
+  '    var code0 = box(doc.getElementById("code-pane"));',
+  '    var body0 = box(doc.getElementById("bottom-body"));',
+  '    ck(ws0.w > 300 && code0.h > 200 && body0.h > 40,',
+  '       "the three regions have a size to drag (" + ws0.w + ", " +',
+  '       code0.h + ", " + body0.h + ")");',
+  '',
+  '    drag("split-cols", 120, 0);',
+  '    var ws1 = box(doc.getElementById("workspace"));',
+  '    ck(Math.abs((ws1.w - ws0.w) - 120) < 3,',
+  '       "dragging the column divider 120 px right widens the code column (" +',
+  '       ws0.w + " -> " + ws1.w + ")");',
+  '    var outCol = box(doc.getElementById("output-pane"));',
+  '    ck(Math.abs((out0.w - outCol.w) - 120) < 4,',
+  '       "the output column gives up the 120 px the code column took (" +',
+  '       out0.w + " -> " + outCol.w + ")");',
+  '',
+  '    drag("split-rows", 0, 80);',
+  '    var code1 = box(doc.getElementById("code-pane"));',
+  '    ck(Math.abs((code1.h - code0.h) - 80) < 3,',
+  '       "dragging the dock divider 80 px down makes the editor taller (" +',
+  '       code0.h + " -> " + code1.h + ")");',
+  '',
+  '    var body0b = box(doc.getElementById("bottom-body"));',
+  '    drag("split-bottom", 0, -60);',
+  '    var body1 = box(doc.getElementById("bottom-body"));',
+  '    ck(Math.abs((body1.h - body0b.h) - 60) < 3,',
+  '       "dragging the drawer divider 60 px up makes the drawer taller (" +',
+  '       body0b.h + " -> " + body1.h + ", first measured " + body0.h + ")");',
+  '',
+  '    ck(digest() === pix0,',
+  '       "the output still renders the same frame after all three drags");',
+  '    var frBox = box(doc.getElementById("display-frame"));',
+  '    ck(Math.abs(frBox.w / frBox.h - 256 / 224) < 0.01,',
+  '       "the canvas keeps its 256:224 aspect in the resized column (" +',
+  '       frBox.w.toFixed(1) + "x" + frBox.h.toFixed(1) + ")");',
+  '',
+  '    var savedLayout = "";',
+  '    try { savedLayout = a.win.localStorage.getItem("pcestudio.layout.v1") || ""; }',
+  '    catch (e) {}',
+  '    ck(/"cols":\\d+/.test(savedLayout) && /"rows":\\d+/.test(savedLayout) &&',
+  '       /"bottom":\\d+/.test(savedLayout),',
+  '       "the three divider sizes are saved in the browser (" + savedLayout + ")");',
+  '',
+  '    /* a second page with the same browser profile: the sizes come back */',
+  '    var lay = await loadFrame(url);',
+  '    var ldoc = lay.win.document;',
+  '    var ws2 = box(ldoc.getElementById("workspace"));',
+  '    var code2 = box(ldoc.getElementById("code-pane"));',
+  '    var body2 = box(ldoc.getElementById("bottom-body"));',
+  '    ck(lay.studio && Math.abs(ws2.w - ws1.w) < 2 &&',
+  '       Math.abs(code2.h - code1.h) < 2 && Math.abs(body2.h - body1.h) < 2,',
+  '       "a reload restores the three sizes (" + ws1.w + "/" + code1.h + "/" +',
+  '       body1.h + " -> " + ws2.w + "/" + code2.h + "/" + body2.h + ")");',
+  '',
+  '    function dbl(id) {',
+  '      doc.getElementById(id).dispatchEvent(new a.win.MouseEvent("dblclick",',
+  '        { bubbles: true, cancelable: true }));',
+  '    }',
+  '    dbl("split-cols"); dbl("split-rows"); dbl("split-bottom");',
+  '    var ws3 = box(doc.getElementById("workspace"));',
+  '    var code3 = box(doc.getElementById("code-pane"));',
+  '    var body3 = box(doc.getElementById("bottom-body"));',
+  '    ck(Math.abs(ws3.w - ws0.w) < 2 && Math.abs(code3.h - code0.h) < 2 &&',
+  '       Math.abs(body3.h - body0.h) < 2,',
+  '       "double-clicking each divider restores the default split (" +',
+  '       ws3.w + "/" + code3.h + "/" + body3.h + ")");',
+  '',
+  '    var kdiv = doc.getElementById("split-cols");',
+  '    kdiv.focus();',
+  '    var kb0 = box(doc.getElementById("workspace")).w;',
+  '    kdiv.dispatchEvent(new a.win.KeyboardEvent("keydown", { key: "ArrowRight",',
+  '      code: "ArrowRight", bubbles: true, cancelable: true }));',
+  '    ck(Math.abs(box(doc.getElementById("workspace")).w - (kb0 + 8)) < 2,',
+  '       "ArrowRight on the focused divider moves it 8 px (" + kb0 + " -> " +',
+  '       box(doc.getElementById("workspace")).w + ")");',
+  '    kdiv.dispatchEvent(new a.win.KeyboardEvent("keydown", { key: "Home",',
+  '      code: "Home", bubbles: true, cancelable: true }));',
+  '    ck(Math.abs(box(doc.getElementById("workspace")).w - kb0) < 2,',
+  '       "Home resets the divider from the keyboard");',
+  '    s.seek(0); s.pause();',
   '',
   '    var marker = "-- autosave-marker-77";',
   '    var edited = marker + "\\n" + s.editorText();',
@@ -6374,12 +6686,14 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  check(data.length === 6,
-        "the gallery carries the five #29 toys and STARFALL (got " +
-        data.length + ")");
+  /* #128 added OAK WOODS and #127 CAVE, two demos besides the five #29
+   * effects and STARFALL; Browse and the studio read the same generated list */
+  check(data.length === 8,
+        "the gallery carries the five #29 toys, STARFALL, OAK WOODS and " +
+        "CAVE (got " + data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall"]);
+      "starfall", "oak-woods", "cave"]);
   let mismatched = [];
   for (const t of data) {
     if (t.source !== toySource(t.file)) mismatched.push(t.file);
@@ -6513,7 +6827,7 @@ function checkGallery(page) {
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall"]);
+      "starfall", "oak-woods", "cave"]);
   check(cards.every((c) => c.ink > 0 && !c.error),
         "every card drew its frame 60 (" +
         cards.map((c) => c.id + " " + c.ink).join(", ") + ")");
@@ -6536,24 +6850,31 @@ function checkGallery(page) {
         "#121: the STARFALL card links to its page, the studio and its file");
 
   B.setTag("raster");
-  eq("the raster tag shows the five raster toys", B.visible(),
-     ["parallax", "sky-gradient", "road", "status-bar", "starfall"]);
+  eq("the raster tag shows the raster toys", B.visible(),
+     ["parallax", "sky-gradient", "road", "status-bar", "starfall",
+      "oak-woods"]);
   B.setTag("");
   B.setQuery("road");
   eq("the search box filters to the road", B.visible(), ["road"]);
   B.setQuery("PCEStudio");
-  eq("search by author finds all five", B.visible(), B.toys().map((t) => t.id));
+  eq("search by author finds the toys PCEStudio made", B.visible(),
+     B.toys().map((t) => t.id).filter((id) => id !== "cave"));
+  /* #127: the cave's card carries the pack's author, because the pack's
+   * licence asks for attribution — and the search can find it there */
+  B.setQuery("Will Tice");
+  eq("the CAVE card is found by the pack's author", B.visible(), ["cave"]);
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["status-bar", "parallax", "palette-cycle", "road", "sky-gradient",
-      "starfall"]);
+     ["cave", "status-bar", "parallax", "oak-woods", "palette-cycle",
+      "road", "sky-gradient", "starfall"]);
   B.setSort("written");
 
   const bt = runBarePage(BROWSE_PAGE, "?tag=raster");
   eq("?tag=raster opens the page filtered",
      bt.sandbox.PCEStudio.browse.visible(),
-     ["parallax", "sky-gradient", "road", "status-bar", "starfall"]);
+     ["parallax", "sky-gradient", "road", "status-bar", "starfall",
+      "oak-woods"]);
 
   /* 4. a toy's own page */
   const t = runBarePage(TOY_PAGE, "?id=road&paused=1");
@@ -6598,7 +6919,7 @@ async function checkGalleryBrowser() {
                          "pcestudio-chrome-80-" + process.pid);
   const pages = [
     { name: "browse.html", file: BROWSE_PAGE, search: "?selftest=1",
-      want: /^PASS 6 cards, each drawn at frame 60 · ink / },
+      want: /^PASS 7 cards, each drawn at frame 60 · ink / },
     { name: "toy.html?id=road", file: TOY_PAGE, search: "?id=road&selftest=1",
       want: /^PASS 60 frames · road · 256x224 · ink [1-9][0-9]* · digest / }
   ];
@@ -6653,6 +6974,7 @@ async function main() {
   checkCodeMirrorEditorText();
   checkOutputColumn(page);
   checkPlayPastLength(page);
+  checkStudioSplits(page);
   checkExamplesVisible(page);
   checkPasteRun(page);
   checkScreenPanel(page);

@@ -317,3 +317,10 @@ Lua may be committed; `tools/deploy.sh` uploads the art with the toy so the demo
 need the art skip with a message when it is missing, so a fresh clone stays green. This unblocks #126 (no licence
 text in the pack) and #130 (its licence forbids redistribution) — @workshop pointed out to Dennis on 2026-10-29 that
 showing the art on a public site is still a form of redistribution of the pack.
+
+## 2026-10-29 — The repo opens tomorrow (Dennis)
+
+Dennis, asked why the MCP server ships as a zip: "no we'll open the repo tomorrow". So on 2026-10-30
+terracide303/PCEStudio becomes public; the guide can then say "clone the repo" for Claude Code users (the #142 zip
+stays built, unused until Dennis says). Opening it is Dennis's action, not a seat's. Card #146 lists what must be
+settled first — among them this log's own 2026-10-28 condition on vendor/huc.

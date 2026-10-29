@@ -1,0 +1,614 @@
+#!/usr/bin/env node
+/*
+ * tools/oak-woods-art.js — the Oak Woods pack, through the #123 importer,
+ * into the toy (card #128).
+ *
+ * WHY THIS IS NOT IN THE REPO.  Dennis, 2026-10-29: the demo art may be shown
+ * on the website but never committed (docs/DECISIONS.md).  So the toy's Lua is
+ * in toys/oak-woods/main.lua and the pack's converted art is written beside
+ * the repo, to demo-art/oak-woods/ — main.lua with the generated block in it,
+ * the importer's own report, and the PNG evidence.  A fresh clone runs the
+ * toy's placeholder picture; with this folder present the toy plays with the
+ * pack's forest.
+ *
+ * THE PACK.  oak_woods_v1.0.zip by Brullov (brullov.art; the readme.TXT in the
+ * zip is a purchase thank-you with no licence text).  It is extracted to a new
+ * empty folder under $TMPDIR and nothing in it is ever run.  The licence
+ * quotes and the fit to the PCE are in the README written beside the art.
+ *
+ * THE PIPELINE.  renderer/pce-source.js is the #123 importer — the same code
+ * the studio's Add Source button runs.  Nothing here re-implements it: this
+ * tool composes the pack's layers into the one background the PCE shows, cuts
+ * the character sheet into the sprite sizes the VDC draws, calls importImage
+ * for each, and writes the result as the vram[]/pal() writes a toy can make.
+ *
+ *   node tools/oak-woods-art.js            import, write demo-art/oak-woods/
+ *   node tools/oak-woods-art.js --check    exit 1 if that folder is stale
+ *   node tools/oak-woods-art.js --pack F   a different copy of the zip
+ *
+ * The pack path defaults to Dennis's download and can be overridden with
+ * OAK_WOODS_PACK.  If the pack AND the written folder are both absent, --check
+ * says SKIP and exits 0, so a fresh clone stays green.
+ */
+"use strict";
+
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const zlib = require("zlib");
+const child = require("child_process");
+const src = require("../renderer/pce-source.js");
+
+const ROOT = path.resolve(__dirname, "..");
+const TOY = path.join(ROOT, "toys", "oak-woods", "main.lua");
+const DEMO_ART = process.env.DEMO_ART ||
+  "/Volumes/External/agent-workshop-demo/demo-art";
+const OUT = path.join(DEMO_ART, "oak-woods");
+const DEFAULT_PACK = "/Volumes/External/Download/oak_woods_v1.0.zip";
+const OPEN = "-- >>> PCEStudio demo art";
+const CLOSE = "-- <<< PCEStudio demo art";
+
+/* ---- the pack, extracted to a new empty folder under $TMPDIR ----------- */
+
+function extract(pack) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "oak-woods-"));
+  child.execFileSync("unzip", ["-q", pack, "-d", dir], { stdio: "pipe" });
+  return dir;
+}
+
+function loadPng(file) {
+  return src.decodePng(fs.readFileSync(file), zlib.inflateSync);
+}
+
+function px(img, x, y) {
+  const o = (y * img.width + x) * 4;
+  return [img.rgba[o], img.rgba[o + 1], img.rgba[o + 2], img.rgba[o + 3]];
+}
+
+/* ---- a canvas the composed pictures are drawn into --------------------- */
+
+function canvas(w, h) {
+  return { width: w, height: h, rgba: new Uint8Array(w * h * 4) };
+}
+
+function set(img, x, y, r, g, b, a) {
+  if (x < 0 || y < 0 || x >= img.width || y >= img.height) return;
+  const o = (y * img.width + x) * 4;
+  img.rgba[o] = r; img.rgba[o + 1] = g; img.rgba[o + 2] = b;
+  img.rgba[o + 3] = a === undefined ? 255 : a;
+}
+
+/* Copy a rectangle, skipping the source's transparent pixels (alpha < 128),
+ * so a layer sits over the fill behind it. */
+function blitFrom(dst, source, sx, sy, w, h, dx, dy, fill) {
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const s = sx + x, t = sy + y;
+    const p = px(source, s, t);
+    if (p[3] >= 128) set(dst, dx + x, dy + y, p[0], p[1], p[2], 255);
+    else if (fill) { const f = fill(dx + x, dy + y); set(dst, dx + x, dy + y, f[0], f[1], f[2], 255); }
+  }
+}
+
+/* ---- the 5x7 font the status bar and the digits use --------------------
+ * Our own glyphs (not the pack's): the PCE has no text, so the HUD is tiles
+ * this tool draws.  Each glyph is 5 pixels wide and 7 tall in an 8x8 cell. */
+const FONT = {
+  "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+  "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+  "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+  "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
+  "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+  "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+  "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+  "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+  "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+  "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+  "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
+  "I": ["01110", "00100", "00100", "00100", "00100", "00100", "01110"],
+  "M": ["10001", "11011", "10101", "10101", "10001", "10001", "10001"],
+  "E": ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
+  "S": ["01111", "10000", "10000", "01110", "00001", "00001", "11110"],
+  "C": ["01110", "10001", "10000", "10000", "10000", "10001", "01110"],
+  "O": ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
+  "R": ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
+};
+
+const BAR = [42, 30, 22];       /* the status bar's brown */
+const CREAM = [232, 220, 190];  /* its text */
+
+function glyph(img, ch, cellX, cellY) {
+  const rows = FONT[ch];
+  for (let y = 0; y < 7; y++) for (let x = 0; x < 5; x++)
+    if (rows[y][x] === "1") set(img, cellX + 1 + x, cellY + 1 + y,
+                                CREAM[0], CREAM[1], CREAM[2], 255);
+}
+
+/* ---- the one background (256x232: 224 shown + the glyph row) ----------- *
+ * Three bands from the pack's three parallax layers, each read through its
+ * own seamless 256-pixel window, over a fill that continues the sky behind
+ * the cut-outs.  The near layer's lower part includes the forest floor, so
+ * the ground is the pack's ground.  Rows 224..231 are off-screen and hold
+ * the ten digit glyphs the HUD swaps into the bar. */
+const BAND = {
+  far:  { layer: 0, x0: 29, srcY: 8,  dstY: 24,  h: 48 },
+  mid:  { layer: 1, x0: 9,  srcY: 30, dstY: 72,  h: 56 },
+  near: { layer: 2, x0: 10, srcY: 84, dstY: 128, h: 96 },
+};
+const NEAR_FILL = [38, 30, 54];
+const GROUND = 204;   /* the near band's forest floor: 128 + (160 - 84) */
+
+function composeBackground(layers) {
+  const img = canvas(256, 232);
+  /* the fill behind a cut-out continues the far band's bottom row, so the
+   * seam between two bands is the same colour on both sides */
+  const sky = (x) => px(layers[0], BAND.far.x0 + x, BAND.far.srcY + BAND.far.h - 1);
+  /* the bar */
+  for (let y = 0; y < 24; y++) for (let x = 0; x < 256; x++)
+    set(img, x, y, BAR[0], BAR[1], BAR[2], 255);
+  /* the three bands */
+  for (const key of ["far", "mid", "near"]) {
+    const b = BAND[key];
+    for (let y = 0; y < b.h; y++) for (let x = 0; x < 256; x++) {
+      const p = px(layers[b.layer], b.x0 + x, b.srcY + y);
+      if (p[3] >= 128) set(img, x, b.dstY + y, p[0], p[1], p[2], 255);
+      else if (key === "near") set(img, x, b.dstY + y,
+                                   NEAR_FILL[0], NEAR_FILL[1], NEAR_FILL[2], 255);
+      else { const f = sky(x); set(img, x, b.dstY + y, f[0], f[1], f[2], 255); }
+    }
+  }
+  /* rows 224..231: the glyph row (off-screen), bar brown behind the glyphs */
+  for (let y = 224; y < 232; y++) for (let x = 0; x < 256; x++)
+    set(img, x, y, BAR[0], BAR[1], BAR[2], 255);
+  for (let d = 0; d < 10; d++) glyph(img, String(d), (1 + d) * 8, 224);
+  /* the labels on the bar's middle row, and the digits' start value */
+  const label = (text, col) => {
+    for (let i = 0; i < text.length; i++) glyph(img, text[i], (col + i) * 8, 8);
+  };
+  label("TIME", 1);
+  label("SCORE", 17);
+  glyph(img, "0", 6 * 8, 8);
+  glyph(img, "0", 7 * 8, 8);
+  glyph(img, "0", 8 * 8, 8);
+  glyph(img, "0", 23 * 8, 8);
+  glyph(img, "0", 24 * 8, 8);
+  glyph(img, "0", 25 * 8, 8);
+  return img;
+}
+
+/* ---- the character: eight 32x64 frames --------------------------------- *
+ * Each 56x56 sheet cell is cropped to the same 32x40 window (x 12..43,
+ * y 16..55) and placed 24 rows down a 32x64 cell, so every frame's feet are
+ * on the cell's bottom row and the run cycle does not bob.  Frames, in the
+ * order the toy's PLY table names them: run 1..6 (sheet row 3), jump (row 4
+ * col 3), fall (row 4 col 1). */
+const CHAR_FRAMES = [
+  [2, 0], [2, 1], [2, 2], [2, 3], [2, 4], [2, 5],
+  [3, 2], [3, 0],
+];
+
+function composeCharacter(sheet) {
+  const n = CHAR_FRAMES.length;
+  const img = canvas(32 * n, 64);
+  for (let i = 0; i < n; i++) {
+    const [row, col] = CHAR_FRAMES[i];
+    for (let y = 0; y < 40; y++) for (let x = 0; x < 32; x++) {
+      const p = px(sheet, col * 56 + 12 + x, row * 56 + 16 + y);
+      if (p[3] >= 128) set(img, i * 32 + x, 24 + y, p[0], p[1], p[2], 255);
+    }
+  }
+  return img;
+}
+
+/* ---- the props: two rocks and the sign, each in a 32x32 cell ----------- *
+ * Rocks sit on the cell's bottom row; the sign's post does too, so the toy
+ * can place both with their bottoms on the ground line. */
+const PROPS = [
+  { file: "decorations/rock_1.png", dx: 6, dy: 20 },
+  { file: "decorations/rock_2.png", dx: 2, dy: 19 },
+  { file: "decorations/sign.png",   dx: 5, dy: 1  },
+];
+
+function composeProps(packDir) {
+  const img = canvas(32 * PROPS.length, 32);
+  for (let i = 0; i < PROPS.length; i++) {
+    const s = loadPng(path.join(packDir, "oak_woods_v1.0", PROPS[i].file));
+    for (let y = 0; y < s.height; y++) for (let x = 0; x < s.width; x++) {
+      const p = px(s, x, y);
+      if (p[3] >= 128) set(img, i * 32 + PROPS[i].dx + x, PROPS[i].dy + y,
+                           p[0], p[1], p[2], 255);
+    }
+  }
+  return img;
+}
+
+/* ---- the picture as Lua ------------------------------------------------ */
+
+function hex16(w) { return "0x" + (w & 0xFFFF).toString(16).toUpperCase().padStart(4, "0"); }
+
+function tileWords(tile) {
+  const out = [];
+  for (let y = 0; y < 8; y++) {
+    let lo = 0, hi = 0, lo2 = 0, hi2 = 0;
+    for (let x = 0; x < 8; x++) {
+      const v = tile.pixels[y * 8 + x], bit = 7 - x;
+      if (v & 1) lo |= 1 << bit;
+      if (v & 2) hi |= 1 << bit;
+      if (v & 4) lo2 |= 1 << bit;
+      if (v & 8) hi2 |= 1 << bit;
+    }
+    out.push(lo | (hi << 8), lo2 | (hi2 << 8));
+  }
+  const words = [];
+  for (let y = 0; y < 8; y++) words.push(out[y * 2]);
+  for (let y = 0; y < 8; y++) words.push(out[y * 2 + 1]);
+  return words;
+}
+
+/* One 16x16 sub-cell of a pattern, as the VDC's four planes. */
+function cellWords(pattern, col, row, cell, words) {
+  for (let k = 0; k < 4; k++) for (let r = 0; r < 16; r++) {
+    let w = 0;
+    for (let x = 0; x < 16; x++)
+      if (pattern.pixels[(row * 16 + r) * pattern.width + (col * 16 + x)] & (1 << k))
+        w |= 1 << (15 - x);
+    if (w) words.push({ addr: cell * 64 + k * 16 + r, word: w });
+  }
+}
+
+function luaBlock(bg, bgRes, charRes, propsRes, layout) {
+  const L = [];
+  const push = (s) => L.push(s);
+  push(OPEN + " — generated by tools/oak-woods-art.js; do not edit");
+  push("-- Oak Woods v1.0 by Brullov (brullov.art), imported by the #123");
+  push("-- importer (renderer/pce-source.js) into VRAM and CRAM.  The pack and");
+  push("-- this block are NOT in the repository (docs/DECISIONS.md, 2026-10-29):");
+  push("-- the playable file is demo-art/oak-woods/main.lua, beside the repo.");
+  push("-- " + bgRes.stats.tiles + " background tiles, " + bgRes.stats.palettes +
+       " background palettes, " + charRes.patterns.length + " player frames,");
+  push("-- " + propsRes.patterns.length + " prop patterns.");
+
+  push("");
+  push("PLY = {" + charRes.sprites.map((s) => layout.charBase + s.pattern * 8).join(", ") + "}");
+  push("PLY_PAL = {" + charRes.sprites.map((s) => s.palette).join(", ") + "}");
+  push("ROCK = {" + [0, 1].map((i) => layout.propBase + i * 4).join(", ") + "}");
+  push("ROCK_PAL = {" + [0, 1].map((i) => propsRes.sprites[i].palette + layout.charPalettes).join(", ") + "}");
+  push("SIGNP = " + (layout.propBase + 8));
+  push("SIGN_PAL = " + (propsRes.sprites[2].palette + layout.charPalettes));
+
+  /* the digit tiles: cells 1..10 of the glyph row (row 28) */
+  /* the importer's tiles[] is indexed by char - $40, not by char */
+  const tileAt = (ch) => bgRes.tiles[ch - 0x40];
+  const digitChars = [], digitPal = [];
+  for (let d = 0; d < 10; d++) {
+    const cell = 28 * 32 + 1 + d;
+    const ch = bgRes.map[cell];
+    digitChars.push(ch);
+    digitPal.push(tileAt(ch).palette);
+  }
+  push("DIGIT_CHARS = {" + digitChars.join(", ") + "}");
+  push("DIGIT_PAL = {" + digitPal.join(", ") + "}");
+  push("HUD_TIME = {" + [6, 7, 8].map((c) => 32 + c).join(", ") + "}");
+  push("HUD_SCORE = {" + [23, 24, 25].map((c) => 32 + c).join(", ") + "}");
+  push("GROUND = " + GROUND);
+  push("START_X = 96");
+  push("FAR_LINE = " + BAND.far.dstY);
+  push("MID_LINE = " + BAND.mid.dstY);
+  push("NEAR_LINE = " + BAND.near.dstY);
+  push("LEVEL_LEN = 1440");
+  push("GOAL_X = 1400");
+  push("ROCK_X = {240, 520, 900, 1240}");
+
+  push("");
+  push("function art_boot()");
+  push("  -- the VCE: every background palette's colour 0 is the shared backdrop");
+  for (let p = 0; p < bgRes.palettes.length; p++)
+    for (let e = 0; e < 16; e++)
+      push("  pal(" + (p * 16 + e) + ", " + bgRes.palettes[p][e] + ")");
+  for (let p = bgRes.palettes.length; p < 16; p++)
+    push("  pal(" + (p * 16) + ", " + bgRes.backdrop + ")   -- palette " + p + "'s colour 0");
+
+  push("  -- the VCE: the sprite palettes at CRAM $100");
+  let base = 0;
+  const spriteRows = [];
+  for (const row of charRes.palettes) spriteRows.push(row);
+  for (const row of propsRes.palettes) spriteRows.push(row);
+  for (let p = 0; p < spriteRows.length; p++)
+    for (let e = 1; e < 16; e++)
+      if (spriteRows[p][e])
+        push("  pal(" + (256 + p * 16 + e) + ", " + spriteRows[p][e] + ")");
+
+  push("  -- the background tiles: character $nn at word char*16");
+  for (const t of bgRes.tiles) {
+    const words = tileWords(t);
+    let any = false;
+    for (let y = 0; y < 16; y++) if (words[y]) any = true;
+    if (!any) continue;
+    push("  -- tile $" + t.char.toString(16));
+    for (let y = 0; y < 16; y++)
+      if (words[y]) push("  vram[" + (t.char * 16 + y) + "] = " + hex16(words[y]));
+  }
+
+  push("  -- the BAT at word 0, runs of one cell");
+  for (let row = 0; row < 32; row++) {
+    const cells = [];
+    for (let col = 0; col < 32; col++) {
+      const ch = bgRes.map[row * 32 + col];
+      const pal = tileAt(ch).palette;
+      cells.push((ch & 0xFFF) | ((pal & 0xF) << 12));
+    }
+    let col = 0;
+    while (col < 32) {
+      let end = col;
+      while (end + 1 < 32 && cells[end + 1] === cells[col]) end++;
+      if (end > col)
+        push("  for c = " + col + ", " + end + " do vram[" + (row * 32) +
+             " + c] = " + hex16(cells[col]) + " end");
+      else
+        push("  vram[" + (row * 32 + col) + "] = " + hex16(cells[col]));
+      col = end + 1;
+    }
+  }
+
+  push("  -- the sprite patterns at their packed cells");
+  const emitPattern = (res, i, cell, w, h) => {
+    const words = [];
+    for (let r = 0; r < h / 16; r++) for (let c = 0; c < w / 16; c++)
+      cellWords(res.patterns[i], c, r, cell + c + 2 * r, words);
+    push("  -- pattern " + i + " (cell " + cell + ")");
+    for (const wd of words) push("  vram[" + wd.addr + "] = " + hex16(wd.word));
+  };
+  for (let i = 0; i < charRes.patterns.length; i++)
+    emitPattern(charRes, i, layout.charBase + i * 8, 32, 64);
+  for (let i = 0; i < propsRes.patterns.length; i++)
+    emitPattern(propsRes, i, layout.propBase + i * 4, 32, 32);
+
+  push("end");
+  push(CLOSE + " — do not edit above this line");
+  return L.join("\n") + "\n";
+}
+
+/* ---- the import -------------------------------------------------------- */
+function build(opts) {
+  opts = opts || {};
+  const pack = opts.pack || process.env.OAK_WOODS_PACK || DEFAULT_PACK;
+  if (!fs.existsSync(pack)) {
+    return { skip: "the Oak Woods pack is not at " + pack +
+      " (set OAK_WOODS_PACK or --pack); no art can be imported" };
+  }
+  const dir = extract(pack);
+  const base = path.join(dir, "oak_woods_v1.0");
+  const layers = [1, 2, 3].map((n) =>
+    loadPng(path.join(base, "background", "background_layer_" + n + ".png")));
+
+  const bgImg = composeBackground(layers);
+  const bgRes = src.importImage(bgImg, { kind: "bg", name: "oak-woods-bg",
+                                         alphaThreshold: 128, dither: "none" });
+  const charImg = composeCharacter(loadPng(path.join(base, "character", "char_blue.png")));
+  const charRes = src.importImage(charImg, { kind: "sprites", size: [32, 64],
+                                             name: "oak-woods-player",
+                                             alphaThreshold: 128, dither: "none",
+                                             maxPalettes: 8 });
+  const propsImg = composeProps(dir);
+  const propsRes = src.importImage(propsImg, { kind: "sprites", size: [32, 32],
+                                               name: "oak-woods-props",
+                                               alphaThreshold: 128, dither: "none",
+                                               maxPalettes: 6 });
+
+  const nTiles = bgRes.tiles.length;
+  const charBase = 16 + Math.ceil(nTiles * 16 / 64);
+  const alignedCharBase = Math.ceil(charBase / 8) * 8;
+  const propBase = alignedCharBase + charRes.patterns.length * 8;
+  const layout = {
+    nTiles: nTiles,
+    charBase: alignedCharBase,
+    propBase: propBase,
+    charPalettes: charRes.palettes.length,
+  };
+  const spriteWords = (charRes.patterns.length * 8 + propsRes.patterns.length * 4) * 64;
+  const tileWordsTotal = nTiles * 16;
+  layout.vram = { bat: 1024, tiles: tileWordsTotal,
+                  sprites: spriteWords,
+                  spriteBase: alignedCharBase * 64,
+                  end: alignedCharBase * 64 + spriteWords,
+                  total: Math.max(1024 + tileWordsTotal, alignedCharBase * 64 + spriteWords) };
+
+  const block = luaBlock(bgImg, bgRes, charRes, propsRes, layout);
+  return { dir, bgImg, bgRes, charImg, charRes, propsImg, propsRes,
+           layout, block };
+}
+
+/* ---- writing ----------------------------------------------------------- */
+
+function splice(source, block) {
+  const open = source.indexOf(OPEN);
+  const close = source.search(/-- <<< PCEStudio demo art[^\n]*\n?/);
+  if (open < 0 || close < 0 || close < open)
+    throw new Error("main.lua has no '" + OPEN + "' … '" + CLOSE + "' block");
+  const before = source.slice(0, open).replace(/\n+$/, "");
+  const after = source.slice(close).replace(/-- <<< PCEStudio demo art[^\n]*\n?/, "")
+                      .replace(/^\n+/, "");
+  return before + "\n\n" + block + "\n" + after;
+}
+
+function pngOf(img) {
+  /* a minimal PNG writer: 8-bit RGBA, one zlib stream */
+  const raw = Buffer.alloc((img.width * 4 + 1) * img.height);
+  for (let y = 0; y < img.height; y++) {
+    raw[y * (img.width * 4 + 1)] = 0;
+    Buffer.from(img.rgba.buffer, y * img.width * 4, img.width * 4)
+      .copy(raw, y * (img.width * 4 + 1) + 1);
+  }
+  const crcTable = [];
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    crcTable[n] = c >>> 0;
+  }
+  const crc = (buf) => {
+    let c = 0xFFFFFFFF;
+    for (const b of buf) c = crcTable[(c ^ b) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const cb = Buffer.alloc(4); cb.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, cb]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(img.width, 0); ihdr.writeUInt32BE(img.height, 4);
+  ihdr[8] = 8; ihdr[9] = 6; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+    chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0))]);
+}
+
+const LICENCE = `The Oak Woods pack's readme.TXT, quoted in full (it is a purchase
+thank-you: the pack carries **no licence text**, no archive comment, and no
+rights metadata in any PNG's XMP):
+
+> Thank you for purchasing this asset pack! Please note that all next updates
+> of this pack are free for you.
+>
+> If you find this asset useful, please rate it on itch! Thanks!
+>
+> Contact:
+>
+> If you have any questions regarding this asset pack you can contact me here:
+>
+> E-Mail: brullov.ad@gmail.com
+> Twitter: https://twitter.com/brullov_art
+>
+> If you want to support me, get access to my private Discord server where you
+> can suggest asset improvements, check my Patreon.
+>
+> https://www.patreon.com/brullov
+>
+> Price will increase with asset's updates.
+>
+> Check the guide.png for useful info about how to use animations properly.
+
+Dennis bought the pack (2026-10-29). docs/DECISIONS.md, 2026-10-29 ("About the
+artwork don't put it on the repo but it's fine as demo on the website"): no pack
+art and nothing converted from it is committed; it lives here, beside the repo,
+and \`tools/deploy.sh\` uploads it with the toy.  Credit: **Oak Woods v1.0 by
+Brullov (brullov.art)**.
+
+The player character is the separate generic_char_v0.2 pack (same author,
+brullov.ad@gmail.com), which does carry a licence:
+
+> You can use it for free or commercial product.
+> You can modify it.
+> You MUSTN'T redistribute or resell it.
+> You MUSTN'T use the assets in any printed media or physical product.
+`;
+
+const FIT = `# Oak Woods on the PC Engine — the fit.
+
+Measured by \`node tools/oak-woods-art.js\` from the pack itself, through
+renderer/pce-source.js:
+
+| what | measured | the PCE |
+|---|---|---|
+| background colours per 8x8 tile | max 7 (all three layers) | 15 + transparent |
+| background colours overall | 25 across the three layers; the composed bands fit in the importer's palettes | 16 palettes x 16 |
+| character colours per frame | 14–18 (21 across the sheet) | 15 + transparent per 16-colour sprite palette; the importer fits each frame, approximating the few colours past 15 |
+| character frame | 32x40 content in a 56x56 cell | one 32x64 sprite (CGX + CGY=3) |
+| rocks | 20x11 and 27x12 | one 32x32 sprite each |
+| sign | 22x31 | one 32x32 sprite |
+
+The background is **one** plane: the pack's three parallax layers are composed
+into three horizontal bands of one 32x32 BAT (the PCE has one background), and
+the RCR line interrupt rewrites BXR at each band's first line — a quarter, a
+half and the full scroll speed.  It is the \`toys/parallax.lua\` trick with the
+pack's art.
+
+The character's 18-colour frames are **fitted**: the importer's palette planner
+puts each frame in one 16-colour sprite palette and maps the colours that do not
+fit to the nearest of the 15 — the only place the art is lossy, and it is the
+#123 importer's own fitting, not a hand edit.
+`;
+
+function writeAll(built) {
+  fs.mkdirSync(OUT, { recursive: true });
+  const source = fs.readFileSync(TOY, "utf8");
+  const playable = splice(source, built.block);
+  fs.writeFileSync(path.join(OUT, "main.lua"), playable);
+  fs.writeFileSync(path.join(OUT, "background.png"), pngOf(built.bgImg));
+  fs.writeFileSync(path.join(OUT, "character.png"), pngOf(built.charImg));
+  fs.writeFileSync(path.join(OUT, "props.png"), pngOf(built.propsImg));
+  const report = {
+    pack: "oak_woods_v1.0.zip",
+    credit: "Oak Woods v1.0 by Brullov (brullov.art)",
+    character: "generic_char_v0.2 by Brullov (brullov.art)",
+    background: built.bgRes.stats,
+    player: built.charRes.stats,
+    props: built.propsRes.stats,
+    vram: built.layout.vram,
+    warnings: [].concat(built.bgRes.warnings, built.charRes.warnings,
+                        built.propsRes.warnings),
+    ground: GROUND,
+  };
+  fs.writeFileSync(path.join(OUT, "art.json"), JSON.stringify(report, null, 2) + "\n");
+  fs.writeFileSync(path.join(OUT, "README.md"),
+    "# OAK WOODS — the demo's art (card #128)\n\n" +
+    "This folder is the pack's art, converted for the PC Engine by\n" +
+    "`tools/oak-woods-art.js` through the #123 importer. It is **not in the\n" +
+    "repository** (docs/DECISIONS.md, 2026-10-29). `main.lua` here is the\n" +
+    "playable file: toys/oak-woods/main.lua with its placeholder picture\n" +
+    "replaced by the pack's tiles, palettes and sprite patterns.\n\n" +
+    "## Licence\n\n" + LICENCE + "\n## Fit\n\n" + FIT + "\n" +
+    "## Tools\n\n```sh\nnode tools/oak-woods-art.js           # rebuild this folder\n" +
+    "node tools/oak-woods-art.js --check   # is it current?\n```\n");
+  return playable;
+}
+
+/* ---- main -------------------------------------------------------------- */
+function main(argv) {
+  const at = argv.indexOf("--pack");
+  const pack = at >= 0 ? argv[at + 1] : undefined;
+  const check = argv.indexOf("--check") >= 0;
+  const playablePath = path.join(OUT, "main.lua");
+
+  if (check) {
+    if (!fs.existsSync(playablePath)) {
+      console.log("SKIP  no demo-art/oak-woods in this clone — " +
+                  "the art is not committed (docs/DECISIONS.md); " +
+                  "run node tools/oak-woods-art.js to build it");
+      return 0;
+    }
+    const built = build({ pack });
+    if (built.skip) { console.log("SKIP  " + built.skip); return 0; }
+    const want = splice(fs.readFileSync(TOY, "utf8"), built.block);
+    const have = fs.readFileSync(playablePath, "utf8");
+    if (want !== have) {
+      console.log("FAIL  demo-art/oak-woods/main.lua is not what " +
+                  "tools/oak-woods-art.js writes (re-run it)");
+      return 1;
+    }
+    console.log("PASS  demo-art/oak-woods/main.lua is the tool's output");
+    return 0;
+  }
+
+  const built = build({ pack });
+  if (built.skip) { console.error(built.skip); return 1; }
+  writeAll(built);
+  const v = built.layout.vram;
+  console.log("wrote " + OUT);
+  console.log("  background " + built.bgRes.stats.tiles + " tiles, " +
+              built.bgRes.stats.palettes + " palettes, max " +
+              built.bgRes.stats.maxTileColours + " colours/tile");
+  console.log("  player " + built.charRes.patterns.length + " frames (32x64), " +
+              built.charRes.stats.palettes + " palettes");
+  console.log("  props " + built.propsRes.patterns.length + " patterns (32x32), " +
+              built.propsRes.stats.palettes + " palettes");
+  console.log("  VRAM words: BAT 1024 + tiles " + v.tiles + " + sprites " +
+              v.sprites + " = " + v.total + " of 32768");
+  for (const w of [].concat(built.bgRes.warnings, built.charRes.warnings,
+                            built.propsRes.warnings)) console.log("  warning: " + w);
+  return 0;
+}
+
+if (require.main === module) process.exit(main(process.argv.slice(2)));
+module.exports = { build, splice, composeBackground, composeCharacter, composeProps, GROUND, BAND };
