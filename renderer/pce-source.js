@@ -68,7 +68,14 @@
   var MAX_TILES = 1536;          /* pce-editor.js: 48 KiB of tile banks */
   var VRAM_WORDS = 32768;
   var VCE_COLOURS = 512;
+  /* The six sizes the VDC draws, and the VRAM cells each reserves: one cell
+   * is 64 words, and pce-editor.js packs patterns after the tiles at the
+   * alignment their CGX/CGY mask demands.  Kept here so the importer can say
+   * "this will not fit" before the panels refuse it. */
   var SPRITE_SIZES = [[16, 16], [32, 16], [16, 32], [32, 32], [16, 64], [32, 64]];
+  var SPRITE_CELLS = { "16x16": [1, 1], "32x16": [2, 2], "16x32": [4, 4],
+                       "32x32": [4, 4], "16x64": [8, 8], "32x64": [8, 8] };
+  var SAT_CELL = 0x7F00 / 64;    /* the SAT's four cells at VRAM $7F00 */
   var FRAME_CLOCKS = 119318;     /* 7.15909 MHz / 60; pce-validate.js */
   var SAMPLE_MAX = 0x1F;         /* a DDA sample is 5 bits (R6 bits 0-4) */
   var DDA_RATES = [3000, 4000, 6000, 8000, 12000];
@@ -528,6 +535,14 @@
       map[cell.cy * BAT_W + cell.cx] = char;
     }
 
+    /* VRAM: the tiles start at character $40 and every character is 16
+     * words; the SAT sits at $7F00, so a picture that walked past it could
+     * not be shown. */
+    var tileEnd = (FIRST_CHAR + tiles.length) * 16;
+    if (tileEnd > 0x7F00)
+      warnings.push("the tiles reach VRAM word $" + tileEnd.toString(16) +
+                    ", past the SAT at $7F00 — the picture does not fit");
+
     var tileColours = tiles.map(function (t) {
       var u = uniqueWords(t.pixels);
       return u.length;
@@ -656,6 +671,17 @@
                        pattern: index, palette: plan.assign[index],
                        priority: 1, hflip: 0, vflip: 0 });
     }
+
+    /* VRAM: the patterns are packed after the tiles at their alignment and
+     * the SAT's four cells are the last thing in the 32768-word VRAM. */
+    var cursor = Math.ceil(FIRST_CHAR / 4);
+    for (var v = 0; v < patterns.length; v++) {
+      var cell = SPRITE_CELLS[pw + "x" + ph] || [1, 1];
+      cursor = Math.ceil(cursor / cell[1]) * cell[1] + cell[0];
+    }
+    if (cursor > SAT_CELL)
+      warnings.push("the patterns end at VRAM cell " + cursor + ", past the " +
+                    "SAT's cells at " + SAT_CELL + " — the picture does not fit");
 
     var result = {
       kind: "sprites", name: opts.name || "sprites",
