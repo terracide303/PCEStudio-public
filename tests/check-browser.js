@@ -243,14 +243,22 @@ function sectionC() {
         "the browser setting reads an env override (" +
         (vars.length ? vars.join(", ") : "none") + ")");
 
-  const defaults = [...mod.text.matchAll(/["']([^"'\n]*chrome-headless-shell[^"'\n]*)["']/g)]
-    .map((m) => m[1]);
-  check(defaults.length > 0,
-        "the browser setting carries a chrome-headless-shell default path");
-  const absolute = defaults.filter((d) => d.startsWith("/"));
-  check(absolute.length > 0,
-        "the default is an absolute path, not a PATH lookup (" +
-        (absolute[0] || (defaults[0] || "none")) + ")");
+  /* The default is checked by resolving the module, not by matching its
+   * source: path.join(BASE, "chrome-headless-shell") is a perfectly good
+   * default and no single literal would carry it. */
+  const resolved = resolvedFromSetting(mod);
+  check(!resolved.error,
+        "the browser setting loads and exposes its resolved path" +
+        (resolved.error ? " (" + resolved.error + ")" : ""));
+  const shell = (resolved.shell || []);
+  check(shell.length > 0,
+        "the setting resolves to a chrome-headless-shell path" +
+        (resolved.paths && resolved.paths.length
+          ? " (it exposes " + resolved.paths.slice(0, 3).join(", ") + ")"
+          : " (it exposes no absolute path)"));
+  check(shell.filter((p) => p.startsWith("/")).length > 0,
+        "the resolved browser is an absolute path, not a PATH lookup (" +
+        (shell[0] || "none") + ")");
 
   for (const l of launches) {
     const rel = path.basename(l.file);
@@ -307,8 +315,6 @@ function sectionD(settings) {
   else check(true, "$TMPDIR is on External II (" + tmp + ")");
   if (settings) {
     const r = resolvedFromSetting(settings.mod);
-    check(!r.error, "the browser setting loads and exposes its resolved " +
-          "path" + (r.error ? " (" + r.error + ")" : ""));
     if (r.shell && r.shell.length) {
       check(r.shell.filter((p) => p.indexOf("/Volumes/External II") >= 0).length > 0,
             "the resolved browser is on External II (" + r.shell[0] + ")");
