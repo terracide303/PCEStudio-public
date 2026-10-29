@@ -178,7 +178,7 @@ done
 # copy the tests check — this is the only place the two are joined.
 DEMO_ART="${DEMO_ART:-/Volumes/External/agent-workshop-demo/demo-art}"
 demo_toys=""
-for toy in oak-woods cave city; do
+for toy in oak-woods city; do
   [ -f "$DEMO_ART/$toy/main.lua" ] && demo_toys="$demo_toys $toy"
 done
 if [ -n "$demo_toys" ]; then
