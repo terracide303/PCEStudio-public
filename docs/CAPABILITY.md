@@ -46,7 +46,7 @@ The two milestones Dennis asked for:
 | Part | Status | How we know | Where |
 |---|---|---|---|
 | Studio page laid out like ppu.toys, online at pcestudio.terracides.com | PROVEN | `check-studio.js --browser`; screenshots compared by @workshop | #75 |
-| Resizable studio regions (drag the dividers, sizes remembered, double-click resets) | TODO | #139, from Dennis 2026-10-29 on ppu.toys: dividers between CODE and the panel dock, between the left and right columns, and between OUTPUT and the markers | #139 |
+| Resizable studio regions (drag the dividers, sizes remembered, double-click resets) | PROVEN | #139: three 6 px grid-track dividers (left/right columns, CODE/dock, OUTPUT/markers) with min/max clamps, keyboard and aria (docs/STUDIO.md §2.4). `check-studio.js` 38 stub checks + `--browser` drags each divider with in-page PointerEvents, the canvas pixel digest is unchanged, and a second page on the same profile restores the sizes. The driver still ends red on two failures older than this card (Space plays, its `tiles.json` edit) — reproduced on a clean clone of `cea7029` | #139 |
 | Code editor (CodeMirror), files, save/open, autosave, Vim, shortcuts | PROVEN | `check-studio.js` 1,407 checks | #77 |
 | Output column: layers, CRT, sound, markers, timeline, pad keys (IJKL) | PROVEN | `check-studio.js`; breaker gaps closed by #91 | #78 |
 | Panels in separate files (so several can be built at once) | PROVEN | `check-studio.js` 1,407 checks; ten `renderer/studio-panel-<name>.js` modules through one registry (docs/STUDIO.md §3.2) | #102 |
