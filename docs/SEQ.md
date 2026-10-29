@@ -134,6 +134,11 @@ watchers on both paths).
   rendered stream is the model's, six voices is the maximum and a noise drum on channel 1 is refused, and
   an edit saves `song.json` without touching the toy's other files.
 
+Six source substitutions of the model were run by hand in a `$TMPDIR` copy on 2026-10-29 and each made
+`check-sequencer.js` fail: swing inverted (tick1/tick2 swapped), no note-cut rows, the octave one too high,
+R7 written without bit 7, the tempo rule `600/BPM`, and no clip-by-the-next-note. They are not committed
+as a `*-mutation.js` suite, so a fresh clone cannot re-run them.
+
 Not proven: the panel's DOM and CSS are judged by the screenshot, not a pixel comparison; the
 AudioContext path is not exercised headlessly (the render it feeds is); no Mednafen recording of a
 sequencer song exists — the PSG model's proof is `check-psg.js`/`check-dmf.js`, and the drums' R7 writes
