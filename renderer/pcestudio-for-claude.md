@@ -6,7 +6,13 @@ A guide a chat AI reads before it helps someone make a PC Engine toy for PCEStud
 
 Everything below assumes a chat AI with no tools: the person pastes your code, runs it and tells you what they see. If you are Claude Code and can run commands, skip that loop and do it yourself. Write the toy, run it, look at a frame, check it, export it — without asking anyone to paste anything.
 
-Install it once. Download pcestudio-mcp.zip from https://pcestudio.terracides.com/pcestudio-mcp.zip, unzip it, and run these in a terminal. <folder> is the pcestudio-mcp folder the unzip makes.
+Install it once, one of two ways. The repository is public, so with git, clone it:
+
+```sh
+git clone https://github.com/terracide303/PCEStudio-public
+```
+
+and <folder> is the PCEStudio-public folder the clone makes. Without git, download pcestudio-mcp.zip from https://pcestudio.terracides.com/pcestudio-mcp.zip, unzip it, and <folder> is the pcestudio-mcp folder the unzip makes. Either way, run these in a terminal:
 
 ```sh
 claude mcp add pcestudio -- node <folder>/tools/mcp/server.js
