@@ -1,6 +1,6 @@
 ---
 name: creating-pce-toys
-description: Make PC Engine toys for PCEStudio — Lua programs that draw to an emulated 256x224 HuC6270 VDC and play on a 6-voice PSG. Use when asked to make a PC Engine toy, game, demo, sprite, parallax, gradient or tune, or to fix a toy the console check refuses. Drives PCEStudio's MCP server (tools/mcp/server.js): write, run, look at a frame, check against the hardware, export a .pce.
+description: Make PC Engine toys for PCEStudio — Lua programs that draw to an emulated 256x224 HuC6270 VDC and play on a 6-voice PSG. Use when asked to make a PC Engine toy, game, demo, sprite, parallax, gradient or tune, or to fix a toy the console check refuses. Drives PCEStudio's MCP server (tools/mcp/server.js): write, run, look at a frame, check against the hardware, save the whole toy as one file the studio opens, export a .pce.
 ---
 
 # Making a PC Engine toy
@@ -8,7 +8,8 @@ description: Make PC Engine toys for PCEStudio — Lua programs that draw to an 
 A **toy** is one Lua file — `main.lua` — that runs on an emulated PC Engine:
 a HuC6270 VDC for the picture, a VCE for the colours, a HuC6280 PSG for the
 sound. PCEStudio's MCP server writes it, runs it deterministically, shows you
-a frame, checks it against the hardware's own limits, and exports a HuCard
+a frame, checks it against the hardware's own limits, saves the whole toy —
+code, art and songs — as one file the studio opens, and exports a HuCard
 `.pce` you can put in an emulator.
 
 This skill is the whole job. Follow the loop; do not invent API — read the
@@ -73,6 +74,13 @@ Or in `.mcp.json` at the repository root:
    validator can place it, and `line:null` when it cannot — do not invent one.
 9. **`export_pce`** builds the `.pce` through the browser route (IL → bytecode
    → ROM over the committed interpreter). The validator runs first.
+10. **Finish with `toy_save`.** It writes ONE `.pce.json` holding every file —
+    `main.lua`, the art `source_add` made, `sources.json`'s named sources, the
+    songs — in the studio's own Save format, inside the folder the server runs
+    in. Then **tell the person**: "Open PCEStudio, press Open… → From file…,
+    pick `<name>.pce.json`" (dropping it on the page works too). Without this
+    step the person has only the code you printed, and the art you imported
+    stays behind.
 
 Write in visible increments — backdrop, then a layer, then motion, then sound —
 not one giant file. The person is watching; a picture appears at step two.
@@ -310,8 +318,15 @@ so the sprites already placed keep their colours; the budget report tells you
 how much of the 32,768-word VRAM the toy's picture now occupies. A refused
 add leaves the toy alone.
 
-Teaches: art as files the panels edit, the import before `init()`, and
-placing imported sprites by moving the SAT slot the import made.
+Then **`toy_save`** with a path such as `"square.pce.json"`: the recipe's
+`main.lua`, `palettes.json`, `sprites.json` and the named sources go into one
+file, and the person opens it with Open… → From file and sees the same red
+square you did. Save before exporting, too — a toy the exporter refuses can
+still be a toy the studio plays with its art.
+
+Teaches: art as files the panels edit, the import before `init()`, placing
+imported sprites by moving the SAT slot the import made, and handing the
+whole toy over as one file.
 
 ### 7. A song in a game — `recipes/07-a-song-in-a-game.lua`
 
@@ -365,6 +380,8 @@ channel from the song, and the sound report is the ear you do not have here.
   whose wave channels play but whose instrument reports `kick`/`snare` is a
   drum the toy engine does not play as noise yet (see below) — use `sfx()`
   for a percussion hit.
+- `toy_save` once, at the end, even if the toy cannot export: that file is
+  what the person opens in the studio, art and song all.
 
 ### What `export_pce` can and cannot build
 

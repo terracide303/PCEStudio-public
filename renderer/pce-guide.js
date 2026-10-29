@@ -322,6 +322,8 @@ function guide() {
         ["frame_png", "the picture at a frame, as a PNG you can look at"],
         ["validate", "check it against the hardware's limits, with file:line " +
                      "findings"],
+        ["toy_save", "save the whole toy — code, art, songs — as one " +
+                     ".pce.json the person opens in the studio"],
         ["export_pce", "build the HuCard .pce from the same IL the studio runs"],
         ["docs", "the reference chapters, generated from the runtime's tables"],
         ["registers_get", "read a VDC, VCE or PSG register with its range"],
@@ -339,6 +341,14 @@ function guide() {
         "says what started on each channel. A toy " +
         "that runs without errors does not mean it looks right: look at the " +
         "frame."),
+      p("**Finish with toy_save.** It writes one .pce.json holding every file " +
+        "— main.lua, the art source_add made, the named sources and the songs " +
+        "— in the studio's own Save format, inside the folder the server runs " +
+        "in (a path outside it is refused). Then tell the person: open " +
+        "PCEStudio, press Open… → From file…, pick that file — or drop it on " +
+        "the page — and the game plays with its art. Without this step you " +
+        "can only hand over the code, and everything source_add imported " +
+        "stays behind."),
       p("No tools at all? Ignore this section. Sections 1 to 11 are the " +
         "paste-and-run route and work the same.")
     ]

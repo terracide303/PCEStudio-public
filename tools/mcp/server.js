@@ -34,6 +34,12 @@
  * The override never touches the toy's source or its simulation, so an
  * agent's poke is reversible and cannot compound (docs/PPU-TOYS.md §4).
  *
+ * THE HAND-OFF (#160): toy_save writes the session as the studio's own file
+ * — one pce.studio/1 envelope with every file and source, through
+ * renderer/pce-source.js's envelopeText(), the builder the studio's Save
+ * uses.  Without it a session could only hand main.lua to the person, and
+ * the art stayed in the agent's process.
+ *
  * ART (#153): a toy's asset files (tiles.json, palettes.json, sprites.json)
  * are imported into VRAM/CRAM/SAT before init() exactly as the studio does —
  * toy_run passes them to renderer/pce-il.js, whose host runs the #117
@@ -734,6 +740,76 @@ function toolToyWrite(args) {
           "imports them into VRAM/CRAM/SAT before init() (#117, #153), and " +
           "the song files are the music(index) slots (#161) — so the files " +
           "the panels edit are the art and the music the toy boots with"
+  };
+}
+
+/* ---- toy_save (#160): the toy as the studio's own file ------------------
+ * The whole session — main.lua, every asset file, sources.json's named
+ * sources, the songs — written as ONE pce.studio/1 envelope, built by
+ * renderer/pce-source.js's envelopeText(): the same function the studio's
+ * Save (renderer/studio.html saveToyFile -> toyEnvelope) uses, so the bytes
+ * are the studio's bytes.  The person then opens it with Open… → From file
+ * (or drops it on the page) and has the game WITH its art; without this the
+ * only thing an agent's session could hand over was main.lua, which leaves
+ * every tile and sprite behind.
+ *
+ * WHERE IT MAY WRITE.  Inside the folder the server was started in — for
+ * Claude Code, the person's project folder — or PCE_MCP_WORKDIR when it
+ * names one.  A path outside that folder is refused (save-path): an agent
+ * must not be able to write over files it was never pointed at. */
+function saveWorkdir() {
+  const env = process.env.PCE_MCP_WORKDIR;
+  return path.resolve(env && env.trim() ? env : process.cwd());
+}
+
+function saveInside(work, outPath) {
+  const rel = path.relative(work, outPath);
+  if (rel === "" || rel === ".." || path.isAbsolute(rel) ||
+      rel.split(path.sep)[0] === "..") {
+    refuse("save-path", "toy_save writes inside the working folder only: " +
+           JSON.stringify(outPath) + " is outside " + JSON.stringify(work) +
+           "; pass a path inside it (PCE_MCP_WORKDIR names another folder)");
+  }
+}
+
+function toolToySave(args) {
+  requireToy();
+  if (typeof args.path !== "string" || !args.path.trim()) {
+    refuse("save-path", "path is the file to write, e.g. \"my-game.pce.json\"");
+  }
+  const work = saveWorkdir();
+  let outPath = path.resolve(work, args.path.trim());
+  /* the studio's own extension, docs/STUDIO.md §3.7a: .pce.json (or the
+   * newer .pce.studio); a bare name gets it appended rather than written as
+   * a file the studio's Open will not offer */
+  if (!/\.(pce\.json|pce\.studio)$/i.test(outPath)) outPath += ".pce.json";
+  saveInside(work, outPath);
+
+  const title = args.title == null
+    ? path.basename(outPath).replace(/\.(pce\.json|pce\.studio)$/i, "")
+    : String(args.title);
+  const description = args.description == null ? "" : String(args.description);
+  const text = sourceLib.envelopeText(title, description, session.files);
+  try {
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, text);
+  } catch (e) {
+    refuse("save-io", outPath + " could not be written: " + errorMessage(e));
+  }
+  return {
+    ok: true,
+    version: "pce.studio/1",
+    path: outPath,
+    name: path.basename(outPath),
+    title: title,
+    description: description,
+    bytes: Buffer.byteLength(text),
+    sha256: sha256(Buffer.from(text, "utf8")),
+    files: session.files.map(function (f) { return f.name; }),
+    note: "one pce.studio/1 envelope — the studio's own Save format, built " +
+          "by renderer/pce-source.js envelopeText() — holding every file " +
+          "and source; in the studio, Open… → From file (or drop it on the " +
+          "page) plays this toy with its art"
   };
 }
 
@@ -1491,6 +1567,33 @@ const TOOLS = [
     }
   },
   {
+    name: "toy_save",
+    description: "Save the loaded toy as the studio's own file (#160): one " +
+      "pce.studio/1 JSON envelope holding main.lua, every asset file, the " +
+      "named sources (sources.json) and the songs, written by the same " +
+      "builder renderer/studio.html's Save uses " +
+      "(renderer/pce-source.js envelopeText) — there is no second format. " +
+      "The person opens it in the studio with Open… → From file, or drops it " +
+      "on the page, and plays the toy WITH its art. The path is relative to " +
+      "the folder the server was started in; a path outside it is refused " +
+      "(save-path).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string",
+                description: "the file to write, inside the working folder; " +
+                  ".pce.json is added when the name has no .pce.json or " +
+                  ".pce.studio extension" },
+        title: { type: "string",
+                 description: "the toy's title, shown in the studio's tab " +
+                   "(default: the file's own name)" },
+        description: { type: "string", description: "optional one line" }
+      },
+      required: ["path"],
+      additionalProperties: false
+    }
+  },
+  {
     name: "toy_run",
     description: "Run the loaded toy's main.lua for `frames` video frames " +
       "(0..frames-1) through the IL runtime, with an optional pad script, and " +
@@ -1743,6 +1846,7 @@ for (const t of TOOLS) TOOL_BY_NAME[t.name] = t;
 
 const HANDLERS = {
   toy_write: toolToyWrite,
+  toy_save: toolToySave,
   toy_run: toolToyRun,
   source_add: toolSourceAdd,
   song_write: toolSongWrite,
@@ -1763,9 +1867,11 @@ const INSTRUCTIONS =
   "compose music with song_write or add a .mid with source_add kind song, " +
   "run it with toy_run (its sound report says what each PSG channel played), " +
   "look with frame_png, read or poke registers with registers_get/" +
-  "register_set, check it with validate, export a .pce with export_pce, and " +
-  "read the toy language with docs. Every tool wraps the same modules the " +
-  "studio and the tests use; there is no second model.";
+  "register_set, check it with validate, save the whole toy for the studio " +
+  "with toy_save (one .pce.json the person opens with Open… → From file), " +
+  "export a .pce with export_pce, and read the toy language with docs. " +
+  "Every tool wraps the same modules the studio and the tests use; there is " +
+  "no second model.";
 
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + "\n");

@@ -46,6 +46,7 @@
     <a href="browse.html">Browse</a>
     <a href="docs.html">Docs</a>
     <a href="testers.html" class="is-on" aria-current="page">Beta testers</a>
+    <a href="claude-code.html">Claude Code</a>
   </nav>
 </header>
 
@@ -115,14 +116,15 @@
   <b>ASSETS → Add Source</b> in the studio. Drop a PNG there, and tell the AI which pattern number it got.</p>
 
   <h3>With Claude Code (it drives the studio itself)</h3>
-  <p>PCEStudio has an MCP server, so Claude Code can write a toy, run it, look at the frames and check it without
-  you copying anything. You need <a href="https://nodejs.org">Node.js</a>.</p>
+  <p>PCEStudio has an MCP server, so Claude Code can write a toy, run it, look at the frames, add art from a PNG
+  and check it, without you copying anything. You need <a href="https://nodejs.org">Node.js</a>. The full manual,
+  with installation for macOS, Linux and Windows, examples and troubleshooting, is here:
+  <a href="claude-code.html"><b>PCEStudio with Claude Code</b></a>. The short version (macOS/Linux):</p>
 <pre>git clone https://github.com/terracide303/PCEStudio-public.git
 cd PCEStudio-public
 claude mcp add pcestudio -- node "$PWD/tools/mcp/server.js"
+mkdir -p ~/.claude/skills
 ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys</pre>
-  <p>Then ask Claude Code to make a toy. It can't import PNG sprites through the server yet (see
-  <a href="#not-yet">below</a>).</p>
 
   <h2 id="studio">4. A tour of the studio</h2>
   <table>
@@ -171,8 +173,9 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
       panel can show old pictures. Reload the page before dropping a new file.</td><td class="status soon">being fixed</td></tr>
     <tr><td>Game art in ASSETS</td><td>Art that a game draws in code shows only in VRAM, not as named assets with
       a preview.</td><td class="status soon">being built</td></tr>
-    <tr><td>MCP server and pictures</td><td>Claude Code can't turn a PNG into sprites through the server yet; it
-      draws them in code.</td><td class="status soon">being built</td></tr>
+    <tr><td>Claude Code: songs and saving</td><td>Through the MCP server a game can't carry a song yet
+      (<code>music(0)</code> is refused; <code>sfx()</code> notes work), and there is no one-click save of a whole toy
+      with its art for the studio yet.</td><td class="status soon">being built</td></tr>
     <tr><td>Demos with bought art</td><td>CITY and OAK WOODS use art packs and come online once they look
       right.</td><td class="status soon">soon</td></tr>
     <tr><td>Old files after an update</td><td>Your browser may keep old copies. Reload with
