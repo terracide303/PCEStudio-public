@@ -117,6 +117,8 @@ output. The current check passes, so each is a real hole, not an equivalent muta
 
 ## Notes on the run
 
+- **Post-commit gate:** a fresh clone of the pushed commit ran `tests/all.sh`:
+  **36 suites PASS, 1 SKIP (`check-ares`, no screen), 0 FAIL**.
 - The first parallel batch's `--browser` runs are cheap and independent (each check serves on
   port 0 and uses its own profile), but two concurrent headless runs produced unrelated
   `browser driver: a dropped .lua loads (drop status pending)` flakes. The 93-L3 break was
