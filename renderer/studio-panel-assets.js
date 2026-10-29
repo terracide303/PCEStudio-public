@@ -16,6 +16,10 @@
  *   sounds     the fifteen built-in PC Engine instruments, each Add to toy,
  *              which copies the patch into the toy's instruments.json — the
  *              ppu.toys Place, with the toy's own file as the destination.
+ *              Every row (a built-in and one the toy holds) also has a play
+ *              button: #122's audition, a phrase of C4, E4, G4 — one hit for
+ *              a drum — rendered by pce-assets.js's play() through
+ *              renderer/pce-psg.js and played in the page's AudioContext.
  *
  * + Add makes a song, a wave, or opens the panel that edits tiles, palettes,
  * sprites and the map (those are files, and their editors are SCREEN /
@@ -46,7 +50,9 @@
     ".asx-val{font:11px var(--mono);color:var(--muted);text-align:right}",
     ".asx-parts{grid-column:2 / span 2;font:10px var(--mono);color:var(--muted);margin-top:-4px}",
     ".asx-list{display:flex;flex-direction:column;max-width:46rem;border-top:1px solid rgba(255,255,255,.08)}",
-    ".asx-row{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);font:12px var(--mono)}",
+    ".asx-row{display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.06);font:12px var(--mono)}",
+    ".asx-actions{display:flex;gap:6px;align-items:center}",
+    ".asx-play{min-width:26px}",
     ".asx-name{color:var(--fg,#ddd)}",
     ".asx-tag{font:600 9px var(--mono);letter-spacing:.08em;color:var(--muted);border:1px solid rgba(255,255,255,.18);border-radius:2px;padding:1px 4px}",
     ".asx-tag.is-in{color:var(--accent,#6cf);border-color:currentColor}",
@@ -77,6 +83,9 @@
         report: null
       };
       var lastReportFor = null;  /* the source the validator last priced */
+      var audio = null;          /* the AudioContext, once a preview needs one */
+      var source = null;         /* the node a preview is playing */
+      var lastPreview = null;    /* the last preview's PCM, for the evidence */
 
       /* ---- small DOM helpers (the stub DOM the checks use has only these) */
       function el(tag, cls, text) {
@@ -227,6 +236,131 @@
                                  data: [31, 31, 31, 31, 31, 28, 24, 20] },
                      about: "a blank sine to edit" };
         return addToToy(inst);
+      }
+
+      /* ---- playing one (#122) ---------------------------------------------
+       * The card's audition: a short phrase — C4, E4, G4 for a melodic
+       * instrument, one hit for a drum — played through pce-assets.js's
+       * play(), which writes the PSG registers a toy would and renders them
+       * with renderer/pce-psg.js.  The panel only schedules the notes and
+       * hands the PCM to the page; the pitch and the timbre are the model's,
+       * so an audition and the toy cannot disagree about what an instrument
+       * is.  No note is invented here: `noteHz` and `play` are pce-assets'. */
+      var PHRASE = ["C4", "E4", "G4"];
+      var NOTE_FRAMES = 24;      /* 0.4 s at 60 frames a second */
+      var DRUM_FRAMES = 30;      /* a drum rings once, a little longer */
+
+      function instrumentByName(name) {
+        var i, list = state.instruments;
+        for (i = 0; i < list.length; i++)
+          if (list[i].name === name) return list[i];
+        list = A.INSTRUMENTS || [];
+        for (i = 0; i < list.length; i++)
+          if (list[i].name === name) return list[i];
+        return null;
+      }
+
+      function resolve(inst) {
+        var got = typeof inst === "string" ? instrumentByName(inst) : inst;
+        if (!got) {
+          var e = new Error("no instrument " + JSON.stringify(inst));
+          e.code = "asset-name";
+          throw e;
+        }
+        return got;
+      }
+
+      /* The notes an instrument is auditioned with: the phrase for a wave,
+       * one hit for a noise drum (its pitch is the noise clock, not a note). */
+      function phraseFor(inst) {
+        if (inst.kind === "noise")
+          return [{ note: "C4", frames: DRUM_FRAMES, hit: true }];
+        return PHRASE.map(function (note) {
+          return { note: note, frames: NOTE_FRAMES, hit: false };
+        });
+      }
+
+      /* Each note is its own render — the model's envelope starts where the
+       * driver starts it — and the pieces are joined into one Int16Array so
+       * the page plays the phrase as one buffer.  The per-note RMS and
+       * fundamental are measured on that note's own samples, which is what
+       * the evidence reads. */
+      function previewPcm(inst) {
+        if (!A || typeof A.play !== "function")
+          throw new Error("the PSG model is not loaded");
+        var notes = phraseFor(inst);
+        var pcm = new Int16Array(0);
+        var at = 0;                       /* the next note's first sample */
+        var out = [];
+        var sampleRate = A.SAMPLE_RATE || 44100;
+        for (var n = 0; n < notes.length; n++) {
+          var spec = notes[n];
+          var got = A.play(inst, { note: spec.note, frames: spec.frames });
+          sampleRate = got.sampleRate;
+          var frames = got.pcm.length / 2;
+          var r = A.rms(got.pcm, 0, frames);
+          var f = A.fundamental(got.pcm, got.sampleRate,
+                                Math.floor(frames * 0.2), frames);
+          out.push({ note: spec.note, hit: !!spec.hit,
+                     hz: A.noteHz(spec.note),
+                     fromSample: at, toSample: at + frames,
+                     frames: frames, rms: r.rms, peak: r.peak,
+                     fundamental: f });
+          var join = new Int16Array(pcm.length + got.pcm.length);
+          join.set(pcm, 0);
+          join.set(got.pcm, pcm.length);
+          pcm = join;
+          at += frames;
+        }
+        var whole = A.rms(pcm, 0, at);
+        lastPreview = {
+          instrument: inst.name,
+          kind: inst.kind,
+          pcm: pcm,
+          sampleRate: sampleRate,
+          samples: at,
+          seconds: at / sampleRate,
+          peak: whole.peak,
+          rms: whole.rms,
+          notes: out
+        };
+        return lastPreview;
+      }
+
+      function context() {
+        if (audio) return audio;
+        var Ctor = root.AudioContext || root.webkitAudioContext;
+        if (!Ctor) return null;
+        try { audio = new Ctor(); } catch (e) { audio = null; }
+        return audio;
+      }
+
+      function stopPreview() {
+        if (source) {
+          try { source.stop(); } catch (e) { /* already stopped */ }
+          source = null;
+        }
+      }
+
+      /* The phrase into the page's audio.  Headless (no AudioContext) this
+       * is the render alone, which is exactly what the evidence wants. */
+      function preview(inst) {
+        var got = previewPcm(resolve(inst));
+        var ctx = context();
+        if (ctx && got.pcm.length) {
+          stopPreview();
+          try {
+            var buf = ctx.createBuffer(1, got.pcm.length, got.sampleRate);
+            var ch = buf.getChannelData(0);
+            for (var i = 0; i < got.pcm.length; i++)
+              ch[i] = got.pcm[i] / 32768;
+            source = ctx.createBufferSource();
+            source.buffer = buf;
+            source.connect(ctx.destination);
+            source.start();
+          } catch (e) { source = null; }
+        }
+        return got;
       }
 
       /* ---- drawing --------------------------------------------------------- */
@@ -405,6 +539,28 @@
         }
       }
 
+      /* #122's play button: every instrument row gets one, built-in and the
+       * toy's own, because the card's question was "how can I listen to
+       * them" and the answer has to be on the row, not behind a menu. */
+      function auditionButton(inst, id) {
+        var b = button("btn-mini asx-play", "▶", function () {
+          try {
+            preview(inst);
+            studio.toast("Playing " + inst.name + " — " +
+              (inst.kind === "noise" ? "one hit" : "C4, E4, G4") +
+              " through the PSG.");
+          } catch (e) {
+            studio.toast((e.code || "error") + ": " + e.message);
+          }
+        });
+        b.id = id;
+        b.title = inst.kind === "noise"
+          ? "Play one hit of " + inst.name + " (noise, pce-psg.js)"
+          : "Play C4, E4, G4 on " + inst.name + " (pce-psg.js)";
+        b.setAttribute("aria-label", b.title);
+        return b;
+      }
+
       function drawInstruments() {
         var host = els.instruments;
         clear(host);
@@ -420,6 +576,8 @@
             var what = el("span", "asx-what",
               A.descriptor(inst) + " · " + inst.about);
             row.appendChild(what);
+            var actions = el("span", "asx-actions");
+            actions.appendChild(auditionButton(inst, "assets-play-" + inst.id));
             var b = button("btn-mini", inToy ? "In toy" : "Add to toy",
               function () {
                 if (isInToy(inst.name)) return;
@@ -428,7 +586,8 @@
               });
             b.disabled = inToy;
             b.id = "assets-add-" + inst.id;
-            row.appendChild(b);
+            actions.appendChild(b);
+            row.appendChild(actions);
             host.appendChild(row);
           })(list[i]);
         }
@@ -454,9 +613,12 @@
                 ? "NOISE · channel " + (inst.channel + 1) + " · NF " + inst.nf
                 : "WAVE · 32 steps · envelope " +
                   (inst.envelope ? inst.envelope.size : "?")));
+            var actions = el("span", "asx-actions");
+            actions.appendChild(auditionButton(inst, "assets-play-toy-" + inst.name));
             var b = button("btn-mini", "Remove", function () { removeFromToy(inst.name); });
             b.className = "btn-mini asx-remove";
-            row.appendChild(b);
+            actions.appendChild(b);
+            row.appendChild(actions);
             host.appendChild(row);
           })(state.instruments[i]);
         }
@@ -524,6 +686,18 @@
         removeFromToy: removeFromToy,
         addBlankSong: addBlankSong,
         addBlankWave: addBlankWave,
+        /* #122: the audition the play buttons run.  `preview(nameOrPatch)`
+         * renders the phrase (C4, E4, G4; one hit for a drum) through
+         * pce-psg.js and returns the PCM and the per-note pitch, whether or
+         * not the page has an AudioContext to play it in. */
+        preview: preview,
+        audition: preview,
+        phrase: function (nameOrPatch) {
+          return phraseFor(typeof nameOrPatch === "string"
+            ? resolve(nameOrPatch) : (nameOrPatch || { kind: "wave" }));
+        },
+        lastPreview: function () { return lastPreview; },
+        stop: stopPreview,
         copy: function () { return { name: state.toyName, title: title() }; }
       };
       return def.api;

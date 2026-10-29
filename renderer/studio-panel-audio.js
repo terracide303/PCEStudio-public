@@ -57,6 +57,8 @@
       var source = null;           /* the node playing the mix */
       var playing = false;
       var lastPeak = null;         /* the last render's peak, 0..1 */
+      var A = P.assets;            /* the toy's instruments (#122) */
+      var chosen = {};             /* voice -> the toy instrument loaded into it */
 
       function ready() { return !!(mx && P.wave && P.psg); }
 
@@ -66,6 +68,78 @@
         var el = studio.$("aud-status");
         if (el) el.textContent = error;
         studio.toast(error);
+      }
+
+      /* ---- #122: the toy's instruments as a voice picker -----------------
+       * The card: an instrument added through ASSETS has to be choosable
+       * here, and Trigger has to play it.  The picker is this module's own
+       * select (the page needed no change): it lists the toy's
+       * instruments.json, and choosing one loads that patch into the
+       * selected voice — mode, the 32-step wave or the noise NF, and a driver
+       * envelope derived from the patch's own R4 sequence.  A drum on a
+       * voice without the generator moves to voice 5 rather than refusing,
+       * because the chip's limit is a place, not a mistake the user made. */
+      function toyInstruments() {
+        if (!A || typeof A.parseInstruments !== "function") return [];
+        var f = studio.toy.file("instruments.json");
+        if (!f || !f.source) return [];
+        try { return A.parseInstruments(f.source).instruments || []; }
+        catch (e) { return []; }
+      }
+
+      function toyByName(name) {
+        var list = toyInstruments();
+        for (var i = 0; i < list.length; i++)
+          if (list[i].name === name) return list[i];
+        return null;
+      }
+
+      /* The patch's HuTrack-shaped envelope ({size, loop, data}) as the
+       * mixer's driver envelope ({attack, decay, sustain, rate}): attack is
+       * the climb to the loudest level, decay the fall to the last one, and
+       * a step a frame.  The shape is the same R4 sequence, written the way
+       * this panel's model takes it. */
+      function mixEnvOf(inst) {
+        var env = inst.envelope || {};
+        var data = Array.isArray(env.data) && env.data.length ? env.data : [31];
+        var peakAt = 0, i;
+        for (i = 0; i < data.length; i++) if (data[i] > data[peakAt]) peakAt = i;
+        var sustain = data[data.length - 1];
+        return {
+          attack: Math.min(mx.ENV_MAX, peakAt),
+          decay: Math.min(mx.ENV_MAX, Math.max(0, data.length - peakAt - 1)),
+          sustain: Math.max(0, Math.min(mx.AL_MAX, sustain)),
+          rate: 1
+        };
+      }
+
+      /* Put the toy's patch on `voice` (default: the selected one).  Returns
+       * {voice, name}; the model's own refusals (wave-range, noise-channel)
+       * are thrown, so the evidence reads the code the panel would toast. */
+      function loadToyInstrument(name, voice) {
+        var inst = toyByName(name);
+        if (!inst) {
+          var e = new Error("no instrument " + JSON.stringify(name));
+          e.code = "asset-name";
+          throw e;
+        }
+        var m = state();
+        var c = voice === undefined ? sel : voice;
+        if (inst.kind === "noise" && mx.NOISE_VOICES.indexOf(c) < 0)
+          c = mx.NOISE_VOICES[0];            /* voice 5, the first generator */
+        if (inst.kind === "noise") {
+          mx.setMode(m, c, "noise");
+          mx.setNoise(m, c, { nf: inst.nf });
+        } else {
+          mx.setMode(m, c, "wave");
+          mx.setWave(m, c, inst.wave);
+        }
+        mx.setEnv(m, c, mixEnvOf(inst));
+        mx.setLevel(m, c, mx.AL_MAX);
+        mx.setChannelOn(m, c, true);
+        chosen[c] = inst.name;
+        sel = c;
+        return { voice: c, name: inst.name, kind: inst.kind };
       }
 
       /* ---- the document, read back from the toy's files ------------------ */
@@ -204,7 +278,50 @@
             preset.appendChild(o);
           });
         }
+
+        /* #122: the toy's instruments — the voice picker.  Its options are
+         * rebuilt on every draw (`paintInstrumentPicker`) because the toy's
+         * instruments can change while the panel is open. */
+        var waveTab = studio.$("aud-tab-wave");
+        if (waveTab) {
+          var line = el("div", "", "aud-line aud-instrument-line");
+          line.appendChild(text("span", "aud-kicker", "instrument"));
+          var pick = el("select", "aud-instrument", "aud-instrument");
+          pick.setAttribute("aria-label",
+            "Load one of the toy's instruments into the selected voice");
+          pick.addEventListener("change", function () {
+            var v = pick.value;
+            if (!v || v.indexOf("toy:") !== 0) return;
+            try {
+              edit(function () { loadToyInstrument(v.slice(4), sel); });
+            } catch (e) { fail(e); }
+          });
+          line.appendChild(pick);
+          waveTab.appendChild(line);
+        }
         built = true;
+      }
+
+      /* The picker's options: the toy's instruments, with the one the
+       * selected voice holds shown as its value (and "—" when the voice is
+       * still the voice's own patch). */
+      function paintInstrumentPicker() {
+        var pick = studio.$("aud-instrument");
+        if (!pick) return;
+        while (pick.firstChild) pick.removeChild(pick.firstChild);
+        var list = toyInstruments();
+        var none = studio.document.createElement("option");
+        none.value = "";
+        none.textContent = list.length ? "— (keep this voice's patch)"
+                                       : "(no instruments in the toy)";
+        pick.appendChild(none);
+        for (var i = 0; i < list.length; i++) {
+          var o = studio.document.createElement("option");
+          o.value = "toy:" + list[i].name;
+          o.textContent = list[i].name + " · " + list[i].kind;
+          pick.appendChild(o);
+        }
+        pick.value = chosen[sel] ? "toy:" + chosen[sel] : "";
       }
 
       function buildRow(i, host) {
@@ -395,6 +512,7 @@
           if (pane) pane.hidden = t !== tab;
         });
         paintWaveEditor(v);
+        paintInstrumentPicker();
         paintEnvelope(v);
         paintLfo();
         paintRegisters(v);
@@ -574,9 +692,52 @@
       }
 
       /* ppu.toys' Trigger / Release note / Reset voice */
+      /* PCM into the page's audio, the shape playMix uses. */
+      function playPcm(pcm, rate) {
+        var ctx = context();
+        if (!ctx || !pcm || !pcm.length) return false;
+        stopAudio();
+        try {
+          var buf = ctx.createBuffer(1, pcm.length, rate || 44100);
+          var ch = buf.getChannelData(0);
+          for (var i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768;
+          source = ctx.createBufferSource();
+          source.buffer = buf;
+          source.connect(ctx.destination);
+          source.start();
+          playing = true;
+          return true;
+        } catch (e) { playing = false; return false; }
+      }
+
+      /* #122: Trigger plays what the voice holds.  If a toy instrument was
+       * chosen for it, the patch's own registers play through pce-psg.js;
+       * otherwise the mix with this voice soloed, as ▶ does.  Headless there
+       * is no AudioContext, so the writes (and the mix) remain the evidence. */
+      function auditionVoice(i) {
+        var name = chosen[i];
+        if (name && A && typeof A.play === "function") {
+          var inst = toyByName(name);
+          if (inst) {
+            try {
+              var got = A.play(inst, { note: "C4", frames: 30 });
+              playPcm(got.pcm, got.sampleRate);
+              return got;
+            } catch (e) { /* fall through to the mix */ }
+          }
+        }
+        var m = state();
+        var was = m.voices.map(function (v) { return v.solo; });
+        m.voices.forEach(function (v, c) { v.solo = c === i; });
+        try { playMix(0.5); }
+        finally { m.voices.forEach(function (v, c) { v.solo = was[c]; }); }
+        return null;
+      }
+
       function onTrigger(i) {
         var writes = [];
         edit(function () { writes = mx.trigger(mix, i); });
+        auditionVoice(i);
         return writes;
       }
       function onRelease(i) {
@@ -692,6 +853,34 @@
         mix: function () { return state(); },
         text: function () { return mx.toJSON(state()); },
         invalidate: function () { mix = null; },
+
+        /* ---- #122: the toy's instruments, as the voice picker sees them */
+        instruments: function () {
+          return toyInstruments().map(function (i) {
+            return { name: i.name, kind: i.kind, nf: i.nf || null,
+                     envelope: i.envelope ? i.envelope.data.slice() : [] };
+          });
+        },
+        choose: function (name, voice) {
+          return apply(function () { return loadToyInstrument(name, voice); });
+        },
+        loaded: function (i) {
+          return chosen[i === undefined ? sel : i] || null;
+        },
+        /* The patch as pce-psg.js renders it — what Trigger plays, by code. */
+        preview: function (name, note, frames) {
+          var inst = toyByName(name);
+          if (!inst) {
+            var e = new Error("no instrument " + JSON.stringify(name));
+            e.code = "asset-name";
+            throw e;
+          }
+          if (!A || typeof A.play !== "function")
+            throw new Error("the PSG model is not loaded");
+          var got = A.play(inst, { note: note || "C4", frames: frames || 30 });
+          return { pcm: got.pcm, sampleRate: got.sampleRate,
+                   frames: got.frames, instrument: inst.name };
+        },
 
         /* ---- the panel's own actions, by code --------------------------- */
         select: function (i) {
@@ -904,6 +1093,9 @@
 
       studio.toy.onAssetEdit(function (name) {
         if (/^waves\.json$/.test(name)) api.invalidate();
+        /* #122: the picker lists the toy's instruments, so a new one shows
+         * without leaving and re-entering the panel. */
+        else if (name === "instruments.json") drawPanel();
       });
 
       studio.panels.register({
