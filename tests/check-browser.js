@@ -370,7 +370,11 @@ function cloneDirs() {
 
 function sectionRun(settings) {
   if (!WANT_BROWSER) {
-    skip("the real browser run and the code_sign_clone count need --browser");
+    /* Not a SKIP: nothing was asked of the browser here, and the static
+     * propositions above all ran. A missing binary or a static failure below
+     * is a SKIP, because then --browser WAS asked and could not be answered. */
+    console.log("      (the real run and the code_sign_clone count need " +
+                "--browser; not requested)");
     return;
   }
   if (failures.length) {
