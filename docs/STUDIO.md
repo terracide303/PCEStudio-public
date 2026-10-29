@@ -245,8 +245,8 @@ refusals are the editor's (`17th-colour`, `not-in-palette`, `tile-space`, `map-r
 **What it edits is the toy's assets, not the running frame.** The tiles and the BAT live in `tiles.json`
 (the map's 1024 character words and its BXR/BYR), the colours in `palettes.json`; every edit writes them and
 autosaves the toy, so Save/Open carry the picture (#77's envelope). The canvas therefore shows the picture
-these assets make. A toy still writes its own VRAM/CRAM with `vram[]`/`pal()` until #24's importer reads
-the files into a running toy, and the panel says so under the Map column.
+these assets make. Since #117 the running toy boots from the same files (§7) — press Run after a panel edit
+and the picture is in VRAM without a line of Lua.
 
 **Refusals.** The module adds only the file-shape ones — `asset-json` (not JSON), `asset-shape` (a tile or
 palette of the wrong length), `map-size` (a map that is not the 32×32 BAT, including any other MWR code),
@@ -353,7 +353,9 @@ the refusals are the editor's. The screen, the pattern sheet and the pattern can
 **What it edits is the toy's assets.** The patterns and the SAT live in `sprites.json`, the sprite
 palettes in `palettes.json`; every edit writes them and autosaves the toy, and the panel does **not**
 rewrite `tiles.json` — that file is SCREEN's, and a sprite edit that rewrote it would be a background
-edit. A toy still writes its own VRAM/SAT until the importer (#24/#71), and the panel says so.
+edit. Since #117 the running toy boots from these files too — patterns into VRAM at their packed cells,
+the SAT at `$7F00`, the sprite palettes into CRAM `$100`–`$1FF` (§7) — with `CR`'s SB set when the picture
+has sprites, so Run shows them.
 
 **Refusals.** The panel lets `pce-editor.js` refuse (65th-sprite, sprite-range, sprite-pattern-range,
 17th-sprite-palette, sprite-flag-range, sprite-pattern-vram, 17th-colour) and adds only the file and
@@ -411,8 +413,8 @@ changes it, page 7 holds the SAT and its jump goes there, a click on the canvas 
 BAT is tinted and labelled. `--browser` adds real DOM clicks and a real `getImageData` of the sheet.
 The pages are `$TMPDIR/pce85/shots/ours-palettes-85.png` and `ours-vram-85.png` (1600×1000, headless
 Chrome, no synthetic input); the PALETTES one shows the example's `palettes.json`, which is all black —
-the artwork the toy writes with `pal()` is not in the file until #24/#71, and the panel says so rather
-than showing the frame's colours as if they were the asset.
+the artwork the toy writes with `pal()` is never written back to the file (the import is one way, files →
+CRAM, #117), and the panel says so rather than showing the frame's colours as if they were the asset.
 
 ### 3.5 Paste & Run (#107)
 
@@ -902,11 +904,45 @@ ppu.toys keeps beside its Lua:
 | `sprites.json` | `{version, patterns: [{width, height, pixels[]}], sprites: [{x, y, pattern, palette, priority, hflip, vflip}]}` | the sprite patterns (4-bit colour numbers, pixel 0 transparent) and the SAT; a parked sprite is `{parked: 1, y: 0}` (#86) |
 | `waves.json` | `{version, channels: [{wave[32], freq, al, balance}]}` | the PSG's channels |
 
-The shapes follow `renderer/pce-editor.js`'s picture and `renderer/pce-wave.js`'s document. The importer
-that feeds them to a running toy is #24/#71; this card makes them first-class, editable files that are saved
-and autosaved with the toy. A toy still writes its own VRAM/CRAM with `vram[]`/`pal()` today, and the
-`ASSETS` tab says so rather than implying an importer exists. Clicking `Edit` in `ASSETS` opens that file in
-the editor; editing an asset never changes the Lua that Run compiles.
+The shapes follow `renderer/pce-editor.js`'s picture and `renderer/pce-wave.js`'s document.
+
+**The importer (#117): the files are the running toy's starting picture.** Both runtimes hand the toy's
+file set to the one host — `PCEStudio.toys.create(source, {files})` and `PCEStudio.il.create(source,
+{files})`, and `studio.html`'s `rebuild()` passes the files the ASSETS tab shows — and
+`renderer/pce-toyhost.js` imports `tiles.json`, `sprites.json` and `palettes.json` **inside
+`createHost()`, before the toy's top-level statements and `init()`**. The importer lives in
+`renderer/pce-toyhost.js` itself (so it cannot be a script tag a page forgets) and builds the
+picture with the panels' own reader (`pce-sat.js` `pictureFromFiles`, which is `pce-screen.js`'s plus the
+sprites) and lays it out with the editor's own exporter (`pce-editor.js` `toPicture`), so there is no
+third model:
+
+| what | where it lands |
+|---|---|
+| `tiles.json`'s tiles and the 32×32 BAT | VRAM words 0–1023 (the BAT) and character `$40` on (16 words a tile) |
+| `tiles.json`'s `map.bxr`/`map.byr` | the `BXR`/`BYR` registers (`MWR` is `$00`) |
+| `sprites.json`'s patterns and SAT | VRAM at the cells `patternLayout` packs, and the SAT at `$7F00` (the host's SAT) |
+| `palettes.json` | CRAM `$000`–`$0FF` (entry 0 of each row = the shared backdrop) and `$100`–`$1FF` |
+| `CR` | `$C0` (BB \| SB) when the picture has sprites, else `$80` — what the panel preview draws with |
+
+A toy's own later `vram[]`/`pal()`/`reg()` writes win: the files are the starting picture, not a lock.
+A new toy's empty default files carry no picture and import nothing, so an example that paints itself is
+unchanged. The flow is one way — a toy's `pal()` does not write `palettes.json` back.
+
+**What it does not import.** `tiles.json`'s `video` is a VCE dot clock outside the toy surface: a
+336/512-dot picture is imported word for word and shown on the host's fixed 256-dot window, and the
+picture's 240-line preview is 16 rows taller than the toy's 224-line frame. `waves.json` is the PSG's
+(#71), not the picture.
+
+**Evidence.** `tests/check-import.js` takes one toy that writes no VRAM, CRAM, SAT or register — a bare
+`frame(t, f)` — boots it on the three asset files `toys/demo-game` carries (which
+`tools/demo-game-assets.js --check` holds to the panels' own output), runs 600 frames in Lua and in the
+IL, and requires the 600th frame to be pixel-equal to `pce-editor.js` `renderPreview()` of the same files
+in the toy's 224 lines, with VRAM/CRAM/SAT byte-equal to `toPicture()` and Lua == IL. No generated Lua
+block is in between. The Node bridge remains only because STARFALL hard-codes the pattern codes its block
+computes; a new toy needs no block at all.
+
+Clicking `Edit` in `ASSETS` opens that file in the editor; editing an asset never changes the Lua that
+Run compiles. Press **Run** after a panel edit: the import happens when the runtime is rebuilt.
 
 **Save and Open are one JSON envelope**, in ppu.toys' packed-toy shape (`docs/PPU-TOYS.md` §3, credited):
 
@@ -1408,8 +1444,9 @@ comparison with their page is claimed.
 * **The toy export is route 1 only.** #115 wires the page to the IL interpreter
   (`renderer/ilvm.bin`); the compiled route (#31 A-C) is still a CLI path, route 2 (#101) is the direct
   generator that has not been built, and route 1's 60 Hz verdict is `pce-validate.js`'s static estimate,
-  not a per-toy capture. Sound in toys (#71), the asset importer (#24) and the agent link (#24) are also
-  absent: `SND`, `ASSETS` and the AGENT drawer say so in the page. The
+  not a per-toy capture. Sound in toys (#71) and the agent link (#24) are also absent: `SND`, the AGENT
+  drawer and the `NEEDS #31` export dialog say so in the page. The asset importer is #117, which landed;
+  its limits are the bullet below. The
   SEQUENCER (§3.10) is a song editor, not a toy's sound: what it plays is `pce-song.js`'s engine, and a
   toy cannot play a sequencer song until #71 gives toys a music call.
 * **#94's SEQUENCER is a grid, and its tests are the builder's.** Not proven: the staff view (#95), the
@@ -1418,9 +1455,12 @@ comparison with their page is claimed.
   not exercised headlessly — the render it feeds is; no Mednafen recording of a sequencer song exists (the
   drums' R7 writes are HuTrack's source, not a recording), and rule 2 is owed: a cold break by another
   seat.
-* **The asset files are carried and edited, not consumed.** `tiles/palettes/sprites/waves.json` are in the
-  toy and the envelope, with the shapes `pce-editor.js`/`pce-wave.js` use, but no importer reads them into a
-  running toy yet (#24/#71). The ASSETS tab says this.
+* **The asset files are carried, edited, and — since #117 — imported.** `tiles/palettes/sprites.json` are
+  in the toy and the envelope, with the shapes `pce-editor.js` uses, and `pce-toyhost.js`'s `createHost`
+  now loads them into the running toy's VRAM/CRAM/SAT before the toy's code (§7). Not proven: the
+  pixel-equal claim is `tests/check-import.js`, a headless run, not a browser pixel grab; the import runs
+  when the runtime is rebuilt, so a panel edit needs **Run**; `waves.json` is still not imported (#71); and
+  the picture's dot clock and display window are not the toy's fixed 256×224 frame.
 * **CodeMirror's Vim mode is selected, not exercised.** The browser run proves `keyMap === "vim"` is set
   and persisted; it does not type `dd`/`ciw` and check the buffer. The plain editor and the Vim keymap are
   both CodeMirror's own, whose tests are upstream's.
@@ -1477,8 +1517,8 @@ comparison with their page is claimed.
   pixels, so the screen, slot grid, sheet and pattern canvas are only sized and driven, never pixel-compared
   against a golden image; there is no browser-driver case yet for a real mouse drag on `#spr-screen` (the
   §11.2 driver covers the SCREEN map only); the "off-screen" position (display row 240) is the model's
-  reading of the 224/240-line window with no capture behind it; `sprites.json` is an asset file no importer
-  reads yet, so a toy cannot show these sprites in a running frame until #24/#71; and the per-line header is
+  reading of the 224/240-line window with no capture behind it; `sprites.json` has reached the running toy
+  since #117 (§7), but the import is a headless comparison, not a browser grab; and the per-line header is
   `pce-editor.js`'s budget over that picture, not a Mednafen measurement.
 * **The SCREEN panel's map is the 32×32 BAT.** MWR `$00` is what the toy host's 256×224 frame and
   `pce-editor.js`'s picture model hold; the map-size picker lists the VDC's 64×32 … 128×64 sizes, but
@@ -1492,10 +1532,10 @@ comparison with their page is claimed.
   `studio.html`, register a duplicate id, drop a `draw`, stop building the menu from the registry, break a
   picker's refusal, or make the video mode not carry into `tiles.json`, and the check must catch each.
   Another seat's break, not the builder's.
-* **The SCREEN panel edits assets, and no toy reads them yet.** Drawing into the map changes
-  `tiles.json`/`palettes.json` and the panel's own rendered picture; it cannot change a running toy's
-  frame until #24's importer reads the files into VRAM/CRAM. The panel says so, and its canvas never
-  claims otherwise.
+* **The SCREEN panel edits assets, and the toy boots from them.** Drawing into the map changes
+  `tiles.json`/`palettes.json` and the panel's own rendered picture; since #117 the running toy's VRAM/CRAM
+  starts from those files too (§7), imported when the runtime is rebuilt — the panel's canvas is still the
+  asset picture, so an edit shows in Run only after **Run**.
 * **Rule 2 for #84.** `tests/check-studio.js`'s #84 block was written by the seat that built the panel
   (the card names the file), so a cold break is owed: break a tool, the zoom, the grid, the asset
   write (`syncFiles`), the rendered frame, a refusal code, or the panel's controls, and the check must
