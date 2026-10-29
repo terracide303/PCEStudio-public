@@ -91,6 +91,43 @@
   var PAD_COUNT = 5;             /* one 2-button pad, up to five with a multitap */
   var PAD_FIELDS = ["up", "down", "left", "right", "i", "ii", "select", "run"];
 
+  /* ---- the timer ($0C00/$0C01, card #45) -------------------------------- */
+
+  /* The HuC6280's 7-bit interval timer.  H8-20: the reload register is 7
+   * bits; a write to $1FEC00 loads it, a write to $1FEC01 bit 0 starts it,
+   * and a borrow sets TIQ and reloads the downcounter.  H8-21: the prescaler
+   * divides OSC1 by 3 and then by 1024, so at 21.48 MHz the tick is
+   * 6.992 kHz — "a value of $00 counts as 1, $7F counts as 128" (pcetech
+   * §2.2), i.e. the period is (reload + 1) ticks.
+   *
+   * The browser host has no sub-frame clock: a frame is 1/60 s (docs/TOYS.md)
+   * and the timer runs in whole ticks of 1/6,991.3 s accumulated across
+   * frames, so the long-run tick rate is the hardware's.  The console
+   * runtime (tools/toyc/toy_runtime.c) gets the same interrupt rate from the
+   * real TMA timer, so a toy's interrupt-per-frame figure is the same on
+   * both sides up to the console's 59.826 Hz video rate. */
+  var TIMER_RELOAD_MAX = 0x7F;
+  var TIMER_HZ = 6991.3;         /* 7,159,090.909 Hz CPU clock / 1024 (H8-21) */
+  var FRAME_HZ = 60;             /* the host's frame, docs/TOYS.md */
+  var TIMER_TICKS_PER_FRAME = TIMER_HZ / FRAME_HZ;
+
+  var TIMER_API = [
+    { call: "timer(period, fn)",
+      what: "starts the TMA timer: the downcounter reloads from period, counts " +
+            "down once per 1024 CPU clocks (6,991.3 Hz) and, on the borrow " +
+            "that sets TIQ, calls fn once and reloads; a period of 0 counts " +
+            "as 1 tick and 127 as 128 (H8-20..H8-22, pcetech §2.2)",
+      limits: "period 0..127; fn is called once per interrupt, at the frame " +
+              "boundary, (frames elapsed × 116.5) / (period+1) times" },
+    { call: "timerstop()",
+      what: "stops the timer (its Start/Stop flag, $0C01 bit 0, goes to 0)",
+      limits: "none" },
+    { call: "timerirqs()",
+      what: "the number of timer interrupts since the previous frame() — the " +
+            "figure a capture's per-frame measurement reads",
+      limits: "none" }
+  ];
+
   /* ---- sound (#71) ------------------------------------------------------ */
 
   /* The toy's sound contract, published by the author's reference (#61) from
@@ -158,6 +195,8 @@
     };
     var padState = {};
     var log = [];
+    var timer = { period: 0, running: false, acc: 0, irqs: 0, frameIrqs: 0,
+                  lastFrame: -1 };
 
     /* ---- sound state (#71) --------------------------------------------- */
 
@@ -505,6 +544,48 @@
         padState[n] = buttons || {};
       },
 
+      /* ---- the timer ($0C00/$0C01) -------------------------------------- */
+
+      /* Write the reload register and set the Start/Stop flag.  A start
+       * reloads the downcounter (H8-20), so the sub-tick remainder restarts. */
+      timerSet: function (period) {
+        period = intIn(period, "a timer period", 0, TIMER_RELOAD_MAX,
+                       "timer-range");
+        timer.period = period;
+        timer.running = true;
+        timer.acc = 0;
+        return period;
+      },
+
+      timerStop: function () {
+        timer.running = false;
+        timer.acc = 0;
+      },
+
+      /* Advance the downcounter to frame f and return the interrupts that
+       * happened since the previous call.  Called once per frame, before the
+       * toy's frame(), by both front ends. */
+      tickTimer: function (f) {
+        timer.frameIrqs = 0;
+        if (timer.lastFrame < 0) { timer.lastFrame = f; return 0; }
+        var frames = f - timer.lastFrame;
+        timer.lastFrame = f;
+        if (!timer.running || frames <= 0) return 0;
+        timer.acc += TIMER_TICKS_PER_FRAME * frames;
+        var period = timer.period + 1;
+        var n = Math.floor(timer.acc / period);
+        timer.acc -= n * period;
+        timer.irqs += n;
+        timer.frameIrqs = n;
+        return n;
+      },
+
+      timerIRQs: function () { return timer.frameIrqs; },
+      timerState: function () {
+        return { period: timer.period, running: timer.running,
+                 irqs: timer.irqs, frameIrqs: timer.frameIrqs };
+      },
+
       /* ---- sound (#71) -------------------------------------------------- */
 
       /* The sound state the tests read: the recorded PSG writes, the player,
@@ -720,6 +801,12 @@
     LOG_MAX: LOG_MAX,
     PAD_COUNT: PAD_COUNT,
     PAD_FIELDS: PAD_FIELDS,
+    /* the timer contract (#45), for the author's reference (#61) */
+    TIMER_RELOAD_MAX: TIMER_RELOAD_MAX,
+    TIMER_HZ: TIMER_HZ,
+    FRAME_HZ: FRAME_HZ,
+    TIMER_TICKS_PER_FRAME: TIMER_TICKS_PER_FRAME,
+    TIMER_API: TIMER_API,
     /* the sound contract (#71), for the author's reference (#61) */
     SOUND_CHANNELS: SOUND_CHANNELS,
     PITCH_MAX: PITCH_MAX,
@@ -739,6 +826,7 @@
       "raster-line": "a raster line outside VDW 0..223",
       "raster-line-full": "a second raster entry on one line, or too many colour writes on it",
       "pad-range": "a pad number outside 1..5",
+      "timer-range": "a timer reload value outside 0..127",
       "music-range": "a song index outside the songs the runtime was given",
       "sfx-range": "an SFX channel, frequency, volume or length outside its range",
       "no-psg": "the PSG model or the song player is not loaded, so no toy can make sound"

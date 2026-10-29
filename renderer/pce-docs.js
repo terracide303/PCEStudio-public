@@ -306,6 +306,44 @@
       ]
     });
 
+    /* 6b. the timer (#45) -------------------------------------------------- */
+    sections.push({
+      id: "timer", title: "The timer",
+      blocks: [
+        { type: "p", text: "The HuC6280's 7-bit interval timer is the console's " +
+            "only sub-frame clock (H8-20..H8-22). timer(period, fn) writes the " +
+            "reload register ($1FEC00) and starts it ($1FEC01 bit 0); the " +
+            "downcounter borrows every period+1 ticks of 6,991.3 Hz, sets TIQ " +
+            "and reloads, and fn is called once per interrupt. A period of " +
+            range(0, host.TIMER_RELOAD_MAX) + " is " + (host.TIMER_RELOAD_MAX + 1) +
+            " ticks at most — 143 us to 18.3 ms (H8-21)." },
+        { type: "p", text: "The browser host has no sub-frame clock. It " +
+            "accumulates whole timer ticks across frames at " +
+            host.TIMER_HZ.toFixed(1) + " Hz and calls fn at the frame boundary, " +
+            "the number of interrupts that happened since the previous " +
+            "frame() — about " + host.TIMER_TICKS_PER_FRAME.toFixed(1) +
+            " ticks per frame at " + host.FRAME_HZ + " Hz. The console runs " +
+            "the same count from the real TMA timer, raised as its own " +
+            "interrupt (vector $FFFA), so timerirqs() reports the hardware's " +
+            "figure there." },
+        { type: "table",
+          headers: ["call", "what it does", "range / refusal"],
+          rows: host.TIMER_API.map(function (a) {
+            return [a.call, a.what, a.limits];
+          }) },
+        { type: "code", lang: "lua", text:
+          "local ticks = 0\n" +
+          "\n" +
+          "-- the interrupt: 17 ticks per period = 6,991.3 / 18 = 388 Hz\n" +
+          "timer(17, function () ticks = ticks + 1 end)\n" +
+          "\n" +
+          "function frame(t, f)\n" +
+          "  -- timerirqs() is what happened during the frame just ended\n" +
+          "  pal(0, rgb(ticks & 7, 0, 0))\n" +
+          "end" }
+      ]
+    });
+
     /* 7. passwords -------------------------------------------------------- */
     var P = toys.PASSWORD;
     sections.push({

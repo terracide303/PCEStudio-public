@@ -251,6 +251,16 @@
       }
     }
 
+    /* The TMA timer (#45): because the toy has called timer(period, fn), the
+     * runtime must raise the timer's interrupt and pump fn from the frame
+     * loop.  One flag for the emitter; the backend never guesses. */
+    var usesTimer = false;
+    for (f = 0; f < functions.length; f++) {
+      for (pc = 0; pc < functions[f].code.length; pc++) {
+        if (functions[f].code[pc].t === "timer") usesTimer = true;
+      }
+    }
+
     return {
       functions: functions,
       maxUps: maxUps,
@@ -258,6 +268,7 @@
       closureAt: closureAt,
       closureCount: closureSites.length,
       typeOf: typeOf,
+      usesTimer: usesTimer,
       globalIds: globalIds,
       globalNames: globalNames,
       hookInit: program.hooks.init != null,
@@ -385,10 +396,10 @@
             refuse("cgen-global", where + ": global `" + ins.name +
                    "` has no declared type");
           }
-          if (!/^(fn|vram|int|bool)$/.test(a.typeOf[ins.name])) {
+          if (!/^(fn|vram|int|bool|padset)$/.test(a.typeOf[ins.name])) {
             refuse("cgen-global", where + ": global `" + ins.name + "` is " +
                    a.typeOf[ins.name] + "; this backend carries fn/vram/" +
-                   "int/bool");
+                   "int/bool/pad");
           }
           break;
         case "reg":
@@ -436,6 +447,38 @@
             refuse("cgen-arity", where + ": " + ins.args.length + " arguments");
           }
           break;
+        case "sat":
+          /* the SAT word (toy_sat): what a moving sprite needs */
+          if (staticType(ins.i) !== "int" || staticType(ins.k) !== "int" ||
+              staticType(ins.v) !== "int") {
+            refuse("cgen-op", where + ": sat()'s arguments must be ints");
+          }
+          break;
+        case "padget":
+          /* pad[n].field (#45): the console reads the port, the host the
+           * scripted state; the C is toy_pad(n, field).  The base operand is
+           * the pad head the padref before it made (`tt: "pad"`), which is
+           * the pad number itself — the interpreter's padref does the same. */
+          if (staticType(ins.pad) !== "pad" && staticType(ins.pad) !== "int") {
+            refuse("cgen-op", where + ": pad[n]'s n must be an int");
+          }
+          break;
+        case "padref":
+          /* pad[n]'s n, held in a register for the padget that indexes it */
+          if (staticType(ins.n) !== "int") {
+            refuse("cgen-op", where + ": pad[n]'s n must be an int");
+          }
+          break;
+        case "timer":
+          /* timer(period, fn): the runtime's TMA timer and the deferred
+           * callback, pumped at the top of toy_frame */
+          if (staticType(ins.period) !== "int") {
+            refuse("cgen-op", where + ": timer()'s period must be an int");
+          }
+          if (ins.fn && staticType(ins.fn) !== "fn") {
+            refuse("cgen-op", where + ": timer()'s callback must be a function");
+          }
+          break;
         case "builtin":
           if (ins.name !== "rgb") {
             refuse("cgen-op", where + ": builtin `" + ins.name + "` (part A " +
@@ -444,8 +487,8 @@
           break;
         default:
           refuse("cgen-op", where + ": not lowered by this backend (" +
-                 "init/frame/raster and reg/pal/vset only; no sprites, " +
-                 "tables, pads or fixed point)");
+                 "init/frame/raster and reg/pal/vset/sat/pad and the timer " +
+                 "only; no sprites, tables or fixed point)");
         }
         var t = (ins.t === "jmp" || ins.t === "br" || ins.t === "fornext")
                 ? ins.target : null;
@@ -568,9 +611,9 @@
         break;
       }
       case "getglobal":
-        if (a.typeOf[ins.name] === "vram") {
-          /* vset/vget do not take a base operand; the marker is a value
-           * only so the register is defined. */
+        if (a.typeOf[ins.name] === "vram" || a.typeOf[ins.name] === "padset") {
+          /* vset/vget and padget do not take a base operand; the marker is a
+           * value only so the register is defined. */
           line("  " + d + " = 0;");
         } else {
           line("  " + d + " = il_globals[" + a.globalIds[ins.name] + "];");
@@ -652,6 +695,26 @@
         line("  " + (d ? d + " = " : "(void)") + call + ";");
         break;
       }
+      case "sat":
+        /* SAT entry i, word k: VRAM $7F00 + i*4 + k, the buffer the runtime's
+         * DSR auto-repeat DMAs into SATB every VBlank (viewer.asm's layout,
+         * docs/ROM_LAYOUT.md). */
+        line("  toy_sat(" + operand(ins.i) + ", " + operand(ins.k) + ", " +
+             operand(ins.v) + ");");
+        break;
+      case "padref":
+        line("  " + d + " = " + operand(ins.n) + ";");
+        break;
+      case "padget":
+        /* pad[n].field: the runtime's own $1000 read, one bit per field
+         * (toy_runtime.h's TOY_PAD_*). */
+        line("  " + d + " = toy_pad(" + operand(ins.pad) + ", TOY_PAD_" +
+             String(ins.field).toUpperCase() + ");");
+        break;
+      case "timer":
+        line("  toy_timer_set(" + operand(ins.period) + ");");
+        line("  il_timer_cb = " + (ins.fn ? operand(ins.fn) : "-1") + ";");
+        break;
       case "ret":
         line("  return " + (ins.src ? operand(ins.src) : "0") + ";");
         break;
@@ -758,6 +821,11 @@
     line("static volatile " + T + " il_globals[IL_NGLOBALS]" +
          (huc ? "" : "    __attribute__((section(\".data\")))") + " = { " +
          a.globalNames.map(function () { return "-1"; }).join(", ") + " };");
+    /* timer(period, fn)'s callback closure slot, written by the timer()
+     * instruction and read by the pump the frame flow calls (#45). */
+    if (a.usesTimer) {
+      line("static " + T + " il_timer_cb = -1;");
+    }
     line("");
     for (i = 0; i < a.functions.length; i++) {
       line("static " + T + " il_fn_" + i +
@@ -835,6 +903,24 @@
     }
 
     /* ---- the entry points --------------------------------------------- */
+    /* The timer's callback closure slot, written by the timer() instruction
+     * and read by the pump below.  Only a toy that starts the timer carries
+     * it, so part A's palette ROM is unchanged. */
+    if (a.usesTimer) {
+      line("/* timer(period, fn): the callback the runtime pumps from the");
+      line(" * frame loop, one call per TMA interrupt (#45). */");
+      line("static void il_timer_pump(void) {");
+      line(huc ? "  " + T + " n;" : "  " + T + " n;");
+      line("  if (il_timer_cb < 0) return;");
+      line("  n = toy_timer_pending();");
+      line(huc ? "  while (n > 0) { n--; (void)il_call(il_timer_cb, " +
+                 ARGS.map(function () { return "0"; }).join(", ") + "); }"
+               : "  while (n-- > 0) (void)il_call(il_timer_cb, " +
+                 ARGS.map(function () { return "0"; }).join(", ") + ");");
+      line("}");
+      line("");
+    }
+
     line("/* The runtime calls toy_boot() once, then toy_frame(f) each VBlank. */");
     line("void toy_boot(void) {");
     /* The chunk is function 0, not a closure value: call it directly. */
@@ -848,6 +934,7 @@
     line("}");
     line("");
     line("void toy_frame(" + T + " f) {");
+    if (a.usesTimer) line("  il_timer_pump();");
     line("  (void)il_call(il_globals[" + a.globalIds["frame"] + "], " +
          callArgs(["0", "f"]) + ");");
     line("}");
