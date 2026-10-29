@@ -12,14 +12,24 @@
  * renderer/pce-sprites.js) are the ones proven against Mednafen.
  *
  * The host owns only the toy's own state (VRAM, CRAM, SAT, the four register
- * values, the pads and the raster table). It draws nothing: render() hands
- * renderer/pce-sprites.js the exact input it already takes.
+ * values, the pads, the raster table and, since #71, the PSG's writes). It
+ * draws nothing: render() hands renderer/pce-sprites.js the exact input it
+ * already takes.
+ *
+ * Sound (#71): the host runs one song on renderer/pce-song.js's player, one
+ * VBlank per toy frame, and lets the toy take a channel for an SFX and give
+ * it back (HuTrack's reserve/release channel hand-off). Every PSG write is
+ * recorded as {f, t, reg, value}, the input renderer/pce-psg.js already
+ * takes; renderSound() is that model's own output. pce-song.js and
+ * pce-psg.js are resolved when a host is created, not when this file loads,
+ * so a page may load them in any order (renderer/studio.html loads the PSG
+ * after this file).
  *
  * Refusal codes: reg-forbidden, reg-range, pal-range, vram-range, sat-range,
- * sprite-range, raster-line, raster-line-full, pad-range, toy-error. The
- * front ends add their own (the Lua VM adds password-*, toy-timeout; the IL
- * lowerer adds il-*). docs/TOYS.md §2 is the surface; docs/IL.md §5 is the
- * same contract seen from the IL.
+ * sprite-range, raster-line, raster-line-full, pad-range, music-range,
+ * sfx-range, no-psg, toy-error. The front ends add their own (the Lua VM
+ * adds password-*, toy-timeout; the IL lowerer adds il-*). docs/TOYS.md §2
+ * is the surface; docs/IL.md §5 is the same contract seen from the IL.
  *
  * The ranges and their manual pages are the ones docs/TOYS.md records:
  * BXR 10 bits (VDC H7-7), BYR 9 bits (H7-7), CR 8 bits (H7-5), 512 CRAM
@@ -27,12 +37,16 @@
  */
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory(require("./pce-sprites.js"));
+    module.exports = factory(require("./pce-sprites.js"),
+                             function () { return require("./pce-song.js"); },
+                             function () { return require("./pce-psg.js"); });
   } else {
     root.PCEStudio = root.PCEStudio || {};
-    root.PCEStudio.toyhost = factory(root.PCEStudio.sprites);
+    root.PCEStudio.toyhost = factory(root.PCEStudio.sprites,
+      function () { return root.PCEStudio.song; },
+      function () { return root.PCEStudio.psg; });
   }
-})(typeof self !== "undefined" ? self : this, function (sprites) {
+})(typeof self !== "undefined" ? self : this, function (sprites, songDep, psgDep) {
   "use strict";
 
   var WIDTH = 256;               /* the toy frame: 32 BAT columns, 28 rows */
@@ -77,6 +91,38 @@
   var PAD_COUNT = 5;             /* one 2-button pad, up to five with a multitap */
   var PAD_FIELDS = ["up", "down", "left", "right", "i", "ii", "select", "run"];
 
+  /* ---- sound (#71) ------------------------------------------------------ */
+
+  /* The toy's sound contract, published by the author's reference (#61) from
+   * this one table: the calls and the ranges the host enforces. */
+  var SOUND_CHANNELS = 6;        /* the HuC6280 PSG's voices */
+  var PITCH_MAX = 0x0FFF;        /* the PSG's 12-bit frequency divider F */
+  var SOUND_VOLUME_MAX = 31;     /* R4's AL field, 5 bits */
+  var SFX_FRAMES_MAX = 600;      /* 10 s at 60 Hz */
+  var SOUND_CYCLE_STEP = 12;     /* in-frame cycles between two writes:
+                                  * pce-song.js's order-preserving default */
+  var SOUND_EVENTS_MAX = 65536;  /* the recording a browser toy keeps; past
+                                  * it writes are played, not recorded */
+  /* The SFX waveform: 32 steps of 5 bits, a square (16 full, 16 silent).
+   * The PSG holds one waveform per channel, so an SFX uploads all 32. */
+  var SFX_WAVE = [];
+  for (var sw = 0; sw < 32; sw++) SFX_WAVE.push(sw < 16 ? 31 : 0);
+
+  var SOUND_API = [
+    { call: "music(index)",
+      what: "plays song index from the start — the whole engine restarts, " +
+            "as HuTrack's playSong does",
+      limits: "an index into the songs the runtime was given (0..songs-1)" },
+    { call: "sfx(channel, freq, volume, frames)",
+      what: "takes the channel (HuTrack's reserve), loads a 32-step square, " +
+            "sets F = freq and AL = volume, and gives it back after frames",
+      limits: "channel 0..5, freq 0..4095, volume 0..31, frames 1..600" },
+    { call: "release(channel)",
+      what: "gives a channel back now (HuTrack's release): control and noise " +
+            "off, and the music waits for a fresh note on it",
+      limits: "channel 0..5; a channel no SFX owns is left alone" }
+  ];
+
   /* A refusal, with the code the tests assert. */
   function ToyError(code, message) {
     this.name = "ToyError";
@@ -112,6 +158,66 @@
     };
     var padState = {};
     var log = [];
+
+    /* ---- sound state (#71) --------------------------------------------- */
+
+    var sound = {
+      songs: options.songs || [],
+      events: [],               /* {f, t, reg, value}: pce-psg.js's input */
+      player: null,             /* pce-song.js's createPlayer, once music(n) runs */
+      frame: 0,
+      col: 0,                   /* write index within the frame */
+      overflow: false,          /* the recording hit SOUND_EVENTS_MAX */
+      sfx: []                   /* per channel: what the toy is playing */
+    };
+    for (var si = 0; si < SOUND_CHANNELS; si++) {
+      sound.sfx.push({ active: false, frames: 0, freq: 0, volume: 0,
+                       owned: false });
+    }
+    var songLib = null;
+    var psgLib = null;
+
+    function songModule() {
+      if (songLib === null) songLib = songDep() || false;
+      return songLib || null;
+    }
+    function psgModule() {
+      if (psgLib === null) psgLib = psgDep() || false;
+      return psgLib || null;
+    }
+
+    /* One PSG write, in the frame's order: the model's own event shape. */
+    function soundWrite(reg, value) {
+      if (sound.events.length >= SOUND_EVENTS_MAX) {
+        sound.overflow = true;
+        return;
+      }
+      sound.events.push({ f: sound.frame, t: sound.col * SOUND_CYCLE_STEP,
+                          reg: reg, value: value & 0xff });
+      sound.col++;
+    }
+
+    function ownedBySfx(ch) { return sound.sfx[ch].owned; }
+
+    /* The two modules sound needs, resolved when a host exists: a page may
+     * load them after this file (renderer/studio.html does) and a page that
+     * never loads them still runs its toys, with sound refused by code. */
+    function needSong() {
+      var lib = songModule();
+      if (!lib) {
+        refuse("no-psg", "the song player (renderer/pce-song.js) is not " +
+               "loaded, so a toy cannot make sound");
+      }
+      return lib;
+    }
+    function needPsg() {
+      var lib = psgModule();
+      if (!lib) {
+        refuse("no-psg", "the PSG model (renderer/pce-psg.js) is not " +
+               "loaded, so a toy cannot make sound");
+      }
+      return lib;
+    }
     var tableEntries = {};     /* line -> entry, table form, this frame */
     var staticEntries = {};    /* line -> entry, registered outside a frame */
     var inFrame = false;
@@ -399,6 +505,103 @@
         padState[n] = buttons || {};
       },
 
+      /* ---- sound (#71) -------------------------------------------------- */
+
+      /* The sound state the tests read: the recorded PSG writes, the player,
+       * the SFX timers. */
+      sound: sound,
+
+      /* music(index): play a song the runtime was given.  The engine's whole
+       * Reset runs again (playSong), so calling it restarts the song. */
+      music: function (index) {
+        var lib = needSong();
+        if (!sound.songs.length) {
+          refuse("music-range", "music(" + index + "): this toy runtime was " +
+                 "given no song (options.songs)");
+        }
+        index = intIn(index, "a song index", 0, sound.songs.length - 1,
+                      "music-range");
+        sound.player = lib.createPlayer(sound.songs[index], {
+          emit: function (reg, value) { soundWrite(reg, value); }
+        });
+        /* a channel an SFX already owns stays the SFX's */
+        for (var ch = 0; ch < SOUND_CHANNELS; ch++)
+          if (ownedBySfx(ch)) sound.player.reserve(ch);
+        return index;
+      },
+
+      /* sfx(channel, freq, volume, frames): take the channel, load a square
+       * and play F/AL for frames frames, then give it back. */
+      sfx: function (ch, freq, volume, frames) {
+        var lib = needSong();
+        ch = intIn(ch, "an SFX channel", 0, SOUND_CHANNELS - 1, "sfx-range");
+        freq = intIn(freq, "an SFX frequency", 0, PITCH_MAX, "sfx-range");
+        volume = intIn(volume, "an SFX volume", 0, SOUND_VOLUME_MAX,
+                       "sfx-range");
+        frames = intIn(frames, "an SFX length in frames", 1, SFX_FRAMES_MAX,
+                       "sfx-range");
+        if (!sound.sfx[ch].owned) {
+          sound.sfx[ch].owned = true;
+          if (sound.player) sound.player.reserve(ch);
+          else lib.reserveWrites(ch, soundWrite);
+        }
+        var s = sound.sfx[ch];
+        s.active = true;
+        s.frames = frames;
+        s.freq = freq;
+        s.volume = volume;
+        /* .copy.wave's shape: wave off ($40 -> $00) resets the PSG's 32-step
+         * pointer, the 32 R6 writes fill it, then F and control start it.
+         * Reserve has already set the balance to both sides full. */
+        soundWrite(0, ch);
+        soundWrite(4, 0x40);
+        soundWrite(4, 0x00);
+        for (var i = 0; i < 32; i++) soundWrite(6, SFX_WAVE[i]);
+        soundWrite(0, ch);
+        soundWrite(2, freq & 0xff);
+        soundWrite(3, (freq >> 8) & 0x0f);
+        soundWrite(4, 0x40 | volume);
+        return ch;
+      },
+
+      /* release(channel): give it back now.  Repeated release is harmless
+       * (the engine tests inProgress first), and a channel no SFX owns is
+       * left alone rather than silenced. */
+      release: function (ch) {
+        ch = intIn(ch, "an SFX channel", 0, SOUND_CHANNELS - 1, "sfx-range");
+        if (!sound.sfx[ch].owned) return ch;
+        sound.sfx[ch].owned = false;
+        sound.sfx[ch].active = false;
+        sound.sfx[ch].frames = 0;
+        if (sound.player) sound.player.release(ch);
+        else needSong().releaseWrites(ch, soundWrite);
+        return ch;
+      },
+
+      /* Once per frame, before the toy's frame(): an SFX that has run its
+       * frames gives the channel back, then the song ticks one VBlank. */
+      tickSound: function (f) {
+        /* a song started in init() (frame 0) keeps its writes in frame 0's
+         * order: the Reset then the first VBlank, not two columns
+         * overlapping at t = 0 */
+        if (f !== sound.frame) { sound.frame = f; sound.col = 0; }
+        for (var ch = 0; ch < SOUND_CHANNELS; ch++) {
+          if (!sound.sfx[ch].active) continue;
+          sound.sfx[ch].frames--;
+          if (sound.sfx[ch].frames <= 0) host.release(ch);
+        }
+        if (sound.player) sound.player.step();
+      },
+
+      /* The PSG model's output for the writes so far — the same model that
+       * is proven against Mednafen (#34). */
+      renderSound: function (count) {
+        var p = needPsg();
+        var s = needSong();
+        if (count == null) count = frameCount + 1;
+        return p.render(sound.events, s.FRAME_CYCLES, count);
+      },
+
       /* ---- the log ------------------------------------------------------ */
 
       logLine: function (parts) {
@@ -413,6 +616,8 @@
         baseRegs = null;
         baseCramWords = null;
         inFrame = true;
+        /* the song's VBlank and the SFX timers run before the toy's frame() */
+        host.tickSound(f);
       },
 
       /* called after frame() returns: the frame's own writes are the base
@@ -515,6 +720,15 @@
     LOG_MAX: LOG_MAX,
     PAD_COUNT: PAD_COUNT,
     PAD_FIELDS: PAD_FIELDS,
+    /* the sound contract (#71), for the author's reference (#61) */
+    SOUND_CHANNELS: SOUND_CHANNELS,
+    PITCH_MAX: PITCH_MAX,
+    SOUND_VOLUME_MAX: SOUND_VOLUME_MAX,
+    SFX_FRAMES_MAX: SFX_FRAMES_MAX,
+    SOUND_CYCLE_STEP: SOUND_CYCLE_STEP,
+    SOUND_EVENTS_MAX: SOUND_EVENTS_MAX,
+    SFX_WAVE: SFX_WAVE,
+    SOUND_API: SOUND_API,
     REFUSALS: {
       "reg-forbidden": "a register a toy may not touch",
       "reg-range": "a register value outside the VDC register's width",
@@ -524,7 +738,10 @@
       "sprite-range": "a sprite field outside the SAT's range",
       "raster-line": "a raster line outside VDW 0..223",
       "raster-line-full": "a second raster entry on one line, or too many colour writes on it",
-      "pad-range": "a pad number outside 1..5"
+      "pad-range": "a pad number outside 1..5",
+      "music-range": "a song index outside the songs the runtime was given",
+      "sfx-range": "an SFX channel, frequency, volume or length outside its range",
+      "no-psg": "the PSG model or the song player is not loaded, so no toy can make sound"
     }
   };
 });

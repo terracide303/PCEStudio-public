@@ -12,11 +12,13 @@
  *
  * The toy may set the registers the author's reference (#61) will list —
  * BXR, BYR, CR — the VCE's colour table, the SAT, VRAM, and the raster table
- * — read pad[1..5] (2-button pads) and pack/read a save as a password. Nothing
- * is drawn here: every frame is handed to the models that already exist and
- * are proven against Mednafen, renderer/pce-bg.js and renderer/pce-sprites.js
- * (and, when sound comes to toys in #71, renderer/pce-psg.js). This file is a
- * front end to those models, not a second model.
+ * — read pad[1..5] (2-button pads), pack/read a save as a password, and make
+ * sound (#71): music(index) plays a song the runtime was given, sfx() takes a
+ * channel for a sound effect and release() gives it back. Nothing is drawn or
+ * synthesised here: every frame is handed to the models that already exist and
+ * are proven against Mednafen, renderer/pce-bg.js, renderer/pce-sprites.js and
+ * renderer/pce-psg.js. This file is a front end to those models, not a second
+ * model.
  *
  * Design decisions and their reasons are in docs/TOYS.md. The short version:
  * Fengari (Lua 5.3 in JavaScript, MIT) over wasmoon — half the bytes, and ~4x
@@ -33,6 +35,9 @@
  *   raster-line       a raster line outside VDW 0..223
  *   raster-line-full  a second raster entry on a line, or too many colour
  *                     writes on one line (the RCR interrupt fires once a line)
+ *   music-range       a song index the runtime was given no song for (#71)
+ *   sfx-range         an SFX channel/frequency/volume/length out of range
+ *   no-psg            the PSG model or the song player is not loaded
  *   password-value    a save value that cannot be packed (type/size/depth)
  *   password-code     a password that is not one (alphabet/check byte/value)
  *   toy-timeout       a hook ran past the frame's Lua budget
@@ -497,8 +502,9 @@
     if (!L) refuse("no-vm", "Lua would not start (out of memory)");
 
     var budgetMs = options.budgetMs != null ? options.budgetMs : DEFAULT_BUDGET_MS;
-    /* The toy's hardware state and frame flow, shared with the IL runtime. */
-    var host = toyhost.createHost();
+    /* The toy's hardware state and frame flow, shared with the IL runtime.
+     * options.songs is the song list music(index) plays (#71). */
+    var host = toyhost.createHost(options);
     var state = host.state;
     var log = host.log;
     var pad = [];              /* pad[1..5] tables, registry refs */
@@ -733,6 +739,35 @@
       }
     }
 
+    /* -- sound (#71) ---------------------------------------------------- */
+
+    /* The three calls the host enforces: music(index), sfx(channel, freq,
+     * volume, frames) and release(channel).  The Lua side checks only the
+     * type (the host's ranges give both runtimes the same codes and words);
+     * the ranges in the lo/hi here only shape the "must be an integer"
+     * message. */
+    setGlobalFn("music", function (Lx) {
+      var index = intArg(Lx, 1, "a song index", 0, 0xFFFF, "music-range");
+      luaHost(Lx, function () { host.music(index); });
+      return 0;
+    });
+
+    setGlobalFn("sfx", function (Lx) {
+      var ch = intArg(Lx, 1, "an SFX channel", 0, 5, "sfx-range");
+      var freq = intArg(Lx, 2, "an SFX frequency", 0, 0xFFF, "sfx-range");
+      var volume = intArg(Lx, 3, "an SFX volume", 0, 31, "sfx-range");
+      var frames = intArg(Lx, 4, "an SFX length in frames", 1, 600,
+                          "sfx-range");
+      luaHost(Lx, function () { host.sfx(ch, freq, volume, frames); });
+      return 0;
+    });
+
+    setGlobalFn("release", function (Lx) {
+      var ch = intArg(Lx, 1, "an SFX channel", 0, 5, "sfx-range");
+      luaHost(Lx, function () { host.release(ch); });
+      return 0;
+    });
+
     /* -- print ---------------------------------------------------------- */
 
     setGlobalFn("print", function (Lx) {
@@ -903,6 +938,9 @@
       dispose: function () { if (L) { lua.lua_close(L); L = null; } },
       log: log,
       pad: host.padState,
+      /* the PSG writes the toy's sound made and the model's PCM for them */
+      sound: host.sound,
+      renderSound: host.renderSound,
       get initialized() { return initialized; },
       get broken() { return broken; },
       get error() { return broken ? new ToyError(broken.code, broken.message) : null; },

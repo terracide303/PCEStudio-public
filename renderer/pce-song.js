@@ -19,8 +19,16 @@
  *     upload (HuTrack_parser.asm .copy.wave).
  *
  * What it deliberately does not do: effect columns, arpeggio envelopes,
- * DDA/PCM samples, SFX, LFO and the music fade.  It refuses a song that
- * needs any of them with a code rather than playing something else.
+ * DDA/PCM samples, LFO and the music fade.  It refuses a song that needs any
+ * of them with a code rather than playing something else.
+ *
+ * createPlayer() is the same engine stepped one VBlank at a time, so a toy
+ * (#71) can run it for a frame and then take a channel away from the music:
+ * reserve() and release() are HuTrack.setChanForSFX / chanReleaseSFX
+ * (vendor/hutrack/lib/HuTrack/HuTrack_lib.asm) — the writes they make, the
+ * four write paths they block while a channel is reserved or waiting, and
+ * the fresh note that hands the hardware back, reloading all 32 wave steps.
+ * trace() is createPlayer() run to the end, so there is one engine.
  *
  * Timing is the one thing this port approximates.  The engine writes
  * inside the VBlank IRQ, so every write's cycle offset within the frame
@@ -189,7 +197,11 @@
       uploadedWave: 0xff,
       processState: 0,
       volEnv: null,
-      waveEnv: null
+      waveEnv: null,
+      /* HuTrack.SFX.inProgress and HuTrack.channel.waitNote: the channel is
+       * handed to an SFX, and after a release it waits for a fresh note. */
+      sfx: false,
+      waitNote: false
     };
   }
 
@@ -208,49 +220,68 @@
     return Math.floor(driverVolume * value / 31);
   }
 
-  function trace(song, opts) {
+  /* HuTrackEngine.setChanForSFX (HuTrack_lib.asm): the channel is handed to
+   * an SFX — control and noise off, the LFO off on channels 0/1 (the
+   * hardware couples them), balance to both sides full.  On its own so a
+   * toy with no song playing (#71) hands a channel over with the same
+   * writes the engine makes. */
+  function reserveWrites(ch, write) {
+    write(0, ch);
+    write(4, 0x00);
+    write(7, 0x00);
+    if (ch < 2) write(9, 0x00);
+    write(5, 0xff);
+  }
+
+  /* HuTrackEngine.chanReleaseSFX: silences the channel and leaves the
+   * caller to wait for a fresh music note. */
+  function releaseWrites(ch, write) {
+    write(0, ch);
+    write(4, 0x00);
+    write(7, 0x00);
+    if (ch < 2) write(9, 0x00);
+  }
+
+  function createPlayer(song, opts) {
     checkSong(song);
     opts = opts || {};
-    var frames = opts.frames || FRAME_CYCLES;
-    var count = opts.count || 300;
     var step = opts.cyclesPerWrite === undefined ? 12
                                                  : opts.cyclesPerWrite;
+    /* A host (#71) passes emit() and numbers the writes itself; without it
+     * the player numbers them as trace() always did. */
+    var emit = opts.emit || null;
 
     var events = [];
     var notes = [];
+    var frame = 0;
     var col = 0;   /* write index within the current frame */
 
     function write(reg, value) {
-      events.push({ f: frame, t: col * step, reg: reg, value: value & 0xff });
+      value &= 0xff;
+      if (emit) emit(reg, value, frame, col * step);
+      else events.push({ f: frame, t: col * step, reg: reg, value: value });
       col++;
     }
 
     /* HuTrackEngine.Reset: $801 = $FF, then each channel's power-on state
      * ($805 = $FF, control $40 then $00, noise off, 32 zero wave steps).
      * Init and playSong each call it, before any EngineCall. */
-    var frame = 0;
-    col = 0;
-    write(1, 0xff);
-    for (var ch = 0; ch < CHANNELS; ch++) {
-      write(0, ch);
-      write(5, 0xff);
-      write(4, 0x40);
-      write(4, 0x00);
-      write(7, 0x00);
-      for (var s = 0; s < 32; s++) write(6, 0x00);
+    function reset() {
+      write(1, 0xff);
+      for (var c = 0; c < CHANNELS; c++) {
+        write(0, c);
+        write(5, 0xff);
+        write(4, 0x40);
+        write(4, 0x00);
+        write(7, 0x00);
+        for (var s = 0; s < 32; s++) write(6, 0x00);
+      }
     }
-    write(1, 0xff);
-    for (ch = 0; ch < CHANNELS; ch++) {
-      write(0, ch);
-      write(5, 0xff);
-      write(4, 0x40);
-      write(4, 0x00);
-      write(7, 0x00);
-      for (s = 0; s < 32; s++) write(6, 0x00);
-    }
+    reset();                               /* Init */
+    reset();                               /* playSong */
 
     var channels = [];
-    for (ch = 0; ch < CHANNELS; ch++) channels.push(newChannel());
+    for (var chi = 0; chi < CHANNELS; chi++) channels.push(newChannel());
     var orderIndex = new Array(CHANNELS).fill(0);
     var rowIndex = new Array(CHANNELS).fill(0);
 
@@ -259,14 +290,18 @@
     var tickB = song.tick2;
     var tickIdx = 0;
 
-    for (frame = 1; frame < count; frame++) {
+    /* One VBlank: the parser tick, then every channel's envelopes.  The
+     * song's logical state advances whether or not an SFX owns a channel —
+     * HuTrack keeps parsing while the channel is reserved. */
+    function stepFrame() {
+      frame++;
       col = 0;
 
       tick--;
       if (tick === 0) {
         tickIdx ^= 1;
         tick = tickIdx ? tickA : tickB;
-        for (ch = 0; ch < CHANNELS; ch++) {
+        for (var ch = 0; ch < CHANNELS; ch++) {
           var order = song.orderMatrix[ch][orderIndex[ch]];
           var row = song.patterns[ch][order][rowIndex[ch]];
           rowIndex[ch]++;
@@ -275,19 +310,46 @@
             orderIndex[ch]++;
             if (orderIndex[ch] >= song.orderCount) orderIndex[ch] = 0;
           }
-          applyRow(channels[ch], ch, row, song);
+          applyRow(channels[ch], ch, row);
         }
       }
 
-      for (ch = 0; ch < CHANNELS; ch++)
-        envelopes(channels[ch], ch, song);
+      for (ch = 0; ch < CHANNELS; ch++) envelopes(channels[ch], ch);
     }
 
-    function applyRow(c, ch, row, song) {
+    /* HuTrackEngine.setChanForSFX (HuTrack_lib.asm): the channel is handed
+     * to an SFX — control and noise off, the LFO off on channels 0/1 (the
+     * hardware couples them), balance to both sides full — and the music
+     * waits for a fresh note to take it back. */
+    function reserve(ch) {
+      var c = channels[ch];
+      c.sfx = true;
+      c.waitNote = true;
+      reserveWrites(ch, write);
+    }
+
+    /* HuTrackEngine.chanReleaseSFX: silences the channel and waits for a
+     * fresh music note.  A repeated release is harmless — the engine tests
+     * inProgress first — and the forced waveform reload is its
+     * uploadedWaveform = $FF. */
+    function release(ch) {
+      var c = channels[ch];
+      if (!c.sfx) return false;
+      c.sfx = false;
+      c.waitNote = true;
+      c.uploadedWave = 0xff;
+      releaseWrites(ch, write);
+      return true;
+    }
+
+    function applyRow(c, ch, row) {
+      var quiet = c.sfx || c.waitNote;
       if (row.note && row.note.cut) {
         c.enabled = false;
-        write(0, ch);
-        write(4, 0x00);
+        if (!quiet) {
+          write(0, ch);
+          write(4, 0x00);
+        }
         return;
       }
       if (row.instrument !== null && row.instrument !== c.instr)
@@ -307,19 +369,34 @@
       c.period = periodFor(c.anchor);
       c.volIdx = 0;
       c.waveIdx = 0;
+      /* Only an actual note after a release hands the hardware back to the
+       * music (HuTrack_parser.asm .do.note_octave): it forgets the last
+       * upload so the next waveform envelope writes all 32 steps again,
+       * even when the waveform has not changed.  While an SFX still owns
+       * the channel a note only advances the song's logical state. */
+      if (!c.sfx && c.waitNote) {
+        c.waitNote = false;
+        c.uploadedWave = 0xff;
+      }
       notes.push({ frame: frame, channel: ch, note: engineNote,
                    semitone: row.note.semitone, octave: row.note.octave,
                    period: c.period });
     }
 
-    function envelopes(c, ch, song) {
+    function envelopes(c, ch) {
       if (!c.enabled) return;
+      /* HuTrack's four write paths (frequency, waveform, control and DDA)
+       * all test SFX.inProgress and channel.waitNote first (WSG.freq,
+       * WSG.control, .check.last.waveform); the envelopes still advance. */
+      var quiet = c.sfx || c.waitNote;
 
       /* HuTrackEngine.Channel.SetFrequency: always writes the applied
        * period, whether or not the note changed this frame. */
-      write(0, ch);
-      write(2, c.period & 0xff);
-      write(3, (c.period >> 8) & 0x0f);
+      if (!quiet) {
+        write(0, ch);
+        write(2, c.period & 0xff);
+        write(3, (c.period >> 8) & 0x0f);
+      }
 
       /* HuTrackEngine.Channel.waveformEnv: a new waveform is uploaded only
        * when the selected waveform index changes (a note resets the
@@ -338,7 +415,7 @@
         }
         c.lastWave = wave;
       }
-      if (wave !== c.uploadedWave) {
+      if (!quiet && wave !== c.uploadedWave) {
         c.uploadedWave = wave;
         var vol = c.processState & 0x1f;
         var first = (c.processState & 0xe0) | vol;
@@ -367,14 +444,46 @@
           scaleVolume(c.driverVolume, c.volEnv.data[c.volIdx++]);
       }
       c.processState = c.outputVolume | 0x80;
-      write(0, ch);
-      write(4, c.processState);
+      if (!quiet) {
+        write(0, ch);
+        write(4, c.processState);
+      }
     }
 
     return {
+      step: stepFrame,
+      reserve: reserve,
+      release: release,
       events: events,
-      frames: frames,
       notes: notes,
+      get frame() { return frame; },
+      /* the channels an SFX owns / the channels waiting for a fresh note */
+      reserved: function () {
+        var out = [];
+        for (var i = 0; i < CHANNELS; i++) if (channels[i].sfx) out.push(i);
+        return out;
+      },
+      waiting: function () {
+        var out = [];
+        for (var i = 0; i < CHANNELS; i++) if (channels[i].waitNote) out.push(i);
+        return out;
+      }
+    };
+  }
+
+  /* The whole song, run to the end: createPlayer stepped count - 1 times
+   * (frame 0 is Reset's, exactly as the engine's Init/playSong pair). */
+  function trace(song, opts) {
+    checkSong(song);
+    opts = opts || {};
+    var frames = opts.frames || FRAME_CYCLES;
+    var count = opts.count || 300;
+    var player = createPlayer(song, opts);
+    for (var f = 1; f < count; f++) player.step();
+    return {
+      events: player.events,
+      frames: frames,
+      notes: player.notes,
       count: count
     };
   }
@@ -388,6 +497,9 @@
   }
 
   return {
+    createPlayer: createPlayer,
+    reserveWrites: reserveWrites,
+    releaseWrites: releaseWrites,
     trace: trace,
     render: render,
     periodFor: periodFor,

@@ -191,10 +191,13 @@ constant operand; `target` is an instruction index in the same function.
 | `sprite` | `i`, `spec` | `int`, `table` | compose SAT entry `i` from a spec table |
 | `raster` | `lineArg`, `spec` | `int`, `table` | register one line's raster-table entry (the table form) |
 | `print` | `args[]` | `int`/`fixed`/`bool` | the page's log |
+| `music` | `song` | `int` | start song `song` (#71); the host refuses an index it was given no song for |
+| `sfx` | `ch`, `freq`, `volume`, `frames` | `int` | take a PSG channel for a sound effect and give it back after `frames` |
+| `release` | `ch` | `int` | give an SFX channel back to the music |
 | `vget` / `vset` | `dst`, `addr` / `addr`, `word` | `int` | read/write a VRAM word |
 | `padref` | `dst`, `n` | `int` → `pad` | `pad[n]` |
 | `padget` | `dst`, `pad`, `field` | `pad` → `bool` | `pad[n].right` etc. |
-| `builtin` | `name`, `dst?`, `args[]` | numeric helpers | `rgb clamp min max floor abs lerp ramp ramp_int sin cos sqrt` |
+| `builtin` | `name`, `dst?`, `args[]` | numeric helpers | `rgb clamp min max floor abs lerp ramp ramp_int sin cos sqrt note` (`note(MIDI)` returns the PSG's F; a note *name* is a string, which the IL does not carry) |
 
 **Why the toy surface has its own instructions.** A validator (#32) has to
 count VDC/VCE writes per line and per frame and check the raster budget. If
