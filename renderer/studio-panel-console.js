@@ -169,7 +169,10 @@
           rasterMean: null, rasterWorst: null, rasterCells: null,
           strips: null, stripLine: null, vramWord: null, vramLimit: 32768,
           codeBytes: codeBytes, romBytes: null, romBanks: null,
-          romLimit: ROM_LIMIT, frameClocks: FRAME_CLOCKS
+          romLimit: ROM_LIMIT, frameClocks: FRAME_CLOCKS,
+          /* #115: route 1's projection for the Export dialog — the same
+           * validator report, not a second estimate. */
+          route1: budgets ? budgets.route1 : null
         };
         if (budgets) {
           stats.frameCycles = budgets.frameCycles;
