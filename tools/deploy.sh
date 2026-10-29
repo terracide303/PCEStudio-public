@@ -57,4 +57,36 @@ for d in $(echo "$files" | xargs -n1 dirname | sort -u); do
   upload "$target" $group >/dev/null
   total=$((total + $(echo "$group" | wc -l)))
 done
+# ---- the demo art (#127, #128), which is NEVER in the repository ----------
+# Dennis, 2026-10-29: the packs' art may be shown on the site but not
+# committed (docs/DECISIONS.md).  Each demo's playable toy and its converted
+# picture live beside the repo in demo-art/<toy>/; this uploads them, and
+# makes the site's gallery carry the playable source instead of the repo's
+# placeholder.  The repo's own renderer/gallery-toys.js stays the art-free
+# copy the tests check — this is the only place the two are joined.
+DEMO_ART="${DEMO_ART:-/Volumes/External/agent-workshop-demo/demo-art}"
+demo_toys=""
+for toy in oak-woods cave; do
+  [ -f "$DEMO_ART/$toy/main.lua" ] && demo_toys="$demo_toys $toy"
+done
+if [ -n "$demo_toys" ]; then
+  stage=$(mktemp -d "${TMPDIR:-/tmp}/pce-deploy-XXXXXX")
+  node tools/gallery.js --with-demo-art > "$stage/gallery-toys.js"
+  upload "$DEST/renderer" "$stage/gallery-toys.js" >/dev/null
+  total=$((total + 1))
+  rm -rf "$stage"
+  for toy in $demo_toys; do
+    echo "demo art: $DEMO_ART/$toy"
+    # the art folder, and the playable main.lua where the toy page's Raw
+    # source and the gallery's ../toys/ link point
+    mkd "$DEST"; mkd "$DEST/demo-art"; mkd "$DEST/demo-art/$toy"; mkd "$DEST/toys/$toy"
+    art=$(find "$DEMO_ART/$toy" -type f ! -name '.*' | sort)
+    upload "$DEST/demo-art/$toy" $art >/dev/null
+    total=$((total + $(echo "$art" | wc -l)))
+    upload "$DEST/toys/$toy" "$DEMO_ART/$toy/main.lua" >/dev/null
+    total=$((total + 1))
+  done
+else
+  echo "demo art: none beside $DEMO_ART — the site keeps the placeholders"
+fi
 echo "uploaded $total files + index.html to $DEST"

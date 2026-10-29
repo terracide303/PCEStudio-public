@@ -207,6 +207,7 @@
   }
 
   player = gallery.player(canvas, toy.source, {
+    songs: toy.songs,
     onFrame(frame, index) {
       if (index % 10 === 0 || index < 3) status(index);
     },
