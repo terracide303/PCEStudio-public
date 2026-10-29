@@ -1269,12 +1269,14 @@ function releasePairs(ch) {
 
 /* The SFX the toy asks for: the channel's reserve, then a 32-step square
  * (the host's documented waveform: 16 full steps, 16 zero), then F and
- * AL.  The balance is reserve's $FF, both sides full. */
+ * AL — R4 = $80 | volume, waveform mode with the channel enabled (bit 7),
+ * DDA clear (bit 6), so pce-psg.js steps the 32 samples just uploaded.
+ * The balance is reserve's $FF, both sides full. */
 function sfxPairs(ch, freq, volume) {
   const out = [[0, ch], [4, 0x40], [4, 0x00]];
   for (let i = 0; i < 32; i++) out.push([6, i < 16 ? 31 : 0]);
   out.push([0, ch], [2, freq & 0xff], [3, (freq >> 8) & 0x0f],
-           [4, 0x40 | volume]);
+           [4, 0x80 | volume]);
   return out;
 }
 

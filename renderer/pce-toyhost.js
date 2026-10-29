@@ -632,8 +632,11 @@
         s.freq = freq;
         s.volume = volume;
         /* .copy.wave's shape: wave off ($40 -> $00) resets the PSG's 32-step
-         * pointer, the 32 R6 writes fill it, then F and control start it.
-         * Reserve has already set the balance to both sides full. */
+         * pointer, the 32 R6 writes fill it, then F and control start it in
+         * WAVEFORM mode ($80 | AL, bit 7 the channel enable, bit 6 clear).
+         * $40 | volume is DDA mode with the channel off: the chip holds one
+         * level and the 32 steps are never clocked.  Reserve has already set
+         * the balance to both sides full. */
         soundWrite(0, ch);
         soundWrite(4, 0x40);
         soundWrite(4, 0x00);
@@ -641,7 +644,7 @@
         soundWrite(0, ch);
         soundWrite(2, freq & 0xff);
         soundWrite(3, (freq >> 8) & 0x0f);
-        soundWrite(4, 0x40 | volume);
+        soundWrite(4, 0x80 | volume);
         return ch;
       },
 

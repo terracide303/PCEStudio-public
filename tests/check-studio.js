@@ -3270,17 +3270,17 @@ function checkAudioPanel(page) {
         (live ? live.writes : 0) + " of " + events.length + ")");
   eq("#97: … decoded onto the voice the toy used",
      [live.voices[2].freq, live.voices[2].note, live.voices[2].al,
-      live.voices[2].dda].join(","), "254,A4,31,true");
+      live.voices[2].dda].join(","), "254,A4,31,false");
   eq("#97: … and the voices the toy left alone",
      live.voices.map((v) => (v.freq ? 1 : 0)).join(""), "001000");
   check(/live toy/.test(page.dom.get("aud-status").textContent),
         "#97: the panel says it is reading a live toy (" +
         page.dom.get("aud-status").textContent + ")");
-  /* OBSERVED, and reported rather than absorbed: the host's sfx() writes
-   * R4 = $40 | volume and never bit 7, so the channel-enable is clear and
-   * the PSG holds one level instead of stepping.  docs/STUDIO.md §12. */
-  eq("#97: the host's SFX leaves R4 bit 7 clear (a #71 gap, see §12)",
-     live.voices[2].on, false);
+  /* #111: the host's sfx() starts the channel in WAVEFORM mode ($80 | AL),
+   * not DDA with the enable clear, so the panel reads the voice as on — the
+   * 32 R6 steps the SFX uploaded are what pce-psg.js steps. */
+  eq("#111: the host's SFX leaves the voice on in waveform mode",
+     [live.voices[2].on, live.voices[2].mode].join(","), "true,wave");
   const livePcm = studio.audioLivePcm();
   eq("#97: the live PCM is pce-psg.js's render of those writes",
      livePcm.samples, rt.renderSound().pcm.length);

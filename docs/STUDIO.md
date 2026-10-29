@@ -1305,14 +1305,18 @@ comparison with their page is claimed.
   `▶ Play mix` through the page's own speakers — is not exercised headlessly at all, only the render it
   feeds; and the envelope's Attack/Decay/Sustain/Rate is a *panel* convention for the R4 sequence a
   driver writes (HuTrack's own volume envelope is `pce-song.js`'s), not a measured HuTrack feature.
-* **#71's `sfx()` does not make the sound it documents.** Observed while building #97's live view and
-  reported rather than absorbed: the host writes `R4 = $40 | volume` (`renderer/pce-toyhost.js`), i.e.
-  DDA mode with the channel-enable bit 7 clear, after filling the 32-step square into R6 while the
-  channel was off. `pce-psg.js` renders that as a DC step, not the square: for the same write stream the
-  measured RMS is 905 (R4 `$5F`) against 5899 with R4 `$9F` — waveform mode, which is what "loads a
-  32-step square" means. `tests/check-toys.js`'s `sfxPairs()` encodes `$40 | volume`, so the evidence
-  agrees with the bug. The panel's live view shows the chip's real state (`on: false` for that channel)
-  and `checkAudioPanel` asserts that, so the gap is measured here, not hidden.
+* **#71's `sfx()` starts the channel in waveform mode.** #97 observed the host writing
+  `R4 = $40 | volume` — DDA mode with the channel-enable bit 7 clear — after filling the 32-step
+  square into R6 while the channel was off; `pce-psg.js` renders that as one held level, not the
+  square. #111 corrects it to `R4 = $80 | volume` (waveform mode, the channel enabled), measured over
+  the same write stream with the balance and master at `$FF`: RMS 908 → 5899, peak 6158 → 6933. The
+  panel's live view now reads the voice `on` in `wave` mode, and `tests/check-toys.js`'s `sfxPairs()`
+  expects the same byte. Still not proven: no Mednafen recording of the toy's SFX exists — the PCM is
+  `pce-psg.js`'s output for the writes — and the toy's own SFX is silent until something writes the
+  PSG's main amplitude R1 `$FF`: `music()` does that in its Reset, but a toy that calls only `sfx()`
+  (the live example in `tests/check-studio.js` does) leaves R1 at its power-on zero. The reference
+  `setChanForSFX` does not write R1 either — on the console the engine's Reset did — so this is the
+  host's power-on state, not the SFX's write sequence.
 * **The SPRITES panel (#86) is not proved by a cold break.** Its checks in `tests/check-studio.js` were
   written by the builder, so rule 2 is owed: another seat, another model, breaks the model, the panel and
   the file round-trip and the checks must catch every break. Also not proven: the stub DOM draws no canvas
