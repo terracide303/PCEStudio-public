@@ -285,6 +285,7 @@ Rule 2: the guard and its self-test were written by @design; a cold break by ano
 
 ### Public release !5
 - [?] #20 PCEStudio goes public: the repo, and the page to use it ~S @you
+- [?] #110 After beta 1: port our ways of working into the public agent-workshop — the list is my-workshop/PORT_TO_AGENT_WORKSHOP.md (Claude, when the new credits are in) ~M @workshop #opus
 
 ### Share !3
 - [?] #37 Publish a toy and play other people's ~L @design
