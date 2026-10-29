@@ -418,6 +418,13 @@
     padding: 8px 10px; font: 11px/1.5 var(--mono); color: #c7ccd5;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); max-width: 80%;
   }
+  .layer-row { display: flex; align-items: center; gap: 6px; }
+  .layer-row label { display: flex; align-items: center; gap: 6px;
+    cursor: pointer; white-space: nowrap; }
+  .layer-row input { accent-color: var(--accent); margin: 0; }
+  .layer-note { color: var(--dim); margin: 2px 0 4px 18px; white-space: pre; }
+  .layer-hint { color: var(--dim); font: 10px/1.45 var(--sans);
+    margin: 5px 0 0; max-width: 250px; white-space: normal; }
   .transport {
     display: flex; align-items: center; gap: 6px; padding: 6px 10px;
     border-top: 1px solid var(--line); background: var(--pane2);
@@ -706,14 +713,28 @@
         <button type="button" class="out-tab" id="tab-live">LIVE OUTPUT</button>
         <button type="button" class="btn-mini" id="btn-layers">Layers</button>
         <span class="spacer"></span>
-        <button type="button" class="chip" id="btn-crt" aria-pressed="false">CRT</button>
-        <button type="button" class="chip" id="btn-snd" aria-pressed="false">SND</button>
-        <span class="res">256×224</span>
+        <button type="button" class="chip" id="btn-crt" aria-pressed="false"
+                title="Scanline overlay on the canvas">CRT</button>
+        <button type="button" class="chip" id="btn-snd" aria-pressed="false"
+                title="No toy sound surface until #71 — the PSG model is checked, toys cannot play it yet">SND</button>
+        <span class="res" id="res" title="VDC display size">256×224</span>
       </div>
       <div class="canvas-wrap" id="canvas-wrap">
         <canvas id="out" width="256" height="224" tabindex="0"
-                aria-label="Toy output. Click to follow a pixel."></canvas>
-        <div class="layer-pop" id="layer-pop" hidden></div>
+                aria-label="Toy output. Click to follow a pixel. The pad keys
+                           IJKL N/M O/P drive pad 1 while it has focus."></canvas>
+        <div class="layer-pop" id="layer-pop" hidden>
+          <div class="layer-row"><label><input type="checkbox" id="layer-bg"
+            checked> BG · background</label></div>
+          <div class="layer-row"><label><input type="checkbox" id="layer-spr"
+            checked> SPR · sprites</label></div>
+          <div class="layer-note" id="layer-detail">no frame yet</div>
+          <div class="layer-row"><label><input type="checkbox"
+            id="layer-viewonly"> View only</label></div>
+          <p class="layer-hint">BG and SPR clear CR bit 7 (BB) and bit 6 (SB)
+            in the live VDC, the way a register write would; View only masks
+            the picture without touching the toy's state.</p>
+        </div>
         <div class="error" id="error" hidden></div>
       </div>
       <div class="transport">
@@ -1256,6 +1277,17 @@ let vimOn = false;
 let palCells = null;
 let toastTimer = null;
 
+/* #78: the output column's Layer controls. `layerOn` is what the author wants
+ * to see; `layerViewOnly` says whether the toggles write CR (the hardware
+ * way) or only mask the picture. `savedBits` remembers the CR bit a hidden
+ * layer had, so showing it again restores the toy's own value. */
+let layerOn = { bg: true, sprites: true };
+let layerViewOnly = false;
+let savedBits = { bg: false, sprites: false };
+let presented = null;        /* the frame the canvas shows (after masking) */
+let image = null;            /* the RGBA buffer behind the canvas */
+let imageW = 0, imageH = 0;
+
 /* The toy's file set and the editor in front of it. `current.source` stays
  * the Lua the runtime runs (main.lua); an asset edit never changes it. */
 let files = [];
@@ -1269,12 +1301,22 @@ let restoredFromStorage = false;
 /* ---- the canvas ------------------------------------------------------- */
 const canvas = $("out");
 const ctx = canvas.getContext("2d");
-const image = ctx.createImageData(canvas.width, canvas.height);
 
 /* The model gives RGB triples (renderer/pce-bg.js renderFrame); the canvas
- * needs RGBA, so each pixel is copied into its four-byte slot. */
+ * needs RGBA, so each pixel is copied into its four-byte slot. The frame's
+ * own size wins: a picture whose dot clock is /3 or /2 is 341 or 512 dots
+ * wide (#27), and the canvas must grow with it. */
 function paint(frame) {
   const rgb = frame.pixels;
+  const w = frame.width || canvas.width;
+  const h = frame.height || canvas.height;
+  if (canvas.width !== w || canvas.height !== h || imageW !== w || imageH !== h) {
+    canvas.width = w;
+    canvas.height = h;
+    image = ctx.createImageData(w, h);
+    imageW = w;
+    imageH = h;
+  }
   const d = image.data;
   for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
     d[j] = rgb[i];
@@ -1283,6 +1325,202 @@ function paint(frame) {
     d[j + 3] = 255;
   }
   ctx.putImageData(image, 0, 0);
+}
+
+/* ---- the layer controls (#78) ----------------------------------------- *
+ * A layer is a CR bit in the VDC: bit 7 (BB) blanks the background, bit 6
+ * (SB) blanks the sprites. `visibleCR` is the one place a hidden layer's bit
+ * is cleared, so the picture and the register state cannot disagree.
+ *
+ * The renderer already honours those bits per line (pce-bg.js CR bit 7,
+ * pce-sprites.js CR bit 6), so a masked frame is drawn by the same code that
+ * draws the toy's frame — no second compositor. */
+const LAYER_BIT = { bg: 0x80, sprites: 0x40 };
+
+function visibleCR(cr) {
+  let v = (cr == null ? 0 : cr) & 0xFF;
+  if (!layerOn.bg) v &= ~LAYER_BIT.bg;
+  if (!layerOn.sprites) v &= ~LAYER_BIT.sprites;
+  return v;
+}
+
+/* The frame's latched registers and its raster table with the hidden layers
+ * gated for every line, including lines whose raster entry sets CR. */
+function maskedRaster(raster) {
+  if (!raster) return raster;
+  const copy = {
+    base: Object.assign({}, raster.base || {}),
+    baseCram: raster.baseCram,
+    entries: raster.entries.map((en) => {
+      const c = Object.assign({}, en);
+      if (c.cr != null) c.cr = visibleCR(c.cr);
+      return c;
+    })
+  };
+  if (copy.base.cr != null) copy.base.cr = visibleCR(copy.base.cr);
+  return copy;
+}
+
+function outputOptions() {
+  if (!runtime) return null;
+  const opts = runtime.options();
+  if (runtime.lastRaster) opts.raster = runtime.lastRaster;
+  opts.regs = Object.assign({}, opts.regs);
+  return opts;
+}
+
+function maskedOptions() {
+  const opts = outputOptions();
+  if (!opts) return null;
+  opts.regs.CR = visibleCR(opts.regs.CR);
+  opts.raster = maskedRaster(opts.raster);
+  return opts;
+}
+
+/* In the hardware mode, hiding a layer writes its CR bit out of the live VDC
+ * state — the same store a toy's reg("CR", …) makes. View only skips this. */
+function applyHardwareLayers() {
+  if (!runtime || layerViewOnly) return false;
+  const cr = runtime.state.regs.CR;
+  const want = visibleCR(cr);
+  if (want === cr) return false;
+  runtime.state.regs.CR = want;
+  panelState = null;
+  return true;
+}
+
+/* Draw what the author should see, masking the hidden layers. With every
+ * layer visible this is the runtime's own frame, byte for byte. */
+function present(frame) {
+  let shown = frame;
+  if (!layerOn.bg || !layerOn.sprites) {
+    const opts = maskedOptions();
+    if (opts) {
+      const img = PCEStudio.sprites.renderFrame(opts);
+      shown = { frame: frame.frame, width: img.width, height: img.height,
+                pixels: img.pixels };
+    }
+  }
+  paint(shown);
+  presented = shown;
+  updateResolution(shown);
+  return shown;
+}
+
+/* Redraw the current frame after a layer change, from the live state. */
+function renderCurrent() {
+  if (!runtime || currentFrame < 0) return null;
+  const opts = maskedOptions();
+  if (!opts) return null;
+  const img = PCEStudio.sprites.renderFrame(opts);
+  return present({ frame: currentFrame, width: img.width,
+                   height: img.height, pixels: img.pixels });
+}
+
+function updateLayerUI() {
+  if ($("layer-bg")) $("layer-bg").checked = layerOn.bg;
+  if ($("layer-spr")) $("layer-spr").checked = layerOn.sprites;
+  if ($("layer-viewonly")) $("layer-viewonly").checked = layerViewOnly;
+}
+
+function setLayer(name, on) {
+  if (name !== "bg" && name !== "sprites") return false;
+  on = !!on;
+  if (!on && layerOn[name]) {
+    if (!layerViewOnly && runtime) savedBits[name] = !!(runtime.state.regs.CR & LAYER_BIT[name]);
+  }
+  if (on && !layerOn[name] && !layerViewOnly && runtime && savedBits[name]) {
+    runtime.state.regs.CR = runtime.state.regs.CR | LAYER_BIT[name];
+    savedBits[name] = false;
+    panelState = null;
+  }
+  layerOn[name] = on;
+  applyHardwareLayers();
+  if (runtime) renderCurrent();
+  panelDirty = true;
+  refreshPanels(true);
+  updateLayerUI();
+  return true;
+}
+
+function setLayerViewOnly(on) {
+  layerViewOnly = !!on;
+  if (!layerViewOnly && runtime) {
+    for (const name of ["bg", "sprites"]) {
+      if (layerOn[name] && savedBits[name]) {
+        /* A layer shown while in View only never got its bit back; do it
+         * now, before any hidden layer is written. */
+        runtime.state.regs.CR = runtime.state.regs.CR | LAYER_BIT[name];
+        savedBits[name] = false;
+      } else if (!layerOn[name]) {
+        /* Coming out of View only with a layer hidden: remember the toy's
+         * own bit before the hardware write clears it, so showing it again
+         * restores what the toy set. */
+        savedBits[name] = !!(runtime.state.regs.CR & LAYER_BIT[name]);
+      }
+    }
+    applyHardwareLayers();
+    panelState = null;
+  }
+  if (runtime) renderCurrent();
+  panelDirty = true;
+  refreshPanels(true);
+  updateLayerUI();
+  return layerViewOnly;
+}
+
+function shownLayerText(st) {
+  let count = 0;
+  for (const s of PCEStudio.panels.satTable(st)) if (!s.empty) count++;
+  const cr = st.regs.CR;
+  return "BG  background · BAT " + st.geom.width + "×" + st.geom.height +
+    " · BXR " + st.regs.BXR + " · BYR " + st.regs.BYR + "\n" +
+    "OBJ  " + count + " sprite" + (count === 1 ? "" : "s") + " in the SAT\n" +
+    "CR   " + hex(cr, 2) + (layerViewOnly ? " · view only" : "");
+}
+
+/* The resolution label follows the dot clock, not a hard-coded string: the
+ * renderer's own DOT_CLOCK table is 256 / 341 / 512 dots for VCE CR DCC
+ * 00 / 01 / 10 (#27). The live toy host is fixed at 256×224, so the label
+ * reads that today; resolutionFor() is the same mapping the moment a frame
+ * carries another clock. */
+const DOT_CLOCK_MHZ = ["5.37", "7.16", "10.74"];
+
+function resolutionFor(vcecr) {
+  const regs = { VCECR: (vcecr == null ? 0 : vcecr) & 0x03 };
+  const dc = PCEStudio.bg.dotClock(regs);
+  const width = PCEStudio.bg.frameWidth({ regs: regs });
+  const height = (PCEStudio.toys && PCEStudio.toys.HEIGHT) || 224;
+  return { width: width, height: height, dotClock: dc,
+           label: width + "×" + height,
+           title: "VDC display " + width + "×" + height + " · VCE dot clock " +
+                  DOT_CLOCK_MHZ[dc] + " MHz (÷" + (4 - dc) + ")" };
+}
+
+function resolution() {
+  const opts = outputOptions();
+  if (!opts) return resolutionFor(0);
+  const regs = opts.regs || {};
+  const dc = PCEStudio.bg.dotClock(regs);
+  const width = presented ? presented.width : PCEStudio.bg.frameWidth(opts);
+  const height = presented ? presented.height : (opts.height || 224);
+  return { width: width, height: height, dotClock: dc,
+           label: width + "×" + height,
+           title: "VDC display " + width + "×" + height + " · VCE dot clock " +
+                  DOT_CLOCK_MHZ[dc] + " MHz (÷" + (4 - dc) + ")" };
+}
+
+function updateResolution(frame) {
+  const r = frame
+    ? { width: frame.width, height: frame.height,
+        dotClock: PCEStudio.bg.dotClock(runtime ? runtime.options().regs : {}) }
+    : resolution();
+  const el = $("res");
+  if (!el) return r;
+  el.textContent = r.width + "×" + r.height;
+  el.title = "VDC display " + r.width + "×" + r.height + " · VCE dot clock " +
+    DOT_CLOCK_MHZ[r.dotClock] + " MHz (÷" + (4 - r.dotClock) + ")";
+  return r;
 }
 
 /* ---- messages --------------------------------------------------------- */
@@ -1324,7 +1562,10 @@ function runFrame(f) {
   padLog[f] = padLog[f] || {};
   runtime.setPad(1, padLog[f]);
   const frame = runtime.frame(f);
-  paint(frame);
+  /* #78: a hidden layer is cleared in CR the way a register write would be,
+   * then the picture is drawn (masked, if View only is on). */
+  applyHardwareLayers();
+  present(frame);
   currentFrame = f;
   panelState = null;
   panelDirty = true;
@@ -1388,6 +1629,19 @@ function updateClock(frame) {
     shown + " · " + Math.round(fps) + "fps";
   $("seek").value = String(Math.max(0, Math.min(lengthFrames - 1, shown)));
   $("btn-addmarker").textContent = "Add marker at frame " + shown;
+}
+
+/* The scrubber's length is the toy clock's horizon: 1..3600 frames, the
+ * slider's max follows it, and nothing can sit past the last frame. */
+function setLength(n) {
+  n = Math.round(Number(n));
+  if (!isFinite(n)) n = lengthFrames;
+  n = Math.max(1, Math.min(3600, n || 1));
+  lengthFrames = n;
+  $("length").value = String(n);
+  $("seek").max = String(n - 1);
+  if (currentFrame >= n) { pause(); seek(n - 1); }
+  return lengthFrames;
 }
 
 function tick(now) {
@@ -1624,15 +1878,8 @@ function refreshPanels(force) {
   else if (activePanel === "scanlines") drawScanlines(st);
   else if (activePanel === "registers") drawRegisters(st);
   else if (activePanel === "console") drawConsole(st);
-  $("layer-pop").textContent = layerText(st);
-}
-
-function layerText(st) {
-  let count = 0;
-  for (const s of PCEStudio.panels.satTable(st)) if (!s.empty) count++;
-  return "BG  background · BAT " + st.geom.width + "×" + st.geom.height +
-    " · BXR " + st.regs.BXR + " · BYR " + st.regs.BYR + "\n" +
-    "OBJ  " + count + " sprite" + (count === 1 ? "" : "s") + " in the SAT";
+  const detail = $("layer-detail");
+  if (detail) detail.textContent = shownLayerText(st);
 }
 
 function selectPanel(id) {
@@ -1774,16 +2021,18 @@ function drawMarkers() {
     b.type = "button";
     b.className = "marker";
     b.textContent = "frame " + m;
+    b.title = "Seek to frame " + m;
     b.addEventListener("click", () => { pause(); seek(m); });
     host.appendChild(b);
   }
 }
 function addMarker() {
-  const f = Math.max(0, currentFrame);
+  const f = Math.max(0, Math.min(lengthFrames - 1, currentFrame));
   if (markers.indexOf(f) < 0) markers.push(f);
   markers.sort((a, b) => a - b);
   drawMarkers();
   toast("Marker at frame " + f + ".");
+  return f;
 }
 
 /* ---- popovers --------------------------------------------------------- */
@@ -2428,18 +2677,29 @@ function bind() {
   $("btn-layers").addEventListener("click", () => {
     const el = $("layer-pop");
     el.hidden = !el.hidden;
+    $("btn-layers").setAttribute("aria-expanded", String(!el.hidden));
     if (!el.hidden) {
+      updateLayerUI();
       const st = stateNow();
-      el.textContent = st ? layerText(st) : "no frame yet";
+      $("layer-detail").textContent = st ? shownLayerText(st) : "no frame yet";
     }
   });
+  $("layer-bg").addEventListener("change", () =>
+    setLayer("bg", $("layer-bg").checked));
+  $("layer-spr").addEventListener("change", () =>
+    setLayer("sprites", $("layer-spr").checked));
+  $("layer-viewonly").addEventListener("change", () =>
+    setLayerViewOnly($("layer-viewonly").checked));
   $("btn-crt").addEventListener("click", () => {
     const on = $("canvas-wrap").classList.toggle("crt");
     $("btn-crt").classList.toggle("is-on", on);
     $("btn-crt").setAttribute("aria-pressed", String(on));
   });
-  $("btn-snd").addEventListener("click", () =>
-    toast("Sound is card #71: the PSG model exists, the toy surface does not."));
+  $("btn-snd").addEventListener("click", () => {
+    $("btn-snd").setAttribute("aria-pressed", "false");
+    toast("Sound is card #71: the PSG model exists and is checked, but toys " +
+          "have no sound surface yet.");
+  });
   $("btn-play").addEventListener("click", () => {
     if (playing) pause(); else play();
   });
@@ -2458,13 +2718,7 @@ function bind() {
     pause();
     seek(Number($("seek").value));
   });
-  $("length").addEventListener("change", () => {
-    const n = Math.max(1, Math.min(3600, Number($("length").value) || 300));
-    lengthFrames = n;
-    $("length").value = String(n);
-    $("seek").max = String(n - 1);
-    if (currentFrame >= n) seek(n - 1);
-  });
+  $("length").addEventListener("change", () => setLength($("length").value));
 
   /* markers / agent */
   $("tab-markers").addEventListener("click", () => selectBottomTab("markers"));
@@ -2566,6 +2820,7 @@ function init() {
   selectPanel("screen");
   selectCodeTab("code");
   selectBottomTab("markers");
+  updateLayerUI();
 
   const qs = (typeof URLSearchParams === "function")
     ? new URLSearchParams(location.search) : new URLSearchParams("");
@@ -2632,6 +2887,21 @@ function init() {
   /* ?tab=assets is how the #77 screenshot opens the ASSETS tab without
    * synthetic input. */
   if (qs.get("tab") === "assets") selectCodeTab("assets");
+  /* #78: the same trick for the output column's controls — the headless
+   * side-by-side opens the Layers popover and the CRT look from the URL. */
+  if (qs.get("layers")) {
+    $("layer-pop").hidden = false;
+    $("btn-layers").setAttribute("aria-expanded", "true");
+    updateLayerUI();
+    const st = stateNow();
+    $("layer-detail").textContent = st ? shownLayerText(st) : "no frame yet";
+  }
+  if (qs.get("crt")) {
+    $("canvas-wrap").classList.add("crt");
+    $("btn-crt").classList.add("is-on");
+    $("btn-crt").setAttribute("aria-pressed", "true");
+  }
+  updateResolution();
 }
 
 /* The tests read the page's own state through this object: no second copy of
@@ -2680,6 +2950,21 @@ PCEStudio.studio = {
   editorKind: () => editor ? "codemirror" : "textarea",
   isPlaying: () => playing,
   pad: () => Object.assign({}, heldPad),
+  /* #78 — the output column. `output()` is the frame on the canvas after the
+   * layer mask, so the evidence compares what is shown, not the toy alone. */
+  output: () => (presented ? { frame: presented.frame,
+                               width: presented.width,
+                               height: presented.height,
+                               pixels: presented.pixels } : null),
+  layers: () => ({ bg: layerOn.bg, sprites: layerOn.sprites,
+                   viewOnly: layerViewOnly }),
+  setLayer: setLayer,
+  setLayerViewOnly: setLayerViewOnly,
+  resolution: resolution,
+  resolutionFor: resolutionFor,
+  length: () => lengthFrames,
+  setLength: setLength,
+  addMarker: addMarker,
   editorOptions: () => {
     if (!editor) return null;
     const mode = editor.getOption("mode");

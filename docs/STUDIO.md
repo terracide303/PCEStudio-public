@@ -10,8 +10,11 @@ quicker than rebuilding it, this page does, with the credit below.
 Docs panel and the honest `needs #31` export message. **#77 is the editor and the files**: CodeMirror with
 Lua highlighting and line numbers replaces the textarea, a toy is a file set beside `main.lua`, Save/Open
 use one versioned JSON envelope in ppu.toys' shape, autosave keeps the whole toy in the browser, Vim keys are
-opt-in in Settings, and every ppu.toys shortcut with a PCE meaning works. A toy `.pce` still waits for the
-compiler; the static-picture export was already proven in the editor.
+opt-in in Settings, and every ppu.toys shortcut with a PCE meaning works. **#78 is the output column** (§2.3):
+the Layers controls (BG and sprites gated through CR, plus a view-only mode), the CRT look, SND's honest
+state, markers, the scrubber's frame length, the resolution label following the dot clock, and the pad keys
+on the focused output. A toy `.pce` still waits for the compiler; the static-picture export was already
+proven in the editor.
 
 ---
 
@@ -80,6 +83,9 @@ Side-by-side evidence (each 3200×1034: theirs left, ours right):
 | `ours-studio-docs.png` | — | the Docs panel at `?docs=1` (hero, search, chapter map) |
 | `ours-studio-docs-registers.png` | — | the Docs panel at `?docs=registers` (chapter + sticky TOC) |
 
+`#78`'s output-column pair is later and lives under `$TMPDIR/pcestudio-design-78/`
+(`side-by-side-studio-78.png`, `ours-studio-78.png`; §11.3).
+
 The measured geometry below is from those PNGs at 1600×1000, so the regions are comparable pixel for
 pixel, not eyeballed at another scale.
 
@@ -130,6 +136,20 @@ workspace, and the code rows use ppu.toys' 30 px tab strip + 36 px file strip.
 The big picture is the same in both: the picture owns the top half of the right column, a transport and a
 scrubber sit under it, and a secondary drawer (markers/agent) fills the bottom. Our canvas is ~13 px deeper
 and our scrubber row is much shorter than their timeline block, so our drawer starts higher (706 vs 744).
+
+**What each output control does (#78).**
+
+| control | behaviour | source |
+|---|---|---|
+| `Layers` | opens a popover with `BG · background`, `SPR · sprites`, the frame's BAT/CR readout, and `View only` | page |
+| `BG` / `SPR` | clears CR bit 7 (BB) / bit 6 (SB) in the live VDC state and redraws — the same bits `pce-bg.js` and `pce-sprites.js` already gate layers on, so the picture is what the hardware would show. Showing a layer again restores the bit the toy set. | `pce-bg.js` CR bit 7, `pce-sprites.js` CR bit 6 |
+| `View only` | masks the layer in the picture without writing CR: the toy's state and the panels keep their own values, and the mask stays on across seeks | page |
+| `CRT` | toggles the canvas's scanline overlay (`.canvas-wrap.crt::after`, ppu.toys' look in CSS, not a shader) | page CSS |
+| `SND` | the honest state: `pce-psg.js` exists and is checked, but toys have no sound surface (#71), so the chip never claims a sound is playing | card #71 |
+| resolution | `renderer/pce-bg.js`'s own `DOT_CLOCK` / `frameWidth`: 256 / 341 / 512 dots for VCE CR DCC `00` / `01` / `10` (#27). The live toy host is fixed at 256×224, so it reads `256×224`; the mapping is the renderer's, and the label's tooltip names the dot clock | `pce-bg.js` |
+| counter / length | the scrubber's max is `Length − 1`; a seek clamps to it, a shortened length moves the playhead inside it, and playback stops on the last frame | page |
+| markers | `Add marker at frame N` records the current frame; each marker is a button that pauses and seeks to it | page |
+| pad keys | with the canvas focused: IJKL = D-pad, N/M = I/II, O = Select, P = Run (pad 1). The page-wide Space/R shortcuts do not consume them | page, §5.2 |
 
 **Where ours deliberately differs.** No account/publishing controls (there is no backend); `Run` and
 `Check` are visible because our editor applies an edit with `Run` and `Check` runs the determinism / Lua-IL
@@ -223,10 +243,13 @@ The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel u
 | IJKL, N/M, O, P (output focused) | 2-button pad 1: D-pad, I, II, Select, Run (the PCE pad; multitap pads 2–5 are in the runtime but not on the keyboard) |
 | Settings → Editor keys → Vim | CodeMirror's Vim keymap, off by default and remembered in the browser |
 | Settings → Line numbers | CodeMirror's gutter, on by default |
-| transport | play/pause, stop, −1, +1, frame slider, `Length` in frames |
+| transport | play/pause, stop, −1, +1, frame slider, `Length` in frames (1…3600) |
+| `Layers` → `BG` / `SPR` | hide the background (CR bit 7, BB) or the sprites (CR bit 6, SB) in the live VDC and redraw; the picture is the renderer's own CR gating |
+| `Layers` → `View only` | the same toggles without a register write: mask the picture only, leave the toy's state and panels alone |
 | `CRT` | scanline overlay on the canvas |
 | `SND` | says where sound is (#71); no invented control |
 | `Lua` / `IL` | switch the runtime: Fengari Lua 5.3, or the IL interpreter over the same toy host (#31) |
+| resolution label | follows the dot clock through `pce-bg.js`: 256 / 341 / 512 dots (VCE CR DCC `00` / `01` / `10`) |
 | `Markers` | add a marker at the current frame; click a marker to seek |
 | `Panels ▾` | show/hide workspace regions and chip panels; `Reset to default` |
 | `Docs` | open the #61 reference as the Docs panel (§4), at the active panel's chapter via `Guide` |
@@ -372,7 +395,7 @@ claims a file it cannot make.
 `node tests/check-studio.js` (written by `@design`; flagged for `@review` cold, rule 2):
 
 ```
-PASS  438 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
+PASS  485 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
       every button's handler executed (88 buttons) (… ms)
 ```
 
@@ -418,6 +441,28 @@ What it does, in order:
 9. The stub is not a browser: layout, CSS, a real canvas, iframe rendering and CodeMirror are stubbed. It
    proves handlers, state and the docs pipeline, not appearance, and the textarea fallback is what it
    exercises — the real CodeMirror is §11.2's job.
+10. **The output column (#78).** Every new control is driven through the page's own state, and the picture is
+    compared with `renderer/pce-sprites.js` drawing the same frame with the layer's CR bit cleared — the same
+    renderer the toy runs, not a second compositor:
+    * **BG** on `palette-cycle`: `BG off` equals the renderer with CR bit 7 clear, byte diff 0; it changes
+      **every one of the 57,344 pixels** (BB blanks the whole background to CRAM[$100]) and the live
+      `state().regs.CR` is `$00`. `BG on` restores the frame and CR `$80`.
+    * **SPR** through the page's editor (`Run`): a 16×16 solid sprite fixture (the page's own
+      `sprite-pad.lua` puts its pattern at `0x100*16` words, which the renderer's cell addressing does not
+      read — a separate fixture bug, not a layer one) shows exactly **256 changed pixels**, all inside the
+      sprite's 16×16 box and none outside; CR goes `$C0 → $80`.
+    * **View only**: the same blank frame with the live CR still `$80`, across a seek; leaving the mode
+      applies the hidden layer to CR, and showing it restores the bit.
+    * **resolution**: `resolutionFor(VCE CR 0/1/2/3)` reads `256×224 / 341×224 / 512×224 / 512×224` from
+      `pce-bg.js`'s own `DOT_CLOCK`, and the live label is the running frame's size (`256×224` today; the
+      toy host is fixed at 256×224).
+    * **markers** add once at the current frame, sort, and a marker button pauses and seeks to its frame;
+      **Length** sets the slider's max to `n−1`, clamps 1…3600, moves the playhead inside a shortened range,
+      and a seek past the end lands on the last frame.
+    * **CRT** toggles the canvas's `.crt` class and its `aria-pressed`, and the page's CSS really is the
+      repeating scanline gradient; **SND** stays unpressed, names #71 in its tooltip and toast, and never
+      claims a sound; all eight pad keys (IJKL/NM/OP) hold and release their `pad[1]` field while the canvas
+      is focused, and the page-wide shortcuts leave them alone.
 
 ### 11.2 The real browser
 
@@ -427,7 +472,7 @@ What it does, in order:
 browser: PASS 40 frames · palette · frame 39 · 256x224 · pixels 172032 · digest f45fd1c2
 browser docs: docs-panel open, #61 reference + ppu.toys layout
 browser driver: 32 checks, 0 failed
-PASS  475 checks, … every button's handler executed (88 buttons), headless Chrome says PASS 40 (… ms)
+PASS  522 checks, … every button's handler executed (88 buttons), headless Chrome says PASS 40 (… ms)
 ```
 
 The first run is `?selftest=1&frames=40&example=palette`: the page runs 40 frames, and an FNV-1a digest of
@@ -470,6 +515,21 @@ PCE's (§3). `ours-studio-77-code.png` is the editor on `main.lua`; `ours-studio
 (`?tab=assets`) is the ASSETS list — `main.lua`, `tiles.json`, `palettes.json`, `sprites.json`,
 `waves.json` with kind and size, each with `Edit` — the file-set counterpart of their asset sources.
 
+**#78's output-column pair.** `side-by-side-studio-78.png` (3200×1000: theirs left, ours right) pairs
+`https://ppu.toys/studio` at 1600×1000 with
+`renderer/studio.html?demo=raster&frame=30&paused=1&layers=1&crt=1` at the same size, both captured by
+headless Chrome's command line only (no synthetic input; the `layers`/`crt` query parameters open the same
+controls the buttons do, the way `?tab=assets` did for #77). Theirs is the default black toy with its
+`Layers ▾` closed; ours runs the raster example with the Layers popover open and CRT on, so the comparison
+is of the output column's furniture, not a colour match. Both place `LIVE OUTPUT` / `Layers` at the left of
+the row and `CRT`, `SND`, the resolution pill at the right; the canvas starts on the same scanline (~80) and
+the transport/scrubber stack under it. Our popover shows `BG · background`, `SPR · sprites`, the frame's
+BAT/CR readout (`CR $80` here), `View only`, and the one-line explanation of the CR bits; their controls are
+the four `BG1`–`BG4` and `OBJ` checkboxes behind `Layers`, the same idea on the SNES's TM bits.
+`ours-studio-78.png` is
+our 1600×1000 capture on its own. The underlying pixels are the renderer's (the raster bands and the CRT
+scanlines are visible); no pixel comparison with ppu.toys is claimed.
+
 ---
 
 ## 12. Not proven, and what comes next
@@ -502,9 +562,24 @@ PCE's (§3). `ours-studio-77-code.png` is the editor on `main.lua`; `ours-studio
   fails the suite, but a change to the fallback alone is caught only in the stub.
 * **Panels are read-only.** ppu.toys' panels are editors with pokes and keyframes; ours reads the toy's own
   state. The panel code (#26) already exposes the values an editor would write through.
-* **Rule 2.** `tests/check-studio.js` was written by the seat that built the page and extended for #77 by
-  the same seat. A cold break by another seat is owed before this closes the card: break the layout, the
+* **The output column's controls are proved in the stub, not by a real click.** #78's layer/marker/length
+  checks drive `PCEStudio.studio` and the page's own handlers; the real DOM's checkbox events and the
+  popover's appearance are judged by the screenshot (§11.3), not by a browser-driver check. The pixels are
+  real: `studio.output()` is the frame `present()` drew, and its reference is `pce-sprites.renderFrame`.
+* **The 341/512 resolutions are a mapping, not a running picture.** No toy can select another VCE dot clock:
+  `pce-toyhost.js` fixes the frame at 256×224. `resolutionFor()` proves the label reads the renderer's own
+  256/341/512 table, and `present()`/`paint()` resize the canvas when a frame of another width arrives, but
+  no such frame has been rendered.
+* **The page's `sprite-pad.lua` example draws no sprite.** It writes its pattern at `0x100*16` words, while
+  `pce-sprites.js` addresses SAT pattern `p` at cell `p*64` words, so the example's sprite is transparent;
+  `check-toys.js` passes because its hand-built expected state copies the same address. That is a pre-existing
+  example/test gap, outside this card's studio files; #78's SPR evidence uses a fixture run through the
+  page's editor instead. A card should fix the example and its expectation together.
+* **Rule 2.** `tests/check-studio.js` was written by the seat that built the page and extended for #77 and
+  #78 by the same seat. A cold break by another seat is owed before this closes the card: break the layout, the
   example list, the frame flow, a panel, a button, the docs wiring (remove a chapter, break the raw
-  equality, make the docs button a no-op), the export message, and for #77 the editor/files path — replace
+  equality, make the docs button a no-op), the export message, for #77 the editor/files path — replace
   CodeMirror with the textarea, stop loading the Lua mode/Vim keymap, drop an asset file from the envelope,
-  make Save write only `main.lua`, stop autosaving, break a shortcut, and the check must catch each.
+  make Save write only `main.lua`, stop autosaving, break a shortcut — and for #78 the output column: stop
+  masking the hidden layer, write CR in view-only, break the resolution table, make a marker not seek, let
+  the length run past its max, or drop a pad key, and the check must catch each.
