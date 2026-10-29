@@ -83,6 +83,23 @@ function tilesOf(root, style) {
   return out;
 }
 
+/* The author's own scene data: the .pyxel project the pack ships (itself a
+ * zip — docData.json plus the 4x4 tiles).  Unzipped inside the pack's own
+ * scratch dir and read, never run. */
+function readDoc(root) {
+  const dir = path.join(root, "pyxel");
+  if (!fs.existsSync(path.join(dir, "docData.json"))) {
+    fs.mkdirSync(dir, { recursive: true });
+    cp.execFileSync("unzip", ["-q", path.join(root, "retro_pixel_cave.pyxel"),
+                              "-d", dir], { stdio: "inherit" });
+  }
+  const doc = JSON.parse(fs.readFileSync(path.join(dir, "docData.json"), "utf8"));
+  const tiles = {};
+  for (let i = 0; i < doc.tileset.numTiles; i++)
+    tiles[i] = readPng(path.join(dir, "tile" + i + ".png"));
+  return { doc: doc, tiles: tiles };
+}
+
 /* ---- drawing: RGBA canvases ------------------------------------------- */
 
 function canvas(w, h) {
@@ -108,97 +125,223 @@ function blit(dst, img, dx, dy, sx, sy, sw, sh, threshold) {
   }
 }
 
-function packer(cols, rows) {
-  return {
-    put(cv, img, cx, cy) {
-      if (!img) return;
-      blit(cv, img, (cx % cols) * TILE, (cy % rows) * TILE, 0, 0,
-           Math.min(TILE, img.width), Math.min(TILE, img.height));
+/* ---- the pack's own scene ----------------------------------------------
+ * The pack ships the author's example scene inside the .pyxel project: a
+ * 160x92 canvas whose terrain and midground layers place 4x4 tiles over
+ * three full-screen backdrop plates (bg3 is the farthest — the readme's own
+ * rule).  RULES.md's rule 1 says the pack's own example is the working
+ * example, so the picture IS that scene: composed the way the author's
+ * editor composes it, measured against the pack's own preview (the
+ * wallpaper is the same stack plus its creatures), and then cut into the
+ * toy's parallax bands.
+ */
+
+/* The author's scene, 160x92: the plates first (farthest at the bottom),
+ * then the terrain layer, then the midground layer — each cell a 4x4 tile
+ * from the .pyxel. */
+function composeDocScene(tiles, docData) {
+  const c = docData.doc.canvas;
+  const cv = canvas(c.width, c.height);
+  for (const p of ["bg3", "bg2", "bg1"])
+    blit(cv, tiles[p], 0, 0, 0, 0, cv.width, cv.height);
+  for (const li of ["0", "1"]) {
+    const refs = c.layers[li].tileRefs;
+    for (const key of Object.keys(refs)) {
+      const cell = parseInt(key, 10);
+      const cx = cell % (c.width / 4), cy = Math.floor(cell / (c.width / 4));
+      blit(cv, docData.tiles[refs[key].index], cx * 4, cy * 4, 0, 0, 4, 4);
     }
-  };
+  }
+  return cv;
 }
 
-/* ---- the scene ---------------------------------------------------------
- * 28 BAT rows of 32 cells.  The pack is a cave: rock edges lit warm, an
- * almost-black interior, and three background plates (bg3 is the farthest,
- * the readme's own rule).  The scene stacks them the way a cave reads —
- * ceiling rock, the far plates, a mid ridge, the floor — and each band gets
- * its own BXR in the toy, so the depth is the parallax.
+/* The pack's own preview, 160x92 (the wallpaper is 12x that: 1920x1104).
+ * The doc scene must BE this picture minus the creatures the toy draws
+ * itself — the fraction is measured, printed, and (in the evidence test)
+ * asserted. */
+function readPreview(root) {
+  const wall = readPng(path.join(root, "retro_pixel_cave_wallpaper_A.png"));
+  const scale = wall.width / 160;
+  const cv = canvas(160, 92);
+  for (let y = 0; y < 92; y++)
+    for (let x = 0; x < 160; x++) {
+      const s = (y * scale * wall.width + x * scale) * 4;
+      const d = (y * 160 + x) * 4;
+      cv.rgba[d] = wall.rgba[s];
+      cv.rgba[d + 1] = wall.rgba[s + 1];
+      cv.rgba[d + 2] = wall.rgba[s + 2];
+      cv.rgba[d + 3] = 255;
+    }
+  return cv;
+}
+
+function previewMatch(scene, preview) {
+  let same = 0, n = 0;
+  for (let y = 0; y < preview.height; y++)
+    for (let x = 0; x < preview.width; x++) {
+      const d = (y * preview.width + x) * 4;
+      n++;
+      if (scene.rgba[d] === preview.rgba[d] &&
+          scene.rgba[d + 1] === preview.rgba[d + 1] &&
+          scene.rgba[d + 2] === preview.rgba[d + 2]) same++;
+    }
+  return same / n;
+}
+
+/* ---- the bands ----------------------------------------------------------
+ * The doc scene is cut into five parallax bands along the lines the scene
+ * itself draws — the ceiling with its stalactites, the crystal band, the
+ * near wall, the mid floor and the near floor — and each band gets its own
+ * BXR in the toy, so the depth is the parallax.  The band lines sit where
+ * the scene is flat, and nothing of the author's crosses one except flat
+ * rock: a feature that did would shear when the bands scroll at five
+ * speeds.  The one exception is cut rather than sheared — the pink crystal
+ * tops that poke into the ceiling band are painted over, so each crystal
+ * lives wholly in its band.
  *
- * The bands are also what keeps the map seamless at the scroll wrap: every
- * cell pattern repeats with a period that divides 32 (the BAT width), so
- * BXR wrapping at 256 px never shows a seam.
+ * Every band is a 32-cell strip that wraps at 256 px without a seam, and no
+ * band is a short block repeated: the whole width is one scene, which is
+ * what the picture must look like.  The strip carries the author's scene in
+ * its first 20 cells — at BXR 0 the frame's left 160 px ARE the preview —
+ * and the last 12 cells stretch the scene's own left side columns (px 0-15,
+ * six wide each), so the wrap meets px 15 on px 0: the scene's own adjacent
+ * columns, exactly as seamless as the scene's interior.  The two floor
+ * bands, which have no scene behind them, are drawn from the author's own
+ * rock tiles with flat fill at both seam ends.
  */
 const BANDS = [
-  /* first row, rows, kind, tile */
-  { row: 0,  rows: 1,  kind: "rock", tile: "terrain_fill_top_center" },
-  { row: 1,  rows: 1,  kind: "edge", tile: "terrain_bottom" },
-  { row: 2,  rows: 4,  kind: "plate", plate: "bg3" },
-  { row: 6,  rows: 4,  kind: "plate", plate: "bg2" },
-  { row: 10, rows: 3,  kind: "plate", plate: "bg1" },
-  { row: 13, rows: 1,  kind: "edge", tile: "terrain_top" },
-  { row: 14, rows: 3,  kind: "fill" },
-  { row: 17, rows: 1,  kind: "ledge" },
-  { row: 18, rows: 4,  kind: "fill" },
-  { row: 22, rows: 1,  kind: "ledge" },
-  { row: 23, rows: 4,  kind: "fill" },
-  { row: 27, rows: 1,  kind: "edge", tile: "terrain_bottom" }
+  /* first row, rows, the scene's own row it starts at */
+  { row: 0,  rows: 4, y0: 0 },   /* the ceiling */
+  { row: 4,  rows: 3, y0: 32 },  /* the crystal band */
+  { row: 7,  rows: 5, y0: 56 },  /* the near wall */
+  { row: 12, rows: 8, floor: true },
+  { row: 20, rows: 8, floor: true }
 ];
 
-/* A glowing cluster the pack paints warm — a few stand inside the rock, so
- * the cave is lit from its own veins and the palette cycle has something to
- * breathe life into. */
-const VEIN = "terrain_bottom_center";
-const VEIN_AT = [[4, 18], [19, 19], [27, 18], [9, 21], [22, 21],
-                 [3, 24], [14, 24], [25, 23], [30, 25], [17, 26], [8, 26]];
+/* The pack's rock floor, below the scene's own 92 px: the author's own 4x4
+ * tiles — flat fill, the dark crack marks, and the warm speckles the cave
+ * is lit by — laid in a designed pattern, the warm speckles scattered so
+ * the veins the glow cycle breathes on are irregular, not one repeated
+ * cell. */
+const FLOOR_FILL = 6;                  /* the doc's flat fill tile */
+const FLOOR_CRACK = [22, 23];          /* fill with a dark crack mark */
+const FLOOR_WARM = [0, 1, 4, 5, 8, 9, 11, 12, 19, 20, 32, 33, 50, 51, 52, 53,
+                    54, 56, 57, 58, 59, 60, 61, 63, 64, 65, 66, 67, 68];
 
-/* The three fill cells of a rock interior, in a 3-cell repeat (3 does not
- * divide 32, so a 2-row stagger keeps the wrap invisible — see below). */
-const FILL = ["terrain_fill_center_left", "terrain_fill_center_center",
-              "terrain_fill_center_right"];
+/* The tile for one 4x4 cell of the floor: c is the cell column 0..63, r the
+ * row 0..31 (the floor bands' first row is y=96, r=0).  The two seam cells
+ * at each end are flat; the diagonals carry the cracks; the scatter carries
+ * the veins. */
+function floorTile(c, r) {
+  if (c < 4 || c > 59) return FLOOR_FILL;
+  const ch = (c + r * 2) % 25;
+  if (ch === 6 || ch === 7) return FLOOR_CRACK[(c + r) % 2];
+  if ((c * 31 + r * 17) % 19 === 5 || (c * 13 + r * 29) % 13 === 2)
+    return FLOOR_WARM[(c * 5 + r * 3) % FLOOR_WARM.length];
+  return FLOOR_FILL;
+}
 
-function composeScene(tiles) {
-  const cv = canvas(BAT_W * TILE, ROWS * TILE);
-  const pack = packer(BAT_W, ROWS);
-  const veins = {};
-  for (const [cx, cy] of VEIN_AT) veins[cx + "," + cy] = true;
-  for (const band of BANDS) {
-    for (let r = 0; r < band.rows; r++) {
-      const cy = band.row + r;
-      for (let cx = 0; cx < BAT_W; cx++) {
-        if (band.kind === "rock") {
-          pack.put(cv, tiles[band.tile], cx, cy);
-        } else if (band.kind === "edge") {
-          /* a rock edge: the pack's left/right corner pieces close the ends
-           * of the 256-px map, which meet when the scroll wraps */
-          const name = cx === 0 ? band.tile + "_left"
-                     : cx === BAT_W - 1 ? band.tile + "_right"
-                     : band.tile + "_center";
-          pack.put(cv, tiles[name], cx, cy);
-        } else if (band.kind === "ledge") {
-          /* a rock platform standing out of the floor: the pack's own
-           * left/centre/right pieces, the corners at its two ends */
-          const name = (cx === 0 || cx === 12) ? "terrain_platform_left"
-                     : (cx === 7 || cx === 19) ? "terrain_platform_right"
-                     : (cx > 0 && cx < 8) || (cx > 12 && cx < 20)
-                       ? "terrain_platform_center"
-                       : FILL[[4, 4, 4, 3, 4, 4, 4, 5][cx % 8] - 3];
-          pack.put(cv, tiles[name], cx, cy);
-        } else if (band.kind === "fill") {
-          if (veins[cx + "," + cy]) { pack.put(cv, tiles[VEIN], cx, cy); continue; }
-          /* a 16-cell period: 5 of the fill cells in a fixed order, which is
-           * how the pack's own 3x3 fill grid tiles without a seam */
-          const pick = [4, 4, 4, 4, 3, 4, 4, 4, 5, 4, 4, 4, 3, 4, 4, 4][cx % 16];
-          pack.put(cv, tiles[FILL[pick - 3]], cx, cy);
-        } else {
-          /* a plate: 8x8 cells of the plate image, 16 cells wide (128 px of
-           * the 160 it has) so the period divides the BAT */
-          const plate = tiles[band.plate];
-          blit(cv, plate, cx * TILE, cy * TILE, (cx % 16) * TILE, r * TILE,
-               TILE, TILE, 0);
-        }
-      }
+/* One column of the scene, stretched six wide: the strip's last 12 cells are
+ * the scene's own left side (px 0-15), so the wrap brings px 15 onto px 0 —
+ * the scene's adjacent columns — and the band tiles without a seam. */
+function stretchSide(dst, img, dx, dy, sx, sy, h) {
+  for (let y = 0; y < h; y++) {
+    const si = ((sy + y) * img.width + sx) * 4;
+    if (img.rgba[si + 3] < 128) continue;
+    const di = ((dy + y) * dst.width + dx) * 4;
+    for (let k = 0; k < 6; k++) {
+      dst.rgba[di + k * 4] = img.rgba[si];
+      dst.rgba[di + k * 4 + 1] = img.rgba[si + 1];
+      dst.rgba[di + k * 4 + 2] = img.rgba[si + 2];
+      dst.rgba[di + k * 4 + 3] = 255;
     }
+  }
+}
+
+/* One band strip: 32 cells (256 px) of the scene slice, closed at the wrap
+ * by the stretch above. */
+function bandStrip(scene, band) {
+  const h = band.rows * TILE;
+  const cv = canvas(BAT_W * TILE, h);
+  const avail = Math.min(h, 92 - band.y0);
+  blit(cv, scene, 0, 0, 0, band.y0, 160, avail);
+  for (let x = 0; x < 16; x++)
+    stretchSide(cv, scene, 160 + x * 6, 0, x, band.y0, avail);
+  if (h > avail) {
+    /* the near wall's strip outruns the scene: the scene's own floor
+     * carries on downward (its last 4 rows repeat) */
+    blit(cv, scene, 0, avail, 0, 88, 160, h - avail);
+    for (let x = 0; x < 16; x++)
+      stretchSide(cv, scene, 160 + x * 6, avail, x, 88, h - avail);
+  }
+  return cv;
+}
+
+/* The crystal tops the author drew into the ceiling's rows (y28-31) belong
+ * to the crystal band's bodies (y32+): cut at the band line, not sheared.
+ * Every bright crystal pixel in those rows is repainted in its cell's own
+ * most common non-crystal colour. */
+const CRYSTAL_COLOURS = ["252,198,254", "242,150,246", "190,118,211",
+                         "133,78,176"];
+function cutCrystalTops(strip) {
+  for (let y = 28; y < 32; y++)
+    for (let x = 0; x < strip.width; x++) {
+      const d = (y * strip.width + x) * 4;
+      const key = strip.rgba[d] + "," + strip.rgba[d + 1] + "," + strip.rgba[d + 2];
+      if (CRYSTAL_COLOURS.indexOf(key) < 0) continue;
+      const counts = new Map();
+      const cx0 = Math.floor(x / TILE) * TILE, cy0 = Math.floor(y / TILE) * TILE;
+      for (let yy = cy0; yy < cy0 + TILE; yy++)
+        for (let xx = cx0; xx < cx0 + TILE; xx++) {
+          const dd = (yy * strip.width + xx) * 4;
+          const kk = strip.rgba[dd] + "," + strip.rgba[dd + 1] + "," + strip.rgba[dd + 2];
+          if (CRYSTAL_COLOURS.indexOf(kk) >= 0) continue;
+          counts.set(kk, (counts.get(kk) || 0) + 1);
+        }
+      let best = null, bn = 0;
+      for (const [kk, v] of counts) if (v > bn) { best = kk; bn = v; }
+      const rgb = best ? best.split(",").map(Number) : [79, 43, 141];
+      strip.rgba[d] = rgb[0];
+      strip.rgba[d + 1] = rgb[1];
+      strip.rgba[d + 2] = rgb[2];
+    }
+}
+
+function composeScene(tiles, docData) {
+  const scene = composeDocScene(tiles, docData);
+  const cv = canvas(BAT_W * TILE, ROWS * TILE);
+  for (const band of BANDS) {
+    if (band.floor) {
+      for (let r = 0; r < band.rows; r++) {
+        const by = band.row + r;
+        if (by === 27) {
+          /* the pack's floor edge closes the picture at the bottom, and its
+           * two end cells are flat fill, so the scroll wrap meets fill on
+           * fill (the pack's decorated corner pieces would not) */
+          for (let cx = 0; cx < BAT_W; cx++)
+            blit(cv, tiles["terrain_bottom_center"], cx * TILE, by * TILE,
+                 0, 0, TILE, TILE);
+          for (const cx of [0, 1, BAT_W - 2, BAT_W - 1])
+            for (let qy = 0; qy < 2; qy++)
+              for (let qx = 0; qx < 2; qx++)
+                blit(cv, docData.tiles[FLOOR_FILL], cx * 8 + qx * 4,
+                     by * 8 + qy * 4, 0, 0, 4, 4);
+          continue;
+        }
+        for (let cx = 0; cx < BAT_W; cx++)
+          for (let qy = 0; qy < 2; qy++)
+            for (let qx = 0; qx < 2; qx++) {
+              const c4 = cx * 2 + qx;
+              const r4 = (by - 12) * 2 + qy;
+              blit(cv, docData.tiles[floorTile(c4, r4)], c4 * 4, by * 8 + qy * 4,
+                   0, 0, 4, 4);
+            }
+      }
+      continue;
+    }
+    const strip = bandStrip(scene, band);
+    if (band.y0 === 0) cutCrystalTops(strip);
+    blit(cv, strip, 0, band.row * TILE, 0, 0, strip.width, strip.height);
   }
   return cv;
 }
@@ -398,19 +541,23 @@ function build(packZip, outDir) {
   const ex = extractPack(packZip);
   try {
     const tiles = tilesOf(ex.root, "style_A");
-    const scene = composeScene(tiles);
+    const docData = readDoc(ex.root);
+    const preview = readPreview(ex.root);
+    const docScene = composeDocScene(tiles, docData);
+    const match = previewMatch(docScene, preview);
+    const scene = composeScene(tiles, docData);
     const picture = src.importImage(scene, { kind: "bg", name: "cave",
                                              maxPalettes: 16, dither: "none" });
     const sprites = composeSprites();
     const sheet = src.importImage(sprites, { kind: "sprites", name: "cave",
                                              size: [16, 16], maxPalettes: 16 });
-    return writeArt(picture, sheet, outDir, ex.root);
+    return writeArt(picture, sheet, outDir, docScene, preview, match);
   } finally {
     cp.execFileSync("rm", ["-rf", ex.dir]);
   }
 }
 
-function writeArt(picture, sheet, outDir, packRoot) {
+function writeArt(picture, sheet, outDir, docScene, preview, match) {
   const palOf = {};
   for (const t of picture.tiles) palOf[t.char] = t.palette;
   const glow = glowEntry(picture.palettes);
@@ -436,8 +583,13 @@ function writeArt(picture, sheet, outDir, packRoot) {
          "toys/cave/README.md).");
   L.push("-- " + picture.stats.tiles + " tiles from $" +
          hex(FIRST_CHAR, 2) + ", " + picture.stats.palettes + " background " +
-         "palettes, " + sheet.patterns.length + " sprite patterns at cell " +
+         "palette" + (picture.stats.palettes === 1 ? "" : "s") + ", " +
+         sheet.patterns.length + " sprite patterns at cell " +
          patternCell + ".");
+  L.push("-- The pack's own scene, measured against its own preview " +
+         "(wallpaper_A): " + (100 * match).toFixed(1) +
+         "% of pixels match — the rest is the preview's creatures, which " +
+         "this toy draws itself.");
   L.push("-- This file is NOT in the repo: docs/DECISIONS.md, 2026-10-29.");
   L.push("");
   L.push("PATTERN_CELL = " + patternCell + "   -- the sprites' pattern codes " +
@@ -494,7 +646,7 @@ function writeArt(picture, sheet, outDir, packRoot) {
   /* the sprite patterns' palettes are the sprites.json's; the background's
    * are palettes.json's — one file each, as the panels write them */
 
-  if (!outDir) return { files: files, console: consoleBuild(lua) };
+  if (!outDir) return { files: files, console: consoleBuild(lua), match: match };
   fs.mkdirSync(outDir, { recursive: true });
   for (const name of Object.keys(files))
     fs.writeFileSync(path.join(outDir, name), files[name]);
@@ -502,8 +654,15 @@ function writeArt(picture, sheet, outDir, packRoot) {
   fs.writeFileSync(path.join(outDir, "cave-console.lua"), console);
   writePng(path.join(outDir, "scene.png"), sceneImage(picture));
   writePng(path.join(outDir, "sprites.png"), spriteImage(sheet));
+  /* the evidence the card asks for: the pack's preview at the frame's own
+   * 1:1 scale — tests/check-cave.js draws it beside the toy's frame and
+   * measures the match */
+  fs.mkdirSync(path.join(outDir, "evidence"), { recursive: true });
+  writePng(path.join(outDir, "evidence", "preview.png"), rgbImage(preview));
+  writePng(path.join(outDir, "evidence", "scene-composed.png"),
+           rgbImage(docScene));
   return { files: files, console: console, picture: picture, sheet: sheet,
-           out: outDir };
+           out: outDir, match: match };
 }
 
 /* The playable toy: the repository's main.lua with the art appended, which is
@@ -551,6 +710,17 @@ function sceneImage(picture) {
 function spriteImage(sheet) {
   return { width: sheet.preview.width, height: sheet.preview.height,
            pixels: sheet.preview.pixels };
+}
+
+/* A raw RGBA canvas as RGB pixels for writePng. */
+function rgbImage(cv) {
+  const pixels = new Uint8Array(cv.width * cv.height * 3);
+  for (let i = 0, j = 0; i < cv.rgba.length; i += 4, j += 3) {
+    pixels[j] = cv.rgba[i];
+    pixels[j + 1] = cv.rgba[i + 1];
+    pixels[j + 2] = cv.rgba[i + 2];
+  }
+  return { width: cv.width, height: cv.height, pixels: pixels };
 }
 
 function writePng(file, img) {
@@ -646,6 +816,9 @@ function main(argv) {
   }
   const built = build(pack, out);
   console.log("wrote " + Object.keys(built.files).length + " files to " + out);
+  console.log("  the pack's own scene vs its own preview: " +
+              (100 * built.match).toFixed(1) + "% of pixels match (the rest " +
+              "is the preview's creatures, which the toy draws itself)");
   console.log("  tiles " + built.picture.stats.tiles + ", backgrounds " +
               built.picture.stats.palettes + ", colours " +
               built.picture.stats.colours + ", max per tile " +
