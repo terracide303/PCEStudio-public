@@ -154,8 +154,6 @@
 
       function cellWidth() { return ZOOMS[zoom] || ZOOMS.normal; }
 
-      var playhead = null;               /* set by play(); the grid draws it */
-
       function drawGrid(s) {
         var cv = studio.$("seq-grid");
         if (!cv || !cv.getContext) return;
@@ -201,11 +199,6 @@
               g.fillRect(x + 3, y + 7, 4, 4);
             }
           }
-        }
-        /* the playhead's column when the panel has been asked to show it */
-        if (playhead !== null && playhead < s.steps) {
-          g.fillStyle = "#ff9540";
-          g.fillRect(LABEL + playhead * cw, HEADER, 1, s.steps ? 6 * ROW : 0);
         }
       }
 
@@ -414,8 +407,8 @@
           return apply(function () { return sq.parseOrder(songObj, text); });
         },
         tempo: function () { return state().tempo; },
-        setTempo: function (npm) {
-          return apply(function () { return sq.setTempo(songObj, npm); });
+        setTempo: function (bpm) {
+          return apply(function () { return sq.setTempo(songObj, bpm); });
         },
         swing: function (n) {
           if (n === undefined) return state().swing;
