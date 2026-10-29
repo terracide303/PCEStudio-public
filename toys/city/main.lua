@@ -1,7 +1,7 @@
 -- main.lua — CITY, a demo made from Anokolisa's "Action Pack - CITY" (card #125).
 --
 -- WHAT THIS IS: a soldier runs along a flooded city street at night, jumps and
--- shoots.  The picture is the pack's own composed scene; the character is nine
+-- shoots.  The picture is the pack's own composed scene; the character is ten
 -- frames of the pack's character sheet.  The pack's Autor_note.txt grants
 -- commercial use and asks for credit: "all the assets here are totally free
 -- for commercial use and the like. credits are optional but appreciated."
@@ -44,6 +44,15 @@
 -- frames are up to 40 px wide, so each frame is two 32x64 patterns side by
 -- side and lands on SAT slots 0 and 1.  The tracer is a 16x16 pattern.
 --
+-- THE RUN CYCLE IS THE AUTHOR'S OWN (#148, Dennis playing it: "the animation
+-- of the character is not running correctly").  The sheet's Full.gif plays
+-- frames 3,4,5,6,7,8,9,10 in that order and run.aseprite holds the same eight
+-- at 100 ms each — so the run is those eight, one every four frames, at a
+-- steady rate, and nothing else.  Frame 1 (the wide planted stand) is the
+-- idle, shown while the pad is at rest; the leap reuses run frame 7's stride;
+-- and the crouched aim (frame 35) shows only WHILE the fire key is held, so
+-- the gun comes down the moment it is released.
+--
 -- CONTROLS on pad[1] (studio and site: IJKL, N, M): left/right walk the
 -- character across the screen, up jumps, N (I) shoots, M (II) shoots too.
 
@@ -51,13 +60,15 @@
 -- VRAM addresses, not art: `node tools/city-assets.js --check` does not read
 -- them, and tests/check-city.js asserts they are the codes the converted
 -- picture really gives.
-RUN_L = {80, 96, 112, 128, 144, 160, 176, 192}   -- the left half of run frames 1..8
+RUN_L = {80, 96, 112, 128, 144, 160, 176, 192}   -- the left half of run frames 3..10
 RUN_R = {88, 104, 120, 136, 152, 168, 184, 200}  -- the right half
+IDLE_L = 208                                     -- frame 1, the planted stand
+IDLE_R = 216
 JUMP_L = 176                                     -- run frame 7, airborne
 JUMP_R = 184                                     -- (no pattern of its own)
-SHOOT_L = 208                                    -- the crouched aim (frame 35)
-SHOOT_R = 216
-BULLET = 224
+SHOOT_L = 224                                    -- the crouched aim (frame 35)
+SHOOT_R = 232
+BULLET = 240
 WATER_A = 17                                     -- the water's three CRAM entries
 WATER_B = 18
 WATER_C = 22
@@ -113,7 +124,7 @@ function init()
   vy = 0                -- jump speed, pixels a frame (positive is down)
   airborne = 0
   run_t = 0             -- run timer; the frame is run_t // 4
-  cooldown = 0          -- frames left showing the aim pose
+  cooldown = 0          -- frames until the rifle can fire again
   shots = {0, 0, 0, 0}
   sx = {0, 0, 0, 0}
   sy = {0, 0, 0, 0}
@@ -188,16 +199,23 @@ function frame(t, f)
     end
   end
 
-  -- the run cycle: eight frames, a new one every four frames, on the ground
+  -- the run cycle: the author's own eight (Full.gif plays sheet frames 3..10
+  -- in order), a new one every four frames, on the ground
   if airborne == 0 then
     run_t = (run_t + 1) % 32
   end
 
-  -- draw: the character (two sprites), then the bullets, then the parked SAT
+  -- draw: the character (two sprites), then the bullets, then the parked SAT.
+  -- #148: the aim pose shows only WHILE the fire key is held — the old
+  -- cooldown timer kept the gun up after the key was released, which is the
+  -- wrong animation Dennis saw.  Standing still shows the idle stand (frame
+  -- 1), walking shows the run cycle, the leap has run frame 7's stride.
   if airborne == 1 then
     put_player(px, py, JUMP_L, JUMP_R)
-  elseif cooldown > 3 then
+  elseif pad[1].i or pad[1].ii then
     put_player(px, py, SHOOT_L, SHOOT_R)
+  elseif move == 0 then
+    put_player(px, py, IDLE_L, IDLE_R)
   else
     local k = run_t // 4
     put_player(px, py, RUN_L[k + 1], RUN_R[k + 1])
