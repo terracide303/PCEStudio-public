@@ -404,15 +404,6 @@ function stripsPerLine(sat) {
   return lines;
 }
 
-function trunkColumns(sat) {
-  let n = 0;
-  for (let slot = 6; slot < 24; slot += 3) {
-    const y = (sat[slot * 8] | (sat[slot * 8 + 1] << 8)) & 0x3FF;
-    if (y !== 0) n++;
-  }
-  return n;
-}
-
 /* the scripted pad over several levels: jump each rock, and press Run on the
  * level's last frame so the run starts again (the sign has ended it by then) */
 const LEVEL = 760;
@@ -426,26 +417,22 @@ function longPad(f) {
 function checkDepth() {
   const rt = toys.create(source, { budgetMs: 400, songs: [song] });
   rt.load();
-  let worst = 0, worstAt = -1, maxTrunkCols = 0, minTrunkCols = 99;
-  let seenPositions = new Set(), levelsWon = 0, lastState = 0;
+  let worst = 0, worstAt = -1, used = 0;
   for (let f = 0; f < 3600; f++) {
     rt.setPad(1, longPad(f));
     const g = rt.frame(f);
     const lines = stripsPerLine(g.state.sat);
     for (let y = 0; y < 224; y++)
       if (lines[y] > worst) { worst = lines[y]; worstAt = f + ":" + y; }
-    const cols = trunkColumns(g.state.sat);
-    if (cols > maxTrunkCols) maxTrunkCols = cols;
-    if (f > 5 && cols < minTrunkCols) minTrunkCols = cols;
-    seenPositions.add(g.state.sat[6 * 8 + 2] | (g.state.sat[6 * 8 + 3] << 8));
+    for (let i = 6; i < 64; i++)
+      if (((g.state.sat[i * 8] | (g.state.sat[i * 8 + 1] << 8)) & 0x3FF) !== 0) used++;
   }
   rt.dispose();
   check(worst <= 16, "no sprite line exceeds 16 strips over 3,600 frames of the " +
         "scripted pad (busiest: " + worst + " at frame:line " + worstAt + ")");
-  check(maxTrunkCols >= 1 && maxTrunkCols <= 4,
-        "front trunks are on the screen, never more than two at a time " +
-        "(" + maxTrunkCols + " of their 6 columns' SAT slots at most)");
-  console.log("  sprites: busiest line " + worst + " of 16 strips, trunk SAT slots 6..23");
+  check(used === 0, "the sprites are the player, the sign and the rocks only: " +
+        "SAT slots 6..63 are never used (#150: the front-trunk sprites are gone)");
+  console.log("  sprites: busiest line " + worst + " of 16 strips (player, sign, rocks)");
 }
 
 /* the seam, read off the rendered picture: the BAT is 32 cells wide (MWR) so
@@ -510,7 +497,7 @@ function checkCut() {
 
 /* a strip of four scroll positions for Dennis */
 function checkScrollStrip() {
-  const at = [0, 150, 300, 450];
+  const at = [0, 150, 300, 450];  /* four scroll positions: 0, 300, 600, 900 px */
   const run = playTogetherLua(scriptedPad, 460, at);
   const W = 256 * 2, H = 224 * 2, grid = new Uint8Array(W * H * 3);
   at.forEach((f, i) => {
