@@ -547,9 +547,10 @@
 
   /* ---- the fade as a toy's asset --------------------------------------- */
 
-  /* fade.json: the stepped palettes recorded beside the toy.  Nothing reads
-   * it into a running toy yet (the importer is #24/#71), so the panel says
-   * that; the toy-code form above is the one that runs. */
+  /* fade.json: the stepped palettes recorded beside the toy.  The importer
+   * (#117) reads tiles/palettes/sprites.json, not fade.json, so nothing reads
+   * this one into a running toy yet and the panel says so; the toy-code form
+   * above is the one that runs. */
   function assetText(plan) {
     var palettes = plan.palettes.map(function (p) {
       return { kind: p.kind, palette: p.palette, addresses: p.addresses };
