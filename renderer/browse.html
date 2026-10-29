@@ -188,7 +188,8 @@
                     error: null, href: link.getAttribute("href"),
                     studioHref: open.getAttribute("href") };
     try {
-      entry.frame = gallery.still(canvas, toy.source, gallery.THUMB_FRAME);
+      entry.frame = gallery.still(canvas, toy.source, gallery.THUMB_FRAME,
+                                  { songs: toy.songs });
       entry.ink = gallery.countInk(entry.frame);
     } catch (e) {
       entry.error = (e && e.code ? e.code + ": " : "") +
