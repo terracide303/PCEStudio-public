@@ -324,8 +324,9 @@ function checkCollision() {
   const drops = before.filter((l, i) => i > 0 && l < before[i - 1]).length;
   rt.dispose();
 
-  check(lost > 0, "a drone that reaches a parked ship costs a life (first at frame " +
-        lost + ")");
+  check(lost > 0, "a drone that reaches a parked ship costs a life" +
+        (lost < 0 ? " (no life was lost in " + FRAMES + " still frames)"
+                  : " (first at frame " + lost + ")"));
   eq("exactly one life is lost in the 600-frame still run", drops, 1);
   eq("the still run ends on two hearts", lastLives, 2);
   return { lost: lost };
