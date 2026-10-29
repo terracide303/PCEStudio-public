@@ -183,6 +183,7 @@ constant operand; `target` is an instruction index in the same function.
 | `table` | `dst` | `table` | a new empty table |
 | `tset` | `base`, `key`, `value` | `table`; key `int`/`str` | set a field or element |
 | `setlist` | `base`, `index`, `values[]` | `table` | fill the array part (Lua's `SETLIST` group of 50) |
+| `tget` | `dst`, `base`, `key` | `table`; key `int`/`str` | read an element (`int` key) or a field (`str` key) |
 | `arith` | `op`, `dst`, `a`, `b`, `type` | `int` or `fixed` | `add sub mul mod div idiv band bor bxor shl shr`; `type` says which arithmetic |
 | `unm` / `bnot` / `not` | `dst`, `a` | same / `int` / any → `bool` | unary minus, bitwise not, logical not (truthiness) |
 | `cmp` | `op`, `dst`, `a`, `b`, `type` | `int`/`fixed`/`bool` → `bool` | `eq lt le` |
@@ -241,6 +242,7 @@ a comparison's following `JMP` is at `pc + 1` and its target is
 | `pad[n].right` | `GETTABUP pad`, `GETTABLE n`, `GETTABLE "right"` | `padref n` then `padget field` |
 | `t = {x = 1, y = 2}` | `NEWTABLE`, `SETTABLE` with constant keys | `table`, then `tset` with str keys |
 | `t = {1, 2, 3}` | `NEWTABLE`, `SETLIST` | `table`, then `setlist` (Lua's 50-field groups) |
+| `t[i]` / `t.x` | `GETTABLE` (or `GETTABUP` on a captured table) | `tget`; a captured table is first loaded with `getupval` into a scratch register, because an IL operand is a register or a constant, not an upvalue |
 | `a + b`, `a - b`, `a * b` | `ADD SUB MUL` | `arith` with the operands' numeric type |
 | `a / b` | `DIV` | `arith div`, type `fixed` (Lua's `/` is floating point) |
 | `a // b`, `a % b` | `IDIV MOD` | `arith idiv`/`mod`, type `int` for int operands |
@@ -296,6 +298,37 @@ compares with the sign of the step, writes the control variable and branches.
 The IL types all four registers `int`; a loop whose start, limit or step is
 fixed is `il-mixed` (Lua would run a float loop; a console one has to be
 integer, and the toy API's ranges are integers).
+
+### Tables, read back (#118)
+
+A table the toy builds can be read. `t[i]` and `t.x` lower to `tget`; nothing
+else about the table changes (the constructor is still `table` + `tset` /
+`setlist`, and `pairs`/`ipairs` are still `il-for-in`). What the typer knows
+about a table is deliberately small, because a Lua table is heterogeneous and
+the IL is not:
+
+- **The array part has one element type.** Every integer-key `tset` and every
+  `setlist` value unifies with the table's `elem`; `t[i]` returns it. So
+  `a = {0, 0, 0} a[1] = 7` types `a[1]` as `int`, and a table written with an
+  `int` in one place and a `fixed` in another is `il-mixed` — the same rule as
+  a variable with one numeric type.
+- **A string-keyed field is typed by its use.** `t.x` yields an unknown value,
+  like an unbound parameter: it takes the type the surrounding operation
+  needs, and is refused where a specific kind is required and none is implied.
+  Writing `t.x` does not constrain it. (Tracking per-field types would make a
+  spec table like `{byr = 0, cram = {...}}` a type conflict, so the IL does
+  not.)
+- **A table captured as an upvalue is read the same way**, through a scratch
+  register the lowering allocates for the `getupval`. Writing a captured table
+  is still refused (below).
+- An integer read of a table whose array part was never typed is an unknown,
+  which the use may bind to `int`; the Lua runtime answers `nil` for a key
+  never set and the IL has no `nil` value, so such a read is a toy bug either
+  runtime shows, not a typing guarantee.
+
+The C backend (`pce-cgen.js`) and the bytecode encoder (`pce-ilbc.js`) do not
+lower tables at all, so a toy that reads one is accepted by the IL and refused
+on the console routes (`cgen-op`, `ilbc-op`).
 
 ---
 
@@ -360,7 +393,6 @@ use `renderer/pce-toyhost.js`. The IL's own:
 | `il-fixed-range` | a fixed constant outside Q16.16 (`1e9`) |
 | `il-type` | a type conflict, a value with no type where one is needed, calling a non-function |
 | `il-cond` | a condition with no run-time value (a string, or `_ENV`); Lua's truthiness itself is `br`'s semantics |
-| `il-table-read` | reading a field of a table the toy built (the IL's tables are write-only aggregates for now; a pad or VRAM read has its own instruction) |
 | `il-pad-write` | writing a pad |
 | `il-key` | a table key that is not an integer register or a constant, or a pad field that is not one of the eight names |
 | `il-reg-name` | `reg()`'s first argument is not a constant string |
@@ -398,7 +430,7 @@ frame(f):  host.beginFrame(f)
 ```
 
 `tests/check-il.js` is the card's evidence. `node tests/check-il.js` exits 0
-with **973 checks**:
+with **1,259 checks**:
 
 - the three toys of #30 — palette cycling, the `raster(line)` callback, the
   sprite reading `pad[1]` — run for **40 frames each** through
@@ -418,10 +450,14 @@ with **973 checks**:
   closure with a mutable captured variable. These are the constructs the
   lowering is easiest to get wrong (the first two runs of this card found an
   inverted `TEST` and a dropped `LOADBOOL` skip, both now fixed);
+- a fifth toy (#118) reads tables back — an array of numbers in a `for` loop,
+  an array of entity tables (`e[i].x`), a string-keyed field, and a table
+  captured as an upvalue (the lowering's scratch-register path) — and its
+  `vram`, `cram`, `sat`, registers and pixels are byte-equal for 40 frames;
 - the helpers agree with the prelude's on a toy that prints
   `clamp/min/max/abs/floor/rgb/lerp` for ten frames (the logs are equal);
 - the host's refusals come back through the IL path by code (11 of them), and
-  the IL's refusal set is asserted by code and line (20 of them), plus a Lua
+  the IL's refusals are asserted by code with the source line, plus a Lua
   syntax error.
 
 **Rule 2:** this test was written by the seat that wrote the IL, so a cold

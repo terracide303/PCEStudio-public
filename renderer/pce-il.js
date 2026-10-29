@@ -41,7 +41,6 @@
  *   il-fixed-range  a fixed-point constant outside its range
  *   il-type         a value the typer cannot resolve, or a type conflict
  *   il-cond         a condition that is not a bool
- *   il-table-read   reading a field of a toy-built table (write-only for now)
  *   il-pad-write    writing a pad table
  *   il-key          a table key that is not a constant or an integer register
  *   il-reg-name     reg()'s first argument is not a constant string
@@ -132,6 +131,13 @@
   function unsupportedType(name) { return { k: "unsupported", name: name }; }
   var nextVar = 1;
   function varType() { return { k: "var", id: nextVar++, ref: null }; }
+  /* A table a toy builds carries the type of its array part (#118): every
+   * integer-key write and setlist value unifies with `elem`, and an integer
+   * read (t[i]) returns it.  `elem` stays unresolved until a write types it;
+   * a string-key read is a fresh variable typed by its use, because the IL's
+   * tables are aggregates, not records.  T.TABLE (the surface's "a table is
+   * required" signature) carries no elem and reads yield an unknown. */
+  function tableType() { return { k: "table", elem: varType() }; }
   function isVar(t) { return !!t && t.k === "var"; }
   function resolve(t) {
     while (isVar(t) && t.ref) t = t.ref;
@@ -954,7 +960,7 @@
       }
 
       case "table":
-        rt[ins.dst] = T.TABLE;
+        rt[ins.dst] = tableType();
         break;
 
       case "setlist": {
@@ -962,6 +968,10 @@
         if (slb.k === "var") U(get(ins.base, line), T.TABLE, line);
         else if (slb.k !== "table") {
           errs.push({ code: "il-type", line: line, message: "(setlist) a table is required, got a " + typeName(slb) });
+        } else if (slb.elem) {
+          for (var li = 0; li < ins.values.length; li++) {
+            U(slb.elem, get(ins.values[li], line), line);
+          }
         }
         break;
       }
@@ -1321,9 +1331,24 @@
           }
           rt[ins.dst] = T.BOOL;
         } else if (gbk.k === "table") {
-          errs.push({ code: "il-table-read", line: line,
-                      message: "a table the toy built is write-only in the IL for now (docs/IL.md §5)" });
-          rt[ins.dst] = varType();
+          /* t[i] is the array part's element type; t.x is an unknown typed
+           * by its use (docs/IL.md §5).  A key that is neither is il-key. */
+          var ktk2 = resolve(get(ins.key, line));
+          if (ktk2.k === "var") {
+            U(get(ins.key, line), T.INT, line);
+            ktk2 = resolve(get(ins.key, line));
+          }
+          note(ins.key, get(ins.key, line));
+          if (ktk2.k === "int") {
+            rt[ins.dst] = gbk.elem || varType();
+          } else if (ktk2.k === "str") {
+            rt[ins.dst] = varType();
+          } else {
+            errs.push({ code: "il-key", line: line,
+                        message: "a table key must be a string or an integer" });
+            rt[ins.dst] = varType();
+          }
+          ins.dstType = kindOf(rt[ins.dst]);
         } else if (gbk.k === "var" || gbk.k === "nil") {
           if (strict) {
             errs.push({ code: "il-type", line: line,
@@ -1351,9 +1376,15 @@
           wantInt(ins.value, line);
         } else if (sbk.k === "table") {
           var ktk = resolve(get(ins.key, line)).k;
-          if (ktk !== "str" && ktk !== "int" && ktk !== "var") {
+          if (ktk === "var") {
+            U(get(ins.key, line), T.INT, line);
+            ktk = resolve(get(ins.key, line)).k;
+          }
+          if (ktk !== "str" && ktk !== "int") {
             errs.push({ code: "il-key", line: line,
                         message: "a table key must be a string or an integer" });
+          } else if (ktk === "int" && sbk.elem) {
+            U(sbk.elem, get(ins.value, line), line);
           }
         } else if (sbk.k === "pad" || sbk.k === "padset") {
           errs.push({ code: "il-pad-write", line: line, message: "the pads are read-only" });
@@ -1650,8 +1681,18 @@
           push({ t: "padget", dst: ins.dst, pad: finalOperand(ins.base, false),
                  field: field, line: line });
         } else if (baseT === "table") {
-          refuse("il-table-read", "line " + line +
-                 ": a table the toy built is write-only in the IL for now (docs/IL.md §5)");
+          /* A table captured as an upvalue has no register operand in the IL:
+           * load it into a scratch slot the lowering allocates, then read. */
+          var tbase;
+          if (ins.base && ins.base.upval != null) {
+            var scratch = fn.nextReg++;
+            push({ t: "getupval", dst: scratch, idx: ins.base.upval, line: line });
+            tbase = { r: scratch, tt: "table" };
+          } else {
+            tbase = finalOperand(ins.base, false);
+          }
+          push({ t: "tget", dst: ins.dst, base: tbase,
+                 key: finalOperand(ins.key, false), line: line });
         } else if (baseT === "env") {
           refuse("il-env", "line " + line + ": _ENV used as a value");
         } else {
@@ -1949,6 +1990,19 @@
           var keyv = cnt(ins.key);
           if (typeof keyv === "number") tbl[keyv - 1] = cnt(ins.value);
           else tbl[keyv] = cnt(ins.value);
+          pc++;
+          break;
+        }
+        case "tget": {
+          var gtbl = cnt(ins.base);
+          if (gtbl === undefined || gtbl === null) fail(ins.line, "attempt to index a nil value");
+          var gkey = cnt(ins.key);
+          /* tset/setlist store an integer key k at JS index k-1, so that
+           * Lua's 1-based array part is the same in both runtimes; a string
+           * key is its own name.  An unset element is undefined, as nil is
+           * the Lua runtime's answer (the IL has no nil value; using it as a
+           * number is a toy bug either runtime will show). */
+          frame.regs[ins.dst].v = typeof gkey === "number" ? gtbl[gkey - 1] : gtbl[gkey];
           pc++;
           break;
         }
@@ -2372,7 +2426,6 @@
       "il-fixed-range": "a fixed-point constant outside Q16.16",
       "il-type": "an unresolvable or conflicting type",
       "il-cond": "a condition that is not a bool",
-      "il-table-read": "reading a field of a toy-built table",
       "il-pad-write": "writing a pad table",
       "il-key": "a table key the IL cannot use",
       "il-reg-name": "reg() without a constant name",
