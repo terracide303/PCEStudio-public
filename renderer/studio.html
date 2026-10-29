@@ -67,6 +67,8 @@
 <link rel="stylesheet" href="../vendor/codemirror/lib/codemirror.css">
 <!-- #86: the SPRITES panel's own styles, beside its module (#102's split) -->
 <link rel="stylesheet" href="studio-panel-sprites.css">
+<!-- #98: the CONSOLE panel's own styles, beside its module -->
+<link rel="stylesheet" href="studio-panel-console.css">
 <style>
   :root {
     /* ppu.toys' design tokens, adapted (source URL in the credit block). */
@@ -1049,10 +1051,24 @@
             <pre class="table" id="reg-table"></pre>
           </div>
           <div class="panel" id="panel-console" data-panel="console" hidden>
+            <div class="con-head">
+              <h3>HOW THIS PROJECT RUNS ON A REAL CONSOLE</h3>
+              <p class="con-sub">frame time · compiler findings · code size</p>
+            </div>
+            <div class="con-banner is-idle" id="console-banner"
+                 data-state="idle" role="status">Reading the toy…</div>
+            <div class="con-findings-head"><span>FINDINGS</span>
+              <span id="console-count"></span></div>
+            <ul class="con-findings" id="console-findings"></ul>
+            <div class="con-stats" id="console-stats"></div>
+            <p class="con-note" id="console-note">Compiled in your browser by
+              PCEStudio's IL pipeline (<code>pce-il.js</code> →
+              <code>pce-validate.js</code> → <code>pce-cgen.js</code>). Frame
+              times are a static estimate, checked against Mednafen and ares,
+              not hardware. A toy <code>.pce</code> is still #31's
+              machine-code half; the picture editor's <b>Download .pce</b> is
+              the working ROM path.</p>
             <pre class="table" id="console-table"></pre>
-            <p class="hint">The PC Engine has no HDMA: per-line changes are the
-              RCR interrupt. The compiler half is #31; machine code and the
-              HuCard export are the second half of #75.</p>
           </div>
         </div>
       </section>
@@ -1251,6 +1267,11 @@
 <script src="pce-vram-map.js"></script>
 <script src="pce-sat.js"></script>
 <script src="pce-psg.js"></script>
+<!-- #98: the CONSOLE panel runs #32's validator and #31's C emitter over the
+     toy, so the tab can say what stops it reaching a real console.  Both sit
+     after pce-il.js/pce-sprites.js/pce-toyhost.js, which they need. -->
+<script src="pce-validate.js"></script>
+<script src="pce-cgen.js"></script>
 <script src="pce-docs.js"></script>
 <!-- #102: every panel is its own module. Each file registers one panel — its
      tab, its Panels-menu entry, its Guide chapter and its draw — through
@@ -2389,6 +2410,46 @@ function drawGutter() {
   $("gutter").textContent = out;
 }
 
+/* #98: a CONSOLE finding's file:line is a link into the editor.  The line is
+ * 1-based (Lua's own numbering); the tab is main.lua, the file the toy's
+ * chunk is.  CodeMirror gets its own cursor/scroll; the textarea fallback
+ * selects the line's first character.  Returns the line it went to. */
+function editorLine(line) {
+  const n = Math.max(1, Math.round(Number(line) || 1));
+  if (editor) {
+    editor.setCursor({ line: n - 1, ch: 0 });
+    if (typeof editor.scrollIntoView === "function")
+      editor.scrollIntoView({ line: n - 1, ch: 0 }, 80);
+    editor.focus();
+    return n;
+  }
+  const ta = $("source");
+  const lines = String(ta.value).split("\n");
+  let pos = 0;
+  for (let i = 0; i < n - 1 && i < lines.length; i++) pos += lines[i].length + 1;
+  ta.setSelectionRange(pos, pos);
+  if (typeof ta.focus === "function") ta.focus();
+  if (typeof ta.scrollIntoView === "function") ta.scrollIntoView();
+  drawGutter();
+  return n;
+}
+
+/* #98: CONSOLE is live as the toy is typed, not only when Run is pressed.
+ * Recompiling every keystroke would price / lower on every character, so the
+ * page asks the panel once typing pauses; the panel keeps its own result
+ * cache, and a draw for any other reason (Run, a frame, a seek) reuses it. */
+let consoleTimer = null;
+function scheduleConsoleRefresh() {
+  if (typeof setTimeout !== "function") return;
+  if (consoleTimer) clearTimeout(consoleTimer);
+  consoleTimer = setTimeout(() => {
+    consoleTimer = null;
+    if (activePanel !== "console") return;
+    panelDirty = true;
+    refreshPanels(true);
+  }, 180);
+}
+
 /* Every edit lands in the active file and, when that file is main.lua, in the
  * Lua the Run button compiles. Autosave on every edit is the ppu.toys
  * contract (`saved in this browser`); a failed write is a convenience lost,
@@ -2400,6 +2461,12 @@ function onEditorChange() {
   current.source = mainSource();
   setSaved("edited — Run to apply");
   persistToy();
+  /* #98: the CONSOLE tab answers as the Lua changes — the file the toy runs
+   * is main.lua, so an edit there is a new input for the compiler. */
+  if (f && f.name === "main.lua") {
+    panelDirty = true;
+    scheduleConsoleRefresh();
+  }
   /* An asset file edited by hand is a new input for the panels that draw
    * the assets (SCREEN): each one decides whether it cares. */
   if (f && (f.name === "tiles.json" || f.name === "palettes.json")) {
@@ -3906,6 +3973,22 @@ const studio = {
   screenPointer: (kind, ev, elem) => screenApi().pointer(kind, ev, elem),
   screenCanvas: () => screenApi().canvas(),
   screenDrawn: () => screenApi().drawn(),
+
+  /* #98 — the CONSOLE panel's report. The module owns the analysis; the
+   * evidence reads the same object its draw uses, and goto() is the function
+   * a finding's file:line link calls. editorLine() is the page's one way to
+   * put the cursor on a Lua line. */
+  console: () => { const a = panelApi("console"); return a ? a.state() : null; },
+  consoleRefresh: () => {
+    const a = panelApi("console");
+    if (!a) return null;
+    a.refresh();
+    panelDirty = true;
+    refreshPanels(true);
+    return a.state();
+  },
+  consoleGoto: (line) => { const a = panelApi("console"); return a ? a.goto(line) : false; },
+  editorLine: editorLine,
 
   /* #85 — the PALETTES panel's 512-colour picker and the VRAM panel's drawn
    * map. The modules own these; the evidence drives the same functions
