@@ -9,6 +9,8 @@ and what needs to be done").
 - **PROVEN** — works, and a named test shows it (in Mednafen, and on a fresh clone).
 - **PARTIAL** — part of it works (the row says which part); the rest is the card named.
 - **RUNNING** — a seat is building it now.
+- **IN CHECK** — built and its own checks pass; the board card sits in check because rule 2's cold
+  break by another seat is still owed.
 - **TODO** — on the board, not started.
 - **WAITING** — blocked on someone or something outside (named in the row).
 - **NOT PROVEN** — built, but the check that would prove it cannot be run here (named in the row).
@@ -68,9 +70,9 @@ The two milestones Dennis asked for:
 |---|---|---|---|
 | Toys run live in the browser (`init`, `frame`, `raster`, pads, passwords) | PROVEN | `check-toys.js`; every example shows a visible picture (#90); breaker gaps closed by #82 | #30, #73, #74, #82, #90 |
 | Five example toys (parallax, sky, road, status bar, palette cycling) | PROVEN | `check-examples.js` 120 frames each | #29 |
-| Sound in toys (a song and sound effects) | PARTIAL | song + SFX through HuTrack's channel hand-off; effects, arpeggio and samples still to do; #111 is open: the toy host's `sfx()` writes R4 = $40 (DDA with the channel-enable bit 7 clear), so `pce-psg.js` renders a constant level, RMS 905 against 5899 for $9F | #71, #111 |
+| Sound in toys (a song and sound effects) | PARTIAL | song + SFX through HuTrack's channel hand-off; effects, arpeggio and samples still to do (#71). #111 is fixed and closed: `sfx()` writes R4 = $80 \| volume (waveform mode, enable on), so the rendered RMS is 5,899 against 908 with the old $40 \| volume (2a5e5e9). #113 is open: nothing writes the PSG's main amplitude R1 $FF, so a toy that calls only `sfx()`, with no `music()` before it, is silent (RMS 0) | #71, #111, #113 |
 | Pads 1-5 and the timer, browser and console | PROVEN | `check-toys.js` 831 checks; console frame and browser frame 1293 both put the sprite at (154,138); the timer ticks 6.47 a frame, arithmetic 6.473 (tests/dumps/pads) | #45 |
-| The IL (our intermediate language) | PARTIAL | `check-il.js` 973 checks, Lua == IL, and the exports through llvm-mos and HuC run it; one documented form fails: a literal `true` in a table field (`spbg=true`) is dropped, so SAT word 3 = 0 while `spbg=1` sets bit 7 (#112) | #31, #112 |
+| The IL (our intermediate language) | PROVEN | `check-il.js` 973 checks, Lua == IL, and the exports through llvm-mos and HuC run it. The one documented form that failed, a literal `true` in a table field, is fixed (#112, 4f37533: `decodeConst()` carries the bool, so `spbg=true` sets SAT word 3 bit 7 = 128 like `spbg=1` and `(1==1)`); a committed regression test for it is still owed to @test, per rule 2 | #31, #112 |
 | The checker: frame time, sprites per line, memory | PROVEN | `check-validate.js`; breaker gaps closed by #89 | #32 |
 | A small game made only in the studio (demo-ready test) | TODO | starts when the panels and sound are in | #88 |
 | AI link part 1: an MCP server (an agent writes, runs, checks and exports toys) | PROVEN | `check-mcp.js` 101 checks: a real MCP client over stdio, frame_png, a register poke, validate with file:line, export_pce byte for byte; the board card is still open for rule 2 | #36 |
@@ -89,7 +91,7 @@ The two milestones Dennis asked for:
 | The Python builder (`tools/genviewer.py`) agrees with the browser builder | PROVEN | `check-python-builder.js`: 9/13/14 regions and the 108-bank fixture byte-equal; G11 and G16 DETECTED when re-broken | #60 |
 | Toys to `.pce` via llvm-mos (the yardstick, needs a native install) | PROVEN | `check-il-console.js` 126 checks: 2 toys diff 0 in Mednafen, 7,417 cycles/frame | #31 A/C |
 | Toys to `.pce` via HuC (comparison) | PROVEN | `check-il-huc.js`; 14x slower than llvm-mos | #31 B/D |
-| Toys to `.pce` in the browser, route 1 (interpreter in the ROM) | PARTIAL | first half proven: the IL as bytecode, interpreted on the console in Mednafen (`check-ilvm.js` 50 checks); the studio's Export button and raster are the second half, and its seat is idle with the card still open | #100 |
+| Toys to `.pce` in the browser, route 1 (interpreter in the ROM) | PARTIAL | first half proven: the IL as bytecode, interpreted on the console in Mednafen (`check-ilvm.js` 50 checks), re-verified from a clean clone and its frame-cost guard cold-broken end to end (4a96740); the studio's Export button and raster are the second half, not started | #100 |
 | Toys to `.pce` in the browser, route 2 (our own compiler) | TODO | for speed, after route 1 | #101 |
 | Music in the `.pce` (Furnace DMF to HuTrack) | PROVEN | `check-export-song.js`, `check-hutrack.js` | #35 |
 | Sound patches to `.pce` (wave editor) | PROVEN | `check-wave.js` | #62 |
@@ -110,7 +112,7 @@ The two milestones Dennis asked for:
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone (`21e6d5e`, 2026-10-29): 36 PASS, 1 SKIP (check-ares, no screen: 10 vraster/effect captures), 0 FAIL; `check-studio.js` 1,227 checks, `check-assets.js` 246 and #103's `check-skill.js` 104 among them | #83, #108, #109 |
+| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone (`4a96740`, 2026-10-29): `make -C tools` then 36 PASS, 1 SKIP (check-ares, no screen: 10 vraster/effect captures), 0 FAIL; `check-studio.js` 1,227 checks, `check-assets.js` 246 and #103's `check-skill.js` 104 among them | #83, #108, #109 |
 | Every new test broken by a different seat (rule 2) | PROVEN | `docs/REVIEW-*.md`; each miss became a card and is closed | rule 2 |
 | Every manual read and mapped to a card | PROVEN | `docs/MANUALS.md` | #44, #55 |
 | Phase 1 read cold by a reviewer | PROVEN | `docs/REVIEW.md`: 12 ranked findings, each fixed in #38/#39 with a test | #11 |
