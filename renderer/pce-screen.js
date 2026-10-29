@@ -19,10 +19,9 @@
  * What the panel edits is the toy's assets, not the running frame.  The map
  * lives in tiles.json beside the tiles it names (a `map` object with the BAT's
  * words), palettes in palettes.json; the shape is pce-editor.js's picture, the
- * same one the ASSETS tab saves (#77) and the importer will read (#24/#71).
- * Until that importer exists a toy still writes its own VRAM/CRAM, so the
- * panel's own canvas is the picture these assets make — rendered by pce-bg.js,
- * the same model as the output column.
+ * same one the ASSETS tab saves (#77) and renderer/pce-toyhost.js's importer
+ * reads into a running toy (#117). The panel's own canvas is the picture these
+ * assets make — rendered by pce-bg.js, the same model as the output column.
  *
  * Part A is the 32x32 BAT (MWR $00), the size the toy host's 256x224 frame
  * uses and the size pce-editor.js's picture model holds.  The VDC's other
