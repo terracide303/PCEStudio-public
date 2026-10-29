@@ -19,10 +19,23 @@ files=$( { find renderer -type f \( -name '*.html' -o -name '*.js' -o -name '*.c
            find vendor/codemirror vendor/fengari vendor/ppu-toys -type f;
            echo LICENSE; } | grep -v '/\.' | sort )
 
-if [ "${1:-}" = "--dry" ]; then echo "$files"; echo "$(echo "$files" | wc -l | tr -d ' ') files"; exit 0; fi
+# The demo art is never committed (docs/DECISIONS.md, 2026-10-29): it lives
+# beside the repo and goes up WITH the toy, folded into the one module the
+# pages read.  The repo's own renderer/gallery-toys.js stays the art-free
+# copy the tests check, so this is the only place the two are joined.
+ARTDIR="${PCE_DEMO_ART:-/Volumes/External/agent-workshop-demo/demo-art}"
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/pce-deploy-XXXXXX"); trap 'rm -rf "$STAGE"' EXIT
+[ -d "$ARTDIR" ] && { node tools/gallery.js --art-dir "$ARTDIR" > "$STAGE/gallery-toys.js" || exit 2; }
+
+if [ "${1:-}" = "--dry" ]; then
+  echo "$files"
+  [ -f "$STAGE/gallery-toys.js" ] && echo "$STAGE/gallery-toys.js  -> renderer/gallery-toys.js"
+  echo "$(echo "$files" | wc -l | tr -d ' ') files ($ARTDIR replaces renderer/gallery-toys.js)"
+  exit 0
+fi
 : "${PCE_CP_PASS:?set PCE_CP_PASS (never put it in a file)}"
 
-jar=$(mktemp); trap 'rm -f "$jar"' EXIT
+jar=$(mktemp); trap 'rm -rf "$jar" "$STAGE"' EXIT
 token=$(curl -s --max-time 40 -c "$jar" --data-urlencode "user=$USER" --data-urlencode "pass=$PCE_CP_PASS" \
           "$CP/login/?login_only=1" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("security_token",""))')
 [ -n "$token" ] || { echo "cPanel login failed" >&2; exit 1; }
@@ -57,4 +70,9 @@ for d in $(echo "$files" | xargs -n1 dirname | sort -u); do
   upload "$target" $group >/dev/null
   total=$((total + $(echo "$group" | wc -l)))
 done
+# the art-bearing gallery module goes over the top of the art-free one
+if [ -d "$ARTDIR" ]; then
+  upload "$DEST/renderer" "$STAGE/gallery-toys.js" >/dev/null
+  echo "uploaded the demo art with it (from $ARTDIR)"
+fi
 echo "uploaded $total files + index.html to $DEST"

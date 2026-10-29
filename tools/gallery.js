@@ -27,6 +27,12 @@ const ROOT = path.resolve(__dirname, "..");
 const TOYS = path.join(ROOT, "toys");
 const OUT = path.join(ROOT, "renderer", "gallery-toys.js");
 
+/* Where the demo art lives when a toy carries an `art` entry: beside the
+ * repo, never inside it (docs/DECISIONS.md, 2026-10-29).  Only --art-dir
+ * turns it on, so `--check` and a fresh clone see the generator's output
+ * without any art on the machine. */
+let ART_DIR = null;
+
 /* The gallery, in the order toys/README.md tells the tricks in.  `effect`
  * is the one-line "what it proves" the toy page prints under the title. */
 const TOYS_META = [
@@ -96,6 +102,23 @@ const TOYS_META = [
       { name: "palettes.json", kind: "palettes" },
       { name: "sprites.json", kind: "sprites" }
     ]
+  },
+  /* #127: a demo built from a bought tileset.  The art is NOT in the repo
+   * (docs/DECISIONS.md, 2026-10-29): `art` names the file tools/cave-assets.js
+   * writes beside the repo, and only a build with --art-dir appends it, so
+   * the committed module and a fresh clone carry the toy's own Lua alone. */
+  {
+    id: "cave",
+    file: "cave/main.lua",
+    title: "CAVE",
+    author: "Will Tice · unTied Games",
+    badge: "#127 demo",
+    tags: ["demo", "parallax", "palette", "sprites", "scroll"],
+    blurb: "Four background bands and a floor scroll at five speeds over " +
+      "the Retro Pixel Cave tileset while the rock's lit veins breathe and " +
+      "two bats and an ember cross the dark. IJKL scrolls it by hand.",
+    effect: "five BXR bands + a palette cycle",
+    art: { dir: "cave", file: "art.lua" }
   }
 ];
 
@@ -123,6 +146,20 @@ function readToy(meta) {
   };
   if (meta.badge) toy.badge = meta.badge;
   toy.source = source;
+  if (meta.art) {
+    /* the art is appended, exactly as the toy page runs it: main.lua defines
+     * the stub, the art file defines the same functions last */
+    if (ART_DIR) {
+      const file = path.join(ART_DIR, meta.art.dir, meta.art.file);
+      if (!fs.existsSync(file))
+        throw new Error("no " + path.join(meta.art.dir, meta.art.file) +
+                        " in " + ART_DIR + " for the gallery's " + meta.id);
+      toy.source = source + "\n" + fs.readFileSync(file, "utf8");
+      toy.art = { file: meta.art.file, present: true };
+    } else {
+      toy.art = { file: meta.art.file, present: false };
+    }
+  }
   if (meta.files) {
     const dir = path.dirname(file);
     toy.files = meta.files.map((f) => ({
@@ -178,11 +215,14 @@ function render() {
 function main(argv) {
   const args = argv.slice(2);
   let mode = "stdout";
-  for (const a of args) {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
     if (a === "--write") mode = "write";
     else if (a === "--check") mode = "check";
+    else if (a === "--art-dir") ART_DIR = args[++i];
     else if (a === "--help" || a === "-h") {
-      process.stdout.write("usage: node tools/gallery.js [--write | --check]\n");
+      process.stdout.write("usage: node tools/gallery.js [--write | --check]" +
+                           " [--art-dir DIR]\n");
       return 0;
     } else {
       process.stderr.write("unknown argument: " + a + "\n");
