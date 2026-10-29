@@ -1171,8 +1171,8 @@ function usedChannels(song) {
        ["main.lua", "song.json"]);
     const openedSongSource = openedSongFile.files.filter(
       (f) => f.name === "song.json")[0].source;
-    eq("... and its song.json is the one song_write wrote",
-       JSON.parse(openedSongSource), composed.body.song);
+    eq("... and its song.json is the one song_write wrote, byte for byte",
+       openedSongSource, JSON.stringify(composed.body.song, null, 2) + "\n");
     const savedSongs = seqLib.songsFromFiles(openedSongFile.files);
     eq("the opened toy carries one playable song slot", savedSongs.length, 1);
     const openedMainSource = openedSongFile.files.filter(
