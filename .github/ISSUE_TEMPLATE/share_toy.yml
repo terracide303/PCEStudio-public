@@ -1,0 +1,39 @@
+name: Share a toy
+description: You made something with PCEStudio and want to show it (or see it in Browse).
+labels: ["toy"]
+body:
+  - type: input
+    id: title
+    attributes:
+      label: Title
+    validations:
+      required: true
+  - type: textarea
+    id: about
+    attributes:
+      label: What it is and the keys
+    validations:
+      required: true
+  - type: textarea
+    id: file
+    attributes:
+      label: The toy
+      description: Attach the file from "Save file" (.pce.json, zip it if GitHub refuses it) or paste the Lua.
+    validations:
+      required: true
+  - type: dropdown
+    id: browse
+    attributes:
+      label: May we put it in Browse with your name?
+      options:
+        - "Yes"
+        - "No, just sharing"
+    validations:
+      required: true
+  - type: checkboxes
+    id: rights
+    attributes:
+      label: Art and code
+      options:
+        - label: All art and code in it is mine, or I am allowed to share it (I checked the licence of any art pack I used).
+          required: true
