@@ -20,15 +20,16 @@ mkdir -p ~/.claude/skills
 ln -s <folder>/plugin/skills/creating-pce-toys ~/.claude/skills/creating-pce-toys
 ```
 
-The server needs Node and nothing else: no npm install, no compiler. The link is the skill that ships beside it (SKILL.md and six worked recipes). Skills load when a session starts, so start a new Claude Code session after this.
+The server needs Node and nothing else: no npm install, no compiler. The link is the skill that ships beside it (SKILL.md and seven worked recipes). Skills load when a session starts, so start a new Claude Code session after this.
 
 ### The tools
 
 | tool | what it does |
 | --- | --- |
 | toy_write | replace the session's toy: a file set whose main.lua runs |
-| toy_run | run it frame by frame, with an optional pad script; returns registers, the raster shape and VRAM/CRAM/SAT hashes |
-| source_add | turn a PNG or a pixel grid with a palette into the toy's tiles, sprites, a tilesheet or a palette, before toy_run; returns the VRAM/CRAM budget |
+| toy_run | run it frame by frame, with an optional pad script; returns registers, the raster shape, VRAM/CRAM/SAT hashes and what each PSG channel played |
+| source_add | turn a PNG or a pixel grid with a palette into the toy's tiles, sprites, a tilesheet or a palette, or a .mid into its song.json, before toy_run; returns the VRAM/CRAM budget |
+| song_write | compose the toy's song.json from a step list with the SEQUENCER's built-in instruments; music(0) plays it |
 | frame_png | the picture at a frame, as a PNG you can look at |
 | validate | check it against the hardware's limits, with file:line findings |
 | toy_save | save the whole toy — code, art, songs — as one .pce.json the person opens in the studio |
@@ -37,7 +38,7 @@ The server needs Node and nothing else: no npm install, no compiler. The link is
 | registers_get | read a VDC, VCE or PSG register with its range |
 | register_set | set a view override frame_png applies (and clears) |
 
-Work the loop the skill teaches: docs(topic) for the API (do not guess names), toy_write, toy_run, frame_png to look, validate, export_pce. Add art with source_add before toy_run: a base64 PNG or a pixel grid with its palette becomes the toy's tiles, sprites, a tilesheet or a palette, merged into its asset files, and the reply is the VRAM/CRAM budget — toy_run imports those files into VRAM, CRAM and the SAT before init(), exactly as the studio does. A toy that runs without errors does not mean it looks right: look at the frame.
+Work the loop the skill teaches: docs(topic) for the API (do not guess names), toy_write, toy_run, frame_png to look, validate, export_pce. Add art with source_add before toy_run: a base64 PNG or a pixel grid with its palette becomes the toy's tiles, sprites, a tilesheet or a palette, merged into its asset files, and the reply is the VRAM/CRAM budget — toy_run imports those files into VRAM, CRAM and the SAT before init(), exactly as the studio does. Add music with song_write (or source_add kind song for a .mid): it writes song.json and music(0) plays it, while toy_run's sound report says what started on each channel. A toy that runs without errors does not mean it looks right: look at the frame.
 
 **Finish with toy_save.** It writes one .pce.json holding every file — main.lua, the art source_add made, the named sources and the songs — in the studio's own Save format, inside the folder the server runs in (a path outside it is refused). Then tell the person: open PCEStudio, press Open… → From file…, pick that file — or drop it on the page — and the game plays with its art. Without this step you can only hand over the code, and everything source_add imported stays behind.
 
@@ -131,7 +132,7 @@ These are the names and ranges the runtime enforces. A value past a range is ref
 | raster(line, spec) | registers one line's entry: {bxr, byr, cr, cram = {{addr, word}, ...}} | line 0..223; one entry per line and at most 64 colour writes on it; raster-line, raster-line-full |
 | pad[n].<button> | controller n, read-only, refreshed before frame() | n 1..5; up, down, left, right, i, ii, select, run |
 | note(name or MIDI) | the PSG's 12-bit F divider for a note name (Lua only) or a MIDI number (both runtimes); feed it to sfx() | a MIDI number 0..127; the result is clamped to 0..4095, and the IL carries no strings so a cartridge uses the number |
-| music(index) | plays song index from the start — the whole engine restarts, as HuTrack's playSong does | an index into the songs the runtime was given (0..songs-1) |
+| music(index) | plays song index from the start — the whole engine restarts, as HuTrack's playSong does | an index into the songs the runtime was given: a toy's song.json / songs.json through pce-seq.js songsFromFiles (0..songs-1); no song file is music-range |
 | sfx(channel, freq, volume, frames) | takes the channel (HuTrack's reserve), loads a 32-step square, sets F = freq and AL = volume, and gives it back after frames | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 |
 | release(channel) | gives a channel back now (HuTrack's release): control and noise off, and the music waits for a fresh note on it | channel 0..5; a channel no SFX owns is left alone |
 | password.pack(v) / password.unpack(code) | a save as a short code starting P1 | an integer -1073741824..1073741823, a string of at most 64 bytes, a table of at most 32 entries nested 6 deep; password-value, password-code |
@@ -1075,7 +1076,9 @@ end
 
 The HuC6280 PSG has 6 channels, each a 32-step waveform of 5-bit samples (0..31), plus noise on channels 4 and 5 and an LFO. The model is renderer/pce-psg.js, a literal transcription of Mednafen's pipeline at 44100 Hz.
 
-music(index) plays a song from the list the runtime was given — a module read by the tracker route (renderer/pce-dmf.js, renderer/pce-song.js), whose writes are the ones HuTrack's engine makes, one VBlank per frame. A toy pasted into the studio gets no such list: the studio builds its runtime without songs, so music(0) there is music-range, and music() is not how a first toy gets sound. Use sfx() and note() instead; music() is for a runtime a page hands a song list.
+music(index) plays a song from the list the runtime was given — a module read by the tracker route (renderer/pce-dmf.js, renderer/pce-song.js), whose writes are the ones HuTrack's engine makes, one VBlank per frame. renderer/pce-seq.js songsFromFiles is what turns a toy's files into that list: song.json (the SEQUENCER's own document) and any playable songs.json entry, compiled by the sequencer's model. The MCP server hands a toy the songs its files carry, and so does the studio when a toy is opened from its file, so music(0) plays the song a game ships with; a toy with no song file is refused music-range. sfx() and note() remain the way an effect takes a channel from the song (recipe 4).
+
+The player writes the song's wave instruments through the PSG's 32-step waveforms. The SEQUENCER's two noise drums (kick and snare) are its own R7 writes on channels 4 and 5; the toy's music() engine does not make them yet (pce-song.js does not do the noise effect), so a drum sounds as its volume envelope on a wave channel — use sfx() for a percussion hit.
 
 sfx(channel, freq, volume, frames) takes a channel from the music the way HuTrack reserves one, loads a 32-step square, sets F and AL, and gives the channel back after frames frames. release(channel) gives a channel back now. If the page did not load the PSG model or the song player, a sound call is no-psg.
 
@@ -1084,7 +1087,7 @@ A release does not resume the middle of a held note: the music waits for the nex
 | call | what it does | limits and refusal |
 | --- | --- | --- |
 | note(name or MIDI) | the PSG's 12-bit F divider for a note name (Lua only) or a MIDI number (both runtimes); feed it to sfx() | a MIDI number 0..127; the result is clamped to 0..4095, and the IL carries no strings so a cartridge uses the number |
-| music(index) | plays song index from the start — the whole engine restarts, as HuTrack's playSong does | an index into the songs the runtime was given (0..songs-1) |
+| music(index) | plays song index from the start — the whole engine restarts, as HuTrack's playSong does | an index into the songs the runtime was given: a toy's song.json / songs.json through pce-seq.js songsFromFiles (0..songs-1); no song file is music-range |
 | sfx(channel, freq, volume, frames) | takes the channel (HuTrack's reserve), loads a 32-step square, sets F = freq and AL = volume, and gives it back after frames | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 |
 | release(channel) | gives a channel back now (HuTrack's release): control and noise off, and the music waits for a fresh note on it | channel 0..5; a channel no SFX owns is left alone |
 

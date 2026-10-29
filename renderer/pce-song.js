@@ -378,7 +378,11 @@
         c.waitNote = false;
         c.uploadedWave = 0xff;
       }
+      /* instrument is the index into the song's instrument list this note
+       * sounds with (c.instr was loaded just above), so a host can say what
+       * is playing on each channel without a second model (#161). */
       notes.push({ frame: frame, channel: ch, note: engineNote,
+                   instrument: c.instr,
                    semitone: row.note.semitone, octave: row.note.octave,
                    period: c.period });
     }

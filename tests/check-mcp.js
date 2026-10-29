@@ -48,6 +48,20 @@
  *      exactly the frame an independent il.create(source, {files}) +
  *      pce-sprites run renders (diff 0), and toy_run reports the #117
  *      import summary.
+ *  11. Songs (#161): toys/oak-woods/song.json in toy_write's files is the
+ *      runtime's options.songs, so music(0) plays it — PSG writes are
+ *      recorded, every channel the compiled song uses starts notes (with its
+ *      instrument), and the run matches an independent il.create(source,
+ *      {songs}) run's write count — while the same toy WITHOUT the file is
+ *      refused music-range, the card's control.  A .mid through source_add
+ *      kind song becomes song.json through the Add Source importer and
+ *      music(0) plays it; song_write composes from a step list with the
+ *      SEQUENCER's built-in instruments; toy_write refuses a song file the
+ *      model cannot compile and leaves the loaded toy alone.  The song
+ *      written is the one the studio's own open path (pce-source.js
+ *      importStudio) carries, and the SEQUENCER's read-back (pce-seq.js
+ *      fromJSON) returns the same grid — so the saved toy opens in the
+ *      studio with the song in the SEQUENCER.
  *  11. `toy_save` (#160): the loaded toy — main.lua, the art source_add
  *      made, the named source in sources.json — written as ONE
  *      pce.studio/1 envelope, the studio's own Save format (its key order,
@@ -81,6 +95,7 @@ const il = require("../renderer/pce-il.js");
 const ilbc = require("../renderer/pce-ilbc.js");
 const romLib = require("../renderer/pce-rom.js");
 const sprites = require("../renderer/pce-sprites.js");
+const seqLib = require("../renderer/pce-seq.js");
 const sourceLib = require("../renderer/pce-source.js");
 
 const ROOT = path.join(__dirname, "..");
@@ -435,6 +450,69 @@ function checkerCell(cells, x, y) {
   return cells[Math.floor(y / 8) * 32 + Math.floor(x / 8)];
 }
 
+/* ---- #161 song helpers ------------------------------------------------- */
+
+/* A toy whose only sound is its song slot: music(0) in init(), silence in
+ * frame().  With no song file it is exactly the card's failing case. */
+function musicToy() {
+  return "function init()\n  music(0)\nend\n" +
+         "function frame(t, f)\nend\n";
+}
+
+/* A Standard MIDI File, format 0, 480 ticks a quarter, 120 BPM — the same
+ * builder tests/check-source-import.js uses for the importer. */
+function makeMidi(notes) {
+  const track = [];
+  const push = (...bytes) => { for (const b of bytes) track.push(b & 0xFF); };
+  const varInt = (v) => {
+    const out = [v & 0x7F];
+    v >>>= 7;
+    while (v) { out.unshift((v & 0x7F) | 0x80); v >>>= 7; }
+    return out;
+  };
+  push(0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20);   /* 120 BPM */
+  push(0x00, 0xFF, 0x03, 0x04, 0x52, 0x49, 0x46, 0x46); /* "RIFF" */
+  let tick = 0;
+  const events = [];
+  for (const n of notes) {
+    events.push({ at: n.start, bytes: [0x90, n.note, 0x64] });
+    events.push({ at: n.end, bytes: [0x80, n.note, 0x40] });
+  }
+  events.sort((a, b) => a.at - b.at);
+  for (const e of events) {
+    push(...varInt(e.at - tick));
+    tick = e.at;
+    push(...e.bytes);
+  }
+  push(0x00, 0xFF, 0x2F, 0x00);
+  const header = Buffer.alloc(14);
+  header.write("MThd", 0, "latin1");
+  header.writeUInt32BE(6, 4);
+  header.writeUInt16BE(0, 8);       /* format 0 */
+  header.writeUInt16BE(1, 10);      /* one track */
+  header.writeUInt16BE(480, 12);    /* division */
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(track.length, 0);
+  return Buffer.concat([header, Buffer.from("MTrk", "latin1"), len,
+                        Buffer.from(track)]);
+}
+
+/* The channels a compiled song actually starts notes on — the test's own
+ * reading of the player's module, so "all used channels active" is not the
+ * server's word for it. */
+function usedChannels(song) {
+  const used = [];
+  for (let ch = 0; ch < 6; ch++) {
+    const orders = song.patterns[ch] || [];
+    let on = false;
+    for (const rows of orders)
+      for (const row of rows)
+        if (row.note && !row.note.cut) on = true;
+    if (on) used.push(ch);
+  }
+  return used;
+}
+
 /* ---- main -------------------------------------------------------------- */
 
 (async function main() {
@@ -469,9 +547,10 @@ function checkerCell(cells, x, y) {
     check(!list.error, "tools/list answers without a JSON-RPC error");
     const tools = list.result.tools || [];
     const names = tools.map((t) => t.name).sort();
-    eq("tools/list lists exactly the card's ten tools", names, [
+    eq("tools/list lists exactly the server's eleven tools", names, [
       "docs", "export_pce", "frame_png", "register_set", "registers_get",
-      "source_add", "toy_run", "toy_save", "toy_write", "validate"
+      "song_write", "source_add", "toy_run", "toy_save", "toy_write",
+      "validate"
     ]);
     for (const t of tools) {
       const schema = t.inputSchema;
@@ -493,10 +572,16 @@ function checkerCell(cells, x, y) {
     eq("toy_save requires path",
        list.result.tools.filter((t) => t.name === "toy_save")[0]
            .inputSchema.required, ["path"]);
-    eq("source_add's kinds are the card's four",
+    eq("source_add's kinds are the picture kinds and song",
        list.result.tools.filter((t) => t.name === "source_add")[0]
            .inputSchema.properties.kind.enum,
-       ["bg", "sprites", "tilesheet", "palette"]);
+       ["bg", "sprites", "tilesheet", "palette", "song"]);
+    eq("song_write publishes notes and song",
+       list.result.tools.filter((t) => t.name === "song_write")[0]
+           .inputSchema.properties.notes.type, "array");
+    eq("source_add documents the .mid input",
+       list.result.tools.filter((t) => t.name === "source_add")[0]
+           .inputSchema.properties.mid.type, "string");
 
     /* 3 — #29's parallax toy, 60 frames, frame 60 is check-examples' frame 60 */
     const wrote = await writeToy(client, "parallax");
@@ -833,11 +918,16 @@ function checkerCell(cells, x, y) {
     });
     check(bothKinds.isError && bothKinds.body.code === "source-picture",
           "passing png and grid both is refused by source-picture");
-    const badKind = await client.call("source_add", {
+    const badSong = await client.call("source_add", {
       kind: "song", png: redPng
     });
+    check(badSong.isError && badSong.body.code === "source-song",
+          "a song add without its .mid is refused by source-song");
+    const badKind = await client.call("source_add", {
+      kind: "movie", png: redPng
+    });
     check(badKind.isError && badKind.body.code === "source-kind",
-          "a non-picture kind is refused by source-kind");
+          "a kind that is not a source is refused by source-kind");
 
     /* a toy whose asset files the panels cannot read: source_add refuses
      * with the panels' own code and leaves the files alone */
@@ -887,6 +977,235 @@ function checkerCell(cells, x, y) {
     eq("the next cell draws the other tile",
        pixelOf(checkerImg, 12, 4), checkerColour(12, 4));
 
+    /* 10 — songs (#161): a toy's song.json is its music(0) */
+
+    const oakMain = fs.readFileSync(path.join(TOY_DIR, "oak-woods", "main.lua"),
+                                    "utf8");
+    const oakSongText = fs.readFileSync(
+      path.join(TOY_DIR, "oak-woods", "song.json"), "utf8");
+    const oakFiles = [{ name: "main.lua", source: oakMain },
+                      { name: "song.json", source: oakSongText }];
+
+    /* the card's control: the same toy WITHOUT its song file is refused
+     * music-range — that was the bug #161 fixes */
+    const noSong = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: oakMain }]
+    });
+    check(!noSong.isError, "OAK WOODS without its song.json still compiles");
+    const noSongRun = await client.call("toy_run", { frames: 60 });
+    check(noSongRun.isError,
+          "without a song file music(0) is refused (the card's control)");
+    eq("the control's refusal is the runtime's music-range",
+       noSongRun.body.code, "music-range");
+    contains("... and it names options.songs", noSongRun.body.message,
+             "options.songs");
+
+    const oakWrite = await client.call("toy_write", { files: oakFiles });
+    check(!oakWrite.isError && oakWrite.body.ok,
+          "OAK WOODS' song.json writes with the toy");
+    eq("toy_write reports the song slot",
+       oakWrite.body.songs.map((s) => s.name), ["Oak Woods"]);
+
+    const oakRun = await client.call("toy_run", { frames: 60 });
+    check(!oakRun.isError && oakRun.body.ok, "OAK WOODS runs 60 frames");
+    check(oakRun.body.sound_writes > 0,
+          "the song writes the PSG (" + oakRun.body.sound_writes + " writes)");
+    eq("the runtime was given one song", oakRun.body.sound.songs, 1);
+    eq("music(0) is playing the toy's own song", {
+      index: oakRun.body.sound.music.index,
+      name: oakRun.body.sound.music.name,
+      playing: oakRun.body.sound.music.playing
+    }, { index: 0, name: "Oak Woods", playing: true });
+
+    /* "all used channels active": the used channels are the test's own
+     * reading of the compiled song, not the server's report */
+    const oakCompiled = seqLib.songsFromFiles(oakFiles)[0];
+    const oakUsed = usedChannels(oakCompiled);
+    check(oakUsed.length >= 3,
+          "OAK WOODS' song uses at least three PSG channels (" +
+          oakUsed.join(", ") + ")");
+    const oakNames = oakCompiled.instruments.map((i) => i.name);
+    for (const ch of oakUsed) {
+      const row = oakRun.body.sound.channels[ch];
+      check(row.notes > 0,
+            "used channel " + ch + " started notes (" + row.notes + ")");
+      check(oakNames.indexOf(row.instrument) >= 0,
+            "channel " + ch + " reports the instrument it sounds with (" +
+            row.instrument + ")");
+    }
+    for (const ch of [0, 1, 2, 3, 4, 5]) {
+      if (oakUsed.indexOf(ch) >= 0) continue;
+      eq("unused channel " + ch + " started no notes",
+         oakRun.body.sound.channels[ch].notes, 0);
+    }
+    eq("the per-channel counts are every note the player started",
+       oakRun.body.sound.channels.reduce((n, c) => n + c.notes, 0),
+       oakRun.body.sound.music.notes);
+
+    /* the wiring, not the engine: an independent il.create with the same
+     * songs is the run the server must be — 60 frames, same writes, same
+     * channel counts */
+    const indSongs = seqLib.songsFromFiles(oakFiles);
+    const indRt = il.create(oakMain, { chunkName: "main.lua", files: oakFiles,
+                                       songs: indSongs });
+    indRt.load();
+    for (let f = 0; f < 60; f++) indRt.frame(f);
+    eq("the run is the independent il.create(songs) run's write count",
+       oakRun.body.sound_writes, indRt.sound.events.length);
+    eq("... and its per-channel note starts",
+       oakRun.body.sound.channels.map((c) => c.notes),
+       [0, 1, 2, 3, 4, 5].map((ch) => indRt.sound.player.notes
+         .filter((n) => n.channel === ch).length));
+
+    /* a .mid through source_add is the toy's song.json, and music(0) plays
+     * it — the Add Source importer, then the player */
+    const midiNotes = [{ start: 0, end: 240, note: 60 },
+                       { start: 240, end: 480, note: 64 },
+                       { start: 480, end: 720, note: 67 },
+                       { start: 720, end: 960, note: 72 }];
+    const midi = makeMidi(midiNotes);
+    const midToy = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: musicToy() }]
+    });
+    check(!midToy.isError, "the music-only toy compiles with no song yet");
+    const fromMid = await client.call("source_add", {
+      kind: "song", name: "four", mid: midi.toString("base64")
+    });
+    check(!fromMid.isError && fromMid.body.ok,
+          "source_add kind song imports the .mid" +
+          (fromMid.isError ? " (" + JSON.stringify(fromMid.body) + ")" : ""));
+    eq("the report names the song", fromMid.body.name, "four");
+    eq("the .mid becomes the toy's song.json",
+       fromMid.body.files.slice().sort(), ["main.lua", "song.json"]);
+    eq("the importer placed the .mid's four notes", fromMid.body.notes, 4);
+    const independentMidi = sourceLib.importMidi(midi, { name: "four" });
+    eq("the song.json is the Add Source importer's own document",
+       fromMid.body.song, JSON.parse(independentMidi.files["song.json"]));
+    eq("it is music slot 0", fromMid.body.music_index, 0);
+
+    const midRun = await client.call("toy_run", { frames: 120 });
+    check(!midRun.isError && midRun.body.ok, "the .mid toy runs");
+    check(midRun.body.sound_writes > 0,
+          "the imported .mid writes the PSG (" + midRun.body.sound_writes +
+          " writes)");
+    eq("music(0) plays the imported .mid", midRun.body.sound.music && {
+      index: midRun.body.sound.music.index,
+      name: midRun.body.sound.music.name,
+      playing: midRun.body.sound.music.playing
+    }, { index: 0, name: "four", playing: true });
+    const midCompiled = seqLib.songsFromFiles(
+      [{ name: "song.json", source: JSON.stringify(fromMid.body.song) }])[0];
+    for (const ch of usedChannels(midCompiled)) {
+      check(midRun.body.sound.channels[ch].notes > 0,
+            "the .mid's channel " + ch + " started notes");
+    }
+
+    /* a .mid the importer refuses leaves the toy's song alone */
+    const badMid = await client.call("source_add", {
+      kind: "song", mid: Buffer.from("not a midi file").toString("base64")
+    });
+    check(badMid.isError, "a .mid the importer cannot read is refused");
+    eq("the refusal is the importer's mid-signature", badMid.body.code,
+       "mid-signature");
+    const afterBadMid = await client.call("toy_run", { frames: 120 });
+    eq("the refused .mid left the toy's song playing",
+       afterBadMid.body.sound.music.name, "four");
+
+    /* song_write: compose from a step list with the SEQUENCER's built-in
+     * instruments, then music(0) plays it */
+    const composeToy = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: musicToy() }]
+    });
+    check(!composeToy.isError, "the toy for song_write compiles");
+    const composed = await client.call("song_write", {
+      name: "step tune", tempo: 140, steps: 16,
+      notes: [
+        { channel: 0, step: 0, note: "C4", length: 2 },
+        { channel: 0, step: 4, note: "E4", length: 2 },
+        { channel: 0, step: 8, note: "G4", length: 4 },
+        { channel: 1, step: 0, note: "C3", length: 8, instrument: "bass" },
+        { channel: 2, step: 4, note: "C5", length: 2, instrument: "bell" }
+      ]
+    });
+    check(!composed.isError && composed.body.ok,
+          "song_write composes from a step list" +
+          (composed.isError ? " (" + JSON.stringify(composed.body) + ")" : ""));
+    eq("it writes song.json", composed.body.file, "song.json");
+    eq("the built-in instruments are the SEQUENCER's",
+       composed.body.instruments,
+       ["lead", "bass", "bell", "strings", "kick", "snare"]);
+    eq("five notes are placed", composed.body.notes_placed, 5);
+    const compRun = await client.call("toy_run", { frames: 120 });
+    check(!compRun.isError && compRun.body.ok, "the composed toy runs");
+    eq("music(0) plays the composed song", compRun.body.sound.music.name,
+       "step tune");
+    eq("channel 0 plays the lead", compRun.body.sound.channels[0].instrument,
+       "lead");
+    eq("channel 1 plays the bass", compRun.body.sound.channels[1].instrument,
+       "bass");
+    eq("channel 2 plays the bell the step list named",
+       compRun.body.sound.channels[2].instrument, "bell");
+    check(compRun.body.sound.channels[0].notes > 0 &&
+          compRun.body.sound.channels[1].notes > 0 &&
+          compRun.body.sound.channels[2].notes > 0,
+          "the composed song starts notes on the three channels it names");
+
+    /* the saved toy opens in the studio with the song in the SEQUENCER, and
+     * toy_save (#160) is what keeps it: the whole session, songs included,
+     * as the studio's own pce.studio/1 file.  Open it with the studio's own
+     * path (renderer/pce-source.js importStudio), then read the song back
+     * with the SEQUENCER panel's own function (pce-seq.js fromJSON). */
+    const savedSong = await client.call("toy_save", {
+      path: "step-tune.pce.json", title: "step tune"
+    });
+    check(!savedSong.isError && savedSong.body.ok,
+          "toy_save writes the composed toy" +
+          (savedSong.isError ? " (" + JSON.stringify(savedSong.body) + ")" : ""));
+    check((savedSong.body.files || []).indexOf("song.json") >= 0,
+          "the saved envelope carries song.json (" +
+          (savedSong.body.files || []).join(", ") + ")");
+    const savedSongText = fs.readFileSync(savedSong.body.path, "utf8");
+    const openedSongFile = sourceLib.importStudio(savedSongText);
+    eq("the studio's open path accepts the saved toy",
+       openedSongFile.files.map((f) => f.name).sort(),
+       ["main.lua", "song.json"]);
+    const openedSongSource = openedSongFile.files.filter(
+      (f) => f.name === "song.json")[0].source;
+    eq("... and its song.json is the one song_write wrote",
+       JSON.parse(openedSongSource), composed.body.song);
+    const savedSongs = seqLib.songsFromFiles(openedSongFile.files);
+    eq("the opened toy carries one playable song slot", savedSongs.length, 1);
+    const openedMainSource = openedSongFile.files.filter(
+      (f) => f.name === "main.lua")[0].source;
+    const savedRt = il.create(openedMainSource, { chunkName: "main.lua",
+                                           files: openedSongFile.files,
+                                           songs: savedSongs });
+    savedRt.load();
+    for (let f = 0; f < 120; f++) savedRt.frame(f);
+    check(savedRt.sound.events.length > 0,
+          "the studio's own runtime plays the opened toy's song (" +
+          savedRt.sound.events.length + " writes)");
+    const readBack = seqLib.fromJSON(openedSongSource);
+    eq("the SEQUENCER reads the song back", readBack.name, "step tune");
+    eq("... with the note the step list put first",
+       readBack.patterns[0].channels[0][0],
+       { note: 36, instrument: 0, length: 2 });
+    eq("... and the same instruments",
+       readBack.instruments.map((i) => i.name), composed.body.instruments);
+
+    /* a song file the model cannot compile is refused at toy_write, and the
+     * loaded toy — song and all — is left alone */
+    const brokenSong = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: musicToy() },
+              { name: "song.json", source: "not json {{{" }]
+    });
+    check(brokenSong.isError,
+          "toy_write refuses a song.json the model cannot compile");
+    eq("the refusal is the sequencer's seq-json", brokenSong.body.code,
+       "seq-json");
+    const afterRefusalSong = await client.call("toy_run", { frames: 120 });
+    eq("the refused write left the loaded toy's song playing",
+       afterRefusalSong.body.sound.music.name, "step tune");
     /* 11 — toy_save (#160): the studio's own file, with the art inside -----
      * The toy is the sprite-mover with its named source (sources.json,
      * #156) written beside it; the art comes from source_add.  toy_save
@@ -1064,8 +1383,11 @@ function checkerCell(cells, x, y) {
               "the validator refuses an over-budget toy with file:line; " +
               "export_pce is the #100 build byte for byte; source_add's " +
               "PNG reaches VRAM as sprites while tiles.json renders through " +
-              "MCP exactly as through the studio host; and toy_save's one " +
-              "pce.studio/1 envelope opens through the studio's own " +
-              "importStudio to the same frame, its art included");
+              "MCP exactly as through the studio host; a toy's song.json is " +
+              "its music(0), with a .mid through source_add and a song_write " +
+              "tune both playing and the SEQUENCER reading the saved song " +
+              "back; and toy_save's one pce.studio/1 envelope opens through " +
+              "the studio's own importStudio to the same frame, its art " +
+              "included");
   process.exit(0);
 })();

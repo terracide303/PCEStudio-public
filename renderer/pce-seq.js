@@ -729,6 +729,72 @@
     }, null, 2) + "\n";
   }
 
+  /* ---- the songs a toy's files carry, for music(index) ------------------ */
+
+  /* The MCP server asks a toy's files the same question the studio asks a
+   * gallery toy's: what can music(0), music(1) ... play?  A toy carries its
+   * song as song.json (the SEQUENCER's own document, above), and the ASSETS
+   * panel's songs.json is a list whose entries are either the counts-only
+   * summaries a .dmf import writes — nothing to play — or, when they carry a
+   * body, a playable module.  Every playable entry is COMPILED here, by the
+   * same compile() the player's song object comes from, so there is one song
+   * model and no second loader: pce-song.js's createPlayer() takes exactly
+   * the array this returns.
+   *
+   * A module body is what the tracker route writes (orderMatrix, patterns of
+   * rows, orderCount) and what toys/oak-woods/song.json is; the SEQUENCER's
+   * own document has version VERSION, order, steps and instruments on each
+   * pattern.  Anything else is refused by the model's own code (seq-json,
+   * seq-*, or pce-song.js's song-* codes). */
+  function playableSong(doc, text, file) {
+    if (!doc || typeof doc !== "object" || Array.isArray(doc))
+      refuse("seq-json", file + " is not one song object");
+    if (Array.isArray(doc.orderMatrix) && Array.isArray(doc.patterns)) {
+      player.checkSong(doc);              /* already the player's module */
+      return doc;
+    }
+    return compile(fromJSON(text));       /* the SEQUENCER's own document */
+  }
+
+  function looksPlayable(entry) {
+    return !!entry && typeof entry === "object" &&
+      ((Array.isArray(entry.orderMatrix) && Array.isArray(entry.patterns)) ||
+       (entry.version === VERSION && Array.isArray(entry.patterns) &&
+        Array.isArray(entry.order)));
+  }
+
+  /* The song slots a file set hands the runtime, in file order: song.json,
+   * then the playable entries of songs.json.  Returns the compiled songs
+   * (options.songs), each still carrying its songName. */
+  function songsFromFiles(files) {
+    var out = [];
+    for (var i = 0; i < (files || []).length; i++) {
+      var f = files[i];
+      if (!f || typeof f.source !== "string") continue;
+      if (f.name === "song.json") {
+        var doc;
+        try { doc = JSON.parse(f.source); }
+        catch (e) { refuse("seq-json", "song.json does not parse: " +
+                                      e.message); }
+        out.push(playableSong(doc, f.source, f.name));
+      } else if (f.name === "songs.json") {
+        var list;
+        try { list = JSON.parse(f.source); }
+        catch (e) { refuse("asset-json", "songs.json is not JSON: " +
+                                        e.message); }
+        if (!list || typeof list !== "object" || !Array.isArray(list.songs))
+          refuse("asset-shape", "songs.json needs a \"songs\" array");
+        for (var k = 0; k < list.songs.length; k++) {
+          var entry = list.songs[k];
+          if (!looksPlayable(entry)) continue;   /* a summary: no music */
+          out.push(playableSong(entry, JSON.stringify(entry),
+                                "songs.json[" + k + "]"));
+        }
+      }
+    }
+    return out;
+  }
+
   function fromJSON(text) {
     var doc;
     try { doc = JSON.parse(String(text)); }
@@ -818,6 +884,7 @@
     inScale: inScale,
     isBlack: isBlack,
     toJSON: toJSON,
-    fromJSON: fromJSON
+    fromJSON: fromJSON,
+    songsFromFiles: songsFromFiles
   };
 });

@@ -221,7 +221,9 @@
     { call: "music(index)",
       what: "plays song index from the start — the whole engine restarts, " +
             "as HuTrack's playSong does",
-      limits: "an index into the songs the runtime was given (0..songs-1)" },
+      limits: "an index into the songs the runtime was given: a toy's " +
+              "song.json / songs.json through pce-seq.js songsFromFiles " +
+              "(0..songs-1); no song file is music-range" },
     { call: "sfx(channel, freq, volume, frames)",
       what: "takes the channel (HuTrack's reserve), loads a 32-step square, " +
             "sets F = freq and AL = volume, and gives it back after frames",
@@ -417,6 +419,7 @@
 
     var sound = {
       songs: options.songs || [],
+      index: null,              /* the song music(n) last started, null until then */
       events: [],               /* {f, t, reg, value}: pce-psg.js's input */
       player: null,             /* pce-song.js's createPlayer, once music(n) runs */
       frame: 0,
@@ -818,6 +821,7 @@
         }
         index = intIn(index, "a song index", 0, sound.songs.length - 1,
                       "music-range");
+        sound.index = index;
         sound.player = lib.createPlayer(sound.songs[index], {
           emit: function (reg, value) { soundWrite(reg, value); }
         });
