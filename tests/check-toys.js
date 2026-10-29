@@ -47,6 +47,13 @@
  * output for those writes, the resume on a fresh note after the release,
  * and the whole run with the IL runtime's (Lua == IL).
  *
+ * #91 (REVIEW-78 T05) adds a second sound run: a song whose row sets the
+ * channel volume to 20 under a looping volume envelope, so the R4 amplitude
+ * must be floor(20 × step / 31) (20 then 10), not the identity the full-volume
+ * toys and check-dmf.js's fixture produce.  The fixture also plays the same
+ * envelope at volume 31 first, so "the envelope ran" and "the channel volume
+ * was applied" cannot be confused.
+ *
  * Written by @design because the card names this file. Per workshop rule 2 a
  * cold break by another seat is owed before this closes the card.
  */
@@ -1429,6 +1436,101 @@ function checkSound() {
   ilNote.dispose();
 }
 
+/* ---- #91 / REVIEW-78 T05: the envelope scales the channel's volume ---- */
+
+/* REVIEW-78 T05: the sound toy above plays an instrument with no volume
+ * envelope, and check-dmf.js's looping-envelope fixture plays at driver
+ * volume 31, where floor(driver * value / 31) is the identity — so ignoring
+ * the channel volume was invisible in both.  This song's first row sets
+ * the channel volume to 20 and its instrument steps the envelope 31 then
+ * 16: the amplitude (the R4 byte's AL field) must be
+ * floor(20 * 31 / 31) = 20 on the note's frame and floor(20 * 16 / 31) =
+ * 10 on the next — not the 16 a driver volume of 31 would give.
+ *
+ * The fixture proves its own distinction before the player is asked: the
+ * same envelope at row volume 31 must give 16, so the two runs separate
+ * "the envelope ran" from "the channel volume was applied". */
+const VOLUME_ROW = 20;
+const VOLUME_ENV = [31, 16];
+
+function volumeSong(rowVolume) {
+  const song = makeSong();
+  song.instruments[0].volumeEnv = { size: VOLUME_ENV.length, loop: 0,
+                                    data: VOLUME_ENV.slice() };
+  song.patterns[0][0][0] = Object.assign({}, song.patterns[0][0][0],
+                                        { volume: rowVolume });
+  return song;
+}
+
+/* Channel 0's writes in one frame, in order; register 0 selects. */
+function channel0Of(events, f) {
+  const out = [];
+  let selected = -1;
+  for (const e of events) {
+    if (e.f !== f) continue;
+    if (e.reg === 0) { selected = e.value; continue; }
+    if (selected === 0) out.push(e);
+  }
+  return out;
+}
+
+/* The frame's last channel-0 R4 write: the envelope's amplitude. */
+function amplitudeOf(events, f) {
+  const r4 = channel0Of(events, f).filter((e) => e.reg === 4);
+  return r4.length ? r4[r4.length - 1].value : null;
+}
+
+const TOY_VOLUME = `
+function init()
+  music(0)
+end
+function frame(t, f) end
+`;
+
+function runVolumeToy(makeRuntime, rowVolume) {
+  const rt = makeRuntime(TOY_VOLUME,
+                         { budgetMs: 250, songs: [volumeSong(rowVolume)] });
+  rt.load();
+  const amps = [];
+  for (let f = 0; f < 8; f++) { rt.frame(f); amps.push(amplitudeOf(rt.sound.events, f)); }
+  const events = rt.sound.events.slice();
+  rt.dispose();
+  return { amps: amps, events: events };
+}
+
+function checkSongVolume() {
+  const full = 31 * VOLUME_ENV[1] / 31 | 0;            /* 16, the identity */
+  const scaled = Math.floor(VOLUME_ROW * VOLUME_ENV[1] / 31);  /* 10 */
+  check(scaled !== full,
+        "volume envelope fixture: the channel volume changes the result (" +
+        VOLUME_ROW + " × " + VOLUME_ENV[1] + " / 31 = " + scaled + ", " +
+        "full volume would be " + full + ")");
+
+  /* R4's bits 0-4 are AL; bit 7 is the engine's process flag. */
+  const al = (bytes) => bytes.map((b) => (b == null ? null : b & 0x1f));
+
+  const identity = runVolumeToy(toys.create, 31);
+  eq("volume envelope at full volume: the note frame's AL is 31, the next 16",
+     al(identity.amps.slice(0, 2)), [31, 16]);
+
+  const lua = runVolumeToy(toys.create, VOLUME_ROW);
+  eq("volume envelope at channel volume 20: AL is 20 then 10, and loops",
+     al(lua.amps), [VOLUME_ROW, scaled, VOLUME_ROW, scaled,
+                    VOLUME_ROW, scaled, VOLUME_ROW, scaled]);
+  check(lua.amps[1] === (0x80 | scaled),
+        "the envelope's write carries AL " + scaled + " in $" +
+        (0x80 | scaled).toString(16) + " (got " +
+        (lua.amps[1] == null ? "no write" :
+         "$" + lua.amps[1].toString(16)) + ") — the channel volume is " +
+        "applied, not ignored");
+
+  const inIl = runVolumeToy(il.create, VOLUME_ROW);
+  eq("volume envelope: the IL runtime writes the same AL sequence",
+     inIl.amps, lua.amps);
+  eq("volume envelope: the IL runtime's writes are the Lua runtime's",
+     inIl.events, lua.events);
+}
+
 /* ---- main ------------------------------------------------------------ */
 
 function main() {
@@ -1445,6 +1547,7 @@ function main() {
   checkPasswords();
   checkOneModel();
   checkSound();
+  checkSongVolume();
   checkPage();
 
   const ms = Date.now() - started;

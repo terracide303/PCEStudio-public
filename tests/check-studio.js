@@ -1387,6 +1387,110 @@ function checkOutputColumn(page) {
         "leaving View only restores a layer that was shown in it");
   studio.setLayer("sprites", true);
 
+  /* -- #91 / REVIEW-78 S02/S05: a raster table's CR is gated too --------- *
+   * The layer cases above run the page's examples, which have no raster
+   * table, so maskedRaster's per-entry rewrite was never exercised: REVIEW-78
+   * S02 leaked 57,344 background pixels from a raster entry that turned CR's
+   * BG bit on, and S05 the same from a table's base.cr, both in View only
+   * with BG hidden.  Two fixtures, one per path:
+   *
+   *   S02: the raster callback sets CR = $C0 at line 32 (an entry with cr).
+   *   S05: init() sets CR = $C0 and the callback only writes BXR, so every
+   *        line starts from the table's base.cr.
+   *
+   * Each case proves the fixture is worth checking before it asserts the
+   * mask: the table really carries the CR the break would leak (an entry
+   * with bit 7 for S02, a base with bit 7 and no cr entries for S05), and
+   * the picture with every layer shown is a picture, so "every pixel is
+   * CRAM[$100]" cannot be true merely because the toy draws nothing. */
+  function litPixels(img) {
+    let n = 0;
+    for (let i = 0; i + 2 < img.pixels.length; i += 3) {
+      if (img.pixels[i] !== 0 || img.pixels[i + 1] !== 0 ||
+          img.pixels[i + 2] !== 0) n++;
+    }
+    return n;
+  }
+  function rasterMaskCase(label, source, shape) {
+    studio.setLayerViewOnly(false);
+    studio.setLayer("bg", true);
+    studio.setLayer("sprites", true);
+    runEditorSource(studio, ilExports.SETUP + source);
+    const table = studio.runtime().lastRaster;
+    check(!!table && table.entries.length > 0,
+          label + ": the fixture builds a raster table (" +
+          (table ? table.entries.length : 0) + " entries)");
+    const problem = shape(table);
+    check(problem === null, label + ": the fixture reaches the mask's path" +
+          (problem ? " — " + problem : " (the table carries the CR the break " +
+           "would leak)"));
+    const on = studio.output();
+    const lit = litPixels(on);
+    check(lit > (on.width * on.height) / 2,
+          label + ": with every layer shown the background is drawn (" + lit +
+          " of " + (on.width * on.height) + " pixels)");
+    studio.setLayerViewOnly(true);
+    studio.setLayer("bg", false);
+    const hidden = studio.output();
+    const leaked = litPixels(hidden);
+    check(leaked === 0, label + ": with BG hidden in View only every pixel is " +
+          "CRAM[$100] (" + leaked + " pixels are drawn; the raster table's CR " +
+          "must go through the same mask as the frame's)");
+    studio.setLayerViewOnly(false);
+    studio.setLayer("bg", true);
+    studio.setLayer("sprites", true);
+  }
+
+  rasterMaskCase(
+    "S02 raster entry with CR",
+    `
+function init()
+  for y = 0, 27 do
+    for x = 0, 31 do vram[y * 32 + x] = 0x0040 end
+  end
+  puttile(0x40, function(col, row) return 1 end)
+  pal(1, rgb(7, 7, 7))
+end
+function frame(t, f) end
+function raster(line)
+  if line == 32 then reg("CR", 0xC0) end
+end
+`,
+    (table) => {
+      if (!table) return "no table";
+      const crs = table.entries.filter((e) => e.cr != null);
+      if (!crs.length) return "no entry carries cr";
+      if (!crs.some((e) => (e.cr & 0x80) !== 0))
+        return "no entry sets CR bit 7 (" +
+               crs.map((e) => "$" + e.cr.toString(16)).join(", ") + ")";
+      return null;
+    });
+
+  rasterMaskCase(
+    "S05 raster base with CR",
+    `
+function init()
+  for y = 0, 27 do
+    for x = 0, 31 do vram[y * 32 + x] = 0x0040 end
+  end
+  puttile(0x40, function(col, row) return 1 end)
+  pal(1, rgb(7, 7, 7))
+  reg("CR", 0xC0)
+end
+function frame(t, f) end
+function raster(line)
+  if line == 0 then reg("BXR", 0) end
+end
+`,
+    (table) => {
+      if (!table) return "no table";
+      if (table.entries.some((e) => e.cr != null))
+        return "an entry carries cr, so the base is not the latch";
+      if (!table.base || (table.base.cr & 0x80) === 0)
+        return "base.cr does not set CR bit 7";
+      return null;
+    });
+
   /* -- markers: add at the current frame, click to seek -- */
   studio.loadExample("palette", true);
   studio.pause();
