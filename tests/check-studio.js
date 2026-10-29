@@ -111,6 +111,7 @@ const { pathToFileURL } = require("url");
 const { execFileSync, spawn } = require("child_process");
 
 const sprites = require("../renderer/pce-sprites.js");
+const vramModel = require("../renderer/pce-vram-map.js");
 
 /* The three toy sources are read from tests/check-il.js's own text instead of
  * requiring it: at this revision check-il.js runs its whole suite when
@@ -456,7 +457,7 @@ function makeStubDom() {
     if (!byId.has(id)) {
       const el = element(id === "vrammap" ? "canvas" : "div", id);
       if (id === "out") { el.width = 256; el.height = 224; }
-      if (id === "vrammap") { el.width = 512; el.height = 44; }
+      if (id === "vrammap") { el.width = 384; el.height = 384; }
       byId.set(id, el);
     }
     return byId.get(id);
@@ -470,7 +471,7 @@ function makeStubDom() {
     el.tagName = String(tag).toUpperCase();
     if (el.tagName === "CANVAS") {
       if (id === "out") { el.width = 256; el.height = 224; }
-      else if (id === "vrammap") { el.width = 512; el.height = 44; }
+      else if (id === "vrammap") { el.width = 384; el.height = 384; }
     }
     return el;
   };
@@ -2053,6 +2054,48 @@ const DRIVER_HTML = [
   '    grid.checked = false;',
   '    grid.dispatchEvent(new a.win.Event("change", { bubbles: true }));',
   '    ck(cs.screen().grid === false, "the grid checkbox works in the browser");',
+  '',
+  '    /* #85: the PALETTES picker and the VRAM map with real DOM clicks and a',
+  '     * real canvas. */',
+  '    cs.loadExample("palette", true);',
+  '    cs.pause();',
+  '    cs.seek(0);',
+  '    cs.panels.select("palettes");',
+  '    cdoc.getElementById("pal-0-5").click();',
+  '    cdoc.getElementById("pal-c-7").click();',
+  '    var palAfter = JSON.parse(cs.files().filter(function (f) {',
+  '      return f.name === "palettes.json"; })[0].source);',
+  '    ck(palAfter.background[0][5] === 0x38,',
+  '       "a real click on a swatch and a picker colour writes $038 (" +',
+  '       palAfter.background[0][5] + ")");',
+  '    ck(/rgb\\(252,\\s*0,\\s*0\\)/.test(cdoc.getElementById("pal-0-5").style.background),',
+  '       "the swatch is red in the browser (" +',
+  '       cdoc.getElementById("pal-0-5").style.background + ")");',
+  '    ck(/CRAM \\$005/.test(cdoc.getElementById("pal-readout").textContent),',
+  '       "the readout names CRAM $005 in the browser");',
+  '    cs.panels.select("vram");',
+  '    cs.vramPage(0);',
+  '    var vmap = cdoc.getElementById("vrammap");',
+  '    ck(vmap.width === 384 && vmap.height === 384,',
+  '       "the VRAM map canvas is 384 px in the browser (" + vmap.width + ")");',
+  '    var vctx = vmap.getContext("2d");',
+  '    var vimg = cs.vramImage();',
+  '    ck(!!vimg && vimg.width === 128, "the sheet is 128 x 128 in the browser");',
+  '    /* character $40 is cell 64: column 0, row 4; its (0,0) pixel is colour 15 */',
+  '    var drawn = vctx.getImageData(0, 97, 1, 1).data;',
+  '    var sheetPx = vimg.data[(32 * 128) * 4];',
+  '    ck(drawn[0] === sheetPx,',
+  '       "the canvas shows the sheet\'s own pixel (" + drawn[0] + " vs " +',
+  '       sheetPx + ")");',
+  '    var vr = vmap.getBoundingClientRect();',
+  '    vmap.dispatchEvent(new a.win.MouseEvent("click", {',
+  '      clientX: vr.left + 5, clientY: vr.top + 100,',
+  '      bubbles: true, cancelable: true }));',
+  '    ck(cs.vram().selected === 0x401,',
+  '       "a real click on the map selects the word under the pointer (" +',
+  '       cs.vram().selected + ")");',
+  '    ck(cs.vram().overlays.labels.indexOf("BAT") >= 0,',
+  '       "the BAT is labelled on the drawn map in the browser");',
   '    done();',
   '  })().catch(function (e) {',
   '    ck(false, "driver threw: " + (e && e.message ? e.message : e));',
@@ -3199,6 +3242,385 @@ function checkScreenGaps(page) {
   studio.seek(0);
 }
 
+/* ---- #85: PALETTES as a visual editor --------------------------------- *
+ * ppu.toys' CGRAM panel one size up: the 32 x 16 table, a click on a swatch
+ * selects that entry, and a click in the 512-colour picker writes exactly
+ * one 9-bit word into palettes.json — the same picture SCREEN edits.  The
+ * evidence reads the file text back, so the entry reaching disk is checked,
+ * not only the panel's own in-memory claim. */
+function paletteFile(studio) {
+  return JSON.parse(studio.files().find((f) => f.name === "palettes.json").source);
+}
+
+function checkPalettesPanel(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const pa = S.palettes;
+
+  check(!!pa && typeof pa.picker === "function",
+        "#85: renderer/pce-palettes.js loaded");
+  check(page.loaded.some((s) => /pce-palettes\.js$/.test(s)),
+        "#85: the page loads renderer/pce-palettes.js");
+  if (!pa || !studio.palettes) {
+    check(false, "#85: the page has no palettes editor");
+    return;
+  }
+
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  studio.panels.select("palettes");
+
+  /* the 32 x 16 table and the 512-colour picker are on the panel */
+  const grid = page.dom.get("pal32");
+  const rows = grid.children.filter((c) => c.className === "prow");
+  check(rows.length === 32, "#85: the table has 32 palette rows (" +
+        rows.length + ")");
+  let swatches = 0;
+  for (const row of rows)
+    swatches += row.children.filter((c) => c.tagName === "BUTTON").length;
+  check(swatches === 512, "#85: 512 swatch buttons, one per CRAM entry (" +
+        swatches + ")");
+  check(grid.children.filter((c) => c.className === "pal-head").length === 2,
+        "#85: the table is split into background and sprite palettes");
+
+  const colours = pa.picker();
+  check(colours.length === 512, "#85: the picker offers 512 colours");
+  check(new Set(colours.map((c) => c.word)).size === 512,
+        "#85: the 512 picker colours are all different");
+  check(colours.every((c) => c.word >= 0 && c.word < 512 &&
+                            c.r >= 0 && c.r < 8 && c.g >= 0 && c.g < 8 &&
+                            c.b >= 0 && c.b < 8),
+        "#85: every picker colour is a 9-bit word (3 bits per channel)");
+  check(!!page.dom.get("pal-c-0") && !!page.dom.get("pal-c-511"),
+        "#85: every one of the 512 colours is a button");
+
+  let st = studio.palettes();
+  check(st.palettes === 32 && st.entries === 16 && st.colours === 512,
+        "#85: the panel reports 32 palettes of 16 = 512 entries");
+  check(st.blank === true,
+        "#85: palettes.json starts all black (the example writes its own pal())");
+  check(/all black/.test(page.dom.get("pal-note").textContent),
+        "#85: the panel says so instead of pretending the file is the frame");
+
+  /* select entry (0,5); the picker's white ($1FF) writes it */
+  const sel = studio.paletteSelect(0, 5);
+  check(sel.palette === 0 && sel.entry === 5,
+        "#85: clicking a swatch selects that entry");
+  eq("#85: the swatch click through the DOM selects it",
+     (page.dom.get("pal-2-4").click(), studio.palettes().selected.palette), 2);
+  eq("#85: … and the entry", studio.palettes().selected.entry, 4);
+  studio.paletteSelect(0, 5);
+
+  studio.palettePick(511);                       /* b7 g7 r7 = $1FF, white */
+  let pal = paletteFile(studio);
+  check(pal.background[0] && pal.background[0][5] === 0x1FF,
+        "#85: the picker writes background palette 0 entry 5 = $1FF (" +
+        JSON.stringify(pal.background[0] && pal.background[0][5]) + ")");
+  eq("#85: the swatch repaints with the new colour",
+     page.dom.get("pal-0-5").style.background, "rgb(252,252,252)");
+  check(/CRAM \$005/.test(page.dom.get("pal-readout").textContent),
+        "#85: the readout names the entry's CRAM address");
+  check(/word \$1FF/.test(page.dom.get("pal-readout").textContent),
+        "#85: the readout names the 9-bit word");
+  check(/CRAM \$005/.test(page.dom.get("pal-0-5").title) &&
+        /word \$1FF/.test(page.dom.get("pal-0-5").title),
+        "#85: the swatch's tooltip carries its address and word");
+  check(studio.palettes().word === 0x1FF && studio.palettes().blank === false,
+        "#85: the panel's own state agrees");
+
+  /* one click, one word: pick red ($038) on the same entry */
+  page.dom.get("pal-c-7").click();                /* b0 g0 r7 = $038, red */
+  pal = paletteFile(studio);
+  eq("#85: the picker button writes the entry", pal.background[0][5], 0x38);
+  eq("#85: the VCE word's channels", studio.paletteCss(0x38), "rgb(252,0,0)");
+  eq("#85: the swatch is red", page.dom.get("pal-0-5").style.background,
+     "rgb(252,0,0)");
+  check(studio.palettesPicture().palettes[0][5] === 0x38,
+        "#85: the picture the panel edits holds the entry");
+  eq("#85: $1FF is exactly 511 picker entries along", colours[511].word, 0x1FF);
+  eq("#85: $038 is entry 7 of the picker", colours[7].word, 0x38);
+
+  /* SCREEN reads the same file: a palette edit reaches its picture */
+  studio.panels.select("screen");
+  check(studio.screenPicture() && studio.screenPicture().palettes[0][5] === 0x38,
+        "#85: SCREEN picks up the palette edit (the same palettes.json)");
+  studio.panels.select("palettes");
+
+  /* entry 0 of a background palette is the one shared backdrop */
+  studio.paletteSelect(3, 0);
+  check(/shared backdrop/.test(page.dom.get("pal-readout").textContent),
+        "#85: entry 0 says it is the shared backdrop");
+  studio.palettePick(64);                         /* b1 g0 r0 = $001 */
+  pal = paletteFile(studio);
+  eq("#85: entry 0 writes the backward", pal.backdrop, 0x001);
+  check(pal.background.every((row) => row[0] === 0x001),
+        "#85: every background palette's entry 0 is that backdrop");
+
+  /* palettes 16-31 are the sprite palettes, and they are separate */
+  studio.paletteSelect(18, 3);
+  eq("#85: palette 18 is a sprite palette", studio.palettes().kind, "sprite");
+  studio.paletteSetWord(18, 3, 0x0E4);
+  pal = paletteFile(studio);
+  eq("#85: sprite palette 2 entry 3 = $0E4", pal.sprites[2][3], 0x0E4);
+  check(pal.background[2][3] !== 0x0E4,
+        "#85: the background palettes are untouched by a sprite edit");
+
+  /* the editor's own refusals come back by code */
+  eq("#85: a 33rd palette is refused",
+     codeOf(() => studio.paletteSetWord(32, 0, 0)), "palette-range");
+  eq("#85: a 17th entry is refused",
+     codeOf(() => studio.paletteSetWord(0, 16, 0)), "entry-range");
+  eq("#85: a colour past 9 bits is refused",
+     codeOf(() => studio.paletteSetWord(0, 1, 512)), "colour-range");
+  eq("#85: a fractional colour is refused",
+     codeOf(() => studio.paletteSetWord(0, 1, 1.5)), "colour-range");
+  eq("#85: a 513th picker index is refused",
+     codeOf(() => studio.palettePick(512)), "picker-range");
+  eq("#85: a bad channel is refused",
+     codeOf(() => pa.word(8, 0, 0)), "channel-range");
+
+  studio.panels.select("screen");
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
+/* ---- #85: VRAM as a drawn map ----------------------------------------- *
+ * ppu.toys' VRAM panel is an image of characters, not a table of ranges.
+ * The decode is proved against a hand-built VRAM (all sixteen colour
+ * numbers, a diagonal, a BAT word and a SAT sprite), then the live panel is
+ * read: the page it drew, the ImageData it put on the sheet, the word under
+ * the pointer and the region the word belongs to. */
+function encodeChar(vram, ch, pixel) {
+  for (let y = 0; y < 8; y++) {
+    let w0 = 0, w1 = 0;
+    for (let x = 0; x < 8; x++) {
+      const v = pixel(x, y) & 0xF;
+      if (v & 1) w0 |= 1 << (7 - x);
+      if (v & 2) w0 |= 1 << (15 - x);
+      if (v & 4) w1 |= 1 << (7 - x);
+      if (v & 8) w1 |= 1 << (15 - x);
+    }
+    vram[(ch * 16 + y) * 2] = w0 & 0xFF;
+    vram[(ch * 16 + y) * 2 + 1] = w0 >> 8;
+    vram[(ch * 16 + 8 + y) * 2] = w1 & 0xFF;
+    vram[(ch * 16 + 8 + y) * 2 + 1] = w1 >> 8;
+  }
+}
+
+function decodeChar(vram, ch) {
+  const out = new Array(64);
+  for (let y = 0; y < 8; y++) {
+    const w0 = vram[(ch * 16 + y) * 2] | (vram[(ch * 16 + y) * 2 + 1] << 8);
+    const w1 = vram[(ch * 16 + 8 + y) * 2] |
+               (vram[(ch * 16 + 8 + y) * 2 + 1] << 8);
+    for (let x = 0; x < 8; x++) {
+      const bit = 7 - x;
+      out[y * 8 + x] = ((w0 >> bit) & 1) | (((w0 >> (bit + 8)) & 1) << 1) |
+                       (((w1 >> bit) & 1) << 2) | (((w1 >> (bit + 8)) & 1) << 3);
+    }
+  }
+  return out;
+}
+
+function checkVramPanel(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const V = vramModel;
+
+  check(!!S.vramMap && typeof S.vramMap.charPixels === "function",
+        "#85: renderer/pce-vram-map.js loaded");
+  check(page.loaded.some((s) => /pce-vram-map\.js$/.test(s)),
+        "#85: the page loads renderer/pce-vram-map.js");
+
+  /* ---- the decode, against a hand-built VRAM -------------------------- */
+  const vram = new Uint8Array(65536);
+  encodeChar(vram, 0x40, (x, y) => (x === y ? 5 : 0));
+  eq("#85: the diagonal decodes to eight 5s",
+     Array.from(V.charPixels(vram, 0x40)).filter((v) => v === 5).length, 8);
+  eq("#85: one pixel of the diagonal", V.charPixel(vram, 0x40, 3, 3), 5);
+  eq("#85: off the diagonal", V.charPixel(vram, 0x40, 0, 7), 0);
+  encodeChar(vram, 0x41, (x, y) => y * 8 + x);
+  eq("#85: all sixteen colour numbers round-trip",
+     Array.from(V.charPixels(vram, 0x41)).join(","),
+     Array.from({ length: 64 }, (_, i) => i % 16).join(","));
+
+  /* ---- pages ---------------------------------------------------------- */
+  eq("#85: the chip is eight pages of 256 characters", V.PAGES, 8);
+  eq("#85: a character is sixteen words", V.CHAR_WORDS, 16);
+  const range4 = V.pageRange(4);
+  check(range4.firstChar === 1024 && range4.lastChar === 1279 &&
+        range4.startWord === 16384 && range4.endWord === 20479,
+        "#85: page 4 is characters 1024-1279, words $4000-$4FFF");
+  eq("#85: the SAT's first word is its first character",
+     V.charOfWord(0x7F00), 2032);
+  eq("#85: the last word is the last character's last row",
+     V.charOfWord(0x7FFF), 2047);
+
+  /* ---- what a word is -------------------------------------------------- */
+  const geom = { width: 32, height: 32, shift: 5, wmask: 31, hmask: 31 };
+  const map = { segments: [
+    { start: 0, words: 1024, kind: "BAT" },
+    { start: 1024, words: 1024, kind: "tiles" },
+    { start: 0x7F00, words: 64, kind: "SAT" }
+  ] };
+  vram[0] = 0x23; vram[1] = 0x51;                 /* BAT word $5123 */
+  let d = V.describe(vram, map, geom, 0x7F00, 0);
+  eq("#85: a BAT word is a BAT cell", d.kind, "BAT");
+  check(/BAT cell 0/.test(d.text) && /char \$123/.test(d.text) &&
+        /palette 5/.test(d.text),
+        "#85: the BAT readout names the character and palette field (" +
+        d.text + ")");
+  d = V.describe(vram, map, geom, 0x7F00, 0x400 + 3);
+  check(d.kind === "tiles" && d.row === 3 && d.plane === 0 &&
+        /\$040/.test(d.text), "#85: a tile word names its row and plane");
+  d = V.describe(vram, map, geom, 0x7F00, 0x400 + 11);
+  check(d.row === 3 && d.plane === 1,
+        "#85: the second plane of the same row is the row's other word");
+  const satAt = 0x7F00 + 2 * 4;
+  vram[satAt * 2] = 0x23; vram[satAt * 2 + 1] = 0x01;          /* Y = $123 */
+  vram[(satAt + 1) * 2] = 0x45;                                 /* X = $45  */
+  vram[(satAt + 2) * 2] = 7 << 1;                               /* pattern  */
+  vram[(satAt + 3) * 2] = 9 | 0x80;                  /* palette 9, SPBG 1 */
+  d = V.describe(vram, map, geom, 0x7F00, 0x7F00 + 8);
+  check(d.kind === "SAT" && d.sprite === 2,
+        "#85: a SAT word names its sprite");
+  check(/Y 291/.test(d.detail) && /X 69/.test(d.detail) &&
+        /pattern \$007/.test(d.detail) && /palette 9/.test(d.detail),
+        "#85: … and its Y, X, pattern and palette (" + d.detail + ")");
+  d = V.describe(vram, map, geom, 0x7F00, 0x7FFF);
+  eq("#85: a word nothing owns is free", d.kind, "free");
+
+  /* the model's refusals */
+  eq("#85: a 2049th character is refused",
+     codeOf(() => V.charPixels(vram, 2048)), "char-range");
+  eq("#85: a ninth page is refused",
+     codeOf(() => V.pageRange(8)), "page-range");
+  eq("#85: word 32768 is outside VRAM",
+     codeOf(() => V.describe(vram, map, geom, 0x7F00, 32768)), "vram-range");
+
+  /* ---- the live panel -------------------------------------------------- */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  studio.panels.select("vram");
+  studio.vramPage(0);
+  let vs = studio.vram();
+  check(!!vs, "#85: the VRAM panel drew the running frame");
+  if (!vs) return;
+  check(vs.pages === 8 && vs.page === 0 && vs.firstChar === 0 &&
+        vs.lastChar === 255,
+        "#85: it starts on page 0, characters 0-255");
+  check(vs.canvas.width === 384 && vs.canvas.height === 384,
+        "#85: the map canvas is a 384-px page (" + vs.canvas.width + "x" +
+        vs.canvas.height + ")");
+  check(vs.drawn === true, "#85: the sheet was drawn");
+  check(vs.regions.length >= 3, "#85: the regions came from the frame (" +
+        vs.regions.map((r) => r.kind).join(",") + ")");
+  check(vs.jumps.length >= 3 && vs.jumps.every((j) => j.page >= 0 &&
+                                                   j.page < 8),
+        "#85: there is a jump for each region");
+  eq("#85: the page select holds all eight pages",
+     page.dom.get("vram-page").children.length, 8);
+  eq("#85: the preview palette select holds sixteen background palettes",
+     page.dom.get("vram-pal").children.length, 16);
+
+  /* the sheet is the toy's VRAM, pixel for pixel: the palette example's
+   * tile $40 is a diagonal of colour 15 on colour 1 */
+  const frameState = studio.state();
+  const t = decodeChar(frameState.vram, 0x40);
+  check(t[0] === 15 && t[1] === 1,
+        "#85: the example's tile $40 is 15s down the diagonal");
+  const cramWord = (entry) => (frameState.cram[entry * 2] |
+                               (frameState.cram[entry * 2 + 1] << 8)) & 0x1FF;
+  const rgbOf = (word) => [((word >> 3) & 7) * 36, ((word >> 6) & 7) * 36,
+                           (word & 7) * 36];
+  const sheet = studio.vramImage();
+  check(!!sheet && sheet.width === 128 && sheet.height === 128,
+        "#85: one page is a 128 x 128 sheet (16 x 16 characters)");
+  /* character $40 is cell 64: column 0, row 4 */
+  let o = ((4 * 8 + 0) * 128 + (0 * 8 + 0)) * 4;
+  const want15 = rgbOf(cramWord(15));
+  check(sheet.data[o] === want15[0] && sheet.data[o + 1] === want15[1] &&
+        sheet.data[o + 2] === want15[2],
+        "#85: the drawn pixel is palette 0 entry 15's colour (" +
+        [sheet.data[o], sheet.data[o + 1], sheet.data[o + 2]].join(",") +
+        " vs " + want15.join(",") + ")");
+  o = ((4 * 8 + 0) * 128 + (0 * 8 + 1)) * 4;
+  const want1 = rgbOf(cramWord(1));
+  check(sheet.data[o] === want1[0] && sheet.data[o + 1] === want1[1] &&
+        sheet.data[o + 2] === want1[2],
+        "#85: … and the pixel beside it is entry 1's colour");
+
+  /* the preview palette is the sheet's colours: palette 1 is black here */
+  studio.vramSetPalette(1);
+  const sheet1 = studio.vramImage();
+  o = ((4 * 8) * 128) * 4;
+  check(sheet1.data[o] === rgbOf(cramWord(16 + 15))[0] &&
+        sheet1.data[o + 1] === rgbOf(cramWord(16 + 15))[1] &&
+        sheet1.data[o + 2] === rgbOf(cramWord(16 + 15))[2],
+        "#85: the preview palette changes the sheet's colours");
+  studio.vramSetPalette(0);
+
+  /* paging and the region jumps */
+  studio.vramPage(7);
+  vs = studio.vram();
+  check(vs.page === 7 && vs.firstChar === 1792 && vs.lastChar === 2047,
+        "#85: page 7 is characters 1792-2047");
+  const satJump = vs.jumps.find((j) => j.kind === "SAT");
+  check(!!satJump && satJump.page === 7,
+        "#85: the SAT is on page 7 and its jump says so");
+  page.dom.get("vram-jump-SAT").click();
+  eq("#85: the SAT jump button pages there", studio.vram().page, 7);
+  studio.vramPage(0);
+
+  /* the pointer names the word: BAT, tile, SAT */
+  d = studio.vramHover(5);
+  check(d.kind === "BAT" && /BAT cell 5/.test(d.text),
+        "#85: hovering a BAT word names the cell (" +
+        (d && d.text) + ")");
+  studio.vramPick(0x400);
+  vs = studio.vram();
+  check(vs.selected === 0x400 && vs.kind === "tiles",
+        "#85: clicking a tile's word selects it and says what it is");
+  check(/\$040 is one tile/.test(page.dom.get("vram-pick").textContent),
+        "#85: the readout names the character");
+  d = studio.vramDescribe(0x7F00 + 2 * 4);
+  check(d.kind === "SAT" && d.sprite === 2,
+        "#85: a SAT word in the running frame names its sprite");
+  const canvas = page.dom.get("vrammap");
+  canvas.listeners.click[0](pointerAt(canvas, 5, 100));
+  eq("#85: a click on the canvas selects the word under the pointer",
+     studio.vram().selected, 0x401);
+
+  /* the drawn map, not a table: the sheet is an image, its regions are
+   * labelled on it, and the legend is chips */
+  const over = studio.vram().overlays;
+  check(over.grid === 34 && over.tints >= 64,
+        "#85: the BAT's 64 cells on page 0 are tinted and the grid is drawn (" +
+        over.tints + " tints, " + over.grid + " grid lines)");
+  check(over.labels.indexOf("BAT") >= 0,
+        "#85: the BAT's name is drawn on the map (" +
+        over.labels.join(",") + ")");
+  const canvasCalls = (page.dom.get("vrammap").__ctx &&
+                       page.dom.get("vrammap").__ctx.__calls) || [];
+  check(canvasCalls.some((c) => c.name === "drawImage"),
+        "#85: the canvas really got the sheet (drawImage)");
+  check(canvasCalls.some((c) => c.name === "fillText" && /BAT/.test(c.args[0])),
+        "#85: … and the BAT label (fillText)");
+  const legend = page.dom.get("vram-legend").children;
+  check(legend.length >= 3 &&
+        /BAT/.test(legend[0].children[1].textContent) &&
+        /words/.test(legend[0].children[1].textContent),
+        "#85: the legend is chips naming each region and its word count");
+
+  studio.panels.select("screen");
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+}
+
 /* ---- #102: the studio API the panels are written against -------------- *
  * current toy and assets (the SCREEN tests above drive them), render/seek,
  * pokes with undo/redo, the Panels registry and the theme tokens. */
@@ -3313,6 +3735,8 @@ async function main() {
   checkSpritesPanel(page);
   checkPanelModules(page);
   checkScreenGaps(page);
+  checkPalettesPanel(page);
+  checkVramPanel(page);
   checkStudioApi(page);
 
   let browser = "not-requested";

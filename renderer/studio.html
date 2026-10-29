@@ -336,15 +336,73 @@
     margin: 0; color: var(--text2); font: 11px/1.45 var(--mono);
     white-space: pre; overflow: visible;
   }
-  #vrammap { width: 100%; height: 44px; image-rendering: pixelated; display: block; }
+  #vrammap {
+    width: 384px; height: 384px; max-width: 100%; image-rendering: pixelated;
+    display: block; border: 1px solid var(--line2); border-radius: 4px;
+    background: #08090c;
+  }
+  /* ---------- the VRAM panel's drawn map (#85) ---------- */
+  .vram-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin: 0 0 8px; padding: 0 0 8px; border-bottom: 1px solid var(--line2);
+    font: 11px var(--mono); color: var(--text2);
+  }
+  .vram-page, .vram-jumps { display: flex; align-items: center; gap: 4px; }
+  .vram-bar select {
+    background: var(--chipbg); color: var(--text2); border: 1px solid var(--line2);
+    border-radius: 3px; font: 11px var(--mono); padding: 2px 4px;
+  }
+  .vram-jumps .btn-mini { font-size: 9px; }
+  .vram-hover { color: var(--dim); margin-left: auto; }
+  .vram-legend {
+    display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px;
+    font: 10px var(--mono); color: var(--text2);
+  }
+  .vleg { display: flex; align-items: center; gap: 4px; }
+  .vleg i { width: 10px; height: 10px; border-radius: 2px; display: block; }
+  .vram-pick {
+    font: 11px/1.5 var(--mono); color: var(--cyan); white-space: pre-wrap;
+    margin-top: 6px;
+  }
+  /* ---------- the PALETTES panel's 512-colour picker (#85) ---------- */
+  .pal-body { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .pal-side { flex: 1 1 300px; min-width: 280px; }
   .pal32 { display: flex; flex-direction: column; gap: 1px; }
+  .pal32 .pal-head {
+    color: var(--muted); font: 9px var(--mono); letter-spacing: 0.08em;
+    margin: 6px 0 2px; text-transform: uppercase;
+  }
   .pal32 .prow { display: flex; align-items: center; gap: 2px; }
   .pal32 .pnum {
     width: 1.9rem; text-align: right; color: var(--dim);
     font: 10px var(--mono);
   }
-  .psw { width: 15px; height: 15px; box-sizing: border-box; }
+  .psw {
+    width: 15px; height: 15px; box-sizing: border-box; padding: 0;
+    border: 0; border-radius: 2px; cursor: pointer;
+  }
+  .psw:hover { outline: 1px solid var(--text); }
+  .psw.is-on { outline: 2px solid var(--accent, #5fc9e8); outline-offset: 1px; }
   .psw.entry0 { border: 1px dashed #89909c; }
+  .pal-readout {
+    font: 11px/1.5 var(--mono); color: var(--text2); white-space: pre-wrap;
+    margin-bottom: 10px;
+  }
+  .pal-picker { display: flex; flex-wrap: wrap; gap: 10px; }
+  .pal-plane-wrap { display: flex; flex-direction: column; gap: 3px; }
+  .pal-plane-wrap b {
+    color: var(--dim); font: 9px var(--mono); letter-spacing: 0.06em;
+  }
+  .pal-plane {
+    display: grid; grid-template-columns: repeat(8, 13px);
+    grid-auto-rows: 13px; gap: 1px;
+  }
+  .pal-c {
+    width: 13px; height: 13px; padding: 0; border: 0; border-radius: 2px;
+    cursor: pointer;
+  }
+  .pal-c:hover { outline: 1px solid var(--text); }
+  .pal-c.is-on { outline: 2px solid var(--accent, #5fc9e8); outline-offset: 1px; }
   .hint { color: var(--dim); font-size: 12px; }
 
   /* ---------- the SCREEN panel's cell-map editor (#84) ---------- */
@@ -816,17 +874,56 @@
               register values on that line.</div>
           </div>
           <div class="panel" id="panel-vram" data-panel="vram" hidden>
-            <canvas id="vrammap" width="512" height="44"></canvas>
-            <p class="hint">Whole VRAM, 32768 words: the BAT, tile and sprite
-              pattern copy regions, the SAT at $7F00 and what is free.</p>
-            <pre class="table" id="vram-legend"></pre>
+            <!-- #85: the VDC's 32768 words drawn, like ppu.toys' VRAM panel:
+                 a page is 256 16-word characters, eight pages; the BAT, the
+                 tiles, the sprite patterns and the SAT are tinted and
+                 labelled; the pointer reads out the word under it. -->
+            <div class="vram-bar">
+              <span class="vram-page">
+                <button type="button" class="btn-mini" id="vram-prev"
+                        title="Previous page">‹</button>
+                <select id="vram-page" aria-label="VRAM page"></select>
+                <button type="button" class="btn-mini" id="vram-next"
+                        title="Next page">›</button>
+              </span>
+              <label class="vram-pal" title="The background palette the
+                     characters are drawn in">preview palette
+                <select id="vram-pal"
+                        aria-label="Preview palette"></select></label>
+              <span class="vram-jumps" id="vram-jumps" role="group"
+                    aria-label="Jump to a region"></span>
+              <span class="vram-hover" id="vram-hover"></span>
+            </div>
+            <canvas id="vrammap" width="384" height="384"
+                    aria-label="VRAM as a drawn map: click a character to inspect it"></canvas>
+            <div class="vram-legend" id="vram-legend"></div>
+            <div class="vram-pick" id="vram-pick">Click a character to inspect
+              its words.</div>
+            <p class="hint">The running toy's VRAM: each cell is one character
+              (16 words, 8×8, 4bpp). The BAT and the SAT hold words, not
+              characters, and are tinted. Eight pages of 256 characters.</p>
           </div>
           <div class="panel" id="panel-palettes" data-panel="palettes" hidden>
-            <div class="pal32" id="pal32"></div>
+            <!-- #85: ppu.toys' CGRAM panel one size up — pick a swatch, then
+                 pick one of the 512 colours the VCE can actually show. -->
+            <div class="pal-body">
+              <div class="pal-grid">
+                <div class="pal32" id="pal32" role="group"
+                     aria-label="The VCE's 32 palettes of 16 colours: click an entry to edit it"></div>
+              </div>
+              <div class="pal-side">
+                <div class="scr-head">The selected entry</div>
+                <div class="pal-readout" id="pal-readout">Click a swatch to
+                  edit its 9-bit word.</div>
+                <div class="scr-head">The VCE's 512 colours (8 G × 8 R × 8 B)</div>
+                <div class="pal-picker" id="pal-picker"
+                     aria-label="Pick one of the VCE's 512 colours"></div>
+                <p class="hint" id="pal-note"></p>
+              </div>
+            </div>
             <p class="hint">Palettes 0–15 are the BAT's 4-bit palette field;
-              palettes 16–31 are the sprite palettes. Entry 0 of a background
-              palette (dashed) is the shared backdrop. Each swatch's tooltip
-              carries its CRAM address and 9-bit word.</p>
+              palettes 16–31 are the 16 sprite palettes. Entry 0 of a
+              background palette (dashed) is the one shared backdrop.</p>
           </div>
           <div class="panel" id="panel-sprites" data-panel="sprites" hidden>
             <!-- #86: the SAT as a visual editor, like ppu.toys' SPRITES.
@@ -1119,6 +1216,10 @@
 <script src="pce-panels.js"></script>
 <script src="pce-editor.js"></script>
 <script src="pce-screen.js"></script>
+<!-- #85: the two panels' models — the VCE colour arithmetic over
+     pce-editor.js's picture, and the 4bpp character decode over VRAM. -->
+<script src="pce-palettes.js"></script>
+<script src="pce-vram-map.js"></script>
 <script src="pce-sat.js"></script>
 <script src="pce-psg.js"></script>
 <script src="pce-docs.js"></script>
@@ -3214,6 +3315,20 @@ function writeSpritesAssets(pic) {
   return writeAssetsWith(PCEStudio.sat, pic);
 }
 
+/* #85: the PALETTES panel's write-back.  Its picture is the same editor
+ * picture SCREEN edits, but its file is palettes.json alone — the palettes
+ * model's syncFiles writes only that (the same rule pce-sat.js follows for
+ * sprites.json).  The changed file is announced to the asset watchers: the
+ * SCREEN and SPRITES panels each hold a picture over the same files, and one
+ * writing a file the other also carries must make the other re-read it —
+ * that is what onAssetEdit exists for (#102's API). */
+function writePalettesAssets(pic) {
+  if (!PCEStudio.palettes) return [];
+  const changed = writeAssetsWith(PCEStudio.palettes, pic);
+  for (const name of changed) notifyAssetEdit(name);
+  return changed;
+}
+
 function registerPanelModules() {
   const modules = (PCEStudio && PCEStudio.studioPanelModules) || [];
   for (const m of modules) {
@@ -3224,11 +3339,14 @@ function registerPanelModules() {
   return modules.length;
 }
 
-/* The screen panel's evidence surface, read from the module that owns it. */
-function screenApi() {
-  const def = panelById("screen");
+/* A panel's evidence surface, read from the module that owns it (#84, #85). */
+function panelApi(id) {
+  const def = panelById(id);
   return (def && def.api) || null;
 }
+
+/* The screen panel's evidence surface. */
+function screenApi() { return panelApi("screen"); }
 
 const studio = {
   /* ---- the layout (the page's, not a panel's) ------------------------- */
@@ -3261,6 +3379,8 @@ const studio = {
     mainSource: mainSource,
     writeAssets: writeAssets,
     writeSpritesAssets: writeSpritesAssets,
+    /* #85: palettes.json only, for the PALETTES panel */
+    writePalettesAssets: writePalettesAssets,
     persist: persistToy,
     saved: setSaved,
     refreshAssets: renderAssets,
@@ -3422,7 +3542,29 @@ const studio = {
   /* the DOM path: a {clientX, clientY} over an element's rect */
   screenPointer: (kind, ev, elem) => screenApi().pointer(kind, ev, elem),
   screenCanvas: () => screenApi().canvas(),
-  screenDrawn: () => screenApi().drawn()
+  screenDrawn: () => screenApi().drawn(),
+
+  /* #85 — the PALETTES panel's 512-colour picker and the VRAM panel's drawn
+   * map. The modules own these; the evidence drives the same functions
+   * their DOM handlers call. */
+  palettes: () => { const a = panelApi("palettes"); return a ? a.state() : null; },
+  paletteSelect: (palette, entry) => panelApi("palettes").select(palette, entry),
+  paletteSetWord: (palette, entry, colour) =>
+    panelApi("palettes").setWord(palette, entry, colour),
+  palettePick: (index) => panelApi("palettes").pick(index),
+  paletteColours: () => panelApi("palettes").colours(),
+  paletteCss: (colour) => panelApi("palettes").css(colour),
+  palettesPicture: () => panelApi("palettes").picture(),
+  vram: () => { const a = panelApi("vram"); return a ? a.state() : null; },
+  vramPage: (n) => panelApi("vram").setPage(n),
+  vramSetPalette: (n) => panelApi("vram").setPalette(n),
+  vramHover: (word) => panelApi("vram").hoverWord(word),
+  vramPick: (word) => panelApi("vram").pickWord(word),
+  vramText: (word) => panelApi("vram").text(word),
+  vramDescribe: (word) => panelApi("vram").describe(word),
+  vramImage: () => panelApi("vram").image(),
+  vramAt: (x, y) => panelApi("vram").wordAt(x, y),
+  vramCharPixels: (ch) => panelApi("vram").charPixels(ch)
 };
 
 /* The registry's methods live on the chip-panel array, so `studio.panels` is
