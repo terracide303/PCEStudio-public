@@ -38,6 +38,8 @@
  *     drawn frame exactly as renderer/pce-sprites.js's renderFrame with that
  *     register says (diff 0 against the renderer's own output, and non-zero
  *     against the frame before) — for BXR, for BYR and for CR's BB bit.
+ *     #116 (REVIEW-PANELS 79-G2): the DECIMAL samples include "10", which is
+ *     ten in DECIMAL and sixteen in HEX — "9" could not tell the bases apart.
  *  5. Undo restores the frame byte for byte; redo re-applies it; the poke
  *     survives a seek back and forward (a keyframe is a frame rule, not a
  *     one-shot).
@@ -582,6 +584,29 @@ function checkPokes(page) {
         "#79: DECIMAL pokes BYR 9");
   sameBytes("#79: the decimal poke's frame is the renderer's with BYR 9",
             studio.output().pixels, rendererFrame(rt, { BYR: 9 }));
+  studio.clearPokes();
+
+  /* #116 (REVIEW-PANELS 79-G2): "9" is the same number in both bases, so the
+   * sample above cannot tell a radix-10 parse from a radix-16 one.  "10" is
+   * ten in DECIMAL and sixteen in HEX: the DEC column must read ten. */
+  check(api.setDec("VDC08", "10"),
+        "#79: a two-digit value typed into DECIMAL is taken");
+  check(studio.pokes().length === 1 && studio.pokes()[0].reg === "BYR" &&
+        studio.pokes()[0].value === 10,
+        "#79: DECIMAL reads \"10\" as ten, not sixteen (" +
+        JSON.stringify(studio.pokes()) + ")");
+  sameBytes("#79: the decimal \"10\" poke's frame is the renderer's with BYR 10",
+            studio.output().pixels, rendererFrame(rt, { BYR: 10 }));
+  studio.clearPokes();
+  /* BXR crosses the same line: $10 is 16, ten is $0A */
+  check(api.setDec("VDC07", "10"),
+        "#79: a two-digit BXR value typed into DECIMAL is taken");
+  check(studio.pokes().length === 1 && studio.pokes()[0].reg === "BXR" &&
+        studio.pokes()[0].value === 10,
+        "#79: DECIMAL reads BXR \"10\" as $0A, not $10 (" +
+        JSON.stringify(studio.pokes()) + ")");
+  sameBytes("#79: the decimal BXR poke's frame is the renderer's with BXR $A",
+            studio.output().pixels, rendererFrame(rt, { BXR: 0x0A }));
   studio.clearPokes();
 
   /* a BIT: CR's bit 7 is BB, the background on/off */

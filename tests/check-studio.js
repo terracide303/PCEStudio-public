@@ -102,6 +102,24 @@
  *   - the movement assertion is one function, `movesByPad`, and ten frames
  *     with NO pad held must fail it (M10).
  *
+ * #116 closes eight of the nine misses the cold break in docs/REVIEW-PANELS.md
+ * left here (each was MISSED on this suite; the ninth, 79-G2, is in
+ * tests/check-pokes.js).  Each check is written so the mutant named there
+ * fails it — re-run on a fresh clone with the break applied, 8/8 DETECTED —
+ * and each is a bit the old fixture could not see:
+ *   - 85-P2: a tooltip for palette 1 / sprite palette 2, where *8 and *16
+ *     differ (palette 0 cannot tell them apart);
+ *   - 86-S2: two sprites over one point, the lower SAT index wins;
+ *   - 92-R2: a wobble's BXR on all 224 lines, against the check's own sine;
+ *   - 93-L2: background palette 1's fade addresses (17-31, never $010);
+ *   - 93-L3: a raster toy whose lines set CR — the layer mask reaches them;
+ *   - 97-A2: the row's L/R balance sliders fired as DOM events;
+ *   - 98-C2: the count with a warning but no error ("0 errors · 1 warning");
+ *   - 107-P2: ```LUA / ```Luau fences, and the old source kept on a refusal.
+ * Blind spots: this still cannot see the panels' painted pixels (the stub
+ * canvas records calls) and does not exercise the browser driver for these
+ * eight beyond what --browser already covers.
+ *
  * Not measured here: layout and CSS (a screenshot is the evidence, under
  * $TMPDIR and described in docs/STUDIO.md), a real canvas's pixels (the stub
  * context records the calls, not the rendered result), the toy
@@ -1925,6 +1943,35 @@ function checkPasteRun(page) {
         "#107: an unclosed fence is refused by code (" +
         (fenceErr && fenceErr.code) + ")");
 
+  /* #116 (REVIEW-PANELS 107-P2): a Markdown fence's language is not
+   * case-sensitive in practice — ```LUA and ```Luau are Lua, and refusing
+   * them keeps the old source.  The suite only used ```lua and ```js. */
+  let upperErr = null, upper = null;
+  try { upper = studio.stripFence("```LUA\n" + body + "```"); }
+  catch (e) { upperErr = e; }
+  check(upperErr === null && upper === body,
+        "#107: a ```LUA fence is the same language as ```lua (" +
+        (upperErr ? upperErr.code + ": " + upperErr.message
+                  : JSON.stringify(upper)) + ")");
+  let luauErr = null, luau = null;
+  try { luau = studio.stripFence("```Luau\n" + body + "```"); }
+  catch (e) { luauErr = e; }
+  check(luauErr === null && luau === body,
+        "#107: a ```Luau fence is the same language as ```lua (" +
+        (luauErr ? luauErr.code + ": " + luauErr.message
+                 : JSON.stringify(luau)) + ")");
+  /* and a real refusal leaves main.lua as it was */
+  const keptSource = studio.current().source;
+  const keptText = studio.editorText();
+  check(studio.pasteText("```js\nconsole.log(1)\n```") === false,
+        "#107: pasting a ```js fence reports that it did not run");
+  check(studio.lastError() && studio.lastError().code === "paste-language",
+        "#107: … with paste-language (" +
+        JSON.stringify(studio.lastError()) + ")");
+  check(studio.current().source === keptSource &&
+        studio.editorText() === keptText,
+        "#107: a refused paste leaves the old main.lua in place");
+
   /* a real toy, pasted the way an AI answers: prose, a fence, more prose */
   const palette = studio.examples.filter((e) => e.id === "palette")[0];
   const answer = "Here is a palette-cycling toy.\n\n```lua\n" +
@@ -3051,6 +3098,28 @@ function checkAudioPanel(page) {
      "15/0");
   studio.audioBalance(0, 0xFF);
 
+  /* #116 (REVIEW-PANELS 97-A2): the row's own L/R sliders.  The API above is
+   * tested; these are the DOM inputs a person drags, and the halves must not
+   * be swapped: L owns R5's high nibble, R its low one. */
+  studio.audioBalance(0, 0xFF);
+  const balL = page.dom.get("aud-balL-0");
+  balL.value = "0";
+  fire(balL, "input");
+  eq("#97: the row's L slider writes R5's high nibble",
+     studio.audio().voices[0].balance, 0x0F);
+  eq("#97: … and that is R5 = $0F", audioWritesOf(studio, 5)[0], 0x0F);
+  eq("#97: … so the left meter is off",
+     studio.audio().meters[0].left.vl, 0x1F);
+  const balR = page.dom.get("aud-balR-0");
+  balR.value = "0";
+  fire(balR, "input");
+  eq("#97: the row's R slider writes R5's low nibble",
+     studio.audio().voices[0].balance, 0x00);
+  eq("#97: … and that is R5 = $00", audioWritesOf(studio, 5)[0], 0x00);
+  eq("#97: … so the right meter is off too",
+     studio.audio().meters[0].right.vl, 0x1F);
+  studio.audioBalance(0, 0xFF);
+
   studio.audioMaster(0xF0);
   st = studio.audio();
   eq("#97: the master is R1", st.master, 0xF0);
@@ -3753,6 +3822,35 @@ function checkSpritesPanel(page) {
         "the panel reads the live frame's SAT too (" +
         page.dom.get("spr-live").textContent + ")");
 
+  /* ---- #116 (REVIEW-PANELS 86-S2): two sprites over one point ---------- *
+   * The VDC draws the LOWER SAT index on an overlap (pce-sprites.js
+   * paintLine paints last-to-first), and a press on the screen selects the
+   * sprite the VDC draws there.  Every fixture above has exactly one sprite,
+   * so "the only sprite" and "the first of two" look the same. */
+  resetSpriteAssets(studio);
+  {
+    const pat0 = { width: 16, height: 16, pixels: new Array(256).fill(0) };
+    pat0.pixels[0] = 5;                    /* (0,0): both sprites lit here */
+    const pat1 = { width: 16, height: 16, pixels: new Array(256).fill(0) };
+    pat1.pixels[0] = 5;                    /* (0,0): the overlap */
+    pat1.pixels[1] = 5;                    /* (1,0): only sprite 1 here */
+    setAssetFile(studio, "sprites.json", JSON.stringify({
+      version: 1,
+      patterns: [pat0, pat1],
+      sprites: [{ x: 10, y: 10, pattern: 0 },
+                { x: 10, y: 10, pattern: 1 }]
+    }));
+    studio.panels.dirty();
+    studio.panels.refresh(true);
+    const pic = api.picture();
+    eq("#86: two sprites over one point — the overlap is the lower SAT index",
+       sat.spriteAt(pic, 10, 10), 0);
+    eq("#86: … and a press on the screen selects it", api.screenPress(10, 10), 0);
+    /* the control: where only the second sprite draws, it is its own index */
+    eq("#86: a point only the second sprite covers is sprite 1",
+       sat.spriteAt(pic, 11, 10), 1);
+  }
+
   /* leave the page on a clean example */
   studio.loadExample("palette", true);
   studio.pause();
@@ -4229,6 +4327,20 @@ function checkPalettesPanel(page) {
   check(/CRAM \$005/.test(page.dom.get("pal-0-5").title) &&
         /word \$1FF/.test(page.dom.get("pal-0-5").title),
         "#85: the swatch's tooltip carries its address and word");
+
+  /* #116 (REVIEW-PANELS 85-P2): palette 0 is the one row where `*8` and `*16`
+   * give the same address, so the tooltip above cannot tell 16 entries a
+   * palette from 8.  Palettes 1-15 and the sprite palettes can: an entry's
+   * CRAM address is palette*16 + entry (palettes 16-31 at $100-$1FF). */
+  check(/CRAM \$015/.test(pa.title(1, 5, 0x1FF)),
+        "#85: background palette 1 entry 5's tooltip is CRAM $015 (" +
+        pa.title(1, 5, 0x1FF) + ")");
+  check(/CRAM \$123/.test(pa.title(18, 3, 0x0E4)),
+        "#85: sprite palette 2 entry 3's tooltip is CRAM $123 (" +
+        pa.title(18, 3, 0x0E4) + ")");
+  check(/CRAM \$015/.test(page.dom.get("pal-1-5").title),
+        "#85: the drawn swatch for palette 1 entry 5 carries it too (" +
+        page.dom.get("pal-1-5").title + ")");
   check(studio.palettes().word === 0x1FF && studio.palettes().blank === false,
         "#85: the panel's own state agrees");
 
@@ -4955,6 +5067,49 @@ function checkScanlinesPanel(page) {
         "#92: a third line count is refused (" + studio.scanlines().error + ")");
   studio.scanlineSetLines(224);
 
+  /* ---- #116 (REVIEW-PANELS 92-R2): the wobble's BXR, line by line ------ *
+   * The budget above prices a wobble at one write a line whatever the
+   * values; the values are BXR = round(amplitude * sin(2π * (line - line0 +
+   * speed*frame) / period)), and they were never read. */
+  const wobBand = [{ from: 0, to: 223, enabled: true,
+                     fx: { kind: "wobble", amplitude: 4, period: 32,
+                           speed: 0 } }];
+  const wobTable = r.toRaster(wobBand, { lines: 224 });
+  const wobByLine = new Map(wobTable.entries.map((e) => [e.line, e.bxr]));
+  let wobbleBad = null;
+  const wobbleFirst = [];
+  for (let line = 0; line < 224; line++) {
+    const want = Math.round(4 * Math.sin(2 * Math.PI * line / 32)) & 0x3FF;
+    const got = wobByLine.get(line);
+    if (got !== want && !wobbleBad)
+      wobbleBad = "line " + line + ": got " + got + ", want " + want;
+    if (line < 6) wobbleFirst.push(line + ":" + got);
+  }
+  check(!wobbleBad, "#92: a period-32 wobble's BXR is 4·sin(2π·line/32) on " +
+        "every one of the 224 lines" + (wobbleBad ? " (" + wobbleBad + ")" : ""));
+  eq("#92: the wobble's first six lines are 0,1,2,2,3,3 — a period, not a " +
+     "half-period", wobbleFirst.join(","), "0:0,1:1,2:2,3:2,4:3,5:3");
+  /* the phase is the band's own start, the frame and the speed; the base
+   * BXR is the table's, added to the offset.  Amplitude 4 over period 24
+   * keeps every line off a rounding knife-edge. */
+  const wobPhase = [{ from: 10, to: 40, enabled: true,
+                      fx: { kind: "wobble", amplitude: 4, period: 24,
+                            speed: 2 } }];
+  const phaseTable = r.toRaster(wobPhase, { lines: 224, frame: 3,
+                                            base: { bxr: 7 } });
+  const phaseByLine = new Map(phaseTable.entries.map((e) => [e.line, e.bxr]));
+  let phaseBad = null;
+  for (let line = 10; line <= 40; line++) {
+    const phase = (line - 10 + 2 * 3) / 24;
+    const want = (7 + Math.round(4 * Math.sin(2 * Math.PI * phase))) & 0x3FF;
+    if (phaseByLine.get(line) !== want && !phaseBad)
+      phaseBad = "line " + line + ": got " + phaseByLine.get(line) +
+                 ", want " + want;
+  }
+  check(!phaseBad, "#92: a wobble's phase is line0 + speed·frame, with its " +
+        "own amplitude, period and the table's base BXR" +
+        (phaseBad ? " (" + phaseBad + ")" : ""));
+
   studio.loadExample("palette", true);
   studio.pause();
   studio.seek(0);
@@ -5074,6 +5229,29 @@ function checkConsolePanel(page) {
   eq("#98: the frame budget finding links to function frame()'s line",
      budget && budget.line, 2);
 
+  /* ---- #116 (REVIEW-PANELS 98-C2): a warning is not an error ----------- *
+   * No fixture above emits a severity "warn" finding, so the warning half of
+   * the count was never read: 0 errors + 2 warnings must not read "2
+   * errors".  This toy's frame is over 60 Hz but under the 8-frame ceiling,
+   * which the validator prices as one warning. */
+  const SLOW = "g = 0\nfunction frame(t, f)\n" +
+               "  for i = 1, 1500 do g = g + 1 end\nend\n";
+  rep = load(SLOW);
+  eq("#98: a slow-but-runnable toy has no errors", rep.errors, 0);
+  eq("#98: … and exactly one warning", rep.warnings, 1);
+  check(rep.findings.some((f) => f.severity === "warn" &&
+                                 f.code === "validate-slow-frame"),
+        "#98: the warning is a finding in its own right (" +
+        rep.findings.map((f) => f.severity + ":" + f.code).join(", ") + ")");
+  eq("#98: a warning leaves the banner green", rep.banner.state, "ok");
+  eq("#98: … drawn green", dom.get("console-banner").textContent,
+     "Can run on the PC Engine");
+  eq("#98: the count separates errors from warnings",
+     dom.get("console-count").textContent, "0 errors · 1 warning");
+  check(/is-warn/.test(dom.get("console-findings").children[0].className),
+        "#98: the warning is drawn as a warning (" +
+        dom.get("console-findings").children[0].className + ")");
+
   /* restore the page's own state for the sections after this one */
   studio.panels.select("screen");
   studio.loadExample("palette", true);
@@ -5151,6 +5329,16 @@ function frame(t, f)
   sprite(0, { x = 144, y = 160, pattern = 0x100, palette = 0, spbg = false })
 end
 `;
+
+/* The same scene with a line callback that sets CR on every line (#116,
+ * REVIEW-PANELS 93-L3): a raster entry's CR overrides the frame's register
+ * on its line, so the layer mask has to reach it too. */
+const LAYERS_RASTER_SCENE = LAYERS_SCENE.replace(
+  "function frame(t, f)",
+  "function raster(line)\n" +
+  "  reg(\"CR\", 0xC0)\n" +
+  "end\n" +
+  "function frame(t, f)");
 
 /* The frame the running runtime would draw with one CR value (and optionally
  * one CRAM table / one SAT), rendered here by the renderer itself. */
@@ -5466,6 +5654,25 @@ function checkLayersPanel(page) {
   check(studio.fadeSpec().steps === 16 && studio.fadeSpec().curve === "linear",
         "#93: a refused spec leaves the panel's fade as it was");
 
+  /* ---- #116 (REVIEW-PANELS 93-L2): background palettes 1-15 ----------- *
+   * Entry 0 of every background palette is the shared backdrop at CRAM
+   * $000, so the BG never reads $010, $020, …; a fade that wrote them would
+   * spend writes on colours nothing shows.  The plan above uses background
+   * palette 0, where the duplicate is deduplicated away. */
+  const bg1Addresses = Array.from({ length: 15 }, (_, i) => 0x11 + i);
+  eq("#93: addressesOf('background', 1) is entries 1-15 only (17-31)",
+     L.addressesOf("background", 1).join(","), bg1Addresses.join(","));
+  studio.fadeSetSpec({ palettes: [{ kind: "background", palette: 1 },
+                                  { kind: "sprite", palette: 0 }],
+                       target: "black", steps: 8, curve: "linear" });
+  const plan1 = studio.fadePlan();
+  const sp0Addresses = Array.from({ length: 16 }, (_, i) => 0x100 + i);
+  eq("#93: a background palette 1 fade plans 17-31, then the sprite " +
+     "palette's $100-$10F", plan1.addresses.join(","),
+     bg1Addresses.concat(sp0Addresses).join(","));
+  check(plan1.addresses.indexOf(0x010) < 0,
+        "#93: the plan never writes CRAM $010, which the BG does not read");
+
   /* The ?fade= hook: the screenshot needs no synthetic input (the same trick
    * as ?poke= and ?bands=). */
   const p2 = runPage("?demo=sprite&paused=1&panel=layers&fade=b0+s0,white,8,linear");
@@ -5477,6 +5684,40 @@ function checkLayersPanel(page) {
   const plan2 = s2.fadePlan();
   eq("#93: ?fade= captured the plan (backdrop, entries 1-15, sprite $100-$10F)",
      plan2.addresses.length, 32);
+
+  /* ---- #116 (REVIEW-PANELS 93-L3): a raster line's CR is masked too ----- *
+   * A raster() entry's CR overrides the frame's register on its line, so
+   * switching the BG off must clear BB there as well — no fixture above has
+   * a raster table at all. */
+  studio.loadExample("palette", true);
+  runEditorSource(studio, LAYERS_RASTER_SCENE);
+  const rst = studio.state();
+  check(!!rst && !!rst.raster && rst.raster.entries.length === 224 &&
+        rst.raster.entries.every((e) => e.cr === 0xC0),
+        "#93: the raster toy's table sets CR $C0 on every line (" +
+        (rst && rst.raster ? rst.raster.entries.length : "no table") +
+        " entries)");
+  const noBB = (v) => v & ~0x80;
+  const gatedTable = L.gatedRaster(rst.raster, noBB);
+  check(gatedTable.entries.every((e) => e.cr === 0x40),
+        "#93: gatedRaster clears BB on every raster entry's CR");
+  check(gatedTable.base.cr === 0x40,
+        "#93: … and on the table's base CR (" + gatedTable.base.cr + ")");
+  studio.setLayer("bg", false);
+  const wantRaster = {
+    base: Object.assign({}, rst.raster.base, { cr: 0x40 }),
+    baseCram: rst.raster.baseCram,
+    entries: rst.raster.entries.map((e) => Object.assign({}, e, { cr: 0x40 }))
+  };
+  const wantOpts = studio.runtime().options();
+  wantOpts.regs = Object.assign({}, wantOpts.regs, { CR: 0x40 });
+  wantOpts.raster = wantRaster;
+  samePixels("#93: with the BG off, every raster line is the renderer with " +
+             "BB cleared", studio.layerPreviews().composed.pixels,
+             sprites.renderFrame(wantOpts).pixels);
+  check((studio.state().regs.CR & 0x80) === 0,
+        "#93: … and the live VDC's BB is clear");
+  studio.setLayer("bg", true);
 
   /* Leave the page on the sprite example, paused at frame 0 (the code the
    * fade was written into is not carried on). */
