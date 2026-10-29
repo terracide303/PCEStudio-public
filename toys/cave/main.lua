@@ -3,9 +3,10 @@
 --
 -- WHAT THIS IS: one background — a cave corridor — scrolling under the pad,
 -- in five bands that each get their own BXR from the RCR line interrupt, so
--- the ceiling, the three far plates, the rock shelf and the floor move at
--- five speeds.  The pack's warm colours are cycled once a frame, so the rock's
--- lit veins breathe.  Three creatures — two bats and an ember — fly over it.
+-- the ceiling (with its stalactites), the crystal band, the near wall, the
+-- mid floor and the near floor move at five speeds.  The pack's warm colours
+-- are cycled once a frame, so the rock's lit veins breathe.  Three creatures
+-- — two bats and an ember — fly over it.
 --
 -- THE ART IS NOT IN THIS FILE, AND NOT IN THE REPO (docs/DECISIONS.md,
 -- 2026-10-29, Dennis: "About the artwork don't put it on the repo but it's
@@ -188,9 +189,9 @@ end
 -- why).
 
 function raster(line)
-  if line == 0 then reg("BXR", (sx // 8) % 1024) end      -- ceiling: slowest
-  if line == 16 then reg("BXR", (sx // 4) % 1024) end     -- the far plate bg3
-  if line == 48 then reg("BXR", (sx // 2) % 1024) end     -- bg2
-  if line == 80 then reg("BXR", sx % 1024) end            -- bg1
-  if line == 104 then reg("BXR", (sx * 2) % 1024) end     -- the floor: fastest
+  if line == 0 then reg("BXR", (sx // 8) % 1024) end      -- the ceiling: slowest
+  if line == 32 then reg("BXR", (sx // 4) % 1024) end     -- the crystal band
+  if line == 56 then reg("BXR", (sx // 2) % 1024) end     -- the near wall
+  if line == 96 then reg("BXR", sx % 1024) end            -- the mid floor
+  if line == 160 then reg("BXR", (sx * 2) % 1024) end     -- the near floor: fastest
 end
