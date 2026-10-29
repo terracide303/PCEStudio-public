@@ -1,0 +1,54 @@
+name: Bug report
+description: Something in PCEStudio is broken or behaves wrongly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing! Please check the [list of what does not work yet](https://pcestudio.terracides.com/renderer/testers.html#not-yet) and search the open issues first. One problem per issue, please.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: What you did, click by click, starting from opening the page.
+      placeholder: |
+        1. Open Browse, pick TOWER
+        2. Click the picture, hold L and press N at the second ladder
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Include the frame number shown under the picture if you can (e.g. "frame 2089").
+    validations:
+      required: true
+  - type: textarea
+    id: messages
+    attributes:
+      label: Messages
+      description: Copy any red text from the CONSOLE panel, Check or Export window. Paste the text, not a screenshot of it.
+      render: text
+  - type: textarea
+    id: toy
+    attributes:
+      label: The toy
+      description: The game's name if it is in Browse; otherwise attach the file from "Save file" (.pce.json, zip it if GitHub refuses it) or paste the Lua here.
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and system
+      placeholder: Chrome 141 on macOS 26
+    validations:
+      required: true
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshot or recording
+      description: Drag images or a short video here if it is something you see or hear.
