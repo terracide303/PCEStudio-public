@@ -238,8 +238,9 @@ cycles, one raster call 1,510, one collection 338,757, flags 0.
 `toys/status-bar.lua` and #30's `TOY_RASTER` do **not** match yet (status-bar's
 bar is right but its playfield is four lines out; TOY_RASTER differs across
 the picture) and are recorded as not proven. **Part B** runs the same IL
-through `renderer/pce-cgen.js`'s HuC dialect into vendor/huc's own compiler
-and PCEAS (`tools/build-huc.sh`, `tools/toyc/huc_runtime.c`,
+through `renderer/pce-cgen.js`'s HuC dialect into HuC's own compiler
+and PCEAS (`tools/build-huc.sh`, which fetches and builds the toolchain;
+`tools/toyc/huc_runtime.c`,
 `tools/toyc/huc_raster.asm` — part C's RCR handler as bank-0 PCEAS, hooked
 through HuC's user IRQ1 vector). `node tests/check-il-huc.js` exits 0 with 74
 checks: both ROMs rebuild byte-identically (57,856 B / 66,048 B, 7/8 banks),

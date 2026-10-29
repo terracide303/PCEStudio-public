@@ -14,7 +14,8 @@
  *
  *   target "llvm" (default)  int32_t, llvm-mos's PCE target (parts A and C)
  *   target "huc"             int (HuC's C has no 32-bit type), the HuC
- *                            compiler from vendor/huc, runtime huc_runtime.c
+ *                            compiler (fetched by tools/build-huc.sh),
+ *                            runtime huc_runtime.c
  *
  * The dialect changes types, attributes and the two shift helpers; it does
  * NOT change the IL lowering or what each toy instruction means.  The

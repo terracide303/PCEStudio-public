@@ -216,8 +216,10 @@ function toyRomExpectation(source) {
 }
 const EXPORT_EXPECT = {
   palette: toyRomExpectation(ilExports.TOY_PALETTE),
-  parallax: toyRomExpectation(fs.readFileSync(
-    path.join(__dirname, "..", "toys", "parallax.lua"), "utf8"))
+  /* #151: the parallax toy left Browse, so the gallery's remaining #29
+   * raster toy is the one the page's Export builds here. */
+  "sky-gradient": toyRomExpectation(fs.readFileSync(
+    path.join(__dirname, "..", "toys", "sky-gradient.lua"), "utf8"))
 };
 
 const RENDERER = path.join(__dirname, "..", "renderer");
@@ -875,16 +877,19 @@ async function checkExport(page) {
           "#115: " + id + "'s export carries route 1's projection");
   }
 
-  /* #29's parallax toy, the raster case, through the page's gallery */
-  studio.loadExample("parallax", true);
-  const parallaxSource = fs.readFileSync(path.join(__dirname, "..", "toys",
-    "parallax.lua"), "utf8");
-  check(studio.current().source === parallaxSource,
-        "#115: the gallery loads toys/parallax.lua's exact source");
-  const par = pageBuild("parallax");
+  /* #29's sky gradient, the raster case, through the page's gallery.  (#151
+   * removed the parallax toy from Browse; its file is still in toys/ and
+   * still tested, but the gallery no longer lists it, so this check uses the
+   * remaining #29 raster toy.) */
+  studio.loadExample("sky-gradient", true);
+  const rasterSource = fs.readFileSync(path.join(__dirname, "..", "toys",
+    "sky-gradient.lua"), "utf8");
+  check(studio.current().source === rasterSource,
+        "#115: the gallery loads toys/sky-gradient.lua's exact source");
+  const par = pageBuild("sky-gradient");
   if (par.ok) {
-    check(Buffer.from(par.bytes).equals(nodeBytes(parallaxSource)),
-          "#115: the parallax ROM built in the page is Node's bytes");
+    check(Buffer.from(par.bytes).equals(nodeBytes(rasterSource)),
+          "#115: the sky gradient's ROM built in the page is Node's bytes");
     check(par.route1 && par.route1.shape === "raster" &&
           par.route1.meets60 === false,
           "#115: the validator says the raster route 1 does not meet 60 Hz");
@@ -3168,16 +3173,16 @@ const DRIVER_HTML = [
   '         cdoc.getElementById("export-footer").textContent),',
   '       "the dialog footer is the Experimental static-estimate sentence");',
   '',
-  '    var xex = await exportAndDownload(cs, "parallax");',
+  '    var xex = await exportAndDownload(cs, "sky-gradient");',
   '    ck(xex.state && xex.state.phase === "built",',
-  '       "the Export button builds the parallax toy in the page (" +',
+  '       "the Export button builds the sky gradient in the page (" +',
   '       (xex.state && xex.state.phase) + ")");',
-  '    ck(!!xex.link && xex.link.name === "parallax.pce",',
-  '       "the page downloads parallax.pce (" +',
+  '    ck(!!xex.link && xex.link.name === "sky-gradient.pce",',
+  '       "the page downloads sky-gradient.pce (" +',
   '       (xex.link && xex.link.name) + ")");',
-  '    ck(!!xex.bytes && xex.bytes.length === EXPECT.parallax.length &&',
-  '       fnv(xex.bytes) === EXPECT.parallax.fnv,',
-  '       "the downloaded parallax ROM is Node buildToyRom\'s bytes (" +',
+  '    ck(!!xex.bytes && xex.bytes.length === EXPECT["sky-gradient"].length &&',
+  '       fnv(xex.bytes) === EXPECT["sky-gradient"].fnv,',
+  '       "the downloaded sky-gradient ROM is Node buildToyRom\'s bytes (" +',
   '       (xex.bytes ? xex.bytes.length : "none") + " B, fnv " +',
   '       (xex.bytes ? fnv(xex.bytes) : "none") + ")");',
   '    ck(/Route 1: \\d+ B of IL bytecode/.test(',
@@ -6845,14 +6850,15 @@ function checkGallery(page) {
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
   /* #128 added OAK WOODS, #127 CAVE, #125 CITY and #147 PLATFORMER and TOWER
-   * — five demos besides the five #29 effects and STARFALL; Browse and the
-   * studio read the same generated list */
-  check(data.length === 11,
-        "the gallery carries the five #29 toys, STARFALL, OAK WOODS, CAVE, " +
-        "CITY, PLATFORMER and TOWER (got " + data.length + ")");
+   * — five demos besides the sky gradient (#29) and STARFALL; #151 added
+   * DUSK RUN and took the other four #29 effects out of Browse (their toys
+   * stay in toys/).  Browse and the studio read the same generated list. */
+  check(data.length === 8,
+        "the gallery carries the sky gradient, STARFALL, OAK WOODS, CAVE, " +
+        "CITY, PLATFORMER, TOWER and DUSK RUN (got " + data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
-     ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall", "oak-woods", "cave", "city", "platformer", "tower"]);
+     ["sky-gradient", "starfall", "oak-woods", "cave", "city", "platformer",
+      "tower", "dusk-run"]);
   /* #125: the committed gallery carries CITY's art-free toy — the playable
    * file with the pack's picture is demo-art/city/main.lua and only the
    * deploy reads it (tools/gallery.js --with-demo-art). */
@@ -6892,23 +6898,25 @@ function checkGallery(page) {
   /* 2. the studio: the gallery list, the top-bar link, and ?toy= */
   eq("studio.gallery is the gallery's toys", studio.gallery.map((g) => g.id),
      data.map((t) => t.id));
-  check(studio.gallery[2].source === toySource("road.lua"),
-        "studio.gallery's road source is toys/road.lua");
+  check(studio.gallery[0].source === toySource("sky-gradient.lua"),
+        "studio.gallery's sky-gradient source is toys/sky-gradient.lua");
   check(/id="btn-browse"[^>]*href="browse\.html"/.test(
           fs.readFileSync(PAGE, "utf8")),
         "the top bar links Browse (the stub DOM does not parse static hrefs)");
 
-  const roadSrc = toySource("road.lua");
-  const q = runPage("?toy=road&paused=1");
+  const skySrc = toySource("sky-gradient.lua");
+  const q = runPage("?toy=sky-gradient&paused=1");
   const qs = q.sandbox.PCEStudio.studio;
-  eq("?toy=road is the gallery's road", qs.current().id, "road");
-  eq("?toy=road shows road.lua in the title", qs.current().name, "road.lua");
-  check(qs.current().source === roadSrc,
-        "?toy=road runs toys/road.lua byte for byte");
+  eq("?toy=sky-gradient is the gallery's sky-gradient", qs.current().id,
+     "sky-gradient");
+  eq("?toy=sky-gradient shows sky-gradient.lua in the title",
+     qs.current().name, "sky-gradient.lua");
+  check(qs.current().source === skySrc,
+        "?toy=sky-gradient runs toys/sky-gradient.lua byte for byte");
 
   /* the same 40 frames as the file run through the runtime with no page */
-  const pageFrames = qs.runFrames(40, "road", "lua");
-  const rt = S.toys.create(roadSrc, { budgetMs: 120 });
+  const pageFrames = qs.runFrames(40, "sky-gradient", "lua");
+  const rt = S.toys.create(skySrc, { budgetMs: 120 });
   rt.load();
   const direct = [];
   for (let f = 0; f < 40; f++) { rt.setPad(1, {}); direct.push(rt.frame(f)); }
@@ -6922,8 +6930,8 @@ function checkGallery(page) {
       stateDiffer++;
   }
   check(pageFrames.length === 40 && pixelsDiffer === 0,
-        "the studio's road runs 40 frames pixel-equal to toys/road.lua (" +
-        pixelsDiffer + " differ)");
+        "the studio's sky-gradient runs 40 frames pixel-equal to " +
+        "toys/sky-gradient.lua (" + pixelsDiffer + " differ)");
   check(stateDiffer === 0,
         "… with vram/cram/sat equal on every frame (" +
         stateDiffer + " differ)");
@@ -6992,8 +7000,8 @@ function checkGallery(page) {
   const cards = B.cards();
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
-     ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall", "oak-woods", "cave", "city", "platformer", "tower"]);
+     ["sky-gradient", "starfall", "oak-woods", "cave", "city", "platformer",
+      "tower", "dusk-run"]);
   /* #125: the committed CITY card runs the art-free toy, so it draws no
    * picture here; the deployed gallery carries the playable file and does.
    * Every other card must have ink. */
@@ -7058,13 +7066,53 @@ function checkGallery(page) {
           qInk + " pixels)");
   }
 
+  /* #151: DUSK RUN, Dennis's endless runner, copied unchanged.  It is on
+   * Browse with the two links, and the studio opens it byte for byte and
+   * runs it visibly — its build draws a few tiles a frame, so frame 60 is
+   * already the score bar and the ground. */
+  {
+    const t = data.find((x) => x.id === "dusk-run") || {};
+    eq("#151: dusk-run's author", t.author, "PCEStudio examples");
+    eq("#151: dusk-run's tags", t.tags,
+       ["playable", "sprites", "raster", "parallax"]);
+    check(/N jumps/.test(t.blurb || "") && /rocks/.test(t.blurb || ""),
+          "#151: dusk-run's blurb names the pad keys (" +
+          JSON.stringify(t.blurb) + ")");
+
+    const card = cards.find((c) => c.id === "dusk-run") || {};
+    check(card.ink > 1000 && !card.error,
+          "#151: Browse draws dusk-run's frame 60 (" + card.ink +
+          " pixels" + (card.error ? ", error " + card.error : "") + ")");
+    check(card.href === "toy.html?id=dusk-run" &&
+          card.studioHref === "studio.html?toy=dusk-run" &&
+          card.rawHref === "../toys/dusk-run/main.lua",
+          "#151: the dusk-run card links to its page, the studio and its file");
+
+    const q = runPage("?toy=dusk-run&paused=1");
+    const qs = q.sandbox.PCEStudio.studio;
+    eq("#151: ?toy=dusk-run opens the demo", qs.current().id, "dusk-run");
+    check(qs.current().source === toySource("dusk-run/main.lua"),
+          "#151: ?toy=dusk-run runs toys/dusk-run/main.lua byte for byte");
+    const qFrames = qs.runFrames(61, null, "lua");
+    const qLast = qFrames[qFrames.length - 1];
+    let qInk = 0;
+    if (qLast && qLast.pixels) {
+      const px = qLast.pixels, r0 = px[0], g0 = px[1], b0 = px[2];
+      for (let i = 0; i < px.length; i += 3)
+        if (px[i] !== r0 || px[i + 1] !== g0 || px[i + 2] !== b0) qInk++;
+    }
+    check(qFrames.length === 61 && qInk > 1000,
+          "#151: dusk-run runs frame 0 to 60 and frame 60 has a picture (" +
+          qInk + " pixels)");
+  }
+
   B.setTag("raster");
   eq("the raster tag shows the raster toys", B.visible(),
-     ["parallax", "sky-gradient", "road", "status-bar", "starfall",
-      "oak-woods"]);
+     ["sky-gradient", "starfall", "oak-woods", "dusk-run"]);
   B.setTag("");
-  B.setQuery("road");
-  eq("the search box filters to the road", B.visible(), ["road"]);
+  B.setQuery("sky");
+  eq("the search box filters to the sky gradient", B.visible(),
+     ["sky-gradient"]);
   B.setQuery("PCEStudio");
   eq("search by author finds the toys PCEStudio made", B.visible(),
      B.toys().map((t) => t.id).filter((id) => id !== "cave"));
@@ -7075,26 +7123,28 @@ function checkGallery(page) {
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["cave", "city", "status-bar", "parallax", "oak-woods", "palette-cycle",
-      "platformer", "road", "sky-gradient", "starfall", "tower"]);
+     ["cave", "city", "dusk-run", "oak-woods", "platformer", "sky-gradient",
+      "starfall", "tower"]);
   B.setSort("written");
 
   const bt = runBarePage(BROWSE_PAGE, "?tag=raster");
   eq("?tag=raster opens the page filtered",
      bt.sandbox.PCEStudio.browse.visible(),
-     ["parallax", "sky-gradient", "road", "status-bar", "starfall",
-      "oak-woods"]);
+     ["sky-gradient", "starfall", "oak-woods", "dusk-run"]);
 
   /* 4. a toy's own page */
-  const t = runBarePage(TOY_PAGE, "?id=road&paused=1");
+  const t = runBarePage(TOY_PAGE, "?id=sky-gradient&paused=1");
   const T = t.sandbox.PCEStudio.toyPage;
   check(!!T, "toy.html exposes PCEStudio.toyPage");
-  eq("toy.html?id=road is the road", T.toy().id, "road");
-  check(T.source() === roadSrc,
-        "the toy page's source is toys/road.lua byte for byte");
-  eq("its raw-source link is the toy's file", T.rawHref(), "../toys/road.lua");
-  eq("its Open in Studio link", T.studioHref(), "studio.html?toy=road");
-  eq("its tag chips", T.toy().tags, ["3d", "raster", "palette"]);
+  eq("toy.html?id=sky-gradient is the sky gradient", T.toy().id,
+     "sky-gradient");
+  check(T.source() === skySrc,
+        "the toy page's source is toys/sky-gradient.lua byte for byte");
+  eq("its raw-source link is the toy's file", T.rawHref(),
+     "../toys/sky-gradient.lua");
+  eq("its Open in Studio link", T.studioHref(),
+     "studio.html?toy=sky-gradient");
+  eq("its tag chips", T.toy().tags, ["palette", "raster"]);
 
   const toyFrames = T.frames(60);
   const toyLast = toyFrames[toyFrames.length - 1];
@@ -7128,9 +7178,10 @@ async function checkGalleryBrowser() {
                          "pcestudio-chrome-80-" + process.pid);
   const pages = [
     { name: "browse.html", file: BROWSE_PAGE, search: "?selftest=1",
-      want: /^PASS 7 cards, each drawn at frame 60 · ink / },
-    { name: "toy.html?id=road", file: TOY_PAGE, search: "?id=road&selftest=1",
-      want: /^PASS 60 frames · road · 256x224 · ink [1-9][0-9]* · digest / }
+      want: /^PASS 8 cards, each drawn at frame 60 · ink / },
+    { name: "toy.html?id=sky-gradient", file: TOY_PAGE,
+      search: "?id=sky-gradient&selftest=1",
+      want: /^PASS 60 frames · sky-gradient · 256x224 · ink [1-9][0-9]* · digest / }
   ];
   let pass = true;
   for (let i = 0; i < pages.length; i++) {

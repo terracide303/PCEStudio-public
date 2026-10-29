@@ -21,8 +21,8 @@ Starting Mednafen 1.32.1
     Failed: Error opening file "/Users/dennisschauw/.mednafen/pgconfig/parallax-huc.pce.cfg" for reading: No such file or directory
 
    ROM:       64KiB
-   ROM CRC32: 0xefe9c858
-   ROM MD5:   0x7ecc0e60388dbf757dc7894d36c1cbc1
+   ROM CRC32: 0x5f12881c
+   ROM MD5:   0x0f38d260abe2686bae53ce7485f499eb
    PSG Revision: HuC6280
 
   Loading custom palette from "/Users/dennisschauw/.mednafen/palettes/pce.pal"...
@@ -39,7 +39,7 @@ Starting Mednafen 1.32.1
    Buffer size: 1411 sample frames(31.995465 ms)
    Latency: 1411 sample frames(31.995465 ms)
 
- Starting QuickTime recording to file "/Volumes/External II/agent-tmp/parallax-huc.mov":
+ Starting QuickTime recording to file "/Volumes/External/agent-tmp/parallax-huc.mov":
   Video width: 1024
   Video height: 232
   Video codec: png

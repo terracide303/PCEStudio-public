@@ -18,6 +18,7 @@ any later version** (`LICENSE`), Dennis, 2026-10-29.
   **Blip_Buffer** 0.4.1 (LGPL-2.1-or-later, Shay Green), which is why the project is GPL; credit and line-level
   notes are in that file.
 - Code under `vendor/` keeps its own licence (see each folder's notice): Fengari, CodeMirror, HuTrack and the
-  parts taken from ppu.toys (Liora Labs) are MIT; HuC's licence is mixed and unsettled — `vendor/huc` is not
-  part of the published studio and must be settled before this repository is made public.
+  parts taken from ppu.toys (Liora Labs) are MIT; HuC's licence is mixed and unsettled, so the repository carries
+  no copy of HuC — `tools/build-huc.sh` downloads HuC mainline (the pinned commit) and builds it as an external
+  tool for the IL→C comparison (`docs/BUILD.md`).
 - The idea comes from ppu.toys, with its author's blessing (`docs/DECISIONS.md`).
