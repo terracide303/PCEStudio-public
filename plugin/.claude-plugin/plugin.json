@@ -1,0 +1,10 @@
+{
+  "name": "pcestudio",
+  "version": "0.1.0",
+  "description": "Make PC Engine toys for PCEStudio: a skill that drives the pcestudio MCP server (tools/mcp/server.js) — write a Lua toy, run it, look at the frame, check it against the HuC6270/VCE/HuC6280 limits, export a .pce.",
+  "author": {
+    "name": "PCEStudio"
+  },
+  "keywords": ["pc-engine", "pce", "huc6280", "mcp", "toys", "lua"],
+  "skills": ["./skills/creating-pce-toys"]
+}

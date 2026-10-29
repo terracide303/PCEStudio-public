@@ -10,7 +10,26 @@ refusal from the module that owns it, every document from
 
 > Status: **part 1 of card #36** (the headless server). The studio's AGENT
 > panel that connects to it is part 3 (#104); the agent skill with recipes is
-> part 2 (#103). The server does not edit `renderer/studio.html`.
+> part 2 (#103), and it is in `plugin/skills/creating-pce-toys/` — read
+> `SKILL.md` first, then `recipes/`. The server does not edit
+> `renderer/studio.html`.
+
+## The agent skill (#103)
+
+`plugin/` is a Claude Code plugin in the ppu.toys shape
+(`docs/PPU-TOYS.md` §4): `.claude-plugin/plugin.json` and one skill,
+`skills/creating-pce-toys/SKILL.md`. The skill teaches this server's tools, the
+hardware's limits, the toy API, the IL subset and five worked recipes. Install:
+
+```sh
+claude mcp add pcestudio -- node "$PWD/tools/mcp/server.js"
+ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys
+```
+
+`node tests/check-skill.js` runs every recipe through this server over stdio and
+requires each to be visible and validator-clean. The evidence, and the three
+cold-seat rounds that shaped the skill, are in `docs/SKILL-TRANSCRIPT.md`.
+
 
 ## Why a minimal JSON-RPC implementation, not the official SDK
 
