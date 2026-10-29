@@ -44,20 +44,19 @@ The two milestones Dennis asked for:
 | Part | Status | How we know | Where |
 |---|---|---|---|
 | Studio page laid out like ppu.toys, online at pcestudio.terracides.com | PROVEN | `check-studio.js --browser`; screenshots compared by @workshop | #75 |
-| Code editor (CodeMirror), files, save/open, autosave, Vim, shortcuts | PROVEN | `check-studio.js` 1,027 checks | #77 |
+| Code editor (CodeMirror), files, save/open, autosave, Vim, shortcuts | PROVEN | `check-studio.js` 1,162 checks | #77 |
 | Output column: layers, CRT, sound, markers, timeline, pad keys (IJKL) | PROVEN | `check-studio.js`; breaker gaps closed by #91 | #78 |
-| Panels in separate files (so several can be built at once) | PROVEN | `check-studio.js` 1,027 checks; ten `renderer/studio-panel-<name>.js` modules through one registry (docs/STUDIO.md §3.2) | #102 |
+| Panels in separate files (so several can be built at once) | PROVEN | `check-studio.js` 1,162 checks; ten `renderer/studio-panel-<name>.js` modules through one registry (docs/STUDIO.md §3.2) | #102 |
 | SCREEN panel: map editor with tools, zoom, tiles, palette | PROVEN | tools, zoom, map, tile sheet, curves, map-size and width dropdowns; breaker gaps closed by #106 | #84, #102 |
 | PALETTES and VRAM panels (512-colour picker, VRAM sheet) | PROVEN | `check-studio.js`: the 512-colour picker edits a 9-bit entry, the VRAM panel is a drawn map; palettes.json only | #85 |
 | SPRITES panel (64 sprites, sizes, patterns) | PROVEN | `check-studio.js` (102 checks for this panel): SAT slots, six pattern tools, per-sprite size, park/clear/release; board lists #86 as needs-checking (a different seat's break is owed) | #86 |
 | SCANLINES panel (bands on the line interrupt) | PROVEN | `check-studio.js` `checkScanlinesPanel` (467 lines): Add band splits 0-31/32-223; Apply to toy writes the fenced raster block and the runtime's own table matches line for line; the drawn frame equals the preview pixel for pixel; three register writes and three colour words are refused by code; a band's cost (64/123, 52%) matches `check-validate.js`'s blank budget. Board lists #92 as needs-checking (rule 2 owed), and the side-by-side screenshot with ppu.toys is not proven | #92 |
 | REGISTERS panel (every register, bit by bit, editable) | PROVEN | `check-pokes.js` 145 checks: every register row and bit, keyframed overrides, undo/redo, written back into the toy | #79 |
-| LAYERS panel (stacking, priority, palette fades) | IN CHECK | `check-studio.js` 1093 checks: four previews diff 0 against the renderer with the check's own CR; toggles through BB/SB; SPBG flipped against a patched SAT; a 16-step fade written into main.lua and run for 17 frames, every frame's CRAM and pixels equal the computed palettes. Rule 2 (a cold break by another seat) owed | #93 |
-| AUDIO panel (the 6 voices live) | RUNNING | a seat is building it now | #97 |
+| LAYERS panel (stacking, priority, palette fades) | IN CHECK | `check-studio.js` 1227 checks: four previews diff 0 against the renderer with the check's own CR; toggles through BB/SB; SPBG flipped against a patched SAT; a 16-step fade written into main.lua and run for 17 frames, every frame's CRAM and pixels equal the computed palettes. Rule 2 (a cold break by another seat) owed | #93 |
+| AUDIO panel (the 6 voices live) | PROVEN | `check-studio.js` `checkAudioPanel` (+134 checks): each control driven twice — AL 31→10 is R4 $9F→$8A and the meter's -31.61 dB matches the rendered PCM; R5 $F0 is heard left and not right; A4 = F 254, C4 = F 428; noise is refused on voice 1; DDA sets R4 bit 6; a broken waves.json is refused, not overwritten; a running toy's writes arrive through `audioLive()`. Board lists #97 as done; rule 2 is owed, DDA holds one level (#71), and the AudioContext path is not exercised headlessly | #97 |
 | CONSOLE panel ("can this run on a real PC Engine?") | PROVEN | `check-studio.js` `checkConsolePanel`: the palette example is green with a measured ROM size; `reg("NOPE",0)` on line 4 is red with range and C-emitter findings, and the `main.lua:4` link moves the editor cursor there; a 20,000-iteration frame is red on the frame budget. Board lists #98 as done; rule 2 is owed, and the numbers are the validator's static model, not a Mednafen/ares capture | #98 |
-| ASSETS: memory bars, sheets, songs, 15 built-in instruments | RUNNING | a seat is building it now | #99 |
-| Details: DISPLAY tab, light theme, Raw output, Guide links, Panels menu | RUNNING | a seat is building it now | #87 |
-
+| ASSETS: memory bars, sheets, songs, 15 built-in instruments | PROVEN | `check-assets.js` 246 checks: fifteen built-ins play through `pce-psg.js` at their register's pitch, the three bars (VRAM/CGRAM/ARAM) are the toy's measured use, and Add to toy writes `instruments.json`; board lists #99 as done, rule 2 is owed | #99 |
+| Details: pceglobals.lua tab, Go to marker, AGENT text and Sign-in, output scaled like ppu.toys' | NOT PROVEN | board lists #87 as done and 31 one-off headless-Chrome checks pass on the served page (globals content, read-only tab, Save guard; the marker select; the agent text and placeholder; the frame box 466.3x408), but no check in `tests/check-studio.js` covers them and rule 2 is owed — a fresh clone cannot rerun those one-off checks | #87 |
 | Browse: a gallery of the example toys | TODO | | #80 |
 | Debug panels and follow a pixel (the earlier text panels) | PROVEN | `check-panels.js` 49,158 checks; breaker gaps closed | #26, #56 |
 | Docs (the reference, generated from the code) | PROVEN | `check-docs.js` | #61 |
@@ -69,7 +68,7 @@ The two milestones Dennis asked for:
 |---|---|---|---|
 | Toys run live in the browser (`init`, `frame`, `raster`, pads, passwords) | PROVEN | `check-toys.js`; every example shows a visible picture (#90); breaker gaps closed by #82 | #30, #73, #74, #82, #90 |
 | Five example toys (parallax, sky, road, status bar, palette cycling) | PROVEN | `check-examples.js` 120 frames each | #29 |
-| Sound in toys (a song and sound effects) | PARTIAL | song + SFX through HuTrack's channel hand-off; effects, arpeggio and samples still to do | #71 |
+| Sound in toys (a song and sound effects) | PARTIAL | song + SFX through HuTrack's channel hand-off; effects, arpeggio and samples still to do; #111 is open: the toy host's `sfx()` writes R4 = $40 (DDA with the channel-enable bit 7 clear), so `pce-psg.js` renders a constant level, RMS 905 against 5899 for $9F | #71, #111 |
 | Pads 1-5 and the timer, browser and console | PROVEN | `check-toys.js` 831 checks; console frame and browser frame 1293 both put the sprite at (154,138); the timer ticks 6.47 a frame, arithmetic 6.473 (tests/dumps/pads) | #45 |
 | The IL (our intermediate language) | PROVEN | `check-il.js` 973 checks, Lua == IL | #31 |
 | The checker: frame time, sprites per line, memory | PROVEN | `check-validate.js`; breaker gaps closed by #89 | #32 |
@@ -77,7 +76,7 @@ The two milestones Dennis asked for:
 | AI link part 1: an MCP server (an agent writes, runs, checks and exports toys) | PROVEN | `check-mcp.js` 101 checks: a real MCP client over stdio, frame_png, a register poke, validate with file:line, export_pce byte for byte; the board card is still open for rule 2 | #36 |
 | AI link part 2: the agent skill with recipes | RUNNING | a seat is building it now | #103 |
 | Guide file for chat AIs (paste into Claude) + Download button | PROVEN | `renderer/pcestudio-for-claude.md`, generated from the code; online (#105); `check-guide.js` 151 checks | #105 |
-| Paste & Run in the studio | PROVEN | `check-studio.js` 1,027 checks (paste box, dropped files, one undo step); the board lists #107 as needs-checking (a different seat's break is owed) | #107 |
+| Paste & Run in the studio | PROVEN | `check-studio.js` 1,162 checks (paste box, dropped files, one undo step); the board lists #107 as needs-checking (a different seat's break is owed) | #107 |
 
 ## 4. Getting it onto a console — export to `.pce`
 
@@ -111,7 +110,7 @@ The two milestones Dennis asked for:
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone (`0d31701`, 2026-10-29): 34 PASS, 1 SKIP (check-ares, no screen), 0 FAIL | #83, #108, #109 |
+| Every test suite passes on a fresh clone | PROVEN | `sh tests/all.sh` on a fresh clone (`49e9dfa`, 2026-10-29): 35 PASS, 1 SKIP (check-ares, no screen), 0 FAIL; `check-studio.js` 1,162 checks and #99's `check-assets.js` 246 checks among them | #83, #108, #109 |
 | Every new test broken by a different seat (rule 2) | PROVEN | `docs/REVIEW-*.md`; each miss became a card and is closed | rule 2 |
 | Every manual read and mapped to a card | PROVEN | `docs/MANUALS.md` | #44, #55 |
 | Phase 1 read cold by a reviewer | PROVEN | `docs/REVIEW.md`: 12 ranked findings, each fixed in #38/#39 with a test | #11 |
