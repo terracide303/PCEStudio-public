@@ -34,7 +34,8 @@
  *
  * WHAT IT DOES NOT PROVE:
  *   - Nothing runs on the console: the Export cannot carry a game yet
- *     (docs/STARFALL-CONSOLE.md, #132..#138); tools/oak-woods-console.js
+ *     (docs/STARFALL-CONSOLE.md, #132..#138, #141, #143);
+ *     tools/starfall-console.js <this file> --song toys/oak-woods/song.json
  *     prints this toy's own findings, and there is no Mednafen capture.
  *   - The art itself is not in the repo, so this test's art checks are only
  *     as good as the folder `tools/oak-woods-art.js` wrote.

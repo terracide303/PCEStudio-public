@@ -6602,14 +6602,14 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  /* #128 added OAK WOODS, a seventh toy besides the five #29 effects and
-   * STARFALL; Browse and the studio read the same generated list */
-  check(data.length === 7,
-        "the gallery carries the five #29 toys, STARFALL and OAK WOODS (got " +
-        data.length + ")");
+  /* #128 added OAK WOODS and #127 CAVE, two demos besides the five #29
+   * effects and STARFALL; Browse and the studio read the same generated list */
+  check(data.length === 8,
+        "the gallery carries the five #29 toys, STARFALL, OAK WOODS and " +
+        "CAVE (got " + data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall", "oak-woods"]);
+      "starfall", "oak-woods", "cave"]);
   let mismatched = [];
   for (const t of data) {
     if (t.source !== toySource(t.file)) mismatched.push(t.file);
@@ -6743,7 +6743,7 @@ function checkGallery(page) {
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall", "oak-woods"]);
+      "starfall", "oak-woods", "cave"]);
   check(cards.every((c) => c.ink > 0 && !c.error),
         "every card drew its frame 60 (" +
         cards.map((c) => c.id + " " + c.ink).join(", ") + ")");
@@ -6773,12 +6773,17 @@ function checkGallery(page) {
   B.setQuery("road");
   eq("the search box filters to the road", B.visible(), ["road"]);
   B.setQuery("PCEStudio");
-  eq("search by author finds all five", B.visible(), B.toys().map((t) => t.id));
+  eq("search by author finds the toys PCEStudio made", B.visible(),
+     B.toys().map((t) => t.id).filter((id) => id !== "cave"));
+  /* #127: the cave's card carries the pack's author, because the pack's
+   * licence asks for attribution — and the search can find it there */
+  B.setQuery("Will Tice");
+  eq("the CAVE card is found by the pack's author", B.visible(), ["cave"]);
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["status-bar", "parallax", "oak-woods", "palette-cycle", "road",
-      "sky-gradient", "starfall"]);
+     ["cave", "status-bar", "parallax", "oak-woods", "palette-cycle",
+      "road", "sky-gradient", "starfall"]);
   B.setSort("written");
 
   const bt = runBarePage(BROWSE_PAGE, "?tag=raster");
