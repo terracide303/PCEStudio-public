@@ -294,3 +294,15 @@ site down. Dennis: "make it GPL 3". Both sources say "or any later version", so 
 `LICENSE` is the GPL-3.0 text, README says what is under it and what keeps its own licence, `pce-psg.js` carries
 the notice and the credit. The rule stands for new code: an emulator is looked at, not copied, unless Dennis
 decides otherwise for that file.
+
+## 2026-10-29 — Export to ROM works in the browser, nothing to install (Dennis)
+
+Dennis: "it's not needed to install compilers and stuff. It needs to work from the browser." The proven
+IL -> C -> llvm-mos route (#31) needs a 700 MB native toolchain, so it stays the reference and the measuring stick,
+not the export. The browser export takes two routes, both pure JavaScript:
+1. **First: an IL interpreter in the ROM** (turboxray's approach, idea #66): a fixed HuC6280 interpreter built once
+   by us (committed as a binary, as `viewer-bank0.bin` is) plus the toy's IL as compact bytecode and its assets,
+   glued together in the browser the way `pce-rom.js` already builds picture ROMs. raster() keeps #31C's
+   table-and-replay handler. Fast to build; slower on the console — measured against llvm-mos.
+2. **Then: a direct IL -> HuC6280 code generator in JavaScript** for speed, compared against llvm-mos's numbers.
+The validator (#32) predicts each route's frame time so the studio can say which one a toy needs.
