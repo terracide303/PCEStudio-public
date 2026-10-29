@@ -835,6 +835,46 @@
   .modal-card p { color: var(--muted); margin: 0 0 10px; }
   .modal-card code { color: var(--text2); font-family: var(--mono); }
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  /* #115 — the Export to ROM dialog: the console's findings, the route and
+   * the static-estimate footer.  The × sits where ppu.toys' export dialog
+   * has it, and the footer is deliberately quiet. */
+  .modal-card.is-export { width: min(560px, 92vw); }
+  .modal-card.is-export h2 { position: relative; padding-right: 26px; }
+  .modal-x {
+    position: absolute; right: 0; top: -3px; background: none; border: 0;
+    color: var(--dim); font: 20px/1 var(--sans); cursor: pointer; padding: 0 4px;
+  }
+  .modal-x:hover { color: var(--text); }
+  .export-findings {
+    list-style: none; margin: 0 0 10px; padding: 0;
+    max-height: 210px; overflow: auto;
+  }
+  .export-finding {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    padding: 5px 2px; border-bottom: 1px solid var(--line);
+    font: 11px/1.45 var(--mono);
+  }
+  .export-finding:empty { display: none; }
+  .export-finding .export-line {
+    flex: none; font: 11px var(--mono); padding: 0;
+    background: none; border: 0; cursor: pointer;
+    color: var(--cyan); text-decoration: underline dotted;
+  }
+  .export-finding .export-line:hover { color: var(--text); }
+  .export-finding .export-line.is-plain {
+    color: var(--faint); cursor: default; text-decoration: none;
+  }
+  .export-finding .export-code { flex: none; color: var(--bad); }
+  .export-finding.is-warn .export-code { color: var(--accent); }
+  .export-finding .export-msg { color: var(--text); min-width: 0; }
+  .export-finding.is-info .export-code { color: var(--cyan); }
+  .export-route {
+    color: var(--text2); font: 11px/1.55 var(--mono); margin: 0;
+  }
+  .export-footer {
+    color: var(--dim); font: 10px/1.5 var(--mono);
+    border-top: 1px solid var(--line); padding-top: 8px; margin: 12px 0 0;
+  }
   .toast {
     position: fixed; z-index: 40; right: 16px; bottom: 16px;
     background: var(--pane); border: 1px solid var(--line); border-radius: 6px;
@@ -895,7 +935,7 @@
               title="Read the clipboard (or drop a .lua / .pce.json file on the page), put it in main.lua and run it">Paste &amp; Run</button>
       <button type="button" class="btn" id="btn-check">Check</button>
       <button type="button" class="btn btn-accent" id="btn-export"
-              title="Export .pce — needs #31 (the toy compiler)">Export…</button>
+              title="Export to ROM — build this toy's .pce in this page (IL bytecode on the interpreter, no compiler)">Export…</button>
       <button type="button" class="btn" id="btn-panels" aria-haspopup="true"
               aria-expanded="false">Panels ▾</button>
       <button type="button" class="btn btn-icon" id="btn-settings"
@@ -1649,19 +1689,24 @@
           title="PCEStudio — the toy author's reference"></iframe>
 </section>
 
-<!-- Export: a toy's .pce needs #31; the button says so instead of pretending. -->
+<!-- Export to ROM (#87's dialog spec, wired by #115).  The button analyses
+     the toy with the CONSOLE tab's own checks.  A toy that cannot run lists
+     those findings with main.lua:N links; a toy that can run is built in this
+     page (IL bytecode + renderer/ilvm.bin, no compiler) and downloaded as a
+     .pce.  The footer is the honest note about the timing. -->
 <div class="modal" id="export-modal" hidden>
-  <div class="modal-card">
-    <h2>Export .pce <span class="needs">NEEDS #31</span></h2>
-    <p>The toy compiler is card #31. Its IL half exists and runs the same
-      three examples, but there is no machine-code backend or toy ROM builder
-      yet, so this button cannot make a <code>.pce</code> from a toy.</p>
-    <p>The static picture path is already proven and separate: the editor
-      paints VRAM/CRAM/registers and <b>Download .pce</b> builds the
-      byte-exact ROM (<code>docs/EXPORT.md</code>).</p>
-    <div class="modal-actions">
-      <a class="btn" href="editor.html">Open the picture editor</a>
-      <button type="button" class="btn btn-accent" id="export-close">Close</button>
+  <div class="modal-card is-export" role="dialog" aria-modal="true"
+       aria-labelledby="export-title">
+    <h2 id="export-title">Export to ROM
+      <button type="button" class="modal-x" id="export-close"
+              aria-label="Close the export dialog">×</button></h2>
+    <p id="export-lead">Analyse the toy, then build its .pce.</p>
+    <ul id="export-findings" class="export-findings"></ul>
+    <p id="export-route" class="export-route"></p>
+    <p id="export-footer" class="export-footer">Experimental: frame timing is
+      a static estimate, checked on an emulator, not on hardware.</p>
+    <div class="modal-actions" id="export-actions">
+      <button type="button" class="btn btn-accent" id="export-done">Close</button>
     </div>
   </div>
 </div>
@@ -1696,6 +1741,11 @@
 <script src="pce-toyhost.js"></script>
 <script src="pce-toys.js"></script>
 <script src="pce-il.js"></script>
+<!-- #115: the Export button's route 1 — the IL encoder and the browser's
+     ROM builder over the committed renderer/ilvm.bin.  Neither calls a
+     compiler; pce-rom.js has no dependency of its own. -->
+<script src="pce-ilbc.js"></script>
+<script src="pce-rom.js"></script>
 <script src="pce-validate.js"></script>
 <script src="pce-panels.js"></script>
 <script src="pce-editor.js"></script>
@@ -3325,6 +3375,314 @@ function downloadText(name, text, type) {
   a.click();
 }
 
+/* ---- #115 — Export to ROM: route 1, built in this page ------------------
+ *
+ * The Export button runs the SAME checks the CONSOLE tab (#98) runs, then
+ * encodes the toy's IL as bytecode (renderer/pce-ilbc.js) and glues it to the
+ * committed interpreter image (renderer/pce-rom.js over renderer/ilvm.bin).
+ * No compiler, no install, no Node: the .pce is assembled by the page.
+ *
+ *   toy.lua --pce-il--> IL --pce-ilbc--> bytecode --pce-rom--> .pce
+ *
+ * A toy that cannot run keeps the dialog closed at the CONSOLE tab's
+ * findings, each a main.lua:N link.  A toy that can run is downloaded; the
+ * footer says the frame timing is a static estimate, because it is.
+ *
+ * The toy's asset files ride after the bytecode only when they carry content
+ * (the interpreter does not read them yet — #24/#71's loader is what will);
+ * a toy on the default empty files builds the exact bytes tools/ilvm/emit.js
+ * builds in Node. */
+const ILVM_URL = "ilvm.bin";
+let exportBank0Cache = null;
+let exportDialogState = null;
+let exportRun = 0;
+
+function exportFileName() {
+  return toyFileName().replace(/\.pce\.json$/, ".pce");
+}
+
+/* JSON.stringify's UTF-8 bytes without TextEncoder: the stub DOM has no
+ * TextEncoder and the asset tail can hold a non-ASCII tile name. */
+function exportUtf8(text) {
+  const s = String(text), out = [];
+  for (let i = 0; i < s.length; i++) {
+    let c = s.charCodeAt(i);
+    if (c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length) {
+      const d = s.charCodeAt(++i);
+      c = 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00);
+    }
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xC0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) {
+      out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    } else {
+      out.push(0xF0 | (c >> 18), 0x80 | ((c >> 12) & 63),
+               0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    }
+  }
+  return new Uint8Array(out);
+}
+
+/* The optional asset tail: only files that differ from the empty defaults.
+ * It is carried, not loaded; buildToyRom's data bank has room for it. */
+function exportAssetTail() {
+  const tail = [];
+  for (const f of files) {
+    if (f.name === "main.lua") continue;
+    const def = DEFAULT_ASSET_FILES.find((a) => a.name === f.name);
+    if (def && f.source === def.source) continue;
+    tail.push({ name: f.name, source: f.source });
+  }
+  if (!tail.length) return null;
+  return exportUtf8(JSON.stringify({ version: 1, files: tail }));
+}
+
+function exportConsole() {
+  const api = panelApi("console");
+  return api ? api.state() : null;
+}
+
+function exportFinding(severity, code, message, line) {
+  return { severity: severity || "error", code: code || "export-error",
+           message: String(message == null ? "" : message),
+           line: line == null ? null : line };
+}
+
+/* The CONSOLE tab's report, then the encoder's own refusals (a construct the
+ * validator prices but route 1 cannot carry).  No DOM, no download. */
+function exportAnalysis() {
+  const source = current.source || mainSource();
+  const con = exportConsole();
+  const findings = con ? con.findings.map((f) => exportFinding(
+    f.severity, f.code, f.message, f.line)) : [];
+  if (!con) findings.push(exportFinding("error", "export-console",
+    "the CONSOLE tab did not report on this toy (studio-panel-console.js)"));
+  const errors = findings.filter((f) => f.severity !== "warn").length;
+  if (errors) return { ok: false, source: source, findings: findings,
+                       route1: con && con.stats ? con.stats.route1 : null };
+  const IL = PCEStudio.il, BC = PCEStudio.ilbc, ROM = PCEStudio.rom;
+  if (!IL || !BC || !ROM) {
+    findings.push(exportFinding("error", "export-modules",
+      "the IL encoder or ROM builder did not load (pce-ilbc.js, pce-rom.js)"));
+    return { ok: false, source: source, findings: findings, route1: null };
+  }
+  let program = null, encoded = null;
+  try {
+    program = IL.compile(source, { chunkName: "@main.lua" });
+  } catch (e) {
+    findings.push(exportFinding("error", e && e.code || "il-error",
+      e && e.message || String(e), null));
+  }
+  if (program) {
+    try {
+      encoded = BC.encode(program);
+    } catch (e) {
+      findings.push(exportFinding("error", e && e.code || "ilbc-error",
+        "route 1 cannot carry this toy: " + (e && e.message || String(e)),
+        null));
+    }
+  }
+  if (findings.filter((f) => f.severity !== "warn").length) {
+    return { ok: false, source: source, findings: findings, route1: null };
+  }
+  return { ok: true, source: source, findings: findings, encoded: encoded,
+           route1: con && con.stats ? con.stats.route1 : null };
+}
+
+/* Build the .pce from an analysed toy and the committed image.  Pure and
+ * synchronous, so the evidence can compare its bytes with Node's. */
+function exportBuild(bank0, analysis) {
+  const A = analysis || exportAnalysis();
+  const name = exportFileName();
+  if (!A.ok) return { ok: false, name: name, findings: A.findings,
+                      route1: A.route1 };
+  try {
+    const bytes = PCEStudio.rom.buildToyRom({
+      bank0: bank0, bytecode: A.encoded.bytes, assets: exportAssetTail()
+    });
+    return { ok: true, name: name, bytes: bytes,
+             bytecodeBytes: A.encoded.bytes.length,
+             findings: A.findings, route1: A.route1 };
+  } catch (e) {
+    return { ok: false, name: name,
+             findings: A.findings.concat([exportFinding(
+               "error", e && e.code || "export-error",
+               e && e.message || String(e), null)]),
+             route1: A.route1 };
+  }
+}
+
+function exportLoadBank0() {
+  if (exportBank0Cache) return Promise.resolve(exportBank0Cache);
+  if (typeof fetch !== "function") {
+    return Promise.reject(toyRefuse("export-image",
+      "the page cannot fetch() renderer/ilvm.bin"));
+  }
+  return fetch(ILVM_URL).then((res) => {
+    if (!res || !res.ok) {
+      throw toyRefuse("export-image", ILVM_URL + ": HTTP " +
+        (res ? res.status : "no response"));
+    }
+    return res.arrayBuffer();
+  }).then((buf) => {
+    const bytes = new Uint8Array(buf);
+    const want = (PCEStudio.rom && PCEStudio.rom.ILVM_BYTES) || 16384;
+    if (bytes.length !== want) {
+      throw toyRefuse("export-image", ILVM_URL + " is " + bytes.length +
+        " B, expected " + want);
+    }
+    exportBank0Cache = bytes;
+    return bytes;
+  });
+}
+
+function exportLead(state) {
+  if (state.phase === "building") {
+    return "Building " + state.name + " in this page: IL bytecode and " +
+           "renderer/ilvm.bin, no compiler.";
+  }
+  if (state.phase === "built") {
+    return "Built " + state.name + " (" + state.bytes.length + " B) and " +
+           "downloaded it." + (state.downloaded ? "" :
+           " The browser did not start the download.");
+  }
+  return "This toy can't run on the PC Engine as written yet. The " +
+         "compiler's findings point at what to change:";
+}
+
+function exportRouteText(state) {
+  if (state.phase !== "built") return "";
+  const r = state.route1;
+  let text = "Route 1: " + state.bytecodeBytes + " B of IL bytecode on the " +
+             "interpreter in renderer/ilvm.bin.";
+  if (r && r.collectionCycles != null) {
+    text += " The validator projects " + r.collectionCycles +
+            " cycles a toy frame (~" + (r.hz >= 10 ? r.hz.toFixed(0) :
+            r.hz.toFixed(1)) + " Hz), so it " +
+            (r.meets60 ? "meets" : "does not meet") + " 60 Hz.";
+  } else {
+    text += " The validator had no frame estimate for this toy.";
+  }
+  return text;
+}
+
+function exportDraw() {
+  const st = exportDialogState;
+  if (!st) return;
+  const lead = $("export-lead"), list = $("export-findings"),
+        route = $("export-route");
+  if (lead) lead.textContent = exportLead(st);
+  if (list) {
+    list.innerHTML = "";
+    const show = st.phase === "built" ? [] :
+      (st.findings || []).filter((f) => f.severity !== "warn" ||
+                                  st.phase === "blocked");
+    for (const f of show) {
+      const li = document.createElement("li");
+      li.className = "export-finding is-" + (f.severity || "error");
+      if (f.line != null) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "export-line";
+        b.textContent = "main.lua:" + f.line;
+        b.title = "Go to main.lua line " + f.line;
+        b.addEventListener("click", () => {
+          $("export-modal").hidden = true;
+          editorLine(f.line);
+        });
+        li.appendChild(b);
+      } else {
+        const span = document.createElement("span");
+        span.className = "export-line is-plain";
+        span.textContent = "main.lua";
+        li.appendChild(span);
+      }
+      const code = document.createElement("span");
+      code.className = "export-code";
+      code.textContent = f.code;
+      li.appendChild(code);
+      const msg = document.createElement("span");
+      msg.className = "export-msg";
+      msg.textContent = f.message;
+      li.appendChild(msg);
+      list.appendChild(li);
+    }
+  }
+  if (route) {
+    const text = exportRouteText(st);
+    route.textContent = text;
+    route.hidden = !text;
+  }
+}
+
+function exportSetState(state) {
+  exportDialogState = state;
+  exportDraw();
+  return state;
+}
+
+/* The Export button's whole action.  `opts.bank0` is the evidence/test
+ * injection point; the page fetches ilvm.bin once and caches it. */
+function exportToy(opts) {
+  opts = opts || {};
+  const run = ++exportRun;
+  const A = exportAnalysis();
+  const name = exportFileName();
+  if (!A.ok) {
+    return Promise.resolve(exportSetState({
+      phase: "blocked", name: name, findings: A.findings,
+      route1: A.route1, bytes: null, bytecodeBytes: 0, downloaded: false
+    }));
+  }
+  exportSetState({ phase: "building", name: name, findings: A.findings,
+                   route1: A.route1, bytes: null, bytecodeBytes: 0,
+                   downloaded: false });
+  const bank = opts.bank0 ? Promise.resolve(opts.bank0) : exportLoadBank0();
+  return bank.then((bank0) => {
+    if (run !== exportRun) return exportDialogState;
+    const built = exportBuild(bank0, A);
+    if (!built.ok) {
+      return exportSetState({
+        phase: "blocked", name: name, findings: built.findings,
+        route1: built.route1, bytes: null, bytecodeBytes: 0,
+        downloaded: false
+      });
+    }
+    const downloaded = downloadBytes(built.name, built.bytes);
+    return exportSetState({
+      phase: "built", name: built.name, findings: built.findings,
+      route1: built.route1, bytes: built.bytes,
+      bytecodeBytes: built.bytecodeBytes, downloaded: downloaded
+    });
+  }).catch((e) => {
+    if (run !== exportRun) return exportDialogState;
+    return exportSetState({
+      phase: "blocked", name: name,
+      findings: A.findings.concat([exportFinding(
+        "error", e && e.code || "export-image",
+        e && e.message || String(e), null)]),
+      route1: A.route1, bytes: null, bytecodeBytes: 0, downloaded: false
+    });
+  });
+}
+
+function downloadBytes(name, bytes) {
+  try {
+    if (typeof Blob === "function" && typeof URL !== "undefined" &&
+        URL.createObjectURL) {
+      const a = document.createElement("a");
+      a.download = name;
+      a.href = URL.createObjectURL(new Blob([bytes],
+        { type: "application/octet-stream" }));
+      a.click();
+      setTimeout(() => { try { URL.revokeObjectURL(a.href); } catch (e) {} },
+                 4000);
+      return true;
+    }
+  } catch (e) { /* the caller reports downloaded:false */ }
+  return false;
+}
+
 function saveToyFile() {
   const text = toyEnvelopeText();
   const name = toyFileName();
@@ -3900,9 +4258,13 @@ function bind() {
   bindDrops();
   $("btn-export").addEventListener("click", () => {
     $("export-modal").hidden = false;
+    exportToy();
   });
   $("btn-export").setAttribute("aria-haspopup", "dialog");
   $("export-close").addEventListener("click", () => {
+    $("export-modal").hidden = true;
+  });
+  $("export-done").addEventListener("click", () => {
     $("export-modal").hidden = true;
   });
   $("btn-panels").addEventListener("click", () => togglePop("panels-pop"));
@@ -4723,6 +5085,24 @@ const studio = {
   },
   consoleGoto: (line) => { const a = panelApi("console"); return a ? a.goto(line) : false; },
   editorLine: editorLine,
+
+  /* #115 — Export to ROM.  `exportToy()` is the button's whole action (fetch
+   * the image, build, download); `exportBytes(bank0)` is the same analysis
+   * and build without the fetch or the DOM, so the evidence can hold the
+   * bytes up against Node's; `exportDialog()` is what the dialog shows. */
+  exportToy: exportToy,
+  exportBytes: (bank0) => exportBuild(bank0),
+  exportAnalysis: () => {
+    const A = exportAnalysis();
+    return { ok: A.ok, findings: A.findings, route1: A.route1,
+             bytecodeBytes: A.encoded ? A.encoded.bytes.length : 0 };
+  },
+  exportDialog: () => (exportDialogState ? Object.assign({}, exportDialogState,
+    { lead: exportLead(exportDialogState),
+      route: exportRouteText(exportDialogState) }) : null),
+  exportOpen: () => !$("export-modal").hidden,
+  exportSetBank0: (bytes) => { exportBank0Cache = bytes || null; },
+  exportBank0: () => exportBank0Cache,
 
   /* #85 — the PALETTES panel's 512-colour picker and the VRAM panel's drawn
    * map. The modules own these; the evidence drives the same functions

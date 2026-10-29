@@ -186,7 +186,8 @@ function dumpNames() {
  * builds (ilvm_runtime.c polls $0000 for VD before each frame). */
 const TOY_CAPTURES = new Set(["toypalette", "toyparallax",
                               "palette-huc", "parallax-huc",
-                              "toypalette-ilvm", "toyparallax-ilvm"]);
+                              "toypalette-ilvm", "toyparallax-ilvm",
+                              "toystatusbar-ilvm"]);
 
 /* ---- the independent status oracle (raw bytes only) -------------------- */
 

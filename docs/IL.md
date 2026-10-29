@@ -320,7 +320,8 @@ the IL is not:
   not.)
 - **A table captured as an upvalue is read the same way**, through a scratch
   register the lowering allocates for the `getupval`. Writing a captured table
-  is still refused (below).
+  is still refused with `il-type`: the lowering has no upvalue operand to
+  write through.
 - An integer read of a table whose array part was never typed is an unknown,
   which the use may bind to `int`; the Lua runtime answers `nil` for a key
   never set and the IL has no `nil` value, so such a read is a toy bug either
@@ -1223,6 +1224,29 @@ optional assets after it, `0xFF` padding). The page loads `ilvm.bin` the way
 it loads `viewer-bank0.bin`. Node and a browser context (`self`, no `module`)
 build the same bytes — tested byte for byte.
 
+**The studio's Export button (#115).** `renderer/studio.html` loads
+`pce-ilbc.js` and `pce-rom.js`, fetches `renderer/ilvm.bin` once, and runs
+the same pipeline on the toy in the editor: `pce-il.js` → `pce-ilbc.js` →
+`buildToyRom()`. Nothing is installed and no compiler runs. The dialog is
+#87's spec: when the CONSOLE tab's checks (#98) find an error, it lists those
+findings with their `main.lua:N` links and builds nothing; a toy the console
+accepts but the encoder refuses (for example `timer()`, which the compiled
+route prices but the interpreter has no opcode for) gets the encoder's own
+`ilbc-*` finding in the same list. A runnable toy is downloaded as
+`<title>.pce`; the dialog also prints route 1's projected frame cost and
+whether it meets 60 Hz. `buildToyRom`'s optional asset tail is used when a
+toy's `tiles.json`/`palettes.json`/`sprites.json`/`waves.json` differ from
+the empty defaults — the tail is carried in the data bank for a future
+loader, not read by this interpreter (#24/#71). A toy on the default files
+builds exactly the bytes `tools/ilvm/emit.js` builds in Node.
+
+`renderer/pce-validate.js` reports the same projection per toy, as
+`report.budgets.route1` (#115): `{shape, factor, collectionCycles, ratio60,
+hz, meets60}`. The factor is measured/estimate from the two captures below —
+32.10 for a toy with no `raster()` callback, 25.94 for one with a raster
+collection — so `meets60` is a static estimate, and the panel and dialog
+label it as one.
+
 ### 14.5 Evidence
 
 `tools/ilvm/emit.js` is the browser's code path in Node: `pce-il.js` →
@@ -1230,16 +1254,16 @@ build the same bytes — tested byte for byte.
 that way and runs the result in Mednafen with `tools/capture-toy.sh`'s command
 line, crop and timer read.
 
-| | palette (`tools/toys/palette.lua`) | parallax (`toys/parallax.lua`) |
-|---|---|---|
-| ROM | 24,576 B (3 physical banks) | 24,576 B |
-| bytecode | 578 B | 1,100 B |
-| code bytes in the container | 405 | 850 |
-| `frame()` | **238,988 cycles** (2.0 video frames) | **5,657 cycles** (0.05 frames) |
-| one `raster()` call | — | **36,072 cycles** |
-| one 224-call collection | — | **8,157,505 cycles** (68.4 frames) |
-| toy frame rate | one per ~3 video frames (~20 Hz) | one per ~69 video frames (~0.87 Hz) |
-| picture vs browser | diff 0 | diff 0 |
+| | palette (`tools/toys/palette.lua`) | parallax (`toys/parallax.lua`) | status-bar (`toys/status-bar.lua`) |
+|---|---|---|---|
+| ROM | 24,576 B (3 physical banks) | 24,576 B | 24,576 B |
+| bytecode | 578 B | 1,100 B | 1,369 B |
+| code bytes in the container | 405 | 850 | 1,029 |
+| `frame()` | **238,988 cycles** (2.0 video frames) | **5,657 cycles** (0.05 frames) | **30,111 cycles** (0.25 frames) |
+| one `raster()` call | — | **36,072 cycles** | **16,862 cycles** |
+| one 224-call collection | — | **8,157,505 cycles** (68.4 frames) | **3,780,450 cycles** (31.7 frames) |
+| toy frame rate | one per ~3 video frames (~20 Hz) | one per ~69 video frames (~0.87 Hz) | one per ~32 video frames (~1.9 Hz) |
+| picture vs browser | diff 0 | diff 0 | bar rows 0-23 diff 0; playfield four lines out of phase |
 
 Set beside §12's compiled numbers, the interpreter costs **32x** the compiled
 palette `frame()` (238,988 vs 7,417 cycles), **4.7x** the compiled parallax
@@ -1251,6 +1275,21 @@ compiled IL functions.  Route 1 trades that speed for a ROM the browser can
 build with no compiler; route 2 (#101) is the direct generator that keeps
 the speed.
 
+**The RCR-split toy (#115).** `toys/status-bar.lua` writes BXR and BYR at
+lines 0 and 24 — the handler's two-register case. Its capture
+(`tests/dumps/toystatusbar-ilvm`) shows the fixed bar is **diff 0** against
+the browser (rows 0-23 of a display frame are byte-equal), and the whole
+interpreter path works: 24,662 raster calls measured, the container carries
+the callback at slot 2, and the save's VRAM is the browser's and its CRAM a
+browser blink state. The scrolled playfield is the one place it does not
+match: the closest browser frame with the same bar is **793 bytes** off —
+the same four-line phase §10.4 records for the compiled route, because both
+routes share `toy_runtime.c`'s RCR replay. The cause is the VDC's background
+fetch pipeline taking the new BYR a few lines after the handler's write; the
+browser model applies it on the exact line. Fixing it would mean writing
+BYR entries early, which would break per-line BYR toys (`road.lua`), so this
+half records the limitation rather than hiding it.
+
 The timer measurement is VBlank-aware. The TMA counter is seven bits, so a
 delta past 128 ticks (131,072 CPU clocks) wraps: the first run read the real
 ~240,000-cycle frame as 30 ticks. The VBlank IRQ now records the timer value
@@ -1261,17 +1300,27 @@ covers every `raster()` call. The figure includes the VBlank IRQ's few cycles
 per frame and is quantised to one tick. The per-frame maximum is clamped at
 255 ticks in the byte-wide save-state cell; the mean is not clamped.
 
-`node tests/check-ilvm.js` exits 0 with **50 checks**: the encoder is
+`node tests/check-ilvm.js` exits 0 with **65 checks**: the encoder is
 deterministic and refuses by code (table, fixed constant, five parameters,
 `clamp`); Node and a browser context build the same 24,576 B ROM; the
 committed `renderer/ilvm.bin` rebuilds byte-identically when llvm-mos is
-present (SKIP otherwise); both dumps' ROM shas match a fresh
+present (SKIP otherwise); the three dumps' ROM shas match a fresh
 `tools/ilvm/emit.js` build; the palette capture's frames are diff 0 against
 the browser's run with eight consecutive browser frames present in order,
 its mean frame cost is above the seven-bit timer's 127-tick ceiling, and the
 save's VRAM/CRAM are the browser's; the parallax capture holds 30 exact
 display frames (a run of eight in order) among the static compute frames,
-and its save is the browser's.
+and its save is the browser's; the status-bar capture's bar is diff 0
+against a browser frame, its container carries the raster hook, its save's
+VRAM/CRAM are the browser's, and its known playfield phase is printed, not
+asserted away.
+
+`node tests/check-studio.js --browser` (the studio page's evidence, #115)
+exports the palette and parallax toys **from the page**: the downloaded Blob
+is Node `buildToyRom`'s bytes (length and FNV in the driver; byte equality
+against the page's own `exportBytes` there, and page-versus-Node byte
+equality in the stub run), and the dialog's lead, findings links, route line
+and Experimental footer are read from the rendered DOM.
 
 **Rule 2, cold-broken** (2026-10-29, a later `@design` seat on a different
 model, not the seat that wrote the suite). Eight breaks were applied one at a
@@ -1338,10 +1387,12 @@ and the other builtins are not in route 1 yet.
 
 Not proven:
 
-- **Two toys.** The palette toy (no callback) and `parallax.lua` (one register
-  write on four lines) are the evidence. #30's third toy (sprites + pad),
-  `status-bar.lua` (its compiled route was already four lines out of phase,
-  §10.4) and the #29 examples are untested.
+- **Three toys, one partial.** The palette toy (no callback), `parallax.lua`
+  (one register write on four lines) and `status-bar.lua` (two register
+  writes at a line boundary) are the evidence. The status bar itself is
+  exact; its scrolled playfield is four lines out of phase (§14.5, §10.4).
+  #30's third toy (sprites + pad), `road.lua`, `sky-gradient.lua` and
+  `palette-cycle.lua` are untested on the console.
 - **No real console and one emulator.** Mednafen only; no ares run of a
   bytecode ROM yet.
 - **Rule 2's breaks are done for the eight §14.5 lists and the new guard.** The
@@ -1351,5 +1402,11 @@ Not proven:
   guarded by `minMeanTicks` and nothing else. Whether the "another model" half
   of the rule is met depends on the authoring seat's model, which the suite
   does not record — §14.5 says what is known.
-- **The studio's Export button is not wired.** The second half adds it; this
-  half's evidence is the Node path and the browser-context byte equality.
+- **The studio's Export button (#115) is wired, and its evidence is the
+  page's own build.** `check-studio.js --browser` exports palette and
+  parallax in headless Chrome; the stub compares the page's `exportBytes`
+  with Node byte for byte. Not proven: the page in a browser other than
+  headless Chrome; the asset tail is carried but nothing reads it; route 1's
+  frame projection is the static estimate `pce-validate.js` labels, not a
+  capture per toy; and rule 2 is owed for the export checks (written by the
+  seat that wired the button).
