@@ -604,8 +604,10 @@ these notes; the section names below are the citation.
    = 1 MB. #46 had just closed (e7c547c) on "up to the HuCard limit"; that
    limit was disputed, and **#57 resolved it: `MAX_ROM_BANKS = 128` (1 MB)**,
    the card's decode, with the HuC6280's 2 MB / 256-block figure kept as the
-   CPU's address space only. A legal picture still tops out at 108 banks
-   (864 KiB) under the 13-descriptor config — a separate card.
+   CPU's address space only. The config's 13 descriptors keep a describable
+   ROM at 108 banks (864 KiB), and a picture whose regions do not overlap at
+   12 banks; #58 decided to keep that config rather than build a
+   16-descriptor layout (`ROM_LAYOUT.md` §The size ceiling).
 3. **263 lines and VCE `$0400`.** `tools/genroms.py` calls `$04` "263-line
    mode"; `tools/ares-frame.py`'s `BLOCK_H` comment says "262 visible lines +
    the VCE extra line (CR bit 2)"; `docs/PLAN.md`'s note on #27 tells it to

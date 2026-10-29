@@ -290,8 +290,12 @@ would need a config layout with 16 descriptors, which the fixed 64-byte
 config does not have. **So "a picture of exactly 1 MB builds" is not
 achievable on this card**: the size guard is the hardware ceiling and the
 descriptor cap is the real ceiling; the exactly-1 MB request is accepted by
-the size guard and refused next by the descriptor cap. Closing the gap
-between 864 KiB and 1 MB is a config-layout card, not a limit card.
+the size guard and refused next by the descriptor cap. **#58 closed the gap
+as a decision, not a build:** the config keeps its 13 descriptors, so 864
+KiB stays the shipped descriptor ceiling, and a picture whose regions do not
+overlap tops out at 12 banks (98,304 B) because all regions live in one
+64 KiB VRAM — the reasoning and the measurement are in
+[`ROM_LAYOUT.md`](ROM_LAYOUT.md) §The size ceiling.
 
 ## What this does NOT prove
 
@@ -307,6 +311,8 @@ between 864 KiB and 1 MB is a config-layout card, not a limit card.
 - **Not every picture.** The sample scenes now cover 32/64/128-wide BATs,
   one- and two-bank BATs, 1–3 tile regions, and (scene10) a 64-row BAT with
   more than six tile banks. Still not exercised: more than 3 regions in one
-  picture, every multi-region boundary case, and a legal picture above
-  108 banks (864 KiB): the 1 MB ceiling is the card's, but the 13-descriptor
-  config is what stops a real picture short of it (see above).
+  picture and every multi-region boundary case. A picture above 12 banks
+  (98,304 B) is not missing coverage — VRAM cannot hold it; the 108-bank
+  (864 KiB) fixture is the config's descriptor ceiling counted on one VRAM,
+  and 1 MB is the card's decode (see [`ROM_LAYOUT.md`](ROM_LAYOUT.md)
+  §The size ceiling).

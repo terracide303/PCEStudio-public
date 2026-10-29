@@ -11,8 +11,12 @@ are filled with `0xff`. The image is headerless (`pceas -raw`) and has
 
 The bank count is not capped at 10 any more (card #46). The copy regions may
 span banks 4–127: the viewer streams them through one 8 KiB window and maps
-the next bank into it, so the image grows to the HuCard limit — 128 banks of
-8 KiB = 1 MB (card #57). A HuCard decodes physical banks `$00`–`$7F` only
+the next bank into it, so the image is bounded by the HuCard's decode — 128
+banks of 8 KiB = 1 MB (card #57) — and by the config's 13 region
+descriptors, which is the tighter number for any picture (#58: 108 banks for
+what the config can describe, 12 banks for a picture whose regions do not
+overlap — [The size ceiling](#the-size-ceiling-cards-57-58)).
+A HuCard decodes physical banks `$00`–`$7F` only
 (sgxtech.txt "HuC6280 memory map"; pcetech.txt §3 "Memory map"; hes spec
 [MEMORY MAP] ROM `0x000000`–`0x0FFFFF`; [`MANUALS.md`](MANUALS.md) §15.1
 GAP 4); `$80`–`$F7` are not card memory, and the HuC6280's 2 MB / 256-block
@@ -234,10 +238,11 @@ The viewer streams this from the MPR2 window (`$4000`–`$5fff`, bank register
 boundaries need not line up with banks. The MPR scheme is the HuC6280's: eight
 8-bit mapping registers, each selecting one of 256 8 KiB physical blocks
 (hardware manual H8-7, H8-10/11); the card, however, decodes only blocks
-`$00`–`$7F`. Banks 4–127 are available to the regions — up to 124 banks =
-992 KiB of tiles, inside the card's 1 MB (banks 0–3 hold the code, config
-and BAT). The 13-descriptor config caps a legal picture below that: the
-largest describable is 108 banks = 864 KiB (see `EXPORT.md`).
+`$00`–`$7F`. Banks 4–127 are available to the regions (banks 0–3 hold the
+code, config and BAT), but no legal picture uses them all: the config's 13
+descriptors cap a legal ROM at 108 banks = 864 KiB, and a picture whose
+regions do not overlap at 12 banks = 98,304 B — see
+[The size ceiling](#the-size-ceiling-cards-57-58).
 
 A region is usually a tile region; for the #12 sprite scenes the list also
 carries the sprite generator (SG) pattern block — cell `$80` upward at VRAM
@@ -256,6 +261,55 @@ Regions whose destination is beyond the 64 KiB VRAM (dest ≥ 32768 words) are
 **not included** — writes beyond 32768 words are dropped on the hardware
 side, which is also what the renderer model does (`renderer/pce-bg.js`), so
 the browser must not emit them either.
+
+## The size ceiling (cards #57, #58)
+
+Two different numbers bound a viewer ROM, and only the smaller one is a
+picture size. The builders stop at 128 banks because that is all a HuCard
+decodes (above). The config's 13 region descriptors (bank 1, `0x0A`–`0x3D`)
+stop what a ROM can *describe* at 13 regions × 32,768 words — the most one
+descriptor can ask for, since its destination plus its count must stay
+inside the 32,768-word VRAM — = 425,984 words = 851,968 B of copy data = 104
+tile banks, so `4 + 104 = 108` banks = 884,736 B = 864 KiB. That is the
+arithmetic behind card #57, and `tests/check-export.js` (`maxLegal`, 13 ×
+`[0, 2048]`) builds it and requires 108 banks.
+
+**The largest legal *picture* is 12 banks = 98,304 B.** Copy regions must
+not overlap each other, the BAT or the SAT (above); VRAM is 32,768 words =
+65,536 B; and the SAT owns the top 256 words of every picture (`DVSSR` is
+`$7f00`, above). Regions can therefore total at most 32,512 words = 65,024 B
+— 7.94 banks, allocated as 8 — so the ROM is at most `4 + 8 = 12` banks.
+With the BAT excluded too (32×32 is the smallest MWR geometry, 1,024
+words), the largest is 31,488 words = 62,976 B, 1,968 tiles from character
+`$40`; that picture builds at 98,304 B (measured 2026-10-29 through
+`renderer/pce-rom.js` with one region `[64, 1968]` on a 32×32-BAT picture;
+no suite asserts it — `tests/check-export.js` `maxLegal` and
+`tests/check-python-builder.js` `largest` still build the 108-bank fixture).
+The 108-bank fixture is the same 64 KiB of VRAM described thirteen times —
+its regions all start at word 0 — so it is a ROM size, not a picture the
+viewer can show anything more with.
+
+**Decision (card #58): the config keeps 13 descriptors; no 16-descriptor
+layout is built.** 1 MB is the card's decode and the size guard's ceiling,
+never a size a picture reaches. 864 KiB (108 banks) is the shipped ceiling
+for what the config can describe, and 12 banks (98,304 B) for what a picture
+can show; a ROM between the two holds regions that rewrite VRAM rather than
+add pixels, and no legal picture is refused for size today because the size
+guard sits above both.
+
+Why not the 16 descriptors an exactly-1 MB build would need: the descriptors
+end at `0x3D`, so 16 of them would need `0x0A`–`0x49` — past the palette at
+`0x40`. Getting them means moving the palette or adding a second descriptor
+block, and either way bank 1's fixed offsets change and the boot code in
+**bank 0** has to copy and read more than the 64 bytes at `$4000`. Bank 0 is
+the one constant every viewer ROM shares — `renderer/viewer-bank0.bin`,
+extracted by `make -C tools bank0`; `tools/extract_bank0.py` refuses a
+differing asset; the browser export copies it verbatim — so that change
+rewrites every ROM built so far and re-pins the evidence in
+[`EXPORT.md`](EXPORT.md), to gain 32 banks that hold no new pixels (above).
+If a picture ever needs more than 13 regions, the change is a config version
+3 with the descriptor table outside the 64-byte block plus the bank-0 code
+that reads it; that is its own card, and it is not this one.
 
 ## How the viewer reads it
 
