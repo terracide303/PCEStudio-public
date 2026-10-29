@@ -41,6 +41,11 @@
  * frames against the browser run.  The skip list is explicit below and a
  * dump with the background off that is not on it is rendered like any
  * other, so a bad capture cannot hide behind a blanket "not a picture" rule.
+ * The four toy dumps are skipped rather than given the crop they record in
+ * meta.json: a still capture records its crop in regs.json (capture.sh), the
+ * toy route does not, and teaching this check to prefer meta.json's crop
+ * would make the unlisted-dump guard's toy copy render clean — the guard
+ * exists to prove an unlisted toy capture is still compared and fails.
  *
  * A dump with raster.json (the #15 raster scenes) is verified against it
  * first (checkRaster below: the table must describe what the ROM actually
