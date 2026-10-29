@@ -4305,6 +4305,53 @@ function checkSequencerPanel(page) {
   eq("#94: a seventh voice is refused — a noise drum on a wave-only channel",
      refused, "seq-voice");
 
+  /* ---- #95: the staff view, on the same song --------------------------- */
+  check(page.loaded.some((s) => /pce-staff\.js$/.test(s)),
+        "#95: the page loads renderer/pce-staff.js");
+  check(!!S.staff && typeof S.staff.layout === "function",
+        "#95: the staff model registers as PCEStudio.staff");
+  const staffBtn = page.dom.get("seq-view-staff");
+  check(staffBtn && staffBtn.disabled === false,
+        "#95: the Staff button is enabled");
+
+  api.clearPattern();
+  api.eraser(false);
+  api.setInstrument(0);
+  api.setLength(1);
+  api.setNote("C4");
+  api.paint(0, 0);                    /* inside the treble staff */
+  api.setNote("C7");
+  api.paint(0, 2);                    /* far above it: 15ma */
+  api.setNote("E4");
+  api.paint(0, 4);                    /* back down: loco */
+
+  /* the button pass earlier clicked every button, so ask for the grid */
+  eq("#95: the grid is the panel's other view", api.view("grid"), "grid");
+  eq("#95: the staff model reads the same song the grid edits",
+     api.staff().notes.length, 3);
+  eq("#95: the staff is one of the two views, and only one shows",
+     [api.view("staff"), page.dom.get("seq-staffbox").hidden,
+      page.dom.get("seq-gridbox").hidden].join(","), "staff,false,true");
+
+  const staffCanvas = page.dom.get("seq-staff");
+  staffCanvas.__ctx.__calls.length = 0;
+  studio.panels.refresh(true);
+  const staffCalls = staffCanvas.__ctx.__calls;
+  const heads = staffCalls.filter((c) => c.name === "ellipse").length;
+  eq("#95: the staff draws one note head per note", heads, 3);
+  const staffLabels = staffCalls.filter((c) => c.name === "fillText")
+    .map((c) => String(c.args[0]));
+  check(staffLabels.indexOf("15ma") >= 0,
+        "#95: a note far above the staff is marked 15ma (" +
+        staffLabels.join(" ") + ")");
+  check(staffLabels.indexOf("loco") >= 0,
+        "#95: the return to the written octave is marked loco");
+  check(staffCalls.some((c) => c.name === "bezierCurveTo"),
+        "#95: the clefs are drawn as paths, not typed glyphs");
+  eq("#95: back to the grid, and the staff box hides again",
+     [api.view("grid"), page.dom.get("seq-staffbox").hidden,
+      page.dom.get("seq-gridbox").hidden].join(","), "grid,true,false");
+
   /* ---- the song saves with the toy as song.json ------------------------ */
   const names = studio.fileNames();
   check(names.indexOf("song.json") >= 0,
