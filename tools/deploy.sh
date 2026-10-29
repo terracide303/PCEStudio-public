@@ -5,7 +5,7 @@
 #   sh tools/deploy.sh --dry                    list what would be uploaded
 #
 # Only the web part goes up: renderer/, toys/ and the browser libraries the pages load.
-# NOT tools/, tests/, docs/ or vendor/huc (its licence is not settled, docs/DECISIONS.md).
+# LICENSE (GPL-3.0) goes up with it. NOT tools/, tests/, docs/ or vendor/huc (its licence is not settled, docs/DECISIONS.md).
 # Uploads go through cPanel's Fileman API over HTTPS: plain FTP to this host refused some files
 # (451) and timed out on others, 2026-10-29. The password comes from the environment only.
 set -eu
@@ -16,7 +16,8 @@ DEST="${PCE_CP_DIR:-public_html/pcestudio}"
 
 files=$( { find renderer -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' -o -name '*.bin' -o -name '*.json' -o -name '*.png' \);
            find toys -type f;
-           find vendor/codemirror vendor/fengari vendor/ppu-toys -type f; } | grep -v '/\.' | sort )
+           find vendor/codemirror vendor/fengari vendor/ppu-toys -type f;
+           echo LICENSE; } | grep -v '/\.' | sort )
 
 if [ "${1:-}" = "--dry" ]; then echo "$files"; echo "$(echo "$files" | wc -l | tr -d ' ') files"; exit 0; fi
 : "${PCE_CP_PASS:?set PCE_CP_PASS (never put it in a file)}"
