@@ -34,3 +34,15 @@ node tests/check-examples.js
 ```
 
 The pictures land in `tests/dumps/examples/`, one PNG per toy.
+
+## The folder toys
+
+Two examples are folders rather than one file, because their picture is
+bigger than a toy: `demo-game/` (STARFALL, #88) keeps its three asset files
+beside `main.lua`, and `city/` (#125) is a demo made from Anokolisa's *Action
+Pack - CITY* whose converted art is **not** in this repository — Dennis's
+2026-10-29 decision keeps it beside the repo in `demo-art/city/` and
+`tools/deploy.sh` uploads it with the toy.  See
+[`city/README.md`](city/README.md) for the licence, the credit, the converter
+and the evidence; `node tests/check-city.js` skips with a clear line when the
+art is not on the machine.
