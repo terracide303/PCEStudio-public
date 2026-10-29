@@ -1,4 +1,4 @@
--- road.lua — a pseudo-3D road from three per-line registers (card #29).
+-- road.lua — a pseudo-3D road from three per-line registers.
 --
 -- THE TRICK: there is no 3D hardware, only a scrolling tilemap and the RCR
 -- interrupt.  Each of the three things it writes per line does one job:

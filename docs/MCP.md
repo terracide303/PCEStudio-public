@@ -359,10 +359,10 @@ Example reply:
 
 ```json
 {"ok":true,"bytes":24576,
- "sha256":"1187f79d9d8d3d4f…",
+ "sha256":"fb53b96fa2d77311…",
  "path":"/tmp/pce-mcp/parallax.pce",
  "route":"#100's browser route, no compiler: renderer/pce-il.js -> renderer/pce-ilbc.js -> renderer/pce-rom.js buildToyRom over the committed renderer/ilvm.bin",
- "bytecode_bytes":1100,"ilvm_bytes":16384,"assets":[],
+ "bytecode_bytes":1115,"ilvm_bytes":16384,"assets":[],
  "note":"the llvm-mos route (tools/toyc) exists where llvm-mos is installed but is not called here; this is the beta's route"}
 ```
 

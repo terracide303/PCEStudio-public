@@ -34,7 +34,14 @@
  *      validator-clean, and move with the pad.
  *   7. The guide fits a chat: under 12,000 words, and it ends every code
  *      answer with the exact Paste & Run line.
- *   8. The guide opens with the MCP route (#142): the download URL, the
+ *   8. The cold review's seven findings stay fixed (#141): every BXR that
+ *      grows with the frame is wrapped (and parallax runs past frame 2048),
+ *      the starter is table-free and pce-cgen lowers it, the pattern range is
+ *      the default layout's real one, every example runs 3,600 frames clean,
+ *      the sound example needs no song, pad buttons and keys are named apart,
+ *      the four missing refusal codes are in section 9, and no internal card
+ *      number or personal attribution survives in the stranger-facing page.
+ *   9. The guide opens with the MCP route (#142): the download URL, the
  *      `claude mcp add` line, the skill to link, and every tool
  *      tools/mcp/server.js's TOOLS array has — the list is read from the
  *      server, so a tool it gains without the guide naming it fails here.
@@ -56,6 +63,7 @@ const toys = require("../renderer/pce-toys.js");
 const il = require("../renderer/pce-il.js");
 const psg = require("../renderer/pce-psg.js");
 const validate = require("../renderer/pce-validate.js");
+const cgen = require("../renderer/pce-cgen.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const GUIDE_PATH = path.join(ROOT, "renderer", "pcestudio-for-claude.md");
@@ -518,6 +526,157 @@ function checkColdSeat() {
   checkExample("the cold seat's main.lua", m[1], true);
 }
 
+/* ---- 6b. the cold review's findings (#141) ---------------------------- */
+
+function refSection(id) {
+  return docs.reference().sections.find((s) => s.id === id);
+}
+function codeOf(sec) {
+  const b = sec && sec.blocks.find((block) => block.type === "code");
+  return b ? b.text : "";
+}
+function parasOf(sec) {
+  return sec ? sec.blocks.filter((b) => b.type === "p")
+                      .map((b) => b.text).join(" ") : "";
+}
+
+/* Each check below is written so the OLD text fails it: the old string is
+ * asserted gone, not just the new one present.  That is the control — run
+ * this file against HEAD's generator and it reports one failure per item. */
+function checkReviewFixes() {
+  const md = guide.markdown();
+  const h = host;
+  const firstPattern = h.BAT_WORDS / 64;
+  const lastPattern = editor.SAT_ADDR / 64 - 1;
+
+  /* (1) every BXR that grows with the frame is wrapped, and 10.1 is integer */
+  const parallax = fs.readFileSync(path.join(ROOT, "toys", "parallax.lua"),
+                                   "utf8");
+  check(!/reg\("BXR", g_f \/\/ 2\)/.test(parallax),
+        "parallax's g_f // 2 band is wrapped (old line gone)");
+  check(!/reg\("BXR", g_f\)/.test(parallax),
+        "parallax's g_f band is wrapped (old line gone)");
+  check(!md.includes("floor(t * 32)"),
+        "the 10.1 example no longer does floor(t * 32) (old line gone)");
+  check(md.includes('reg("BXR", (f * 2) % ' + (h.ALLOWED_REGS.BXR + 1) + ")"),
+        "the 10.1/10.2 examples wrap BXR with the integer frame number f");
+
+  /* (2) the starter is cartridge-ready: no table, and pce-cgen lowers it */
+  check(!/sprite\(\s*0\s*,\s*\{/.test(guide.STARTER.replace(/--[^\n]*/g, "")),
+        "the starter no longer calls sprite(0, {...}) (old line gone)");
+  check(/sat\(0, 0, sy\)/.test(guide.STARTER) &&
+        /sat\(0, 3, 0\)/.test(guide.STARTER),
+        "the starter places SAT entry 0 with four sat() words");
+  let starterC = null, starterErr = null;
+  try { starterC = cgen.emitC(il.compile(guide.STARTER,
+                                         { chunkName: "main.lua" })); }
+  catch (e) { starterErr = e; }
+  check(!starterErr && typeof starterC === "string" && starterC.length > 0,
+        "the starter really is cartridge-ready: pce-cgen lowers it" +
+        (starterErr ? " (" + (starterErr.code || starterErr.name) + ": " +
+                      starterErr.message + ")" : ""));
+
+  /* (3) the real free pattern range, and a sprites example that shows */
+  check(md.includes(firstPattern + ".." + lastPattern),
+        "the guide prints the default layout's free sprite-pattern range " +
+        firstPattern + ".." + lastPattern);
+  check(!md.includes("below 512"),
+        "the old 'below 512' pattern claim is gone");
+  const sprCode = codeOf(refSection("sprites"));
+  check(/reg\("CR", 0xC0\)/.test(sprCode),
+        "the sprites example turns sprites on with reg(\"CR\", 0xC0)");
+  check(!/pattern = 0[,}]/.test(sprCode),
+        "the sprites example does not use pattern 0 (old line gone)");
+
+  /* (4) examples follow the guide's own rules */
+  check(!md.includes("64 + floor(32 * sin(t))"),
+        "the 10.2 example no longer uses sin(t)/floor (old line gone)");
+  const pwCode = codeOf(refSection("passwords"));
+  check(/function init\(\)/.test(pwCode) && !/function frame/.test(pwCode),
+        "the password example prints once in init(), not every frame " +
+        "(old frame() line gone)");
+
+  /* (5) sound works from a paste: no music(0), and note() is in section 4 */
+  const sndCode = codeOf(refSection("sound"));
+  check(!sndCode.includes("music(0)"),
+        "the sound example no longer calls music(0) (old line gone)");
+  check(sndCode.includes("sfx(") && sndCode.includes("note("),
+        "the sound example uses sfx() with note()");
+  const sndText = parasOf(refSection("sound"));
+  check(sndText.includes("music-range") && sndText.includes("song list"),
+        "the sound chapter says a pasted toy has no song list and music() is " +
+        "music-range there");
+  const apiSec = guide.guide().sections.find((s) => s.id === "api");
+  const apiRows = apiSec.blocks.find((b) => b.type === "table").rows;
+  check(apiRows.some((r) => /^note\(/.test(r[0])),
+        "the section 4 API table lists note()");
+
+  /* (6) pad BUTTON names and keyboard keys are told apart */
+  check(md.includes("I button (key N)") && md.includes("Up (key I)"),
+        "the guide says \"I button (key N)\" and \"Up (key I)\", never " +
+        "an ambiguous \"press I\"");
+  check(!md.includes("(I up,") &&
+        !md.includes("N and M as the I and II buttons"),
+        "the old ambiguous keyboard sentence is gone");
+  /* the key table the guide prints is the pages' own binding */
+  const studioHtml = fs.readFileSync(path.join(ROOT, "renderer", "studio.html"),
+                                     "utf8");
+  const toyHtml = fs.readFileSync(path.join(ROOT, "renderer", "toy.html"),
+                                  "utf8");
+  const keys = h.PAD_KEYS || {};
+  for (const field of h.PAD_FIELDS) {
+    const binding = "Key" + keys[field] + ': "' + field + '"';
+    check(studioHtml.includes(binding) && toyHtml.includes(binding),
+          "pad button " + field + " is key " + keys[field] +
+          " on both pages");
+  }
+
+  /* (7) the four missing refusal codes are in section 9, with meanings */
+  const index = docs.refusalIndex();
+  const errorRows = guide.guide().sections.find((s) => s.id === "errors")
+    .blocks.find((b) => b.type === "table").rows;
+  for (const code of ["il-pad-write", "tile-space", "validate-rom",
+                      "cgen-op"]) {
+    check(index[code] && index[code].description,
+          "the refusal index has a meaning for " + code);
+    check(errorRows.some((r) => r[0] === code),
+          "section 9 lists " + code);
+  }
+
+  /* (7b) the page a stranger reads carries no internal bookkeeping */
+  check(!/#\d/.test(md), "the guide carries no internal card number");
+  check(!md.includes("(Dennis"), "the guide carries no personal attribution");
+}
+
+/* ---- 6c. every example runs 3,600 frames (past frame 2048) ------------ */
+
+function checkLongExamples() {
+  const md = guide.markdown();
+  const blocks = luaBlocks(md);
+  const parallax = fs.readFileSync(path.join(ROOT, "toys", "parallax.lua"),
+                                   "utf8");
+  let parallaxErr = null, sawParallax = false;
+  for (let i = 0; i < blocks.length; i++) {
+    let err = null;
+    try {
+      const rt = toys.create(blocks[i], { budgetMs: 250 });
+      rt.load();
+      for (let f = 0; f < 3600; f++) rt.frame(f);
+    } catch (e) { err = e; }
+    check(!err, "guide lua block " + (i + 1) + " runs 3,600 frames clean" +
+          (err ? " (" + (err.code || err.name) + ": " + err.message + ")" : ""));
+    if (blocks[i].trimEnd() === parallax.trimEnd()) {
+      sawParallax = true;
+      parallaxErr = err;
+    }
+  }
+  check(sawParallax, "the guide's listing of parallax is the one long-run");
+  check(!parallaxErr, "toys/parallax.lua runs past frame 2048 without " +
+        "reg-range (3,600 frames)" +
+        (parallaxErr ? " (" + (parallaxErr.code || parallaxErr.name) + ": " +
+                       parallaxErr.message + ")" : ""));
+}
+
 /* ---- 7. it fits a chat, and ends with the button's name --------------- */
 
 function checkSize() {
@@ -590,6 +749,8 @@ function main() {
   checkFollowsCode();
   checkExamples();
   checkColdSeat();
+  checkReviewFixes();
+  checkLongExamples();
   checkSize();
   checkMcpSection();
 
@@ -603,9 +764,10 @@ function main() {
   console.log("PASS  " + checks + " checks: the guide is the generator's " +
               "bytes, every API name and range is the code's, the 12 tables " +
               "move it, the starter and the five toys run visible and " +
-              "validator-clean, the cold seat's main.lua runs too, the MCP " +
-              "section is first and names every tool the server has, and it " +
-              "is " + words + " words");
+              "validator-clean, the cold seat's main.lua runs too, the cold " +
+              "review's seven findings stay fixed, every listing runs 3,600 " +
+              "frames clean, the MCP section is first and names every tool " +
+              "the server has, and it is " + words + " words");
 }
 
 if (require.main === module) main();

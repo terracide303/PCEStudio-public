@@ -6686,15 +6686,22 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  /* #128 added OAK WOODS and #127 CAVE, two demos besides the five #29
-   * effects and STARFALL; #147 added PLATFORMER and TOWER.  Browse and the
+  /* #128 added OAK WOODS, #127 CAVE, #125 CITY and #147 PLATFORMER and TOWER
+   * — five demos besides the five #29 effects and STARFALL; Browse and the
    * studio read the same generated list */
-  check(data.length === 10,
+  check(data.length === 11,
         "the gallery carries the five #29 toys, STARFALL, OAK WOODS, CAVE, " +
-        "PLATFORMER and TOWER (got " + data.length + ")");
+        "CITY, PLATFORMER and TOWER (got " + data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall", "oak-woods", "cave", "platformer", "tower"]);
+      "starfall", "oak-woods", "cave", "city", "platformer", "tower"]);
+  /* #125: the committed gallery carries CITY's art-free toy — the playable
+   * file with the pack's picture is demo-art/city/main.lua and only the
+   * deploy reads it (tools/gallery.js --with-demo-art). */
+  const cityToy = data.find((t) => t.id === "city") || {};
+  check(typeof cityToy.source === "string" &&
+        (cityToy.source.match(/vram\[/g) || []).length === 0,
+        "#125: the committed CITY source has no converted art in it");
   let mismatched = [];
   for (const t of data) {
     if (t.source !== toySource(t.file)) mismatched.push(t.file);
@@ -6828,9 +6835,13 @@ function checkGallery(page) {
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall", "oak-woods", "cave", "platformer", "tower"]);
-  check(cards.every((c) => c.ink > 0 && !c.error),
-        "every card drew its frame 60 (" +
+      "starfall", "oak-woods", "cave", "city", "platformer", "tower"]);
+  /* #125: the committed CITY card runs the art-free toy, so it draws no
+   * picture here; the deployed gallery carries the playable file and does.
+   * Every other card must have ink. */
+  check(cards.every((c) => !c.error && (c.ink > 0 || c.id === "city")),
+        "every card drew its frame 60, except the CITY placeholder " +
+        "(art-free in the repo, playable when deployed) (" +
         cards.map((c) => c.id + " " + c.ink).join(", ") + ")");
   check(cards.every((c) => c.href === "toy.html?id=" + c.id),
         "each card links to the toy's own page");
@@ -6906,7 +6917,7 @@ function checkGallery(page) {
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["cave", "status-bar", "parallax", "oak-woods", "palette-cycle",
+     ["cave", "city", "status-bar", "parallax", "oak-woods", "palette-cycle",
       "platformer", "road", "sky-gradient", "starfall", "tower"]);
   B.setSort("written");
 

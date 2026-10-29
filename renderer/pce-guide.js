@@ -48,7 +48,9 @@ const STUDIO_URL = "https://pcestudio.terracides.com";
 const REFUSALS_A_BEGINNER_HITS = [
   "reg-forbidden", "reg-range", "pal-range", "vram-range", "sat-range",
   "sprite-range", "raster-line", "raster-line-full", "pad-range",
+  "il-pad-write",
   "music-range", "sfx-range", "no-psg", "password-value", "password-code",
+  "tile-space", "validate-rom", "cgen-op",
   "toy-timeout", "toy-error",
   "il-syntax", "il-op", "il-string", "il-mixed",
   "il-method", "il-for-in", "il-undefined", "il-arity"
@@ -93,7 +95,7 @@ end
 
 -- A sprite pattern is 64 VRAM words, NOT a background character: pattern p
 -- starts at word p*64, plane n at p*64 + n*16 + row, leftmost pixel in bit
--- 15.  This is the layout #90 found written the wrong way.
+-- 15.  This is the layout section 7.1 describes getting wrong.
 local function putsprite(pattern, fn)
   for row = 0, 15 do
     local p0, p1, p2, p3 = 0, 0, 0, 0
@@ -142,7 +144,13 @@ function frame(t, f)
   if sx > 32 + 240 then sx = 32 + 240 end
   if sy < 64 then sy = 64 end
   if sy > 64 + 208 then sy = 64 + 208 end
-  sprite(0, { x = sx, y = sy, pattern = 0x100, palette = 0 })
+  -- SAT entry 0 is four words: Y, X, pattern<<1, palette | flags.  Written
+  -- with sat() because sprite(0, { ... }) takes a table, which the console
+  -- export cannot lower (section 8); sat() is the same four hardware words.
+  sat(0, 0, sy)               -- Y
+  sat(0, 1, sx)               -- X
+  sat(0, 2, 0x100 << 1)       -- pattern 0x100, the SAT stores it shifted
+  sat(0, 3, 0)                -- palette 0, no flips
 end
 `;
 
@@ -266,6 +274,11 @@ function guide() {
   const ref = docs.reference();
   const byId = {};
   for (const s of ref.sections) byId[s.id] = s;
+
+  /* The sprite patterns the default layout leaves free: after the BAT and
+   * before the SAT.  Read from the host's/editor's own layout constants. */
+  const firstPattern = host.BAT_WORDS / 64;
+  const lastPattern = editor.SAT_ADDR / 64 - 1;
 
   const sections = [];
 
@@ -412,10 +425,15 @@ function guide() {
         "(background on, sprites OFF), and every VRAM, CRAM and SAT word " +
         "zero. That last default is why a sprite does not appear until " +
         "reg(\"CR\", 0xC0)."),
-      p("Keyboard: pad 1 is IJKL (I up, J left, K down, L right) with N and " +
-        "M as the I and II buttons, O Select and P Run, after a click on the " +
-        "picture. Pad[" + 2 + "]..pad[" + host.PAD_COUNT + "] exist for a " +
-        "multitap and are not driven by the studio's keyboard.")
+      p("Keyboard: the studio's keys are I/J/K/L for the D-pad directions " +
+        "up/left/down/right, N and M for the two fire buttons, O for Select " +
+        "and P for Run, after a click on the picture. A pad FIELD names a pad " +
+        "BUTTON, and a button's name is not always its key: pad[1].i is the I " +
+        "button, pressed with keyboard key N, while pad[1].up is the Up " +
+        "direction, pressed with keyboard key I. So never tell the person to " +
+        "\"press I\": say \"the I button (key N)\" or \"Up (key I)\". Pad[" +
+        2 + "]..pad[" + host.PAD_COUNT + "] exist for a multitap and are not " +
+        "driven by the studio's keyboard.")
     ]
   });
 
@@ -427,7 +445,9 @@ function guide() {
         "one thing at a time. puttile writes a background character and " +
         "putsprite writes a 16 x 16 sprite pattern; both encode the " +
         "hardware's bitplane layout, which is the part first toys get " +
-        "wrong."),
+        "wrong. It is also inside the cartridge subset: the sprite is placed " +
+        "with four sat() words because sprite(i, spec) takes a table, and the " +
+        "console back end cannot lower tables (section 8)."),
       code("lua", STARTER),
       p("What to point at when it does not show: reg(\"CR\", 0xC0) turns " +
         "sprites on; pal(0x101, ...) is sprite palette 0 colour 1, the " +
@@ -469,8 +489,16 @@ function guide() {
         "plane word is the strip's left pixel. Writing vram[p * 16 + row] " +
         "for a sprite leaves the pattern the SAT reads empty, so the sprite " +
         "is invisible even though the code \"wrote a pattern\". Use the " +
-        "putsprite helper in section 5 (this is #90). Keep the pattern " +
-        "number below 512: 512 x 64 words is all of VRAM."),
+        "putsprite helper in section 5. The hardware does not check where a " +
+        "pattern lives, so the usable numbers are set by the two tables it " +
+        "must not overwrite: in the default layout the BAT owns VRAM words " +
+        "0.." + (host.BAT_WORDS - 1) + " (patterns 0.." + (firstPattern - 1) +
+        ") and the SAT owns $7F00..$7FFF (patterns " + (lastPattern + 1) +
+        ".." + (lastPattern + 4) + "). A sprite pattern is therefore " + firstPattern +
+        ".." + lastPattern + " — and your background tiles share that space, " +
+        "because character 0x40 starts at word 0x400 (pattern " + firstPattern +
+        "), so keep tiles and patterns apart: the starter uses tile 0x40 and " +
+        "sprite pattern 0x100."),
       h3("2. Colour 0 is the backdrop, and sprite colour 0 is transparent"),
       p("A background pixel whose colour number is 0 shows CRAM[0] — the " +
         "backdrop — whatever palette its cell named. A sprite pixel whose " +
@@ -500,9 +528,10 @@ function guide() {
         "frame(), and use raster() only for the per-line registers and " +
         "colours."),
       h3("6. A pad is a held state, not an event"),
-      p("pad[1].i is true for every frame the button is held. If an action " +
-        "should fire once, remember the previous frame: `if pad[1].i and not " +
-        "was_i then ... end; was_i = pad[1].i`."),
+      p("pad[1].i is true for every frame the I button is held — the I " +
+        "BUTTON, keyboard key N; pad[1].up is the Up direction, key I. Name " +
+        "which you mean. If an action should fire once, remember the previous " +
+        "frame: `if pad[1].i and not was_i then ... end; was_i = pad[1].i`."),
       h3("7. Integers, not fractions"),
       p("Stay in whole numbers: `x // 16`, not `x / 16` or 1.5. The studio's " +
         "IL is a fixed-point machine and refuses or diverges on mixes " +
@@ -539,9 +568,11 @@ function guide() {
         "in print, not in a variable."),
       p("- Tables: the IL reads them back (t[i], t.x), but pce-cgen, the " +
         "console back end, does not lower tables at all (cgen-op), so a toy " +
-        "with a table read runs in the browser and will not export. The " +
-        "worked examples fill a table with constants and do not read it back; " +
-        "keep to that if the person wants a cartridge."),
+        "with a table read runs in the browser and will not export. sprite(i, " +
+        "spec) is a table too: place sprites with sat() words (section 5) when " +
+        "the toy must export. The worked examples fill a table with constants " +
+        "and do not read it back; keep to that if the person wants a " +
+        "cartridge."),
       p("- No method calls (:), no varargs (...), no pairs/ipairs, and no " +
         "multiple return values. Use for i = a, b, step do and plain " +
         "functions."),
@@ -565,7 +596,8 @@ function guide() {
       p("Every refusal is a named failure, not a silent drop: the studio " +
         "shows `code: file:line: message` (or the error line under the " +
         "picture). Read the code first, then the line, then fix the value or " +
-        "the construct. The codes a first toy meets:"),
+        "the construct. The codes a first toy meets, and the ones its " +
+        "cartridge export can raise:"),
       table(["code", "meaning"], errorRows),
       p("If the person reports \"nothing happens\" with no error: the toy is " +
         "running and drawing nothing visible. Check, in order, CR (sprites " +
@@ -618,7 +650,7 @@ function guide() {
            "generated from the runtime's own tables, and the examples are " +
            "the toys/ files themselves.",
     footer: "Generated by node tools/docs.js --claude: the API chapters from " +
-            "renderer/pce-docs.js (#61), which reads every range and refusal " +
+            "renderer/pce-docs.js, which reads every range and refusal " +
             "out of the module that enforces it; the examples from toys/. " +
             "Do not edit this file by hand — tests/check-guide.js regenerates " +
             "it and fails on a hand-written number.",
