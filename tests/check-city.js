@@ -36,9 +36,14 @@
  *      moves 2-3 px a frame against the far band's 0-1.
  *   6. LUA == IL, FRAME BY FRAME.  120 frames: vram, cram, sat, registers, the
  *      raster table and the rendered pixels are byte-equal in both runtimes.
- *   7. THE EVIDENCE IS WHERE THE ART IS.  An eight-cell frame strip is written
- *      to demo-art/city/evidence/strip.png (never into the repo) and read back
- *      pixel for pixel.
+ *   7. THE RUN IS THE AUTHOR'S CYCLE (#148).  The shoot pattern appears on
+ *      exactly the frames the fire key is held — the run cycle's sequence
+ *      never contains it while fire is not pressed — and the pad at rest
+ *      shows the idle stand, its own frame.
+ *   8. THE EVIDENCE IS WHERE THE ART IS.  A ten-cell frame strip — one full
+ *      run cycle in order, one jump, one shot — is written to
+ *      demo-art/city/evidence/strip.png (never into the repo), its cells are
+ *      proved to be those poses, and it is read back pixel for pixel.
  *
  * Rule 2: this file was written by the card's own seat (@design), so a cold
  * break by another seat is owed before the card closes.
@@ -164,21 +169,24 @@ function checkNumbersAreTheArts(files) {
      listedList("RUN_L"), [0, 2, 4, 6, 8, 10, 12, 14].map((i) => codes[i]));
   eq("the run cycle's right halves are main.lua's RUN_R",
      listedList("RUN_R"), [0, 2, 4, 6, 8, 10, 12, 14].map((i) => codes[i + 1]));
-  /* frames are packed two patterns a frame, in this order: 8 run frames,
-   * then the leap, then the aim, then the tracer */
-  /* the leap reuses run frame 7 (index 6 in the run list), so it names the
+  /* frames are packed two patterns a frame, in this order: the run cycle's
+   * eight (Full.gif's own order, frames 3..10), then the idle stand (frame
+   * 1), then the crouched aim (frame 35), then the tracer */
+  eq("IDLE_L is the idle stand's left half", listedInt("IDLE_L"), codes[16]);
+  eq("IDLE_R is the idle stand's right half", listedInt("IDLE_R"), codes[17]);
+  /* the leap reuses run frame 7 (the 5th of the run's eight), so it names the
    * run cycle's own patterns and costs no VRAM of its own */
-  eq("JUMP_L is run frame 7's left half", listedInt("JUMP_L"), codes[12]);
-  eq("JUMP_R is run frame 7's right half", listedInt("JUMP_R"), codes[13]);
-  eq("SHOOT_L is the aim frame's left half", listedInt("SHOOT_L"), codes[16]);
-  eq("SHOOT_R is the aim frame's right half", listedInt("SHOOT_R"), codes[17]);
+  eq("JUMP_L is run frame 7's left half", listedInt("JUMP_L"), codes[8]);
+  eq("JUMP_R is run frame 7's right half", listedInt("JUMP_R"), codes[9]);
+  eq("SHOOT_L is the aim frame's left half", listedInt("SHOOT_L"), codes[18]);
+  eq("SHOOT_R is the aim frame's right half", listedInt("SHOOT_R"), codes[19]);
   eq("BULLET is the tracer pattern's code", listedInt("BULLET"),
      codes[codes.length - 1]);
 
   /* every pattern is the VDC's 32x64 or 16x16, and none reaches the SAT */
   const sizes = pic.spritePatterns.map((p) => p.width + "x" + p.height);
-  check(sizes.slice(0, 18).every((s) => s === "32x64"),
-        "the character's eighteen patterns are 32x64");
+  check(sizes.slice(0, 20).every((s) => s === "32x64"),
+        "the character's twenty patterns are 32x64");
   eq("the tracer is the one 16x16 pattern", sizes[sizes.length - 1], "16x16");
   check(layout.endCell <= 0x1F0, "the patterns end at cell " + layout.endCell +
         ", inside the 496 cells before the SAT at $7F00");
@@ -244,13 +252,16 @@ function checkBudgets(source) {
 
 /* ---- 3-6: play, Lua and IL side by side -------------------------------- */
 
-/* The scripted pad: run right, jump, run back, fire every twelve frames. */
+/* The scripted pad: run right, stand still (the idle pose), jump, run back,
+ * stand, jump again, and fire every twelve frames — enough to cover the run
+ * cycle, the idle stand, two leaps and the aim pose. */
 function scriptedPad(f) {
   const p = {};
-  if (f < 60) p.right = true;
-  else p.left = true;
-  if (f >= 30 && f < 36) p.up = true;      /* a held press: one jump */
-  if (f >= 70 && f < 74) p.up = true;
+  if (f < 20) p.right = true;
+  else if (f >= 40 && f < 60) p.right = true;
+  else if (f >= 60 && f < 80) p.left = true;
+  else if (f >= 100) p.left = true;
+  if ((f >= 30 && f < 36) || (f >= 90 && f < 94)) p.up = true;
   if (f % 12 < 2) p.i = true;
   return p;
 }
@@ -296,6 +307,9 @@ function playTogether(files, padFn, frames, keep) {
       px: visible(ga.state, 0) ? spriteX(ga.state, 0) : null,
       feet: visible(ga.state, 0) ? spriteY(ga.state, 0) : null,
       pattern: visible(ga.state, 0) ? spritePattern(ga.state, 0) : null,
+      fire: !!(p.i || p.ii),
+      left: !!p.left,
+      right: !!p.right,
       shots: shots,
       slot: shots.length ? shots[0] : null,
       shotX: shots.length ? spriteX(ga.state, shots[0]) : null,
@@ -314,8 +328,7 @@ function playTogether(files, padFn, frames, keep) {
 }
 
 function checkPlay(files) {
-  const keep = [0, 8, 30, 33, 72, 90, 110, 119];
-  const run = playTogether(files, scriptedPad, FRAMES, keep);
+  const run = playTogether(files, scriptedPad, FRAMES, []);
   const rec = run.records;
 
   eq("Lua == IL: frame-by-frame differences over " + FRAMES + " frames",
@@ -338,6 +351,30 @@ function checkPlay(files) {
   const patterns = rec.filter((r) => r.pattern !== null).map((r) => r.pattern);
   check(new Set(patterns).size >= 4,
         "the run cycle turns through " + new Set(patterns).size + " patterns");
+
+  /* #148 (Dennis, playing it): the aim pose plays only WHILE the fire key is
+   * held — the old cooldown timer let the gun linger up after the release,
+   * which is the wrong animation he saw.  So the shoot pattern appears on
+   * exactly the frames the key is down (on the ground; the leap's stride
+   * wins in the air), and the run cycle's own sequence never contains it
+   * while fire is not pressed. */
+  const shootL = listedInt("SHOOT_L");
+  const fireFrames = rec.filter((r) => r.fire && r.feet === 208).map((r) => r.f);
+  const shotPose = rec.filter((r) => r.pattern === shootL).map((r) => r.f);
+  check(shotPose.length > 0, "the aim pose shows while the fire key is held (" +
+        shotPose.length + " frames)");
+  eq("and on exactly those frames — never while fire is not pressed",
+     shotPose, fireFrames);
+
+  /* the idle stand is its own frame (sheet frame 1), shown whenever the pad
+   * is at rest on the ground with no fire held — and on no other frame */
+  const idleL = listedInt("IDLE_L");
+  const idleFrames = rec.filter((r) => r.pattern === idleL).map((r) => r.f);
+  check(idleFrames.length >= 8, "the pad at rest shows the idle stand (" +
+        idleFrames.length + " frames)");
+  eq("on every still, grounded, not-firing frame, and no other", idleFrames,
+     rec.filter((r) => !r.left && !r.right && !r.fire && r.feet === 208)
+        .map((r) => r.f));
 
   /* the jump: away from the water line and back to it */
   const feet = rec.map((r) => r.feet);
@@ -478,17 +515,40 @@ function makePng(width, height, rgba) {
   ]);
 }
 
-function writeStrip(run) {
-  const cell = 96, cols = 4, picks = [0, 8, 30, 33, 72, 90, 110, 119];
-  const w = cols * cell, h = Math.ceil(picks.length / cols) * cell;
+function writeStrip(files) {
+  /* The card's strip: one full run cycle, one jump, one shot.  Its own pad
+   * drives them: right for the cycle (a new run frame every four frames, so
+   * the cycle's eight land at 0, 3, 7, 11, 15, 19, 23, 27), up for the leap
+   * (kept mid-air), then a held fire for the aim. */
+  const stripPad = (f) => {
+    const p = {};
+    if (f < 32) p.right = true;
+    else if (f >= 40 && f < 46) p.up = true;
+    else if (f >= 60 && f < 62) p.i = true;
+    return p;
+  };
+  const cell = 128, ch = 120, cols = 4, picks = [0, 3, 7, 11, 15, 19, 23, 27, 41, 61];
+  const run = playTogether(files, stripPad, FRAMES, picks);
+  eq("Lua == IL on the strip's 120 frames", run.diffs.slice(0, 8), []);
+
+  /* the kept frames are the poses the strip must show: the run cycle's eight
+   * patterns in order, then the leap's, then the aim's */
+  const wantPatterns = listedList("RUN_L")
+    .concat([listedInt("JUMP_L"), listedInt("SHOOT_L")]);
+  eq("the strip's ten cells are one run cycle in order, one jump, one shot",
+     picks.map((f) => run.records[f].pattern), wantPatterns);
+
+  const w = cols * cell, h = Math.ceil(picks.length / cols) * ch;
   const rgba = new Uint8Array(w * h * 4);
   for (let i = 0; i < w * h; i++) rgba[i * 4 + 3] = 255;
   picks.forEach((f, i) => {
     const px = run.kept.get(f);
-    const ox = (i % cols) * cell, oy = Math.floor(i / cols) * cell;
-    for (let y = 0; y < cell; y++) for (let x = 0; x < cell; x++) {
-      /* the character's corner of the screen: x 40..136, y 120..216 */
-      const sx = 40 + x, sy = 120 + y;
+    const ox = (i % cols) * cell, oy = Math.floor(i / cols) * ch;
+    for (let y = 0; y < ch; y++) for (let x = 0; x < cell; x++) {
+      /* the character's own corner of the screen: the 64-px pair walks from
+       * x 104 to 232 and a leap tops out at y 109, so x 104..232, y 100..220
+       * holds every pose whole */
+      const sx = 104 + x, sy = 100 + y;
       if (sx >= WIDTH || sy >= HEIGHT) continue;
       const si = (sy * WIDTH + sx) * 3, oi = ((oy + y) * w + ox + x) * 4;
       rgba[oi] = px[si]; rgba[oi + 1] = px[si + 1]; rgba[oi + 2] = px[si + 2];
@@ -512,9 +572,9 @@ function writeStrip(run) {
   let cellDiffers = 0;
   for (let c = 1; c < picks.length; c++) {
     const ox0 = 0, oy0 = 0;
-    const ox1 = (c % cols) * cell, oy1 = Math.floor(c / cols) * cell;
+    const ox1 = (c % cols) * cell, oy1 = Math.floor(c / cols) * ch;
     let differs = false;
-    for (let y = 0; y < cell && !differs; y += 4) for (let x = 0; x < cell; x += 4) {
+    for (let y = 0; y < ch && !differs; y += 4) for (let x = 0; x < cell; x += 4) {
       if (rgba[((oy0 + y) * w + ox0 + x) * 4] !==
           rgba[((oy1 + y) * w + ox1 + x) * 4]) { differs = true; break; }
     }
@@ -563,8 +623,8 @@ function runWithArt() {
 
   checkNumbersAreTheArts(files);
   checkBudgets(source);
-  const played = checkPlay(files);
-  writeStrip(played);
+  checkPlay(files);
+  writeStrip(files);
 
   console.log("\n" + checks + " checks, " + (checks - failures.length) +
               " PASS, " + failures.length + " FAIL");

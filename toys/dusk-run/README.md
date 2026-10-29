@@ -52,7 +52,7 @@ runtime runs the toy at the page's frame rate.
 DUSK RUN keeps its rocks, birds, hearts and game state in Lua tables.  The
 console **Export** path cannot carry a table yet: `renderer/pce-ilbc.js`
 refuses the `table` instruction, so Export lists that as a finding instead
-of building a ROM.  It also reads `pad[1]` and calls `sfx()`, which the
-encoder has no bytecode form for either.  The toy runs fine in the browser
+of building a ROM.  It also reads `pad[1]` and calls `sfx()`, neither of
+which the encoder has a bytecode form for.  The toy runs fine in the browser
 studio (and in the IL runtime the validator uses); it is the bytecode
 encoder that is missing the op.  See `docs/IL.md`.

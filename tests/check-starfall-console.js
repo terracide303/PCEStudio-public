@@ -23,7 +23,7 @@
  *      first main.lua line of each and the two route-1-only pad kinds.
  *   4. THE NEXT BLOCKER AFTER #132 (#143).  cgen refuses getglobal/setglobal
  *      on a global whose declared type is outside fn/vram/int/bool/padset
- *      (pce-cgen.js:399).  STARFALL has 36 such instructions over 7 table
+ *      (pce-cgen.js:400).  STARFALL has 36 such instructions over 7 table
  *      globals; the first is `setglobal DIGIT` at function 0 pc 14,
  *      main.lua:47 — the instruction right after the table constructor.  So
  *      #132 carrying the four table kinds still leaves the page blocked.  A
@@ -46,7 +46,7 @@
  *   - The page's `exportAnalysis()` was not executed here: this machine has
  *     no chrome-headless-shell (#114), so the real-page run in the write-up
  *     is not re-verified.  The panel function it reads was executed, and the
- *     early return at studio.html:3835 is asserted from source.
+ *     early return at studio.html:3838 is asserted from source.
  *   - The inventory is dispatch-table membership plus the operand checks
  *     modelled here.  A refusal raised only deeper in cgen's lowering
  *     (cgen-target, cgen-hook, the closure rules) would not be counted.
@@ -346,14 +346,14 @@ function checkCapacity() {
 
 /* ---- 6. the write-up's citations --------------------------------------- */
 const CITATIONS = [
-  ["renderer/studio.html", 3835, "if (errors) return"],
+  ["renderer/studio.html", 3838, "if (errors) return"],
   ["renderer/studio-panel-console.js", 140, "emitC"],
   ["renderer/studio-panel-console.js", 143, "severity: \"error\""],
-  ["renderer/pce-cgen.js", 399, "fn|vram|int|bool|padset"],
-  ["renderer/pce-cgen.js", 457, "case \"padget\""],
-  ["renderer/pce-cgen.js", 466, "case \"padref\""],
-  ["renderer/pce-cgen.js", 484, "builtin `"],
-  ["renderer/pce-cgen.js", 489, "refuse(\"cgen-op\""],
+  ["renderer/pce-cgen.js", 400, "fn|vram|int|bool|padset"],
+  ["renderer/pce-cgen.js", 458, "case \"padget\""],
+  ["renderer/pce-cgen.js", 467, "case \"padref\""],
+  ["renderer/pce-cgen.js", 485, "builtin `"],
+  ["renderer/pce-cgen.js", 490, "refuse(\"cgen-op\""],
   ["renderer/pce-ilbc.js", 116, "var OPS = {"],
   ["renderer/pce-ilbc.js", 127, "var BUILTIN = {"],
   ["renderer/pce-ilbc.js", 220, "refuse(\"ilbc-op\""],

@@ -45,6 +45,7 @@ change the hash above, regenerate the manifest.
 ## Building
 
 The engine needs **PCEAS 4.x**; the repo's external PCEAS is 3.23
-(docs/BUILD.md) and cannot assemble it. `vendor/huc` (HuC mainline
-`54f5c736`) builds a 4.x `pceas` from `src/mkit/as`; the CI/test machine keeps
-it outside the repo and exposes it as `pceas4` (see docs/HUTRACK.md).
+(docs/BUILD.md) and cannot assemble it. HuC mainline `54f5c736` (fetched by
+`tools/build-huc.sh`; not vendored) builds a 4.x `pceas` from `src/mkit/as`;
+the CI/test machine keeps it outside the repo and exposes it as `pceas4`
+(see docs/HUTRACK.md).
