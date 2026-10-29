@@ -161,6 +161,13 @@ function gridOf(source) {
   return m ? JSON.parse(m[1]) : null;
 }
 
+/* Recipe 07's song travels the same way: the -- SONG {json} line is the
+ * song_write call an agent makes, so the recipe stays one file. */
+function songOf(source) {
+  const m = /-- SONG (\{.*\})/.exec(source);
+  return m ? JSON.parse(m[1]) : null;
+}
+
 /* Pixels that are not the backdrop.  CRAM[0] is read from the SERVER
  * (registers_get chip vce addr 0), so "the backdrop" is the toy's own, not a
  * colour this test assumed. */
@@ -303,13 +310,14 @@ function firstLuaBlock(text) {
            "name: creating-pce-toys");
   check(/description:\s*\S/.test(fm ? fm[1] : ""),
         "the skill's frontmatter has a description");
-  eq("the skill's directory holds six fixed recipes and one broken one",
-     [FIXED.length, BEFORE.length], [6, 1]);
+  eq("the skill's directory holds seven fixed recipes and one broken one",
+     [FIXED.length, BEFORE.length], [7, 1]);
   for (const name of recipeFiles) {
     contains("SKILL.md names the recipe file " + name, skillText, name);
   }
   for (const task of ["Parallax", "sprite on the pad", "sky gradient",
-                      "song in a toy", "Fixing a console finding",
+                      "song in a toy", "song in a game",
+                      "Fixing a console finding",
                       "sprite from a PNG"]) {
     contains("SKILL.md carries the recipe \"" + task + "\"", skillText, task);
   }
@@ -345,8 +353,9 @@ function firstLuaBlock(text) {
     /* 3 — every tool the skill names is one the server publishes */
     const list = await client.request("tools/list", {});
     const tools = (list.result.tools || []).map((t) => t.name);
-    for (const tool of ["toy_write", "toy_run", "source_add", "frame_png",
-                        "validate", "toy_save", "export_pce", "docs"]) {
+    for (const tool of ["toy_write", "toy_run", "source_add", "song_write",
+                        "frame_png", "validate", "toy_save", "export_pce",
+                        "docs"]) {
       contains("SKILL.md tells the agent about " + tool, skillText, tool);
       check(tools.indexOf(tool) >= 0,
             "the server publishes the tool " + tool + " that SKILL.md names");
@@ -360,9 +369,10 @@ function firstLuaBlock(text) {
 
     /* 4 and 5 — every fixed recipe, through the server */
     for (const name of FIXED) {
-      /* the source_add recipe needs its -- GRID line added first; its own
-       * block below does that, so the generic loop skips it */
-      if (name.indexOf("06-") === 0) continue;
+      /* the source_add recipe needs its -- GRID line added first, and the
+       * song recipe its -- SONG line; their own blocks below do that, so the
+       * generic loop skips them */
+      if (name.indexOf("06-") === 0 || name.indexOf("07-") === 0) continue;
       const source = recipeSource(name);
       const w = await client.call("toy_write", {
         files: [{ name: "main.lua", source: source }]
@@ -422,7 +432,7 @@ function firstLuaBlock(text) {
 
       if (name.indexOf("01-parallax") === 0) {
         /* SKILL.md states the export route is background-only and that a
-         * table makes export_pce refuse.  All six recipes use tables, so
+         * table makes export_pce refuse.  All seven recipes use tables, so
          * the refusal is the documented, tested behaviour — and a
          * background-only toy is exported to prove the route itself works. */
         const refused = await client.call("export_pce", { name: "parallax" });
@@ -492,6 +502,66 @@ function firstLuaBlock(text) {
         if (!v.isError) {
           eq("the recipe with its sprite is validator-CLEAN (zero findings)",
              v.body.problems, []);
+        }
+      }
+    }
+
+    /* 7 — the song recipe (#161): its -- SONG line is the song_write call,
+     * and music(0) then plays the toy's own song.json */
+    const seven = recipeSource("07-a-song-in-a-game.lua");
+    const song = songOf(seven);
+    check(!!song, "recipe 07 carries its song as a -- SONG line");
+    if (song) {
+      await client.call("toy_write", {
+        files: [{ name: "main.lua", source: seven }]
+      });
+      /* the control: the recipe before its song is added is the card's
+       * failing case — music(0) is refused, because a toy has no song */
+      const dry = await client.call("toy_run", { frames: 60 });
+      check(dry.isError && dry.body.code === "music-range",
+            "without its song file the recipe's music(0) is refused " +
+            "music-range");
+      const sw = await client.call("song_write", song);
+      check(!sw.isError && sw.body.ok, "the recipe's -- SONG line writes" +
+            (sw.isError ? " (" + JSON.stringify(sw.body) + ")" : ""));
+      if (!sw.isError) {
+        eq("the recipe's song is song.json", sw.body.file, "song.json");
+        check(sw.body.notes_placed > 0,
+              "the recipe's song places notes (" + sw.body.notes_placed + ")");
+        const run = await client.call("toy_run", { frames: 60 });
+        check(!run.isError, "the recipe runs 60 frames with its song");
+        if (!run.isError) {
+          check(run.body.sound_writes > 0,
+                "the song recipe records PSG writes (" +
+                run.body.sound_writes + ")");
+          eq("music(0) plays the recipe's song", {
+            index: run.body.sound.music.index,
+            name: run.body.sound.music.name,
+            playing: run.body.sound.music.playing
+          }, { index: 0, name: song.name, playing: true });
+          for (const ch of [0, 1, 2]) {
+            check(run.body.sound.channels[ch].notes > 0,
+                  "the song's channel " + ch + " started notes (" +
+                  run.body.sound.channels[ch].notes + ")");
+          }
+          eq("the bass channel sounds the bass the step list named",
+             run.body.sound.channels[1].instrument, "bass");
+          const img = imageOf(await client.call("frame_png", { frame: 59 }));
+          const backdrop = await backdropOf(client);
+          const vis = visibleCount(img, backdrop);
+          check(vis > VISIBLE_MIN,
+                "the song recipe is VISIBLE at frame 59 (" + vis +
+                " non-backdrop pixels)");
+          check(distinctColours(img) >= 3,
+                "the song recipe is a picture, not a blank screen (" +
+                distinctColours(img) + " distinct colours)");
+          const v = await client.call("validate", { frames: 8 });
+          check(!v.isError, "the song recipe passes the console check" +
+                (v.isError ? " (" + JSON.stringify(v.body) + ")" : ""));
+          if (!v.isError) {
+            eq("the song recipe is validator-CLEAN (zero findings)",
+               v.body.problems, []);
+          }
         }
       }
     }

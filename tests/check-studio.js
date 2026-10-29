@@ -3745,6 +3745,39 @@ function checkScreenPanel(page) {
   const back = sc.pictureFromFiles([{ name: "tiles.json", source: text }]);
   eq("tiles.json round-trips byte for byte", sc.tilesText(back), text);
 
+  /* #161: a toy opened from a file carries its song, and music(0) plays it.
+   * The studio compiles the song with renderer/pce-seq.js songsFromFiles —
+   * the same call the MCP server makes — so a game written through the
+   * tools sounds the same opened here. */
+  const seqLib = require("../renderer/pce-seq.js");
+  const openedSong = seqLib.newSong(16);
+  openedSong.name = "opened song";
+  seqLib.setCell(openedSong, 0, 0, 0, { note: 36, instrument: 0, length: 2 });
+  seqLib.setCell(openedSong, 0, 1, 0, { note: 24, instrument: 1, length: 8 });
+  const songEnv = JSON.stringify({
+    version: "pce.studio/1", title: "song toy", description: "",
+    files: [
+      { name: "main.lua",
+        source: "function init()\n  music(0)\nend\n" +
+                "function frame(t, f)\nend\n" },
+      { name: "song.json", source: seqLib.toJSON(openedSong) }
+    ], sources: []
+  });
+  studio.openToy(songEnv, "song.pce.json", { persist: false });
+  const songRt = studio.runtime();
+  check(!!songRt && songRt.sound && songRt.sound.songs.length === 1,
+        "#161: a toy opened from a file is handed its song.json");
+  check(!!songRt && songRt.sound && songRt.sound.index === 0 &&
+        songRt.sound.events.length > 0,
+        "#161: music(0) plays the opened toy's song (" +
+        (songRt && songRt.sound ? songRt.sound.events.length : -1) +
+        " writes)");
+  studio.seek(20);                       /* a note row is applied in a frame */
+  check(!!songRt && songRt.sound && songRt.sound.player &&
+        songRt.sound.player.notes.length >= 1 &&
+        songRt.sound.player.notes[0].instrument === 0,
+        "#161: the player starts the song's notes with its instrument");
+
   /* leave the page on a clean example */
   studio.loadExample("palette", true);
   studio.pause();

@@ -488,11 +488,21 @@
         { type: "p", text: "music(index) plays a song from the list the " +
             "runtime was given — a module read by the tracker route " +
             "(renderer/pce-dmf.js, renderer/pce-song.js), whose writes are the " +
-            "ones HuTrack's engine makes, one VBlank per frame. A toy pasted " +
-            "into the studio gets no such list: the studio builds its runtime " +
-            "without songs, so music(0) there is music-range, and music() is " +
-            "not how a first toy gets sound. Use sfx() and note() instead; " +
-            "music() is for a runtime a page hands a song list." },
+            "ones HuTrack's engine makes, one VBlank per frame. " +
+            "renderer/pce-seq.js songsFromFiles is what turns a toy's files " +
+            "into that list: song.json (the SEQUENCER's own document) and " +
+            "any playable songs.json entry, compiled by the sequencer's " +
+            "model. The MCP server hands a toy the songs its files carry, " +
+            "and so does the studio when a toy is opened from its file, so " +
+            "music(0) plays the song a game ships with; a toy with no song " +
+            "file is refused music-range. sfx() and note() remain the way an " +
+            "effect takes a channel from the song (recipe 4)." },
+        { type: "p", text: "The player writes the song's wave instruments " +
+            "through the PSG's 32-step waveforms. The SEQUENCER's two noise " +
+            "drums (kick and snare) are its own R7 writes on channels 4 and 5; " +
+            "the toy's music() engine does not make them yet (pce-song.js " +
+            "does not do the noise effect), so a drum sounds as its volume " +
+            "envelope on a wave channel — use sfx() for a percussion hit." },
         { type: "p", text: "sfx(channel, freq, volume, frames) takes a " +
             "channel from the music the way HuTrack reserves one, loads a " +
             "32-step square, sets F and AL, and gives the channel back after " +

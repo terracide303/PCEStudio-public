@@ -55,24 +55,32 @@ Or in `.mcp.json` at the repository root:
    words used; stay inside the VRAM row above. The import already places
    sprites in the SAT (slots 0..) with their code and palette, so the toy
    moves them with `sat(i, 0, y)` / `sat(i, 1, x)` — recipe 6 shows it.
-4. **`toy_run`** for frames (1..600, deterministic: frame `f`, `t = f/60`).
+   Kind `song` is the other source: a base64 `.mid` becomes `song.json`.
+4. **`song_write`** to give the toy music: a step list with the SEQUENCER's
+   built-in instruments, written as `song.json`. **`music(0)`** in the toy
+   then plays it — no per-frame stepping, the runtime loops the song. A
+   `.mid` through `source_add` kind `song` becomes the same file. You cannot
+   hear it; `toy_run`'s `sound` report says what happened — the write count,
+   and for each of the six channels the notes it started and the instrument
+   each sounds with. Recipe 7 shows it.
+5. **`toy_run`** for frames (1..600, deterministic: frame `f`, `t = f/60`).
    Pass a `pad` script to hold buttons: `[{from,to,pad,buttons:["left"]}]`,
    buttons `up down left right i ii select run`, pads 1..5.
-5. **`frame_png`** and **LOOK AT IT.** A clean run is not a good picture. Plan
+6. **`frame_png`** and **LOOK AT IT.** A clean run is not a good picture. Plan
    on three passes: draw it, look, name what is wrong, change one thing.
    `frame_png` is 256x224 RGB; seek any frame 0..599 deterministically.
-6. **`validate`** before every export. It reports; an `error` code refuses.
-7. **Fix one finding, re-run.** Each finding carries `file:line` when the
+7. **`validate`** before every export. It reports; an `error` code refuses.
+8. **Fix one finding, re-run.** Each finding carries `file:line` when the
    validator can place it, and `line:null` when it cannot — do not invent one.
-8. **`export_pce`** builds the `.pce` through the browser route (IL → bytecode
+9. **`export_pce`** builds the `.pce` through the browser route (IL → bytecode
    → ROM over the committed interpreter). The validator runs first.
-9. **Finish with `toy_save`.** It writes ONE `.pce.json` holding every file —
-   `main.lua`, the art `source_add` made, `sources.json`'s named sources, the
-   songs — in the studio's own Save format, inside the folder the server runs
-   in. Then **tell the person**: "Open PCEStudio, press Open… → From file…,
-   pick `<name>.pce.json`" (dropping it on the page works too). Without this
-   step the person has only the code you printed, and the art you imported
-   stays behind.
+10. **Finish with `toy_save`.** It writes ONE `.pce.json` holding every file —
+    `main.lua`, the art `source_add` made, `sources.json`'s named sources, the
+    songs — in the studio's own Save format, inside the folder the server runs
+    in. Then **tell the person**: "Open PCEStudio, press Open… → From file…,
+    pick `<name>.pce.json`" (dropping it on the page works too). Without this
+    step the person has only the code you printed, and the art you imported
+    stays behind.
 
 Write in visible increments — backdrop, then a layer, then motion, then sound —
 not one giant file. The person is watching; a picture appears at step two.
@@ -129,8 +137,10 @@ pad[n].left             booleans: up down left right i ii select run, n 1..5.
                         an edge.
 timer(period, fn)       the 7-bit interval timer, ~6,991 Hz; fn per
                         interrupt, at the frame boundary. period 0..127.
-music(index)            a song the runtime was given. The MCP server gives a
-                        toy NO songs, so music() is refused (music-range).
+music(index)            plays song index from the toy's song files — the
+                        song.json song_write or source_add wrote, or the
+                        songs.json list. The runtime loops it; index is
+                        0..songs-1. No song file = music-range.
 sfx(channel, freq, vol, frames)  take a PSG channel: 0..5, freq 0..4095
                         (use note(midi)), volume 0..31, frames 1..600.
 release(channel)        give the channel back now.
@@ -258,7 +268,7 @@ end
 ```
 
 Teaches: `sfx`, `note(midi)`, that the PSG has no hardware envelope (the length
-is `frames`), and that `music()` needs song slots this server does not give.
+is `frames`), and that a tune stepped by hand is the alternative to a song.
 
 ### 5. Fixing a console finding — `recipes/05-fixing-a-console-finding-before.lua` → `recipes/05-fixing-a-console-finding.lua`
 
@@ -318,6 +328,44 @@ Teaches: art as files the panels edit, the import before `init()`, placing
 imported sprites by moving the SAT slot the import made, and handing the
 whole toy over as one file.
 
+### 7. A song in a game — `recipes/07-a-song-in-a-game.lua`
+
+A song is a file, not code: `song_write` composes `song.json` from a step
+list with the SEQUENCER's built-in instruments (lead, bass, bell, strings,
+kick, snare), and `music(0)` in `init()` plays it. The recipe's own song
+travels on its `-- SONG` line, and `tests/check-skill.js` sends that line as
+the `song_write` call an agent makes:
+
+```json
+{ "name": "game tune", "tempo": 140, "steps": 16,
+  "notes": [ { "channel": 0, "step": 0, "note": "C4",
+               "length": 2, "instrument": "lead" },
+             { "channel": 1, "step": 0, "note": "C3",
+               "length": 8, "instrument": "bass" } ] }
+```
+
+`note` is a name (`C4`) or the engine note 0..83; `length` is in steps;
+`instrument` is a built-in name or an index. `step` counts columns from 0
+across patterns of `steps` columns, so step 32 is pattern 2 column 0. An
+instrument left out is the lead (index 0), so name the bass and the bell.
+With no song file, `music(0)` is refused `music-range` — the control this
+recipe turns green:
+
+```lua
+function init()
+  music(0)                     -- the toy's own song.json, loaded already
+end
+```
+
+An effect is still `sfx(channel, freq, volume, frames)`: it takes a channel
+from the song for a few frames and hands it back (the recipe's jump on
+channel 4). You cannot hear any of it — `toy_run`'s `sound` report is how you
+check: `writes` (zero is silence), `music` (index, name, notes started), and
+`channels[0..5]` each with `notes`, `instrument` and any `sfx` that owns it.
+
+Teaches: a song is `song.json` and `music(0)` plays it, `sfx` still takes a
+channel from the song, and the sound report is the ear you do not have here.
+
 ## Before you export
 
 - `validate` returns `ok` with **no findings**. A `validate-slow-frame` warning
@@ -326,9 +374,14 @@ whole toy over as one file.
   Is anything the wrong colour, clipped, or only visible by accident?
 - Every sprite's line has 16 strips or fewer; the BAT has no cell pointing at a
   character you never wrote.
-- Sound: `toy_run` reports `sound_writes`; zero means silence.
+- Sound: `toy_run`'s `sound.writes` is zero when nothing reaches the PSG;
+  `sound.music.playing` says the toy's song is running and each
+  `sound.channels[n].notes` is a note that started on that voice. A song
+  whose wave channels play but whose instrument reports `kick`/`snare` is a
+  drum the toy engine does not play as noise yet (see below) — use `sfx()`
+  for a percussion hit.
 - `toy_save` once, at the end, even if the toy cannot export: that file is
-  what the person opens in the studio, art and all.
+  what the person opens in the studio, art and song all.
 
 ### What `export_pce` can and cannot build
 
@@ -350,7 +403,7 @@ sprites and the pad runs in the studio and validates, and cannot be exported
 yet; a background toy (tiles, palettes, `reg`, the `raster(line)` callback)
 exports. The exported `.pce` is 16 KiB of interpreter plus one 8 KiB data bank;
 a payload past 8 KiB is refused by `toy-data-bank-full`. Every recipe here uses
-sprites or tables, so `export_pce` refuses all six with `ilbc-op` — that is
+sprites or tables, so `export_pce` refuses all seven with `ilbc-op` — that is
 tested, not a guess.
 
 ## What this does not model
@@ -361,6 +414,10 @@ Say so rather than pretending the toy is proven:
   manual, Mednafen and ares as references), not against real hardware.
 - PSG writes are **recorded, not heard** by the MCP server; the PCM model is
   `renderer/pce-psg.js`.
+- `music()` plays the song's wave instruments through `renderer/pce-song.js`.
+  Its two noise drums (`kick`, `snare`) are the SEQUENCER's own noise writes
+  and play their envelope on a wave channel here, not a drum — pce-song.js
+  does not do effect 0F yet. Use `sfx()` for a percussion hit in a toy.
 - The VCE's `CR` and `CTA` are catalogued but not settable; 262/263-line mode is
   not modelled; no mid-line VCE write has been proven.
 - `export_pce` uses the no-compiler browser route. The llvm-mos route
