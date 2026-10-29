@@ -59,6 +59,12 @@ node tests/check-breaker-78.js  # #91: REVIEW-78's E01/E05 — setVideoMode refu
                                 # an illegal dot clock, and the wide viewer's boot
                                 # writes HDR from $5F04 (assembled, then read back
                                 # from a Mednafen save state)
+node tests/check-browser.js     # #114: one setting decides the browser (a
+                                # chrome-headless-shell default + an env override),
+                                # nothing launches /Applications/Google Chrome.app,
+                                # profiles come from $TMPDIR; --browser also runs
+                                # check-studio --browser and requires no new
+                                # com.google.Chrome.code_sign_clone folder
 ```
 
 `check-breaker-78.js` also needs `pceas` (through `make -C tools`) and
