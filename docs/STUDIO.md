@@ -630,6 +630,63 @@ owns the layout.
 **Refusals.** `asset-json`, `asset-shape`, `asset-wave` (a wave that is not 32 steps of 0–31),
 `asset-envelope` (a level past 31, or a size that disagrees with the data), `asset-noise` (noise off
 channels 5–6, or NF outside 0–31), `asset-duplicate` (a name the toy already has) and `asset-name`.
+
+### 3.7a Add Source: a dropped file becomes PCE assets (#123)
+
+ppu.toys' Add Source dialog (Dennis, 2026-10-29) takes a dropped picture or sound and makes it something
+the console can use: a drop zone (`drop PNG, audio, .mid, or .ppusrc.json, or click to pick`), a **kind**
+list, `bit depth 4bpp · 16 colors`, `palettes · at most 8`, `tile size fixed at 8px`, a dither list
+(`none · flat nearest color`), an `alpha threshold 128` slider, a name, **Cancel / Add source**, and
+`Preview appears here after you drop an image or audio file`. The studio's version is in the ASSETS module
+(`renderer/studio-panel-assets.js`, the **Add Source** button beside `+ Add`) and the importing is
+`renderer/pce-source.js`. The rule for every option is the card's: **it maps to what the PC Engine can do,
+or it is left out** — no SNES leftovers, and no option that would be silently ignored.
+
+| ppu.toys | the studio |
+|---|---|
+| kind: BG (tilemap), Mode 7, OBJ (sprites), Tilesheet, Sample (BRR) | **BG (tilemap)**, **Sprites (patterns)**, **Tilesheet (tiles only)**, **Palette only**, **Sample (DDA audio)**, **Song (.mid)**. No Mode 7: the HuC6270 has no rotation or scaling, so there is nothing to map it to and it is not shown. No BRR — the PCE's samples are DDA writes of 5-bit values to R6 |
+| `bit depth 2bpp · 4 colors / 4bpp · 16 / 8bpp · 256` | one fixed line, `4bpp · 16 colours (the PC Engine always uses 16 per tile)`. Every VDC tile is 16 colours; the rare 4-colour mode is idea #47 |
+| `palettes · at most 8` | `palettes · at most 16` — the BAT's four palette bits name 16 background palettes, and the sprite layer has 16 of its own |
+| colours snapped to 15-bit BGR555 | every colour snapped to the **VCE's 512**: 3 bits each of G/R/B, shown as level × 36 (the same decode `pce-bg.js` and `pce-editor.js` use) |
+| a tile may use any of the picture's colours | **a tile shows the 16 colours of ONE palette** (entry 0 is the backdrop), so tiles are grouped by their colours, greedily, into at most 16 palettes; past that the nearest palette is used and the result warns |
+| dither: none / ordered / diffusion | the same three with the same labels. The error is measured in the VCE's 3-bit space and **does not cross a tile edge**: the next tile may carry another palette |
+| alpha threshold → transparent | the same: a pixel under the threshold is **colour 0** — the backdrop in a tile, transparent in a sprite pattern |
+| — | **our own file**: a dropped `pce.studio/1` envelope arrives as its files, the same act as Open… → From file |
+
+**The picture is the panels'.** `importImage()` returns `tiles.json`, `palettes.json` (and
+`sprites.json`) in the shapes `pce-screen.js`'s `pictureFromFiles` and `pce-sat.js` read, so what Add Source
+writes is what SCREEN / SPRITES / PALETTES open — there is no second art model, and the preview the dialog
+draws is the same arithmetic `pce-bg.js` uses (the test compares them pixel for pixel). The preview shows
+the **original beside the PCE result**, then the tiles, palettes and colours it used, and one warning line
+for each limit the picture passes (more than 16 palettes, a map larger than 32×32, tiles past the ROM
+layout, lines past the 240 the VDC shows).
+
+**A WAV becomes a DDA sample.** `parseWav` reads uncompressed 8/16-bit PCM, mixes to mono and resamples to
+the chosen rate (3/4/6/8/12 kHz; 6 kHz is the default), quantised to **5 bits**. The preview renders the
+register stream through `renderer/pce-psg.js` — R1 $FF, channel 0 selected, R4 = on | DDA | level 31, then
+one R6 per sample — so the audition is the model's, not a second synth. The size the dialog shows is one
+byte a sample, against the 1 MB ROM. It is written to the toy as `samples.json`; **no toy loader reads it
+yet** — that is #96/#71, and the file says so rather than pretending the sample plays.
+
+**A .mid becomes a song.** `parseMidi` reads a Standard MIDI File's note on/off, tempo, time signature and
+track names (controllers, pitch bend and sysex are counted and skipped, not applied), maps MIDI channels
+onto the PSG's six voices, and builds the song with `renderer/pce-seq.js`'s own `newSong`/`setCell` — a
+step is a sixteenth note, the note is `midi − 24` (the sequencer's C1..B7), and the tempo is the file's
+first `set_tempo`. **Add source** writes `song.json`, the SEQUENCER's file, so the song opens in the grid
+(#94); exporting it needs the tracker route (#96).
+
+**Refusals** carry a code, like the rest of the studio: `png-signature`, `png-header`, `png-depth` (not
+8-bit), `png-type`, `png-interlace`, `png-palette`, `png-inflate`; `wav-signature`, `wav-shape`,
+`wav-format`, `wav-bits`; `mid-signature`, `mid-smtpe`; `source-kind`, `source-dither`, `source-alpha`,
+`source-size`, `source-rate`, `source-tiles`, `source-empty`; `studio-json`, `studio-version`,
+`studio-shape`.
+
+**Not proven:** the dialog's DOM is opened by `check-studio.js` (every button's handler runs) but its
+pixels are judged with the model's preview, not a browser screenshot; the PNG's zlib stream goes through
+the page's `DecompressionStream` (this branch is exercised by a dropped file in a browser, not by the Node
+tests, which pass `zlib.inflateSync`); and rule 2 is owed — the card names `tests/check-import.js`, but
+#117 took that filename first, so the evidence is `tests/check-source-import.js`.
+
 ### 3.8 LAYERS, the PCE's answer to ppu.toys' COMPOSE (#93)
 
 ppu.toys' COMPOSE panel (Dennis, 2026-10-29) is the working example: previews of the **main** and **sub**

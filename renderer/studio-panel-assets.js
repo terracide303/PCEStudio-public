@@ -62,7 +62,24 @@
     ".asx-pop.is-on{display:block}",
     ".asx-pop button{display:block;width:100%;text-align:left;background:none;border:0;color:var(--fg,#ddd);font:12px var(--mono);padding:5px 8px;cursor:pointer}",
     ".asx-pop button:hover{background:rgba(255,255,255,.06)}",
-    ".asx-note{font:11px var(--mono);color:var(--muted);margin:6px 0 0}"
+    ".asx-note{font:11px var(--mono);color:var(--muted);margin:6px 0 0}",
+
+    /* #123 — the Add Source dialog, ppu.toys' shape with the PCE's options. */
+    ".asx-modal{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center}",
+    ".asx-dialog{background:var(--pop,#15181d);border:1px solid rgba(255,255,255,.16);border-radius:4px;width:min(760px,92vw);max-height:88vh;overflow:auto;padding:16px 18px;font:12px var(--mono);color:var(--fg,#ddd);box-shadow:0 18px 60px rgba(0,0,0,.55)}",
+    ".asx-dialog h2{font:600 13px var(--mono);letter-spacing:.1em;text-transform:uppercase;margin:0 0 12px}",
+    ".asx-drop{border:1px dashed rgba(255,255,255,.28);border-radius:3px;padding:18px;text-align:center;color:var(--muted);cursor:pointer}",
+    ".asx-drop.is-over{border-color:var(--accent,#6cf);color:var(--accent,#6cf)}",
+    ".asx-fields{display:grid;grid-template-columns:150px 1fr;gap:8px 12px;align-items:center;margin:14px 0}",
+    ".asx-fields label{color:var(--muted);font:11px var(--mono);letter-spacing:.06em}",
+    ".asx-fixed{color:var(--muted);font:11px var(--mono)}",
+    ".asx-preview{border:1px solid rgba(255,255,255,.12);border-radius:3px;padding:10px;min-height:96px}",
+    ".asx-preview canvas{image-rendering:pixelated;display:block}",
+    ".asx-preview .asx-side{display:flex;gap:14px;flex-wrap:wrap}",
+    ".asx-preview .asx-cap{font:10px var(--mono);color:var(--muted);margin-top:4px}",
+    ".asx-warn{color:#f6c46a;font:11px var(--mono);margin:6px 0 0}",
+    ".asx-err{color:#f78a8a;font:11px var(--mono);margin:6px 0 0}",
+    ".asx-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}"
   ].join("\n");
 
   P.studioPanelModules.push({
@@ -370,6 +387,13 @@
       }
 
       function addMenu(host) {
+        /* #123: Add Source sits beside + Add -- one makes an empty file, the
+         * other turns a dropped picture or sound into the files the panels
+         * edit. */
+        var source = button("btn-mini", "Add Source", function () { openAdd(); });
+        source.id = "assets-addsource";
+        source.title = "Import a PNG, WAV, .mid or .pce.studio file as PCE assets";
+        host.appendChild(source);
         var wrap = el("div", "asx-menu");
         /* The popover is built once and toggled: rebuilding it per click
          * would leave a stack of hidden menus in the pane. */
@@ -403,6 +427,528 @@
         if (f) studio.toy && studio.toy.selectFile && studio.toy.selectFile(file);
         studio.toast("The " + file + " editor is the " + panel.toUpperCase() + " panel.");
         return panel;
+      }
+
+      /* ---- Add Source (#123) ----------------------------------------------
+       * ppu.toys' Add Source, with every option either mapped to what the PC
+       * Engine can do or left out.  The kinds are the four things the VDC
+       * draws and the two the PSG plays; there is no Mode 7 (the PCE has no
+       * rotation or scaling) and no bit-depth list (a VDC tile is always
+       * 16 colours -- the line says so instead of offering a choice that
+       * would be ignored).  The palettes slider stops at 16 because that is
+       * all the BAT's four palette bits name.  The picture and the sample
+       * are made by renderer/pce-source.js; this module draws the dialog and
+       * writes the files the panels already read. */
+      var KIND_LABELS = [
+        ["bg", "BG (tilemap)"],
+        ["sprites", "Sprites (patterns)"],
+        ["tilesheet", "Tilesheet (tiles only)"],
+        ["palette", "Palette only"],
+        ["sample", "Sample (DDA audio)"],
+        ["song", "Song (.mid)"]
+      ];
+      var DITHER_LABELS = [
+        ["none", "none · flat nearest colour"],
+        ["ordered", "ordered · 8x8 Bayer"],
+        ["diffusion", "diffusion · Floyd-Steinberg"]
+      ];
+      var SAMPLE_RATES = [3000, 4000, 6000, 8000, 12000];
+      var add = null;      /* the open dialog: {state, els} */
+
+      function srcModel() {
+        var S = P.source;
+        if (!S) throw new Error("renderer/pce-source.js is not loaded");
+        return S;
+      }
+
+      /* The page has no synchronous zlib, so a PNG's IDAT goes through
+       * DecompressionStream ("deflate" is the zlib wrapper, which is what a
+       * PNG holds).  Node-style callers pass zlib.inflateSync to the model. */
+      function inflateBytes(bytes) {
+        if (typeof DecompressionStream !== "function")
+          return Promise.reject(new Error("this browser has no DecompressionStream"));
+        var stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate"));
+        return new Response(stream).arrayBuffer().then(function (b) {
+          return new Uint8Array(b);
+        });
+      }
+
+      function readFile(file) {
+        if (file && typeof file.arrayBuffer === "function")
+          return file.arrayBuffer().then(function (b) {
+            return { name: file.name || "source", bytes: new Uint8Array(b) };
+          });
+        return new Promise(function (resolve, reject) {
+          var reader = new root.FileReader();
+          reader.onload = function () {
+            resolve({ name: file.name || "source",
+                      bytes: new Uint8Array(reader.result) });
+          };
+          reader.onerror = function () { reject(reader.error || new Error("read failed")); };
+          reader.readAsArrayBuffer(file);
+        });
+      }
+
+      /* The image as drawable RGB: the original for the left-hand pane. */
+      function rgbOfImage(img) {
+        var n = img.width * img.height;
+        var out = new Uint8Array(n * 4);
+        for (var i = 0; i < n; i++) {
+          out[i * 4] = img.rgba[i * 4];
+          out[i * 4 + 1] = img.rgba[i * 4 + 1];
+          out[i * 4 + 2] = img.rgba[i * 4 + 2];
+          out[i * 4 + 3] = 255;
+        }
+        return out;
+      }
+
+      function paint(canvas, width, height, rgba) {
+        if (!canvas || !canvas.getContext) return false;
+        var ctx = canvas.getContext("2d");
+        if (!ctx) return false;
+        canvas.width = width;
+        canvas.height = height;
+        if (!ctx.createImageData) return false;
+        var img = ctx.createImageData(width, height);
+        for (var i = 0; i < rgba.length; i++) img.data[i] = rgba[i];
+        ctx.putImageData(img, 0, 0);
+        return true;
+      }
+
+      /* Every image kind ends up in these files; the sample and the song are
+       * their own.  Kept in one place so "Add source" writes exactly what the
+       * preview measured. */
+      function filesFor(result) {
+        if (!result) return {};
+        if (result.kind === "sample") {
+          return { "samples.json": JSON.stringify({
+            version: 1,
+            samples: [{ name: result.name, rate: result.rate, bits: 5,
+                        data: result.samples,
+                        seconds: result.seconds, source: "Add Source (#123)" }]
+          }, null, 2) + "\n" };
+        }
+        if (result.kind === "song") return result.files || {};
+        if (result.kind === "studio") {
+          var out = {};
+          for (var i = 0; i < result.files.length; i++)
+            out[result.files[i].name] = result.files[i].source;
+          return out;
+        }
+        return result.files || {};
+      }
+
+      function closeAdd() {
+        if (!add) return;
+        if (add.els && add.els.modal && add.els.modal.parentNode)
+          add.els.modal.parentNode.removeChild(add.els.modal);
+        add = null;
+      }
+
+      function addState() {
+        return add ? add.state : null;
+      }
+
+      /* Read a dropped file into the dialog's state and redraw the preview.
+       * Everything is async because the PNG's zlib stream is the page's. */
+      function feedAdd(file) {
+        if (!add) return Promise.reject(new Error("the dialog is not open"));
+        var S = srcModel();
+        return readFile(file).then(function (got) {
+          var state = add.state;
+          state.fileName = got.name;
+          state.error = "";
+          if (!state.name || state.name === "source")
+            state.name = got.name.replace(/\.[^.]+$/, "");
+          var kind = S.kindOf(got.name, got.bytes);
+          if (kind) state.detected = kind;
+          try {
+            if (kind === "studio") {
+              state.result = S.importStudio(new TextDecoder().decode(got.bytes));
+              state.kind = "studio";
+            } else if (kind === "sample") {
+              /* the bytes are kept: moving the rate slider re-imports the
+               * same sound rather than asking for the file again */
+              state.sampleBytes = got.bytes;
+              state.kind = "sample";
+              state.result = S.importWav(got.bytes, { rate: state.rate,
+                                                     name: state.name });
+            } else if (kind === "song") {
+              state.result = S.importMidi(got.bytes, { name: state.name });
+              state.kind = "song";
+            } else {
+              /* an image: decode, then import with the dialog's options.  A
+               * picture dropped while a WAV's kind was still selected is a
+               * picture, not a sample, so the kind falls back to BG. */
+              state.sampleBytes = null;
+              if (["bg", "sprites", "tilesheet", "palette"]
+                    .indexOf(state.kind) < 0) state.kind = "bg";
+              var info = S.pngInfo(got.bytes);
+              return inflateBytes(info.idat).then(function (raw) {
+                state.image = S.pngPixels(info, raw);
+                state.original = { width: state.image.width,
+                                   height: state.image.height,
+                                   pixels: rgbOfImage(state.image) };
+                reimport();
+                drawAdd();
+                return state.result;
+              });
+            }
+            reimport();
+          } catch (e) {
+            state.error = (e.code || "error") + ": " + e.message;
+            state.result = null;
+          }
+          drawAdd();
+          return state.result;
+        }, function (e) {
+          add.state.error = "read: " + (e && e.message || e);
+          drawAdd();
+          return null;
+        });
+      }
+
+      /* Run the importer again with the dialog's current options (a slider
+       * move, a dither change), without re-reading the file. */
+      function reimport() {
+        if (!add) return null;
+        var S = srcModel();
+        var state = add.state;
+        if (state.kind === "sample" && state.fileName && state.sampleBytes) {
+          try {
+            state.result = S.importWav(state.sampleBytes,
+              { rate: state.rate, name: state.name });
+          } catch (e) {
+            state.error = (e.code || "error") + ": " + e.message;
+            state.result = null;
+          }
+          return state.result;
+        }
+        if (state.kind === "song" || state.kind === "studio") return state.result;
+        if (!state.image) return null;
+        try {
+          state.result = S.importImage(state.image, {
+            kind: state.kind, dither: state.dither,
+            alphaThreshold: state.alpha, maxPalettes: state.palettes,
+            name: state.name
+          });
+          state.error = "";
+        } catch (e) {
+          state.error = (e.code || "error") + ": " + e.message;
+          state.result = null;
+        }
+        return state.result;
+      }
+
+      /* The preview: the original and the PCE result side by side, then what
+       * it costs -- tiles, palettes, colours -- and a warning for each limit
+       * it does not fit inside. */
+      function drawAdd() {
+        if (!add) return;
+        var state = add.state, els = add.els, S = srcModel();
+        /* a dropped file decides its own kind, so the dropdown follows */
+        if (els.kind && els.kind.value !== state.kind) els.kind.value = state.kind;
+        var host = els.preview;
+        clear(host);
+        if (state.error) {
+          host.appendChild(el("p", "asx-err", state.error));
+        }
+        if (!state.result) {
+          host.appendChild(el("p", "asx-sub",
+            "Preview appears here after you drop an image or audio file"));
+          els.commit.disabled = true;
+          return;
+        }
+        var result = state.result;
+        var sides = el("div", "asx-side");
+
+        if (state.original) {
+          var a = el("div");
+          var ca = el("canvas");
+          if (paint(ca, state.original.width, state.original.height,
+                    state.original.pixels)) a.appendChild(ca);
+          a.appendChild(el("div", "asx-cap", "original " + state.original.width +
+                          "x" + state.original.height));
+          sides.appendChild(a);
+        }
+        if (result.preview) {
+          var b = el("div");
+          var cb = el("canvas");
+          if (paint(cb, result.preview.width, result.preview.height,
+                    rgbaOf(result.preview.pixels))) b.appendChild(cb);
+          b.appendChild(el("div", "asx-cap", "PC Engine " +
+                          result.preview.width + "x" + result.preview.height));
+          sides.appendChild(b);
+        }
+        if (result.kind === "sample") {
+          var c = el("div");
+          var cc = el("canvas");
+          if (paint(cc, 256, 64, waveOf(result.samples))) c.appendChild(cc);
+          c.appendChild(el("div", "asx-cap", "DDA " + result.rate + " Hz, 5 bits"));
+          sides.appendChild(c);
+        }
+        host.appendChild(sides);
+
+        var line = els.stats;
+        clear(line);
+        if (result.kind === "sample") {
+          line.textContent = result.samples.length + " samples · " +
+            result.seconds.toFixed(2) + " s at " + result.rate + " Hz · " +
+            result.stats.bytes + " bytes of the 1 MB ROM";
+        } else if (result.kind === "song") {
+          line.textContent = result.stats.notes + " notes · " +
+            result.stats.patterns + " patterns · " + result.stats.tempo +
+            " BPM · " + result.stats.channels + " channel(s)";
+        } else if (result.kind === "studio") {
+          line.textContent = result.stats.files + " files";
+        } else {
+          line.textContent = result.stats.tiles + " tiles · " +
+            result.stats.palettes + " of " + srcModel().BG_PALETTES +
+            " palettes · " + result.stats.colours + " colours of 512 · at " +
+            "most " + result.stats.maxTileColours + " a tile";
+        }
+        host.appendChild(line);
+
+        /* the warnings: what does not fit, said rather than discovered later */
+        var warnings = (result.warnings || []).slice();
+        if (result.kind !== "sample" && result.kind !== "song" &&
+            result.kind !== "studio" && result.stats.tiles > S.MAX_TILES)
+          warnings.push(result.stats.tiles + " tiles pass the ROM layout's " +
+                        S.MAX_TILES + " — the picture will not fit");
+        for (var w = 0; w < warnings.length; w++)
+          host.appendChild(el("p", "asx-warn", warnings[w]));
+
+        els.commit.disabled = false;
+        if (els.name && !els.name.value) els.name.value = state.name;
+      }
+
+      function rgbaOf(rgb) {
+        var n = rgb.length / 3, out = new Uint8Array(n * 4);
+        for (var i = 0; i < n; i++) {
+          out[i * 4] = rgb[i * 3];
+          out[i * 4 + 1] = rgb[i * 3 + 1];
+          out[i * 4 + 2] = rgb[i * 3 + 2];
+          out[i * 4 + 3] = 255;
+        }
+        return out;
+      }
+
+      /* The sample as a waveform picture: 256 columns, 64 rows. */
+      function waveOf(samples) {
+        var w = 256, h = 64, out = new Uint8Array(w * h * 4);
+        for (var i = 0; i < w * h; i++) {
+          out[i * 4] = 22; out[i * 4 + 1] = 26; out[i * 4 + 2] = 32;
+          out[i * 4 + 3] = 255;
+        }
+        for (var x = 0; x < w; x++) {
+          var at = Math.floor(x * samples.length / w);
+          var v = samples[Math.min(samples.length - 1, at)] / 31;
+          var y = Math.round((1 - v) * (h - 1));
+          var o = (y * w + x) * 4;
+          out[o] = 108; out[o + 1] = 204; out[o + 2] = 255;
+        }
+        return out;
+      }
+
+      function openAdd() {
+        if (add) return add.state;
+        closePop();
+        var state = {
+          name: "source", kind: "bg", dither: "none", palettes: 16, alpha: 128,
+          rate: 6000, result: null, error: "", image: null, original: null,
+          fileName: "", sampleBytes: null
+        };
+        var els = {};
+        var modal = el("div", "asx-modal");
+        modal.id = "assets-addsource";
+        var dialog = el("div", "asx-dialog");
+        modal.appendChild(dialog);
+        dialog.appendChild(el("h2", null, "Add source"));
+
+        /* the drop zone, theirs' wording with our kinds */
+        var drop = el("div", "asx-drop",
+          "drop a PNG, WAV, .mid or .pce.studio, or click to pick");
+        drop.id = "addsource-drop";
+        var picker = doc.createElement("input");
+        picker.type = "file";
+        picker.accept = ".png,.wav,.mid,.midi,.pce.studio,.json";
+        picker.id = "addsource-file";
+        picker.style.display = "none";
+        drop.addEventListener("click", function () {
+          if (picker.click) picker.click();
+        });
+        drop.addEventListener("dragover", function (e) {
+          drop.className = "asx-drop is-over";
+          if (e && e.preventDefault) e.preventDefault();
+        });
+        drop.addEventListener("dragleave", function () { drop.className = "asx-drop"; });
+        drop.addEventListener("drop", function (e) {
+          drop.className = "asx-drop";
+          if (e && e.preventDefault) e.preventDefault();
+          var f = e && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+          if (f) feedAdd(f);
+        });
+        picker.addEventListener("change", function () {
+          if (picker.files && picker.files[0]) feedAdd(picker.files[0]);
+        });
+        dialog.appendChild(drop);
+        dialog.appendChild(picker);
+
+        var fields = el("div", "asx-fields");
+        function field(label, control, id) {
+          fields.appendChild(el("label", null, label));
+          if (control) control.id = id;
+          fields.appendChild(control);
+          return control;
+        }
+
+        var kindSel = doc.createElement("select");
+        KIND_LABELS.forEach(function (k) {
+          var o = doc.createElement("option");
+          o.value = k[0];
+          o.textContent = k[1];
+          kindSel.appendChild(o);
+        });
+        kindSel.addEventListener("change", function () {
+          state.kind = kindSel.value;
+          if (state.kind !== "sample") state.sampleBytes = null;
+          reimport();
+          drawAdd();
+        });
+        field("kind", kindSel, "addsource-kind");
+
+        /* No bit depth choice: the VDC's tile is always 16 colours, so the
+         * dialog says that rather than offering a list that would be a lie. */
+        field("bit depth", el("span", "asx-fixed",
+              "4bpp · 16 colours (the PC Engine always uses 16 per tile)"),
+              "addsource-depth");
+
+        var palRange = doc.createElement("input");
+        palRange.type = "range";
+        palRange.min = "1";
+        palRange.max = "16";
+        palRange.value = "16";
+        var palVal = el("span", "asx-fixed", "palettes · at most 16");
+        palRange.addEventListener("input", function () {
+          state.palettes = Number(palRange.value);
+          palVal.textContent = "palettes · at most " + state.palettes;
+          reimport();
+          drawAdd();
+        });
+        var palWrap = el("span");
+        palWrap.appendChild(palRange);
+        palWrap.appendChild(el("span", null, " "));
+        palWrap.appendChild(palVal);
+        field("palettes", palWrap, "addsource-palettes");
+
+        var ditherSel = doc.createElement("select");
+        DITHER_LABELS.forEach(function (d) {
+          var o = doc.createElement("option");
+          o.value = d[0];
+          o.textContent = d[1];
+          ditherSel.appendChild(o);
+        });
+        ditherSel.addEventListener("change", function () {
+          state.dither = ditherSel.value;
+          reimport();
+          drawAdd();
+        });
+        field("dither", ditherSel, "addsource-dither");
+
+        var alphaRange = doc.createElement("input");
+        alphaRange.type = "range";
+        alphaRange.min = "0";
+        alphaRange.max = "255";
+        alphaRange.value = "128";
+        var alphaVal = el("span", "asx-fixed", "alpha threshold 128");
+        alphaRange.addEventListener("input", function () {
+          state.alpha = Number(alphaRange.value);
+          alphaVal.textContent = "alpha threshold " + state.alpha;
+          reimport();
+          drawAdd();
+        });
+        var alphaWrap = el("span");
+        alphaWrap.appendChild(alphaRange);
+        alphaWrap.appendChild(el("span", null, " "));
+        alphaWrap.appendChild(alphaVal);
+        field("alpha", alphaWrap, "addsource-alpha");
+
+        var rateSel = doc.createElement("select");
+        SAMPLE_RATES.forEach(function (r) {
+          var o = doc.createElement("option");
+          o.value = String(r);
+          o.textContent = r + " Hz";
+          rateSel.appendChild(o);
+        });
+        rateSel.value = "6000";
+        rateSel.addEventListener("change", function () {
+          state.rate = Number(rateSel.value);
+          if (state.sampleBytes) reimport();
+          drawAdd();
+        });
+        field("sample rate", rateSel, "addsource-rate");
+
+        var nameInput = doc.createElement("input");
+        nameInput.type = "text";
+        nameInput.value = "source";
+        nameInput.addEventListener("input", function () { state.name = nameInput.value; });
+        field("name", nameInput, "addsource-name");
+        dialog.appendChild(fields);
+
+        var preview = el("div", "asx-preview");
+        preview.id = "addsource-preview";
+        dialog.appendChild(preview);
+        var stats = el("p", "asx-sub");
+        stats.id = "addsource-stats";
+        dialog.appendChild(stats);
+
+        var foot = el("div", "asx-foot");
+        var cancel = button("btn-mini", "Cancel", function () { closeAdd(); });
+        cancel.id = "addsource-cancel";
+        var commit = button("btn-mini", "Add source", function () {
+          try { commitAdd(); } catch (e) {
+            studio.toast((e.code || "error") + ": " + e.message);
+          }
+        });
+        commit.id = "addsource-commit";
+        commit.disabled = true;
+        foot.appendChild(cancel);
+        foot.appendChild(commit);
+        dialog.appendChild(foot);
+
+        var body = doc.body || doc.documentElement;
+        body.appendChild(modal);
+        add = { state: state, els: { modal: modal, preview: preview,
+                                     stats: stats, commit: commit,
+                                     name: nameInput, kind: kindSel,
+                                     dither: ditherSel, palettes: palRange,
+                                     alpha: alphaRange, rate: rateSel,
+                                     picker: picker } };
+        drawAdd();
+        return state;
+      }
+
+      /* "Add source": write the files the preview measured into the toy, so
+       * the panels open what was imported. */
+      function commitAdd() {
+        if (!add) return null;
+        var state = add.state;
+        if (state.kind === "sample" && state.sampleBytes)
+          reimport();
+        var result = state.result;
+        if (!result) throw new Error("nothing to add");
+        var files = filesFor(result);
+        var names = Object.keys(files);
+        for (var i = 0; i < names.length; i++) putFile(names[i], files[i]);
+        var what = result.kind === "sample"
+          ? result.samples.length + " samples at " + result.rate + " Hz in samples.json"
+          : result.kind === "song"
+            ? "song.json (" + result.stats.notes + " notes)"
+            : names.join(", ");
+        closeAdd();
+        refresh();
+        studio.toast("Added " + (state.name || "source") + " — " + what + ".");
+        return result;
       }
 
       function h(host, text, extra) {
@@ -698,6 +1244,22 @@
         },
         lastPreview: function () { return lastPreview; },
         stop: stopPreview,
+        /* #123: Add Source.  `open`/`close` are the dialog; `feed` takes a
+         * File (or anything with arrayBuffer()) and returns a promise of the
+         * import; `state` is the dialog's live state, `commit` writes what
+         * the preview measured into the toy.  The checks drive these without
+         * a DOM, and the dialog's buttons call the same functions. */
+        addSource: {
+          open: openAdd,
+          close: closeAdd,
+          feed: feedAdd,
+          state: addState,
+          commit: commitAdd,
+          files: function () {
+            var s = addState();
+            return s && s.result ? filesFor(s.result) : {};
+          }
+        },
         copy: function () { return { name: state.toyName, title: title() }; }
       };
       return def.api;
