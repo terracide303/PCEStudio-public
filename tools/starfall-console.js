@@ -3,9 +3,12 @@
  * tools/starfall-console.js — what the studio's Export makes of STARFALL
  * (card #131), reproduced in Node with the same modules the page runs.
  *
- *   node tools/starfall-console.js [toy.lua]
+ *   node tools/starfall-console.js [toy.lua] [--song song.json]
  *
- * Default toy: toys/demo-game/main.lua (STARFALL).
+ * Default toy: toys/demo-game/main.lua (STARFALL).  --song gives the
+ * validator the module the toy's music() plays, the way the runtime gets it;
+ * without it a toy that calls music(0) is refused with music-range, which is
+ * a missing argument and not a finding about the toy.
  *
  * The page's Export is three stages, in this order (renderer/studio.html's
  * exportAnalysis(), which mirrors renderer/studio-panel-console.js's
@@ -38,7 +41,14 @@ const cgen = require(path.join(ROOT, "renderer/pce-cgen.js"));
 const ilbc = require(path.join(ROOT, "renderer/pce-ilbc.js"));
 const romLib = require(path.join(ROOT, "renderer/pce-rom.js"));
 
-const REL = process.argv[2] || "toys/demo-game/main.lua";
+const ARGS = process.argv.slice(2);
+const songAt = ARGS.indexOf("--song");
+const SONG_FILE = songAt >= 0 ? ARGS[songAt + 1] : null;
+const songs = SONG_FILE
+  ? [JSON.parse(fs.readFileSync(path.resolve(ROOT, SONG_FILE), "utf8"))] : [];
+const positionals = ARGS.filter((a, i) =>
+  a !== "--song" && !(songAt >= 0 && i === songAt + 1));
+const REL = positionals[0] || "toys/demo-game/main.lua";
 const SRC = path.resolve(ROOT, REL);
 const FRAMES = 8;              /* renderer/studio-panel-console.js's run length */
 
@@ -78,7 +88,7 @@ if (!comp.ok) {
 }
 const program = comp.value;
 const vr = stage(() => validate.validateProgram(program, {
-  chunkName: "@main.lua", frames: FRAMES }));
+  chunkName: "@main.lua", frames: FRAMES, songs: songs }));
 const report = vr.ok ? vr.value : null;
 const cgenR = stage(() => cgen.emitC(program, { target: "llvm" }));
 
@@ -102,7 +112,7 @@ console.log("   page verdict: " + (errors
   : "proceeds to the encoder"));
 console.log("");
 
-if (report) {
+if (report && report.budgets) {
   const b = report.budgets;
   console.log("   budgets (the model's estimate, NOT a capture):");
   console.log("     frame(): " + b.frameCycles + " cycles");
