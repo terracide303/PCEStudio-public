@@ -78,10 +78,24 @@
  * the pad-right key is held — driven through the page's key handler and
  * studio.stepForward, never by writing state behind the page's back.
  *
+ * #106 closes the #84/#90 breaker's misses here (docs/REVIEW-84.md,
+ * docs/CHECK-106.md), each with a control that fails when the guard is
+ * weakened:
+ *   - the bucket stops at a tile of a different character (M02): a 2x2 $42
+ *     island inside the $40 field must survive the fill;
+ *   - a zoom chip never writes the BAT (M05): the map's cells and
+ *     tiles.json's bytes are snapshotted around every chip;
+ *   - the visible-screen outline's cell is computed here from BYR, not from
+ *     the panel's arithmetic (M07) — the stub canvas now records rect()
+ *     arguments, because it used to swallow the outline entirely;
+ *   - the movement assertion is one function, `movesByPad`, and ten frames
+ *     with NO pad held must fail it (M10).
+ *
  * Not measured here: layout and CSS (a screenshot is the evidence, under
  * $TMPDIR and described in docs/STUDIO.md), a real canvas's pixels (the stub
- * context records nothing), the toy compiler/export (#31, second half of
- * #75), sound (#71), the asset importer (#24/#71), and the agent link (#24).
+ * context records the calls, not the rendered result), the toy
+ * compiler/export (#31, second half of #75), sound (#71), the asset importer
+ * (#24/#71), and the agent link (#24).
  *
  *   node tests/check-studio.js
  *   node tests/check-studio.js --browser
@@ -294,16 +308,24 @@ function stubClassList() {
   };
 }
 
+/* A canvas context that draws nothing and remembers what it was asked to
+ * draw.  Every drawing method is still a no-op (nothing is rendered in the
+ * stub DOM), but its name and arguments are recorded in __calls, so geometry
+ * the page paints — the #84 visible-screen outline, in particular — can be
+ * read back by the evidence.  Before this, a wrong outline was invisible:
+ * the Proxy swallowed rect() and strokeRect() alike. */
 function stubContext() {
+  const calls = [];
   return new Proxy({}, {
     get(_, key) {
+      if (key === "__calls") return calls;
       if (key === "createImageData" || key === "getImageData") {
         return (w, h) => ({ width: w, height: h,
           data: new Uint8ClampedArray(w * h * 4) });
       }
       if (key === "measureText") return () => ({ width: 0 });
       if (key === "canvas") return null;
-      return () => {};
+      return (...args) => { calls.push({ name: key, args: args }); };
     },
     set() { return true; }
   });
@@ -391,7 +413,9 @@ function makeStubDom() {
       getBoundingClientRect() {
         return { left: 0, top: 0, width: this.width, height: this.height };
       },
-      getContext() { return stubContext(); },
+      /* One context per element, as a real canvas has: the recorder stays
+       * reachable at el.__ctx across redraws. */
+      getContext() { return this.__ctx || (this.__ctx = stubContext()); },
       setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b; }
     };
     /* A created element with an id is findable by getElementById, as in a
@@ -1627,6 +1651,23 @@ end
 const SPR_X = 112;
 const SPR_Y = 96;
 
+/* The movement assertion as a function, not a hand-rolled loop: the moving
+ * run and the still-sprite control below must go through the same
+ * comparison, or weakening one would leave the other green.  `fromX` is the
+ * box's column before the run; true only when every frame stands one more
+ * (right) or one fewer (left) column along `dir` than the frame before, at
+ * the same row. */
+function movesByPad(frames, dir, fromX) {
+  const step = dir === "right" ? 1 : -1;
+  if (!frames.length) return false;
+  for (let i = 0; i < frames.length; i++) {
+    const want = fromX + step * (i + 1);
+    if (!frames[i].box || frames[i].box[0] !== want ||
+        frames[i].box[1] !== SPR_Y) return false;
+  }
+  return true;
+}
+
 function cramRgb(cram, addr) {
   const v = cram[addr * 2] | (cram[addr * 2 + 1] << 8);
   return [36 * ((v >> 3) & 7), 36 * ((v >> 6) & 7), 36 * (v & 7)];
@@ -1723,17 +1764,10 @@ function checkExamplesVisible(page) {
   check(right.every((v) => v.n === 256),
         "sprite VISIBILITY: every frame of the move shows all 256 block " +
         "pixels (" + right.map((v) => v.n).join(",") + ")");
-  let byOne = true;
-  for (let i = 0; i < 10; i++) {
-    const want = i + 1;
-    if (!right[i].box || right[i].box[0] !== SPR_X + want ||
-        right[i].box[1] !== SPR_Y) {
-      byOne = false;
-    }
-  }
-  check(byOne, "sprite VISIBILITY: ten frames of right move the block right " +
-        "one column a frame (x = " + right.map((v) => (v.box || [])[0])
-                                           .join(",") + ")");
+  check(movesByPad(right, "right", SPR_X),
+        "sprite VISIBILITY: ten frames of right move the block right one " +
+        "column a frame (x = " + right.map((v) => (v.box || [])[0])
+                                  .join(",") + ")");
   key("keyup", "KeyL", "");
 
   key("keydown", "KeyJ", "j");
@@ -1746,7 +1780,31 @@ function checkExamplesVisible(page) {
   eq("sprite VISIBILITY: ten frames of left bring the block back to (" +
      SPR_X + "," + SPR_Y + ")", back.box,
      [SPR_X, SPR_Y, SPR_X + 15, SPR_Y + 15]);
+  check(movesByPad(left, "left", SPR_X + 10),
+        "sprite VISIBILITY: ten frames of left move the block left one " +
+        "column a frame (x = " + left.map((v) => (v.box || [])[0])
+                                   .join(",") + ")");
   key("keyup", "KeyJ", "");
+
+  /* The control: the SAME assertion, given ten frames with no pad held, must
+   * be false.  The #90 breaker's M10 made the movement check accept a still
+   * sprite; the moving run alone cannot see that — a positive-only check
+   * agrees with a still one.  The sprite is at (SPR_X, SPR_Y) after the
+   * left run, and with no key it stays there, so "moved right" is a lie the
+   * control has to catch. */
+  let still = [];
+  for (let i = 0; i < 10; i++) {
+    studio.stepForward();
+    still.push(spriteBox());
+  }
+  check(still.every((v) => v.box && v.box[0] === SPR_X && v.box[1] === SPR_Y),
+        "no pad held: the block stands still at (" + SPR_X + "," + SPR_Y +
+        ") for ten frames (x = " + still.map((v) => (v.box || [])[0])
+                                          .join(",") + ")");
+  check(!movesByPad(still, "right", SPR_X),
+        "the movement assertion FAILS on a still sprite (the control)");
+  check(!movesByPad(still, "left", SPR_X),
+        "the movement assertion FAILS on a still sprite read as left too");
 
   console.log("      VISIBILITY: " + counts.join("  ·  ") +
               " non-backdrop pixels at the expected place; the sprite moves " +
@@ -2299,14 +2357,30 @@ function checkScreenPanel(page) {
         "the rect changed only its own cells (" + countChar(cells, 0x41) +
         " of 1024 are $41)");
 
-  /* fill: the connected $40 region becomes the selected tile */
+  /* fill: the connected $40 region becomes the selected tile, and a tile of
+   * a different character is a wall.  The #84 breaker's M02 dropped the
+   * neighbour test, and a whole-map fill cannot tell the two apart: every
+   * cell is the same $40, so an unconditional flood lands on the same 1024
+   * cells.  The island of $42 is what separates them. */
+  studio.screenNewTile();
+  check(studio.screen().tile === 0x42,
+        "a second + tile makes tile $42 and selects it (got $" +
+        (studio.screen().tile || 0).toString(16).toUpperCase() + ")");
+  studio.screenSetTool("pencil");
+  const ISLAND = [[10, 10], [11, 10], [10, 11], [11, 11]];
+  for (const [ix, iy] of ISLAND) studio.screenClick(ix, iy);
+  check(ISLAND.every(([ix, iy]) => studio.screen().cell(ix, iy) === 0x42),
+        "the island is four cells of $42 inside the $40 field");
   studio.screenSelectChar(0x41);
   studio.screenSetTool("fill");
   studio.screenClick(25, 25);
   cells = mapCells(studio);
-  check(countChar(cells, 0x41) === 1024,
-        "the bucket fills the connected region (" + countChar(cells, 0x41) +
-        " of 1024 cells)");
+  check(countChar(cells, 0x42) === 4,
+        "the bucket stops at a different tile (the island's " +
+        countChar(cells, 0x42) + " cells stay $42)");
+  check(countChar(cells, 0x41) === 1020,
+        "the bucket fills the connected $40 region (" + countChar(cells, 0x41) +
+        " of 1024 cells are $41, the island's 4 are not)");
 
   /* erase: back to the blank tile */
   studio.screenSetTool("erase");
@@ -2335,17 +2409,34 @@ function checkScreenPanel(page) {
   check(/4 × 3 = 12 cells/.test(page.dom.get("scr-pick").textContent),
         "the pick line counts the selection");
 
-  /* the zoom row changes the canvas: 1x/2x/4x/Fit */
-  clickOne(page, "scr-zoom-2x");
-  check(studio.screen().zoom === "2x", "the 2× chip sets the zoom");
-  check(studio.screenCanvas().map === 512, "2× draws a 512-px map canvas");
-  clickOne(page, "scr-zoom-4x");
-  check(studio.screenCanvas().map === 1024, "4× draws a 1024-px map canvas");
-  clickOne(page, "scr-zoom-1x");
-  check(studio.screenCanvas().map === 256, "1× is the 256-px map");
-  clickOne(page, "scr-zoom-fit");
-  check(studio.screen().zoom === "fit" &&
-        studio.screenCanvas().map >= 256, "Fit fills the panel");
+  /* the zoom row changes the canvas, never the BAT: the #84 breaker's M05
+   * made a zoom chip resample the zoomed picture back into the map and
+   * commit it.  The dimension assertions alone cannot see that (every canvas
+   * size stays right), so each chip is bracketed by a snapshot of the map's
+   * cells and of tiles.json's own bytes. */
+  const ZOOM_PX = { "2x": 512, "4x": 1024, "1x": 256 };
+  for (const z of ["2x", "4x", "1x", "fit"]) {
+    const cellsBeforeZoom = mapCells(studio);
+    const jsonBeforeZoom = studio.files().find((f) =>
+      f.name === "tiles.json").source;
+    clickOne(page, "scr-zoom-" + z);
+    check(studio.screen().zoom === z, "the " + z + " chip sets the zoom");
+    if (ZOOM_PX[z]) {
+      check(studio.screenCanvas().map === ZOOM_PX[z],
+            z + " draws a " + ZOOM_PX[z] + "-px map canvas (got " +
+            studio.screenCanvas().map + ")");
+    } else {
+      check(studio.screenCanvas().map >= 256, "Fit fills the panel");
+    }
+    const zoomDiff = mapCells(studio).filter((c, i) =>
+      c !== cellsBeforeZoom[i]).length;
+    check(zoomDiff === 0,
+          "zooming to " + z + " leaves the BAT's cells unchanged (" +
+          zoomDiff + " of 1024 cells changed)");
+    check(studio.files().find((f) => f.name === "tiles.json").source ===
+          jsonBeforeZoom,
+          "zooming to " + z + " leaves tiles.json byte for byte unchanged");
+  }
 
   /* the grid checkbox */
   const gridBox = page.dom.get("scr-grid");
@@ -2407,6 +2498,45 @@ function checkScreenPanel(page) {
      mapBefore.join());
   check(studio.screen().scroll.BXR === 1 && studio.screen().scroll.BYR === 1,
         "reopening the toy restores BXR/BYR");
+
+  /* the visible-screen outline: its first row is the cell BYR names, and
+   * here that cell is computed from the register itself, not from the
+   * panel's own arithmetic.  The #84 breaker's M07 started the outline one
+   * cell (8 px) low; the stub canvas used to swallow rect(), so nothing
+   * noticed.  Two BYR values, neither a multiple of 8, so a mere constant
+   * shift cannot hide behind the rounding. */
+  const mapCanvas = page.dom.get("scr-map");
+  const canvasCalls = () => (mapCanvas.__ctx && mapCanvas.__ctx.__calls) || [];
+  const frameLines = studio.screenFrame().height;   /* the picture's window */
+  for (const byr of [1, 9]) {
+    const mark = canvasCalls().length;
+    studio.screenScroll(0, byr - studio.screen().scroll.BYR);
+    check(studio.screen().scroll.BYR === byr,
+          "the scroll sets BYR to " + byr + " (got " +
+          studio.screen().scroll.BYR + ")");
+    const scale = mapCanvas.width / 256;
+    const outline = canvasCalls().slice(mark)
+      .filter((c) => c.name === "rect").map((c) => c.args)[0];
+    check(!!outline, "BYR " + byr + ": the visible-screen outline is drawn");
+    if (!outline) continue;
+    const y0 = byr % 256;
+    const cell = Math.floor(((outline[1] - 0.5) / scale) / 8);
+    check(cell === Math.floor(y0 / 8),
+          "the visible-screen outline starts on the cell BYR " + byr +
+          " names (cell " + Math.floor(y0 / 8) + ", drawn at " + cell + ")");
+    check(Math.round((outline[3] + 1) / scale) ===
+          Math.min(frameLines, 256 - y0),
+          "the outline is " + Math.min(frameLines, 256 - y0) + " lines tall " +
+          "at BYR " + byr);
+    /* BXR cannot move this outline: the window is exactly the map's 256
+     * dots wide (the panel says so), so the BXR half of the cell is the
+     * full-width x = 0.5.  Pinned here so a stray horizontal offset fails. */
+    check(outline[0] === 0.5 && outline[2] === mapCanvas.width - 1,
+          "the outline spans the map's full width at BYR " + byr);
+  }
+  studio.screenScroll(0, 1 - studio.screen().scroll.BYR);
+  check(studio.screen().scroll.BYR === 1,
+        "the outline test leaves BYR back at 1");
 
   /* the refusals are pce-editor.js's and the panel's own */
   const fresh = S.editor.newPicture();
