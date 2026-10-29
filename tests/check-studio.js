@@ -4038,6 +4038,180 @@ function checkAudioPanel(page) {
   studio.panels.select("screen");
 }
 
+/* ---- #140: the voice picker offers the song's patches AND the built-ins --
+ * ppu.toys' AUDIO dropdown is the shape (Dennis, 2026-10-29): the song's own
+ * sample first with a tick on it, a grey heading, then every built-in sample,
+ * so a patch is one pick away instead of a trip through ASSETS.  Ours lists
+ * the toy's instruments.json first, a "load into the voice" heading, and all
+ * fifteen of #99's built-ins.  Picking a built-in adds it to instruments.json
+ * (once) and loads it into the voice; Trigger plays it — the patch's own
+ * registers through pce-psg.js, at the voice's frequency, noise for a drum.
+ *
+ * NOTE: written by @design under the same arrangement as the rest of this
+ * file — rule 2's cold break by another seat is owed. */
+function checkAudioVoicePicker(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const A = S.assets;
+  const NAMES = ["piano", "bass", "lead", "strings", "organ", "bell", "flute",
+                 "pluck", "kick", "snare", "hat", "ohat", "tom", "clap",
+                 "crash"];
+  if (!A || !studio.audioChoose) {
+    check(false, "#140: the page has no AUDIO voice picker");
+    return;
+  }
+
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.panels.select("audio");
+  studio.audioSelect(0);
+
+  const instrumentsJson = () => {
+    const f = studio.files().find((x) => x.name === "instruments.json");
+    if (!f) return null;
+    try { return JSON.parse(f.source); } catch (e) { return null; }
+  };
+  const stored = () => (instrumentsJson() || { instruments: [] }).instruments;
+  const pick = page.dom.get("aud-instrument");
+  const groupOf = () => pick && pick.children
+    .find((c) => c.tagName === "OPTGROUP");
+
+  /* ---- the picker's shape before anything is picked ------------------- *
+   * A fresh toy has no instruments.json, so everything the picker offers is
+   * a built-in under the heading. */
+  eq("#140: a fresh toy carries no instruments.json", instrumentsJson(), null);
+  check(!!pick, "#140: the AUDIO panel carries the voice picker");
+  if (!groupOf()) {
+    /* nothing below can mean anything without the list, and a missing group
+     * must be a red check rather than a crash that ends the whole run */
+    check(false, "#140: … the built-ins sit under a heading");
+    return;
+  }
+  eq("#140: the heading is the card's 'load into the voice'",
+     groupOf().label, "load into the voice");
+  eq("#140: the first option is this voice's own patch",
+     pick.children[0].value, "");
+  eq("#140: all fifteen built-ins are listed, in #99's order",
+     groupOf().children.map((o) => o.textContent).join(","), NAMES.join(","));
+  eq("#140: … each carried as builtin:<id>",
+     groupOf().children.map((o) => o.value).join(","),
+     NAMES.map((n) => "builtin:" + n).join(","));
+  /* the same list through the page's evidence surface (a module whose api
+   * shadows its own list would recurse here rather than pass) */
+  eq("#140: the page's built-in list is the picker's",
+     studio.audioBuiltins().map((b) => b.id).join(","), NAMES.join(","));
+  eq("#140: … typed the way the chip makes them",
+     studio.audioBuiltins().map((b) => b.kind).join(","),
+     A.INSTRUMENTS.map((i) => i.kind).join(","));
+
+  /* ---- one pick per built-in, through the picker's own handler -------- *
+   * The DOM change handler is driven, not the API, so what is measured is
+   * the control a person clicks. */
+  const perPick = [];
+  for (const name of NAMES) {
+    const before = stored().length;
+    pick.value = "builtin:" + name;
+    const fired = fire(pick, "change");
+    const voice = studio.audio().selected;
+    perPick.push([fired, stored().length - before,
+                  voice, studio.audioLoaded(voice)]);
+  }
+  eq("#140: every pick reaches the picker's change handler",
+     perPick.map((p) => p[0]).join(","), NAMES.map(() => 1).join(","));
+  eq("#140: … and adds exactly one instrument to the toy",
+     perPick.map((p) => p[1]).join(","), NAMES.map(() => 1).join(","));
+  eq("#140: each pick is what that voice then holds",
+     perPick.map((p) => p[3]).join(","), NAMES.join(","));
+  eq("#140: a drum moves to the first voice with the noise generator " +
+     "(0-based 4, the panel's voice 5)",
+     perPick.map((p) => p[2]).join(","), "0,0,0,0,0,0,0,0,4,4,4,4,4,4,4");
+  eq("#140: the toy ends with all fifteen, each once",
+     [stored().length, new Set(stored().map((i) => i.name)).size].join(","),
+     "15,15");
+
+  /* ---- the song's instruments now come first, with the tick ----------- *
+   * ppu.toys marks the song's own entry ('✓ Sample 00 · song'); ours marks
+   * the one loaded into the selected voice. */
+  studio.audioSelect(0);
+  studio.audioChoose("piano", 0);
+  const groupAt = pick.children.findIndex((c) => c.tagName === "OPTGROUP");
+  eq("#140: the song's instruments sit above the heading",
+     groupAt, 1 + NAMES.length);
+  eq("#140: … one entry each, in the order they were added",
+     pick.children.slice(1, groupAt).map((o) => o.value).join(","),
+     NAMES.map((n) => "toy:" + n).join(","));
+  check(pick.children.slice(1, groupAt)
+         .every((o) => / · (wave|noise)$/.test(o.textContent)),
+        "#140: … each saying its kind (" + pick.children[1].textContent + ")");
+  check(pick.children[1].textContent.indexOf("✓ ") === 0,
+        "#140: the one loaded into this voice is ticked (" +
+        pick.children[1].textContent + ")");
+  eq("#140: … and the picker's value points at it", pick.value, "toy:piano");
+
+  /* ---- no duplicates: the same built-in again adds nothing ------------ */
+  const again = studio.audioChoose("piano", 0);
+  eq("#140: picking a built-in the toy already has adds nothing",
+     again.added, false);
+  eq("#140: … instruments.json still holds one piano",
+     [stored().length, stored().filter((i) => i.name === "piano").length]
+       .join(","), "15,1");
+  /* … and the entry is ASSETS' own stored shape, not the built-in object */
+  const patch = stored()[0];
+  eq("#140: the stored copy is ASSETS' own shape",
+     [patch.source, patch.kind, patch.envelope.size]
+       .join(","), "built-in,wave," + patch.envelope.data.length);
+
+  /* ---- Trigger plays it: pce-psg.js's PCM from the patch's registers -- *
+   * `audioAudition` is the function onTrigger calls, so this is Trigger's
+   * output, not a second renderer.  The voice is A4 (F = 254 → 440.4 Hz). */
+  const pitches = [];
+  for (const name of NAMES) {
+    const inst = A.byId(name);
+    studio.audioSelect(0);
+    studio.audioNote(0, "A4");
+    const got = studio.audioChoose(name, 0);
+    const aud = studio.audioAudition(got.voice);
+    const n = aud.pcm.length / 2;
+    /* the loud part: a pluck has decayed to nothing by frame 30 */
+    const level = A.rms(aud.pcm, 0, Math.floor(n * 0.25));
+    check(level.rms > 40 && level.peak > 200,
+          "#140: Trigger on " + name + " is not silent (rms " +
+          level.rms.toFixed(0) + ", peak " + level.peak + ")");
+    if (inst.kind === "wave") {
+      const hz = A.fundamental(aud.pcm, aud.sampleRate, Math.floor(n * 0.2), n);
+      /* anchored on the MIX's voice, not on the trace: the trace agreeing
+       * with itself would prove nothing about what Trigger asked for */
+      const voiceFreq = studio.audio().voices[got.voice].freq;
+      const want = A.toneHz(voiceFreq);
+      pitches.push(name + ":" + aud.freq);
+      check(aud.freq === voiceFreq && Math.abs(hz.hz - want) <= want * 0.02,
+            "#140: … at the voice's pitch, F = " + voiceFreq + " → " +
+            want.toFixed(1) + " Hz for " + name + " (trace F = " + aud.freq +
+            ", measured " + hz.hz.toFixed(1) + ")");
+      eq("#140: … with 32 R6 wave steps on the voice",
+         aud.trace.events.filter((e) => e.reg === 6).length, 32);
+    } else {
+      const r7 = aud.trace.events.filter((e) => e.reg === 7);
+      eq("#140: " + name + " is the noise generator (R7 = $80 | NF " +
+         inst.nf + ")", r7.length ? r7[0].value : null, 0x80 | inst.nf);
+      eq("#140: … so it uploads no wave",
+         aud.trace.events.filter((e) => e.reg === 6).length, 0);
+      eq("#140: … and plays on the voice it moved to",
+         aud.trace.channel, got.voice);
+    }
+  }
+  eq("#140: every melodic built-in sounds the voice's A4 (F = 254)",
+     pitches.join(","),
+     NAMES.filter((n) => A.byId(n).kind === "wave").map((n) => n + ":254")
+       .join(","));
+
+  /* the panel is left as it was found */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  studio.panels.select("screen");
+}
+
 function spritePanel(page) {
   const def = page.sandbox.PCEStudio.studio.panels.get("sprites");
   return (def && def.api) || null;
@@ -6719,6 +6893,7 @@ async function main() {
   checkConsolePanel(page);
   checkLayersPanel(page);
   checkAudioPanel(page);
+  checkAudioVoicePicker(page);
   checkSequencerPanel(page);
   checkStudioApi(page);
   checkGallery(page);
