@@ -3,7 +3,7 @@
  * tools/starfall-console.js — what the studio's Export makes of STARFALL
  * (card #131), reproduced in Node with the same modules the page runs.
  *
- *   node tools/starfall-console.js [toy.lua]
+ *   node tools/starfall-console.js [toy.lua] [--song song.json]
  *
  * Default toy: toys/demo-game/main.lua (STARFALL).
  *
@@ -14,7 +14,7 @@
  *   1. the CONSOLE tab's checks: pce-il.js compile, pce-validate.js budgets,
  *      pce-cgen.js emitC (the C backend, llvm-mos)
  *   2. if stage 1 reported any error, STOP: the encoder is never reached
- *      (renderer/studio.html:3494)
+ *      (renderer/studio.html:3499)
  *   3. pce-ilbc.js encode -> pce-rom.js buildToyRom over renderer/ilvm.bin
  *
  * Stage 1's cgen refuses the FIRST instruction it cannot lower, so the page
@@ -105,7 +105,11 @@ function oneLine(s) { return String(s == null ? "" : s).replace(/\s+/g, " "); }
 /* ---- the analysis ------------------------------------------------------
  * Everything the report prints, as data, so tests/check-starfall-console.js
  * can pin it.  Nothing here writes to a file. */
-function analyse(rel) {
+/* opts.songs: the modules a toy's music(index) plays, handed to the
+ * validator the way the runtime gets them.  Without it a toy that calls
+ * music(0) is refused with music-range — a missing argument, not a finding. */
+function analyse(rel, opts) {
+  opts = opts || {};
   rel = rel || DEFAULT_TOY;
   const src = path.resolve(ROOT, rel);
   const source = fs.readFileSync(src, "utf8");
@@ -123,7 +127,7 @@ function analyse(rel) {
   out.program = program;
 
   const vr = stage(() => validate.validateProgram(program, {
-    chunkName: "@main.lua", frames: FRAMES }));
+    chunkName: "@main.lua", frames: FRAMES, songs: opts.songs || [] }));
   out.validator = vr;
   const report = vr.ok ? vr.value : null;
   out.report = report;
@@ -136,7 +140,7 @@ function analyse(rel) {
   out.page = {
     errors: errors,
     blocked: errors > 0,
-    earlyReturn: "renderer/studio.html:3494"
+    earlyReturn: "renderer/studio.html:3499"
   };
 
   const enc = stage(() => ilbc.encode(program));
@@ -382,7 +386,7 @@ function report(r) {
     : "proceeds to the encoder"));
   console.log("");
 
-  if (reportVal) {
+  if (reportVal && reportVal.budgets) {
     const b = reportVal.budgets;
     console.log("   budgets (the model's estimate, NOT a capture):");
     console.log("     frame(): " + b.frameCycles + " cycles");
@@ -477,7 +481,15 @@ function report(r) {
 }
 
 if (require.main === module) {
-  report(analyse(process.argv[2]));
+  /* node tools/starfall-console.js [toy.lua] [--song song.json] */
+  const args = process.argv.slice(2);
+  const at = args.indexOf("--song");
+  const songs = at >= 0 && args[at + 1]
+    ? [JSON.parse(fs.readFileSync(path.resolve(ROOT, args[at + 1]), "utf8"))]
+    : [];
+  const rel = args.filter((a, i) => a !== "--song" &&
+                                    !(at >= 0 && i === at + 1))[0];
+  report(analyse(rel, { songs: songs }));
 }
 
 module.exports = {
