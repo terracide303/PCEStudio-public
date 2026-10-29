@@ -293,7 +293,7 @@ function listZip(zip) {
     const names = tools.map((t) => t.name).sort();
     eq("the unpacked server lists every tool", names,
        ["docs", "export_pce", "frame_png", "register_set", "registers_get",
-        "source_add", "toy_run", "toy_write", "validate"]);
+        "song_write", "source_add", "toy_run", "toy_write", "validate"]);
     for (const t of tools) {
       check(t.inputSchema && t.inputSchema.type === "object" &&
             t.inputSchema.properties,
@@ -353,7 +353,7 @@ function listZip(zip) {
     process.exit(1);
   }
   console.log("PASS  " + checks + " checks: the pack builds, unzips alone " +
-              "into an empty folder, starts over stdio, lists all 9 tools, " +
+              "into an empty folder, starts over stdio, lists all 10 tools, " +
               "and runs a recipe from the unpacked skill to a visible " +
               WIDTH + "x" + HEIGHT + " frame");
 })();

@@ -2739,10 +2739,20 @@ function rebuild() {
    * which imports tiles/palettes/sprites into VRAM, CRAM, the SAT and the
    * scroll before the toy's own code runs; empty defaults import nothing. */
   /* songs: a gallery toy's own module (#128), so music(0) has something to
-   * play when the toy is opened from Browse */
+   * play when the toy is opened from Browse; a toy opened from a file
+   * (#161) carries its song as song.json, which renderer/pce-seq.js
+   * songsFromFiles compiles to the player's module — the same call the MCP
+   * server makes, so a Claude Code game's music plays here too. A song the
+   * model refuses is the SEQUENCER panel's error to show, not a reason to
+   * stop the toy: the runtime gets no song and music() is music-range. */
+  let songs = (current.example && current.example.songs) || [];
+  if (!songs.length && PCEStudio.seq &&
+      typeof PCEStudio.seq.songsFromFiles === "function") {
+    try { songs = PCEStudio.seq.songsFromFiles(files); }
+    catch (e) { songs = []; }
+  }
   const rt = factory.create(current.source, {
-    budgetMs: 120, files: files,
-    songs: (current.example && current.example.songs) || [] });
+    budgetMs: 120, files: files, songs: songs });
   rt.load();
   runtime = rt;
   currentFrame = -1;
