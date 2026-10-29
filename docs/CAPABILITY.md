@@ -52,11 +52,12 @@ The two milestones Dennis asked for:
 | SPRITES panel (64 sprites, sizes, patterns) | PROVEN | `check-studio.js` (102 checks for this panel): SAT slots, six pattern tools, per-sprite size, park/clear/release; board lists #86 as needs-checking (a different seat's break is owed) | #86 |
 | SCANLINES panel (bands on the line interrupt) | PROVEN | `check-studio.js` `checkScanlinesPanel` (467 lines): Add band splits 0-31/32-223; Apply to toy writes the fenced raster block and the runtime's own table matches line for line; the drawn frame equals the preview pixel for pixel; three register writes and three colour words are refused by code; a band's cost (64/123, 52%) matches `check-validate.js`'s blank budget. Board lists #92 as needs-checking (rule 2 owed), and the side-by-side screenshot with ppu.toys is not proven | #92 |
 | REGISTERS panel (every register, bit by bit, editable) | PROVEN | `check-pokes.js` 145 checks: every register row and bit, keyframed overrides, undo/redo, written back into the toy | #79 |
-| LAYERS panel (stacking, priority, palette fades) | RUNNING | a seat is building it now | #93 |
+| LAYERS panel (stacking, priority, palette fades) | IN CHECK | `check-studio.js` 1093 checks: four previews diff 0 against the renderer with the check's own CR; toggles through BB/SB; SPBG flipped against a patched SAT; a 16-step fade written into main.lua and run for 17 frames, every frame's CRAM and pixels equal the computed palettes. Rule 2 (a cold break by another seat) owed | #93 |
 | AUDIO panel (the 6 voices live) | RUNNING | a seat is building it now | #97 |
 | CONSOLE panel ("can this run on a real PC Engine?") | PROVEN | `check-studio.js` `checkConsolePanel`: the palette example is green with a measured ROM size; `reg("NOPE",0)` on line 4 is red with range and C-emitter findings, and the `main.lua:4` link moves the editor cursor there; a 20,000-iteration frame is red on the frame budget. Board lists #98 as done; rule 2 is owed, and the numbers are the validator's static model, not a Mednafen/ares capture | #98 |
 | ASSETS: memory bars, sheets, songs, 15 built-in instruments | RUNNING | a seat is building it now | #99 |
 | Details: DISPLAY tab, light theme, Raw output, Guide links, Panels menu | RUNNING | a seat is building it now | #87 |
+
 | Browse: a gallery of the example toys | TODO | | #80 |
 | Debug panels and follow a pixel (the earlier text panels) | PROVEN | `check-panels.js` 49,158 checks; breaker gaps closed | #26, #56 |
 | Docs (the reference, generated from the code) | PROVEN | `check-docs.js` | #61 |

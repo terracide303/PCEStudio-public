@@ -71,6 +71,17 @@
  *     CodeMirror's text — not the stale textarea — is what editorText()
  *     returns and what the page runs, through a stand-in that models
  *     CodeMirror's non-syncing textarea.
+ * 12. #93: the LAYERS panel.  Four previews (backdrop, BG, sprites, composed)
+ *     diff-0 against frames this check renders from CR values it computes
+ *     itself; the layer toggles are CR bits (BB/SB) and the composed preview
+ *     and the canvas agree with the renderer; a sprite's SPBG flipped in the
+ *     view equals the renderer given a SAT this check patched; a 16-step fade
+ *     is planned, its arithmetic re-done here channel by channel, written
+ *     into main.lua and RUN for 17 frames — every frame's CRAM and pixels
+ *     equal the computed palettes — and recorded as fade.json.  Refusals by
+ *     code.  Blind spots in docs/STUDIO.md §12: the painted canvases are not
+ *     pixel-diffed (the stub records calls), no raster-table toy is
+ *     exercised, and the fade's source palettes are captured constants.
  *
  * #90 adds a VISIBILITY assertion to every example: the frame the canvas drew
  * must be a picture at the expected place (57,344 / 7,168 / 256 non-backdrop
@@ -573,8 +584,8 @@ function checkBoot(page) {
   const studio = page.sandbox.PCEStudio.studio;
   check(studio.examples.length === 3,
         "the page carries three examples (got " + studio.examples.length + ")");
-  check(studio.panels.length === 8,
-        "the panel dock has eight PCE panels (got " + studio.panels.length + ")");
+  check(studio.panels.length === 9,
+        "the panel dock has nine PCE panels (got " + studio.panels.length + ")");
   check(page.loaded.some((s) => /pce-toys\.js$/.test(s)),
         "the page loads renderer/pce-toys.js");
   check(page.loaded.some((s) => /pce-il\.js$/.test(s)),
@@ -3207,16 +3218,16 @@ function checkSpritesPanel(page) {
  * longer holds the panels' drawing code — and that the registry builds the
  * dock and the menu from what registered. */
 const PANEL_MODULES = ["screen", "vram", "palettes", "sprites", "audio",
-                       "scanlines", "registers", "console", "markers", "agent",
-                       "assets"];
+                       "layers", "scanlines", "registers", "console",
+                       "markers", "agent", "assets"];
 const CHIP_PANELS = ["screen", "vram", "palettes", "sprites", "audio",
-                     "scanlines", "registers", "console"];
+                     "layers", "scanlines", "registers", "console"];
 
 function checkPanelModules(page) {
   const S = page.sandbox.PCEStudio;
   const studio = S.studio;
 
-  eq("#102: the eleven panel modules registered, chip panels first",
+  eq("#102: the twelve panel modules registered, chip panels first",
      studio.panels.modules().join(","), PANEL_MODULES.join(","));
   for (const id of PANEL_MODULES) {
     check(page.loaded.indexOf("studio-panel-" + id + ".js") >= 0,
@@ -4348,6 +4359,411 @@ function checkConsolePanel(page) {
   studio.seek(0);
 }
 
+/* ---- #93: LAYERS, the PCE's answer to ppu.toys' COMPOSE ---------------- *
+ * ppu.toys' COMPOSE previews a main and a sub screen and adds them with a
+ * brightness; the PC Engine has neither, so this panel shows the backdrop,
+ * the background and the sprites apart and composed, the stacking order, the
+ * layers' on/off through CR (BB/SB), each sprite's SPBG bit, and a fade done
+ * the only way the VCE can: by rewriting palettes.
+ *
+ * What is measured here, all through the page's own API:
+ *   - each preview is renderer/pce-sprites.js drawing the running frame with
+ *     ONE CR value changed, compared against a frame this check renders
+ *     itself from that same value (the test never asks the panel what the
+ *     answer is);
+ *   - the layer toggles are CR bits: the composed preview and the canvas
+ *     both equal the renderer with the bit cleared, and the live VDC's CR
+ *     carries the write;
+ *   - a sprite's SPBG bit flipped in the view equals the renderer given a SAT
+ *     this check patches itself (word 3 bit 7);
+ *   - a 16-step fade runs headlessly: the toy code the panel writes is put
+ *     into main.lua, the toy is run for 17 frames, and every frame's CRAM
+ *     entries and pixels equal this check's own arithmetic and the renderer
+ *     drawn with the computed palettes.  The plan's step 8 word is also
+ *     worked out here by hand (3-bit channels, floor) so the fade's curve is
+ *     checked, not just its self-consistency;
+ *   - the two write-backs (main.lua block, fade.json) and the model's
+ *     refusals by code.
+ *
+ * Written by @design with the panel, as this file's card says; @review owes
+ * it a cold break (RULES.md rule 2). */
+const LAYERS_SCENE = `
+local function puttile(char, fn)
+  for row = 0, 7 do
+    local w0, w1 = 0, 0
+    for col = 0, 7 do
+      local c = fn(col, row)
+      if c % 2 >= 1 then w0 = w0 | (1 << (7 - col)) end
+      if c >= 2 and (c % 4) >= 2 then w0 = w0 | (1 << (15 - col)) end
+      if c >= 4 and (c % 8) >= 4 then w1 = w1 | (1 << (7 - col)) end
+      if c >= 8 then w1 = w1 | (1 << (15 - col)) end
+    end
+    vram[char * 16 + row] = w0
+    vram[char * 16 + 8 + row] = w1
+  end
+end
+
+function init()
+  -- a filled 32x32 BAT of one opaque character (colours 1 and 15)
+  for y = 0, 27 do
+    for x = 0, 31 do vram[y * 32 + x] = 0x0040 end
+  end
+  puttile(0x40, function(col, row)
+    if col == row then return 15 else return 1 end
+  end)
+  -- a 16x16 sprite, colour 2 (planes 0 and 1 set), SPBG 0 = behind the BG
+  for row = 0, 15 do
+    vram[0x100 * 64 + row] = 0
+    vram[0x100 * 64 + 16 + row] = 0xFFFF
+    vram[0x100 * 64 + 32 + row] = 0
+    vram[0x100 * 64 + 48 + row] = 0
+  end
+  pal(0, rgb(1, 0, 0))       -- the shared backdrop, CRAM $000
+  pal(1, rgb(0, 7, 0))       -- the background's colour 1 (green 7)
+  pal(15, rgb(7, 7, 7))      -- its colour 15
+  pal(0x101, rgb(0, 0, 7))   -- sprite colour 1
+  pal(0x102, rgb(7, 0, 7))   -- sprite colour 2
+  reg("CR", 0xC0)
+end
+function frame(t, f)
+  sprite(0, { x = 144, y = 160, pattern = 0x100, palette = 0, spbg = false })
+end
+`;
+
+/* The frame the running runtime would draw with one CR value (and optionally
+ * one CRAM table / one SAT), rendered here by the renderer itself. */
+function layerFrame(studio, over) {
+  const opts = studio.runtime().options();
+  opts.regs = Object.assign({}, opts.regs);
+  if (over && over.CR != null) opts.regs.CR = over.CR;
+  if (over && over.cram) opts.cram = over.cram;
+  if (over && over.sat) opts.sat = over.sat;
+  return sprites.renderFrame(opts);
+}
+
+/* CRAM words -> the renderer's byte table (the test's own conversion, not the
+ * model's). */
+function cramBytesOf(words) {
+  const out = new Uint8Array(1024);
+  for (let i = 0; i < 512; i++) {
+    out[i * 2] = words[i] & 0xFF;
+    out[i * 2 + 1] = (words[i] >> 8) & 0x3;
+  }
+  return out;
+}
+
+function cramWordsOf(bytes) {
+  const words = new Array(512);
+  for (let i = 0; i < 512; i++)
+    words[i] = (bytes[i * 2] | (bytes[i * 2 + 1] << 8)) & 0x1FF;
+  return words;
+}
+
+/* The same fade arithmetic a person can do on paper: three 3-bit channels,
+ * floor at every step. */
+function fadedWord(from, to, k, steps) {
+  const ch = (w) => [(w >> 6) & 7, (w >> 3) & 7, w & 7];
+  const a = ch(from), b = ch(to);
+  const mix = (x, y) => Math.floor((x * steps + (y - x) * k) / steps);
+  return (mix(a[0], b[0]) << 6) | (mix(a[1], b[1]) << 3) | mix(a[2], b[2]);
+}
+
+function countPixels(pixels, test) {
+  let n = 0;
+  for (let i = 0; i + 2 < pixels.length; i += 3)
+    if (test(pixels[i], pixels[i + 1], pixels[i + 2])) n++;
+  return n;
+}
+
+function checkLayersPanel(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const L = S.layers;
+  const modFile = fs.readFileSync(path.join(RENDERER, "studio-panel-layers.js"), "utf8");
+
+  check(!!studio.panels.get("layers"),
+        "#93: the LAYERS panel registered");
+  eq("#93: LAYERS is a chip panel with a draw and the model's Guide chapter",
+     [studio.panels.get("layers").group,
+      typeof studio.panels.get("layers").draw,
+      studio.panels.get("layers").chapter],
+     ["chip", "function", "registers"]);
+  check(modFile.indexOf("No colour blending on the PC Engine") >= 0,
+        "#93: the panel carries the one line about no colour blending");
+  check(modFile.indexOf("flicker (#28)") >= 0 && /dither/.test(modFile),
+        "#93: that line names flicker (#28) and a dither");
+
+  /* A scene with both layers: an opaque tiled BG and a SPBG=0 sprite over
+   * it.  Frame 0, paused. */
+  studio.loadExample("palette", true);
+  runEditorSource(studio, LAYERS_SCENE);
+  studio.pause();
+  studio.seek(0);
+  const st = studio.state();
+  check(!!st && st.regs.CR === 0xC0,
+        "#93: the scene runs with CR $C0 (BB and SB set)");
+  const cr = st.regs.CR;
+  const live = L.cramWords ? L.cramWords(st.cram) : cramWordsOf(st.cram);
+  check(live[0] === 0x008 && live[1] === 0x1C0 && live[15] === 0x1FF &&
+        live[0x101] === 0x007 && live[0x102] === 0x03F,
+        "#93: the scene's palettes are where the toy wrote them (backdrop $008, " +
+        "BG $1C0/$1FF, sprite $007/$03F)");
+
+  /* -- the four previews, each the renderer with one CR value -- */
+  const pv = studio.layerPreviews();
+  const dec = S.bg.decodeCram(st.cram);
+  let backdropSame = true;
+  for (let i = 0; i < pv.backdrop.pixels.length; i += 3) {
+    if (pv.backdrop.pixels[i] !== dec[0] ||
+        pv.backdrop.pixels[i + 1] !== dec[1] ||
+        pv.backdrop.pixels[i + 2] !== dec[2]) { backdropSame = false; break; }
+  }
+  check(backdropSame && pv.backdrop.pixels.length === st.width * st.height * 3,
+        "#93: the backdrop preview is CRAM $000 everywhere (" +
+        [dec[0], dec[1], dec[2]].join(",") + ")");
+
+  const bgOnly = layerFrame(studio, { CR: (cr | 0x80) & ~0x40 });
+  const spOnly = layerFrame(studio, { CR: (cr | 0x40) & ~0x80 });
+  const composed = layerFrame(studio, { CR: cr });
+  samePixels("#93: the BG preview is the renderer with BB on and SB clear",
+             pv.bg.pixels, bgOnly.pixels);
+  samePixels("#93: the sprite preview is the renderer with SB on and BB clear",
+             pv.sprites.pixels, spOnly.pixels);
+  samePixels("#93: the composed preview is the renderer with the frame's CR",
+             pv.composed.pixels, composed.pixels);
+  samePixels("#93: the composed preview is what the output column draws",
+             pv.composed.pixels, studio.output().pixels);
+
+  /* The sprite is behind the BG and the BG is opaque, so it is invisible in
+   * the composed frame but visible in its own preview. */
+  const MAGENTA = (r, g, b) => r === 252 && g === 0 && b === 252;
+  check(countPixels(pv.composed.pixels, MAGENTA) === 0,
+        "#93: with SPBG=0 under an opaque BG the sprite shows nowhere");
+  check(countPixels(pv.sprites.pixels, MAGENTA) === 256,
+        "#93: the sprite preview shows the 16x16 block (" +
+        countPixels(pv.sprites.pixels, MAGENTA) + " pixels)");
+  check(countPixels(pv.bg.pixels, MAGENTA) === 0,
+        "#93: the BG preview holds no sprite pixels");
+
+  /* -- the stacking order, spelled out -- */
+  const stack = L.stack();
+  eq("#93: the stacking order is backdrop, SPBG=0, BG, SPBG=1",
+     stack.map((s) => s.key).join(","),
+     "backdrop,sprites-back,bg,sprites-front");
+  const rows = studio.layerRows();
+  eq("#93: the layer table starts backdrop / background / sprites",
+     rows.slice(0, 3).map((r) => r.label).join(","),
+     "Backdrop,Background,Sprites");
+  eq("#93: the table names the bits the layers really live on",
+     [rows[1].source, rows[2].source],
+     ["CR bit 7 (BB)", "CR bit 6 (SB)"]);
+  check(/SAT word 3 bit 7/.test(rows[3].source),
+        "#93: the sprite row names SPBG (SAT word 3 bit 7)");
+
+  /* -- toggles through CR -- */
+  studio.setLayer("sprites", false);
+  check(studio.layers().sprites === false &&
+        (studio.state().regs.CR & 0x40) === 0,
+        "#93: sprites off clears SB (CR bit 6) in the live VDC");
+  samePixels("#93: sprites off — the panel's composed frame is CR with SB clear",
+             studio.layerPreviews().composed.pixels,
+             layerFrame(studio, { CR: cr & ~0x40 }).pixels);
+  samePixels("#93: sprites off — the canvas is that same frame",
+             studio.output().pixels, layerFrame(studio, { CR: cr & ~0x40 }).pixels);
+  check(/SB 0/.test(studio.layerRegisters()),
+        "#93: the registers fold shows SB 0 while sprites are off");
+  studio.setLayer("sprites", true);
+
+  studio.setLayer("bg", false);
+  /* BB clear blanks the background to CRAM $100; the SPRITES are still on,
+   * and an SPBG=0 sprite shows over a colour index whose low nibble is 0 —
+   * so the sprite is now the only thing in the picture. */
+  const bgOff = layerFrame(studio, { CR: (cr & ~0x80) | 0x40 });
+  samePixels("#93: BG off — the composed frame is CR with BB clear, SB set",
+             studio.layerPreviews().composed.pixels, bgOff.pixels);
+  check((studio.state().regs.CR & 0x80) === 0 &&
+        (studio.state().regs.CR & 0x40) === 0x40,
+        "#93: BG off clears only BB; SB stays the toy's");
+  check(countPixels(studio.layerPreviews().composed.pixels, MAGENTA) === 256,
+        "#93: with the BG blanked the SPBG=0 sprite shows over the backdrop");
+  studio.setLayer("bg", true);
+  samePixels("#93: both layers back — the composed frame is the toy's own",
+             studio.layerPreviews().composed.pixels, composed.pixels);
+
+  /* -- a sprite's SPBG, flipped in the view -- */
+  const sat0 = studio.state().sat;
+  const patched = new Uint8Array(sat0);
+  patched[6] = patched[6] | 0x80;      /* SAT word 3, high byte, bit 7 */
+  const inFront = layerFrame(studio, { CR: cr, sat: patched });
+  check(countPixels(inFront.pixels, MAGENTA) === 256,
+        "#93: SPBG=1 puts the sprite in front of the opaque BG (control)");
+  studio.layerSetSpritePriority(0, true);
+  const afterFlip = studio.layerPreviews().composed;
+  samePixels("#93: the flipped sprite equals the renderer with SPBG set in the SAT",
+             afterFlip.pixels, inFront.pixels);
+  check(countPixels(afterFlip.pixels, MAGENTA) === 256,
+        "#93: the flip shows the sprite in the composed frame");
+  check(studio.state().sat[6] === sat0[6],
+        "#93: the view's flip does not touch the toy's SAT (SPBG left as it was)");
+  check(/SPBG 1/.test(studio.layerRegisters()),
+        "#93: the registers fold reads SPBG 1 after the flip");
+  eq("#93: the sprite row says it is a view override",
+     [studio.layerRows()[3].front, studio.layerRows()[3].viewOnly,
+      studio.layerRows()[3].spbg],
+     [true, true, false]);
+  studio.layerClearSpritePriorities();
+  samePixels("#93: clearing the override returns the sprite behind the BG",
+             studio.layerPreviews().composed.pixels, composed.pixels);
+
+  /* -- the fade -- */
+  /* The button pass before this check clicked every chip, so the spec is
+   * set here rather than assumed. */
+  const allSpec = studio.fadeSetSpec({ palettes: "all", target: "black",
+                                       steps: 16, curve: "linear" });
+  eq("#93: \"all\" chooses the VCE's 32 palettes, black, 16 steps, linear",
+     [allSpec.palettes.length, allSpec.target, allSpec.steps, allSpec.curve],
+     [32, 0, 16, "linear"]);
+  studio.fadeSetSpec({ palettes: [{ kind: "background", palette: 0 },
+                                  { kind: "sprite", palette: 0 }],
+                       target: "white", steps: 16, curve: "linear" });
+  let plan = studio.fadePlan();
+  const want = [0].concat(Array.from({ length: 15 }, (_, i) => 1 + i),
+                          Array.from({ length: 16 }, (_, i) => 0x100 + i));
+  eq("#93: background palette 0 owns the backdrop and entries 1-15; sprite " +
+     "palette 0 owns CRAM $100-$10F",
+     plan.addresses.join(","), want.join(","));
+  eq("#93: step 0 is the source palette",
+     plan.frames[0], plan.addresses.map((a) => live[a]));
+  eq("#93: the last step is the target word",
+     plan.frames[16].filter((w) => w === 0x1FF).length,
+     plan.addresses.length);
+  /* By hand: $03F (G0 R7 B7) -> $1FF at 8 of 16 is G3 R7 B7 = $0FF. */
+  const at102 = plan.addresses.indexOf(0x102);
+  check(at102 >= 0 && fadedWord(0x03F, 0x1FF, 8, 16) === 0x0FF &&
+        plan.frames[8][at102] === 0x0FF,
+        "#93: step 8 of $03F -> white is $0FF, by the check's own arithmetic " +
+        "and the plan's (plan says $" +
+        (at102 >= 0 ? plan.frames[8][at102].toString(16).toUpperCase() : "?") +
+        ")");
+  /* And every step of the plan is that arithmetic, not just step 8. */
+  let planOk = true;
+  for (let k = 0; k <= 16 && planOk; k++)
+    for (let i = 0; i < plan.addresses.length; i++)
+      if (plan.frames[k][i] !== fadedWord(live[plan.addresses[i]], 0x1FF, k, 16))
+        planOk = false;
+  check(planOk, "#93: all 17 steps are the 3-bit floor interpolation");
+
+  /* The panel's drawn step equals the renderer with those palettes. */
+  const step8 = studio.fadeStep(8);
+  const words8 = live.slice();
+  for (let i = 0; i < plan.addresses.length; i++)
+    words8[plan.addresses[i]] = plan.frames[8][i];
+  samePixels("#93: the fade preview at step 8 is the renderer with step 8's palettes",
+             step8.frame.pixels,
+             layerFrame(studio, { CR: cr, cram: cramBytesOf(words8) }).pixels);
+
+  /* The curve is integer arithmetic the toy code can repeat: ease-in at 8 of
+   * 16 is 4, ease-out is 12. */
+  eq("#93: the curves are (k*k)/steps and steps-((steps-k)^2)/steps",
+     [L.curveAt("in", 8, 16), L.curveAt("out", 8, 16), L.curveAt("linear", 8, 16)],
+     [4, 12, 8]);
+
+  /* -- the toy code the panel writes, run headlessly -- */
+  const wrote = studio.fadeWriteToy();
+  check(wrote && wrote.changed === true,
+        "#93: Write to toy puts the fade block into main.lua");
+  const src = studio.current().source;
+  check(src.indexOf("-- >>> PCEStudio fade") >= 0 &&
+        src.indexOf("-- <<< PCEStudio fade") >= 0,
+        "#93: the block carries its markers (a second write replaces it)");
+  const again = studio.fadeWriteToy();
+  check(again.changed === false &&
+        (studio.current().source.match(/-- >>> PCEStudio fade/g) || []).length === 1,
+        "#93: writing twice leaves one block, byte-equal");
+
+  const frames = studio.render.runFrames(17, null, "lua");
+  eq("#93: the written toy runs 17 frames (16 steps, 0..16)", frames.length, 17);
+  let cramFrames = 0, pixelFrames = 0, firstBad = "";
+  for (let f = 0; f < 17; f++) {
+    const fr = frames[f];
+    const words = cramWordsOf(fr.state.cram);
+    let cramOk = true;
+    for (let i = 0; i < plan.addresses.length; i++)
+      if (words[plan.addresses[i]] !== plan.frames[f][i]) cramOk = false;
+    if (!cramOk) { cramFrames++; if (!firstBad) firstBad = "cram f" + f; }
+    const want = words.slice();
+    for (let i = 0; i < plan.addresses.length; i++)
+      want[plan.addresses[i]] = plan.frames[f][i];
+    const exp = layerFrame(studio, { CR: cr, cram: cramBytesOf(want) });
+    if (pixelDiffCount(fr.pixels, exp.pixels) !== 0) {
+      pixelFrames++;
+      if (!firstBad) firstBad = "pixels f" + f;
+    }
+  }
+  check(cramFrames === 0,
+        "#93: every frame's CRAM is the step's palette (" + firstBad + ")");
+  check(pixelFrames === 0,
+        "#93: every frame equals the renderer with the computed palettes (" +
+        firstBad + ")");
+  check(pixelDiffCount(frames[16].pixels, composed.pixels) > 0,
+        "#93: the faded frame is a different picture from the toy's own");
+  check(countPixels(frames[16].pixels, (r, g, b) => r === 252 && g === 252 &&
+                                                b === 252) ===
+        st.width * st.height,
+        "#93: at step 16 the whole picture is white (every channel to 7)");
+
+  /* -- the asset form -- */
+  const asset = studio.fadeSaveAsset();
+  check(studio.fileNames().indexOf("fade.json") >= 0,
+        "#93: Save as asset puts fade.json in the toy's files");
+  const file = studio.files().find((x) => x.name === "fade.json");
+  let parsed = null;
+  try { parsed = JSON.parse(file.source); } catch (e) { parsed = null; }
+  check(!!parsed && parsed.kind === "pce.fade" && parsed.steps === 16 &&
+        parsed.frames.length === 17 &&
+        parsed.addresses.length === plan.addresses.length,
+        "#93: fade.json records the 17 stepped palettes");
+  eq("#93: fade.json's step 8 is the plan's step 8", parsed.frames[8],
+     plan.frames[8]);
+  check(asset.changed === true &&
+        studio.fadeSaveAsset().changed === false,
+        "#93: saving the same plan again writes nothing");
+
+  /* -- refusals, by code -- */
+  eq("#93: a 1-step fade is refused", codeOf(() => studio.fadeSetSpec({ steps: 1 })),
+     "fade-steps");
+  eq("#93: an unknown curve is refused", codeOf(() => studio.fadeSetSpec({ curve: "smooth" })),
+     "fade-curve");
+  eq("#93: a target past 9 bits is refused",
+     codeOf(() => studio.fadeSetSpec({ target: 0x200 })), "fade-target");
+  eq("#93: a fade with no palette is refused",
+     codeOf(() => studio.fadeSetSpec({ palettes: [] })), "fade-palettes");
+  eq("#93: an unknown palette kind is refused",
+     codeOf(() => studio.fadeSetSpec({ palettes: [{ kind: "bg", palette: 0 }] })),
+     "palette-kind");
+  check(studio.fadeSpec().steps === 16 && studio.fadeSpec().curve === "linear",
+        "#93: a refused spec leaves the panel's fade as it was");
+
+  /* The ?fade= hook: the screenshot needs no synthetic input (the same trick
+   * as ?poke= and ?bands=). */
+  const p2 = runPage("?demo=sprite&paused=1&panel=layers&fade=b0+s0,white,8,linear");
+  const s2 = p2.sandbox.PCEStudio.studio;
+  eq("#93: ?fade= sets the panel's fade spec",
+     [s2.fadeSpec().steps, s2.fadeSpec().curve, s2.fadeSpec().target],
+     [8, "linear", 0x1FF]);
+  eq("#93: ?panel=layers selects the panel", s2.panels.active(), "layers");
+  const plan2 = s2.fadePlan();
+  eq("#93: ?fade= captured the plan (backdrop, entries 1-15, sprite $100-$10F)",
+     plan2.addresses.length, 32);
+
+  /* Leave the page on the sprite example, paused at frame 0 (the code the
+   * fade was written into is not carried on). */
+  studio.loadExample("sprite", true);
+
+  studio.pause();
+  studio.seek(0);
+}
+
 /* ---- main ------------------------------------------------------------- */
 async function main() {
   const started = Date.now();
@@ -4377,6 +4793,7 @@ async function main() {
   checkVramPanel(page);
   checkScanlinesPanel(page);
   checkConsolePanel(page);
+  checkLayersPanel(page);
   checkStudioApi(page);
 
   let browser = "not-requested";

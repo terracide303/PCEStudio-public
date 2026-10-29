@@ -1,0 +1,89 @@
+/*
+ * studio-panel-layers.css — the LAYERS panel's styles (card #93).
+ *
+ * #102's split: a panel's CSS may live beside its module (the SPRITES panel's
+ * does), so the panel adds no rules to studio.html's <style> block.  The
+ * classes are the panel's own (lay-), the tokens are the page's.
+ */
+
+.lay-prevs {
+  display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 0 0 10px; border-bottom: 1px solid var(--line2);
+}
+.lay-prev { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.lay-prev canvas {
+  display: block; width: 150px; height: auto; image-rendering: pixelated;
+  background: #08090c; border: 1px solid var(--line);
+}
+.lay-prev b {
+  font: 700 10px var(--mono); letter-spacing: 0.1em; color: var(--text2);
+}
+.lay-prev span {
+  font: 9px/1.35 var(--mono); color: var(--dim); max-width: 150px;
+}
+
+.lay-order { margin: 0 0 10px; }
+.lay-stacklist {
+  margin: 4px 0 0; padding: 0 0 0 18px; color: var(--text2);
+  font: 11px/1.5 var(--mono);
+}
+.lay-stackrow b { color: var(--text); }
+.lay-stackrow span { display: block; color: var(--muted); font-size: 10.5px; }
+.lay-rule { color: var(--dim); font: 10px/1.4 var(--mono); margin-top: 4px; }
+
+.lay-table { margin: 0 0 10px; }
+.lay-row {
+  display: grid; grid-template-columns: 6.5rem 4.5rem 1fr; gap: 8px;
+  align-items: center; padding: 2px 0; color: var(--text2);
+  font: 11px var(--mono); border-top: 1px solid var(--line2);
+}
+.lay-headrow {
+  color: var(--muted); font: 700 9.5px var(--mono); letter-spacing: 0.1em;
+  text-transform: uppercase; border-top: 0;
+}
+.lay-row code { color: var(--muted); font: 10.5px var(--mono); }
+.lay-row .btn-mini { justify-self: start; }
+.lay-always { color: var(--muted); font: 10.5px var(--mono); }
+.lay-sprites { margin: 2px 0; }
+.lay-sprites .lay-row { border-top: 1px dotted var(--line2); }
+
+.lay-fade {
+  margin: 0 0 10px; padding: 8px 0 0; border-top: 1px solid var(--line2);
+}
+.lay-chips { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; margin: 2px 0 6px; }
+.lay-chips .scr-zoomlabel { margin: 0 4px 0 6px; }
+.lay-chips .btn-mini {
+  min-width: 22px; font: 9.5px var(--mono); padding: 2px 4px;
+}
+.lay-chips .btn-mini.is-on {
+  border-color: var(--accent, #5fc9e8); color: var(--text);
+  background: var(--raised);
+}
+.lay-num {
+  width: 3.4rem; background: var(--pane2); color: var(--text2);
+  border: 1px solid var(--line); border-radius: 4px;
+  font: 11px var(--mono); padding: 1px 3px;
+}
+.lay-range { width: 12rem; accent-color: var(--accent, #5fc9e8); }
+.lay-fade-prevrow { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; margin: 6px 0; }
+.lay-strip {
+  display: block; height: 160px; width: 288px; image-rendering: pixelated;
+  border: 1px solid var(--line); background: #08090c;
+}
+.lay-step {
+  display: block; width: 150px; height: auto; image-rendering: pixelated;
+  border: 1px solid var(--line); background: #08090c;
+}
+.lay-fade-note { color: var(--cyan); font: 10px/1.4 var(--mono); }
+
+.lay-regs { margin: 6px 0; }
+.lay-regs summary {
+  cursor: pointer; color: var(--muted); font: 700 10px var(--mono);
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.lay-regs .table { margin-top: 6px; }
+
+.lay-stat {
+  margin: 12px 0 0; padding-top: 8px; border-top: 1px solid var(--line2);
+  color: var(--muted); font: 11px/1.5 var(--mono);
+}

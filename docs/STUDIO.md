@@ -166,7 +166,7 @@ and our scrubber row is much shorter than their timeline block, so our drawer st
 
 **Where ours deliberately differs.** No account/publishing controls (there is no backend); `Run` and
 `Check` are visible because our editor applies an edit with `Run` and `Check` runs the determinism / Lua-IL
-comparison; the dock has eight PCE panels rather than eleven SNES panels (§3); `Lua / IL` replaces
+comparison; the dock has nine PCE panels rather than eleven SNES panels (§3); `Lua / IL` replaces
 `Lua / Cart` because the compiler's IR exists (#31) and machine code does not; `Length` is frames because our
 toy clock is `t = f/60` and a seek replays deterministically.
 
@@ -202,7 +202,7 @@ Scanlines, Registers, SNES. Ours keeps the strip's place and shape and gives eac
 | Sprites | **SPRITES** | **a visual editor (#86)**: the 64 SAT slots drawn as a grid, the screen with the selected sprite outlined and numbered, a picker (slot with ‹ ›, X/Y with −/+, pattern, palette, SPBG priority, H/V, size read from the pattern), *release position*, *off-screen* and *clear slot*, the sprite palette strip, and a pattern sheet whose selected pattern is drawn with the same six tools as SCREEN at pixel granularity. The per-line header is #50's model (`n/16 strips · n/256 px`, the overflow shown). It edits `sprites.json` and the sprite palettes in `palettes.json` | `renderer/pce-sat.js`, `renderer/pce-editor.js` `renderPreview` |
 | Audio | **AUDIO** | the honest state: `pce-psg.js` exists and is checked; toys have no sound surface yet (#71) | — |
 | Sequencer | *(none yet)* | the tracker lives in `renderer/pce-hutrack.js`; a toy-facing sequencer is a later card | — |
-| Compose | *(none)* | **no PCE counterpart**: the HuC6270 has one background layer plus sprites and the HuC6260 has no sub-screen, colour math or blending | — |
+| Compose | **LAYERS** | **the PCE's answer (#93)**: **no sub screen and no colour math** exist on the HuC6260, so instead of `out = main + sub` the panel shows the backdrop (CRAM $000), the background, the sprites and the composed frame as four previews; the stacking order spelled out; the layers on/off through CR (**BB**, bit 7; **SB**, bit 6) and each sprite's **SPBG**; and a **fade** done the only way the VCE can — by rewriting palettes, stepped per frame with a curve, as toy code or a `fade.json` asset. Its Registers fold shows CR and the SAT priority bits, and one line says there is no colour blending (transparency is flicker #28 or a dither) | `renderer/pce-layers.js`, `renderer/studio-panel-layers.js`, `pce-sprites.js` `renderFrame`, `pce-panels.js` `satTable` |
 | Windows | *(none)* | **no PCE counterpart**: the VDC has no window/mask registers. Per-line `CR` (display on/blank) and `BXR/BYR` are the closest thing, and they sit in SCANLINES | — |
 | Scanlines | **SCANLINES** | one row per VDW line: BXR, BYR, CR, whether the raster table writes this line, and the RCR the chain arms | `pce-panels.js` `registerLines` |
 | Registers | **REGISTERS** | **a visual editor (#79)**: every register the console has — the VDC's R00–R13, the VCE's CR/CTA/CTW, the ten PSG registers, the timer and the IRQ pair — as one searchable table: address, register, editable HEX and DECIMAL, clickable bits, decoded fields with their Lua names, a curve button and a POKED column. A value is a keyframed **poke**; `Write to toy` puts the curves into the toy's own `main.lua` | `renderer/pce-pokes.js`, `renderer/studio-panel-registers.js`, `pce-panels.js` `vdcRegisters`, `pce-psg.js` `REGISTERS` |
@@ -214,11 +214,11 @@ mirror image: it reads the toy's *source* and runs the compiler pipeline over it
 run on a console" is a question about the code, not about the frame the browser just drew. There is no
 second copy of the picture: the same panel code the editor uses reads the toy's frame. The panel strip
 is hidden/shown from the `Panels ▾` menu, which groups `WORKSPACE` (Editor, Assets, Output, Markers, Agent)
-and `THE CHIP` (the eight panels), with `Reset to default`, like ppu.toys' menu.
+and `THE CHIP` (the nine panels), with `Reset to default`, like ppu.toys' menu.
 
 A panel's **`Guide`** button opens the Docs panel at that panel's chapter: SCREEN → registers, VRAM → the
-toy, PALETTES → palettes, SPRITES → sprites, AUDIO → sound, SCANLINES → raster, REGISTERS → registers,
-CONSOLE → budgets.
+toy, PALETTES → palettes, SPRITES → sprites, AUDIO → sound, LAYERS → registers (CR and the SAT), SCANLINES
+→ raster, REGISTERS → registers, CONSOLE → budgets.
 
 ### 3.1 SCREEN as a visual editor (#84, part A)
 
@@ -268,7 +268,7 @@ no PCE counterpart; the palette *entries* are edited in the PALETTES panel (#85)
 
 Every panel is its own file — `renderer/studio-panel-<name>.js` for `screen`, `vram`, `palettes`,
 `sprites`, `audio`, `scanlines`, `registers`, `console`, `markers` and `agent`. Each pushes one module with
-a `register(studio)`; `studio.html` loads the eleven files and calls every `register(studio)` before it builds
+a `register(studio)`; `studio.html` loads the twelve files and calls every `register(studio)` before it builds
 the dock, **after** which the page names no panel:
 
 ```
@@ -316,8 +316,8 @@ implementation):
 | `theme.token(name)` / `.tokens()` | the page's CSS custom properties (`--bg`, `--accent`, …), read from `:root` |
 | `$`, `document`, `toast(msg)`, `hex`, `follow()`, `layout.drawer(which)` | the small DOM/layout surface: an element by id, a note, the followed pixel, and a workspace drawer |
 
-**The split is enforced, not just tidy.** `tests/check-studio.js` asserts each of the eleven files is loaded,
-that the eleven register in order, that the dock and the Panels menu are built from the registry, and that
+**The split is enforced, not just tidy.** `tests/check-studio.js` asserts each of the twelve files is loaded,
+that the twelve register in order, that the dock and the Panels menu are built from the registry, and that
 `studio.html`'s inline script no longer contains the panels' drawing code (`function drawVram`,
 `function drawScreen`, `function drawMarkers`, `let screenPic`, …). The page keeps the layout, the editor,
 the output, the transport and the API; a panel keeps its own state and drawing.
@@ -628,6 +628,58 @@ owns the layout.
 **Refusals.** `asset-json`, `asset-shape`, `asset-wave` (a wave that is not 32 steps of 0–31),
 `asset-envelope` (a level past 31, or a size that disagrees with the data), `asset-noise` (noise off
 channels 5–6, or NF outside 0–31), `asset-duplicate` (a name the toy already has) and `asset-name`.
+### 3.8 LAYERS, the PCE's answer to ppu.toys' COMPOSE (#93)
+
+ppu.toys' COMPOSE panel (Dennis, 2026-10-29) is the working example: previews of the **main** and **sub**
+screens, `out = ( main + sub )`, a layer table `BG1-3/OBJ/Backdrop × MAIN/SUB/MATH`, `BRIGHTNESS 0-15` with a
+curve, `OPERATION add/sub`, `+ 2 half`, `ADDEND sub screen/fixed color`, `FIXED COLOR` and a `Registers`
+fold with `TM/TS/CGADSUB/CGWSEL/COLDATA`. **None of that math exists on the PC Engine**: the HuC6260 VCE has
+no sub screen, no colour math and no brightness register, so the PCE counterpart is not a port:
+
+| ppu.toys COMPOSE (measured 2026-10-29) | `studio.html`'s LAYERS panel |
+|---|---|
+| MAIN and SUB previews, `out = ( main + sub )` | **four previews**: BACKDROP (a solid frame of CRAM $000), BG, SPRITES and OUT — the composed frame. Each is `renderer/pce-sprites.js` drawing the running frame with **one CR value** (or one CRAM table) changed, so there is no second compositor |
+| BG1–BG4 / OBJ / Backdrop × MAIN/SUB/MATH | the stacking order, spelled out, because there are only four layers: **backdrop → sprites with SPBG=0 → background → sprites with SPBG=1**; among sprites the **lower SAT index wins**; sprite colour 0 is transparent; a background colour 0 shows the backdrop (and a BB-clear line shows the blanking-period colour CRAM $100) |
+| Visible / per-layer enables | a layer table whose SHOWN column writes the VDC's own bits: **BB** (CR bit 7) blanks the background, **SB** (CR bit 6) blanks the sprites — the same state the output column's `Layers` controls use (#78), through `studio.setLayer`, so the panel and the column cannot disagree. One row per non-empty SAT slot shows its **SPBG** (SAT word 3 bit 7) in front/behind; the button flips it **in the view** (a SAT copy, the toy's SAT untouched, like the pokes) |
+| BRIGHTNESS 0-15 with a curve | a **FADE** helper. The PCE can only fade by rewriting palettes: pick palettes (16 background, 16 sprite, `all`), a target (black, white or any of the VCE's 512 colours), 2–64 steps and a curve (`linear`, `ease-in` `(k·k)/steps`, `ease-out` `steps−((steps−k)²)/steps`). The panel captures the frame's CRAM, computes every step in **3-bit channel integer arithmetic** and draws the stepped palettes as a strip plus the composed frame at a chosen step. `Write to toy` puts a generated block into `main.lua` (`-- >>> PCEStudio fade` … `-- <<< PCEStudio fade`, replaced on the next write) that runs the toy's own `frame()` and then rewrites the chosen CRAM entries every frame — the same closure `pce-pokes.js` writes (#79) — and re-runs it. `Save as asset` records the 17 stepped palettes as `fade.json` beside the toy |
+| OPERATION add/sub/half, ADDEND, FIXED COLOR | **none**, and the panel says why: no colour math, no addend, no fixed colour. The one line at the foot reads *No colour blending on the PC Engine: transparency is faked with flicker (#28) or a dither* |
+| Registers fold (TM/TS/CGADSUB/CGWSEL/COLDATA) | a **Registers** fold: `CR $C0 BB 1 SB 1`, the SAT's `SPBG` bit per slot (`slot 0 pattern $100 pal 0 SPBG 0 behind`), and the note that a slot has no on/off of its own (move it past the display window or clear its entry) |
+
+**Which CRAM entries a palette owns.** A background palette's entry 0 is the one shared backdrop, so
+background palette 0 owns CRAM $000 and entries 1–15; palettes 1–15 own entries 1–15 only (a word written to
+$010, $020 … is never read by the background — `pce-bg.js` fixes colour 0 up to $000). A sprite palette owns
+all 16 entries. The fade plan lists exactly the addresses a palette shows.
+
+**What the evidence measures** (`tests/check-studio.js`, `checkLayersPanel`). A scene with an opaque tiled BG
+and an SPBG=0 sprite is run through the page: each preview diff-0 against a frame the check renders itself
+with the CR value it computed (`BB on, SB clear`; `SB on, BB clear`; the frame's CR); toggling the layers
+through `studio.setLayer` clears the live VDC's CR bit and the composed preview and the canvas equal the
+renderer with that bit cleared; flipping a sprite's SPBG equals the renderer given a SAT the check patched
+itself, and the toy's SAT is unchanged; a **16-step fade to white** is planned, its step 8 checked by the
+check's own hand arithmetic (`$03F → $0FF`), every step compared with a 3-bit floor interpolation, then
+written into `main.lua` and **run for 17 frames**: each frame's CRAM entries equal the plan and each frame's
+pixels equal `pce-sprites.renderFrame` drawn with those palettes, and step 16 is the whole picture white.
+`fade.json` is checked to hold the same 17 steps, and the refusals come back by code (`fade-steps`,
+`fade-curve`, `fade-target`, `fade-palettes`, `palette-kind`), leaving the spec as it was. The `?fade=` URL
+hook (below) is exercised by a second page boot.
+
+**Refusals.** `fade-steps` (2..64), `fade-curve` (the three), `fade-target` (a 9-bit word), `fade-palettes`
+(none chosen), `palette-kind` (`background`/`sprite`), `palette-range`, `no-frame` (nothing run yet),
+`sprite-range` (SAT slot 0–63), `no-toy` (no `main.lua`).
+
+**No synthetic input.** `?fade=<palettes>,<target>,<steps>,<curve>[,<step>]` sets the panel's spec and
+captures the plan from the current frame — e.g.
+`?demo=sprite&frame=30&paused=1&panel=layers&fade=b0+s0,white,16,linear,8` — the same trick as `?poke=`,
+`?bands=` and `?tab=assets`. Palette tokens are `all` or `b0..b15`/`s0..s15` joined by `+`.
+
+**Limits, stated rather than pretended.** The fade's source words are **constants captured at write time**,
+and it starts at frame 0: a toy that rewrites the chosen palettes every frame keeps those writes only until
+the block's frame() runs, and the block then wins. `fade.json` is a record — nothing reads it into a running
+toy yet (the importer is #24/#71); the toy-code form is the one that runs. The per-sprite SPBG flip is the
+view's, not the toy's; editing an asset's priority is the SPRITES panel's (#86). No raster-table toy is
+exercised by the LAYERS checks, so the per-line CR gating in a preview is the model's and unproven against a
+capture. The fade is one step per frame, not a duration in seconds.
+
 
 ## 4. The Docs panel (the generated #61 reference)
 
@@ -1107,6 +1159,26 @@ and labelled and the tile region's own pixels, the legend (`BAT $0000-$03FF · 1
 ppu.toys DOM, so no side-by-side pair is claimed for this card — the comparison is the component read from
 the served bundle (§3.4), which is a source, not a pixel match.
 
+**#93's LAYERS pair.** `$TMPDIR/pce93/shots/side-by-side-layers-93.png` (3200×1000: theirs left, ours
+right) puts `https://ppu.toys/studio` at 1600×1000 beside our studio at the same size with the LAYERS panel
+open. Theirs shows COMPOSE: the MAIN and SUB previews joined by `out = ( main + sub )`, the layer table
+`BG1 BG2 BG3 BG4 Backdrop × MAIN SUB MATH`, `BRIGHTNESS` 0-15 with its curve button, `OPERATION add/sub`,
+`+ 2 half`, `ADDEND sub screen / fixed color`, `FIXED COLOR` and the `Registers` fold. Ours shows the four
+previews (BACKDROP, BG, SPRITES, OUT), the stacking order with the four layers and the three rules, and the
+layer table `layer · shown · where the bit lives` (`Backdrop always CRAM $000`, `Background ☑ CR bit 7 (BB)`,
+`Sprites ☑ CR bit 6 (SB)`, then `Sprite 0 behind the BG · slot 0 · pattern $100 · pal 0 · SPBG 0`). Our panel
+is taller than theirs — it carries the fade and the registers fold below the fold — so
+`$TMPDIR/pce93/shots/ours-layers-93-full.png` (1600×2000, the whole panel) shows the rest: the `FADE` box
+(32 palette chips, target `white · G7 R7 B7 · $1FF`, 16 steps, linear curve, `preview / Write to toy / Save
+as asset`), the stepped-palette strip, the composed frame at step 8 of 16, the `Registers — CR and the SAT
+priority bits` fold and the one line about no colour blending. `theirs-compose.png` and
+`ours-layers-93.png` are the two captures on their own. Captured with headless Chrome; ours from the URL
+above with `?fade=b0+s0,white,16,linear,8` (no synthetic input). Theirs needed COMPOSE selected, which is a
+tab click and not a URL: it was done inside the same headless Chrome with the DevTools protocol, dispatching
+pointer/mouse events **at the DOM** of their page — no keyboard or mouse event reaches the desktop (this is
+the one capture in this document made that way, and it is named here rather than implied). No pixel
+comparison between the two pictures is claimed: the panels are different by design.
+
 ---
 
 ## 12. Not proven, and what comes next
@@ -1140,9 +1212,16 @@ the served bundle (§3.4), which is a source, not a pixel match.
 * **SCREEN, SPRITES and REGISTERS are editors so far.** ppu.toys' panels are all editors with pokes and
   keyframes. #84 made SCREEN an editor of the toy's *assets* (§3.1), #86 did the same for SPRITES (§3.3),
   and #79 made REGISTERS an editor of **keyframed register pokes** (§3.5) — which are the view's, not the
-  toy's, until `Write to toy` puts them into `main.lua`. Still read-only: VRAM, PALETTES (#85),
-  SCANLINES, CONSOLE. #102 puts each panel in its own file and the API in §3.2, so those cards can run in
-  parallel.
+  toy's, until `Write to toy` puts them into `main.lua`. #93's LAYERS edits registers through that same poke
+  path (the BB/SB layer state is #78's, which writes the live VDC), flips SPBG in a view-only SAT copy, and
+  its fade is the first panel edit that writes a *new* kind of block into `main.lua`. Still read-only: VRAM,
+  PALETTES (#85), SCANLINES, CONSOLE. #102 puts each panel in its own file and the API in §3.2, so those
+  cards can run in parallel.
+* **#93's LAYERS limits.** The fade's source palettes are captured constants and the block starts at frame
+  0; `fade.json` is a record nothing consumes yet (#24/#71); the SPBG flip is the view's; no raster-table
+  toy exercises a LAYERS preview; the strip and the step preview are the panel's own drawing, which the
+  stub-DOM check does not pixel-diff (it compares the frames the panel's model returns, not the painted
+  canvas). Rule 2 is owed: the check was written with the panel, so @review owes it a cold break.
 * **#79's pokes reach the toy only through three registers.** BXR, BYR and CR are the registers a toy may
   set (`docs/TOYS.md`), so a poke of MWR, HSR, a PSG register or the timer is a view override that
   `Write to toy` reports as `reg-forbidden` and does not write (§3.5). Widening the toy's register set is a
