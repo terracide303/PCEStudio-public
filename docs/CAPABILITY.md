@@ -73,6 +73,8 @@ The two milestones Dennis asked for:
 | The IL (our intermediate language) | PROVEN | `check-il.js` 973 checks, Lua == IL | #31 |
 | The checker: frame time, sprites per line, memory | PROVEN | `check-validate.js`; breaker gaps closed by #89 | #32 |
 | A small game made only in the studio (demo-ready test) | TODO | starts when the panels and sound are in | #88 |
+| AI link part 1: an MCP server (an agent writes, runs, checks and exports toys) | RUNNING | | #36 |
+| AI link part 2: the agent skill with recipes | TODO | | #103 |
 
 ## 4. Getting it onto a console — export to `.pce`
 
@@ -111,7 +113,7 @@ The two milestones Dennis asked for:
 
 | Part | Status | How we know | Where |
 |---|---|---|---|
-| AI link: an MCP server and the studio's AGENT panel | LATER | | #36 |
+| AI link part 3: the live link — an agent drives the open studio | LATER | after the beta | #104 |
 | Describe it, get it (a sentence becomes a picture) | LATER | | #24 |
 | Publish a toy, play other people's, sign in | LATER | needs a server | #37 |
 | A photo becomes a PCE picture | LATER | | #18 |
