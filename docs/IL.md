@@ -1260,11 +1260,38 @@ exited 0 with all 49 checks; rebuilt and recaptured, the palette's own frame
 and save assertions still passed at 30,510 cycles/frame. The guard is the
 palette's `minMeanTicks` (127): a frame() that spans VBlanks must
 reconstruct more than the seven-bit ceiling, and the same recapture now
-fails (`29.79 TMA ticks, need > 127`). A cold read of that new assertion is
-still owed. Also found while re-running the evidence:
-`tools/capture-ilvm.sh`'s `TRIM_FRAMES` trim piped `ls` into `head` under
-`pipefail` and could exit before `meta.json` was rewritten, leaving a
+fails (`29.79 TMA ticks, need > 127`). Also found while re-running the
+evidence: `tools/capture-ilvm.sh`'s `TRIM_FRAMES` trim piped `ls` into `head`
+under `pipefail` and could exit before `meta.json` was rewritten, leaving a
 recaptured dump beside the old measurement; it trims with a bash array now.
+
+**The new assertion, cold-read and cold-broken again** (2026-10-29, a third
+`@design` seat, a fresh clone of `fee05e1`, every step re-run rather than the
+dumps edited). `elapsed_ticks` was short-circuited to return the raw seven-bit
+delta for every bracket, `tools/ilvm/build.sh` rebuilt the image (sha
+`cc5e015c…`, `main` 2,077 B against 2,321 — the phase reconstruction is dead
+code and is dropped), and `tools/capture-ilvm.sh toypalette-ilvm
+tools/toys/palette.lua` recaptured. The capture read **32.87 TMA ticks/frame
+(33,654 cycles, max 126, min 1, 439 frames)** and `node tests/check-ilvm.js`
+exited 1 with **2 of 50 FAIL**: `frame() spans more than one video frame
+(32.87 TMA ticks, need > 127)`, which is the guard, and — for a reason with
+nothing to do with the timer — the parallax dump's "a fresh browser-path build
+is the dumped ROM". The palette's frame-match, VRAM/CRAM and save-state
+assertions all still passed, so `minMeanTicks` alone is what catches this
+break, as the paragraph above says.
+
+The second failure is the operational fact that run paid for: **every dump's
+`meta.json` records the ROM sha of a build made from the committed
+`ilvm.bin`, so rebuilding that image invalidates *both* captures at once.**
+Changing the interpreter and recapturing only the toy being studied leaves the
+other dump failing the ROM-sha check; a rebuild is followed by
+`tools/capture-ilvm.sh toypalette-ilvm tools/toys/palette.lua` **and**
+`tools/capture-ilvm.sh toyparallax-ilvm toys/parallax.lua`, not one of them.
+
+This seat is deepseek-flash, the card's own model tag. Rule 2 asks for another
+*seat* and another *model*: the seat half is met; if the seat that wrote
+`tests/check-ilvm.js` was also deepseek-flash, the model half is still owed and
+`@review` is the one to say so.
 
 ### 14.6 What this half refuses, and what it does not prove
 
@@ -1281,10 +1308,12 @@ Not proven:
   §10.4) and the #29 examples are untested.
 - **No real console and one emulator.** Mednafen only; no ares run of a
   bytecode ROM yet.
-- **Rule 2 is done for the eight breaks §14.5 lists, and one guard is new.**
-  The operand encoding, the browser glue, the rebuilt-image sha and a
-  recaptured arithmetic break were all caught; the stale timer read was
-  missed and is now guarded by `minMeanTicks`. A cold read of that new
-  assertion by yet another seat is the remaining part.
+- **Rule 2's breaks are done for the eight §14.5 lists and the new guard.** The
+  operand encoding, the browser glue, the rebuilt-image sha, a recaptured
+  arithmetic break and (twice, the second time from a clean clone) the stale
+  timer read were all applied to a scratch copy and caught; the stale read is
+  guarded by `minMeanTicks` and nothing else. Whether the "another model" half
+  of the rule is met depends on the authoring seat's model, which the suite
+  does not record — §14.5 says what is known.
 - **The studio's Export button is not wired.** The second half adds it; this
   half's evidence is the Node path and the browser-context byte equality.
