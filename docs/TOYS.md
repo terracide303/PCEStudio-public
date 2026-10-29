@@ -145,6 +145,7 @@ frames. `t` is deterministic (`f/60`), not wall-clock: a frame is reproducible.
 | `timer(period, fn)` | start the TMA timer ($1FEC00/$1FEC01, H8-20) with reload `period`; `fn` is called once per interrupt (period+1 ticks of 6,991.3 Hz) | period 0..127, `timer-range` |
 | `timerstop()` | stop the timer (its Start/Stop flag, $1FEC01 bit 0) | none |
 | `timerirqs()` | timer interrupts since the previous `frame()` | none |
+| `sr()` | the VDC's status register after the frame last drawn (#119): bit 0 CC (sprite #0 collided), bit 1 OR (a line overflowed), bit 2 RR (RCR matched), bit 5 VD (VBlank). Each bit is the condition AND its CR interrupt enable (CC bit 0, OC bit 1, RC bit 2, VC bit 3) | read-only 0..63; a read does not clear it |
 | `rgb(r, g, b)` | a VCE word from 3-bit channels | channels are masked to 0..7 |
 | `note(name or MIDI)` | the PSG's 12-bit F for a note | `toy-error` on a bad name |
 | `music(index)` | play song `index` from the start (#71) | an index into the songs the runtime was given; none or past them is `music-range` |
@@ -173,6 +174,20 @@ picture comes from `pce-editor.js`'s `renderPreview`, which turns SB on when the
 picture has sprites), so the panel showing a sprite while Run shows none is this
 bit, not a broken asset. `toys/demo-game/main.lua` and the studio's
 `sprite-pad.lua` example both open with that `reg()` call.
+
+**Collision and overflow are the VDC's, read with `sr()`.** The VDC detects a
+sprite-0 collision (CC) and a line overflow (OR) itself, and `sr()` hands the
+toy the status register that holds them. Two hardware rules come with it. The
+flag is gated by the interrupt enable in the same `reg("CR", ...)`: CC needs CR
+bit 0 and OR bit 1, so a toy that wants the collision flag writes
+`reg("CR", 0xC3)` (BB | SB | CC | OC), not `0xC0`. And `sr()` answers for the
+frame last drawn — `frame()` reads what the previous frame's display found, as
+the CPU reads SR in VBlank — so a collision costs a frame of latency and
+`init()` reads 0. CC is sprite #0 against every other sprite, so the sprite
+that should collide (the player) must be slot 0. `toys/demo-game/main.lua`
+does exactly this: the ship is SAT slot 0 and `sr() & 0x01` is its collision
+test; its bullet-vs-drone hits stay arithmetic because slot 0 is already
+taken.
 
 **A sprite pattern is not a background tile.** The BAT addresses a tile as 16
 words (`vram[char*16 + row]`, two bitplanes per word); the SAT addresses a

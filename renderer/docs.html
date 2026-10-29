@@ -61,6 +61,7 @@
       <a href="#registers">Registers</a>
       <a href="#palettes">Palettes and colour</a>
       <a href="#sprites">Sprites and the SAT</a>
+      <a href="#status">The VDC's status flags</a>
       <a href="#raster">Raster: changes per line</a>
       <a href="#pads">Pads</a>
       <a href="#timer">The timer</a>
@@ -116,6 +117,23 @@ end</code></pre>
 <pre><code class="lua">function init()
   sprite(0, { x = 32, y = 64, pattern = 0, palette = 1 })
   sprite(1, { x = 80, y = 64, pattern = 0, palette = 2, hflip = true })
+end</code></pre>
+</section>
+<section id="status">
+<h2>The VDC's status flags</h2>
+<p>The VDC records what its display found in a status register (SR, HuC6270 manual p. H7-4): a collision of sprite #0 with another sprite, more sprites on a line than it could draw, a line-counter match and vertical blanking. A toy reads the frame's flags with sr(), computed by the same model renderer/pce-sprites.js status() gives the SPRITES panel and the validator — there is no arithmetic in the toy.</p>
+<table><thead><tr><th>call</th><th>what it does</th><th>range / refusal</th></tr></thead><tbody><tr><td>sr()</td><td>the VDC's status register after the frame last drawn: bit 0 CC (sprite #0 collided), bit 1 OR (a line overflowed), bit 2 RR (RCR matched), bit 5 VD (vertical blanking). A bit is the condition AND its interrupt enable in CR (CC bit 0, OC bit 1, RC bit 2, VC bit 3 — CR R05 p. H7-5..H7-6). frame() reads what the frame before it detected, the way the CPU reads SR in VBlank; init() reads 0</td><td>0..63; a read does not clear the bits here (the model does not simulate the CPU's read)</td></tr></tbody></table>
+<table class="tight"><thead><tr><th>bit</th><th>flag</th><th>set when</th><th>manual</th></tr></thead><tbody><tr><td>$01</td><td>CC</td><td>sprite #0 overlapped any of sprites #1-#63: both had an opaque pixel at the same display column of a line. Set only while CR bit 0 (the CC interrupt enable) is on</td><td>SR H7-4</td></tr><tr><td>$02</td><td>OR</td><td>a line asked for more than the 16 sprite strips the VDC draws. Set only while CR bit 1 (the OC interrupt enable) is on</td><td>SR H7-4</td></tr><tr><td>$04</td><td>RR</td><td>the scanning-line counter matched RCR. Set only while CR bit 2 (the line interrupt enable) is on</td><td>SR H7-4</td></tr><tr><td>$20</td><td>VD</td><td>the display entered vertical blanking. Set only while CR bit 3 (the VBlank interrupt enable) is on</td><td>SR H7-4</td></tr></tbody></table>
+<p>sr() answers for the frame last drawn, not the one being built: frame() reads what the previous frame's display found, the way the CPU reads SR in VBlank, and init() reads 0. A bit is a condition AND its interrupt enable in CR 0..255 (CC bit 0, OC bit 1, RC bit 2, VC bit 3 — CR R05 p. H7-5..H7-6), so a toy that wants the collision flag sets CR bit 0: reg(&quot;CR&quot;, 0xC3) is background, sprites, CC and OC. The host does not clear the bits on a read; the condition is the frame's own.</p>
+<pre><code class="lua">function init()
+  reg(&quot;CR&quot;, 0xC3)   -- BB, SB, and the CC/OC interrupt enables
+  sprite(0, { x = 120, y = 128, pattern = 0, palette = 1 })
+  sprite(1, { x = 160, y = 128, pattern = 0, palette = 2 })
+end
+
+function frame(t, f)
+  -- sprite #0 (the player) touched another sprite last frame
+  if sr() &amp; 0x01 ~= 0 then print(1) end
 end</code></pre>
 </section>
 <section id="raster">

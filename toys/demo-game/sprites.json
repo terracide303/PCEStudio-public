@@ -3672,6 +3672,15 @@
   ],
   "sprites": [
     {
+      "x": 120,
+      "y": 160,
+      "pattern": 10,
+      "palette": 0,
+      "priority": 0,
+      "hflip": 0,
+      "vflip": 0
+    },
+    {
       "x": 196,
       "y": 4,
       "pattern": 0,
@@ -3721,15 +3730,6 @@
       "y": 4,
       "pattern": 13,
       "palette": 1,
-      "priority": 0,
-      "hflip": 0,
-      "vflip": 0
-    },
-    {
-      "x": 120,
-      "y": 160,
-      "pattern": 10,
-      "palette": 0,
       "priority": 0,
       "hflip": 0,
       "vflip": 0

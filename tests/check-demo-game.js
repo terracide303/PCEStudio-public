@@ -23,6 +23,9 @@
  *      the playfield), N fires (rate-limited to one shot in eight frames, four
  *      slots), a shot that meets a drone raises the score, and a drone that
  *      meets a parked ship costs a life once and not again while inv runs.
+ *      That life is the VDC's own collision flag: the ship is SAT slot 0 and
+ *      `sr()` carries the CC bit (#119); clearing CR bit 0, its enable, in a
+ *      copy of the source loses no life at all, which is the control.
  *      The status bar is a raster split: BYR 0 and the bar's backdrop above
  *      line 24, the frame's own scroll and the field's backdrop below it.
  *   5. THE EVIDENCE IS IN THE REPO.  The seven key frames and a six-cell strip
@@ -35,8 +38,9 @@
  *     writes happen, but with no music() the host never sets the master
  *     amplitude R1, so its PCM renders silent (card #113).  The test prints
  *     the PCM's RMS; when #113 lands the line stops saying 0.
- *   - The hardware's collision flags are not used because a toy cannot read
- *     them (card #119); hit() is arithmetic.
+ *   - The VDC's CC flag is used only for the ship: a bullet against a drone
+ *     is still `hit()` arithmetic, because the hardware reports sprite #0
+ *     against the others and #0 is the ship.
  *   - The entity lists are int arrays now that the IL reads a table index
  *     (card #118): four bullets and six drones are three arrays each and
  *     every operation is one loop over them.  The HUD digits are a ten-entry
@@ -67,11 +71,12 @@ const FRAMES = 600;
 const WIDTH = 256;
 const HEIGHT = 224;
 
-/* Sprite slots, from main.lua's own table: 0..2 score digits, 3..5 lives,
- * 6 the ship, 7..12 drones, 13..16 bullets. */
-const SLOT_SCORE = [0, 1, 2];
-const SLOT_LIVES = [3, 4, 5];
-const SLOT_SHIP = 6;
+/* Sprite slots, from main.lua's own table: 0 the ship (sprite #0 so the
+ * VDC's CC flag is the player's collision, #119), 1..3 score digits, 4..6
+ * lives, 7..12 drones, 13..16 bullets. */
+const SLOT_SCORE = [1, 2, 3];
+const SLOT_LIVES = [4, 5, 6];
+const SLOT_SHIP = 0;   /* #119: sprite #0 is the VDC's CC subject */
 const SLOT_BULLET = 13;
 const DIGIT_BASE = 18;   /* the ten digit pattern codes, art block */
 
@@ -277,7 +282,7 @@ function checkPlay() {
   for (let i = 0; i < rec.length; i++) {
     const r = rec[i];
     if (r.barLine !== 0 || r.fieldLine !== 24) split = false;
-    if (r.baseByr !== 0 || r.baseCr !== 0xC0) split = false;
+    if (r.baseByr !== 0 || r.baseCr !== 0xC3) split = false;
     if (r.byr !== (i + 1) % 256) split = false;
     if (r.byr !== 0) sawScroll = true;
     if (JSON.stringify(r.barCram) === JSON.stringify(r.fieldCram)) split = false;
@@ -331,6 +336,23 @@ function checkCollision() {
                   : " (first at frame " + lost + ")"));
   eq("exactly one life is lost in the 600-frame still run", drops, 1);
   eq("the still run ends on two hearts", lastLives, 2);
+
+  /* THE CONTROL (#119): the same still run with the CC enable cleared loses
+   * no life, so the loss above is the VDC's status flag and not arithmetic
+   * that would happen with or without sr(). */
+  const noCc = source.replace('reg("CR", 0xC3)', 'reg("CR", 0xC0)');
+  check(noCc !== source, "the control copy cleared CR bit 0 (the CC enable)");
+  const ctl = toys.create(noCc, { budgetMs: 250 });
+  ctl.load();
+  let ctlLost = -1;
+  for (let f = 0; f < FRAMES; f++) {
+    ctl.setPad(1, {});
+    const l = lives(ctl.frame(f).state);
+    if (ctlLost < 0 && l < 3) ctlLost = f;
+  }
+  ctl.dispose();
+  check(ctlLost < 0, "with the CC enable cleared no life is lost in the same " +
+        "600 still frames" + (ctlLost < 0 ? "" : " (lost at frame " + ctlLost + ")"));
   return { lost: lost };
 }
 
