@@ -1581,10 +1581,14 @@ function checkExamplesVisible(page) {
 
   /* -- the sprite answers the pad, in the pixels -- *
    * The block is solid, so the frame's non-backdrop pixels are it: ten
-   * frames of right move it ten columns, ten frames of left bring it back. */
-  studio.loadExample("sprite", true);
-  studio.pause();
-  studio.seek(0);
+   * frames of right move it ten columns, ten frames of left bring it back.
+   * The example goes through the page's editor → Run path (Ctrl+Enter), so
+   * the source the human edits is the source these pixels come from. */
+  const spriteSource = studio.examples.filter((e) => e.id === "sprite")[0]
+    .source;
+  runEditorSource(studio, spriteSource);
+  check(studio.current().source === spriteSource,
+        "the editor ran the page's own sprite-pad.lua (Ctrl+Enter)");
   const spriteBox = () => visibleBox(studio.output(), exampleCram(studio),
                                      [0, 0, 256, 224]);
   const start = spriteBox();
