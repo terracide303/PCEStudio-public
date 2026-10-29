@@ -486,6 +486,7 @@ function writeArt(picture, sheet, outDir, packRoot) {
 
   const files = {
     "art.lua": lua,
+    "main.lua": playable(lua),
     "tiles.json": picture.files["tiles.json"],
     "palettes.json": picture.files["palettes.json"],
     "sprites.json": sheet.files["sprites.json"]
@@ -503,6 +504,15 @@ function writeArt(picture, sheet, outDir, packRoot) {
   writePng(path.join(outDir, "sprites.png"), spriteImage(sheet));
   return { files: files, console: console, picture: picture, sheet: sheet,
            out: outDir };
+}
+
+/* The playable toy: the repository's main.lua with the art appended, which is
+ * how the page runs it and what tools/gallery.js's --with-demo-art reads
+ * (demo-art/cave/main.lua).  It is built from the repo file rather than from
+ * art.lua alone so the two can never drift. */
+function playable(artLua) {
+  const toy = fs.readFileSync(path.join(ROOT, "toys", "cave", "main.lua"), "utf8");
+  return toy + "\n" + artLua;
 }
 
 /* ---- the console build --------------------------------------------------

@@ -27,12 +27,6 @@ const ROOT = path.resolve(__dirname, "..");
 const TOYS = path.join(ROOT, "toys");
 const OUT = path.join(ROOT, "renderer", "gallery-toys.js");
 
-/* Where the demo art lives when a toy carries an `art` entry: beside the
- * repo, never inside it (docs/DECISIONS.md, 2026-10-29).  Only --art-dir
- * turns it on, so `--check` and a fresh clone see the generator's output
- * without any art on the machine. */
-let ART_DIR = null;
-
 /* The gallery, in the order toys/README.md tells the tricks in.  `effect`
  * is the one-line "what it proves" the toy page prints under the title. */
 const TOYS_META = [
@@ -103,24 +97,49 @@ const TOYS_META = [
       { name: "sprites.json", kind: "sprites" }
     ]
   },
-  /* #127: a demo built from a bought tileset.  The art is NOT in the repo
-   * (docs/DECISIONS.md, 2026-10-29): `art` names the file tools/cave-assets.js
-   * writes beside the repo, and only a build with --art-dir appends it, so
-   * the committed module and a fresh clone carry the toy's own Lua alone. */
+  /* #128: a game whose art is NOT in the repository (docs/DECISIONS.md,
+   * 2026-10-29).  The source here is the toy's placeholder picture; the
+   * playable file with the pack's art is demo-art/oak-woods/main.lua and
+   * tools/deploy.sh puts it on the site.  `song` is our own module, carried
+   * in the entry so music(0) has something to play in Browse and the studio. */
+  {
+    id: "oak-woods",
+    file: "oak-woods/main.lua",
+    title: "OAK WOODS",
+    author: "PCEStudio · art by Brullov",
+    badge: "#128 demo game",
+    tags: ["playable", "sprites", "music", "raster", "parallax"],
+    blurb: "A forest runner: three tree bands slide past at a quarter, a half " +
+      "and the full speed, rocks roll in on the ground, and the top 24 lines " +
+      "hold the HUD still. IJKL dodges, N jumps; reach the sign.",
+    effect: "a forest runner",
+    song: "oak-woods/song.json",
+    demoArt: "oak-woods"
+  },
+  /* #127: the same shape as #128.  The repo's cave/main.lua is the demo with
+   * a plain rock stub; the playable file with the pack's converted picture is
+   * demo-art/cave/main.lua (tools/cave-assets.js writes it) and only a
+   * --with-demo-art build reads it.  The author is the pack's, because its
+   * licence asks for attribution (toys/cave/README.md). */
   {
     id: "cave",
     file: "cave/main.lua",
     title: "CAVE",
     author: "Will Tice · unTied Games",
     badge: "#127 demo",
-    tags: ["demo", "parallax", "palette", "sprites", "scroll"],
-    blurb: "Four background bands and a floor scroll at five speeds over " +
-      "the Retro Pixel Cave tileset while the rock's lit veins breathe and " +
-      "two bats and an ember cross the dark. IJKL scrolls it by hand.",
+    tags: ["demo", "parallax", "palette", "sprites"],
+    blurb: "The Retro Pixel Cave: four background bands and a floor scroll " +
+      "at five speeds while the rock's lit veins breathe and two bats and " +
+      "an ember cross the dark. IJKL scrolls it by hand.",
     effect: "five BXR bands + a palette cycle",
-    art: { dir: "cave", file: "art.lua" }
+    demoArt: "cave"
   }
 ];
+
+/* #128: where the uncommitted art lives (docs/DECISIONS.md).  Only
+ * `--with-demo-art` reads it; the committed gallery and `--check` never do. */
+const DEMO_ART = process.env.DEMO_ART ||
+  "/Volumes/External/agent-workshop-demo/demo-art";
 
 function readFile(file, id) {
   if (!fs.existsSync(file)) {
@@ -132,9 +151,13 @@ function readFile(file, id) {
   return text;
 }
 
-function readToy(meta) {
+function readToy(meta, withDemoArt) {
   const file = path.join(TOYS, meta.file);
-  const source = readFile(file, meta.id);
+  let source = readFile(file, meta.id);
+  if (withDemoArt && meta.demoArt) {
+    /* the playable file: the same toy with the pack's art in its block */
+    source = readFile(path.join(DEMO_ART, meta.demoArt, "main.lua"), meta.id);
+  }
   const toy = {
     id: meta.id,
     file: meta.file,
@@ -146,19 +169,8 @@ function readToy(meta) {
   };
   if (meta.badge) toy.badge = meta.badge;
   toy.source = source;
-  if (meta.art) {
-    /* the art is appended, exactly as the toy page runs it: main.lua defines
-     * the stub, the art file defines the same functions last */
-    if (ART_DIR) {
-      const file = path.join(ART_DIR, meta.art.dir, meta.art.file);
-      if (!fs.existsSync(file))
-        throw new Error("no " + path.join(meta.art.dir, meta.art.file) +
-                        " in " + ART_DIR + " for the gallery's " + meta.id);
-      toy.source = source + "\n" + fs.readFileSync(file, "utf8");
-      toy.art = { file: meta.art.file, present: true };
-    } else {
-      toy.art = { file: meta.art.file, present: false };
-    }
+  if (meta.song) {
+    toy.songs = [JSON.parse(readFile(path.join(TOYS, meta.song), meta.id))];
   }
   if (meta.files) {
     const dir = path.dirname(file);
@@ -176,21 +188,21 @@ function readToy(meta) {
   return toy;
 }
 
-function data() {
+function data(withDemoArt) {
   const seen = new Set();
   const toys = TOYS_META.map((meta) => {
     if (seen.has(meta.id)) throw new Error("duplicate gallery id " + meta.id);
     seen.add(meta.id);
-    return readToy(meta);
+    return readToy(meta, withDemoArt);
   });
   return { version: 1, toys: toys };
 }
 
-function render() {
+function render(withDemoArt) {
   return "/*\n" +
     " * gallery-toys.js — the example toys as the Browse page, a toy's own\n" +
-    " * page and the studio read them (#80): the five effects of #29 and\n" +
-    " * STARFALL (#88, #121).\n" +
+    " * page and the studio read them (#80): the five effects of #29,\n" +
+    " * STARFALL (#88, #121), OAK WOODS (#128) and CAVE (#127).\n" +
     " *\n" +
     " * GENERATED by tools/gallery.js from toys/*.lua; do not edit by hand.\n" +
     " * The titles, tags and blurbs are that tool's TOYS_META, the sources are\n" +
@@ -208,21 +220,21 @@ function render() {
     "  }\n" +
     "})(typeof globalThis !== \"undefined\" ? globalThis : this, function () {\n" +
     "  \"use strict\";\n" +
-    "  return " + JSON.stringify(data(), null, 2) + ";\n" +
+    "  return " + JSON.stringify(data(withDemoArt), null, 2) + ";\n" +
     "});\n";
 }
 
 function main(argv) {
   const args = argv.slice(2);
   let mode = "stdout";
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
+  let withDemoArt = false;
+  for (const a of args) {
     if (a === "--write") mode = "write";
     else if (a === "--check") mode = "check";
-    else if (a === "--art-dir") ART_DIR = args[++i];
+    else if (a === "--with-demo-art") withDemoArt = true;
     else if (a === "--help" || a === "-h") {
-      process.stdout.write("usage: node tools/gallery.js [--write | --check]" +
-                           " [--art-dir DIR]\n");
+      process.stdout.write("usage: node tools/gallery.js [--write | --check | " +
+                           "--with-demo-art]\n");
       return 0;
     } else {
       process.stderr.write("unknown argument: " + a + "\n");
@@ -231,7 +243,7 @@ function main(argv) {
   }
   let text;
   try {
-    text = render();
+    text = render(withDemoArt);
   } catch (e) {
     process.stderr.write("gallery: " + e.message + "\n");
     return 2;
@@ -239,7 +251,7 @@ function main(argv) {
   if (mode === "stdout") { process.stdout.write(text); return 0; }
   if (mode === "write") {
     fs.writeFileSync(OUT, text);
-    process.stdout.write("wrote renderer/gallery-toys.js (" + data().toys.length +
+    process.stdout.write("wrote renderer/gallery-toys.js (" + data(withDemoArt).toys.length +
                          " toys, " + text.length + " bytes)\n");
     return 0;
   }
@@ -251,7 +263,7 @@ function main(argv) {
     return 1;
   }
   process.stdout.write("renderer/gallery-toys.js is the generator's output (" +
-                       data().toys.length + " toys, " + text.length +
+                       data(withDemoArt).toys.length + " toys, " + text.length +
                        " bytes)\n");
   return 0;
 }
