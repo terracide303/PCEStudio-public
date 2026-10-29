@@ -43,9 +43,13 @@ three asset files, and rewrites the block in `main.lua` between the two
 writes the toy makes for itself.
 
 ```sh
-node tools/demo-game-assets.js           # after editing a panel
+node tools/demo-game-assets.js           # after a panel edit, or any edit to main.lua
 node tools/demo-game-assets.js --check   # 0 if the toy still boots the panels' picture
 ```
+
+Run it after an edit to the game too, not only to a panel: the studio envelope
+embeds `main.lua` whole, so Save and Open stay one source — and `--check` calls
+the envelope stale until the tool refreshes it.
 
 A real importer would let the person stop running a Node tool outside the
 browser; that is #117.
