@@ -3,8 +3,8 @@
  * tools/gallery.js — write or check renderer/gallery-toys.js, the example
  * toys as the Browse page, a toy's own page and the studio read them (#80):
  * the sky gradient (#29), STARFALL (#88, #121), the demos OAK WOODS (#128),
- * CAVE (#127), CITY (#125), and the playable demos PLATFORMER and TOWER
- * (#147) and DUSK RUN (#151).
+ * CITY (#125), and the playable demos PLATFORMER and TOWER (#147) and
+ * DUSK RUN (#151).
  *
  * #151 (Dennis, 2026-10-29): the other four #29 effects — "Line-scroll
  * parallax", the "Pseudo-3D road", "Palette cycling" and the "Fixed status
@@ -89,29 +89,12 @@ const TOYS_META = [
     song: "oak-woods/song.json",
     demoArt: "oak-woods"
   },
-  /* #127: the same shape as #128.  The repo's cave/main.lua is the demo with
-   * a plain rock stub; the playable file with the pack's converted picture is
-   * demo-art/cave/main.lua (tools/cave-assets.js writes it) and only a
-   * --with-demo-art build reads it.  The author is the pack's, because its
-   * licence asks for attribution (toys/cave/README.md). */
-  {
-    id: "cave",
-    file: "cave/main.lua",
-    title: "CAVE",
-    author: "Will Tice · unTied Games",
-    badge: "#127 demo",
-    tags: ["demo", "parallax", "palette", "sprites"],
-    blurb: "The Retro Pixel Cave: four background bands and a floor scroll " +
-      "at five speeds while the rock's lit veins breathe and two bats and " +
-      "an ember cross the dark. IJKL scrolls it by hand.",
-    effect: "five BXR bands + a palette cycle",
-    demoArt: "cave"
-  },
-  /* #125: the same shape again.  The repo's city/main.lua is the game with an
-   * empty art_boot(); the playable file — the same game plus the pack's
-   * converted picture — is demo-art/city/main.lua (tools/city-assets.js writes
-   * it) and only a --with-demo-art build reads it.  Anokolisa's note asks for
-   * credit rather than requiring it; it is here anyway. */
+  /* #125: a game whose art is NOT in the repository.  The repo's city/main.lua
+   * is the game with an empty art_boot(); the playable file — the same game
+   * plus the pack's converted picture — is demo-art/city/main.lua
+   * (tools/city-assets.js writes it) and only a --with-demo-art build reads it.
+   * Anokolisa's note asks for credit rather than requiring it; it is here
+   * anyway. */
   {
     id: "city",
     file: "city/main.lua",
@@ -250,7 +233,7 @@ function render(withDemoArt) {
   return "/*\n" +
     " * gallery-toys.js — the example toys as the Browse page, a toy's own\n" +
     " * page and the studio read them (#80): the sky gradient (#29),\n" +
-    " * STARFALL (#88, #121), OAK WOODS (#128), CAVE (#127), CITY (#125),\n" +
+    " * STARFALL (#88, #121), OAK WOODS (#128), CITY (#125),\n" +
     " * the #147 demos PLATFORMER and TOWER, and DUSK RUN (#151).\n" +
     " * #151 took the parallax, road, status-bar and palette-cycle effects\n" +
     " * out of Browse; their toys/*.lua files stay for the tests and guide.\n" +

@@ -6924,15 +6924,16 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  /* #128 added OAK WOODS, #127 CAVE, #125 CITY and #147 PLATFORMER and TOWER
-   * — five demos besides the sky gradient (#29) and STARFALL; #151 added
-   * DUSK RUN and took the other four #29 effects out of Browse (their toys
-   * stay in toys/).  Browse and the studio read the same generated list. */
-  check(data.length === 8,
-        "the gallery carries the sky gradient, STARFALL, OAK WOODS, CAVE, " +
-        "CITY, PLATFORMER, TOWER and DUSK RUN (got " + data.length + ")");
+  /* #128 added OAK WOODS, #125 CITY and #147 PLATFORMER and TOWER — four
+   * demos besides the sky gradient (#29) and STARFALL; #151 added DUSK RUN
+   * and took the other four #29 effects out of Browse (their toys stay in
+   * toys/); #159 removed CAVE.  Browse and the studio read the same
+   * generated list. */
+  check(data.length === 7,
+        "the gallery carries the sky gradient, STARFALL, OAK WOODS, CITY, " +
+        "PLATFORMER, TOWER and DUSK RUN (got " + data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
-     ["sky-gradient", "starfall", "oak-woods", "cave", "city", "platformer",
+     ["sky-gradient", "starfall", "oak-woods", "city", "platformer",
       "tower", "dusk-run"]);
   /* #125: the committed gallery carries CITY's art-free toy — the playable
    * file with the pack's picture is demo-art/city/main.lua and only the
@@ -7075,7 +7076,7 @@ function checkGallery(page) {
   const cards = B.cards();
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
-     ["sky-gradient", "starfall", "oak-woods", "cave", "city", "platformer",
+     ["sky-gradient", "starfall", "oak-woods", "city", "platformer",
       "tower", "dusk-run"]);
   /* #125: the committed CITY card runs the art-free toy, so it draws no
    * picture here; the deployed gallery carries the playable file and does.
@@ -7099,13 +7100,13 @@ function checkGallery(page) {
   {
     const demo = process.env.DEMO_ART ||
       "/Volumes/External/agent-workshop-demo/demo-art";
-    const present = ["oak-woods", "cave", "city"].every((id) =>
+    const present = ["oak-woods", "city"].every((id) =>
       fs.existsSync(path.join(demo, id, "sources.json")));
     if (present) {
       const gdata = require(path.join(RENDERER, "..", "tools", "gallery.js"))
         .data(true);
       const G = require(path.join(RENDERER, "pce-gallery.js"));
-      for (const id of ["oak-woods", "cave", "city"]) {
+      for (const id of ["oak-woods", "city"]) {
         const t = gdata.toys.find((x) => x.id === id) || {};
         eq("#156: the deployed gallery's " + id + " is a folder of five",
            (t.files || []).map((f) => f.name),
@@ -7229,15 +7230,11 @@ function checkGallery(page) {
      ["sky-gradient"]);
   B.setQuery("PCEStudio");
   eq("search by author finds the toys PCEStudio made", B.visible(),
-     B.toys().map((t) => t.id).filter((id) => id !== "cave"));
-  /* #127: the cave's card carries the pack's author, because the pack's
-   * licence asks for attribution — and the search can find it there */
-  B.setQuery("Will Tice");
-  eq("the CAVE card is found by the pack's author", B.visible(), ["cave"]);
+     B.toys().map((t) => t.id));
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["cave", "city", "dusk-run", "oak-woods", "platformer", "sky-gradient",
+     ["city", "dusk-run", "oak-woods", "platformer", "sky-gradient",
       "starfall", "tower"]);
   B.setSort("written");
 
