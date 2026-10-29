@@ -2807,6 +2807,498 @@ function assetText(studio, name) {
   return f ? f.source : null;
 }
 
+/* ---- #97: the AUDIO panel as a mixer ---------------------------------- *
+ * ppu.toys' AUDIO panel is the shape; the PSG is what it can actually be.
+ * Every control is driven through the panel's own API — the same functions
+ * its DOM handlers call — and each one is checked twice: the register words
+ * the mixer writes, and the PCM renderer/pce-psg.js makes from them.  The
+ * meter is checked against that PCM, which is the only way a bar can be
+ * evidence rather than decoration. */
+function fire(el, type) {
+  const listeners = el.listeners[type] || [];
+  for (const fn of listeners)
+    fn({ type: type, target: el, currentTarget: el,
+         preventDefault() {}, stopPropagation() {},
+         clientX: 10, clientY: 6, key: "", code: "" });
+  return listeners.length;
+}
+
+function audioWritesOf(studio, reg) {
+  return studio.audioWritesOf(reg).map((w) => w.value);
+}
+
+/* The mixer writes R4 twice per voice: once in the setup pass (all off) and
+ * once in the enable pass (the level).  [6] is voice 0's enable. */
+function audioR4(studio, voice) {
+  const w = audioWritesOf(studio, 4);
+  return w[6 + voice];
+}
+
+function audioR6(studio) {
+  return audioWritesOf(studio, 6);
+}
+
+/* The peak per side of the rendered PCM for the mix the panel holds. */
+function audioPeaks(studio, seconds) {
+  const doc = studio.audioMix();
+  if (!doc) return { left: 0, right: 0 };
+  const pcm = require("../renderer/pce-mix.js").render(doc, seconds || 0.2).pcm;
+  let left = 0, right = 0;
+  for (let i = 0; i < pcm.length; i += 2) {
+    left = Math.max(left, Math.abs(pcm[i]));
+    right = Math.max(right, Math.abs(pcm[i + 1]));
+  }
+  return { left: left, right: right };
+}
+
+function checkAudioPanel(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const mixModel = S.mix;
+
+  check(!!mixModel && typeof mixModel.newMix === "function",
+        "#97: renderer/pce-mix.js loaded");
+  check(page.loaded.some((s) => /pce-mix\.js$/.test(s)),
+        "#97: the page loads renderer/pce-mix.js");
+  check(page.loaded.some((s) => /pce-wave\.js$/.test(s)),
+        "#97: the page loads renderer/pce-wave.js (the wave editor's model)");
+  if (!mixModel || !studio.audio) {
+    check(false, "#97: the page has no AUDIO mixer");
+    return;
+  }
+
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  studio.panels.select("audio");
+
+  /* ---- the mix the panel reads ---------------------------------------- */
+  let st = studio.audio();
+  eq("#97: the mixer has the PSG's six voices", st.voices.length, 6);
+  eq("#97: the mix starts on voice 1", st.selected, 0);
+  eq("#97: voice 1 is a wave voice, on, square at A4",
+     [st.voices[0].mode, st.voices[0].on, st.voices[0].freq, st.voices[0].note,
+      st.voices[0].al, st.voices[0].balance].join(","),
+     "wave,true,254,A4,31,255");
+  eq("#97: master volume is R1 full ($FF)", st.master, 0xFF);
+
+  /* ---- the rows are on the panel -------------------------------------- */
+  const host = page.dom.get("aud-rows");
+  const rows = host.children.filter((c) => /aud-row/.test(c.className));
+  eq("#97: one header row plus six voice rows", rows.length, 7);
+  let controls = 0;
+  for (let i = 0; i < 6; i++) {
+    const row = page.dom.get("aud-row-" + i);
+    controls += row.children.filter((c) => c.tagName === "BUTTON" ||
+      c.tagName === "INPUT" || c.tagName === "SELECT" || c.tagName === "CANVAS")
+      .length;
+  }
+  check(controls >= 6 * 7,
+        "#97: every voice row carries its controls (" + controls + ")");
+  const modeSel = page.dom.get("aud-mode-0");
+  const noiseOpt = modeSel.children.find((o) => o.value === "noise");
+  check(!!noiseOpt && noiseOpt.disabled === true,
+        "#97: the mode picker greys noise on a voice without the generator");
+  check(page.dom.get("aud-mode-4").children.find((o) => o.value === "noise")
+          .disabled !== true,
+        "#97: … and offers it on voice 5");
+  const mini = page.dom.get("aud-wave-0");
+  mini.__ctx.__calls.length = 0;
+  studio.audioSelect(0);
+  check(mini.__ctx.__calls.filter((c) => c.name === "fillRect").length === 32,
+        "#97: each row draws its 32-step wave (" +
+        mini.__ctx.__calls.filter((c) => c.name === "fillRect").length +
+        " bars)");
+
+  /* ---- the register stream is the PSG's own --------------------------- */
+  let w = studio.audioWrites();
+  const r2 = audioWritesOf(studio, 2);
+  const r3 = audioWritesOf(studio, 3);
+  const r5 = audioWritesOf(studio, 5);
+  eq("#97: R2 carries the frequency LSB (254 & $FF)", r2[0], 254);
+  eq("#97: R3 carries the high nibble (0 for A4)", r3[0], 0);
+  eq("#97: R5 carries the balance ($FF = both sides full)", r5[0], 0xFF);
+  eq("#97: the setup pass writes R4 = 0 before the wave",
+     audioWritesOf(studio, 4).slice(0, 6).join(","), "0,0,0,0,0,0");
+  eq("#97: voice 1 is enabled at AL 31 ($9F)", audioR4(studio, 0), 0x9F);
+  eq("#97: the other five voices are off ($00)",
+     audioWritesOf(studio, 4).slice(7, 12).join(","), "0,0,0,0,0");
+  eq("#97: R6 holds 6 x 32 wave steps", audioR6(studio).length, 192);
+  eq("#97: R1 is the master volume", audioWritesOf(studio, 1).join(","), "255");
+
+  /* the mixer's writes ARE pce-wave.js's: fold, not a second generator */
+  const wv = S.wave;
+  const folded = wv.instructions(mixModel.soundOf(studio.audioMix()))
+    .filter((i) => i.write)
+    .map((i) => ({ reg: i.write[0], value: i.write[1] }));
+  check(JSON.stringify(folded) === JSON.stringify(studio.audioWrites()),
+        "#97: the mixer's write stream is pce-wave.js's own");
+
+  /* ---- volume (R4 bits 0-4) ------------------------------------------- */
+  studio.audioSolo(0, true);
+  const full = audioPeaks(studio, 0.2).left;
+  studio.audioLevel(0, 10);
+  st = studio.audio();
+  eq("#97: the volume slider sets AL", st.voices[0].al, 10);
+  eq("#97: AL 10 is R4 = $8A", audioR4(studio, 0), 0x8A);
+  eq("#97: the row's slider follows the API",
+     page.dom.get("aud-vol-0").value, "10");
+  const quiet = audioPeaks(studio, 0.2).left;
+  const measured = 20 * Math.log10(quiet / full);
+  check(Math.abs(measured - st.meters[0].left.db) < 0.1,
+        "#97: the meter is the PCM (AL 31->10: meter " +
+        st.meters[0].left.db.toFixed(2) + " dB, measured " +
+        measured.toFixed(2) + ")");
+  check(Math.abs(st.meters[0].left.vl - 21) === 0,
+        "#97: AL 10 is a 21-step reduction");
+  studio.audioLevel(0, 0);
+  eq("#97: AL 0 is the PSG's off (-inf dB)",
+     studio.audio().meters[0].left.db, -Infinity);
+  studio.audioLevel(0, 21);
+  check(studio.audio().meters[0].left.db < -15 &&
+        studio.audio().meters[0].left.db > -16,
+        "#97: AL 21 is 11 steps off full, ~1.5 dB each");
+
+  /* the DOM slider is the same action */
+  const vol = page.dom.get("aud-vol-0");
+  vol.value = "5";
+  fire(vol, "input");
+  eq("#97: the row's slider writes AL", studio.audio().voices[0].al, 5);
+  eq("#97: … and R4", audioR4(studio, 0), 0x85);
+  studio.audioLevel(0, 31);
+  studio.audioSolo(0, false);          /* the meters below are per voice */
+
+  /* ---- balance (R5), and master (R1) ---------------------------------- */
+  studio.audioBalance(0, 0xF0);
+  st = studio.audio();
+  eq("#97: balance L only is R5 = $F0", st.voices[0].balance, 0xF0);
+  eq("#97: … written as $F0", audioWritesOf(studio, 5)[0], 0xF0);
+  eq("#97: the left meter is full", st.meters[0].left.vl, 0);
+  eq("#97: the right meter is off", st.meters[0].right.vl, 0x1F);
+  const lr = audioPeaks(studio, 0.2);
+  check(lr.left > 0 && lr.right === 0,
+        "#97: R5 $F0 is heard on the left and not the right (" +
+        lr.left + " / " + lr.right + ")");
+  eq("#97: the row's L/R sliders show the nibbles",
+     page.dom.get("aud-balL-0").value + "/" + page.dom.get("aud-balR-0").value,
+     "15/0");
+  studio.audioBalance(0, 0xFF);
+
+  studio.audioMaster(0xF0);
+  st = studio.audio();
+  eq("#97: the master is R1", st.master, 0xF0);
+  eq("#97: … written to R1", audioWritesOf(studio, 1)[0], 0xF0);
+  eq("#97: master L full / R off", st.meters[0].right.vl, 0x1F);
+  eq("#97: the master readout names the register",
+     /R1 \$F0/.test(page.dom.get("aud-master-readout").textContent), true);
+  studio.audioMaster(0xFF);
+
+  /* ---- pitch: the 12-bit word and the note ----------------------------- */
+  eq("#97: A4 is F = 254", studio.audioPitch(0, 254), 254);
+  eq("#97: … named A4", studio.audio().voices[0].note, "A4");
+  eq("#97: … R2 = $FE", audioWritesOf(studio, 2)[0], 0xFE);
+  eq("#97: … R3 = $00", audioWritesOf(studio, 3)[0], 0x00);
+  const up = studio.audioStep(0, 1);
+  eq("#97: the + button steps one semitone to A#4",
+     studio.audio().voices[0].note, "A#4");
+  check(up < 254 && up > 254 * 0.9,
+        "#97: … a higher pitch is a SMALLER divider (" + up + ")");
+  studio.audioStep(0, -1);
+  eq("#97: and − comes back to A4", studio.audio().voices[0].note, "A4");
+  eq("#97: C4 is F 428", studio.audioNote(0, "C4"), 428);
+  eq("#97: … named C4", studio.audio().voices[0].note, "C4");
+  eq("#97: a 12-bit word reaches into R3", studio.audioPitch(0, 1151), 1151);
+  eq("#97: … R3 = $04", audioWritesOf(studio, 3)[0], 0x04);
+  eq("#97: … R2 = $7F", audioWritesOf(studio, 2)[0], 0x7F);
+  studio.audioPitch(0, 254);
+
+  /* ---- modes: noise and DDA ------------------------------------------- */
+  eq("#97: voice 5 takes the noise generator",
+     studio.audioMode(4, "noise"), "noise");
+  eq("#97: noise writes R7 = $80 | NF",
+     audioWritesOf(studio, 7).filter((v) => (v & 0x80))[0], 0x8F);
+  const noisePeak = audioPeaks(studio, 0.2);
+  check(noisePeak.left !== noisePeak.right || noisePeak.left > 0,
+        "#97: a noise voice makes sound");
+  eq("#97: a voice without the generator is refused",
+     codeOf(() => studio.audioMode(0, "noise")), "noise-channel");
+  eq("#97: a mode that is not wave/noise/dda is refused",
+     codeOf(() => studio.audioMode(0, "sample")), "mode-range");
+  studio.audioMode(4, "wave");
+
+  eq("#97: voice 2 can hold a DDA level", studio.audioMode(1, "dda"), "dda");
+  eq("#97: … the setup pass selects DDA while still off ($40)",
+     audioWritesOf(studio, 4)[1], 0x40);
+  eq("#97: … and an off DDA voice writes no level", audioR6(studio).length, 160);
+  studio.audioOn(1, true);
+  eq("#97: DDA on sets R4 bit 6 ($C0 | AL)", audioR4(studio, 1) & 0xC0, 0xC0);
+  eq("#97: a DDA voice writes no 32-step wave",
+     audioR6(studio).length, 161);
+  eq("#97: the DDA level is the one R6 write", audioR6(studio)[160], 16);
+  eq("#97: the panel counts the DDA bytes in the ROM",
+     studio.audio().ddaBytes, 4);
+  check(/DDA sample bytes in the ROM · 4 B/.test(
+          page.dom.get("aud-budget").textContent),
+        "#97: the footer counts them (" +
+        page.dom.get("aud-budget").textContent + ")");
+  eq("#97: a DDA level past 31 is refused",
+     codeOf(() => studio.audioDdaLevel(1, 32)), "dda-range");
+  studio.audioMode(1, "wave");
+  studio.audioOn(1, false);
+  eq("#97: back to wave writes R4 with bit 6 clear", audioR4(studio, 1) & 0xC0, 0);
+  eq("#97: and the DDA byte count falls to 0", studio.audio().ddaBytes, 0);
+
+  /* ---- M and S --------------------------------------------------------- */
+  studio.audioMute(2, true);
+  st = studio.audio();
+  eq("#97: M takes the voice out", st.audible[2], false);
+  eq("#97: … by writing R4 = $00", audioR4(studio, 2), 0x00);
+  eq("#97: a muted voice's meter is off", st.meters[2].left.vl, 0x1F);
+  check(page.dom.get("aud-mute-2").classList.contains("is-on"),
+        "#97: the M button shows it");
+  eq("#97: the M button toggles it back",
+     (fire(page.dom.get("aud-mute-2"), "click"), studio.audio().voices[2].mute),
+     false);
+
+  studio.audioSolo(0, false);
+  studio.audioOn(2, true);
+  studio.audioSolo(2, true);
+  eq("#97: S leaves only that voice on", studio.audio().audible.join(","),
+     "false,false,true,false,false,false");
+  eq("#97: … the others' R4 is $00",
+     audioWritesOf(studio, 4).slice(6).join(","),
+     "0,0,159,0,0,0");
+  studio.audioSolo(2, false);
+  studio.audioOn(2, false);
+  studio.audioSolo(0, true);
+
+  /* ---- the LFO --------------------------------------------------------- */
+  let lfo = studio.audioLfo(1, 200);
+  eq("#97: LFCTL 1 and R8 = 200", [lfo.ctl, lfo.freq].join(","), "1,200");
+  eq("#97: R8 is written", audioWritesOf(studio, 8).pop(), 200);
+  const r9 = audioWritesOf(studio, 9);
+  eq("#97: R9 is a strobe: set bit 7, then clear it",
+     r9.slice(-2).join(","), (0x81) + "," + 1);
+  eq("#97: with the LFO on, voice 2 is the silent carrier",
+     studio.audio().writes.filter((x) => x.reg === 4)[7].value, 0x80);
+  check(/voice 2 is the carrier/.test(
+          page.dom.get("aud-lfo-readout").textContent),
+        "#97: the LFO tab says what it does");
+  studio.audioLfo(0);
+  eq("#97: LFO off writes no R8/R9", studio.audioWritesOf(8).length, 0);
+
+  /* ---- the driver's envelope ------------------------------------------ */
+  studio.audioEnv(0, { attack: 4, decay: 2, sustain: 10, rate: 3 });
+  st = studio.audio();
+  eq("#97: the envelope is stored", JSON.stringify(st.voices[0].env),
+     '{"attack":4,"decay":2,"sustain":10,"rate":3}');
+  eq("#97: attack 4 then decay 2 is 7 R4 values",
+     studio.audioEnvelope(0).length, 7);
+  eq("#97: … starting at 0 and ending at the sustain",
+     [studio.audioEnvelope(0)[0], studio.audioEnvelope(0)[6]].join(","), "0,10");
+  check(/driver envelope/.test(page.dom.get("aud-env-readout").textContent),
+        "#97: the envelope tab names the driver, not a chip ADSR");
+  eq("#97: an attack past 15 is refused",
+     codeOf(() => studio.audioEnv(0, { attack: 16, decay: 0, sustain: 0,
+                                       rate: 1 })), "env-range");
+
+  const trig = studio.audioTrigger(0);
+  eq("#97: Trigger selects the voice then writes R4",
+     trig.map((x) => x.reg + ":" + x.value).join(","), "0:0,4:128");
+  eq("#97: … the voice is on at the first envelope value",
+     [studio.audio().voices[0].on, studio.audio().voices[0].al].join(","),
+     "true,0");
+  const rel = studio.audioRelease(0);
+  eq("#97: Release note ramps R4 down over `rate` steps",
+     rel.filter((x) => x.reg === 4).length, 3);
+  eq("#97: … and ends by switching the channel off",
+     rel[rel.length - 1].value, 0x00);
+  eq("#97: … the voice is off afterwards", studio.audio().voices[0].on, false);
+  eq("#97: Release all releases every voice",
+     studio.audioReleaseAll().length, 6);
+  studio.audioReset(0);
+  eq("#97: Reset voice is the mixer's default again",
+     [studio.audio().voices[0].al, studio.audio().voices[0].balance,
+      studio.audio().voices[0].freq].join(","), "31,255,254");
+
+  /* ---- #62's wave editor, inline -------------------------------------- */
+  const wave = studio.audioWaveStep(0, 3, 0);
+  eq("#97: the wave editor writes one step", wave[3], 0);
+  eq("#97: … into the voice's own 32 steps", studio.audio().voices[0].al, 31);
+  eq("#97: … and into R6", audioR6(studio)[3], 0);
+  const preset = studio.audioPreset(0, "saw");
+  eq("#97: a preset replaces the wave",
+     [preset[0], preset[31]].join(","), "0,31");
+  eq("#97: a wave step past 31 is refused",
+     codeOf(() => studio.audioWaveStep(0, 32, 0)), "wave-step");
+  eq("#97: a wave value past 31 is refused",
+     codeOf(() => studio.audioWaveStep(0, 0, 32)), "wave-range");
+  eq("#97: a channel past 6 is refused",
+     codeOf(() => studio.audioSelect(6)), "channel-range");
+
+  /* the wave canvas: a real click sets the column under it */
+  const canvas = page.dom.get("aud-waveedit");
+  const before = studio.audio().voices[0].wave.slice();
+  fire(canvas, "click");
+  const after = studio.audio().voices[0].wave;
+  check(after.some((v, i) => v !== before[i]),
+        "#97: a click on the wave canvas writes one column");
+  /* the stub canvas keeps its default height; the real one is the HTML's */
+  eq("#97: … the column and value under the click (10 px of 256 → step 1)",
+     after[1], Math.round((1 - 6 / canvas.height) * 31));
+
+  /* the presets are in the picker */
+  eq("#97: the preset picker offers #62's shapes",
+     page.dom.get("aud-preset").children
+       .filter((o) => o.value).map((o) => o.value).join(","),
+     "square,pulse,saw,invsaw,triangle,sine,silence");
+
+  /* ---- the tabs -------------------------------------------------------- */
+  studio.audioTab("wave");
+  eq("#97: the wave tab is the default", studio.audio().tab, "wave");
+  eq("#97: the LFO tab opens", studio.audioTab("lfo"), "lfo");
+  eq("#97: … and only its pane is shown",
+     [page.dom.get("aud-tab-lfo").hidden, page.dom.get("aud-tab-wave").hidden]
+       .join(","), "false,true");
+  studio.audioTab("registers");
+  check(/R4 channel control/.test(page.dom.get("aud-regs").textContent) &&
+        /R9 LFO control/.test(page.dom.get("aud-regs").textContent),
+        "#97: the registers tab prints the voice's R2-R7 and R1/R8/R9");
+  studio.audioTab("envelope");
+  check(page.dom.get("aud-env-meter").__ctx.__calls
+          .some((c) => c.name === "fillRect"),
+        "#97: the envelope tab draws the R4 sequence");
+  eq("#97: an unknown tab is refused",
+     codeOf(() => studio.audioTab("echo")), "tab-range");
+  studio.audioTab("wave");
+
+  /* ---- the honest line, and the save ----------------------------------- */
+  check(/has no echo/.test(page.dom.get("aud-echo").textContent),
+        "#97: the panel says the PSG has no echo");
+  check(/second, later, quieter voice/.test(
+          page.dom.get("aud-echo").textContent),
+        "#97: … and what to do instead");
+
+  /* the mix saves with the toy */
+  studio.audioLevel(0, 12);
+  studio.audioBalance(0, 0x3C);
+  const text = studio.audioSaveMix();
+  check(text === assetText(studio, "waves.json"),
+        "#97: Save mix writes waves.json, byte for byte");
+  const doc = JSON.parse(assetText(studio, "waves.json"));
+  eq("#97: waves.json holds six voices", doc.voices.length, 6);
+  eq("#97: … and the edit", [doc.voices[0].al, doc.voices[0].balance]
+     .join(","), "12,60");
+  eq("#97: the other four files are untouched", studio.files().length, 5);
+
+  /* every edit is written, because the mix saves with the toy */
+  studio.audioLevel(0, 1);
+  eq("#97: an edit is in waves.json at once",
+     JSON.parse(assetText(studio, "waves.json")).voices[0].al, 1);
+  eq("#97: Save mix returns the file's own text",
+     studio.audioSaveMix(), assetText(studio, "waves.json"));
+  studio.audioLoadSaved();
+  eq("#97: Load saved re-reads the file",
+     studio.audio().voices[0].al, 1);
+
+  /* a hand-edited waves.json is what the panel reads */
+  setAssetFile(studio, "waves.json", JSON.stringify({
+    version: 1,
+    master: { balance: 0xFF },
+    lfo: { freq: 255, ctl: 0 },
+    voices: [{ on: true, mode: "wave", wave: new Array(32).fill(20),
+               freq: 428, al: 7, balance: 0xF0, mute: false, solo: false,
+               noise: { nf: 15 }, dda: [1], env: { attack: 0, decay: 0,
+               sustain: 31, rate: 1 } }]
+      .concat(new Array(5).fill(null).map(() => ({
+        on: false, mode: "wave", wave: new Array(32).fill(16), freq: 254,
+        al: 31, balance: 255, mute: false, solo: false, noise: { nf: 15 },
+        dda: [1], env: { attack: 0, decay: 0, sustain: 31, rate: 1 } })))
+  }, null, 2) + "\n");
+  studio.panels.select("audio");
+  studio.audioLoadSaved();
+  eq("#97: the panel reads a hand-written waves.json",
+     [studio.audio().voices[0].al, studio.audio().voices[0].freq,
+      studio.audio().voices[0].note].join(","), "7,428,C4");
+
+  /* a broken one is refused by code and not written over */
+  const broken = "{ not json";
+  setAssetFile(studio, "waves.json", broken);
+  studio.audioLoadSaved();
+  check(/waves-json/.test(studio.audio().error),
+        "#97: a broken waves.json is a waves-json refusal (" +
+        studio.audio().error + ")");
+  eq("#97: … and the file is not rewritten", assetText(studio, "waves.json"),
+     broken);
+  eq("#97: a five-voice mix is refused",
+     codeOf(() => mixModel.fromJSON('{"voices":[]}')), "mix-voices");
+
+  /* ---- live from a running toy (#71's PSG writes) --------------------- *
+   * The toy host records every PSG write a toy makes as pce-psg.js's own
+   * event shape; the panel reads that stream, so "what the toy is doing to
+   * the chip" and "what it sounds like" are one source. */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.panels.select("audio");
+  runEditorSource(studio, [
+    "function init()",
+    "  sfx(2, 254, 31, 60)",
+    "end",
+    "function frame(t, f) end",
+    ""
+  ].join("\n"));
+  const rt = studio.render.runtime();
+  const events = rt && rt.sound ? rt.sound.events : [];
+  check(events.length > 0, "#97: the toy's PSG writes are recorded (#71)");
+  check(events.every((e) => typeof e.f === "number" && typeof e.t === "number" &&
+                            e.reg >= 0 && e.reg <= 9),
+        "#97: … in pce-psg.js's own event shape");
+  const live = studio.audioLive();
+  check(!!live && live.writes === events.length,
+        "#97: the panel reads the same stream (" +
+        (live ? live.writes : 0) + " of " + events.length + ")");
+  eq("#97: … decoded onto the voice the toy used",
+     [live.voices[2].freq, live.voices[2].note, live.voices[2].al,
+      live.voices[2].dda].join(","), "254,A4,31,true");
+  eq("#97: … and the voices the toy left alone",
+     live.voices.map((v) => (v.freq ? 1 : 0)).join(""), "001000");
+  check(/live toy/.test(page.dom.get("aud-status").textContent),
+        "#97: the panel says it is reading a live toy (" +
+        page.dom.get("aud-status").textContent + ")");
+  /* OBSERVED, and reported rather than absorbed: the host's sfx() writes
+   * R4 = $40 | volume and never bit 7, so the channel-enable is clear and
+   * the PSG holds one level instead of stepping.  docs/STUDIO.md §12. */
+  eq("#97: the host's SFX leaves R4 bit 7 clear (a #71 gap, see §12)",
+     live.voices[2].on, false);
+  const livePcm = studio.audioLivePcm();
+  eq("#97: the live PCM is pce-psg.js's render of those writes",
+     livePcm.samples, rt.renderSound().pcm.length);
+
+  /* ---- the render the panel plays -------------------------------------- */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.panels.select("audio");
+  const r1 = studio.audioRender(0.2);
+  check(r1.samples > 1000 && r1.peak > 0,
+        "#97: the mix renders through pce-psg.js (" + r1.samples +
+        " samples, peak " + r1.peak + ")");
+  studio.audioLevel(0, 0);
+  studio.audioMode(4, "wave");
+  studio.audioMode(3, "wave");
+  check(studio.audioRender(0.2).peak < r1.peak,
+        "#97: a quieter mix renders quieter");
+  eq("#97: Play mix renders and reports the peak",
+     studio.audioPlay(0.1).samples > 0, true);
+  studio.audioStop();
+  eq("#97: stopping leaves the panel not playing", studio.audio().playing, false);
+
+  /* the panel is left as it was found */
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.seek(0);
+  studio.panels.select("screen");
+}
+
 function spritePanel(page) {
   const def = page.sandbox.PCEStudio.studio.panels.get("sprites");
   return (def && def.api) || null;
@@ -3244,7 +3736,9 @@ function checkPanelModules(page) {
         "#102: a panel carries its Guide chapter");
   for (const id of CHIP_PANELS) {
     const def = studio.panels.get(id);
-    check(id === "audio" ? !def.draw : typeof def.draw === "function",
+    /* #97 gave AUDIO a draw: #102's one exception (the panel that had no
+     * state to paint) is gone. */
+    check(typeof def.draw === "function",
           "#102: " + id + "'s draw comes from its module (" +
           (typeof def.draw) + ")");
   }
@@ -4377,6 +4871,7 @@ async function main() {
   checkVramPanel(page);
   checkScanlinesPanel(page);
   checkConsolePanel(page);
+  checkAudioPanel(page);
   checkStudioApi(page);
 
   let browser = "not-requested";
