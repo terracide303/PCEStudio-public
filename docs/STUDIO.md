@@ -1218,8 +1218,10 @@ The static-picture path is separate and unchanged: the editor paints VRAM/CRAM/r
 * **The gallery, and a toy's own page (#80).** ppu.toys' `/browse` (a wall of toy cards with a picture,
   title, author and tag chips, and a search box) and `/t/<id>` (the picture, the title, the author, the
   tags, `Play full screen`, `Raw output`, `Fork`, and the source under file tabs) are the reference for
-  `renderer/browse.html` and `renderer/toy.html`. The five example toys of #29 are the gallery's content;
-  the sources are `renderer/gallery-toys.js`, generated from `toys/*.lua` by `tools/gallery.js`, so a card,
+  `renderer/browse.html` and `renderer/toy.html`. The example toys of #29 plus the demos (STARFALL,
+  OAK WOODS, CAVE, CITY, PLATFORMER, TOWER, DUSK RUN) are the gallery's content — #151 took the
+  parallax, road, status-bar and palette-cycle effects out of Browse, though their files stay in
+  `toys/`; the sources are `renderer/gallery-toys.js`, generated from `toys/*.lua` by `tools/gallery.js`, so a card,
   a toy's page, the studio and `tests/check-examples.js` all read the same bytes. The studio's top bar
   links **Browse**, and `?toy=<id>` opens a gallery toy in it. §10.1 is the mapping, the evidence and
   what is deliberately not there.
@@ -1235,7 +1237,7 @@ DOM was captured, see §1) | PCEStudio |
 |---|---|
 | header `ppu.toys · Studio Console Browse Docs · Sign in with Discord` | `PCE·studio · Studio Browse Docs` — the same three pages, no account |
 | kicker `EXPLORE THE ARCHIVE`, `Browse Toys`, `Search by title or author` + Search | `Explore the archive`, `Browse toys`, the same search box; `?q=` opens it filled |
-| toolbar: Tag select, `Play feed`, `All published toys`, `Newest / Popular` | Tag select, **`Play a random toy`** (opens one toy's page at random), `5 examples`, **`As written / A–Z`** |
+| toolbar: Tag select, `Play feed`, `All published toys`, `Newest / Popular` | Tag select, **`Play a random toy`** (opens one toy's page at random), `8 examples`, **`As written / A–Z`** |
 | a card: a looping video clip, the title, the author, a heart count, `#tag` chips | a card: **frame 60 of the toy**, drawn by the same renderer, the title, `PCEStudio · <file>`, an **`Open in Studio`** link, and the `#tag` chips which link `browse.html?tag=…` |
 | `/t/<id>`: a big player, title, author, tags, `Play full screen` (orange), heart, `Raw output`, `Fork`, `SOURCE` with file tabs and the source | `/toy.html?id=<toy>`: the same shape. `Play full screen` (orange) makes the picture the page (Esc gives the page back; `?play=1` opens straight into it), `Raw source` is the toy's own `toys/<file>`, **`Open in Studio`** is the Fork (`studio.html?toy=<id>`), and `SOURCE` shows `main.lua` |
 | `/t/<id>/play`: the picture full-bleed with an on-screen D-pad and buttons, `Pause`, `START` | `toy.html?id=<id>&play=1`: the picture full-bleed, `Pause` / `Exit full screen`; no on-screen pad is drawn — the picture takes the keyboard instead (#124): click it, then IJKL = D-pad, N/M = I/II, O/P = Select/Run on pad 1, with a focus ring and a hint saying so. Before #124 the gallery player handed every toy an empty pad, so STARFALL opened from Browse could not be played |
@@ -1249,7 +1251,8 @@ from `toys/<file>`. `node tools/gallery.js --check` exits 1 if the committed fil
 `renderer/pce-toys.js` over the toy host, drawn by `pce-sprites.js`/`pce-bg.js`, the same stack as the
 studio and the Mednafen checks.
 
-**The studio opens a gallery toy by URL.** `?toy=road` (or any of the five ids) loads its `main.lua` from
+**The studio opens a gallery toy by URL.** `?toy=sky-gradient` (or any of the eight ids) loads its
+`main.lua` from
 `gallery-toys.js`, resets the asset files to a fresh toy's, runs it, and wins over the browser's autosave.
 An id that is not one records itself in `studio.galleryMiss()` and says `No gallery toy …` rather than
 silently opening something else. The `Open…` menu lists the three IL examples and links to the gallery
@@ -1257,17 +1260,18 @@ silently opening something else. The `Open…` menu lists the three IL examples 
 
 **The evidence** (`tests/check-studio.js`, §11.1 item 12 and §11.2): `checkGallery` runs
 `tools/gallery.js --check`; asserts every gallery source is `toys/<file>` byte for byte; opens the studio
-at `?toy=road` and compares **40 frames** of it with the same file run through the runtime directly —
-pixels, vram, cram and sat equal on every frame — and checks `?toy=<unknown>` records the miss; boots
-`browse.html` in the stub DOM (five cards in the toys' order, each card's frame-60 ink non-zero, its
-`toy.html?id=` and `studio.html?toy=` links, and the tag/search/A–Z filters) and `toy.html?id=road`
-(source byte-equal, its two links, 60 frames with a picture) and `?id=<unknown>` (`unknown-toy` by code);
-`--browser` opens both pages in headless Chrome and reads their own selftests — `PASS 5 cards, each drawn
-at frame 60`, and `PASS 60 frames · road · 256x224 · ink 49232 · digest ef2ecf0b`. The pages are
+at `?toy=sky-gradient` and compares **40 frames** of it with the same file run through the runtime
+directly — pixels, vram, cram and sat equal on every frame — and checks `?toy=<unknown>` records the
+miss; boots `browse.html` in the stub DOM (eight cards in the toys' order, each card's frame-60 ink
+non-zero except the art-free committed CITY placeholder, its `toy.html?id=` and `studio.html?toy=` links,
+and the tag/search/A–Z filters) and `toy.html?id=sky-gradient` (source byte-equal, its two links, 60
+frames with a picture) and `?id=<unknown>` (`unknown-toy` by code); `--browser` opens both pages in
+headless Chrome and reads their own selftests — `PASS 8 cards, each drawn
+at frame 60`, and `PASS 60 frames · sky-gradient · 256x224 · ink 49152 · digest d6751e37`. The pages are
 `$TMPDIR/pc80/ours-browse-80c.png`, `ours-toy-80b.png` and `ours-toy-play-80b.png` (1600×1000, headless
 Chrome, no synthetic input), beside the reference captures in `$TMPDIR/pcestudio-design-75/`.
 
-**Limits, stated rather than pretended.** The gallery is the five `toys/` examples, not user toys: there
+**Limits, stated rather than pretended.** The gallery is the eight `toys/` examples, not user toys: there
 is no upload, account, publication or comment, and "Play a random toy" picks from what the page shows.
 The cards are stills at frame 60, not video clips. `Play full screen` is a page-level layout (the
 Fullscreen API needs a user gesture and is not used), and `Open in Studio` on a card is the studio's
@@ -1432,13 +1436,15 @@ What it does, in order:
       `consoleRefresh()`/a panel select instead), and the browser driver has no CONSOLE case.
 16. **The gallery, the Browse page and a toy's own page (#80).** `checkGallery` (its own runner,
     `runBarePage`, boots a page that is not the studio): `tools/gallery.js --check` passes and
-    `renderer/gallery-toys.js`'s five sources are `toys/<file>` byte for byte; `studio.gallery` is those
-    five; `?toy=road` loads `road.lua` and its **40 frames** are pixel- and state-equal to the same file
-    through `PCEStudio.toys` directly; `?toy=<unknown>` records the miss and leaves the first example.
-    `browse.html` builds five cards in the toys' order, every card's frame-60 ink is non-zero, the two
-    links per card are `toy.html?id=` and `studio.html?toy=`, `?tag=raster` and the search box filter the
-    wall, search by author finds all five, and A–Z sorts it. `toy.html?id=road` shows `road.lua`'s source,
-    its `../toys/road.lua` and `studio.html?toy=road` links, its three tag chips and 60 frames with a
+    `renderer/gallery-toys.js`'s eight sources are `toys/<file>` byte for byte; `studio.gallery` is those
+    eight; `?toy=sky-gradient` loads `sky-gradient.lua` and its **40 frames** are pixel- and state-equal
+    to the same file through `PCEStudio.toys` directly; `?toy=<unknown>` records the miss and leaves the
+    first example. `browse.html` builds eight cards in the toys' order, every card's frame-60 ink is
+    non-zero except the art-free committed CITY placeholder, the two links per card are `toy.html?id=`
+    and `studio.html?toy=`, `?tag=raster` and the search box filter the wall, search by author finds all
+    but the credited CAVE, and A–Z sorts it. `toy.html?id=sky-gradient` shows its source, its
+    `../toys/sky-gradient.lua` and `studio.html?toy=sky-gradient` links, its two tag chips and 60 frames
+    with a
     picture; `?id=<unknown>` is refused `unknown-toy` and marks the page root. What the stub cannot show is
     the canvas; §11.2's gallery run reads the pages' own selftests in Chrome.
 
