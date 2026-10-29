@@ -5,7 +5,7 @@
 #   sh tools/deploy.sh --dry                    list what would be uploaded
 #
 # Only the web part goes up: renderer/, toys/ and the browser libraries the pages load.
-# LICENSE (GPL-3.0) goes up with it. NOT tools/, tests/, docs/ or vendor/huc (its licence is not settled, docs/DECISIONS.md).
+# LICENSE (GPL-3.0) goes up with it. NOT tools/, tests/, docs/ or the vendored HuC copy (its licence is not settled, docs/DECISIONS.md).
 # Uploads go through cPanel's Fileman API over HTTPS: plain FTP to this host refused some files
 # (451) and timed out on others, 2026-10-29. The password comes from the environment only.
 set -eu

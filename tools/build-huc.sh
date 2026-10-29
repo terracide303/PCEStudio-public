@@ -3,14 +3,20 @@
 # (#31 part B, the HuC route).
 #
 #   tools/build-huc.sh tools/toys/palette.lua [name]
+#   tools/build-huc.sh --toolchain      fetch and build HuC, then print its path
 #
-# Needs the HuC source built under an external directory (never vendored; the
-# same rule as PCEAS and llvm-mos, docs/DECISIONS.md):
+# HuC is NOT vendored: its licence is mixed and unsettled
+# (docs/DECISIONS.md, docs/PUBLIC-CHECK.md F1), so this script downloads
+# HuC mainline itself and builds it outside the repo (the same rule as
+# PCEAS and llvm-mos, docs/DECISIONS.md):
 #
-#   /Volumes/External II/pce-tools/huc-toyc        (vendor/huc, built)
+#   /Volumes/External/pce-tools/huc-src     pce-devel/huc at the pinned
+#                                           commit, built (bin/huc, bin/pceas)
 #
-# override with HUC_DIR=/path/to/huc-toyc.  The compiler is `bin/huc` (the
-# maintained HuC, vendor/huc/VENDORED.md) and the assembler `bin/pceas`.
+# override with HUC_DIR=/path/to/huc-src.  The pinned commit is HUC_COMMIT
+# below — the revision the repo's vendored record pins (54f5c736, 2026-10-28).
+# The compiler is `bin/huc` and the assembler `bin/pceas`, built by the
+# upstream Makefiles from src/huc and src/mkit/as; nothing is patched.
 #
 # Output, beside the llvm-mos route's files:
 #   tools/gen/<name>.huc.c       the generated C (huc dialect)
@@ -22,17 +28,87 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SRC="${1:?usage: tools/build-huc.sh TOY.lua [NAME]}"
+HUC_REPO="https://github.com/pce-devel/huc.git"
+HUC_COMMIT="54f5c73606c1e7142e8095c727cab2767e2b3cb3"
+HUC_DEFAULT="/Volumes/External/pce-tools/huc-src"
+
+# Fetch and build the toolchain if it is not already there.  Runs from the
+# repo root (the cd above); the clone lives outside it, always.
+ensure_toolchain() {
+  HUC_DIR="${HUC_DIR:-$HUC_DEFAULT}"
+  HUC_DIR="${HUC_DIR%/}"
+
+  # Resolve the path and refuse anything inside the repository.
+  local base abs
+  base="${HUC_DIR%/*}"
+  [ -d "$base" ] || base="."
+  abs="$(cd "$base" && pwd)/${HUC_DIR##*/}"
+  case "$abs" in
+    "$(pwd)"/*) echo "refusing: HUC_DIR ($abs) is inside the repo; " \
+                     "HuC is an external tool" >&2
+                exit 2 ;;
+  esac
+
+  if [ -d "$HUC_DIR/.git" ]; then
+    local url
+    url="$(git -C "$HUC_DIR" remote get-url origin 2>/dev/null || true)"
+    case "$url" in
+      *pce-devel/huc*|*pce-devel/huc.git*) ;;
+      *) echo "refusing: $HUC_DIR is a clone of ${url:-unknown}, not " \
+              "$HUC_REPO (move it aside, or set HUC_DIR)" >&2
+         exit 2 ;;
+    esac
+    if [ "$(git -C "$HUC_DIR" rev-parse HEAD 2>/dev/null || true)" != \
+         "$HUC_COMMIT" ]; then
+      git -C "$HUC_DIR" fetch -q origin "$HUC_COMMIT"
+      git -C "$HUC_DIR" checkout -q -f "$HUC_COMMIT"
+      # Rebuild from a clean tree: .o files from another commit would
+      # otherwise be mistaken for up-to-date (and bin/ is rebuilt).
+      git -C "$HUC_DIR" clean -q -fdx
+    elif [ -x "$HUC_DIR/bin/huc" ] && [ -x "$HUC_DIR/bin/pceas" ]; then
+      return 0
+    fi
+  else
+    if [ -e "$HUC_DIR" ]; then
+      echo "refusing: $HUC_DIR exists but is not a HuC clone " \
+           "(move it aside, or set HUC_DIR)" >&2
+      exit 2
+    fi
+    mkdir -p "$(dirname "$HUC_DIR")"
+    echo "fetching HuC into $HUC_DIR ($HUC_REPO at $HUC_COMMIT)"
+    git clone -q "$HUC_REPO" "$HUC_DIR"
+    git -C "$HUC_DIR" fetch -q origin "$HUC_COMMIT"
+    git -C "$HUC_DIR" checkout -q -f "$HUC_COMMIT"
+  fi
+
+  echo "building HuC (make -C src/mkit/as; make -C src/huc)"
+  mkdir -p "$HUC_DIR/bin"
+  if ! make -C "$HUC_DIR/src/mkit/as" -j4; then
+    echo "building PCEAS failed (output above)" >&2
+    exit 2
+  fi
+  if ! make -C "$HUC_DIR/src/huc" -j4; then
+    echo "building HuC failed (output above)" >&2
+    exit 2
+  fi
+  if [ ! -x "$HUC_DIR/bin/huc" ] || [ ! -x "$HUC_DIR/bin/pceas" ]; then
+    echo "the build finished but $HUC_DIR/bin has no huc/pceas" >&2
+    exit 2
+  fi
+  echo "HuC toolchain ready in $HUC_DIR"
+}
+
+if [ "${1:-}" = "--toolchain" ]; then
+  ensure_toolchain
+  echo "HuC toolchain: $HUC_DIR (bin/huc, bin/pceas)"
+  exit 0
+fi
+
+SRC="${1:?usage: tools/build-huc.sh TOY.lua [NAME] (or --toolchain)}"
 NAME="${2:-$(basename "$SRC" .lua)}"
-HUC_DIR="${HUC_DIR:-/Volumes/External II/pce-tools/huc-toyc}"
-HUC_DIR=$(cd "$HUC_DIR" && pwd)
+ensure_toolchain
 HUC="$HUC_DIR/bin/huc"
 PCEAS="$HUC_DIR/bin/pceas"
-
-if [ ! -x "$HUC" ] || [ ! -x "$PCEAS" ]; then
-  echo "HuC not found at $HUC_DIR (set HUC_DIR to the huc-toyc root)" >&2
-  exit 2
-fi
 
 GEN=tools/gen
 mkdir -p "$GEN"
