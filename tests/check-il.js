@@ -99,6 +99,26 @@ local function puttile(char, fn)
     vram[char * 16 + 8 + row] = w1
   end
 end
+local function putsprite(pattern, fn)
+  -- A sprite pattern is NOT a BAT character: the SAT's pattern code p is read
+  -- at word p*64, plane n at p*64 + n*16 + row, and bit 15 is the strip's
+  -- left pixel (HuC6270 manual 2.4 "sprite pattern"; renderer/pce-sprites.js
+  -- stripWords/stripPixel).  16 rows of 16 pixels, four 1-bit planes.
+  for row = 0, 15 do
+    local p0, p1, p2, p3 = 0, 0, 0, 0
+    for col = 0, 15 do
+      local c = fn(col, row)
+      if c % 2 >= 1 then p0 = p0 | (1 << (15 - col)) end
+      if c >= 2 and (c % 4) >= 2 then p1 = p1 | (1 << (15 - col)) end
+      if c >= 4 and (c % 8) >= 4 then p2 = p2 | (1 << (15 - col)) end
+      if c >= 8 then p3 = p3 | (1 << (15 - col)) end
+    end
+    vram[pattern * 64 + row] = p0
+    vram[pattern * 64 + 16 + row] = p1
+    vram[pattern * 64 + 32 + row] = p2
+    vram[pattern * 64 + 48 + row] = p3
+  end
+end
 `;
 
 const TOY_PALETTE = SETUP + `
@@ -140,16 +160,17 @@ function raster(line)
 end
 `;
 
-const TOY_SPRITE = `
+const TOY_SPRITE = SETUP + `
 function init()
-  -- one solid 16x16 sprite, colour 1, pattern code $100 (cell 256)
-  for row = 0, 15 do
-    vram[0x100 * 16 + row] = 0xFFFF
-    vram[0x100 * 16 + 8 + row] = 0
-  end
+  -- one solid 16x16 sprite, colour 1, pattern code $100 (sprite cell 256)
+  putsprite(0x100, function(col, row)
+    return 1
+  end)
   pal(0x101, rgb(7, 7, 0))
   reg("CR", 0xC0)
-  sx, sy = 32, 64
+  -- SAT X 32 / Y 64 is the top-left of the display; start in the middle so
+  -- every pad direction has room to move
+  sx, sy = 144, 160
 end
 function frame(t, f)
   if pad[1].right then sx = sx + 1 end

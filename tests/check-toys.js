@@ -13,6 +13,14 @@
  * may not touch, too many raster entries on a line — the password helpers,
  * the sandbox doors, and a timeout.
  *
+ * #90 adds a VISIBILITY assertion to every toy: the frames are read for their
+ * picture, not only for their state — the tiled field is not the backdrop,
+ * the raster toy's diagonals are drawn, and the sprite is exactly 256
+ * non-backdrop pixels whose box the scripted pad moves a column a frame.
+ * The state comparison cannot prove this: at this revision it agreed with a
+ * black screen, because the toy wrote the pattern at the BAT's address and
+ * the hand-built state copied it.
+ *
  * #74 (REVIEW-30's three misses): the pads are checked DISTINCT on all five
  * (A6), the password round trip is checked at every cap (#73's checks, A7),
  * and every toy's frame loop is checked against a count the loop cannot
@@ -206,6 +214,37 @@ function rgb(r, g, b) {
   return ((g % 8) * 64) + ((r % 8) * 8) + (b % 8);
 }
 
+/* #90 VISIBILITY.  A frame's picture is proved in its pixels, not in the
+ * toy's writes: a comparison of the runtime with a hand-built state cannot
+ * tell a picture from an empty one when both sides agree.  The backdrop is
+ * CRAM[0], the colour a background pixel of colour 0 shows (pce-bg.js); a
+ * 256x224 frame is all window, so it holds no CRAM[$100] border pixels. */
+function cramRgb(cram, addr) {
+  const v = cramWord(cram, addr);
+  return [36 * ((v >> 3) & 7), 36 * ((v >> 6) & 7), 36 * (v & 7)];
+}
+
+/* The pixels inside box = [x0, y0, x1, y1) that are not the backdrop, and
+ * their bounding box (null when the box is empty). */
+function visibleIn(pixels, width, height, cram, box) {
+  const bg = cramRgb(cram, 0);
+  const x0 = box[0], y0 = box[1], x1 = box[2], y1 = box[3];
+  let n = 0, minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let y = y0; y < y1 && y < height; y++) {
+    for (let x = x0; x < x1 && x < width; x++) {
+      const i = (y * width + x) * 3;
+      if (pixels[i] === bg[0] && pixels[i + 1] === bg[1] &&
+          pixels[i + 2] === bg[2]) continue;
+      n++;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  return { n: n, box: n ? [minX, minY, maxX, maxY] : null };
+}
+
 /* ---- the Lua sources ------------------------------------------------- */
 
 const SETUP = `
@@ -221,6 +260,26 @@ local function puttile(char, fn)
     end
     vram[char * 16 + row] = w0
     vram[char * 16 + 8 + row] = w1
+  end
+end
+local function putsprite(pattern, fn)
+  -- A sprite pattern is NOT a BAT character: the SAT's pattern code p is read
+  -- at word p*64, plane n at p*64 + n*16 + row, and bit 15 is the strip's
+  -- left pixel (HuC6270 manual 2.4 "sprite pattern"; renderer/pce-sprites.js
+  -- stripWords/stripPixel).  16 rows of 16 pixels, four 1-bit planes.
+  for row = 0, 15 do
+    local p0, p1, p2, p3 = 0, 0, 0, 0
+    for col = 0, 15 do
+      local c = fn(col, row)
+      if c % 2 >= 1 then p0 = p0 | (1 << (15 - col)) end
+      if c >= 2 and (c % 4) >= 2 then p1 = p1 | (1 << (15 - col)) end
+      if c >= 4 and (c % 8) >= 4 then p2 = p2 | (1 << (15 - col)) end
+      if c >= 8 then p3 = p3 | (1 << (15 - col)) end
+    end
+    vram[pattern * 64 + row] = p0
+    vram[pattern * 64 + 16 + row] = p1
+    vram[pattern * 64 + 32 + row] = p2
+    vram[pattern * 64 + 48 + row] = p3
   end
 end
 `;
@@ -264,16 +323,17 @@ function raster(line)
 end
 `;
 
-const TOY_SPRITE = `
+const TOY_SPRITE = SETUP + `
 function init()
-  -- one solid 16x16 sprite, colour 1, pattern code $100 (cell 256)
-  for row = 0, 15 do
-    vram[0x100 * 16 + row] = 0xFFFF
-    vram[0x100 * 16 + 8 + row] = 0
-  end
+  -- one solid 16x16 sprite, colour 1, pattern code $100 (sprite cell 256)
+  putsprite(0x100, function(col, row)
+    return 1
+  end)
   pal(0x101, rgb(7, 7, 0))
   reg("CR", 0xC0)
-  sx, sy = 32, 64
+  -- SAT X 32 / Y 64 is the top-left of the display; start in the middle so
+  -- every pad direction has room to move
+  sx, sy = 144, 160
 end
 function frame(t, f)
   if pad[1].right then sx = sx + 1 end
@@ -305,6 +365,17 @@ function checkPaletteToy() {
     eq("palette f" + f + " regs", got.state.regs, state.regs);
     check(got.raster === null, "palette f" + f + " has no raster table");
     samePixels("palette f" + f + " pixels", got.pixels, want);
+
+    /* VISIBILITY (#90): the tiled field covers every pixel, so the frame is
+     * never the backdrop.  Checked against the pixels the model drew, which
+     * proves the picture is visible, not merely that the toy wrote. */
+    if (f === 0 || f === 20) {
+      const vis = visibleIn(got.pixels, WIDTH, HEIGHT, cram,
+                            [0, 0, WIDTH, HEIGHT]);
+      check(vis.n > WIDTH * HEIGHT * 0.9,
+            "palette f" + f + " VISIBILITY: the picture fills the screen (" +
+            vis.n + " non-backdrop pixels)");
+    }
   }
   recordFrames("the palette toy", rt);
   rt.dispose();
@@ -358,6 +429,24 @@ function checkRasterToy() {
     /* the callback makes one entry for every line, in increasing order */
     check(got.raster.entries.length === HEIGHT,
           "raster f" + f + " has one entry per VDW line");
+
+    /* VISIBILITY (#90): the tile's colour 15 diagonal is the picture — the
+     * field's colour 1 is CRAM[1], which this toy never writes, so it is
+     * the backdrop and cannot count.  The diagonals must show on a frame
+     * drawn from the toy's own raster table, in the top half and the bottom
+     * (the per-band palettes are written per line).  Frame 0 is checked
+     * whole: its bands share one CRAM[15], so the halves are lopsided. */
+    if (f === 0 || f === 20) {
+      const boxes = f === 0 ? [[0, 0, WIDTH, HEIGHT]]
+        : [[0, 0, WIDTH, 112], [0, 112, WIDTH, HEIGHT]];
+      for (const band of boxes) {
+        const vis = visibleIn(got.pixels, WIDTH, HEIGHT, cram, band);
+        check(vis.n > 1000,
+              "raster f" + f + " VISIBILITY: rows " + band[1] + ".." +
+              (band[3] - 1) + " show the diagonal picture (" + vis.n +
+              " non-backdrop pixels)");
+      }
+    }
     prevLine = nextPrev;
   }
   recordFrames("the raster toy", rt);
@@ -374,11 +463,18 @@ function checkSpriteToy() {
     vram[addr * 2] = v & 0xFF;
     vram[addr * 2 + 1] = (v >> 8) & 0xFF;
   };
-  /* pce-sprites.js: word bit 15 is the leftmost sprite pixel; a solid
-   * colour-1 16x16 cell is plane word0 = $FFFF, word1 = 0 at rows 0..15. */
+  /* The pattern layout is the SAT's, not the BAT's (HuC6270 manual 2.4;
+   * pce-sprites.js stripWords/stripPixel): pattern p is a 64-word cell at
+   * word p*64, plane n at p*64 + n*16 + row, bit 15 = the left pixel.  A
+   * solid colour-1 16x16 sprite is plane 0 = $FFFF on rows 0..15 and planes
+   * 1-3 = 0.  (#90: the old address here, 0x100*16, was the BAT's tile
+   * layout — it wrote where no SAT pattern is read, and the picture was
+   * black; the state comparison agreed because both sides were wrong.) */
   for (let r = 0; r < 16; r++) {
-    word(0x100 * 16 + r, 0xFFFF);
-    word(0x100 * 16 + 8 + r, 0);
+    word(0x100 * 64 + r, 0xFFFF);
+    word(0x100 * 64 + 16 + r, 0);
+    word(0x100 * 64 + 32 + r, 0);
+    word(0x100 * 64 + 48 + r, 0);
   }
   const cram = new Uint8Array(1024);
   setsCram(cram, 0x101, rgb(7, 7, 0));
@@ -391,7 +487,7 @@ function checkSpriteToy() {
             : { up: true });
   }
 
-  let sx = 32, sy = 64;
+  let sx = 144, sy = 160;
   for (let f = 0; f < FRAMES; f++) {
     const p = pads[f];
     rt.setPad(1, p);
@@ -421,6 +517,53 @@ function checkSpriteToy() {
     samePixels("sprite f" + f + " pixels", got.pixels, want);
   }
   recordFrames("the sprite toy", rt);
+  rt.dispose();
+}
+
+/* ---- toy C, #90: the sprite is in the pixels, and the pad moves it ---- */
+
+/* A focused run: frame 0 with no pad, ten frames of right, then two of down.
+ * The sprite is a solid 16x16 block, so the frame's non-backdrop pixels are
+ * exactly 256 and their bounding box IS the sprite.  SAT X 32 / Y 64 is
+ * display (0,0) and the toy starts at sx, sy = 144, 160, so the block stands
+ * at (112,96) and every right press moves it one column — the picture a
+ * screenshot must show, measured in the picture.  The state comparison above
+ * cannot prove this: at this revision it agreed with a black screen (#90). */
+function checkSpriteVisibility() {
+  const rt = toys.create(TOY_SPRITE, { budgetMs: 250 });
+  rt.load();
+  const frames = [];
+  const run = (n, pad) => { rt.setPad(1, pad); return rt.frame(n); };
+  frames.push(run(0, {}));
+  for (let f = 1; f <= 10; f++) frames.push(run(f, { right: true }));
+  for (let f = 11; f <= 12; f++) frames.push(run(f, { down: true }));
+
+  frames.forEach((fr, f) => {
+    const vis = visibleIn(fr.pixels, WIDTH, HEIGHT, fr.state.cram,
+                          [0, 0, WIDTH, HEIGHT]);
+    check(vis.n === 256,
+          "sprite f" + f + " VISIBILITY: the 16x16 block shows in the pixels (" +
+          vis.n + " of 256 non-backdrop)");
+    const x = 112 + Math.min(f, 10), y = 96 + Math.max(0, f - 10);
+    eq("sprite f" + f + " VISIBILITY: the block stands at display (" + x +
+       "," + y + ") to (" + (x + 15) + "," + (y + 15) + ")", vis.box,
+       [x, y, x + 15, y + 15]);
+  });
+  /* the pad's direction is the picture's direction, frame by frame */
+  const boxOf = (fr) => visibleIn(fr.pixels, WIDTH, HEIGHT, fr.state.cram,
+                                  [0, 0, WIDTH, HEIGHT]).box || [-1, -1, -1, -1];
+  eq("sprite VISIBILITY: ten frames of right move the block right by 10",
+     boxOf(frames[10])[0] - boxOf(frames[0])[0], 10);
+  eq("sprite VISIBILITY: those ten frames leave the block's row alone",
+     boxOf(frames[10])[1] - boxOf(frames[0])[1], 0);
+  eq("sprite VISIBILITY: two frames of down move the block down by 2",
+     boxOf(frames[12])[1] - boxOf(frames[10])[1], 2);
+  eq("sprite VISIBILITY: those two frames leave the block's column alone",
+     boxOf(frames[12])[0] - boxOf(frames[10])[0], 0);
+  console.log("      VISIBILITY: sprite block " + JSON.stringify(boxOf(frames[0])) +
+              " -> " + JSON.stringify(boxOf(frames[10])) + " over 10 frames " +
+              "of pad right, -> " + JSON.stringify(boxOf(frames[12])) +
+              " over 2 of pad down; 256 non-backdrop pixels each frame");
   rt.dispose();
 }
 
@@ -1293,6 +1436,7 @@ function main() {
   checkPaletteToy();
   checkRasterToy();
   checkSpriteToy();
+  checkSpriteVisibility();
   checkPadDistinct();
   checkFrameCounter();
   checkRasterForms();
