@@ -14,12 +14,21 @@ through `renderer/pce-il.js` too — the console path (#31).
 | `status-bar.lua` | an RCR split: lines 0–23 hold still, everything below scrolls | BXR + BYR on lines 0 and 24 | blink palette 1 colour 3 |
 | `palette-cycle.lua` | water and fire by rotating two palette runs | — | palette 0 colours 1–6, palette 1 colours 1–6 |
 | `cave/main.lua` | a demo over a bought tileset: five parallax bands, a breathing palette, bats and embers (#127) | BXR on 5 lines | palette entry, 5 SAT entries |
+| `platformer/main.lua` | a one-screen platformer: run, jump, land on the ledges above the pit (#147) | — | 1 SAT entry |
+| `tower/main.lua` | an original climber: ladders, rolling boulders, hearts, a hammer, a gem per round (#147) | — | 18 SAT entries |
 
 `cave/` is a demo rather than a trick: its picture is converted from the
 "Retro Pixel Cave" pack by `tools/cave-assets.js` and lives **beside** the
 repo, never in it (`docs/DECISIONS.md`, 2026-10-29) — see
 [`cave/README.md`](cave/README.md).  Without that art the toy draws a plain
 rock wall and `tests/check-cave.js` prints a SKIP.
+
+`platformer/` and `tower/` are #147's two playable demos, written with Claude
+for Dennis on 2026-10-29 and copied unchanged.  Their picture is drawn in the
+toy itself with `puttile`/`putsprite`, so there is no pack art and nothing to
+download beside them.  Both are browser-only for now: the studio runs them,
+but the console export cannot carry a `pad[1]` read (PLATFORMER) or a Lua
+table (TOWER) yet — each README says which.
 
 Every file opens with a comment naming the trick and each block says why it
 is there.  A tile is written by `puttile`, which packs colour numbers into the

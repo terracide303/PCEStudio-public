@@ -6686,15 +6686,15 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  /* #128 added OAK WOODS, #127 CAVE and #125 CITY — three demos besides the
-   * five #29 effects and STARFALL; Browse and the studio read the same
-   * generated list */
-  check(data.length === 9,
-        "the gallery carries the five #29 toys, STARFALL, OAK WOODS, CAVE " +
-        "and CITY (got " + data.length + ")");
+  /* #128 added OAK WOODS, #127 CAVE, #125 CITY and #147 PLATFORMER and TOWER
+   * — five demos besides the five #29 effects and STARFALL; Browse and the
+   * studio read the same generated list */
+  check(data.length === 11,
+        "the gallery carries the five #29 toys, STARFALL, OAK WOODS, CAVE, " +
+        "CITY, PLATFORMER and TOWER (got " + data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall", "oak-woods", "cave", "city"]);
+      "starfall", "oak-woods", "cave", "city", "platformer", "tower"]);
   /* #125: the committed gallery carries CITY's art-free toy — the playable
    * file with the pack's picture is demo-art/city/main.lua and only the
    * deploy reads it (tools/gallery.js --with-demo-art). */
@@ -6835,7 +6835,7 @@ function checkGallery(page) {
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall", "oak-woods", "cave", "city"]);
+      "starfall", "oak-woods", "cave", "city", "platformer", "tower"]);
   /* #125: the committed CITY card runs the art-free toy, so it draws no
    * picture here; the deployed gallery carries the playable file and does.
    * Every other card must have ink. */
@@ -6861,6 +6861,45 @@ function checkGallery(page) {
         starCard.rawHref === "../toys/demo-game/main.lua",
         "#121: the STARFALL card links to its page, the studio and its file");
 
+  /* #147: PLATFORMER and TOWER are Dennis's two playable demos, copied
+   * unchanged.  Both are on Browse with the two links, and the studio opens
+   * each byte for byte and runs it visibly. */
+  for (const id of ["platformer", "tower"]) {
+    const t = data.find((x) => x.id === id) || {};
+    eq("#147: " + id + "'s author", t.author, "PCEStudio examples");
+    eq("#147: " + id + "'s tags", t.tags, ["playable", "sprites"]);
+    check(/J and L/.test(t.blurb || "") && /N jumps/.test(t.blurb || ""),
+          "#147: " + id + "'s blurb names the pad keys (" +
+          JSON.stringify(t.blurb) + ")");
+
+    const card = cards.find((c) => c.id === id) || {};
+    check(card.ink > 1000 && !card.error,
+          "#147: Browse draws " + id + "'s frame 60 (" + card.ink +
+          " pixels" + (card.error ? ", error " + card.error : "") + ")");
+    check(card.href === "toy.html?id=" + id &&
+          card.studioHref === "studio.html?toy=" + id &&
+          card.rawHref === "../toys/" + id + "/main.lua",
+          "#147: the " + id + " card links to its page, the studio and its " +
+          "file");
+
+    const q = runPage("?toy=" + id + "&paused=1");
+    const qs = q.sandbox.PCEStudio.studio;
+    eq("#147: ?toy=" + id + " opens the demo", qs.current().id, id);
+    check(qs.current().source === toySource(id + "/main.lua"),
+          "#147: ?toy=" + id + " runs toys/" + id + "/main.lua byte for byte");
+    const qFrames = qs.runFrames(61, null, "lua");
+    const qLast = qFrames[qFrames.length - 1];
+    let qInk = 0;
+    if (qLast && qLast.pixels) {
+      const px = qLast.pixels, r0 = px[0], g0 = px[1], b0 = px[2];
+      for (let i = 0; i < px.length; i += 3)
+        if (px[i] !== r0 || px[i + 1] !== g0 || px[i + 2] !== b0) qInk++;
+    }
+    check(qFrames.length === 61 && qInk > 1000,
+          "#147: " + id + " runs frame 0 to 60 and frame 60 has a picture (" +
+          qInk + " pixels)");
+  }
+
   B.setTag("raster");
   eq("the raster tag shows the raster toys", B.visible(),
      ["parallax", "sky-gradient", "road", "status-bar", "starfall",
@@ -6879,7 +6918,7 @@ function checkGallery(page) {
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
      ["cave", "city", "status-bar", "parallax", "oak-woods", "palette-cycle",
-      "road", "sky-gradient", "starfall"]);
+      "platformer", "road", "sky-gradient", "starfall", "tower"]);
   B.setSort("written");
 
   const bt = runBarePage(BROWSE_PAGE, "?tag=raster");
