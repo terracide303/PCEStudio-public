@@ -1,0 +1,20 @@
+{
+  "card": 88,
+  "game": "toys/demo-game/main.lua",
+  "frames": 600,
+  "scriptedPad": "right 0-179, left 180-239, up 240-299, down 300-359, N held on f%12<2",
+  "finalScore": 6,
+  "finalLives": 3,
+  "firstLifeLostInStillRun": 365,
+  "stripFrames": [
+    0,
+    60,
+    120,
+    240,
+    360,
+    480,
+    599
+  ],
+  "strip": "strip.png (2x4 cells of 256x224)",
+  "sound": "sfx-only: PSG writes happen, PCM is silent until card #113 sets R1"
+}
