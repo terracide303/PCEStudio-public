@@ -75,6 +75,17 @@
   var RCR_HEAD = 29;                         /* saves 9 + status/dispatch 20 */
   var RCR_REG = 35;                          /* one VDC register write */
   var RCR_COLOUR = 36;                       /* one VCE colour word */
+  var RCR_MAX_COLOURS = 2;                   /* part C's handler carries two */
+
+  /* The number every raster budget is made of, exported so a panel that
+   * shows a band's share of the blank and this file that refuses a line
+   * cannot disagree (#92). */
+  function replayCost(registers, colours) {
+    return RCR_HEAD + RCR_REG * registers + RCR_COLOUR * colours;
+  }
+
+  var RCR = { BLANK: RCR_BLANK, HEAD: RCR_HEAD, REG: RCR_REG,
+              COLOUR: RCR_COLOUR, MAX_COLOURS: RCR_MAX_COLOURS };
 
   /* ---- cycles per executed IL op -------------------------------------- */
   /* The shape is the timings table; the scale is the calibration described
@@ -298,11 +309,12 @@
         var regs = (e.bxr != null ? 1 : 0) + (e.byr != null ? 1 : 0) +
                    (e.cr != null ? 1 : 0);
         var colours = e.cram ? e.cram.length : 0;
-        var cost = RCR_HEAD + RCR_REG * regs + RCR_COLOUR * colours;
+        var cost = replayCost(regs, colours);
         lines.push({ line: e.line, registers: regs, colours: colours,
                      cycles: cost });
         if (cost > RCR_BLANK) over.push({ line: e.line, cycles: cost });
-        if (colours > 2) coloursOver.push({ line: e.line, colours: colours });
+        if (colours > RCR_MAX_COLOURS)
+          coloursOver.push({ line: e.line, colours: colours });
       }
     }
     var worst = null;
@@ -571,6 +583,11 @@
     validate: validate,
     validateProgram: validateProgram,
     finding: finding,
+    /* #92: the blank's arithmetic, so the SCANLINES panel shows the same
+     * share of the budget this file refuses */
+    replayCost: replayCost,
+    RCR: RCR,
+    blankBudget: blankBudget,
     MODEL: MODEL,
     REFUSALS: {
       "validate-frame-budget": "a toy frame over the 8-display-frame ceiling",

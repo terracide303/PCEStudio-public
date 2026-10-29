@@ -67,6 +67,8 @@
 <link rel="stylesheet" href="../vendor/codemirror/lib/codemirror.css">
 <!-- #86: the SPRITES panel's own styles, beside its module (#102's split) -->
 <link rel="stylesheet" href="studio-panel-sprites.css">
+<!-- #98: the CONSOLE panel's own styles, beside its module -->
+<link rel="stylesheet" href="studio-panel-console.css">
 <style>
   :root {
     /* ppu.toys' design tokens, adapted (source URL in the credit block). */
@@ -175,6 +177,11 @@
   }
   .workspace {
     display: grid; grid-template-rows: minmax(220px, 44.3fr) minmax(0, 55.7fr);
+    /* #92: the one column is capped at the workspace's own width.  Without
+     * this its implicit `auto` column was sized by the widest child's
+     * max-content, so a panel with a wide flex row (SCANLINES' preview)
+     * pushed the dock — and that preview — off the page. */
+    grid-template-columns: minmax(0, 1fr);
     min-height: 0; border-right: 1px solid var(--line);
   }
 
@@ -288,7 +295,11 @@
   /* ---------- the panel dock ---------- */
   .dock {
     display: grid; grid-template-rows: 30px 28px minmax(0, 1fr);
-    min-height: 0; background: var(--pane); border-top: 1px solid var(--line);
+    grid-template-columns: minmax(0, 1fr);
+    /* #92: a panel whose flex row is wider than the dock must not widen the
+     * dock itself (see .workspace above). */
+    min-width: 0; min-height: 0; background: var(--pane);
+    border-top: 1px solid var(--line);
   }
   .dock-tabs {
     display: flex; align-items: stretch; gap: 14px; padding: 0 10px;
@@ -477,10 +488,94 @@
     background: #08090c; border: 1px solid var(--line); cursor: crosshair;
   }
 
+  /* ---------- the SCANLINES panel's band editor (#92) ---------- */
+  .scn-top {
+    display: flex; gap: 12px; align-items: flex-start; flex-wrap: nowrap;
+  }
+  .scn-minicol { flex: 0 0 100px; }
+  .scn-head { flex: 1 1 0; min-width: 0; }
+  .scn-previewcol { flex: 0 0 auto; }
+  .scn-top input[type=number], .scn-edit input[type=number] {
+    background: var(--pane2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; font: 11px var(--mono); padding: 1px 3px;
+  }
+  .scn-top input[type=text], .scn-band input[type=text] {
+    background: var(--pane2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px; font: 11px var(--mono); padding: 1px 4px;
+  }
+  .scn-top input:focus-visible, .scn-edit input:focus-visible {
+    outline: 1px solid var(--accent, #5fc9e8);
+  }
+  .scn-minicol, .scn-previewcol { display: flex; flex-direction: column; gap: 4px; }
+  #scn-mini {
+    display: block; width: 44px; height: auto; image-rendering: pixelated;
+    background: #08090c; border: 1px solid var(--line);
+  }
+  #scn-preview {
+    display: block; max-width: 160px; height: auto;
+    image-rendering: pixelated; background: #08090c;
+    border: 1px solid var(--line);
+  }
+  .scn-frame-note {
+    color: var(--dim); font: 9px/1.35 var(--mono); white-space: nowrap;
+  }
+  .scn-head {
+    display: flex; flex-direction: column; gap: 7px;
+    color: var(--text2); font: 11px var(--mono);
+  }
+  .scn-line {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    color: var(--text2); font: 11px var(--mono);
+  }
+  .scn-head input[type=number] { width: 58px; }
+  .scn-head input[type=range] { width: 110px; }
+  .scn-head select, .scn-edit select {
+    background: var(--pane2); color: var(--text2); border: 1px solid var(--line);
+    border-radius: 4px; font: 11px var(--mono); padding: 1px 3px;
+    max-width: 15rem;
+  }
+  .scn-budget { color: var(--dim); font: 10px var(--mono); }
+  .scn-bands {
+    display: flex; flex-direction: column; gap: 3px; margin: 8px 0 0;
+    max-height: 148px; overflow: auto;
+  }
+  .scn-band {
+    display: flex; align-items: center; gap: 5px; padding: 3px 5px;
+    border: 1px solid var(--line2); border-radius: 4px;
+    background: var(--pane2); font: 11px var(--mono); color: var(--text2);
+  }
+  .scn-num { width: 14px; color: var(--dim); text-align: right; }
+  .scn-band .scn-name { flex: 1 1 70px; min-width: 50px; max-width: 150px; }
+  .scn-band input[type=number] { width: 60px; }
+  .scn-dash, .scn-ctl, .scn-cost { color: var(--dim); white-space: nowrap; }
+  .scn-cost.is-over { color: var(--bad, #e0625c); }
+  .scn-band select {
+    background: var(--chipbg); color: var(--text2); border: 1px solid var(--line2);
+    border-radius: 4px; font: 11px var(--mono);
+  }
+  .scn-edit {
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line2);
+    font: 11px var(--mono); color: var(--text2);
+  }
+  .scn-edithead { color: var(--muted); margin-bottom: 6px; }
+  .scn-onrow {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .scn-onrow input[type=number] { width: 58px; }
+  #scn-cram { display: inline-flex; gap: 6px; align-items: center; }
+  .scn-word {
+    background: var(--code); color: var(--cyan); padding: 1px 4px;
+    border-radius: 3px; font: 10px var(--mono);
+  }
+  .scn-dim { color: var(--dim); }
+  .scn-note { margin-top: 4px; color: var(--text2); font: 11px var(--mono); }
+  .scn-note.is-error { color: var(--bad, #e0625c); }
+
   /* ---------- output column ---------- */
   .output-pane {
     display: grid;
-    grid-template-rows: 30px 40px minmax(0, 1fr) auto auto 28px minmax(0, 0.6fr);
+    grid-template-rows: 30px 40px minmax(0, 1fr) auto auto auto 28px minmax(0, 0.6fr);
     min-height: 0; background: var(--pane); position: relative;
   }
   .out-head {
@@ -524,13 +619,24 @@
     color: var(--text); background: var(--raised); border-color: var(--line2);
   }
   .res { color: var(--dim); font: 10px var(--mono); white-space: nowrap; }
+  /* The frame box is ppu.toys' `.display`/`.display-frame` rule (#87): the
+   * largest box of the frame's own aspect that fits the column, with the
+   * canvas filling it and `pixelated` keeping every game pixel a square.
+   * --frame-w/--frame-h follow the dot clock (256x224, or 341/512 wide);
+   * paint() sets them when a frame of another size arrives. */
   .canvas-wrap {
-    position: relative; min-height: 0; background: #050608;
+    position: relative; min-height: 0; background: #05060a;
     display: flex; align-items: center; justify-content: center;
-    overflow: hidden; padding: 10px;
+    overflow: hidden; container-type: size;
+    border: 1px solid var(--line2); border-radius: 6px;
+  }
+  .display-frame {
+    position: relative;
+    width: min(100cqw, calc(100cqh * var(--frame-w, 256) / var(--frame-h, 224)));
+    aspect-ratio: var(--frame-w, 256) / var(--frame-h, 224);
   }
   #out {
-    width: 100%; height: 100%; object-fit: contain;
+    width: 100%; height: 100%; display: block;
     image-rendering: pixelated; outline: 0; background: #000;
   }
   .canvas-wrap.crt::after {
@@ -579,6 +685,23 @@
   }
   #btn-play:hover { background: color-mix(in srgb, var(--accent) 85%, #fff); }
   .clock { color: var(--dim); font: 11px var(--mono); white-space: nowrap; margin-left: 4px; }
+  /* ppu.toys' `.timeline-controls` row (#87): Go to marker sits above the
+   * scrubber, a jump control that always falls back to "Choose marker…". */
+  .timeline-controls {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    padding: 4px 10px 2px; background: var(--pane2);
+  }
+  .timeline-controls label {
+    display: flex; align-items: center; gap: 5px;
+    color: var(--dim); font: 10px var(--mono); white-space: nowrap;
+  }
+  .timeline-controls select {
+    min-height: 22px; box-sizing: border-box; padding: 0 5px;
+    border: 1px solid var(--line); border-radius: 4px;
+    background: var(--pane); color: var(--text); font: 10px var(--mono);
+    max-width: 170px;
+  }
+  .timeline-controls select:disabled { color: var(--faint); }
   .scrub {
     display: flex; align-items: center; gap: 10px; padding: 3px 10px 7px;
     background: var(--pane2); border-top: 1px solid var(--line2);
@@ -609,7 +732,24 @@
     font: 11px var(--mono); padding: 1px 0;
   }
   .marker:hover { color: #d5ecff; }
-  .agent-state { color: var(--bad); font: 11px var(--mono); letter-spacing: 0.06em; }
+  /* The AGENT drawer, ppu.toys' `.agent-panel` pre-connection state (#87):
+   * a dot and a title, the intro text, and the Sign-in placeholder. */
+  .agent-head { display: flex; align-items: center; gap: 7px; margin: 0 0 7px; }
+  .agent-dot {
+    width: 7px; height: 7px; flex: none; border-radius: 50%;
+    background: var(--dim);
+  }
+  .agent-state {
+    color: var(--text2); font: 11px var(--mono); letter-spacing: 0.06em;
+  }
+  .agent-intro { margin: 0; color: var(--text2); font: 12px/1.5 var(--sans); }
+  .agent-intro p { margin: 0 0 9px; }
+  .agent-connect {
+    font: 12px var(--sans); padding: 5px 13px; border-radius: 999px;
+    border: 1px solid var(--accent); background: var(--accent);
+    color: var(--accent-ink); cursor: pointer;
+  }
+  .agent-connect:hover { background: color-mix(in srgb, var(--accent) 85%, #fff); }
 
   /* ---------- popovers, modal, toast ---------- */
   .popover {
@@ -1040,19 +1180,117 @@
               returns the PSG's 12-bit F word, so the vocabulary is in place.</p>
           </div>
           <div class="panel" id="panel-scanlines" data-panel="scanlines" hidden>
-            <pre class="table" id="scan-table"></pre>
-            <p class="hint">A PCE line is an RCR interrupt, not HDMA: one entry
-              per line, and the ISR must fit the blank. The compiler prices
-              this (#32); the browser calls raster(line) for all 224 lines.</p>
+            <!-- #92: ppu.toys' SCANLINES, on the PCE's line interrupt. A
+                 band is what the RCR writes at its first line and holds
+                 until the next band's first line. -->
+            <div class="scn-top">
+              <div class="scn-minicol">
+                <canvas id="scn-mini" width="48" height="224"
+                        aria-label="The bands down the frame"></canvas>
+                <div class="scn-frame-note" id="scn-frame-note">Full frame ·
+                  lines 0-223</div>
+              </div>
+              <div class="scn-head">
+                <div class="scn-line">Inspect line
+                  <input type="number" id="scn-line" min="0" max="223" value="0"
+                         aria-label="Inspect line">
+                  <input type="range" id="scn-line-slider" min="0" max="223"
+                         value="0" aria-label="Inspect line slider"></div>
+                <div class="scn-line">Apply edits to
+                  <select id="scn-target" aria-label="Apply edits to a band"></select></div>
+                <div class="scn-line">Lines
+                  <select id="scn-lines" aria-label="The display's line count">
+                    <option value="224">224</option>
+                    <option value="240">240</option>
+                  </select>
+                  <span class="scn-budget" id="scn-budget"></span></div>
+                <div class="scn-line">
+                  <button type="button" class="btn-mini" id="scn-add">Add band</button>
+                  <select id="scn-ready" aria-label="Ready-made bands">
+                    <option value="">Ready-made…</option>
+                    <option value="status">Status bar</option>
+                    <option value="sprites-off">Sprites off</option>
+                    <option value="blank">Blank</option>
+                    <option value="parallax">Parallax</option>
+                    <option value="wobble">Wobble</option>
+                    <option value="gradient">Gradient</option>
+                  </select>
+                  <button type="button" class="btn-mini" id="scn-apply"
+                          title="Write the bands into main.lua as a raster(line) callback">Apply to toy</button>
+                  <button type="button" class="btn-mini" id="scn-import"
+                          title="Read the toy's own raster table back into bands">Import</button>
+                </div>
+              </div>
+              <div class="scn-previewcol">
+                <canvas id="scn-preview" width="256" height="224"
+                        aria-label="The frame the bands make"></canvas>
+                <div class="scn-frame-note" id="scn-preview-note">the bands
+                  over this frame</div>
+              </div>
+            </div>
+            <div class="scn-bands" id="scn-bands"></div>
+            <div class="scn-edit" id="scn-edit">
+              <div class="scn-edithead">Editing <b id="scn-edit-band">—</b></div>
+              <div class="scn-onrow">
+                <label class="scn-check"><input type="checkbox" id="scn-bxr-on">
+                  BXR <input type="number" id="scn-bxr" min="0" max="1023" value="0"></label>
+                <label class="scn-check"><input type="checkbox" id="scn-byr-on">
+                  BYR <input type="number" id="scn-byr" min="0" max="511" value="0"></label>
+                <label class="scn-check"><input type="checkbox" id="scn-cr-on">
+                  CR <input type="number" id="scn-cr" min="0" max="255" value="0"></label>
+              </div>
+              <div class="scn-onrow">
+                <label class="scn-check"><input type="checkbox" id="scn-bg-on"
+                  checked> BG on</label>
+                <label class="scn-check"><input type="checkbox" id="scn-spr-on"
+                  checked> sprites on</label>
+                <span class="scn-line">effect
+                  <select id="scn-fx" aria-label="The band's effect">
+                    <option value="">none</option>
+                    <option value="gradient">gradient</option>
+                    <option value="wobble">wobble</option>
+                    <option value="parallax">parallax</option>
+                  </select>
+                  <span id="scn-fx-note">no effect</span></span>
+              </div>
+              <div class="scn-onrow">colour writes <span id="scn-cram"></span>
+                <input type="number" id="scn-cram-addr" min="0" max="511"
+                       value="1" aria-label="CRAM address">
+                <input type="number" id="scn-cram-word" min="0" max="511"
+                       value="511" aria-label="9-bit colour word">
+                <button type="button" class="btn-mini" id="scn-cram-add">+
+                  colour</button>
+                <button type="button" class="btn-mini" id="scn-cram-clear">clear</button>
+              </div>
+              <div class="scn-note" id="scn-note"></div>
+              <p class="hint">A PCE line is an RCR interrupt, not HDMA: one
+                entry per line and the handler must fit the blank, so each
+                band's cost is shown against it and refused past it (#32).
+                The preview is the renderer over this frame with the bands.</p>
+            </div>
           </div>
           <div class="panel" id="panel-registers" data-panel="registers" hidden>
             <pre class="table" id="reg-table"></pre>
           </div>
           <div class="panel" id="panel-console" data-panel="console" hidden>
+            <div class="con-head">
+              <h3>HOW THIS PROJECT RUNS ON A REAL CONSOLE</h3>
+              <p class="con-sub">frame time · compiler findings · code size</p>
+            </div>
+            <div class="con-banner is-idle" id="console-banner"
+                 data-state="idle" role="status">Reading the toy…</div>
+            <div class="con-findings-head"><span>FINDINGS</span>
+              <span id="console-count"></span></div>
+            <ul class="con-findings" id="console-findings"></ul>
+            <div class="con-stats" id="console-stats"></div>
+            <p class="con-note" id="console-note">Compiled in your browser by
+              PCEStudio's IL pipeline (<code>pce-il.js</code> →
+              <code>pce-validate.js</code> → <code>pce-cgen.js</code>). Frame
+              times are a static estimate, checked against Mednafen and ares,
+              not hardware. A toy <code>.pce</code> is still #31's
+              machine-code half; the picture editor's <b>Download .pce</b> is
+              the working ROM path.</p>
             <pre class="table" id="console-table"></pre>
-            <p class="hint">The PC Engine has no HDMA: per-line changes are the
-              RCR interrupt. The compiler half is #31; machine code and the
-              HuCard export are the second half of #75.</p>
           </div>
         </div>
       </section>
@@ -1073,9 +1311,11 @@
         <span class="res" id="res" title="VDC display size">256×224</span>
       </div>
       <div class="canvas-wrap" id="canvas-wrap">
-        <canvas id="out" width="256" height="224" tabindex="0"
-                aria-label="Toy output. Click to follow a pixel. The pad keys
-                           IJKL N/M O/P drive pad 1 while it has focus."></canvas>
+        <div class="display-frame" id="display-frame">
+          <canvas id="out" width="256" height="224" tabindex="0"
+                  aria-label="Toy output. Click to follow a pixel. The pad keys
+                             IJKL N/M O/P drive pad 1 while it has focus."></canvas>
+        </div>
         <div class="layer-pop" id="layer-pop" hidden>
           <div class="layer-row"><label><input type="checkbox" id="layer-bg"
             checked> BG · background</label></div>
@@ -1100,6 +1340,12 @@
         <button type="button" class="chip is-on" id="btn-lua">Lua</button>
         <button type="button" class="chip" id="btn-cart">IL</button>
       </div>
+      <div class="timeline-controls">
+        <label for="go-marker">Go to marker
+          <select id="go-marker" aria-label="Go to marker" disabled>
+            <option value="">Choose marker…</option>
+          </select></label>
+      </div>
       <div class="scrub">
         <input type="range" id="seek" min="0" max="299" value="0"
                aria-label="Frame">
@@ -1116,11 +1362,21 @@
           <div class="marker-list" id="marker-list"></div>
         </div>
         <div class="panel" id="bottom-agent" hidden>
-          <p class="agent-state">NOT CONNECTED</p>
-          <p>The agent link is card #24: a coding agent will drive this studio
-            over MCP — write the Lua, import art, screenshot and check while
-            you watch. Until then the studio is driven by hand, and this page
-            already exposes the same runtime the link will call.</p>
+          <p class="agent-head"><span class="agent-dot" aria-hidden="true"></span>
+            <span class="agent-state">NOT CONNECTED</span></p>
+          <div class="agent-intro">
+            <p>Let your coding agent drive this studio over MCP: it writes the
+              Lua, runs it, screenshots the frame, checks it and builds a
+              <code>.pce</code> while you watch. The server is
+              <code>tools/mcp/server.js</code> (card #36), a local process on
+              this machine.</p>
+            <p>Your agent signs in as you, so sign in first — accounts and
+              publishing are card #37, and the local MCP server needs no
+              account.</p>
+            <button type="button" class="agent-connect"
+                    id="btn-agent-signin"
+                    title="Sign in is a placeholder: accounts and publishing are card #37; the MCP server (#36) is local.">Sign in</button>
+          </div>
         </div>
       </div>
     </section>
@@ -1241,9 +1497,11 @@
 <script src="pce-toyhost.js"></script>
 <script src="pce-toys.js"></script>
 <script src="pce-il.js"></script>
+<script src="pce-validate.js"></script>
 <script src="pce-panels.js"></script>
 <script src="pce-editor.js"></script>
 <script src="pce-screen.js"></script>
+<script src="pce-raster.js"></script>
 <script src="pce-pokes.js"></script>
 <!-- #85: the two panels' models — the VCE colour arithmetic over
      pce-editor.js's picture, and the 4bpp character decode over VRAM. -->
@@ -1251,7 +1509,17 @@
 <script src="pce-vram-map.js"></script>
 <script src="pce-sat.js"></script>
 <script src="pce-psg.js"></script>
+<!-- #99: the validator prices a toy for the ASSETS panel's ROM bar; it needs
+     pce-il.js, pce-sprites.js and pce-toyhost.js, all loaded above. -->
+
+<!-- #98: the CONSOLE panel runs the C emitter too, so the tab can say what
+     stops a toy reaching a real console.  pce-cgen.js has no dependencies. -->
+<script src="pce-cgen.js"></script>
+<script src="pce-assets.js"></script>
 <script src="pce-docs.js"></script>
+<!-- #87: the generated pceglobals.lua document, built from the register,
+     pad and helper tables above (the ppuglobals.lua tab ppu.toys has). -->
+<script src="pce-globals.js"></script>
 <!-- #102: every panel is its own module. Each file registers one panel — its
      tab, its Panels-menu entry, its Guide chapter and its draw — through
      register(studio) in init(); this page only loads them and draws the
@@ -1266,6 +1534,7 @@
 <script src="studio-panel-console.js"></script>
 <script src="studio-panel-markers.js"></script>
 <script src="studio-panel-agent.js"></script>
+<script src="studio-panel-assets.js"></script>
 <script>
 "use strict";
 /* -------------------------------------------------------------------------
@@ -1760,6 +2029,19 @@ function paint(frame) {
     image = ctx.createImageData(w, h);
     imageW = w;
     imageH = h;
+    /* #87: the frame box follows the dot clock, as ppu.toys' fixed 8:7
+     * `.display-frame` does for the SNES. A wide frame (341 or 512 dots)
+     * gets its own ratio instead of being stretched into 256:224. */
+    const box = $("display-frame");
+    if (box) {
+      if (box.style.setProperty) {
+        box.style.setProperty("--frame-w", String(w));
+        box.style.setProperty("--frame-h", String(h));
+      } else {
+        box.style["--frame-w"] = String(w);
+        box.style["--frame-h"] = String(h);
+      }
+    }
   }
   const d = image.data;
   for (let i = 0, j = 0; i < rgb.length; i += 3, j += 4) {
@@ -2369,6 +2651,22 @@ function fileKind(name) {
   return "json";
 }
 
+/* The generated tab (#87). `showingGlobals` means the editor is showing the
+ * read-only pceglobals.lua document instead of the toy's active file; any
+ * setEditorText() that is not showGlobals() itself leaves that view, so a
+ * file switch, an example, a paste or a restore cannot leave the editor
+ * read-only or a switch write the document into main.lua. */
+const GLOBALS_NAME = "pceglobals.lua";
+let showingGlobals = false;
+
+function globalsDoc() {
+  const G = typeof window !== "undefined" && window.PCEStudio &&
+            window.PCEStudio.globals;
+  return G ? G.text()
+           : "-- " + GLOBALS_NAME + " is unavailable: renderer/pce-globals.js " +
+             "did not load\n";
+}
+
 /* What the editor shows, whichever editor is mounted. CodeMirror replaces the
  * textarea in a real browser; the tests' stub DOM keeps the textarea. */
 function editorText() {
@@ -2376,6 +2674,11 @@ function editorText() {
   return $("source").value;
 }
 function setEditorText(text) {
+  if (showingGlobals) {
+    showingGlobals = false;
+    if (editor) editor.setOption("readOnly", false);
+    else if ($("source")) $("source").readOnly = false;
+  }
   if (editor) editor.setValue(String(text == null ? "" : text));
   else $("source").value = String(text == null ? "" : text);
   if (!editor) drawGutter();
@@ -2389,17 +2692,66 @@ function drawGutter() {
   $("gutter").textContent = out;
 }
 
+/* #98: a CONSOLE finding's file:line is a link into the editor.  The line is
+ * 1-based (Lua's own numbering); the tab is main.lua, the file the toy's
+ * chunk is.  CodeMirror gets its own cursor/scroll; the textarea fallback
+ * selects the line's first character.  Returns the line it went to. */
+function editorLine(line) {
+  const n = Math.max(1, Math.round(Number(line) || 1));
+  if (editor) {
+    editor.setCursor({ line: n - 1, ch: 0 });
+    if (typeof editor.scrollIntoView === "function")
+      editor.scrollIntoView({ line: n - 1, ch: 0 }, 80);
+    editor.focus();
+    return n;
+  }
+  const ta = $("source");
+  const lines = String(ta.value).split("\n");
+  let pos = 0;
+  for (let i = 0; i < n - 1 && i < lines.length; i++) pos += lines[i].length + 1;
+  ta.setSelectionRange(pos, pos);
+  if (typeof ta.focus === "function") ta.focus();
+  if (typeof ta.scrollIntoView === "function") ta.scrollIntoView();
+  drawGutter();
+  return n;
+}
+
+/* #98: CONSOLE is live as the toy is typed, not only when Run is pressed.
+ * Recompiling every keystroke would price / lower on every character, so the
+ * page asks the panel once typing pauses; the panel keeps its own result
+ * cache, and a draw for any other reason (Run, a frame, a seek) reuses it. */
+let consoleTimer = null;
+function scheduleConsoleRefresh() {
+  if (typeof setTimeout !== "function") return;
+  if (consoleTimer) clearTimeout(consoleTimer);
+  consoleTimer = setTimeout(() => {
+    consoleTimer = null;
+    if (activePanel !== "console") return;
+    panelDirty = true;
+    refreshPanels(true);
+  }, 180);
+}
+
 /* Every edit lands in the active file and, when that file is main.lua, in the
  * Lua the Run button compiles. Autosave on every edit is the ppu.toys
  * contract (`saved in this browser`); a failed write is a convenience lost,
  * not a broken toy. */
 function onEditorChange() {
+  /* #87: the generated document is not a file of the toy; an edit event from
+   * it (a stray input on the textarea fallback) must not reach main.lua. */
+  if (showingGlobals) return;
   const text = editorText();
   const f = findFile(activeFile);
   if (f) f.source = text;
   current.source = mainSource();
   setSaved("edited — Run to apply");
   persistToy();
+  /* #98: the CONSOLE tab answers as the Lua changes — the file the toy runs
+   * is main.lua, so an edit there is a new input for the compiler. */
+  if (f && f.name === "main.lua") {
+    panelDirty = true;
+    scheduleConsoleRefresh();
+  }
   /* An asset file edited by hand is a new input for the panels that draw
    * the assets (SCREEN): each one decides whether it cares. */
   if (f && (f.name === "tiles.json" || f.name === "palettes.json")) {
@@ -2464,6 +2816,19 @@ function updateFileTabs() {
     b.addEventListener("click", () => selectFile(f.name));
     host.appendChild(b);
   }
+  /* #87: ppuglobals.lua's counterpart. It is generated from the build and
+   * read-only, so it is a tab and not a file of the toy (it is not in the
+   * envelope and studio.files() does not list it). It sits with the code
+   * files, before the `+`. */
+  const g = document.createElement("button");
+  g.type = "button";
+  g.className = "file-tab" + (showingGlobals ? " is-on" : "");
+  g.id = "tab-globals";
+  g.textContent = GLOBALS_NAME;
+  g.title = GLOBALS_NAME + " — generated: the register and constant names " +
+    "a toy may use (read-only, not saved)";
+  g.addEventListener("click", showGlobals);
+  host.appendChild(g);
   const add = document.createElement("button");
   add.type = "button";
   add.className = "file-tab file-add";
@@ -2508,7 +2873,7 @@ function renderAssets() {
 function selectFile(name) {
   const f = findFile(name);
   if (!f) return false;
-  if (activeFile !== name && !switchingFile) {
+  if (!showingGlobals && activeFile !== name && !switchingFile) {
     const cur = findFile(activeFile);
     if (cur) cur.source = editorText();
   }
@@ -2520,6 +2885,26 @@ function selectFile(name) {
   $("doc-title").textContent = name;
   updateFileTabs();
   renderAssets();
+  selectCodeTab("code");
+  return true;
+}
+
+/* Show the generated pceglobals.lua (#87) in the editor, read-only. It is a
+ * view of the build, not one of the toy's files: activeFile stays the file
+ * the toy runs, and setEditorText() on the next file switch leaves this. */
+function showGlobals() {
+  switchingFile = true;
+  setEditorText(globalsDoc());       /* leaves a previous globals view */
+  switchingFile = false;
+  showingGlobals = true;
+  if (editor) {
+    editor.setOption("readOnly", true);
+    editor.setOption("mode", "lua");
+  } else if ($("source")) {
+    $("source").readOnly = true;
+  }
+  $("doc-title").textContent = GLOBALS_NAME;
+  updateFileTabs();
   selectCodeTab("code");
   return true;
 }
@@ -2537,6 +2922,8 @@ function loadExample(id, quiet, noApply) {
   setEditorText(ex.source);
   switchingFile = false;
   notifyAssetEdit("tiles.json");
+  /* #92: the example's main.lua is a new band source for SCANLINES */
+  if (scanlinesApi()) scanlinesApi().invalidate();
   panelDirty = true;
   if (editor) editor.setOption("mode", "lua");
   $("doc-title").textContent = ex.name;
@@ -2558,7 +2945,9 @@ function toyRefuse(code, message) {
 
 function toyEnvelope() {
   const cur = findFile(activeFile);
-  if (cur) cur.source = editorText();
+  /* #87: while pceglobals.lua is on screen the editor's text is not the
+   * active file's — never save the generated document into a toy file. */
+  if (cur && !showingGlobals) cur.source = editorText();
   current.source = mainSource();
   return {
     version: TOY_VERSION,
@@ -2649,6 +3038,9 @@ function openToy(text, fileName, opts) {
   updateFileTabs();
   renderAssets();
   notifyAssetEdit("tiles.json");
+  /* #92: a different toy is a different main.lua, so the SCANLINES panel
+   * adopts the band block the new toy carries (or starts one). */
+  if (scanlinesApi()) scanlinesApi().invalidate();
   panelDirty = true;
   if (!opts || opts.apply !== false) applySource();
   if (!opts || opts.persist !== false) persistToy();
@@ -2855,7 +3247,7 @@ function runFrames(count, exampleId, mode) {
   if (exampleId && !ex) throw new Error("no example " + exampleId);
   if (!ex) {
     const cur = findFile(activeFile);
-    if (cur) cur.source = editorText();
+    if (cur && !showingGlobals) cur.source = editorText();
   }
   const source = ex ? ex.source : mainSource();
   const oldMode = current.mode;
@@ -3502,6 +3894,17 @@ function init() {
     if (regDef && regDef.api && regDef.api.curve)
       regDef.api.curve(qs.get("curve").toUpperCase());
   }
+  /* #92: ?bands=demo seeds the SCANLINES panel's four ready-made bands and
+   * applies them to the toy, so the #92 screenshot opens on bands without
+   * synthetic input — the same trick as ?tab=assets, ?layers and ?crt. */
+  if (qs.get("bands") === "demo" && scanlinesApi()) {
+    const a = scanlinesApi();
+    a.addBand("sprites-off", 160);
+    a.addBand("parallax", 96);
+    a.addBand("gradient", 32);
+    try { a.apply(); } catch (e) { /* the panel shows the refusal */ }
+    if (applySource()) { seek(parseInt(qs.get("frame"), 10) || 0); pause(); }
+  }
   updateResolution();
 }
 
@@ -3688,6 +4091,9 @@ function panelApi(id) {
 /* The screen panel's evidence surface. */
 function screenApi() { return panelApi("screen"); }
 
+/* #92: the SCANLINES panel's evidence surface, the same way. */
+function scanlinesApi() { return panelApi("scanlines"); }
+
 const studio = {
   /* ---- the layout (the page's, not a panel's) ------------------------- */
   $: $,
@@ -3812,6 +4218,12 @@ const studio = {
   fileNames: () => files.map((f) => f.name),
   activeFile: () => activeFile,
   selectFile: selectFile,
+  /* #87 — the generated pceglobals.lua tab. globals() is its text (what the
+   * editor shows); showGlobals() opens it; globalsOpen() says whether the
+   * editor is showing it. */
+  globals: globalsDoc,
+  showGlobals: showGlobals,
+  globalsOpen: () => showingGlobals,
   editorText: editorText,
   setEditorText: (text) => {
     switchingFile = true;
@@ -3906,6 +4318,43 @@ const studio = {
   screenPointer: (kind, ev, elem) => screenApi().pointer(kind, ev, elem),
   screenCanvas: () => screenApi().canvas(),
   screenDrawn: () => screenApi().drawn(),
+
+  /* #92 — the SCANLINES panel's band editor. The module owns these; the
+   * evidence drives the same functions its DOM handlers call. */
+  scanlines: () => { const a = scanlinesApi(); return a ? a.state() : null; },
+  scanlineBands: () => { const a = scanlinesApi(); return a ? a.bands() : []; },
+  scanlineAdd: (readyId, at) => scanlinesApi().addBand(readyId, at),
+  scanlineRemove: (id) => scanlinesApi().removeBand(id),
+  scanlineMove: (id, dir) => scanlinesApi().move(id, dir),
+  scanlineDuplicate: (id) => scanlinesApi().duplicate(id),
+  scanlineSet: (id, spec) => scanlinesApi().setBand(id, spec),
+  scanlineSelect: (id) => scanlinesApi().select(id),
+  scanlineInspect: (line) => scanlinesApi().inspectAt(line),
+  scanlineSetLines: (n) => scanlinesApi().setLines(n),
+  scanlineTable: (opts) => scanlinesApi().table(opts),
+  scanlineFrame: () => scanlinesApi().frame(),
+  scanlineApply: () => scanlinesApi().apply(),
+  scanlineImport: () => scanlinesApi().importToy(),
+  scanlineLua: () => scanlinesApi().lua(),
+  scanlinePrice: () => scanlinesApi().price(),
+  scanlineDrawn: () => scanlinesApi().drawn(),
+  scanlineInvalidate: () => scanlinesApi().invalidate(),
+
+  /* #98 — the CONSOLE panel's report. The module owns the analysis; the
+   * evidence reads the same object its draw uses, and goto() is the function
+   * a finding's file:line link calls. editorLine() is the page's one way to
+   * put the cursor on a Lua line. */
+  console: () => { const a = panelApi("console"); return a ? a.state() : null; },
+  consoleRefresh: () => {
+    const a = panelApi("console");
+    if (!a) return null;
+    a.refresh();
+    panelDirty = true;
+    refreshPanels(true);
+    return a.state();
+  },
+  consoleGoto: (line) => { const a = panelApi("console"); return a ? a.goto(line) : false; },
+  editorLine: editorLine,
 
   /* #85 — the PALETTES panel's 512-colour picker and the VRAM panel's drawn
    * map. The modules own these; the evidence drives the same functions
