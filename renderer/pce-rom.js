@@ -96,17 +96,32 @@
   var CFG_RASTER = 9;            /* 1 = the #16 raster table is present */
   var CFG_REG0 = 0x0A;
   var REG_SIZE = 4;
-  /* #70: the wide-window block.  A picture whose VCE CR selects a /3 or /2
+  /* #70/#67: the window block.  A picture whose VCE CR selects a /3 or /2
    * dot clock (DCC bits 1-0 != 00) is a 336- or 512-dot picture; the viewer
    * cannot use the 256-dot HSR/HDR constants, so config version 2 says the
-   * block at bank 1 offset 0x1F00 is present.  It sits after the raster table
-   * (which ends at 0x1550) and is 0xff in every version 1 picture, so every
-   * ROM built before #70 is byte-identical.  Byte-identical to
-   * tools/genviewer.py's encoder (docs/ROM_LAYOUT.md). */
-  var WIDE_OFFSET = 0x1F00;
-  var WIDE_SIZE = 8;
-  var WIDE_VCE_CR = 0, WIDE_HSR_LO = 2, WIDE_HSR_HI = 3,
-      WIDE_HDR_LO = 4, WIDE_HDR_HI = 5;
+   * block at bank 1 offset 0x1F00 is present with VCE CR + HSR/HDR.  #67
+   * extends it: a picture whose display window differs from the viewer's
+   * constants writes config version 3, and the block also carries VPR, VDR
+   * and VCR — the five window registers viewer.asm writes before the
+   * display.  It sits after the raster table (which ends at 0x1550) and is
+   * 0xff in every version 1 picture, so every ROM built before #70 is
+   * byte-identical.  Byte-identical to tools/genviewer.py's encoder
+   * (docs/ROM_LAYOUT.md). */
+  var WINDOW_OFFSET = 0x1F00;
+  var WIDE_SIZE = 8;             /* version 2: VCE CR + HSR + HDR */
+  var WINDOW_SIZE = 16;          /* version 3: + VPR + VDR + VCR */
+  var WINDOW_VCE_CR = 0, WINDOW_HSR_LO = 2, WINDOW_HSR_HI = 3,
+      WINDOW_HDR_LO = 4, WINDOW_HDR_HI = 5,
+      WINDOW_VPR_LO = 6, WINDOW_VPR_HI = 7,
+      WINDOW_VDR_LO = 8, WINDOW_VDR_HI = 9,
+      WINDOW_VCR_LO = 10, WINDOW_VCR_HI = 11;
+  /* The viewer's own constants (tools/viewer.asm): a 256x240 window on the
+   * /4 clock.  A picture whose five registers all equal these writes config
+   * version 1 and no block. */
+  var DEFAULT_WINDOW = { HSR: 0x0202, HDR: 0x041F, VPR: 0x0F02,
+                         VDR: 0x00EF, VCR: 0x000C };
+  var WINDOW_LIMITS = { HSR: 0x7F1F, HDR: 0x7F7F, VPR: 0x1F1F,
+                        VDR: 0x01FF, VCR: 0x00FF };
   /* 13 descriptors fit between CFG_REG0 and the palette at 0x40:
    * (0x40 - 0x0A) / 4 = 13.  The count byte could hold 255; going past 13
    * would need a new config layout (docs/ROM_LAYOUT.md). */
@@ -348,14 +363,45 @@
     var vcecr = regs.VCECR != null ? regs.VCECR : 0x04;
     byte("VCECR", vcecr, 0xFF);
     var wide = (vcecr & 0x03) !== 0;
-    var wideHsr = regs.HSR != null ? regs.HSR : 0x0202;
-    var wideHdr = regs.HDR != null ? regs.HDR : 0x041F;
-    byte("HSR", wideHsr, 0xFFFF);
-    byte("HDR", wideHdr, 0xFFFF);
+    /* #67: the five display-window registers, from the picture.  A dump
+     * names the VDC's R0C (VPR) "VSR" in its save-state field, so both
+     * spellings are accepted; a caller without them is the viewer's
+     * 256x240 constants. */
+    var vprReg = regs.VPR != null ? regs.VPR : regs.VSR;
+    var win = {
+      HSR: regs.HSR != null ? regs.HSR : DEFAULT_WINDOW.HSR,
+      HDR: regs.HDR != null ? regs.HDR : DEFAULT_WINDOW.HDR,
+      VPR: vprReg != null ? vprReg : DEFAULT_WINDOW.VPR,
+      VDR: regs.VDR != null ? regs.VDR : DEFAULT_WINDOW.VDR,
+      VCR: regs.VCR != null ? regs.VCR : DEFAULT_WINDOW.VCR
+    };
+    for (var wk in WINDOW_LIMITS) {
+      byte(wk, win[wk], 0xFFFF);
+      if (win[wk] > WINDOW_LIMITS[wk]) {
+        refuse("window-range", wk + "=$" + win[wk].toString(16) +
+               " is past the register's $" +
+               WINDOW_LIMITS[wk].toString(16) + " field width (VDC manual " +
+               "H7-9..H7-11)");
+      }
+    }
+    /* Version 3 = the window block carries the five registers.  A wide
+     * picture whose vertical window is the standard one keeps version 2 and
+     * its 8-byte block (its HSR/HDR are the wide mode's, #70), so #70's
+     * wide ROMs do not change. */
+    var windowChanged = false, verticalChanged = false;
+    for (var wname in DEFAULT_WINDOW) {
+      if (win[wname] !== DEFAULT_WINDOW[wname]) {
+        windowChanged = true;
+        if (wname !== "HSR" && wname !== "HDR") verticalChanged = true;
+      }
+    }
+    var version = (verticalChanged || (!wide && windowChanged)) ? 3
+                : wide ? 2 : 1;
     /* #70: the wide-window block and the #16 raster table are mutually
      * exclusive (docs/ROM_LAYOUT.md): genviewer.py refuses the combination,
      * and so does this builder, so the two stay comparable on every picture
-     * either can describe. */
+     * either can describe.  A version 3 window block does not overlap the
+     * table, so a non-wide window picture may run one. */
     if (wide && picture.raster)
       refuse("wide-raster", "a wide picture (VCE CR DCC != 00) cannot also " +
              "carry a raster table; the wide-window block and the table are " +
@@ -453,7 +499,7 @@
 
     var bank1 = BANK;
     var cfg = new Uint8Array(CONFIG_SIZE);
-    cfg[CFG_VERSION] = wide ? 2 : 1;
+    cfg[CFG_VERSION] = version;
     u16(cfg, CFG_BXR, bxr);
     u16(cfg, CFG_BYR, byr);
     cfg[CFG_MWR] = mwr;
@@ -469,16 +515,27 @@
     rom.set(palette, bank1 + PALETTE_OFFSET);
     rom.set(sat, bank1 + SAT_OFFSET);
     if (rasterImage) rom.set(rasterImage, bank1 + RASTER_OFFSET);
-    if (wide) {
-      /* #70: the wide-window block, byte for byte what tools/genviewer.py
-       * writes: VCE CR, reserved 0, HSR lo/hi, HDR lo/hi, reserved 0,0. */
-      var wideBlock = new Uint8Array(WIDE_SIZE);
-      wideBlock[WIDE_VCE_CR] = vcecr & 0xFF;
-      wideBlock[WIDE_HSR_LO] = wideHsr & 0xFF;
-      wideBlock[WIDE_HSR_HI] = (wideHsr >> 8) & 0xFF;
-      wideBlock[WIDE_HDR_LO] = wideHdr & 0xFF;
-      wideBlock[WIDE_HDR_HI] = (wideHdr >> 8) & 0xFF;
-      rom.set(wideBlock, bank1 + WIDE_OFFSET);
+    if (version >= 2) {
+      /* #70/#67: the window block, byte for byte what tools/genviewer.py
+       * writes: version 2 is VCE CR, reserved 0, HSR lo/hi, HDR lo/hi and
+       * two reserved bytes; version 3 continues with VPR, VDR and VCR
+       * (docs/ROM_LAYOUT.md). */
+      var block = new Uint8Array(version === 3 ? WINDOW_SIZE : WIDE_SIZE);
+      block[WINDOW_VCE_CR] = vcecr & 0xFF;
+      var pairs = version === 3
+        ? [["HSR", WINDOW_HSR_LO, WINDOW_HSR_HI],
+           ["HDR", WINDOW_HDR_LO, WINDOW_HDR_HI],
+           ["VPR", WINDOW_VPR_LO, WINDOW_VPR_HI],
+           ["VDR", WINDOW_VDR_LO, WINDOW_VDR_HI],
+           ["VCR", WINDOW_VCR_LO, WINDOW_VCR_HI]]
+        : [["HSR", WINDOW_HSR_LO, WINDOW_HSR_HI],
+           ["HDR", WINDOW_HDR_LO, WINDOW_HDR_HI]];
+      for (var pi = 0; pi < pairs.length; pi++) {
+        var pv = win[pairs[pi][0]];
+        block[pairs[pi][1]] = pv & 0xFF;
+        block[pairs[pi][2]] = (pv >> 8) & 0xFF;
+      }
+      rom.set(block, bank1 + WINDOW_OFFSET);
     }
 
     rom.set(bat, 2 * BANK);

@@ -116,6 +116,7 @@ the message.
 | `no-tile` | a character with no tile behind it | the map may only name tiles that exist |
 | `backdrop-entry` | setting entry 0 of one background palette | colour 0 is one shared backdrop; use `setBackdrop` |
 | `sprite-range`, `sprite-pattern-range`, `sprite-pixel-range`, `sprite-palette-range`, `sprite-entry-range`, `sprite-flag-range`, `map-range`, `pixel-range`, `colour-range`, `palette-range`, `entry-range`, `colour-index` | out-of-range coordinates/codes/flags | the value has no valid meaning |
+| `window-lines`, `window-width`, `window-mode` | `setWindow` with a height other than 224/240 lines, a width other than 256/224 dots, or a 224-dot width on the 336/512-dot clocks | the VDC's window fields hold those values, and the narrow HDW's HSR/HDR are the 256-dot display table's (#67) |
 
 The page's panels cannot produce most of these (16 rows of 16 swatches, six
 sizes in a list, 64 slots checked by the model). Its **Check the rules**
@@ -306,6 +307,30 @@ wider BAT is not part of #70. `tests/check-editor.js` renders both wide
 modes against an independent model, exports them, and (when the captures are
 present) holds `tests/dumps/wedit336` and `wedit512` to the editor's own
 VRAM/CRAM/registers and a Mednafen frame diff 0 at 341×232 and 512×232.
+
+### The display window (#67)
+
+The **Display window** controls (`setWindow(pic, { lines, width })`) choose
+the VDC's window: 240 lines (the viewer's own default, `VDR $00EF`) or 224
+lines (`VDR $00DF`), and 256 dots (`HDR $041F`) or 224 dots (`HSR $0402`,
+`HDR $041B` — 16 px of border on each side, #48's narrow scene). `VPR`
+(`$0F02`: the display starts at line 17) and `VCR` (`$000C`) are the
+viewer's constants. The preview is the window: as wide as the dot clock's
+captured frame and as tall as the window, drawn by `pce-bg.js` from the five
+registers, so the 224-dot window's border columns are visible. A 224-dot
+window is refused on the 336/512-dot clocks (`window-mode`); switching to a
+wide clock widens the window back to the mode's own.
+
+The export writes config **version 3** and the window block's five registers
+whenever a register differs from the viewer's constants
+(`docs/ROM_LAYOUT.md`); the viewer writes them before the display, so the
+same ROM runs on the console. `tests/check-editor.js` checks the five
+registers, renders the 224-line/224-dot preview against an independent model
+(every border pixel is `CRAM[$100]`), exports the ROM and — when
+`tests/dumps/wwindow` is present (`tools/capture.sh window`) — requires
+Mednafen's 256×232 frame to equal the editor's picture at diff 0: the 16-px
+border columns and the 8 border rows under the 224-line window are in the
+comparison, and the saved `HSR/HDR/VSR/VDR/VCR` must be the five it wrote.
 
 ## Evidence (measured 2026-10-28)
 
@@ -521,9 +546,10 @@ followinfo: pixel (168,92) · VDW line 92 · winner: background
   API; they show the chain works, not that the UI is pleasant to draw with.
 - **Mednafen's crop.** Its default display rectangle starts one VDW line in
   (`RCRCount − (scanline − 18) = 1` in both captures), so the captures show
-  picture rows 1–232; the editor previews from VDW line 0. The check compares
-  the preview with each capture one row apart, and the 232-row render with the
-  capture directly (diff 0). That is Mednafen's crop, not a hardware fact this
-  repo measured.
+  picture rows 1–232; the editor previews from VDW line 0, over the display
+  window's own height (240 rows by default, 224 with the 224-line window
+  chosen in #67). The check compares the preview with each capture one row
+  apart, and the 232-row render with the capture directly (diff 0). That is
+  Mednafen's crop, not a hardware fact this repo measured.
 - **Not the console.** Mednafen is not a HuCard on real hardware; the #8 Tang
   Nano photo is still the hardware check.

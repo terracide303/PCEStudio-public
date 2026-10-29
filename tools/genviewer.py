@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """genviewer.py — build the picture-data banks for the #8/#14/#16 viewer ROM.
 
-    python3 -I genviewer.py 1|2|3|7|10
+    python3 -I genviewer.py 1|2|3|7|10|11..14
     python3 -I genviewer.py vsprite1..vsprite12
     python3 -I genviewer.py vraster1..vraster10
 
@@ -85,20 +85,73 @@ PALETTE_OFFSET = 0x40          # 512 words, LE (entries 0-511)
 SAT_OFFSET = 0x440             # 256 words, LE (64 SAT entries x 4) — #14
 SAT_ADDR = 0x7F00              # the SAT's VRAM word address (DVSSR)
 
-# ---- #70: the wide-window block (docs/ROM_LAYOUT.md)
+# ---- #70/#67: the window block (docs/ROM_LAYOUT.md)
 # A picture whose VCE CR selects a non-/4 dot clock (DCC bits 1-0 != 00) is
 # a 336- or 512-dot picture: the viewer cannot use the 256-dot HSR/HDR
 # constants, so config version 2 says the block at bank 1 offset 0x1F00 is
-# present.  The block sits after the raster table (which ends at 0x1550) and
-# is 0xFF padding in every version 1 picture, so no existing ROM changes.
-# viewer.asm reads it at $5F00 through MPR2 before any data bank is mapped.
-WIDE_OFFSET = 0x1F00
-WIDE_VCE_CR = 0
-WIDE_HSR_LO = 2
-WIDE_HSR_HI = 3
-WIDE_HDR_LO = 4
-WIDE_HDR_HI = 5
-WIDE_SIZE = 8
+# present with its VCE CR and HSR/HDR.  #67 extends the same block: a
+# picture whose display window differs from the viewer's constants (a
+# 224-line window, a narrower HDW) writes config version 3 and the block
+# carries all five window registers — HSR, HDR, VPR, VDR and VCR — so
+# viewer.asm writes them instead of its constants.  The block sits after the
+# raster table (which ends at 0x1550) and is 0xFF padding in every version 1
+# picture, so no existing ROM changes.  viewer.asm reads it at $5F00
+# through MPR2 before any data bank is mapped.
+WINDOW_OFFSET = 0x1F00
+WINDOW_VCE_CR = 0
+WINDOW_HSR_LO = 2
+WINDOW_HSR_HI = 3
+WINDOW_HDR_LO = 4
+WINDOW_HDR_HI = 5
+WINDOW_VPR_LO = 6
+WINDOW_VPR_HI = 7
+WINDOW_VDR_LO = 8
+WINDOW_VDR_HI = 9
+WINDOW_VCR_LO = 10
+WINDOW_VCR_HI = 11
+WIDE_SIZE = 8                    # version 2: VCE CR + HSR + HDR
+WINDOW_SIZE = 16                 # version 3: + VPR + VDR + VCR
+
+# The viewer's own constants (tools/viewer.asm): HSR $0202 (HDS=2, HSW=2),
+# HDR $041F (HDW=31, HDE=4), VPR $0F02 (VDS=15, VSW=2), VDR $00EF (240
+# lines), VCR $000C — a 256x240 window on the /4 clock.  A picture whose
+# registers all equal these writes config version 1 and no block.
+DEFAULT_WINDOW = {
+    "HSR": 0x0202, "HDR": 0x041F, "VPR": 0x0F02, "VDR": 0x00EF,
+    "VCR": 0x000C,
+}
+VERTICAL_WINDOW = ("VPR", "VDR", "VCR")
+
+
+def window_registers(regs):
+    """The picture's five display-window registers (docs/ROM_LAYOUT.md).
+
+    The dump records the live HSR/HDR/VDR/VCR; its vertical-sync register is
+    saved as `VSR` (mcs-extract.py's field name), which is VPR — the VDC's
+    own name for the R0C register (VDS/VSW).  A dump with none of them is the
+    viewer's 256x240 constants."""
+    vpr = regs["VSR"] if "VSR" in regs else regs.get("VPR")
+    return {
+        "HSR": int(regs.get("HSR", DEFAULT_WINDOW["HSR"])),
+        "HDR": int(regs.get("HDR", DEFAULT_WINDOW["HDR"])),
+        "VPR": int(vpr if vpr is not None else DEFAULT_WINDOW["VPR"]),
+        "VDR": int(regs.get("VDR", DEFAULT_WINDOW["VDR"])),
+        "VCR": int(regs.get("VCR", DEFAULT_WINDOW["VCR"])),
+    }
+
+
+def check_window(w):
+    """Refuse a register value the VDC cannot hold (VDC manual H7-9..H7-11).
+
+    HSR: HSW bits 0-4, HDS bits 8-14; HDR: HDW bits 0-6, HDE bits 8-14;
+    VPR: VSW bits 0-4, VDS bits 8-12; VDR: VDW bits 0-8; VCR: 8 bits."""
+    limits = {"HSR": 0x7F1F, "HDR": 0x7F7F, "VPR": 0x1F1F, "VDR": 0x01FF,
+              "VCR": 0x00FF}
+    for name, value in w.items():
+        if value < 0 or value > limits[name]:
+            raise ValueError(
+                f"window-range: {name}=${value:04x} is past the register's "
+                f"{limits[name]:#06x} field width (VDC manual H7-9..H7-11)")
 
 
 def is_wide(regs):
@@ -221,7 +274,8 @@ def load_regions(dumpdir):
 
 
 def build(spec):
-    """spec: '1'..'3' -> viewerN from tests/dumps/sceneN; 'vspriteN' ->
+    """spec: '1'..'3'/'7'/'10'/'11'..'14' -> viewerN from tests/dumps/sceneN
+    ('11'..'14' are #48's display-window scenes, #67); 'vspriteN' ->
     vspriteN from tests/dumps/spriteN (#14: the #12 sprite scenes);
     'vrasterN' -> vrasterN from tests/dumps/rasterN and the scene's
     raster table tools/gen/rasterN.raster.json (#16); 'flicker' -> the
@@ -280,12 +334,21 @@ def build(spec):
         palette_words = None
     words = bat_words(mwr)
 
-    # #70: a 336- or 512-dot picture carries its VCE CR and the HSR/HDR of
-    # its window in the wide-window block (docs/ROM_LAYOUT.md).  #27's wide
-    # dumps record both the live registers and the latched *_cache fields;
-    # the live HSR/HDR are what the scene ROM wrote and the *_cache values
-    # agree (the viewer writes the same registers before enabling display).
+    # #70/#67: the picture's window registers.  #27's wide dumps record both
+    # the live registers and the latched *_cache fields; the live values are
+    # what the scene ROM wrote and the viewer writes the same registers
+    # before enabling display.  A picture that does not match the viewer's
+    # constants writes config version 3 and the block carries all five
+    # (docs/ROM_LAYOUT.md); a wide picture whose vertical window is the
+    # standard one keeps version 2 and its 8-byte block, so #70's wide
+    # pictures do not change.
     wide = is_wide(regs)
+    window = window_registers(regs)
+    check_window(window)
+    changed = [k for k in DEFAULT_WINDOW if window[k] != DEFAULT_WINDOW[k]]
+    vertical_changed = [k for k in changed if k in VERTICAL_WINDOW]
+    version = 3 if (vertical_changed or (not wide and changed)) else \
+        (2 if wide else 1)
 
     regions = []
     for char0, count in load_regions(dumpdir):
@@ -322,13 +385,16 @@ def build(spec):
                     f"flicker: region words {dest}..{dest + count} overlap "
                     f"the rotated SAT copies {copy_lo}..{SAT_ADDR + 0xff}")
 
-    # config block.  Version 2 = the wide-window block is present (#70); a
-    # wide and a flicker picture are mutually exclusive (the flicker bytes
-    # $3E/$3F stay 0), and a raster table never comes with a wide window.
+    # config block.  Version 2 = the wide-window block is present (#70);
+    # version 3 = the window block carries all five registers (#67); a wide
+    # and a flicker picture are mutually exclusive (the flicker bytes $3E/$3F
+    # stay 0), and a raster table never comes with a wide window (a version 3
+    # window block at $1F00 and the table at $640 do not overlap, so a
+    # non-wide window picture may also run a table).
     assert not (wide and flicker), "wide and flicker are mutually exclusive"
     assert not (wide and raster), "wide and raster are mutually exclusive"
     cfg = bytearray(CONFIG_SIZE)
-    cfg[CFG_VERSION] = 2 if wide else 1
+    cfg[CFG_VERSION] = version
     cfg[CFG_BXR:CFG_BXR + 2] = struct.pack("<H", bxr)
     cfg[CFG_BYR:CFG_BYR + 2] = struct.pack("<H", byr)
     cfg[CFG_MWR] = mwr
@@ -343,19 +409,25 @@ def build(spec):
         cfg[off:off + 2] = struct.pack("<H", dest)
         cfg[off + 2:off + 4] = struct.pack("<H", count)
 
-    # #70: the wide-window block (bank 1 offset 0x1F00) — the picture's VCE
-    # CR and the HSR/HDR its window needs.  The values come from the dump's
-    # own registers, not from a width table, so a future window is carried
-    # the same way.
-    wide_block = None
-    if wide:
-        wide_block = bytearray(WIDE_SIZE)
-        wide_block[WIDE_VCE_CR] = int(regs["VCECR"]) & 0xFF
-        hsr, hdr = int(regs["HSR"]) & 0xFFFF, int(regs["HDR"]) & 0xFFFF
-        wide_block[WIDE_HSR_LO] = hsr & 0xFF
-        wide_block[WIDE_HSR_HI] = (hsr >> 8) & 0xFF
-        wide_block[WIDE_HDR_LO] = hdr & 0xFF
-        wide_block[WIDE_HDR_HI] = (hdr >> 8) & 0xFF
+    # #70/#67: the window block (bank 1 offset 0x1F00).  Version 2 carries
+    # the picture's VCE CR and HSR/HDR (the wide modes); version 3 also
+    # carries VPR/VDR/VCR, the five window registers, so a 224-line or
+    # narrower picture is written by viewer.asm instead of its constants.
+    # The values come from the dump's own registers, not from a width table,
+    # so a future window is carried the same way.
+    window_block = None
+    if version >= 2:
+        window_block = bytearray(WINDOW_SIZE if version == 3 else WIDE_SIZE)
+        window_block[WINDOW_VCE_CR] = int(regs.get("VCECR", 0x04)) & 0xFF
+        for reg, lo, hi in (("HSR", WINDOW_HSR_LO, WINDOW_HSR_HI),
+                            ("HDR", WINDOW_HDR_LO, WINDOW_HDR_HI),
+                            ("VPR", WINDOW_VPR_LO, WINDOW_VPR_HI),
+                            ("VDR", WINDOW_VDR_LO, WINDOW_VDR_HI),
+                            ("VCR", WINDOW_VCR_LO, WINDOW_VCR_HI)):
+            if version == 2 and reg not in ("HSR", "HDR"):
+                continue
+            window_block[lo] = window[reg] & 0xFF
+            window_block[hi] = (window[reg] >> 8) & 0xFF
 
     # palette: VCE entries 0-511 (the 16 BG palettes and the 16 sprite
     # palettes the picture uses).  A raster picture's boot colour table is
@@ -403,9 +475,9 @@ def build(spec):
             f.write(raster_bin)
         shutil.copyfile(os.path.join(OUT, f"raster{name[7:]}.raster.json"),
                         os.path.join(OUT, f"{name}.raster.json"))
-    if wide:
+    if window_block is not None:
         with open(os.path.join(outdir, "wide.bin"), "wb") as f:
-            f.write(wide_block)
+            f.write(window_block)
 
     # the asm: viewer.asm (bank 0) + the data banks at the fixed places.
     # BAT and tiles are split into 8 KiB banks so the .incbins never spill
@@ -451,9 +523,9 @@ def build(spec):
         .org $4640
         .incbin "{rel}/raster.bin"
 """)
-    if wide:
+    if window_block is not None:
         banks.append(f"""\
-        .org ${0x4000 + WIDE_OFFSET:04x}
+        .org ${0x4000 + WINDOW_OFFSET:04x}
         .incbin "{rel}/wide.bin"
 """)
     for i in range(bat_banks):
@@ -486,9 +558,14 @@ def build(spec):
     if flicker:
         raster_note = (f", flicker step {flicker['step']} x "
                        f"{flicker['phases']} phases")
-    if wide:
-        raster_note += (f", wide window VCE CR=${wide_block[WIDE_VCE_CR]:02x}"
-                        f" HSR=${regs['HSR']:04x} HDR=${regs['HDR']:04x}")
+    if window_block is not None:
+        raster_note += (f", window v{version} VCE CR="
+                        f"${window_block[WINDOW_VCE_CR]:02x}"
+                        f" HSR=${window['HSR']:04x} HDR=${window['HDR']:04x}")
+        if version == 3:
+            raster_note += (f" VPR=${window['VPR']:04x}"
+                            f" VDR=${window['VDR']:04x}"
+                            f" VCR=${window['VCR']:04x}")
     print(f"wrote {rel}/{{config,palette,bat,tiles,sat}}.bin and "
           f"gen/{name}.asm "
           f"(BXR={bxr}, BYR={byr}, MWR=${mwr:02x}, CR=${cr:02x}, "
@@ -504,12 +581,15 @@ def main():
     # vsprite1..vsprite12 -> the viewer ROMs of the sprite scenes;
     # vraster1..vraster10 -> the viewer ROMs of the #15 raster scenes (#16);
     # vwide336/vwide512 -> the viewer ROMs of #27's wide pictures (#70).
-    valid = [str(i) for i in (1, 2, 3, 7, 10)] + \
+    # #67: 11-14 are #48's display-window scenes (224 lines, a shifted
+    # window, a narrower HDW, a short picture); their viewer ROMs carry the
+    # five window registers in config version 3.
+    valid = [str(i) for i in (1, 2, 3, 7, 10, 11, 12, 13, 14)] + \
         [f"vsprite{i}" for i in range(1, 14)] + \
         [f"vraster{i}" for i in range(1, 11)] + \
         ["vwide336", "vwide512", "flicker"]
     if len(sys.argv) != 2 or sys.argv[1] not in valid:
-        print(f"usage: {sys.argv[0]} 1|2|3|7|10|vsprite1..vsprite13|"
+        print(f"usage: {sys.argv[0]} 1|2|3|7|10|11..14|vsprite1..vsprite13|"
               f"vraster1..vraster10|vwide336|vwide512|flicker",
               file=sys.stderr)
         return 2

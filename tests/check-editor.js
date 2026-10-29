@@ -111,6 +111,18 @@
  *     dump's own state with its patched raster.json — the chain's writes
  *     landed per line exactly as the renderer models them (diff 0).
  *
+ * Card #67 adds the editor's display window:
+ * 16. A 224-line, 224-dot picture.  The five registers the viewer writes
+ *     (HSR $0402, HDR $041B, VPR $0F02, VDR $00DF, VCR $000C), the preview
+ *     drawn by pce-bg.js against an independent model (16 px of border each
+ *     side, every border pixel CRAM[$100]), and the exported ROM's config
+ *     version 3 + 16-byte window block asserted byte by byte.  The
+ *     page's #lines/#hdw controls are executed in the stub DOM.  The
+ *     capture, tests/dumps/wwindow/ (tools/capture.sh window), must be the
+ *     editor's VRAM/CRAM and all five saved registers, and Mednafen's
+ *     256x232 frame must equal the editor's picture at diff 0 — the border
+ *     columns and the rows under the 224-line window included.
+ *
  *   node tests/check-editor.js                 # check both captures
  *   node tests/check-editor.js --write         # write tools/gen/painted.pce
  *   node tests/check-editor.js --write sprite  # write tools/gen/spainted.pce
@@ -119,12 +131,16 @@
  *   node tests/check-editor.js --write wide336 # write tools/gen/wedit336.pce
  *   node tests/check-editor.js --write wide512 # write tools/gen/wedit512.pce
  *                                              # (#70: the editor's wide pictures)
+ *   node tests/check-editor.js --write window  # write tools/gen/wwindow.pce
+ *                                              # (#67: the 224-line/224-dot
+ *                                              # display-window picture)
  *
  *   tools/capture.sh painted    # builds + captures the background picture
  *   tools/capture.sh spainted   # builds + captures the sprite scene
  *   tools/capture.sh effect     # builds + captures the effect picture
  *   tools/capture.sh 336 wedit  # builds + captures the 336-dot wide picture
  *   tools/capture.sh 512 wedit  # builds + captures the 512-dot wide picture
+ *   tools/capture.sh window     # builds + captures the display-window picture
  *
  * Exit 0 only if everything above holds.
  *
@@ -156,6 +172,8 @@ const EFFECT_CAPTURE = path.join(HERE, "dumps", "effect1");
 /* #70: the wide pictures' captures (tools/capture.sh 336|512 wedit) */
 const WIDE_CAPTURES = { 336: path.join(HERE, "dumps", "wedit336"),
                         512: path.join(HERE, "dumps", "wedit512") };
+/* #67: the display-window picture's capture (tools/capture.sh window) */
+const WINDOW_CAPTURE = path.join(HERE, "dumps", "wwindow");
 const SAT_BYTE = 0x7F00 * 2;   /* the SAT at VRAM word $7F00 */
 const EDITOR_SRC = fs.readFileSync(
   path.join(HERE, "..", "renderer", "pce-editor.js"), "utf8");
@@ -248,17 +266,22 @@ function modelFrame(pic) {
   return { width: W, height: H, pixels: px };
 }
 
-/* #70: the wide preview recomputed from the editor's own data.  The window
+/* #70/#67: the preview recomputed from the editor's own data.  The window
  * is the VDC's: the display starts (HDS+1)*8 dots after hsync and is
  * (HDW+1)*8 wide; the absolute alignment inside Mednafen's output is
  * xs[1] = {24, 38, 96} for the three clocks (#27, pce-bg.js DOT_CLOCK).
  * Outside the window the VCE shows CRAM[0x100] (the editor leaves its sprite
  * palettes black, so that is colour 0).  Inside it the 32x32 BAT wraps every
- * 256 dots, exactly as the console does with a 32-tile BAT. */
-function modelWideFrame(pic, mode) {
-  const W = mode.frame, H = ed.VIEW_H;
+ * 256 dots, exactly as the console does with a 32-tile BAT.  The preview is
+ * the window vertically (224 or 240 rows, so every row is inside it) and the
+ * captured frame horizontally (256 / 341 / 512 px). */
+function modelWindowFrame(pic) {
+  const mode = ed.videoMode(pic);
+  const size = ed.previewSize(pic);
+  const W = size.width, H = size.height;
   const hAlign = { 256: 24, 336: 38, 512: 96 }[mode.width];
-  const hds = mode.HSR >> 8, hdw = mode.HDR & 0x7F;
+  const regs = ed.windowRegs(pic);
+  const hds = regs.HSR >> 8, hdw = regs.HDR & 0x7F;
   const x0 = (hds + 1) * 8 - hAlign;
   const x1 = x0 + (hdw + 1) * 8;
   const border = pic.spritePalettes[0][0];   /* CRAM[0x100] */
@@ -284,16 +307,16 @@ function modelWideFrame(pic, mode) {
 }
 
 /* #70: a 336- or 512-dot picture.  Three independent witnesses: the editor's
- * registers, pce-bg.js's preview against modelWideFrame(), and the exported
+ * registers, pce-bg.js's preview against modelWindowFrame(), and the exported
  * ROM's version-2 config + wide-window block. */
 function checkWidePicture(pic, width) {
   const problems = [];
   ed.setVideoMode(pic, width);
   const mode = ed.videoMode(pic);
   const size = ed.previewSize(pic);
-  if (size.width !== mode.frame || size.height !== ed.VIEW_H)
+  if (size.width !== mode.frame || size.height !== ed.windowOf(pic).lines)
     problems.push(`previewSize ${size.width}x${size.height}, expected ` +
-                  `${mode.frame}x${ed.VIEW_H}`);
+                  `${mode.frame}x${ed.windowOf(pic).lines}`);
 
   const data = ed.toPicture(pic);
   for (const r of ["VCECR", "HSR", "HDR"])
@@ -303,7 +326,7 @@ function checkWidePicture(pic, width) {
   const preview = ed.renderPreview(pic, 0);
   if (preview.width !== mode.frame)
     problems.push(`the preview drew ${preview.width} px, expected ${mode.frame}`);
-  const model = modelWideFrame(pic, mode);
+  const model = modelWindowFrame(pic);
   const p = diffPixels(preview, model, `${width}-dot preview vs model`);
   if (p) problems.push(p);
 
@@ -328,6 +351,78 @@ function checkWidePicture(pic, width) {
     problems.push(`${borderPx} border column(s), the window leaves ` +
                   `${Math.max(0, x0) + Math.max(0, mode.frame - x1)}`);
   return { problems, mode, data, preview };
+}
+
+/* #67: the editor's display window — 224 lines and a 224-dot HDW, the narrow
+ * window #48 proved on scenes 13/14.  Three witnesses: the editor's own five
+ * registers, pce-bg.js's preview against an independent model (border and
+ * all), and the exported ROM's version-3 config + window block.  The capture
+ * is held to the same picture by checkCapture(). */
+const WINDOW_WANT = { HSR: 0x0402, HDR: 0x041B, VPR: 0x0F02, VDR: 0x00DF,
+                      VCR: 0x000C };
+function checkWindowPicture(pic, bank0) {
+  const problems = [];
+  ed.setWindow(pic, { lines: 224, width: 224 });
+  const regs = ed.windowRegs(pic);
+  for (const k of Object.keys(WINDOW_WANT))
+    if (regs[k] !== WINDOW_WANT[k])
+      problems.push(`window ${k}=$${regs[k].toString(16)}, expected $` +
+                    WINDOW_WANT[k].toString(16));
+  const size = ed.previewSize(pic);
+  if (size.width !== 256 || size.height !== 224)
+    problems.push(`previewSize ${size.width}x${size.height}, expected 256x224 ` +
+                  `(the 256-dot frame, the 224-line window)`);
+  if (ed.validate(pic).length)
+    problems.push("validate: " + ed.validate(pic).join("; "));
+
+  const data = ed.toPicture(pic);
+  for (const k of Object.keys(WINDOW_WANT))
+    if (data.regs[k] !== WINDOW_WANT[k])
+      problems.push(`toPicture ${k}=$${data.regs[k].toString(16)}, expected $` +
+                    WINDOW_WANT[k].toString(16));
+
+  /* the preview through pce-bg.js against the independent model */
+  const preview = ed.renderPreview(pic, 0);
+  if (preview.width !== 256 || preview.height !== 224)
+    problems.push(`the preview drew ${preview.width}x${preview.height}, ` +
+                  `expected 256x224`);
+  const model = modelWindowFrame(pic);
+  const p = diffPixels(preview, model, "224-line/224-dot preview vs model");
+  if (p) problems.push(p);
+
+  /* the border: columns 0-15 and 240-255 are CRAM[0x100] on every row; the
+   * window's edge columns are not */
+  const border = pic.spritePalettes[0][0];   /* CRAM[0x100], black here */
+  const br = [36 * ((border >> 3) & 7), 36 * ((border >> 6) & 7),
+              36 * (border & 7)];
+  let wrong = 0;
+  for (let y = 0; y < 224; y++)
+    for (let x = 0; x < 256; x++)
+      if ((x < 16 || x >= 240) && !samePixel(pixelAt(preview, x, y), br)) wrong++;
+  if (wrong) problems.push(`${wrong} border pixel(s) are not CRAM[0x100]`);
+  if (samePixel(pixelAt(preview, 0, 100), br) &&
+      samePixel(pixelAt(preview, 128, 100), br))
+    problems.push("the preview is all border — the window did not draw");
+
+  /* the export: version 3 and the window block's five registers */
+  const romBytes = rom.buildRom({ bank0, vram: data.vram, cram: data.cram,
+                                  regs: data.regs, regions: data.regions });
+  checkExport(data, romBytes, bank0).forEach((s) => problems.push(s));
+  const cfg = romBytes.subarray(8192, 8192 + 64);
+  if (cfg[0] !== 3)
+    problems.push(`config version ${cfg[0]}, expected 3 (the window block)`);
+  const block = romBytes.subarray(8192 + 0x1F00, 8192 + 0x1F10);
+  const u16 = (b, o) => b[o] | (b[o + 1] << 8);
+  if (block[0] !== data.regs.VCECR)
+    problems.push("window block VCE CR differs");
+  for (const [name, off] of [["HSR", 2], ["HDR", 4], ["VPR", 6],
+                             ["VDR", 8], ["VCR", 10]])
+    if (u16(block, off) !== data.regs[name])
+      problems.push(`window block ${name} differs`);
+  for (const i of [1, 12, 13, 14, 15])
+    if (block[i] !== 0) problems.push(`window block byte ${i} is not 0`);
+
+  return { problems, data, rom: romBytes, preview, regs };
 }
 
 /* The sprite scene recomputed from the editor's own model — independently of
@@ -721,11 +816,21 @@ function checkExport(data, romBytes, bank0) {
    * SAT at 0x440 (card #14) */
   const cfg = romBytes.subarray(BANK, BANK + 64);
   const u16 = (b, o) => b[o] | (b[o + 1] << 8);
-  /* #70: a picture on a /3 or /2 dot clock is config version 2 and carries
-   * the wide-window block at bank 1 offset 0x1F00. */
+  /* #70/#67: a picture on a /3 or /2 dot clock is config version 2 (the
+   * wide-window block at bank 1 offset 0x1F00); a picture whose display
+   * window differs from the viewer's constants is version 3 and the block
+   * also carries VPR/VDR/VCR. */
   const wide = (data.regs.VCECR & 3) !== 0;
-  if (cfg[0] !== (wide ? 2 : 1))
-    problems.push(`config version is ${cfg[0]}, expected ${wide ? 2 : 1}`);
+  const DEF_WINDOW = { HSR: 0x0202, HDR: 0x041F, VPR: 0x0F02,
+                       VDR: 0x00EF, VCR: 0x000C };
+  const windowChanged = Object.keys(DEF_WINDOW).some(
+    (k) => data.regs[k] !== DEF_WINDOW[k]);
+  const verticalChanged = ["VPR", "VDR", "VCR"].some(
+    (k) => data.regs[k] !== DEF_WINDOW[k]);
+  const version = (verticalChanged || (!wide && windowChanged)) ? 3
+                : wide ? 2 : 1;
+  if (cfg[0] !== version)
+    problems.push(`config version is ${cfg[0]}, expected ${version}`);
   if (u16(cfg, 2) !== data.regs.BXR) problems.push("config BXR differs");
   if (u16(cfg, 4) !== data.regs.BYR) problems.push("config BYR differs");
   if (cfg[6] !== data.regs.MWR) problems.push("config MWR differs");
@@ -747,22 +852,35 @@ function checkExport(data, romBytes, bank0) {
         .equals(Buffer.from(data.vram.subarray(0xFE00, 0xFE00 + 512))))
     problems.push("the ROM's SAT is not the editor's VRAM words $7f00..");
 
-  /* #70: the wide-window block, byte for byte what tools/genviewer.py
-   * writes (VCE CR, 0, HSR lo/hi, HDR lo/hi, 0, 0). */
-  if (wide) {
+  /* #70/#67: the window block, byte for byte what tools/genviewer.py
+   * writes.  Version 2 is VCE CR, 0, HSR lo/hi, HDR lo/hi, 0, 0; version 3
+   * continues with VPR, VDR and VCR (and four reserved bytes). */
+  if (version >= 2) {
     const at = BANK + 0x1F00;
-    const block = romBytes.subarray(at, at + 8);
-    if (block[0] !== data.regs.VCECR) problems.push("wide block VCE CR differs");
-    if (u16(block, 2) !== data.regs.HSR) problems.push("wide block HSR differs");
-    if (u16(block, 4) !== data.regs.HDR) problems.push("wide block HDR differs");
-    for (const i of [1, 6, 7])
-      if (block[i] !== 0) problems.push(`wide block byte ${i} is not 0`);
+    const size = version === 3 ? 16 : 8;
+    const block = romBytes.subarray(at, at + size);
+    if (block[0] !== data.regs.VCECR) problems.push("window block VCE CR differs");
+    if (u16(block, 2) !== data.regs.HSR) problems.push("window block HSR differs");
+    if (u16(block, 4) !== data.regs.HDR) problems.push("window block HDR differs");
+    if (version === 3) {
+      if (u16(block, 6) !== data.regs.VPR)
+        problems.push("window block VPR differs");
+      if (u16(block, 8) !== data.regs.VDR)
+        problems.push("window block VDR differs");
+      if (u16(block, 10) !== data.regs.VCR)
+        problems.push("window block VCR differs");
+      for (const i of [1, 12, 13, 14, 15])
+        if (block[i] !== 0) problems.push(`window block byte ${i} is not 0`);
+    } else {
+      for (const i of [1, 6, 7])
+        if (block[i] !== 0) problems.push(`window block byte ${i} is not 0`);
+    }
   } else {
-    /* a 256-dot picture leaves the block as padding, so old ROMs are
+    /* a version 1 picture leaves the block as padding, so old ROMs are
      * byte-identical to before #70 */
-    for (let i = 0; i < 8; i++)
+    for (let i = 0; i < 16; i++)
       if (romBytes[BANK + 0x1F00 + i] !== 0xFF)
-        problems.push(`a 256-dot ROM's wide block is not 0xff padding`);
+        problems.push(`a version 1 ROM's window block is not 0xff padding`);
   }
 
   /* banks 2-3: the BAT */
@@ -809,9 +927,15 @@ function checkCapture(pic, data, sprite, captureDir) {
     problems.push("captured VRAM is not the editor's VRAM");
   if (!cram.equals(Buffer.from(data.cram)))
     problems.push("captured CRAM is not the editor's 512 colour-table entries");
-  for (const r of ["MWR", "BXR", "BYR", "CR", "VCECR", "HSR", "HDR"])
-    if (regs[r] !== data.regs[r])
-      problems.push(`captured ${r}=${regs[r]}, the editor wrote ${data.regs[r]}`);
+  /* #67: all five window registers.  The save state calls the VDC's R0C
+   * (VPR: VDS/VSW) "VSR". */
+  for (const [dumpName, editorName] of [
+    ["MWR", "MWR"], ["BXR", "BXR"], ["BYR", "BYR"], ["CR", "CR"],
+    ["VCECR", "VCECR"], ["HSR", "HSR"], ["HDR", "HDR"],
+    ["VSR", "VPR"], ["VDR", "VDR"], ["VCR", "VCR"]])
+    if (regs[dumpName] !== data.regs[editorName])
+      problems.push(`captured ${dumpName}=${regs[dumpName]}, the editor ` +
+                    `wrote ${editorName}=${data.regs[editorName]}`);
 
   /* the SATB mirror: the VDC's DMA carried exactly the editor's SAT */
   const satPath = path.join(dir, "sat.bin");
@@ -1284,8 +1408,9 @@ function checkEffectPreview(editor, rendererBg, rendererSprites, label) {
 
   const render = (p, frame, withTable, useSprites) => {
     const data = editor.toPicture(p);
+    const size = editor.previewSize(p);
     const opts = { vram: data.vram, cram: data.cram, regs: editor.viewRegs(p),
-      width: editor.VIEW_W, height: editor.VIEW_H };
+      width: size.width, height: size.height };
     if (useSprites)
       opts.sat = data.vram.slice(editor.SAT_ADDR * 2,
                                  editor.SAT_ADDR * 2 + 512);
@@ -1696,6 +1821,35 @@ function checkPageWiring(label) {
       P.push(label + ": #video: the change handler threw (" + e.message + ")");
     }
   }
+  /* #67: the display-window controls are wired to setWindow, and they move
+   * the VDC's window and the preview's height. */
+  const lineChanges = element("lines").listeners.change || [];
+  const hdwChanges = element("hdw").listeners.change || [];
+  if (lineChanges.length !== 1 || hdwChanges.length !== 1) {
+    P.push(label + ": editor.html registers " + lineChanges.length + "/" +
+      hdwChanges.length + " change handler(s) on #lines/#hdw, expected 1/1");
+  } else {
+    try {
+      /* back to the 256-dot clock, then the narrow 224-line window */
+      element("video").value = "256";
+      (element("video").listeners.change || [])[0]();
+      element("lines").value = "224";
+      element("hdw").value = "224";
+      lineChanges[0]();
+      const win = JSON.parse(vm.runInContext(
+        "JSON.stringify({ lines: ed.windowOf(pic).lines," +
+        " width: ed.windowOf(pic).width, height: ed.previewSize(pic).height," +
+        " regs: ed.windowRegs(pic) })", sandbox));
+      if (win.lines !== 224 || win.width !== 224 || win.height !== 224 ||
+          win.regs.HSR !== 0x0402 || win.regs.HDR !== 0x041B ||
+          win.regs.VDR !== 0x00DF)
+        P.push(label + ": the #lines/#hdw handlers left " +
+          JSON.stringify(win) + ", expected a 224-line/224-dot window " +
+          "(HSR $0402, HDR $041b, VDR $00df) and a 224-row preview");
+    } catch (e) {
+      P.push(label + ": #lines/#hdw: a change handler threw (" + e.message + ")");
+    }
+  }
   return P;
 }
 
@@ -1707,7 +1861,9 @@ function main() {
   const writeEffect = write && argv.indexOf("effect") >= 0;
   const writeWide = write && (argv.indexOf("wide336") >= 0 ||
                               argv.indexOf("wide512") >= 0);
-  const writeBg = write && !writeSprite && !writeEffect && !writeWide;
+  const writeWindow = write && argv.indexOf("window") >= 0;
+  const writeBg = write && !writeSprite && !writeEffect && !writeWide &&
+                  !writeWindow;
   let failed = 0;
   const out = (s) => console.log(s);
   const fail = (s) => { out(s); failed++; };
@@ -1805,10 +1961,24 @@ function main() {
     wide[w] = { pic: wpic, data: check.data, rom: wrom, mode: check.mode };
     out(`wide ${w} dots: VCE CR $${check.mode.VCECR.toString(16)}, ` +
         `HSR $${check.mode.HSR.toString(16)}, HDR $${check.mode.HDR.toString(16)}, ` +
-        `preview ${check.mode.frame}x${ed.VIEW_H} == the model; export ` +
-        `${wrom.length} bytes, sha256 ${sha256(wrom).slice(0, 16)}… ` +
-        `(config version 2 + the wide-window block)`);
+        `preview ${check.mode.frame}x${ed.windowOf(wpic).lines} == the model; ` +
+        `export ${wrom.length} bytes, sha256 ` +
+        `${sha256(wrom).slice(0, 16)}… (config version 2 + the wide-window ` +
+        `block)`);
   }
+
+  /* 3d. #67: the display window — 224 lines and a 224-dot HDW.  The
+   * editor's five registers, pce-bg.js's preview (border and all) against an
+   * independent model, and the exported ROM's version-3 window block. */
+  const windowPic = ed.demoPicture();
+  const windowCheck = checkWindowPicture(windowPic, bank0);
+  if (windowCheck.problems.length) windowCheck.problems.forEach(fail);
+  else out(`display window: 224 lines, 224-dot HDW (HSR $0402, HDR $041b, ` +
+           `VPR $0f02, VDR $00df, VCR $000c) — preview 256x224 == the model, ` +
+           `16-px border each side is CRAM[$100]; export ` +
+           `${windowCheck.rom.length} bytes, sha256 ` +
+           `${sha256(windowCheck.rom).slice(0, 16)}… (config version 3 + the ` +
+           `five-register window block)`);
 
   if (writeBg) {
     fs.mkdirSync(GEN, { recursive: true });
@@ -1843,6 +2013,17 @@ function main() {
       fs.writeFileSync(at, wide[w].rom);
       out(`wrote ${path.relative(HERE, at)} (${wide[w].rom.length} bytes) — ` +
           `run: tools/capture.sh ${w} wedit`);
+    }
+  }
+  if (writeWindow) {
+    if (windowCheck.problems.length) {
+      out("window: the export did not build, so no ROM was written");
+    } else {
+      fs.mkdirSync(GEN, { recursive: true });
+      const at = path.join(GEN, "wwindow.pce");
+      fs.writeFileSync(at, windowCheck.rom);
+      out(`wrote ${path.relative(HERE, at)} ` +
+          `(${windowCheck.rom.length} bytes) — run: tools/capture.sh window`);
     }
   }
 
@@ -1899,22 +2080,36 @@ function main() {
   });
   const sameWide = !wide[512] ||
                    Buffer.from(gwrom).equals(Buffer.from(wide[512].rom));
-  if (gref.problems.length || !sameBytes || !sameWide || geffProblems.length)
+  /* #67: the browser-global editor knows the display window too */
+  const gwwpic = globalEditor.demoPicture();
+  globalEditor.setWindow(gwwpic, { lines: 224, width: 224 });
+  const gwwdata = globalEditor.toPicture(gwwpic);
+  const gwwrom = rom.buildRom({
+    bank0, vram: gwwdata.vram, cram: gwwdata.cram,
+    regs: gwwdata.regs, regions: gwwdata.regions
+  });
+  const sameWindow = !windowCheck.problems.length &&
+                     Buffer.from(gwwrom).equals(Buffer.from(windowCheck.rom));
+  if (gref.problems.length || !sameBytes || !sameWide || !sameWindow ||
+      geffProblems.length)
     fail(`browser-global branch: ${gref.problems.concat(geffProblems).join("; ") ||
          "same refusals, different bytes"}`);
   else out(`browser-global branch: same ${gref.count}/${gref.count} ` +
            `refusals, ${geffRef.count}/${geffRef.count} effect refusals, ` +
            `same effect tables and previews, same ${grom.length}, ` +
-           `${gsrom.length}, ${geffectRom.length} and ${gwrom.length} bytes ` +
-           `(the last a 512-dot picture)`);
+           `${gsrom.length}, ${geffectRom.length}, ${gwrom.length} (a ` +
+           `512-dot picture) and ${gwwrom.length} bytes (a 224-line/224-dot ` +
+           `window)`);
 
   /* 7. the page's own Remove buttons (#52) */
   const pageProblems = checkPageWiring("page");
   if (pageProblems.length) pageProblems.forEach(fail);
   else out(`page: renderer/editor.html executed in a stub DOM — ` +
            `#cleargrad, #clearwob and #clearbands each clear their own ` +
-           `effect and leave the other two, and the #video Dot clock ` +
-           `control puts the picture on the 512-dot clock (512-px preview)`);
+           `effect and leave the other two, the #video Dot clock control ` +
+           `puts the picture on the 512-dot clock (512-px preview), and ` +
+           `#lines/#hdw set the 224-line/224-dot window (HSR $0402, HDR ` +
+           `$041b, VDR $00df, a 224-row preview)`);
 
   /* 4. the captures */
   const haveCapture = fs.existsSync(path.join(CAPTURE, "mednafen.png"));
@@ -1982,14 +2177,37 @@ function main() {
              `equals the editor's picture (diff 0)`);
   }
 
+  /* #67: the display window's capture (tools/capture.sh window).  The five
+   * registers, the 224-line VDR and the 16-px border columns are compared
+   * against the editor's picture; the frame diff is the border witness. */
+  let haveWindowCapture =
+    fs.existsSync(path.join(WINDOW_CAPTURE, "mednafen.png"));
+  if (!haveWindowCapture) {
+    out(`window capture: not present — run tools/capture.sh window once the ` +
+        `ROM is written`);
+    if (!write) failed++;
+  } else if (windowCheck.problems.length) {
+    failed++;
+  } else {
+    const problems = checkCapture(windowPic, windowCheck.data, false,
+                                  WINDOW_CAPTURE);
+    if (problems.length) problems.forEach(fail);
+    else out(`window capture: tests/dumps/wwindow is the editor's ` +
+             `VRAM/CRAM and all five window registers (HSR $0402, HDR $041b, ` +
+             `VPR $0f02, VDR $00df, VCR $000c); Mednafen's 256x232 frame ` +
+             `equals the editor's picture (diff 0, the 16-px border columns ` +
+             `and the 8 border rows under the 224-line window included)`);
+  }
+
   out(failed === 0
     ? (haveCapture && haveSpriteCapture && haveEffectCapture &&
-       haveWideCaptures
-      ? "PASS: the editor paints tiles, sprites and wide (336/512-dot " +
-        "window) pictures, writes #15's raster table for the three scanline " +
-        "effects and previews it through pce-bg.js/pce-sprites.js, refuses " +
-        "what the VDC cannot show, exports #9's ROM — and the effect and " +
-        "wide pictures run on the viewer, so Mednafen shows all of them"
+       haveWideCaptures && haveWindowCapture
+      ? "PASS: the editor paints tiles, sprites, wide (336/512-dot) and " +
+        "224/240-line or narrowed (224-dot HDW) pictures, writes #15's " +
+        "raster table for the three scanline effects and previews it through " +
+        "pce-bg.js/pce-sprites.js, refuses what the VDC cannot show, exports " +
+        "#9's ROM — and the effect, wide and window pictures run on the " +
+        "viewer, so Mednafen shows all of them"
       : "PASS: the editor paints tiles and sprites, writes #15's raster " +
         "table for the three scanline effects and previews it through " +
         "pce-bg.js/pce-sprites.js, refuses what the VDC cannot show and " +

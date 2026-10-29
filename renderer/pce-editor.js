@@ -153,12 +153,73 @@
       refuse("video-mode", "the VCE has three dot clocks: 256, 336 or 512 " +
              "dots; " + width + " is not one of them");
     pic.video = width;
+    /* #67: the 224-dot window is defined on the 256-dot clock; a wide mode
+     * gives that picture the mode's own window width again. */
+    if (width !== 256 && pic.window) pic.window.width = 256;
+  }
+
+  /* ---- #67: the display window -----------------------------------------
+   *
+   * The editor's picture is the VDC's display window: 224 or 240 lines
+   * (VDR's VDW = lines-1) and 256 or 224 dots wide (HDR's HDW).  A 224-dot
+   * window is HDS=4/HDW=27 — 16 px of border on each side of the 256-dot
+   * frame, the #48 narrow scene.  The five registers the viewer writes
+   * before the display are HSR/HDR (the dot clock's window or the narrow
+   * one), VPR and VCR (the viewer's constants: VDS=15/VSW=2, VCR=$0c) and
+   * VDR (the height).  A window equal to the viewer's constants exports
+   * config version 1 (version 2 on a wide clock); anything else exports
+   * version 3 with the five registers in the window block
+   * (docs/ROM_LAYOUT.md, #67).
+   *
+   * The preview is the window itself: as wide as the captured frame
+   * (256 / 341 / 512) so a narrowed HDW shows its border columns, and as
+   * tall as the window (224 or 240 lines).  pce-bg.js draws it from these
+   * registers like every captured frame. */
+  var WINDOW_LINES = { 224: 0x00DF, 240: 0x00EF };     /* VDW = lines - 1 */
+  var WINDOW_WIDTHS = { 256: null,                     /* the mode's HSR/HDR */
+                        224: { HSR: 0x0402, HDR: 0x041B } };  /* HDS=4, HDW=27 */
+  var WINDOW_VPR = 0x0F02;    /* VDS=15, VSW=2: the display starts at line 17 */
+  var WINDOW_VCR = 0x000C;
+
+  function windowOf(pic) {
+    return (pic && pic.window) || { lines: 240, width: 256 };
+  }
+
+  function setWindow(pic, spec) {
+    spec = spec || {};
+    var lines = spec.lines !== undefined ? spec.lines : windowOf(pic).lines;
+    var width = spec.width !== undefined ? spec.width : windowOf(pic).width;
+    if (!WINDOW_LINES[lines])
+      refuse("window-lines", "a display window is 224 or 240 VDC lines; " +
+             lines + " is not one of them");
+    if (!(width in WINDOW_WIDTHS))
+      refuse("window-width", "a display window is 256 or 224 dots wide; " +
+             width + " is not one of them");
+    if (width !== 256 && videoMode(pic).width !== 256)
+      refuse("window-mode", "the 224-dot window is defined on the 256-dot " +
+             "clock; this picture is on the " + videoMode(pic).width +
+             "-dot clock (setVideoMode(pic, 256) first)");
+    pic.window = { lines: lines, width: width };
+  }
+
+  /* The five window registers of a picture (docs/ROM_LAYOUT.md, #67). */
+  function windowRegs(pic) {
+    var mode = videoMode(pic);
+    var win = windowOf(pic);
+    var narrow = mode.width === 256 ? WINDOW_WIDTHS[win.width] : null;
+    return {
+      HSR: narrow ? narrow.HSR : mode.HSR,
+      HDR: narrow ? narrow.HDR : mode.HDR,
+      VPR: WINDOW_VPR,
+      VDR: WINDOW_LINES[win.lines] || WINDOW_LINES[240],
+      VCR: WINDOW_VCR
+    };
   }
 
   /* The preview's pixel size: the captured frame's width for the picture's
-   * dot clock (256 / 341 / 512), the editor's 224 visible rows. */
+   * dot clock (256 / 341 / 512) and the display window's height. */
   function previewSize(pic) {
-    return { width: videoMode(pic).frame, height: VIEW_H };
+    return { width: videoMode(pic).frame, height: windowOf(pic).lines };
   }
 
   /* ---- sprites (card #13) ---------------------------------------------- */
@@ -258,7 +319,8 @@
       spritePalettes: spritePalettes,
       spritePatterns: [],
       sprites: [],
-      video: 256                      /* #70: VCE dot clock (256/336/512) */
+      video: 256,                     /* #70: VCE dot clock (256/336/512) */
+      window: { lines: 240, width: 256 }  /* #67: display window (240x256) */
     };
   }
 
@@ -1110,13 +1172,15 @@
       regions.push([layout.firstCell * 4, layout.cellCount * 4]);
 
     var mode = videoMode(pic);
+    var win = windowRegs(pic);
     return {
       vram: vram,
       cram: cram,
       regs: { BXR: pic.scroll.BXR, BYR: pic.scroll.BYR,
               MWR: MWR_32x32,
               CR: CR_BG_ON | (pic.sprites.length ? CR_SPRITES_ON : 0),
-              VCECR: mode.VCECR, HSR: mode.HSR, HDR: mode.HDR },
+              VCECR: mode.VCECR, HSR: win.HSR, HDR: win.HDR,
+              VPR: win.VPR, VDR: win.VDR, VCR: win.VCR },
       regions: regions,
       width: VIEW_W,
       height: VIEW_H
@@ -1131,13 +1195,15 @@
    * the preview line up one row apart — docs/EDITOR.md says why. */
   function viewRegs(pic) {
     var mode = videoMode(pic);
+    var win = windowRegs(pic);
     return {
       BXR: pic.scroll.BXR, BYR: pic.scroll.BYR,
       MWR: MWR_32x32,
       CR: CR_BG_ON | (pic.sprites.length ? CR_SPRITES_ON : 0),
       RCRCount: 0, scanline: 18,
-      /* #70: the preview follows the picture's dot clock and window */
-      VCECR: mode.VCECR, HSR: mode.HSR, HDR: mode.HDR
+      /* #70/#67: the preview follows the picture's dot clock and window */
+      VCECR: mode.VCECR, HSR: win.HSR, HDR: win.HDR,
+      VPR: win.VPR, VDR: win.VDR, VCR: win.VCR
     };
   }
 
@@ -1174,6 +1240,19 @@
                         pic.palettes[p][e]);
     if (!isInt(pic.backdrop) || pic.backdrop < 0 || pic.backdrop >= VCE_COLOURS)
       problems.push("backdrop = " + pic.backdrop);
+
+    /* #67: the display window must be one the VDC has: 224/240 lines and
+     * 256/224 dots (the narrow one only on the 256-dot clock). */
+    if (pic.window) {
+      if (!WINDOW_LINES[pic.window.lines])
+        problems.push("window height " + pic.window.lines +
+                      " (224 or 240 lines)");
+      if (!(pic.window.width in WINDOW_WIDTHS))
+        problems.push("window width " + pic.window.width + " (256 or 224 dots)");
+      else if (pic.window.width !== 256 && videoMode(pic).width !== 256)
+        problems.push("a 224-dot window on the " + videoMode(pic).width +
+                      "-dot clock");
+    }
 
     /* sprites (card #13) */
     if (pic.spritePatterns.length > 16)
@@ -1636,6 +1715,12 @@
     "frame-range": "a raster frame number that is not a non-negative integer",
     "video-mode": "a dot clock that is not one of the VCE's 256, 336 or " +
       "512-dot modes (VCE CR DCC bits 1-0)",
+    "window-lines": "a display window height that is not 224 or 240 VDC " +
+      "lines (VDR's VDW)",
+    "window-width": "a display window width that is not 256 or 224 dots " +
+      "(HDR's HDW)",
+    "window-mode": "a 224-dot window on a 336/512-dot clock: the narrow " +
+      "window's HSR/HDR are the 256-dot display table's",
     "no-renderer": "renderPreview called without pce-bg.js and " +
       "pce-sprites.js loaded"
   };
@@ -1718,6 +1803,12 @@
     VIDEO_MODES: VIDEO_MODES,
     videoMode: videoMode,
     setVideoMode: setVideoMode,
+    /* #67: the display window (224/240 lines, 256/224 dots) */
+    WINDOW_LINES: WINDOW_LINES,
+    WINDOW_WIDTHS: WINDOW_WIDTHS,
+    windowOf: windowOf,
+    setWindow: setWindow,
+    windowRegs: windowRegs,
     previewSize: previewSize,
     validate: validate,
     stats: stats,

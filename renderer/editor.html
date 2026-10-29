@@ -210,6 +210,18 @@
       <span class="fx">wide modes draw a 341- or 512-px frame</span>
     </div>
     <div class="sprow">
+      <b>Display window</b>
+      <select id="lines">
+        <option value="240">240 lines</option>
+        <option value="224">224 lines</option>
+      </select>
+      <select id="hdw">
+        <option value="256">256 dots — 32 characters</option>
+        <option value="224">224 dots — 16-px border each side</option>
+      </select>
+      <span class="fx">the VDC's VDR/HDW; the preview is the window itself</span>
+    </div>
+    <div class="sprow">
       <b>Scroll</b>
       BXR <input type="number" id="bxr" value="0" min="0" max="1023">
       BYR <input type="number" id="byr" value="0" min="0" max="511">
@@ -261,8 +273,8 @@
   </section>
 
   <section>
-    <h2>Preview — the VDC model (256 / 341 / 512 px, the dot clock)</h2>
-    <canvas id="preview" width="256" height="224"></canvas>
+    <h2>Preview — the VDC model (the dot clock's width, the window's height)</h2>
+    <canvas id="preview" width="256" height="240"></canvas>
     <div id="stats"></div>
   </section>
 
@@ -823,6 +835,8 @@ $("setscroll").addEventListener("click", () => {
 if ($("video")) $("video").addEventListener("change", () => {
   try {
     ed.setVideoMode(pic, Number($("video").value));
+    /* #67: a wide clock puts the window back to the mode's full width. */
+    if ($("hdw")) $("hdw").value = String(ed.windowOf(pic).width);
     const mode = ed.videoMode(pic);
     say(`dot clock: ${mode.width} dots, VCE CR $${mode.VCECR.toString(16)}, ` +
         `HSR $${mode.HSR.toString(16)}, HDR $${mode.HDR.toString(16)} ` +
@@ -830,6 +844,26 @@ if ($("video")) $("video").addEventListener("change", () => {
     drawPreview();
   } catch (e) { say(e.message); }
 });
+
+/* #67: the display window.  Changing either control moves the VDC's window
+ * (VDR's height, HDR's HDW) and the preview shows it — a narrowed HDW is
+ * 16 px of border on each side, drawn by pce-bg.js from the registers.  The
+ * export carries all five window registers when they differ from the
+ * viewer's constants (config version 3, the window block). */
+function setWindowFromControls() {
+  try {
+    ed.setWindow(pic, { lines: Number($("lines").value),
+                        width: Number($("hdw").value) });
+    const regs = ed.windowRegs(pic);
+    const size = ed.previewSize(pic);
+    say(`display window: ${size.height} lines, HDR $${regs.HDR.toString(16)} ` +
+        `(HDW ${regs.HDR & 0x7F}), VDR $${regs.VDR.toString(16)} ` +
+        `(VDW ${regs.VDR & 0x1FF}) — preview ${size.width}x${size.height}`);
+    drawPreview();
+  } catch (e) { say(e.message); }
+}
+for (const id of ["lines", "hdw"])
+  if ($(id)) $(id).addEventListener("change", setWindowFromControls);
 
 $("setgrad").addEventListener("click", () => {
   try {
@@ -1256,6 +1290,10 @@ $("export").addEventListener("click", async () => {
 
 /* ---- start ------------------------------------------------------------- */
 function resetSelection() {
+  /* #67/#70: the controls follow the picture the page just loaded. */
+  if ($("video")) $("video").value = String(pic.video || 256);
+  if ($("lines")) $("lines").value = String(ed.windowOf(pic).lines);
+  if ($("hdw")) $("hdw").value = String(ed.windowOf(pic).width);
   selTile = ed.FIRST_CHAR;
   selPalette = 0;
   selEntry = 1;
