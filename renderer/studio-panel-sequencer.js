@@ -38,10 +38,40 @@
   var HEADER = 14;
   var LABEL = 54;
 
+  /* The staff's geometry (#95): five lines a clef, SP apart, the treble's
+   * top line at TREBLE_TOP and the bass's at BASS_TOP.  A diatonic step is
+   * SP/2, so a line every 2 steps and a space every 1.  The canvas is wider
+   * than the box and scrolls, like the grid. */
+  var STAFF = {
+    SP: 7,
+    TREBLE_TOP: 30,
+    BASS_TOP: 84,
+    HEIGHT: 142,
+    CLEF_W: 24,          /* the clef's gutter, left of the key signature */
+    SIG_W: 9,            /* one accidental glyph of the key signature */
+    LEFT: 6,
+    BAR_GAP: 8,
+    STEP_W: { small: 8, normal: 11, large: 15 }
+  };
+
+  /* The glyphs are drawn, not typed: a font's musical symbols are not on
+   * every machine and a staff with tofu in it is worse than no staff. */
+  var INK = {
+    staff: "#3a4557",
+    bar: "#59647a",
+    clef: "#c8d2e0",
+    accidental: "#e6ebf5",
+    mark: "#9aa4b5",
+    wave: "#5fc9e8",
+    noise: "#ff9540",
+    head: "#0b0d13"
+  };
+
   P.studioPanelModules.push({
     id: "sequencer",
     register: function (studio) {
       var sq = P.seq;
+      var staffModel = P.staff;      /* #95: the staff view's notation model */
       var A = P.assets;               /* the toy's instrument patches (#122) */
       var INSTRUMENTS_CAP = 16;       /* pce-seq.js INSTRUMENTS_MAX */
       var songObj = null;            /* the live song object */
@@ -290,6 +320,298 @@
         }
       }
 
+      /* ---- the staff (#95) ---------------------------------------------- */
+
+      /* y of a diatonic step on a clef: step 0 is the clef's bottom line,
+       * every step SP/2 up, so the five lines are steps 0, 2, 4, 6, 8. */
+      function staffY(clef, step) {
+        var bottom = clef === "bass" ? STAFF.BASS_TOP : STAFF.TREBLE_TOP;
+        return bottom + 4 * STAFF.SP - step * (STAFF.SP / 2);
+      }
+
+      function staffLines(g, x0, x1, top) {
+        g.strokeStyle = INK.staff;
+        g.lineWidth = 1;
+        for (var i = 0; i < 5; i++) {
+          var y = Math.round(top + i * STAFF.SP) + 0.5;
+          g.beginPath();
+          g.moveTo(x0, y);
+          g.lineTo(x1, y);
+          g.stroke();
+        }
+      }
+
+      /* A drawn accidental: a sharp, a flat or a natural.  Vector strokes so
+       * the staff never depends on a font that has ♯ ♭ ♮. */
+      function drawAccidental(g, kind, x, y) {
+        g.strokeStyle = INK.accidental;
+        g.fillStyle = INK.accidental;
+        g.lineWidth = 1.2;
+        if (kind === "#") {
+          /* ♯ leans: the two uprights slant, the two bars lean further */
+          g.beginPath();
+          g.moveTo(x - 2.6, y); g.lineTo(x - 3.6, y - 6);
+          g.moveTo(x + 1.6, y + 1); g.lineTo(x + 0.6, y - 5);
+          g.moveTo(x - 4.4, y - 2); g.lineTo(x + 2.2, y - 2.6);
+          g.moveTo(x - 4.4, y + 1.4); g.lineTo(x + 2.2, y + 0.8);
+          g.stroke();
+        } else if (kind === "b") {
+          g.beginPath();
+          g.moveTo(x, y - 7); g.lineTo(x, y + 1);
+          g.bezierCurveTo(x + 5, y - 3, x + 5, y + 3, x, y + 4);
+          g.stroke();
+        } else {                     /* "n": the natural */
+          g.beginPath();
+          g.moveTo(x - 3, y - 6); g.lineTo(x - 3, y + 3);
+          g.moveTo(x + 1, y - 3); g.lineTo(x + 1, y + 6);
+          g.moveTo(x - 3, y - 1); g.lineTo(x + 1, y - 1);
+          g.moveTo(x - 3, y + 2); g.lineTo(x + 1, y + 2);
+          g.stroke();
+        }
+      }
+
+      /* The clefs.  The musical-symbol glyphs (U+1D11E and U+1D122) are
+       * what a browser draws — they are in every system font stack that
+       * matters, and a canvas screenshot on this machine shows them.  A
+       * context with no measureText (the tests' stub) or a font without the
+       * glyph falls back to the drawn clefs below, so the staff is never
+       * headless. */
+      var CLEF_GLYPH = { treble: "𝄞", bass: "𝄢" };
+      var CLEF_FONT = '"Apple Symbols","Segoe UI Symbol","Noto Music",serif';
+
+      function hasClefGlyph(g) {
+        try {
+          var m = g.measureText && g.measureText(CLEF_GLYPH.treble);
+          return !!(m && m.width > 0);
+        } catch (e) { return false; }
+      }
+
+      function drawClef(g, clef, x) {
+        if (hasClefGlyph(g)) {
+          g.fillStyle = INK.clef;
+          g.font = "34px " + CLEF_FONT;
+          g.textBaseline = "middle";
+          g.fillText(CLEF_GLYPH[clef], x, clef === "treble"
+                     ? staffY("treble", 2) : staffY("bass", 6));
+          return;
+        }
+        if (clef === "treble") drawTrebleClef(g, x);
+        else drawBassClef(g, x);
+      }
+
+      /* The treble G clef, its curl on the G4 line (step 2). */
+      function drawTrebleClef(g, x) {
+        var cx = x + 9;
+        var gy = staffY("treble", 2);
+        g.strokeStyle = INK.clef;
+        g.lineWidth = 1.6;
+        g.beginPath();
+        g.moveTo(cx, gy + 17);
+        g.bezierCurveTo(cx + 8, gy + 17, cx + 10, gy + 6, cx + 3, gy + 2);
+        g.bezierCurveTo(cx - 5, gy - 2, cx - 7, gy - 11, cx - 2, gy - 16);
+        g.bezierCurveTo(cx + 3, gy - 21, cx + 10, gy - 17, cx + 8, gy - 10);
+        g.bezierCurveTo(cx + 6, gy - 3, cx - 2, gy - 1, cx - 6, gy + 3);
+        g.bezierCurveTo(cx - 11, gy + 8, cx - 6, gy + 14, cx + 1, gy + 13);
+        g.stroke();
+        g.beginPath();
+        g.moveTo(cx + 3, gy + 2);
+        g.bezierCurveTo(cx + 8, gy - 6, cx + 4, gy - 24, cx - 1, gy - 26);
+        g.bezierCurveTo(cx - 5, gy - 28, cx - 8, gy - 24, cx - 6, gy - 20);
+        g.stroke();
+      }
+
+      /* The bass F clef: the curl on the F3 line (step 6) and its two dots
+       * in the spaces either side of it (steps 5 and 7). */
+      function drawBassClef(g, x) {
+        var cx = x + 9;
+        var fy = staffY("bass", 6);
+        g.strokeStyle = INK.clef;
+        g.fillStyle = INK.clef;
+        g.lineWidth = 1.6;
+        g.beginPath();
+        g.moveTo(cx + 3, fy - 5);
+        g.bezierCurveTo(cx + 10, fy - 8, cx + 12, fy + 1, cx + 4, fy + 4);
+        g.bezierCurveTo(cx - 4, fy + 8, cx - 11, fy + 2, cx - 8, fy - 4);
+        g.quadraticCurveTo(cx - 6, fy - 8, cx - 2, fy - 7);
+        g.stroke();
+        g.beginPath();
+        g.arc(cx + 7, staffY("bass", 5), 1.7, 0, Math.PI * 2);
+        g.fill();
+        g.beginPath();
+        g.arc(cx + 7, staffY("bass", 7), 1.7, 0, Math.PI * 2);
+        g.fill();
+      }
+
+      /* Where a letter sits in a key signature, the octave engravers use:
+       * treble F5 C5 G5 D5 A4 E5 B4, bass F3 C3 G3 D3 A2 E3 B2.  It keeps
+       * the first sharp on the top line and the first flat in the middle,
+       * which is where a musician looks for them. */
+      var SIG_OCTAVE = {
+        treble: { F: 5, C: 5, G: 5, D: 5, A: 4, E: 5, B: 4 },
+        bass: { F: 3, C: 3, G: 3, D: 3, A: 2, E: 3, B: 2 }
+      };
+      function sigStep(clef, letter) {
+        var o = SIG_OCTAVE[clef === "bass" ? "bass" : "treble"][letter] || 4;
+        return staffModel.diatonic(letter, o) - STAFF_CLEF_BOTTOM(clef);
+      }
+      function STAFF_CLEF_BOTTOM(clef) {
+        return clef === "bass" ? 18 : 30;   /* pce-staff.js CLEF_BOTTOM */
+      }
+
+      function drawKeySignature(g, sig, clef, x) {
+        for (var i = 0; i < sig.marks.length; i++) {
+          var m = sig.marks[i];
+          drawAccidental(g, m.accidental, x + i * STAFF.SIG_W + 4,
+                         staffY(clef, sigStep(clef, m.letter)));
+        }
+      }
+
+      function drawNote(g, note, x, colour) {
+        var step = note.shifted - STAFF_CLEF_BOTTOM(note.clef);
+        var clef = note.clef;
+        var y = staffY(clef, step);
+        var v = note.value;
+
+        /* ledger lines, one every other step outside the five lines */
+        g.strokeStyle = INK.staff;
+        g.lineWidth = 1;
+        var s;
+        if (step < 0)
+          for (s = -2; s >= step; s -= 2) {
+            g.beginPath();
+            g.moveTo(x - 6, Math.round(staffY(clef, s)) + 0.5);
+            g.lineTo(x + 6, Math.round(staffY(clef, s)) + 0.5);
+            g.stroke();
+          }
+        else if (step > 8)
+          for (s = 10; s <= step; s += 2) {
+            g.beginPath();
+            g.moveTo(x - 6, Math.round(staffY(clef, s)) + 0.5);
+            g.lineTo(x + 6, Math.round(staffY(clef, s)) + 0.5);
+            g.stroke();
+          }
+
+        /* the accidental, left of the head */
+        if (note.accidental)
+          drawAccidental(g, note.accidental, x - 9, y);
+
+        /* the head */
+        g.fillStyle = colour;
+        g.strokeStyle = colour;
+        g.lineWidth = 1.2;
+        g.beginPath();
+        g.ellipse(x, y, 3.4, 2.5, -0.32, 0, Math.PI * 2);
+        if (v.filled) g.fill(); else g.stroke();
+
+        /* the stem, up below the middle line (step 4), down from it */
+        var up = step < 4;
+        var sx = up ? x + 2.8 : x - 2.8;
+        var len = 3.1 * STAFF.SP;
+        if (v.stem) {
+          g.beginPath();
+          g.moveTo(sx, y);
+          g.lineTo(sx, up ? y - len : y + len);
+          g.stroke();
+          for (var f = 0; f < v.flags; f++) {
+            var fy = up ? y - len + f * 5 : y + len - f * 5;
+            g.beginPath();
+            g.moveTo(sx, fy);
+            g.quadraticCurveTo(sx + (up ? 6 : -6), fy + 2,
+                               sx + (up ? 5 : -5), fy + 6);
+            g.stroke();
+          }
+        }
+
+        /* the dots of a dotted value */
+        for (var d = 0; d < v.dots; d++) {
+          g.beginPath();
+          g.arc(x + 7 + d * 3, step % 2 ? y - 1 : y + 1, 1.2, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+
+      /* The octave mark over (or under) the note that carries it: 8va,
+       * 15ma, 8vb, 15mb, and loco where the written octave returns. */
+      function drawMark(g, note, x, colour) {
+        var label = note.loco ? "loco" : note.mark;
+        if (!label) return;
+        g.fillStyle = INK.mark;
+        g.font = "8px monospace";
+        var y;
+        if (note.clef === "treble" && !note.loco && note.markShift > 0)
+          y = STAFF.TREBLE_TOP - 6 - (note.markShift - 1) * 9;
+        else if (note.clef === "bass" && !note.loco && note.markShift < 0)
+          y = STAFF.BASS_TOP + 4 * STAFF.SP + 12 - (note.markShift + 1) * 9;
+        else if (note.loco)
+          y = note.clef === "bass" ? STAFF.BASS_TOP + 4 * STAFF.SP + 12
+                                   : STAFF.TREBLE_TOP - 6;
+        else
+          y = staffY(note.clef, note.shifted - STAFF_CLEF_BOTTOM(note.clef)) - 12;
+        g.fillText(label, x - 4, y);
+      }
+
+      function drawStaff(s) {
+        var cv = studio.$("seq-staff");
+        if (!cv || !cv.getContext || !staffModel) return;
+        var lay = staffModel.layout(s);
+        var stepW = STAFF.STEP_W[zoom] || STAFF.STEP_W.normal;
+        var barW = Math.max(s.steps * stepW, 40);
+        var sigW = lay.keySignature.marks.length * STAFF.SIG_W;
+        var musicX = STAFF.LEFT + STAFF.CLEF_W + sigW + 10;
+        var w = Math.max(374, musicX + lay.bars.length * barW + 10);
+        var h = STAFF.HEIGHT;
+        if (cv.width !== w) cv.width = w;
+        if (cv.height !== h) cv.height = h;
+        var g = cv.getContext("2d");
+        if (!g) return;
+        g.fillStyle = "#0b0d13";
+        g.fillRect(0, 0, w, h);
+
+        /* The staves stop at the song's last bar line: a staff that ran on
+         * past the music would say the bar is longer than it is. */
+        var endX = musicX + lay.bars.length * barW;
+        staffLines(g, STAFF.LEFT, endX, STAFF.TREBLE_TOP);
+        staffLines(g, STAFF.LEFT, endX, STAFF.BASS_TOP);
+        drawClef(g, "treble", STAFF.LEFT);
+        drawClef(g, "bass", STAFF.LEFT);
+        g.textBaseline = "alphabetic";
+        drawKeySignature(g, lay.keySignature, "treble", STAFF.LEFT + STAFF.CLEF_W);
+        drawKeySignature(g, lay.keySignature, "bass", STAFF.LEFT + STAFF.CLEF_W);
+
+        /* bar lines, and the step number over each beat (four steps) */
+        g.strokeStyle = INK.bar;
+        g.fillStyle = "#858d9c";
+        g.font = "8px monospace";
+        var bar, x;
+        for (bar = 0; bar < lay.bars.length; bar++) {
+          x = musicX + bar * barW;
+          g.beginPath();
+          g.moveTo(Math.round(x) + 0.5, STAFF.TREBLE_TOP);
+          g.lineTo(Math.round(x) + 0.5, STAFF.BASS_TOP + 4 * STAFF.SP);
+          g.stroke();
+          g.fillText(lay.bars[bar].name, x + 3, STAFF.TREBLE_TOP - 6);
+        }
+        x = musicX + lay.bars.length * barW;
+        g.beginPath();
+        g.moveTo(Math.round(x) + 0.5, STAFF.TREBLE_TOP);
+        g.lineTo(Math.round(x) + 0.5, STAFF.BASS_TOP + 4 * STAFF.SP);
+        g.stroke();
+
+        /* the notes, one dot per (bar, step, staff position) */
+        var used = {};
+        for (var i = 0; i < lay.notes.length; i++) {
+          var n = lay.notes[i];
+          var nx = musicX + n.order * barW + n.step * stepW + stepW / 2;
+          var key = n.order + ":" + n.step + ":" + n.shifted;
+          var dup = used[key] || 0;
+          used[key] = dup + 1;
+          nx += dup * 4;
+          var colour = n.channel >= 4 ? INK.noise : INK.wave;
+          drawNote(g, n, nx, colour);
+          drawMark(g, n, nx, colour);
+        }
+      }
+
       function drawPanel() {
         if (!ready()) return;
         var s = state();
@@ -337,6 +659,13 @@
 
         drawGrid(s);
         drawVoices(s);
+        var gridBox = studio.$("seq-gridbox");
+        var voicesBox = studio.$("seq-voicesbox");
+        var staffBox = studio.$("seq-staffbox");
+        if (gridBox) gridBox.hidden = view !== "grid";
+        if (voicesBox) voicesBox.hidden = view !== "grid";
+        if (staffBox) staffBox.hidden = view !== "staff";
+        if (view === "staff") drawStaff(s);
 
         var t = sq.timing(s);
         var bars = sq.voiceBars(s, pattern);
@@ -357,8 +686,11 @@
         if (status) status.textContent = error || (playing ? "playing…" : "");
         var eraser = studio.$("seq-eraser");
         if (eraser) eraser.setAttribute("aria-pressed", String(brush.eraser));
-        var staff = studio.$("seq-view-staff");
-        if (staff) staff.disabled = true;
+        var staffBtn = studio.$("seq-view-staff");
+        if (staffBtn) {
+          staffBtn.disabled = false;
+          staffBtn.setAttribute("aria-pressed", String(view === "staff"));
+        }
         var grid = studio.$("seq-view-grid");
         if (grid) grid.setAttribute("aria-pressed", String(view === "grid"));
       }
@@ -573,6 +905,15 @@
         play: function () { return play(); },
         stop: function () { stopAudio(); drawPanel(); },
         cellAt: cellAt,
+        /* #95: the view, and the staff's own reading of the song */
+        view: function (name) {
+          if (name === undefined) return view;
+          if (name === "grid" || name === "staff") { view = name; drawPanel(); }
+          return view;
+        },
+        staff: function () {
+          return staffModel ? staffModel.layout(state()) : null;
+        },
         zoom: function (name) {
           if (name === undefined) return zoom;
           if (ZOOMS[name]) { zoom = name; drawPanel(); }
@@ -639,14 +980,16 @@
       bind("seq-zoom", "change", function () {
         api.zoom(studio.$("seq-zoom").value);
       });
-      /* The two view buttons: the grid is this card, the staff is #95.  Both
-       * answer, so the page's "every button has a handler" rule holds. */
+      /* The two view buttons: the same song as a step grid or as a staff
+       * (#95).  The staff never edits — it is a reading of what the grid
+       * holds — so a click is a redraw either way. */
       bind("seq-view-grid", "click", function () {
         view = "grid";
         drawPanel();
       });
       bind("seq-view-staff", "click", function () {
-        studio.toast("The staff view is part 2 (#95); the grid is the same song.");
+        view = "staff";
+        drawPanel();
       });
       studio.toy.onAssetEdit(function (name) {
         /* #122: an instrument added to (or removed from) the toy changes the

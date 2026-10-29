@@ -1,10 +1,11 @@
-# The sequencer — a step grid for the PSG (#94, part 1)
+# The sequencer — a step grid for the PSG (#94, part 1) and its staff (#95, part 2)
 
 **Decision.** ppu.toys' SEQUENCER panel is the shape (`docs/STUDIO.md` §3.10): a song of patterns, a
-step grid, Tempo / Steps / Swing / Key, an instrument palette, note values and a voices bar per step. This
-card is the grid; the staff view is #95 and the DMF export is #96. The panel is
-`renderer/studio-panel-sequencer.js`; the model is `renderer/pce-seq.js`. The panel draws and binds, and
-every question about the music goes to the model.
+step grid, Tempo / Steps / Swing / Key, an instrument palette, note values and a voices bar per step. #94
+was the grid, #95 is the staff on the same song (§11), and the DMF export is #96. The panel is
+`renderer/studio-panel-sequencer.js`; the models are `renderer/pce-seq.js` (the song) and
+`renderer/pce-staff.js` (the notation). The panel draws and binds, and every question about the music goes
+to a model.
 
 ## 1. The song
 
@@ -25,8 +26,8 @@ length = steps, 1..song.steps
 * **a cell sounds until its length ends or the next note on that channel starts**, whichever is first. A
   note whose length reaches the pattern's end is cut by the next pattern; no cut row is written.
 * **key** (0..11) is the spelling of the note names on the grid and the major-scale highlight — a view
-  of the same notes, not a transposition, so it changes no PSG write. #95's staff is where it becomes a
-  decision (sharps, flats, octave marks).
+  of the same notes, not a transposition, so it changes no PSG write. On the staff (#95) it is also the key
+  signature that decides each note's letter and accidental (§11).
 
 ## 2. Compiling to the song pce-song.js plays
 
@@ -146,6 +147,48 @@ are HuTrack's source, not a recording; and rule 2 is owed (the tests were writte
 
 ## 10. Not in part 1
 
-The staff view (#95), the DMF export and DDA drum samples (#96), undo/redo, note values shorter than a
-step (the grid's resolution is 1/16), triplets, and the instrument editor beyond the six built-ins — the
-AUDIO panel (#97) edits a toy's `waves.json`, which is a different document from the song's instruments.
+The DMF export and DDA drum samples (#96), undo/redo, note values shorter than a step (the grid's
+resolution is 1/16), triplets, and the instrument editor beyond the six built-ins — the AUDIO panel (#97)
+edits a toy's `waves.json`, which is a different document from the song's instruments. The staff view,
+which was part 1's other gap, is §11.
+
+## 11. The staff view (#95, part 2)
+
+The same song, read as music. `renderer/pce-staff.js` is the model — it takes a song and returns notes,
+never a second song — and the SEQUENCER panel draws it. `?view=staff` opens it without synthetic input.
+
+**A grand staff, one bar per order entry.** Bass below middle C (engine note 36), treble from it up, so
+middle C is the first ledger line under the treble staff and over the bass. Bars follow the song's `order`,
+not only the pattern the grid shows. Notes keep the grid's channel colours, and a second voice on the same
+pitch at the same step is nudged sideways rather than hidden.
+
+**Spelling.** A note that is a degree of the key's major scale takes that degree's letter and the key
+signature covers its accidental; a chromatic note takes the key's own direction — a sharp key spells it
+with a sharp, a flat key with a flat, the same split `pce-seq.js`'s `noteName()` uses on the grid. A natural
+sign is written when the note is the natural of a letter the signature alters (key G, the note F natural).
+Octaves are solved so the letter and the pitch agree at the edges: B♯5 is C6's line and G♭4 is F♯4's.
+
+**Key signature.** From the twelve major keys' own degrees, in the conventional order — sharps
+F C G D A E B, flats B E A D G C F — on the lines musicians look at (treble F5 C5 G5 D5 A4 E5 B4, bass
+F3 C3 G3 D3 A2 E3 B2).
+
+**Note values.** A step is a 1/16 (§2), so a cell's length is its value: 1 = 1/16, 2 = 1/8, 3 = dotted 1/8,
+4 = 1/4, 6 = dotted 1/4, 8 = 1/2, 12 = dotted 1/2, 16 = whole. A length that is no drawn value draws the
+value below it and the model says `exact: false`; a length past a whole draws a whole and says the same.
+
+**Octave marks.** Above the treble, `8va` from C6 and `15ma` from C7; below the bass, `8vb` from G1 and
+down and `15mb` from C1 (diatonic positions 42 / 49 and 11 / 7). A note far enough outside its staff is
+drawn shifted and labelled; a run of shifted notes repeats no mark, and `loco` is written at the first note
+of a voice that returns to the written octave. The state is per channel — two voices at one step can be in
+different octaves — and it restarts at every bar.
+
+**Not proven.** Accidentals are not carried within a bar: every note is signed against the key signature,
+so a sign repeats where strict engraving would not. The clefs are the musical-symbol glyphs when the font
+has them and a drawn clef when it does not; the headless checks only exercise the drawn path. The staff's
+pixels are judged by a screenshot, not a pixel comparison. Rule 2 is owed.
+
+**Evidence.** `tests/check-staff.js` — twelve key signatures, the spelling rules, the clefs, every note
+value, the four octave marks and `loco`, and `layout()` on the demo song with the song unchanged;
+`tests/check-studio.js`'s `checkSequencerPanel` — the panel's toggle, one head per note, `15ma` and `loco`
+painted, the drawn clefs, and the grid restored.
+

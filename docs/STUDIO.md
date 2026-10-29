@@ -201,7 +201,7 @@ Scanlines, Registers, SNES. Ours keeps the strip's place and shape and gives eac
 | CGRAM | **PALETTES** | **a visual editor (#85)**: the VCE's 32 palettes of 16 as swatch buttons (entry 0 dashed — the shared backdrop), and a **512-colour picker** that offers exactly the 9-bit colours the VCE can show (8 G × 8 R × 8 B); click a swatch, then a colour, and that one entry is written to `palettes.json`; the readout gives the CRAM address, the 9-bit word and its channels | `pce-palettes.js`, `pce-editor.js` |
 | Sprites | **SPRITES** | **a visual editor (#86)**: the 64 SAT slots drawn as a grid, the screen with the selected sprite outlined and numbered, a picker (slot with ‹ ›, X/Y with −/+, pattern, palette, SPBG priority, H/V, size read from the pattern), *release position*, *off-screen* and *clear slot*, the sprite palette strip, and a pattern sheet whose selected pattern is drawn with the same six tools as SCREEN at pixel granularity. The per-line header is #50's model (`n/16 strips · n/256 px`, the overflow shown). It edits `sprites.json` and the sprite palettes in `palettes.json` | `renderer/pce-sat.js`, `renderer/pce-editor.js` `renderPreview` |
 | Audio | **AUDIO** | the honest state: `pce-psg.js` exists and is checked; toys have no sound surface yet (#71) | — |
-| Sequencer | **SEQUENCER** | **a step grid (#94)**: six channel rows (the PSG's voices) by steps, patterns A..H with a one-line order, tempo, steps, swing and key, an instrument palette of four wave voices (32-step wave + driver envelope) and two noise drums, a brush note and length, Eraser / Clear / zoom, `Grid \| Staff` (Staff is #95) and a **voices bar per step** that counts the six channels and refuses a seventh. It edits `song.json`; playback is `pce-song.js` + `pce-psg.js` over the compiled song | `renderer/pce-seq.js`, `renderer/studio-panel-sequencer.js` |
+| Sequencer | **SEQUENCER** | **a step grid (#94) and a staff (#95) on the same song**: six channel rows (the PSG's voices) by steps, patterns A..H with a one-line order, tempo, steps, swing and key, an instrument palette of four wave voices (32-step wave + driver envelope) and two noise drums, a brush note and length, Eraser / Clear / zoom, `Grid \| Staff` (the staff is a grand staff with treble and bass clefs, the key signature, note values, accidentals and the octave marks 15mb/8vb/loco/8va/15ma) and a **voices bar per step** that counts the six channels and refuses a seventh. It edits `song.json`; playback is `pce-song.js` + `pce-psg.js` over the compiled song | `renderer/pce-seq.js`, `renderer/pce-staff.js`, `renderer/studio-panel-sequencer.js` |
 | Compose | **LAYERS** | **the PCE's answer (#93)**: **no sub screen and no colour math** exist on the HuC6260, so instead of `out = main + sub` the panel shows the backdrop (CRAM $000), the background, the sprites and the composed frame as four previews; the stacking order spelled out; the layers on/off through CR (**BB**, bit 7; **SB**, bit 6) and each sprite's **SPBG**; and a **fade** done the only way the VCE can — by rewriting palettes, stepped per frame with a curve, as toy code or a `fade.json` asset. Its Registers fold shows CR and the SAT priority bits, and one line says there is no colour blending (transparency is flicker #28 or a dither) | `renderer/pce-layers.js`, `renderer/studio-panel-layers.js`, `pce-sprites.js` `renderFrame`, `pce-panels.js` `satTable` |
 | Windows | *(none)* | **no PCE counterpart**: the VDC has no window/mask registers. Per-line `CR` (display on/blank) and `BXR/BYR` are the closest thing, and they sit in SCANLINES | — |
 | Scanlines | **SCANLINES** | one row per VDW line: BXR, BYR, CR, whether the raster table writes this line, and the RCR the chain arms | `pce-panels.js` `registerLines` |
@@ -806,12 +806,12 @@ and the DMF export is #96. `docs/SEQ.md` is the model's reference; this section 
 |---|---|
 | a song picker with New / Rename / Delete, Undo/Redo | one song per toy, saved as `song.json`; the model's setters are the undo unit #95/#96 can build a history on — **no Undo/Redo yet** |
 | Pattern A.. | **Pattern A..H**, `+ pattern`, and a one-line **order** (`A,A,B`) — the song's playing order |
-| Grid \| Staff, resolution 1/16 … 1/32 and note values 1/16..whole | **Grid** (this card) and **Staff** (disabled, titled #95). The step is a 1/16 note and a cell's fill is its length in steps — the grid has no resolution picker or note values yet |
-| Tempo, Pattern tempo, Steps, Swing, Key | **Tempo** (30-300 BPM, `round(900/BPM)` ticks a step), **Steps** (8/16/32/64), **Swing** (0-60 %: the on-beat step lengthened and the off-beat shortened into `pce-song.js`'s `tick1`/`tick2`), **Key** (the note spelling and scale highlight; #95's staff is where the key does more). No per-pattern tempo |
+| Grid \| Staff, resolution 1/16 … 1/32 and note values 1/16..whole | **Grid** and **Staff** (#95, both live). The step is a 1/16 note and a cell's fill is its length in steps, so a note's length is its value — 1 = 1/16, 2 = 1/8, 3 = dotted 1/8, 4 = 1/4, 6 = dotted 1/4, 8 = 1/2, 12 = dotted 1/2, 16 = whole. The grid has no resolution picker (#95's staff reads the same 1/16 grid) |
+| Tempo, Pattern tempo, Steps, Swing, Key | **Tempo** (30-300 BPM, `round(900/BPM)` ticks a step), **Steps** (8/16/32/64), **Swing** (0-60 %: the on-beat step lengthened and the off-beat shortened into `pce-song.js`'s `tick1`/`tick2`), **Key** (the note spelling and scale highlight; on the staff it is the key signature, §3.11). No per-pattern tempo |
 | an instrument palette of icons (keys, guitar, bass, strings, bell, harp, drums, cymbals) | **six PSG voices**: four waves (`lead` pulse, `bass` square, `bell` sine, `strings` saw — each a 32-step 5-bit wave with a driver envelope) and two noise drums (`kick`, `snare`, channels 5-6 only) |
 | an 8-voice SNES sound chip | **six channels**, so the grid has six rows; the voices bar counts each step's sounding channels against that six, and a noise drum on channels 1-4 is refused `seq-voice`, not dropped |
-| Eraser, sharp/flat/natural, octave marks | **Eraser**, a note stepper (0..83, C1..B7) and a length stepper. Sharps/flats are the key's spelling; the octave marks are #95's staff |
-| zoom, a staff, drum hits under the staff | **zoom** (small/normal/large, the cell width). No staff (that is #95) |
+| Eraser, sharp/flat/natural, octave marks | **Eraser**, a note stepper (0..83, C1..B7) and a length stepper. Sharps, flats and naturals are written by the staff from the key signature and the note (§3.11); the octave marks 15mb / 8vb / loco / 8va / 15ma are the staff's |
+| zoom, a staff, drum hits under the staff | **zoom** (small/normal/large, the cell width, and the staff's step width). The **staff** is §3.11; a drum is drawn as a note on its channel's row like any other voice (the PSG noise generator ignores the note's pitch, so the drum still shows the note it was painted with) |
 | a "voices" bar per step | the same: a bar per step, filled by how many of the six channels sound, with the count drawn in it, under the grid |
 
 **One model, one song.** `renderer/pce-seq.js` holds the song, `compile()`s it to the DMF-shaped object
@@ -835,6 +835,52 @@ a pattern written through the panel that saves `song.json` and leaves the toy's 
 The screenshot `$TMPDIR/pcestudio-design-94/seq-ours.png` is `?demo=palette&frame=30&panel=sequencer`
 (side by side with ppu.toys' SEQUENCER in `seq-side-by-side.png` when that page is reachable; this
 machine's capture is ours alone).
+
+### 3.11 SEQUENCER: the staff view (#95, part 2)
+
+`Grid | Staff` reads the same song two ways; the staff edits nothing. The model is
+`renderer/pce-staff.js` (spelling, clefs, note values, octave marks, and the whole-song `layout()`); the
+panel draws it, and `?view=staff` opens it without synthetic input (a screenshot hook, like `?panel`).
+
+* **A grand staff, one bar per order entry.** Treble from middle C up, bass below it — so middle C sits on
+  the first ledger line under the treble staff and over the bass staff. Bars follow the song's `order`, not
+  just the pattern the grid shows, and the staff lines stop at the last bar line. Notes keep the grid's
+  channel colours (channels 1-4 blue, 5-6 orange) and a note on a second voice at the same pitch is nudged
+  sideways rather than hidden.
+* **Spelling and accidentals.** A note that is a degree of the key's major scale takes that degree's letter
+  and the key signature covers its accidental. A chromatic note takes the key's own direction (sharp key ->
+  a sharp, flat key -> a flat). A natural sign is written when the note is the natural of a letter the
+  signature alters — key G, the note F natural. Octaves are solved so the letter and the pitch agree at the
+  edges (B♯5 is C6's line; G♭4 is F♯4's). Accidentals are not carried within a bar: every note is signed
+  against the key signature, which repeats a sign where strict engraving would not.
+* **Key signature.** Drawn from the twelve major keys' own degrees, in the conventional order (sharps
+  F C G D A E B, flats B E A D G C F), on the lines a musician looks at (treble F5 C5 G5 D5 A4 E5 B4, bass
+  F3 C3 G3 D3 A2 E3 B2).
+* **Note values.** A step is a 1/16, so a cell's length is the note value: 1 = 1/16, 2 = 1/8, 3 = dotted
+  1/8, 4 = 1/4, 6 = dotted 1/4, 8 = 1/2, 12 = dotted 1/2, 16 = whole. A length that is no drawn value still
+  draws the value below it and the model says `exact: false`; a length past a whole draws a whole and says
+  the same.
+* **Octave marks.** A note far enough outside its staff is drawn shifted and labelled: above the treble
+  `8va` from C6 and `15ma` from C7, below the bass `8vb` from G1 and down and `15mb` from C1. The mark sits
+  on the note that needs it and a run of shifted notes repeats none; `loco` is written at the first note of
+  a voice that returns to the written octave. The state is per channel, because two voices at one step can
+  be in different octaves, and it restarts at every bar.
+* **Clefs.** The musical-symbol glyphs (U+1D11E treble, U+1D122 bass) are drawn when the font has them; a
+  drawn clef (beziers and dots) stands in when `measureText` says the glyph is absent — which is also the
+  path the headless stub takes, so the checks exercise it.
+
+**Evidence.** `tests/check-staff.js` is the model: twelve key signatures with their exact accidentals and
+order; the spelling rules including the natural sign, the sharp/flat split and the octave edges; the clefs;
+every note value and its dots; the four octave marks' thresholds and all four reachable in the engine's
+0..83 range; `loco` on a voice's return and its restart per bar; and `layout()` on the demo song, with the
+song deep-equal before and after. `tests/check-studio.js`'s `checkSequencerPanel` drives the panel: the
+Staff button is enabled, switching hides the grid and shows the staff, the staff canvas gets one head per
+note, `15ma` and `loco` are painted, the clefs are drawn (through the stub's no-font path), and switching
+back restores the grid.
+
+Not proven: the staff's pixels are judged by a screenshot, not a pixel comparison; the glyph path is what a
+browser takes and the fallback path is what the checks take, so only the fallback is exercised headlessly;
+accidentals are not carried within a bar; and rule 2 is owed (the tests were written with the panel).
 
 ## 4. The Docs panel (the generated #61 reference)
 
@@ -1506,12 +1552,13 @@ comparison with their page is claimed.
   its limits are the bullet below. The
   SEQUENCER (§3.10) is a song editor, not a toy's sound: what it plays is `pce-song.js`'s engine, and a
   toy cannot play a sequencer song until #71 gives toys a music call.
-* **#94's SEQUENCER is a grid, and its tests are the builder's.** Not proven: the staff view (#95), the
-  DMF export (#96), Undo/Redo, a resolution picker and note values shorter than a step; the panel's DOM
-  and CSS are judged by the screenshot, not a pixel comparison; the AudioContext path (`▶ Play song`) is
-  not exercised headlessly — the render it feeds is; no Mednafen recording of a sequencer song exists (the
-  drums' R7 writes are HuTrack's source, not a recording), and rule 2 is owed: a cold break by another
-  seat.
+* **#94's SEQUENCER is a grid, and its tests are the builder's.** Not proven: the DMF export (#96),
+  Undo/Redo, a resolution picker and note values shorter than a step; the panel's DOM and CSS are judged by
+  the screenshot, not a pixel comparison; the AudioContext path (`▶ Play song`) is not exercised
+  headlessly — the render it feeds is; no Mednafen recording of a sequencer song exists (the drums' R7
+  writes are HuTrack's source, not a recording), and rule 2 is owed: a cold break by another seat. The
+  staff (#95, §3.11) is in the same position: its glyph path is the browser's and its fallback is the only
+  one the checks run, and it does not carry an accidental within a bar.
 * **The asset files are carried, edited, and — since #117 — imported.** `tiles/palettes/sprites.json` are
   in the toy and the envelope, with the shapes `pce-editor.js` uses, and `pce-toyhost.js`'s `createHost`
   now loads them into the running toy's VRAM/CRAM/SAT before the toy's code (§7). Not proven: the
