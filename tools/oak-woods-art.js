@@ -124,28 +124,174 @@ function glyph(img, ch, cellX, cellY) {
 }
 
 /* ---- the one background (256x232: 224 shown + the glyph row) ----------- *
- * Three bands from the pack's three parallax layers, each read through its
- * own seamless 256-pixel window, over a fill that continues the sky behind
- * the cut-outs.  The near layer's lower part includes the forest floor, so
- * the ground is the pack's ground.  Rows 224..231 are off-screen and hold
- * the ten digit glyphs the HUD swaps into the bar. */
+ * Card #150 (Dennis, playing #128: "the trees are cut now").  The pack's three
+ * layers overlap full-screen; the PCE has ONE background, and #128 cut the
+ * screen into three horizontal bands, so every tree that crossed a band edge
+ * was sliced.  Now:
+ *
+ *   (a) layer 1 (the far trees) and layer 2 (the mid trees) are composited
+ *       into ONE picture, and the pack's forest floor (layer 3's rows from
+ *       GROUND_ROW down) sits on it.  It is one 256-px loop: each layer is read
+ *       through the 256-px window whose two edges match best (seamCost), so
+ *       the BAT's wrap shows no step.
+ *   (b) the top SKY STRIP is cut at the one row where the composite is a flat
+ *       colour for the whole width (no tree crosses it): findCut().  It scrolls
+ *       slower, through the raster table.
+ *   (c) layer 3's front trunks are not in the picture: composeTrunks() cuts
+ *       them into sprite cells and the toy moves them faster than the ground.
+ *
+ * The 224 rows: 0..23 the status bar, 24..43 flat sky (the strip's extra
+ * lines, the colour of the composite's own top row), then the layers' 180
+ * rows at 44..223 — layer row 160 (the forest floor's line) lands on 204, the
+ * GROUND the game stands on.  Rows 224..231 are off-screen and hold the ten
+ * digit glyphs the HUD swaps into the bar. */
+const LAYER_Y = 44;        /* screen row of the layers' row 0 */
+const GROUND_ROW = 150;    /* layer 3's rows from here down are the forest floor */
+const TRUNK_BOX = [{ x: 112 }, { x: 252 }];   /* layer 3's two trunks, 64 px wide */
+const TRUNK_W = 64;
+
+function colDist(a, b) {
+  if (!a[3] && !b[3]) return 0;
+  if (!a[3] || !b[3]) return 765;
+  return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+}
+
+/* a 320-wide layer, wrapping, as a function */
+function wrapPx(img, x, y) {
+  const p = px(img, ((x % img.width) + img.width) % img.width, y);
+  return [p[0], p[1], p[2], p[3] >= 128 ? 255 : 0];
+}
+
+/* The cost of the loop's seam if the 256-px window starts at x0: how far the
+ * column that would sit left of column 0 (x0-1) is from the one that does
+ * (x0+255), summed over the rows.  Pixel art has a typical adjacent-column cost;
+ * a seam at or under it is not a seam. */
+function seamCost(img, x0, y0, y1) {
+  let c = 0;
+  for (let y = y0; y < y1; y++) c += colDist(wrapPx(img, x0 + 255, y), wrapPx(img, x0 - 1, y));
+  return c;
+}
+
+function bestWindow(img, y0, y1) {
+  let best = 0, bestCost = Infinity;
+  for (let x0 = 0; x0 < img.width; x0++) {
+    const c = seamCost(img, x0, y0, y1);
+    if (c < bestCost) { bestCost = c; best = x0; }
+  }
+  let typical = 0;
+  for (let x = 0; x < img.width - 1; x++)
+    for (let y = y0; y < y1; y++) typical += colDist(wrapPx(img, x, y), wrapPx(img, x + 1, y));
+  return { x0: best, cost: bestCost, typical: typical / (img.width - 1) };
+}
+
+/* Layer 3's forest floor as its own 320-wide picture: the rows from GROUND_ROW
+ * down, with the two trunks' columns replaced by columns of the same rows taken
+ * from the trunk-free left of the layer, so no root flare is left behind in the
+ * background when the trunk sprite has moved on. */
+function composeGround(layer3) {
+  const g = canvas(layer3.width, layer3.height);
+  const DONOR0 = 4, DONOR_N = 90;
+  for (let y = GROUND_ROW; y < layer3.height; y++) for (let x = 0; x < layer3.width; x++) {
+    let sx = x;
+    for (const box of TRUNK_BOX)
+      if (x >= box.x - 8 && x < box.x + TRUNK_W + 8)
+        sx = DONOR0 + ((x - box.x + 8) % DONOR_N);
+    const p = wrapPx(layer3, sx, y);
+    if (p[3]) set(g, x, y, p[0], p[1], p[2], 255);
+  }
+  return g;
+}
+
+function windows(layers) {
+  const ground = composeGround(layers[2]);
+  return {
+    far: bestWindow(layers[0], 0, 180),
+    mid: bestWindow(layers[1], 0, 180),
+    ground: bestWindow(ground, GROUND_ROW, 180),
+    groundImg: ground,
+  };
+}
+
+/* the composite of layers 1, 2 and the floor, rows 0..179, 256 wide */
+function composeScene(layers) {
+  const w = windows(layers);
+  const img = canvas(256, 180);
+  for (let y = 0; y < 180; y++) for (let x = 0; x < 256; x++) {
+    let p = wrapPx(layers[0], w.far.x0 + x, y);
+    const m = wrapPx(layers[1], w.mid.x0 + x, y);
+    if (m[3]) p = m;
+    if (y >= GROUND_ROW) {
+      const q = wrapPx(w.groundImg, w.ground.x0 + x, y);
+      if (q[3]) p = q;
+    }
+    set(img, x, y, p[0], p[1], p[2], 255);
+  }
+  return { img, windows: w };
+}
+
+function rowUniform(img, y) {
+  const a = px(img, 0, y);
+  for (let x = 1; x < img.width; x++) {
+    const b = px(img, x, y);
+    if (b[0] !== a[0] || b[1] !== a[1] || b[2] !== a[2]) return false;
+  }
+  return true;
+}
+
+/* The sky strip's cut: the largest scene row c (above the first crown) where
+ * rows c-1 and c are each ONE colour across the whole width, so nothing
+ * crosses the line between the slow strip and the faster picture below. */
+function findCut(scene) {
+  for (let c = 40; c >= 1; c--)
+    if (rowUniform(scene, c - 1) && rowUniform(scene, c)) return c;
+  throw new Error("the composite has no clean horizontal break above row 40");
+}
+
+const GROUND = 204;   /* LAYER_Y + 160: the forest floor's line */
+
+function composeBackground(layers) {
+  const sc = composeScene(layers);
+  const cut = findCut(sc.img);
+  const img = canvas(256, 232);
+  for (let y = 0; y < 24; y++) for (let x = 0; x < 256; x++)
+    set(img, x, y, BAR[0], BAR[1], BAR[2], 255);
+  for (let y = 0; y < LAYER_Y; y++) for (let x = 0; x < 256; x++) {
+    const p = px(sc.img, x, 0);
+    if (y >= 24) set(img, x, y, p[0], p[1], p[2], 255);
+  }
+  for (let y = 0; y < 180; y++) for (let x = 0; x < 256; x++) {
+    const p = px(sc.img, x, y);
+    set(img, x, LAYER_Y + y, p[0], p[1], p[2], 255);
+  }
+  for (let y = 224; y < 232; y++) for (let x = 0; x < 256; x++)
+    set(img, x, y, BAR[0], BAR[1], BAR[2], 255);
+  for (let d = 0; d < 10; d++) glyph(img, String(d), (1 + d) * 8, 224);
+  const label = (text, col) => {
+    for (let i = 0; i < text.length; i++) glyph(img, text[i], (col + i) * 8, 8);
+  };
+  label("TIME", 1);
+  label("SCORE", 17);
+  for (const c of [6, 7, 8, 23, 24, 25]) glyph(img, "0", c * 8, 8);
+  img.cut = LAYER_Y + cut;       /* the strip's last line + 1 */
+  img.windows = sc.windows;
+  return img;
+}
+
+/* The control: card #128's banded build, kept so a test can show it fails
+ * "no tree crosses a band edge" where the new one passes.  Three horizontal
+ * bands from the three layers, each through its own window, over a fill. */
 const BAND = {
   far:  { layer: 0, x0: 29, srcY: 8,  dstY: 24,  h: 48 },
   mid:  { layer: 1, x0: 9,  srcY: 30, dstY: 72,  h: 56 },
   near: { layer: 2, x0: 10, srcY: 84, dstY: 128, h: 96 },
 };
 const NEAR_FILL = [38, 30, 54];
-const GROUND = 204;   /* the near band's forest floor: 128 + (160 - 84) */
 
-function composeBackground(layers) {
-  const img = canvas(256, 232);
-  /* the fill behind a cut-out continues the far band's bottom row, so the
-   * seam between two bands is the same colour on both sides */
+function composeBandedBackground(layers) {
+  const img = canvas(256, 224);
   const sky = (x) => px(layers[0], BAND.far.x0 + x, BAND.far.srcY + BAND.far.h - 1);
-  /* the bar */
   for (let y = 0; y < 24; y++) for (let x = 0; x < 256; x++)
     set(img, x, y, BAR[0], BAR[1], BAR[2], 255);
-  /* the three bands */
   for (const key of ["far", "mid", "near"]) {
     const b = BAND[key];
     for (let y = 0; y < b.h; y++) for (let x = 0; x < 256; x++) {
@@ -156,22 +302,34 @@ function composeBackground(layers) {
       else { const f = sky(x); set(img, x, b.dstY + y, f[0], f[1], f[2], 255); }
     }
   }
-  /* rows 224..231: the glyph row (off-screen), bar brown behind the glyphs */
-  for (let y = 224; y < 232; y++) for (let x = 0; x < 256; x++)
-    set(img, x, y, BAR[0], BAR[1], BAR[2], 255);
-  for (let d = 0; d < 10; d++) glyph(img, String(d), (1 + d) * 8, 224);
-  /* the labels on the bar's middle row, and the digits' start value */
-  const label = (text, col) => {
-    for (let i = 0; i < text.length; i++) glyph(img, text[i], (col + i) * 8, 8);
-  };
-  label("TIME", 1);
-  label("SCORE", 17);
-  glyph(img, "0", 6 * 8, 8);
-  glyph(img, "0", 7 * 8, 8);
-  glyph(img, "0", 8 * 8, 8);
-  glyph(img, "0", 23 * 8, 8);
-  glyph(img, "0", 24 * 8, 8);
-  glyph(img, "0", 25 * 8, 8);
+  img.edges = [BAND.mid.dstY, BAND.near.dstY];   /* the band edges inside the picture */
+  return img;
+}
+
+/* A band edge is clean when the rows on both sides are one colour across the
+ * width, i.e. no tree is cut by it. */
+function edgeClean(img, y) { return rowUniform(img, y - 1) && rowUniform(img, y); }
+
+/* ---- the front trunks: sprite cells ------------------------------------- *
+ * Layer 3's first trunk, 64 px wide, as three rows of two 32x64 cells (the
+ * trunk is 192 rows tall: 3 x 64).  The crown is rounded into a dome (the
+ * canopy that joined it to its neighbours is not a sprite), and the floor
+ * rows from GROUND_ROW + 12 down are left to the background.  Cell order:
+ * (left, right) for each of the three rows. */
+function composeTrunks(layer3) {
+  const T = TRUNK_BOX[0];
+  const img = canvas(32 * 6, 64);
+  const cx = T.x + TRUNK_W / 2;
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 2; c++) for (let y = 0; y < 64; y++) for (let x = 0; x < 32; x++) {
+    const ly = r * 64 + y, lx = T.x + c * 32 + x;
+    if (ly >= layer3.height || ly >= GROUND_ROW + 12) continue;
+    /* the dome: half-width the crown may have at this row */
+    let half = TRUNK_W / 2;
+    if (ly < 46) half = Math.round(10 + (TRUNK_W / 2 - 10) * Math.sqrt(Math.max(0, 1 - Math.pow((46 - ly) / 46, 2))));
+    if (Math.abs(lx - cx + 0.5) > half) continue;
+    const p = px(layer3, lx, ly);
+    if (p[3] >= 128) set(img, (r * 2 + c) * 32 + x, y, p[0], p[1], p[2], 255);
+  }
   return img;
 }
 
@@ -255,7 +413,7 @@ function cellWords(pattern, col, row, cell, words) {
   }
 }
 
-function luaBlock(bg, bgRes, charRes, propsRes, layout) {
+function luaBlock(bg, bgRes, charRes, propsRes, trunkRes, layout) {
   const L = [];
   const push = (s) => L.push(s);
   push(OPEN + " — generated by tools/oak-woods-art.js; do not edit");
@@ -265,7 +423,8 @@ function luaBlock(bg, bgRes, charRes, propsRes, layout) {
   push("-- the playable file is demo-art/oak-woods/main.lua, beside the repo.");
   push("-- " + bgRes.stats.tiles + " background tiles, " + bgRes.stats.palettes +
        " background palettes, " + charRes.patterns.length + " player frames,");
-  push("-- " + propsRes.patterns.length + " prop patterns.");
+  push("-- " + propsRes.patterns.length + " prop patterns, " + trunkRes.patterns.length +
+       " front-trunk patterns (sprites, card #150).");
 
   push("");
   push("PLY = {" + charRes.sprites.map((s) => layout.charBase + s.pattern * 8).join(", ") + "}");
@@ -274,6 +433,9 @@ function luaBlock(bg, bgRes, charRes, propsRes, layout) {
   push("ROCK_PAL = {" + [0, 1].map((i) => propsRes.sprites[i].palette + layout.charPalettes).join(", ") + "}");
   push("SIGNP = " + (layout.propBase + 8));
   push("SIGN_PAL = " + (propsRes.sprites[2].palette + layout.charPalettes));
+  /* the front trunk: rows of (left, right) 32x64 cells */
+  push("TRK = {" + trunkRes.sprites.map((t) => layout.trunkBase + t.pattern * 8).join(", ") + "}");
+  push("TRK_PAL = {" + trunkRes.sprites.map((t) => t.palette + layout.charPalettes + layout.propPalettes).join(", ") + "}");
 
   /* the digit tiles: cells 1..10 of the glyph row (row 28) */
   /* the importer's tiles[] is indexed by char - $40, not by char */
@@ -291,9 +453,9 @@ function luaBlock(bg, bgRes, charRes, propsRes, layout) {
   push("HUD_SCORE = {" + [23, 24, 25].map((c) => 32 + c).join(", ") + "}");
   push("GROUND = " + GROUND);
   push("START_X = 96");
-  push("FAR_LINE = " + BAND.far.dstY);
-  push("MID_LINE = " + BAND.mid.dstY);
-  push("NEAR_LINE = " + BAND.near.dstY);
+  push("SKY_LINE = 24");
+  push("MAIN_LINE = " + bg.cut);
+  push("TRUNK_TOP = " + LAYER_Y);
   push("LEVEL_LEN = 1440");
   push("GOAL_X = 1400");
   push("ROCK_X = {240, 520, 900, 1240}");
@@ -312,6 +474,7 @@ function luaBlock(bg, bgRes, charRes, propsRes, layout) {
   const spriteRows = [];
   for (const row of charRes.palettes) spriteRows.push(row);
   for (const row of propsRes.palettes) spriteRows.push(row);
+  for (const row of trunkRes.palettes) spriteRows.push(row);
   for (let p = 0; p < spriteRows.length; p++)
     for (let e = 1; e < 16; e++)
       if (spriteRows[p][e])
@@ -361,6 +524,8 @@ function luaBlock(bg, bgRes, charRes, propsRes, layout) {
     emitPattern(charRes, i, layout.charBase + i * 8, 32, 64);
   for (let i = 0; i < propsRes.patterns.length; i++)
     emitPattern(propsRes, i, layout.propBase + i * 4, 32, 32);
+  for (let i = 0; i < trunkRes.patterns.length; i++)
+    emitPattern(trunkRes, i, layout.trunkBase + i * 8, 32, 64);
 
   push("end");
   push(CLOSE + " — do not edit above this line");
@@ -394,17 +559,26 @@ function build(opts) {
                                                alphaThreshold: 128, dither: "none",
                                                maxPalettes: 6 });
 
+  const trunkImg = composeTrunks(layers[2]);
+  const trunkRes = src.importImage(trunkImg, { kind: "sprites", size: [32, 64],
+                                               name: "oak-woods-trunk",
+                                               alphaThreshold: 128, dither: "none",
+                                               maxPalettes: 6 });
+
   const nTiles = bgRes.tiles.length;
   const charBase = 16 + Math.ceil(nTiles * 16 / 64);
   const alignedCharBase = Math.ceil(charBase / 8) * 8;
   const propBase = alignedCharBase + charRes.patterns.length * 8;
+  const trunkBase = Math.ceil((propBase + propsRes.patterns.length * 4) / 8) * 8;
   const layout = {
     nTiles: nTiles,
     charBase: alignedCharBase,
     propBase: propBase,
+    trunkBase: trunkBase,
     charPalettes: charRes.palettes.length,
+    propPalettes: propsRes.palettes.length,
   };
-  const spriteWords = (charRes.patterns.length * 8 + propsRes.patterns.length * 4) * 64;
+  const spriteWords = (trunkBase + trunkRes.patterns.length * 8 - alignedCharBase) * 64;
   const tileWordsTotal = nTiles * 16;
   layout.vram = { bat: 1024, tiles: tileWordsTotal,
                   sprites: spriteWords,
@@ -412,8 +586,9 @@ function build(opts) {
                   end: alignedCharBase * 64 + spriteWords,
                   total: Math.max(1024 + tileWordsTotal, alignedCharBase * 64 + spriteWords) };
 
-  const block = luaBlock(bgImg, bgRes, charRes, propsRes, layout);
-  return { dir, bgImg, bgRes, charImg, charRes, propsImg, propsRes,
+  const block = luaBlock(bgImg, bgRes, charRes, propsRes, trunkRes, layout);
+  return { dir, layers, bgImg, bgRes, charImg, charRes, propsImg, propsRes,
+           trunkImg, trunkRes, bandedImg: composeBandedBackground(layers),
            layout, block };
 }
 
@@ -518,11 +693,16 @@ renderer/pce-source.js:
 | rocks | 20x11 and 27x12 | one 32x32 sprite each |
 | sign | 22x31 | one 32x32 sprite |
 
-The background is **one** plane: the pack's three parallax layers are composed
-into three horizontal bands of one 32x32 BAT (the PCE has one background), and
-the RCR line interrupt rewrites BXR at each band's first line — a quarter, a
-half and the full scroll speed.  It is the \`toys/parallax.lua\` trick with the
-pack's art.
+The background is **one** plane (card #150, replacing #128's three bands, whose
+edges sliced every tree that crossed them).  Layers 1 and 2 and the forest floor
+are ONE composite that loops at the 32-cell BAT's 256 px (each layer read
+through the window whose seam is cheapest) and scrolls at the ground's speed.
+The strip above the first crown is cut where the composite is one flat colour
+across the whole width, so no tree crosses the cut, and the RCR line interrupt
+gives it a slower BXR.  Layer 3's front trunks are not in the picture: they are
+sprites (64x192 as three rows of two 32x64 cells) moved faster than the ground
+and recycled when they leave the screen, never more than two trunks (eight
+sprite strips) on a line.
 
 The character's 18-colour frames are **fitted**: the importer's palette planner
 puts each frame in one 16-colour sprite palette and maps the colours that do not
@@ -538,6 +718,7 @@ function writeAll(built) {
   fs.writeFileSync(path.join(OUT, "background.png"), pngOf(built.bgImg));
   fs.writeFileSync(path.join(OUT, "character.png"), pngOf(built.charImg));
   fs.writeFileSync(path.join(OUT, "props.png"), pngOf(built.propsImg));
+  fs.writeFileSync(path.join(OUT, "trunk.png"), pngOf(built.trunkImg));
   const report = {
     pack: "oak_woods_v1.0.zip",
     credit: "Oak Woods v1.0 by Brullov (brullov.art)",
@@ -545,9 +726,13 @@ function writeAll(built) {
     background: built.bgRes.stats,
     player: built.charRes.stats,
     props: built.propsRes.stats,
+    trunks: built.trunkRes.stats,
+    windows: { far: built.bgImg.windows.far, mid: built.bgImg.windows.mid,
+               ground: built.bgImg.windows.ground },
+    skyCut: built.bgImg.cut,
     vram: built.layout.vram,
     warnings: [].concat(built.bgRes.warnings, built.charRes.warnings,
-                        built.propsRes.warnings),
+                        built.propsRes.warnings, built.trunkRes.warnings),
     ground: GROUND,
   };
   fs.writeFileSync(path.join(OUT, "art.json"), JSON.stringify(report, null, 2) + "\n");
@@ -601,14 +786,17 @@ function main(argv) {
               built.bgRes.stats.maxTileColours + " colours/tile");
   console.log("  player " + built.charRes.patterns.length + " frames (32x64), " +
               built.charRes.stats.palettes + " palettes");
+  console.log("  trunk " + built.trunkRes.patterns.length + " patterns (32x64), " +
+              built.trunkRes.stats.palettes + " palettes; sky strip cut at line " + built.bgImg.cut);
   console.log("  props " + built.propsRes.patterns.length + " patterns (32x32), " +
               built.propsRes.stats.palettes + " palettes");
   console.log("  VRAM words: BAT 1024 + tiles " + v.tiles + " + sprites " +
               v.sprites + " = " + v.total + " of 32768");
   for (const w of [].concat(built.bgRes.warnings, built.charRes.warnings,
-                            built.propsRes.warnings)) console.log("  warning: " + w);
+                            built.propsRes.warnings, built.trunkRes.warnings)) console.log("  warning: " + w);
   return 0;
 }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
-module.exports = { build, splice, composeBackground, composeCharacter, composeProps, GROUND, BAND };
+module.exports = { build, splice, composeBackground, composeBandedBackground, composeCharacter,
+                   composeProps, composeTrunks, edgeClean, rowUniform, seamCost, GROUND, BAND };
