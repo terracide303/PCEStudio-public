@@ -365,7 +365,9 @@
   function runBudgets(program, options) {
     var frames = options.frames || 8;
     var problems = [];
-    var host = toyhost.createHost();
+    /* the host needs the songs the toy was written for: music(0) without
+     * them is a real run-time refusal (music-range), not a budget */
+    var host = toyhost.createHost({ songs: options.songs || [] });
     var frameFid = program.hooks.frame;
     var rasterFid = program.hooks.raster;
     var maxVram = -1;
@@ -442,7 +444,8 @@
 
   /* ---- validate --------------------------------------------------------- */
 
-  /* source (Lua text) -> report.  options: frames, chunkName, tolerance. */
+  /* source (Lua text) -> report.  options: frames, chunkName, tolerance,
+   * songs (the list music(index) may play, as the runtime's create() takes). */
   function validate(source, options) {
     options = options || {};
     var program;

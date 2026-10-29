@@ -6602,12 +6602,14 @@ function checkGallery(page) {
           String((e && (e.stderr || e.message)) || e).trim() + ")");
   }
   const data = (S.galleryData && S.galleryData.toys) || [];
-  check(data.length === 6,
-        "the gallery carries the five #29 toys and STARFALL (got " +
+  /* #128 added OAK WOODS, a seventh toy besides the five #29 effects and
+   * STARFALL; Browse and the studio read the same generated list */
+  check(data.length === 7,
+        "the gallery carries the five #29 toys, STARFALL and OAK WOODS (got " +
         data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall"]);
+      "starfall", "oak-woods"]);
   let mismatched = [];
   for (const t of data) {
     if (t.source !== toySource(t.file)) mismatched.push(t.file);
@@ -6741,7 +6743,7 @@ function checkGallery(page) {
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
      ["parallax", "sky-gradient", "road", "status-bar", "palette-cycle",
-      "starfall"]);
+      "starfall", "oak-woods"]);
   check(cards.every((c) => c.ink > 0 && !c.error),
         "every card drew its frame 60 (" +
         cards.map((c) => c.id + " " + c.ink).join(", ") + ")");
@@ -6764,8 +6766,9 @@ function checkGallery(page) {
         "#121: the STARFALL card links to its page, the studio and its file");
 
   B.setTag("raster");
-  eq("the raster tag shows the five raster toys", B.visible(),
-     ["parallax", "sky-gradient", "road", "status-bar", "starfall"]);
+  eq("the raster tag shows the raster toys", B.visible(),
+     ["parallax", "sky-gradient", "road", "status-bar", "starfall",
+      "oak-woods"]);
   B.setTag("");
   B.setQuery("road");
   eq("the search box filters to the road", B.visible(), ["road"]);
@@ -6774,14 +6777,15 @@ function checkGallery(page) {
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["status-bar", "parallax", "palette-cycle", "road", "sky-gradient",
-      "starfall"]);
+     ["status-bar", "parallax", "oak-woods", "palette-cycle", "road",
+      "sky-gradient", "starfall"]);
   B.setSort("written");
 
   const bt = runBarePage(BROWSE_PAGE, "?tag=raster");
   eq("?tag=raster opens the page filtered",
      bt.sandbox.PCEStudio.browse.visible(),
-     ["parallax", "sky-gradient", "road", "status-bar", "starfall"]);
+     ["parallax", "sky-gradient", "road", "status-bar", "starfall",
+      "oak-woods"]);
 
   /* 4. a toy's own page */
   const t = runBarePage(TOY_PAGE, "?id=road&paused=1");
@@ -6826,7 +6830,7 @@ async function checkGalleryBrowser() {
                          "pcestudio-chrome-80-" + process.pid);
   const pages = [
     { name: "browse.html", file: BROWSE_PAGE, search: "?selftest=1",
-      want: /^PASS 6 cards, each drawn at frame 60 · ink / },
+      want: /^PASS 7 cards, each drawn at frame 60 · ink / },
     { name: "toy.html?id=road", file: TOY_PAGE, search: "?id=road&selftest=1",
       want: /^PASS 60 frames · road · 256x224 · ink [1-9][0-9]* · digest / }
   ];

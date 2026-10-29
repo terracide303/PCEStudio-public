@@ -2029,6 +2029,7 @@ const GALLERY = (((typeof PCEStudio !== "undefined" && PCEStudio.galleryData) ||
   tags: t.tags,
   blurb: t.blurb,
   files: t.files,
+  songs: t.songs,
   badge: t.badge,
   gallery: true
 }));
@@ -2695,7 +2696,11 @@ function rebuild() {
    * Both runtimes hand `files` to the shared host (renderer/pce-toyhost.js),
    * which imports tiles/palettes/sprites into VRAM, CRAM, the SAT and the
    * scroll before the toy's own code runs; empty defaults import nothing. */
-  const rt = factory.create(current.source, { budgetMs: 120, files: files });
+  /* songs: a gallery toy's own module (#128), so music(0) has something to
+   * play when the toy is opened from Browse */
+  const rt = factory.create(current.source, {
+    budgetMs: 120, files: files,
+    songs: (current.example && current.example.songs) || [] });
   rt.load();
   runtime = rt;
   currentFrame = -1;
