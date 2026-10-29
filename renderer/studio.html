@@ -3603,27 +3603,6 @@ function loadExample(id, quiet, noApply) {
   setEditorText(ex.source);
   switchingFile = false;
   notifyAssetEdit("tiles.json");
-  /* #125: a demo toy made from a third-party pack keeps its picture out of the
-   * repository (Dennis, 2026-10-29; docs/DECISIONS.md).  The gallery entry
-   * names where the site keeps it (ex.art) and the page fetches it; the toy
-   * opens at once and the picture arrives a moment later, or — a clone served
-   * locally, or an upload that skipped the folder — the toy opens without it
-   * and says so.  Nothing is fetched when the entry carries its own files. */
-  if (ex.art) {
-    loadDemoArt(ex).then(function (art) {
-      if (current.example !== ex) return;      /* another toy opened meanwhile */
-      if (!art) {
-        toast("Demo art not uploaded (demo-art/" + ex.id + "): this toy opens " +
-              "without its picture.");
-        return;
-      }
-      const artNames = art.map((f) => f.name);
-      files = files.filter((f) => artNames.indexOf(f.name) < 0).concat(art);
-      renderAssets();
-      notifyAssetEdit("tiles.json");
-      if (!noApply) applySource();
-    });
-  }
   /* #94: the example has no song.json, so the SEQUENCER starts a fresh song
    * instead of keeping the previous toy's. */
   notifyAssetEdit("song.json");
@@ -3639,24 +3618,6 @@ function loadExample(id, quiet, noApply) {
   persistToy();
   if (!quiet) toast("Opened " + ex.name + ".");
   return true;
-}
-
-/* #125: a demo toy's art is not in the repository.  The gallery entry names
- * the folder the deploy puts it in (`art`, e.g. art/city/); this page fetches
- * it the way renderer/pce-gallery.js's loadArt does for the toy and Browse
- * pages — the studio does not load that module, so the fetch is here, and it
- * answers null (never throws) when there is no fetch or no folder. */
-function loadDemoArt(ex) {
-  if (!ex.art || typeof fetch !== "function") return Promise.resolve(null);
-  const base = ex.art.base || ("art/" + ex.id + "/");
-  return Promise.all(ex.art.files.map((f) =>
-    fetch("../" + base + f.name).then((r) => {
-      if (!r.ok) throw new Error(f.name + ": HTTP " + r.status);
-      return r.text();
-    })
-  )).then((texts) => ex.art.files.map((f, i) => ({
-    name: f.name, kind: f.kind, source: texts[i]
-  }))).catch(() => null);
 }
 
 /* ---- the toy file: one JSON envelope, ppu.toys' shape with credit ------ */
