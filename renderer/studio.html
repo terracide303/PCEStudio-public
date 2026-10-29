@@ -73,6 +73,8 @@
 <link rel="stylesheet" href="studio-panel-layers.css">
 <!-- #97: the AUDIO panel's own styles, beside its module -->
 <link rel="stylesheet" href="studio-panel-audio.css">
+<!-- #94: the SEQUENCER panel's own styles, beside its module -->
+<link rel="stylesheet" href="studio-panel-sequencer.css">
 <style>
   :root {
     /* ppu.toys' design tokens, adapted (source URL in the credit block). */
@@ -1267,6 +1269,96 @@
                 registers are all in the voice detail's registers tab.</p>
             </details>
           </div>
+          <div class="panel" id="panel-sequencer" data-panel="sequencer" hidden>
+            <!-- #94: ppu.toys' SEQUENCER, answered by the PSG — a step grid
+                 of six channel rows (the chip's six voices), patterns,
+                 tempo, swing and key, wave instruments with a 32-step wave
+                 and a driver envelope, noise drums on channels 5-6, and a
+                 voices bar per step.  Playback is renderer/pce-song.js +
+                 renderer/pce-psg.js over renderer/pce-seq.js's compiled
+                 song.  The song saves with the toy as song.json. -->
+            <div class="seq-top">
+              <b>THE SEQUENCER</b>
+              <span class="seq-sub">six PSG voices · patterns, tempo, swing,
+                key · wave instruments and noise drums</span>
+              <button type="button" class="btn-mini" id="seq-play"
+                      title="Render the song through pce-song.js and pce-psg.js and play it">▶ Play song</button>
+              <button type="button" class="btn-mini" id="seq-stop"
+                      title="Stop the song">■ Stop</button>
+              <span class="seq-status" id="seq-status"></span>
+            </div>
+            <div class="seq-song">
+              <span class="seq-kicker">SONG</span>
+              <label>pattern
+                <select id="seq-pattern" aria-label="The pattern the grid edits"></select></label>
+              <button type="button" class="btn-mini" id="seq-addpattern"
+                      title="Add an empty pattern (A..H)">+ pattern</button>
+              <label>order
+                <input type="text" id="seq-order" class="seq-order"
+                       aria-label="The song's pattern order, e.g. A,A,B"
+                       title="The patterns in playing order, e.g. A,A,B"></label>
+              <label>tempo
+                <input type="number" id="seq-tempo" min="30" max="300" value="150"></label>
+              <label>steps
+                <select id="seq-steps" aria-label="Steps per pattern">
+                  <option value="8">8</option>
+                  <option value="16">16</option>
+                  <option value="32">32</option>
+                  <option value="64">64</option>
+                </select></label>
+              <label>swing
+                <input type="number" id="seq-swing" min="0" max="60" value="0"></label>
+              <label>key
+                <select id="seq-key" aria-label="The key's note spelling"></select></label>
+              <button type="button" class="btn-mini" id="seq-view-grid"
+                      aria-pressed="true">Grid</button>
+              <button type="button" class="btn-mini" id="seq-view-staff"
+                      disabled title="The staff view is part 2 (#95)">Staff</button>
+            </div>
+            <div class="seq-tools">
+              <span class="seq-kicker">INSTRUMENT</span>
+              <select id="seq-instrument" aria-label="The instrument the brush paints"></select>
+              <label>note
+                <button type="button" class="btn-mini" id="seq-note-down"
+                        title="One semitone down">−</button>
+                <input type="number" id="seq-note" min="0" max="83" value="36"
+                       aria-label="The brush's note (engine note number)">
+                <button type="button" class="btn-mini" id="seq-note-up"
+                        title="One semitone up">+</button>
+                <span class="seq-note-name" id="seq-note-name">C4</span></label>
+              <label>length
+                <input type="number" id="seq-length" min="1" max="64" value="1"
+                       aria-label="The note's length in steps"></label>
+              <button type="button" class="btn-mini seq-erase" id="seq-eraser"
+                      aria-pressed="false"
+                      title="Click a cell to erase it whatever the brush is">Eraser</button>
+              <button type="button" class="btn-mini" id="seq-clear"
+                      title="Erase every cell of this pattern">Clear</button>
+              <label>zoom
+                <select id="seq-zoom" aria-label="The grid's zoom">
+                  <option value="small">small</option>
+                  <option value="normal" selected>normal</option>
+                  <option value="large">large</option>
+                </select></label>
+            </div>
+            <div class="seq-gridbox">
+              <canvas id="seq-grid" width="374" height="126" tabindex="0"
+                      aria-label="The step grid: six channel rows, click a cell to place or erase a note"></canvas>
+            </div>
+            <div class="seq-voicesbox">
+              <canvas id="seq-voices" width="374" height="26"
+                      aria-label="How many of the six voices sound at each step"></canvas>
+            </div>
+            <div class="seq-foot">
+              <span class="seq-info" id="seq-info"></span>
+              <span id="seq-budget"></span>
+            </div>
+            <p class="seq-hint">A cell is a note on that PSG channel; its fill
+              is the note's length. Noise drums only go on channels 5 and 6.
+              The voices bar counts the six channels at each step — the chip
+              has no seventh. The song is saved with the toy as song.json and
+              played by the same HuTrack model the console runs.</p>
+          </div>
           <div class="panel" id="panel-layers" data-panel="layers" hidden>
             <!-- #93: ppu.toys' COMPOSE, answered by the PCE — backdrop, BG,
                  sprites and the composed frame side by side; the stacking
@@ -1620,6 +1712,10 @@
 <script src="pce-wave.js"></script>
 <script src="pce-song.js"></script>
 <script src="pce-mix.js"></script>
+<!-- #94: the SEQUENCER panel's model — the step grid compiled to the song
+     object pce-song.js plays, plus the noise drums' R7 writes.  It needs
+     pce-song.js, pce-psg.js and pce-wave.js's wave shapes, all above. -->
+<script src="pce-seq.js"></script>
 <script src="pce-docs.js"></script>
 <!-- #87: the generated pceglobals.lua document, built from the register,
      pad and helper tables above (the ppuglobals.lua tab ppu.toys has). -->
@@ -1633,6 +1729,7 @@
 <script src="studio-panel-palettes.js"></script>
 <script src="studio-panel-sprites.js"></script>
 <script src="studio-panel-audio.js"></script>
+<script src="studio-panel-sequencer.js"></script>
 <script src="studio-panel-layers.js"></script>
 <script src="studio-panel-scanlines.js"></script>
 <script src="studio-panel-registers.js"></script>
@@ -3027,6 +3124,9 @@ function loadExample(id, quiet, noApply) {
   setEditorText(ex.source);
   switchingFile = false;
   notifyAssetEdit("tiles.json");
+  /* #94: the example has no song.json, so the SEQUENCER starts a fresh song
+   * instead of keeping the previous toy's. */
+  notifyAssetEdit("song.json");
   /* #92: the example's main.lua is a new band source for SCANLINES */
   if (scanlinesApi()) scanlinesApi().invalidate();
   panelDirty = true;
@@ -3143,6 +3243,9 @@ function openToy(text, fileName, opts) {
   updateFileTabs();
   renderAssets();
   notifyAssetEdit("tiles.json");
+  /* #94: a toy with no song.json gives the SEQUENCER a fresh song rather
+   * than the previous toy's. */
+  notifyAssetEdit("song.json");
   /* #92: a different toy is a different main.lua, so the SCANLINES panel
    * adopts the band block the new toy carries (or starts one). */
   if (scanlinesApi()) scanlinesApi().invalidate();
@@ -4278,6 +4381,19 @@ const studio = {
     persist: persistToy,
     saved: setSaved,
     refreshAssets: renderAssets,
+    /* #94: a panel whose model is a file the toy does not carry yet (the
+     * SEQUENCER's song.json) adds it on its first save, so the default toy
+     * stays #77's five-file toy until a panel has something to save. */
+    addFile: function (name, kind, source) {
+      if (typeof name !== "string" || !name)
+        throw new Error("addFile needs a file name");
+      if (findFile(name)) throw new Error(name + " is already a file");
+      files.push({ name: name, kind: kind || fileKind(name),
+                   source: String(source === undefined ? "" : source) });
+      persistToy();
+      if (!$("assets-pane").hidden) renderAssets();
+      return name;
+    },
     onAssetEdit: (fn) => {
       if (typeof fn !== "function") throw new Error("onAssetEdit needs a function");
       assetEditWatchers.push(fn);

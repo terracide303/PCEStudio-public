@@ -1,0 +1,47 @@
+/*
+ * studio-panel-sequencer.css — the SEQUENCER panel's own styles (card #94).
+ *
+ * The panel's chrome (heads, lines, the hint text, .btn-mini) is the page's,
+ * which studio.html already defines; this file holds only what #94 adds, so
+ * the SEQUENCER tab looks like the rest of the dock (#102's split).  Colours
+ * come from the page's tokens, so both themes work.
+ */
+
+.seq-top, .seq-song, .seq-tools {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font: 11px var(--mono); color: var(--text2);
+}
+.seq-top { margin-bottom: 4px; }
+.seq-top b { color: var(--text); font-weight: 600; letter-spacing: .04em; }
+.seq-sub { color: var(--dim); }
+.seq-kicker {
+  color: var(--accent); font: 600 10px var(--mono);
+  letter-spacing: .10em; text-transform: uppercase;
+}
+.seq-song { margin: 6px 0 4px; }
+.seq-tools { margin: 4px 0 8px; }
+.seq-song label, .seq-tools label {
+  display: inline-flex; align-items: center; gap: 3px; color: var(--dim);
+}
+.seq-song input[type="number"], .seq-tools input[type="number"] {
+  width: 54px;
+}
+.seq-order { width: 92px; }
+.seq-status { color: var(--dim); margin-left: auto; }
+.seq-status:not(:empty) { color: var(--accent); }
+
+.seq-gridbox { overflow-x: auto; border: 1px solid var(--line);
+  border-radius: 4px; background: #0b0d13; padding: 2px; }
+.seq-gridbox canvas { display: block; }
+.seq-voicesbox { margin-top: 4px; }
+.seq-foot {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 6px; font: 10px var(--mono); color: var(--dim);
+}
+.seq-foot .seq-info { color: var(--text2); }
+.seq-note-name {
+  display: inline-block; min-width: 30px; color: var(--text);
+  font-weight: 600;
+}
+.seq-erase.is-on { border-color: var(--accent); color: var(--accent); }
+.seq-hint { color: var(--dim); font: 10px var(--mono); margin-top: 4px; }

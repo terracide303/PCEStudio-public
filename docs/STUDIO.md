@@ -201,7 +201,7 @@ Scanlines, Registers, SNES. Ours keeps the strip's place and shape and gives eac
 | CGRAM | **PALETTES** | **a visual editor (#85)**: the VCE's 32 palettes of 16 as swatch buttons (entry 0 dashed — the shared backdrop), and a **512-colour picker** that offers exactly the 9-bit colours the VCE can show (8 G × 8 R × 8 B); click a swatch, then a colour, and that one entry is written to `palettes.json`; the readout gives the CRAM address, the 9-bit word and its channels | `pce-palettes.js`, `pce-editor.js` |
 | Sprites | **SPRITES** | **a visual editor (#86)**: the 64 SAT slots drawn as a grid, the screen with the selected sprite outlined and numbered, a picker (slot with ‹ ›, X/Y with −/+, pattern, palette, SPBG priority, H/V, size read from the pattern), *release position*, *off-screen* and *clear slot*, the sprite palette strip, and a pattern sheet whose selected pattern is drawn with the same six tools as SCREEN at pixel granularity. The per-line header is #50's model (`n/16 strips · n/256 px`, the overflow shown). It edits `sprites.json` and the sprite palettes in `palettes.json` | `renderer/pce-sat.js`, `renderer/pce-editor.js` `renderPreview` |
 | Audio | **AUDIO** | the honest state: `pce-psg.js` exists and is checked; toys have no sound surface yet (#71) | — |
-| Sequencer | *(none yet)* | the tracker lives in `renderer/pce-hutrack.js`; a toy-facing sequencer is a later card | — |
+| Sequencer | **SEQUENCER** | **a step grid (#94)**: six channel rows (the PSG's voices) by steps, patterns A..H with a one-line order, tempo, steps, swing and key, an instrument palette of four wave voices (32-step wave + driver envelope) and two noise drums, a brush note and length, Eraser / Clear / zoom, `Grid \| Staff` (Staff is #95) and a **voices bar per step** that counts the six channels and refuses a seventh. It edits `song.json`; playback is `pce-song.js` + `pce-psg.js` over the compiled song | `renderer/pce-seq.js`, `renderer/studio-panel-sequencer.js` |
 | Compose | **LAYERS** | **the PCE's answer (#93)**: **no sub screen and no colour math** exist on the HuC6260, so instead of `out = main + sub` the panel shows the backdrop (CRAM $000), the background, the sprites and the composed frame as four previews; the stacking order spelled out; the layers on/off through CR (**BB**, bit 7; **SB**, bit 6) and each sprite's **SPBG**; and a **fade** done the only way the VCE can — by rewriting palettes, stepped per frame with a curve, as toy code or a `fade.json` asset. Its Registers fold shows CR and the SAT priority bits, and one line says there is no colour blending (transparency is flicker #28 or a dither) | `renderer/pce-layers.js`, `renderer/studio-panel-layers.js`, `pce-sprites.js` `renderFrame`, `pce-panels.js` `satTable` |
 | Windows | *(none)* | **no PCE counterpart**: the VDC has no window/mask registers. Per-line `CR` (display on/blank) and `BXR/BYR` are the closest thing, and they sit in SCANLINES | — |
 | Scanlines | **SCANLINES** | one row per VDW line: BXR, BYR, CR, whether the raster table writes this line, and the RCR the chain arms | `pce-panels.js` `registerLines` |
@@ -214,11 +214,11 @@ mirror image: it reads the toy's *source* and runs the compiler pipeline over it
 run on a console" is a question about the code, not about the frame the browser just drew. There is no
 second copy of the picture: the same panel code the editor uses reads the toy's frame. The panel strip
 is hidden/shown from the `Panels ▾` menu, which groups `WORKSPACE` (Editor, Assets, Output, Markers, Agent)
-and `THE CHIP` (the nine panels), with `Reset to default`, like ppu.toys' menu.
+and `THE CHIP` (the ten panels), with `Reset to default`, like ppu.toys' menu.
 
 A panel's **`Guide`** button opens the Docs panel at that panel's chapter: SCREEN → registers, VRAM → the
-toy, PALETTES → palettes, SPRITES → sprites, AUDIO → sound, LAYERS → registers (CR and the SAT), SCANLINES
-→ raster, REGISTERS → registers, CONSOLE → budgets.
+toy, PALETTES → palettes, SPRITES → sprites, AUDIO → sound, SEQUENCER → sound, LAYERS → registers (CR and
+the SAT), SCANLINES → raster, REGISTERS → registers, CONSOLE → budgets.
 
 ### 3.1 SCREEN as a visual editor (#84, part A)
 
@@ -734,6 +734,49 @@ read back; a broken one is `waves-json` and is not written over; and a running t
 panel through `audioLive()`, decoded onto the voice the toy used, with the PCM rendered from the same
 events. The `--browser` run is not extended for this panel; the screenshot below is.
 
+### 3.10 SEQUENCER: a step grid for the PSG (#94, part 1)
+
+ppu.toys' SEQUENCER is the working example (Dennis showed it on 2026-10-29; the card's reading is on #94
+in `docs/PLAN.md`): "Write songs as notes on a staff (or a step grid), bar by bar", Undo/Redo, a song
+picker, Pattern A.., `Grid | Staff`, resolution, Tempo / Pattern tempo / Steps / Swing / Key, an
+instrument palette (keys, guitar, bass, strings, bell, harp, drums, cymbals), Eraser, note values, zoom,
+a staff with treble and bass clef, and a "voices" bar per step. This card is the grid; the staff is #95
+and the DMF export is #96. `docs/SEQ.md` is the model's reference; this section is the panel.
+
+| ppu.toys (SEQUENCER, from the card's reading) | `studio.html`'s SEQUENCER panel |
+|---|---|
+| a song picker with New / Rename / Delete, Undo/Redo | one song per toy, saved as `song.json`; the model's setters are the undo unit #95/#96 can build a history on — **no Undo/Redo yet** |
+| Pattern A.. | **Pattern A..H**, `+ pattern`, and a one-line **order** (`A,A,B`) — the song's playing order |
+| Grid \| Staff, resolution 1/16 … 1/32 and note values 1/16..whole | **Grid** (this card) and **Staff** (disabled, titled #95). The step is a 1/16 note and a cell's fill is its length in steps — the grid has no resolution picker or note values yet |
+| Tempo, Pattern tempo, Steps, Swing, Key | **Tempo** (30-300 BPM, `round(900/BPM)` ticks a step), **Steps** (8/16/32/64), **Swing** (0-60 %: the on-beat step lengthened and the off-beat shortened into `pce-song.js`'s `tick1`/`tick2`), **Key** (the note spelling and scale highlight; #95's staff is where the key does more). No per-pattern tempo |
+| an instrument palette of icons (keys, guitar, bass, strings, bell, harp, drums, cymbals) | **six PSG voices**: four waves (`lead` pulse, `bass` square, `bell` sine, `strings` saw — each a 32-step 5-bit wave with a driver envelope) and two noise drums (`kick`, `snare`, channels 5-6 only) |
+| an 8-voice SNES sound chip | **six channels**, so the grid has six rows; the voices bar has six segments and a noise drum on channels 1-4 is refused `seq-voice`, not dropped |
+| Eraser, sharp/flat/natural, octave marks | **Eraser**, a note stepper (0..83, C1..B7) and a length stepper. Sharps/flats are the key's spelling; the octave marks are #95's staff |
+| zoom, a staff, drum hits under the staff | **zoom** (small/normal/large, the cell width). No staff (that is #95) |
+| a "voices" bar per step | the same: a bar per step, filled by how many of the six channels sound, with the count drawn in it, under the grid |
+
+**One model, one song.** `renderer/pce-seq.js` holds the song, `compile()`s it to the DMF-shaped object
+`renderer/pce-song.js`'s player takes, and `render()`s it through `renderer/pce-psg.js`. The panel only
+draws and binds. `▶ Play song` renders one pass and plays it through the page's AudioContext; the PCM is
+the same model `check-psg.js` proves against Mednafen. Noise drums are the one thing the player does not
+do (no effect columns), so the model adds only the two R7 writes HuTrack's `.platFX.Noise` makes, in the
+frame the player applies the drum's own note; the drum's volume is still the player's R4 envelope
+(`docs/SEQ.md` §4).
+
+**The file.** The song saves with the toy as `song.json`. It is created on the panel's first edit, so an
+untouched toy stays #77's five-file toy, and the page announces `song.json` to the asset watchers when a
+toy or example is opened, so the panel never shows a previous toy's song.
+
+**Evidence.** `tests/check-sequencer.js` (the model) and `tests/check-studio.js`'s `checkSequencerPanel`
+(the panel): the model's every refusal code; `compile()` against a hand-written DMF song field by field;
+the row schedule against the frames `pce-song.js` applies notes on, straight and swung; the PCM sample for
+sample against `pce-psg.js`'s render of `pce-song.js`'s trace of the hand-written song; the drum's R7
+writes and the PCM difference they make; note lengths as cut rows; six voices with a seventh refused; and
+a pattern written through the panel that saves `song.json` and leaves the toy's other files byte for byte.
+The screenshot `$TMPDIR/pcestudio-design-94/seq-ours.png` is `?demo=palette&frame=30&panel=sequencer`
+(side by side with ppu.toys' SEQUENCER in `seq-side-by-side.png` when that page is reachable; this
+machine's capture is ours alone).
+
 ## 4. The Docs panel (the generated #61 reference)
 
 The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel under the top bar:
@@ -1159,6 +1202,17 @@ the four `BG1`–`BG4` and `OBJ` checkboxes behind `Layers`, the same idea on th
 our 1600×1000 capture on its own. The underlying pixels are the renderer's (the raster bands and the CRT
 scanlines are visible); no pixel comparison with ppu.toys is claimed.
 
+**#94's SEQUENCER capture.** `$TMPDIR/pcestudio-design-94/seq-ours.png` is
+`renderer/studio.html?demo=palette&frame=30&panel=sequencer` at 1600×1000, taken by headless Chrome's
+command line only, no synthetic input. It shows the SEQUENCER tab in the dock, the song row (Pattern A,
+order A, tempo 150, 16 steps, swing 0, key C), the six-row grid with the demo riff's notes named (C4 E4
+G4 C5 …), the instrument brush on `lead · 36 · C4`, length 1, the voices bar under the grid and the
+footer ("1 bar · 16 steps · 20 notes in this pattern · 5 of 6 voices at once · 6 ticks · 1.70 s"). A
+side-by-side with ppu.toys' SEQUENCER was not made: their studio is reachable by URL, but opening its
+SEQUENCER tab takes a click, and this seat sends no synthetic mouse or keyboard input; the capture above
+is ours alone, and no pixel comparison with theirs is claimed. The panel's shape is compared with the
+card's written reading of theirs in §3.10.
+
 **#84's SCREEN pair.** `$TMPDIR/pcestudio-design-84/side-by-side-screen-84.png` (3200×1000: theirs left,
 ours right) is `https://ppu.toys/studio` at 1600×1000 beside our studio at the same size with the SCREEN
 panel drawn on. Theirs is the default toy: `BACKGROUNDS` with BG1–BG4, Mode `1`, `4bpp`, Visible, the six
@@ -1262,8 +1316,16 @@ comparison with their page is claimed.
   the side-by-sides are the evidence, and no pixel-diff against ppu.toys' page is claimed.
 * **`Check` is not the validator.** `Check` is determinism + Lua/IL agreement; cycles, sprites per line
   and source budgets are `#32`/`#61`, run by the **CONSOLE** tab (§3.6) rather than by the Check button.
-* **No toy export, compiler backend, audio, sequencer, asset import or agent link.** Those are #31, #71
-  and #24. `SND`, `ASSETS`, `AUDIO`, the AGENT drawer and the `NEEDS #31` export dialog say so in the page.
+* **No toy export, compiler backend, sound in toys, asset import or agent link.** Those are #31, #71
+  and #24. `SND`, `ASSETS`, the AGENT drawer and the `NEEDS #31` export dialog say so in the page. The
+  SEQUENCER (§3.10) is a song editor, not a toy's sound: what it plays is `pce-song.js`'s engine, and a
+  toy cannot play a sequencer song until #71 gives toys a music call.
+* **#94's SEQUENCER is a grid, and its tests are the builder's.** Not proven: the staff view (#95), the
+  DMF export (#96), Undo/Redo, a resolution picker and note values shorter than a step; the panel's DOM
+  and CSS are judged by the screenshot, not a pixel comparison; the AudioContext path (`▶ Play song`) is
+  not exercised headlessly — the render it feeds is; no Mednafen recording of a sequencer song exists (the
+  drums' R7 writes are HuTrack's source, not a recording), and rule 2 is owed: a cold break by another
+  seat.
 * **The asset files are carried and edited, not consumed.** `tiles/palettes/sprites/waves.json` are in the
   toy and the envelope, with the shapes `pce-editor.js`/`pce-wave.js` use, but no importer reads them into a
   running toy yet (#24/#71). The ASSETS tab says this.

@@ -584,8 +584,8 @@ function checkBoot(page) {
   const studio = page.sandbox.PCEStudio.studio;
   check(studio.examples.length === 3,
         "the page carries three examples (got " + studio.examples.length + ")");
-  check(studio.panels.length === 9,
-        "the panel dock has nine PCE panels (got " + studio.panels.length + ")");
+  check(studio.panels.length === 10,
+        "the panel dock has ten PCE panels (got " + studio.panels.length + ")");
   check(page.loaded.some((s) => /pce-toys\.js$/.test(s)),
         "the page loads renderer/pce-toys.js");
   check(page.loaded.some((s) => /pce-il\.js$/.test(s)),
@@ -3703,6 +3703,176 @@ function checkSpritesPanel(page) {
   studio.panels.select("screen");
 }
 
+/* ---- #94: the SEQUENCER panel ----------------------------------------- *
+ * The card's evidence: a pattern written headlessly through the panel's own
+ * API (the same calls its canvas click handler makes), the song it compiles
+ * checked row by row, and the sound it plays being pce-song.js's and
+ * pce-psg.js's for those notes.  tests/check-sequencer.js is the model's
+ * own, longer evidence; this is the panel on the page. */
+function checkSequencerPanel(page) {
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const seq = S.seq;
+  const def = studio.panels.get("sequencer");
+  check(!!seq && typeof seq.demoSong === "function",
+        "#94: renderer/pce-seq.js loaded");
+  check(page.loaded.some((s) => /pce-seq\.js$/.test(s)),
+        "#94: the page loads renderer/pce-seq.js");
+  check(!!def && typeof def.api === "object" && !!def.api,
+        "#94: the SEQUENCER panel registered with its API");
+  if (!seq || !def || !def.api) {
+    check(false, "#94: the page has no SEQUENCER panel");
+    return;
+  }
+  const api = def.api;
+
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.panels.select("sequencer");
+
+  const st = api.state();
+  eq("#94: a toy with no song.json opens on the demo song",
+     seq.orderText(st), "A");
+  eq("#94: the grid is the PSG's six channels",
+     st.patterns[0].channels.length, 6);
+  eq("#94: six voices is the chip's limit, and the bar shows it",
+     [api.voiceLimit(), api.voiceCapacity()].join(","), "6,6");
+  eq("#94: nothing is saved until the panel writes",
+     studio.fileNames().indexOf("song.json"), -1);
+  eq("#94: the palette is four waves and two noise drums",
+     api.instruments().map((i) => i.kind).join(","),
+     "wave,wave,wave,wave,noise,noise");
+  eq("#94: a wave instrument is 32 steps of 5 bits", [
+     st.instruments[0].wave.length,
+     Math.max(...st.instruments[0].wave) <= 31].join(","), "32,true");
+  eq("#94: an instrument carries its driver envelope",
+     st.instruments[1].env.data.join(","), "31,28,24");
+
+  /* ---- the grid and the voices bar are drawn --------------------------- */
+  const grid = page.dom.get("seq-grid");
+  const voices = page.dom.get("seq-voices");
+  grid.__ctx.__calls.length = 0;
+  voices.__ctx.__calls.length = 0;
+  studio.panels.refresh(true);
+  const cells = grid.__ctx.__calls.filter((c) => c.name === "fillRect").length;
+  check(cells >= 6 * 16 + 16,
+        "#94: the grid draws six rows of sixteen cells and the notes (" +
+        cells + " rects)");
+  const bars = voices.__ctx.__calls.filter((c) => c.name === "fillRect").length;
+  check(bars >= 16,
+        "#94: the voices bar has one bar per step (" + bars + " rects)");
+  const notesDrawn = grid.__ctx.__calls.filter((c) => c.name === "fillText")
+    .map((c) => String(c.args[0]));
+  check(notesDrawn.indexOf("C4") >= 0,
+        "#94: the grid labels notes by name (" + notesDrawn.join(" ") + ")");
+
+  /* ---- a pattern written through the panel ----------------------------- */
+  api.clearPattern();
+  /* the button pass above clicked Eraser; this check paints notes */
+  api.eraser(false);
+  api.setTempo(150);
+  api.swing(0);
+  api.steps(8);
+  api.selectPattern(0);
+  api.setInstrument(0);
+  api.setNote("C4");
+  api.setLength(2);
+  api.paint(0, 0);                    /* C4 on channel 1, step 1, 2 steps */
+  api.paint(0, 4);                    /* … again on step 5 */
+  api.setInstrument(4);               /* the kick drum */
+  api.setLength(1);
+  api.paint(4, 2);                    /* noise on channel 5, step 3 */
+
+  const song = api.song();
+  eq("#94: the compiled song is the DMF shape pce-song takes",
+     [song.rowsPerPattern, song.orderCount, song.timeBase, song.frameMode,
+      song.tick1, song.tick2].join(","), "8,1,1,1,6,6");
+  const ch0 = song.patterns[0][0];
+  eq("#94: step 1 is C4 on the lead wave",
+     [ch0[0].note.semitone, ch0[0].note.octave, ch0[0].instrument].join(","),
+     "0,3,0");
+  check(ch0[2].note && ch0[2].note.cut === true && ch0[2].instrument === null,
+        "#94: a two-step note is cut two steps later");
+  check(ch0[6].note && ch0[6].note.cut === true,
+        "#94: … and the second one at step 7");
+  check(!ch0[1].note && !ch0[3].note,
+        "#94: the steps between the notes are empty rows");
+  const ch4 = song.patterns[4][0];   /* channel 5, order slot 0 */
+  eq("#94: the drum is on channel 5 with the noise instrument",
+     [ch4[2].note.semitone, ch4[2].instrument].join(","), "0,4");
+  check(ch4[3].note && ch4[3].note.cut === true,
+        "#94: the one-step drum is cut at the next step");
+
+  /* ---- the noise writes pce-song.js does not make ---------------------- */
+  const got = api.events();
+  const r7 = got.events.filter((e) => e.kind && /^noise/.test(e.kind) &&
+                                      e.reg === 7);
+  eq("#94: the drum switches R7 on and off (two writes each)",
+     r7.map((e) => e.value).join(","), "156,0");
+  eq("#94: … on the drum's own channel",
+     got.events.filter((e) => e.kind && /^noise/.test(e.kind) &&
+                              e.reg === 0 && e.value === 4).length >= 2, true);
+  const rowFrames = api.timing();
+  eq("#94: the drum's R7 on is the frame of row 3",
+     r7[0].f, rowFrames.rowFrame(2));
+  eq("#94: … and its off is row 4", r7[1].f, rowFrames.rowFrame(3));
+
+  /* ---- the sound is pce-song.js's and pce-psg.js's --------------------- */
+  const played = api.render();
+  check(played.pcm.length > 0 && played.count > 0,
+        "#94: the song renders to PCM (" + played.pcm.length + " samples)");
+  let pcmPeak = 0;
+  for (let i = 0; i < played.pcm.length; i++)
+    pcmPeak = Math.max(pcmPeak, Math.abs(played.pcm[i]));
+  check(pcmPeak > 0, "#94: … and the PCM is not silence (peak " +
+        pcmPeak + ")");
+  const again = psgEventCount(played.events);
+  eq("#94: the rendered stream is the one the model hands pce-psg",
+     played.events.length, again);
+
+  /* ---- the six-voice limit --------------------------------------------- */
+  api.setInstrument(0);
+  api.clearPattern();
+  for (let ch = 0; ch < 6; ch++) api.paint(ch, 0);
+  eq("#94: six channels sounding at one step is the maximum",
+     [...api.voices()].sort((a, b) => b - a)[0], 6);
+  eq("#94: the voices bar shows six", api.voicesAt(0), 6);
+  api.setInstrument(4);               /* a noise drum */
+  let refused = null;
+  try { api.paint(0, 2); } catch (e) { refused = e.code; }
+  eq("#94: a seventh voice is refused — a noise drum on a wave-only channel",
+     refused, "seq-voice");
+
+  /* ---- the song saves with the toy as song.json ------------------------ */
+  const names = studio.fileNames();
+  check(names.indexOf("song.json") >= 0,
+        "#94: an edit saves the song as song.json (" + names.join(", ") + ")");
+  const saved = studio.files().find((f) => f.name === "song.json").source;
+  const back = seq.fromJSON(saved);
+  eq("#94: song.json round-trips through the model byte for byte",
+     seq.toJSON(back), saved);
+  eq("#94: … and carries the pattern the panel wrote",
+     back.patterns[0].channels[0][0].note, 36);
+  eq("#94: the toy's other files are untouched",
+     studio.fileNames().slice(0, 5).join(","),
+     "main.lua,tiles.json,palettes.json,sprites.json,waves.json");
+
+  /* put the toy back as the five-file toy the other checks expect */
+  const live = studio.toy.files();
+  const at = live.findIndex((f) => f.name === "song.json");
+  if (at >= 0) live.splice(at, 1);
+  studio.toy.persist();
+  studio.loadExample("palette", true);
+  studio.pause();
+  studio.panels.select("screen");
+}
+
+/* The rendered stream's write count, read back from the player's own trace so
+ * the comparison is between two objects, not two calls to one function. */
+function psgEventCount(events) {
+  return events.filter((e) => e.reg !== undefined).length;
+}
+
 /* ---- #102: every panel is its own module ------------------------------ *
  * The page only loads the ten modules; each one registers itself (its tab,
  * its Panels-menu entry, its Guide chapter and its draw) through the studio
@@ -3710,16 +3880,17 @@ function checkSpritesPanel(page) {
  * longer holds the panels' drawing code — and that the registry builds the
  * dock and the menu from what registered. */
 const PANEL_MODULES = ["screen", "vram", "palettes", "sprites", "audio",
-                       "layers", "scanlines", "registers", "console",
-                       "markers", "agent", "assets"];
+                       "sequencer", "layers", "scanlines", "registers",
+                       "console", "markers", "agent", "assets"];
 const CHIP_PANELS = ["screen", "vram", "palettes", "sprites", "audio",
-                     "layers", "scanlines", "registers", "console"];
+                     "sequencer", "layers", "scanlines", "registers",
+                     "console"];
 
 function checkPanelModules(page) {
   const S = page.sandbox.PCEStudio;
   const studio = S.studio;
 
-  eq("#102: the twelve panel modules registered, chip panels first",
+  eq("#102: the thirteen panel modules registered, chip panels first",
      studio.panels.modules().join(","), PANEL_MODULES.join(","));
   for (const id of PANEL_MODULES) {
     check(page.loaded.indexOf("studio-panel-" + id + ".js") >= 0,
@@ -3737,7 +3908,7 @@ function checkPanelModules(page) {
         typeof studio.panels.refresh === "function" &&
         typeof studio.panels.dirty === "function",
         "#102: studio.panels is the registry and the chip list");
-  eq("#102: the registry holds all ten panels",
+  eq("#102: the registry holds all thirteen panels",
      studio.panels.list().length, PANEL_MODULES.length);
   check(studio.panels.get("vram").group === "chip" &&
         studio.panels.get("markers").group === "workspace",
@@ -3789,7 +3960,8 @@ function checkPanelModules(page) {
   }
   for (const fn of ["studio-panel-screen.js", "studio-panel-vram.js",
                     "studio-panel-palettes.js", "studio-panel-sprites.js",
-                    "studio-panel-audio.js", "studio-panel-scanlines.js",
+                    "studio-panel-audio.js", "studio-panel-sequencer.js",
+                    "studio-panel-scanlines.js",
                     "studio-panel-registers.js", "studio-panel-console.js",
                     "studio-panel-markers.js", "studio-panel-agent.js"]) {
     check(html.indexOf('src="' + fn + '"') >= 0,
@@ -5289,6 +5461,7 @@ async function main() {
   checkConsolePanel(page);
   checkLayersPanel(page);
   checkAudioPanel(page);
+  checkSequencerPanel(page);
   checkStudioApi(page);
 
   let browser = "not-requested";

@@ -103,7 +103,7 @@ The two milestones Dennis asked for:
 |---|---|---|---|
 | Furnace songs (DMF) play in the browser and on the console | PROVEN | `check-dmf.js`, `check-hutrack.js`, `music-mutation.js` | #35, #72 |
 | Wave editor (32-step waves, 6 channels) | PROVEN | `check-wave.js` | #62 |
-| SEQUENCER in the studio: step grid | TODO | | #94 |
+| SEQUENCER in the studio: step grid | PROVEN | `check-sequencer.js` (the model) and `check-studio.js` `checkSequencerPanel` (the panel): the compiled song is a hand-written DMF song field for field and its PCM is `pce-psg.js`'s render of `pce-song.js`'s trace of that song sample for sample; the row schedule is the frames the player applies notes on; noise drums are the two R7 writes HuTrack makes, the drum's volume the player's own R4 envelope; six voices with a seventh refused; saved as song.json. Rule 2 owed; no staff (#95), no DMF export (#96) | #94 |
 | SEQUENCER: staff view | TODO | | #95 |
 | SEQUENCER: songs saved as DMF for HuTrack and Furnace | TODO | | #96 |
 | HuVGM as a second music route | WAITING | turboxray's release, or access to his private repo | #65 |
