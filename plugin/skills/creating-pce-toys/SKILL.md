@@ -150,8 +150,10 @@ only see an empty picture:
 `toy_write` compiles through the same IL the validator and the exporter use.
 These come back by code with `file:line` — they are not style opinions:
 
-- `il-table-read` — a table *the toy built* cannot be read back yet. Write
-  if-chains instead of a lookup table. (Passing a table literal straight to
+- Tables — the IL reads a table *the toy built* back (`t[i]`, `t.x`), but the
+  console back end does not lower tables, so a toy with a table read runs in
+  the browser and fails export (`cgen-op`). For a cartridge, write if-chains
+  or a `vram[]` array instead. (Passing a table literal straight to
   `sprite()` is fine.)
 - `il-op` — a tail call (`return f(x)`) is not lowered. Assign to a local and
   return that.
