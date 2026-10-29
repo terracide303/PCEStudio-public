@@ -9,7 +9,7 @@
 -- THE DEPTH (card #150; Dennis, playing the first build: "oakwood is 3
 -- layers but it's very weird, the trees are cut").  The PCE has ONE
 -- background, and the first build cut it into three horizontal bands, so a
--- tree crossing a band edge was sliced.  Now there are three speeds and no
+-- tree crossing a band edge was sliced.  Now there are two speeds and no
 -- cut tree:
 --   * the far and mid trees and the forest floor are ONE composite picture
 --     that loops at the BAT's 256 px, scrolling with the ground (2 px a frame,
@@ -18,12 +18,9 @@
 --     SKY_LINE, another at MAIN_LINE) on its OWN counter, one pixel a frame.
 --     MAIN_LINE is a row where the composite is a flat colour, so no tree
 --     crosses it;
---   * the front trunks (layer 3 of the pack) are SPRITES, 64x192 as three rows
---     of two 32x64 cells, four pixels a frame — faster than the ground — and
---     recycled when they leave the screen.  Three trunks a TRK_PERIOD apart
---     keep two on the screen at most: two trunks are 8 sprite strips on a line,
---     the player 2, a rock 2, the sign 2 — inside the VDC's 16.  Each band on its
---     own counter (as CITY's, #148): a divided shared counter would snap.
+-- Each band is on its own counter (as CITY's, #148: a divided shared counter
+-- would snap).  Front-trunk sprites were tried and removed (Dennis: "remove
+-- the weird poles"): the background alone is the depth.
 --
 -- THE ART IS NOT IN THIS FILE'S REPOSITORY.  The pack is Oak Woods v1.0 by
 -- Brullov (brullov.art), used under the licence Dennis purchased; the raw pack
@@ -43,8 +40,6 @@
 -- with the Oak Woods tiles, palettes and sprite patterns.
 C_SKY = 3
 C_GROUND = 5
-TRK = {3, 3, 3, 3, 3, 3}
-TRK_PAL = {0, 0, 0, 0, 0, 0}
 PLY = {1, 1, 1, 1, 1, 1, 1, 1}
 PLY_PAL = {0, 0, 0, 0, 0, 0, 0, 0}
 ROCK = {2, 2}
@@ -59,7 +54,6 @@ HUD_TIME = {33, 34, 35}
 HUD_SCORE = {52, 53, 54}
 SKY_LINE = 24
 MAIN_LINE = 63
-TRUNK_TOP = 44
 LEVEL_LEN = 1440
 GOAL_X = 1400
 ROCK_X = {240, 520, 900, 1240}
@@ -103,17 +97,8 @@ end
 -- element here is an int (docs/IL.md §5, #118).
 --
 -- Sprite slots: 0 the player (sprite #0 for the VDC's own collision flag),
--- 1 the sign, 2..5 the rocks, 6..23 the three front trunks (six cells each).
--- A lower slot draws in front, so the player and the rocks pass in front of
--- the trunks.
+-- 1 the sign, 2..5 the rocks.
 
--- The front trunks.  A trunk is TRK_PERIOD / 3 apart from the next; its left
--- edge on the screen is (TRK_X0 - trk) mod TRK_PERIOD - 80, so it enters on
--- the right at 400 - 256 = 144 px beyond the edge and leaves 80 px past the
--- left.  A cell is drawn while it is inside the SAT's 32..288 range; the
--- rest are parked once, when they leave, not every frame.
-TRK_PERIOD = 480
-TRK_X0 = {0, 160, 320}
 
 -- One frame of the runner: the run cycle is six frames, the jump and the fall
 -- one each; the idle pair is unused because the world never stops.
@@ -134,7 +119,7 @@ function hurt()
   if lives <= 0 then state = 2 end
 end
 
--- The rocks roll with the near trunks, so their screen x is their world x
+-- The rocks roll with the ground, so their screen x is their world x
 -- minus the scroll.  A rock already passed the player scores one point.
 function move_rocks()
   for i = 1, 4 do
@@ -184,10 +169,6 @@ function reset()
   inv = 60
   passed = {0, 0, 0, 0}
   sky = 0
-  trk = 0
-  -- every trunk column counts as drawn, so draw_trunks() parks the ones that
-  -- are off the screen in the new run and a restart leaves no stale trunk
-  tvis = {1, 1, 1, 1, 1, 1}
   music(0)
 end
 
@@ -200,31 +181,6 @@ function bands()
   raster(0, {bxr = 0})
   raster(SKY_LINE, {bxr = sky})
   raster(MAIN_LINE, {bxr = scroll % 256})
-end
-
--- The three front trunks: each is two columns (left, right) of three cells.
--- A column is drawn while it is on the screen; once off it, its three
--- sprites are parked a single time (tvis tells which) so the frame does not
--- pay for the ones that are not there.
-function draw_trunks()
-  for i = 1, 3 do
-    local x = (TRK_X0[i] - trk) % TRK_PERIOD - 80
-    for c = 0, 1 do
-      local k = (i - 1) * 2 + c + 1
-      local cx = x + 32 * c
-      if cx > -32 and cx < 256 then
-        tvis[k] = 1
-        for r = 0, 2 do
-          sprite(6 + (k - 1) * 3 + r, {x = cx + 32, y = TRUNK_TOP + 64 * r + 64,
-                 pattern = TRK[1 + r * 2 + c], palette = TRK_PAL[1 + r * 2 + c],
-                 cgx = 1, cgy = 3, spbg = 1})
-        end
-      elseif tvis[k] == 1 then
-        tvis[k] = 0
-        for r = 0, 2 do sprite(6 + (k - 1) * 3 + r, {y = 0}) end
-      end
-    end
-  end
 end
 
 function init()
@@ -246,7 +202,6 @@ function frame(t, f)
   if scroll < LEVEL_LEN then
     scroll = scroll + 2
     sky = (sky + 1) % 256
-    trk = (trk + 4) % TRK_PERIOD
   end
   bands()
   if timeleft > 0 then timeleft = timeleft - 1 end
@@ -308,6 +263,5 @@ function frame(t, f)
                palette = PLY_PAL[k], cgx = 1, cgy = 3, spbg = 1})
   end
 
-  draw_trunks()
   draw_hud()
 end
