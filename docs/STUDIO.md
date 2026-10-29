@@ -99,7 +99,7 @@ pixel, not eyeballed at another scale.
 |---|---|---|
 | left | purple chip mark, `ppu.toys` | our tile mark, `PCE·studio` in Pixelify Sans (links to `renderer/index.html`) |
 | title | `untitled toy` + `saved in this browser` | the active file (`main.lua`) + `saved in this browser` / `edited — Run to apply` / `restored from this browser` |
-| right | Export to ROM (orange), Raw output, Panels ▾, gear, Docs, Save file, Open…, Sign in to publish | Run, Check, Export… (orange), Panels ▾, gear, Docs, Save file, Open…, not signed in |
+| right | Export to ROM (orange), Raw output, Panels ▾, gear, Docs, Save file, Open…, Sign in to publish | Run, Paste & Run, Check, Export… (orange), Panels ▾, gear, Docs, Save file, Open…, not signed in |
 
 Measured: both bars are 0…49 with a 1 px border at y=49. The orange primary action is the export in both;
 ours opens the honest `needs #31` dialog (§9). `Docs` opens the in-studio Docs panel (§4); `not signed in` is
@@ -167,8 +167,8 @@ Scanlines, Registers, SNES. Ours keeps the strip's place and shape and gives eac
 | ppu.toys panel | `studio.html` tab | what it shows | source |
 |---|---|---|---|
 | Backgrounds | **SCREEN** | **a visual editor (#84)**: the BAT drawn as a 32×32 cell map with ppu.toys' tool row (select, pencil, rect, fill, erase, move), the `#` grid, zoom Fit/1×/2×/4×, a visible-screen outline and the footer; beside it the Characters column (tile, char base, the selected tile's 16-colour strip, the tile sheet, an 8×8 tile editor) and the Map column (map base, map size/MWR, tile size, BXR/BYR with −/+). It edits `tiles.json` and `palettes.json`. Below it the live summary and the follow-a-pixel readout still come from the frame | `renderer/pce-screen.js`, `pce-panels.js` `lineValues`, `followPixel` |
-| VRAM | **VRAM** | all 32768 words as a map: BAT, tiles, sprite patterns, SAT at `$7F00`, free space; segment table | `pce-panels.js` `vramMap` |
-| CGRAM | **PALETTES** | the VCE's 512 colours as 32 palettes of 16; entry 0 dashed (the shared backdrop); each swatch's tooltip is its CRAM address and 9-bit word | `pce-panels.js` `vcePalettes` |
+| VRAM | **VRAM** | **a drawn map (#85)**: all 32768 words as eight pages of 256 characters (16 words, 8×8, 4bpp), each character drawn in a chosen preview palette, the BAT/tiles/sprite patterns/SAT/free tinted and labelled on the sheet, a legend, a jump per region, and a hover/click readout of the word under the pointer (BAT cell, tile row, SAT sprite Y/X/pattern/palette, free) | `pce-vram-map.js`, `pce-panels.js` `vramMap` |
+| CGRAM | **PALETTES** | **a visual editor (#85)**: the VCE's 32 palettes of 16 as swatch buttons (entry 0 dashed — the shared backdrop), and a **512-colour picker** that offers exactly the 9-bit colours the VCE can show (8 G × 8 R × 8 B); click a swatch, then a colour, and that one entry is written to `palettes.json`; the readout gives the CRAM address, the 9-bit word and its channels | `pce-palettes.js`, `pce-editor.js` |
 | Sprites | **SPRITES** | **a visual editor (#86)**: the 64 SAT slots drawn as a grid, the screen with the selected sprite outlined and numbered, a picker (slot with ‹ ›, X/Y with −/+, pattern, palette, SPBG priority, H/V, size read from the pattern), *release position*, *off-screen* and *clear slot*, the sprite palette strip, and a pattern sheet whose selected pattern is drawn with the same six tools as SCREEN at pixel granularity. The per-line header is #50's model (`n/16 strips · n/256 px`, the overflow shown). It edits `sprites.json` and the sprite palettes in `palettes.json` | `renderer/pce-sat.js`, `renderer/pce-editor.js` `renderPreview` |
 | Audio | **AUDIO** | the honest state: `pce-psg.js` exists and is checked; toys have no sound surface yet (#71) | — |
 | Sequencer | *(none yet)* | the tracker lives in `renderer/pce-hutrack.js`; a toy-facing sequencer is a later card | — |
@@ -225,7 +225,7 @@ so a value the VDC cannot show cannot be stored by either front end (see [`EDITO
 host's 256×224 frame uses and the size `pce-editor.js`'s picture model holds; the VDC's other MWR sizes
 (64×32 … 128×64) are part B. The map-size picker lists all six — so the hardware's sizes are visible — and
 picking one refuses with `map-size` and snaps back to `$00`. The BXR/BYR curve buttons are live since #79:
-clicking one selects the REGISTERS panel and opens that offset's keyframe curve there (§3.4), where the
+clicking one selects the REGISTERS panel and opens that offset's keyframe curve there (§3.5), where the
 keys, the undo and `Write to toy` live — the panel that shows the offsets is the one that keyframes them.
 The **screen-width picker** is
 real: 256, 336 or 512 dots sets the picture's VCE dot clock through `pce-editor.js`'s `setVideoMode`, and
@@ -270,6 +270,7 @@ implementation):
 | `toy.current()` / `.mode()` / `.source()` | the toy on the page: its example id/name, `"lua"` or `"il"`, the Lua that runs |
 | `toy.files()` / `.file(name)` / `.activeFile()` / `.mainSource()` | the toy's asset files (**the live array**, as the ASSET tab sees it) and the editor's current file |
 | `toy.writeAssets(pic)` | writes a `pce-screen.js` picture into `tiles.json`/`palettes.json`, follows in the open editor, autosaves; returns the changed names, throws the model's refusal |
+| `toy.writeSpritesAssets(pic)` / `toy.writePalettesAssets(pic)` | the same write for a panel that owns a narrower file set: `sprites.json` + the sprite palettes (#86), or `palettes.json` alone (#85) — through that model's `syncFiles` |
 | `toy.writeSpritesAssets(pic)` | the same write for `pce-sat.js`'s picture (#86): `sprites.json` and the sprite palettes — deliberately **not** `tiles.json` |
 | `toy.persist()` / `.saved(text)` / `.refreshAssets()` | the page's own autosave, status line and ASSETS list |
 | `toy.onAssetEdit(fn)` | subscribe to "an asset file changed" (a hand edit, a new example, an opened toy) — SCREEN invalidates its picture |
@@ -328,7 +329,98 @@ SAT-order ones: `asset-json`, `asset-shape`, `sprite-size`, `65th-sprite` for a 
 `sprite-gap` (the SAT is filled in order: placing slot 5 with 0-4 empty would need the hardware to skip
 them), `no-sprite`, `no-pattern`, `no-position`.
 
-### 3.4 REGISTERS as a visual editor, and the pokes (#79)
+### 3.4 PALETTES and VRAM as visual editors (#85, part B)
+
+Both panels' working examples are ppu.toys' own panels, read — not guessed — from its served bundle
+(`$TMPDIR/pcestudio-design-75/app.js`, the `cgram-panel` and `vram-panel` components): CGRAM is a grid of
+address rows and sixteen swatch **buttons**, and a click opens an editor for that one entry with its
+address (`cgram[0xNN]`) and its value on screen; VRAM is a **drawn image of characters**, paged with a
+`‹ page ›` picker, a preview palette and a "Jump to …" row, and the pointer reports the address and
+character under it. Ours are those shapes for the HuC6260/HuC6270: 512 nine-bit entries instead of 256
+fifteen-bit ones, and 2048 four-bit characters instead of SNES VRAM's mixed formats.
+
+| ppu.toys (read from the bundle, 2026-10-29) | `studio.html`'s panel |
+|---|---|
+| CGRAM: 16 rows × 16 swatches, address `$00`…`$F0` | **PALETTES**: 32 rows × 16 swatches (0-15 background, S0-S15 sprite), address in the tooltip and the readout, entry 0 dashed (the one shared backdrop) |
+| a swatch click opens a popover with a native colour input, `cgram[0xNN]`, the value and a copy button | a swatch click selects that entry; the picker beside the table is **all 512 colours the VCE can show** (one 8×8 plane per blue level, red across, green down) — not an RGB wheel that names colours the chip would round; the readout is `CRAM $nnn · word $nnn · G/R/B · rgb(…)` |
+| the popover's "Edit scope: Full frame" (HDMA-aware) | the PC Engine's equivalent is a palette write per line (`raster()` writes `pal()`), which is SCANLINES' (#92); this panel edits the toy's asset |
+| the swatch tooltip names the entry | the swatch's tooltip and `aria-label` carry the palette, the CRAM address, the 9-bit word and its channels; a `poked` ring marks an overridden entry (the SNES one has this; ours has no poke yet) |
+| VRAM: a page of 256 characters drawn as an image, `‹ page ›`, format picker, preview palette, "Jump to BG characters", hover `$addr · char XX` | **VRAM**: eight pages of 256 characters (16×16 cells of 8×8), `‹ page ›` + page select, a preview palette of the 16 background palettes, a jump per region (BAT, tiles, sprite patterns, SAT, free), hover `BAT cell n …` / `char $nnn · row r · plane p` / `SAT sprite n · word w`, and a click readout with the word's full detail |
+| clicking a character opens its pixel editor | not here: the tile and pattern editors are SCREEN's (#84) and SPRITES' (#86); this panel inspects |
+| — | the PCE's BAT (words 0-1023) and SAT (`$7F00`, 64 words) are **not** characters; their cells are tinted and labelled, so the sheet is never read as tile data that is not there |
+
+**What they edit, and what they read.** PALETTES edits the toy's assets: `palettes.json` only, through
+`pce-palettes.js`'s `syncFiles` → `pce-screen.js`'s `palettesText` (the one writer of that file), so it
+does not rewrite `tiles.json` — that is SCREEN's, the same rule `pce-sat.js` follows for `sprites.json`.
+Every edit is `pce-editor.js`'s own call — `setPaletteColour`, `setSpritePaletteColour`, and
+`setBackdrop` for entry 0, because the backdrop is one colour shared by all 16 background palettes — so
+its refusals stand (`backdrop-entry`, `17th-colour`, …), and `pce-palettes.js` adds only the table's own
+(`palette-range` 0-31, `entry-range` 0-15, `colour-range` 0-511, `channel-range` 0-7). VRAM reads the
+**running frame's** VRAM (the same words `pce-bg.js` draws) and the regions `pce-panels.js` `vramMap`
+derives from it; it edits nothing.
+
+**The panel that is not the active tab.** Three panels now hold a picture over `palettes.json` — SCREEN,
+SPRITES and PALETTES — so PALETTES' write-back announces the changed file through the studio API's
+`onAssetEdit` (the page's `writePalettesAssets` calls `notifyAssetEdit`), which is what makes SCREEN and
+SPRITES drop their cached picture and re-read the file on their next draw instead of writing a stale
+table back. The PALETTES panel's own selection (which entry the picker edits) is separate from its
+picture and survives the rebuild.
+
+**Evidence.** `tests/check-studio.js` adds `checkPalettesPanel` and `checkVramPanel`: the table is 32
+rows of 16 buttons, the picker holds all 512 distinct 9-bit words, a swatch click then a picker click
+writes exactly one entry into the `palettes.json` text (background `[0][5] = $1FF`, then `$038`, whose
+`rgb(252,0,0)` the swatch shows), entry 0 writes the shared `backdrop` into every background row, a
+sprite palette writes `sprites[2][3]`, SCREEN's picture follows the same file, and the refusals come
+back by code (`palette-range`, `entry-range`, `colour-range`, `picker-range`, `channel-range`). VRAM's
+decode is proved against a hand-built VRAM (a diagonal tile, all sixteen colour numbers, a BAT word
+`$5123`, a SAT sprite's Y/X/pattern/palette), then the live panel: page 0 is characters 0-255, the sheet
+is 128×128, the drawn pixel is palette 0 entry 15's colour from the toy's own CRAM, the preview palette
+changes it, page 7 holds the SAT and its jump goes there, a click on the canvas selects `$401`, and the
+BAT is tinted and labelled. `--browser` adds real DOM clicks and a real `getImageData` of the sheet.
+The pages are `$TMPDIR/pce85/shots/ours-palettes-85.png` and `ours-vram-85.png` (1600×1000, headless
+Chrome, no synthetic input); the PALETTES one shows the example's `palettes.json`, which is all black —
+the artwork the toy writes with `pal()` is not in the file until #24/#71, and the panel says so rather
+than showing the frame's colours as if they were the asset.
+
+### 3.5 Paste & Run (#107)
+
+The loop this exists for: a chat AI answers with one fenced Lua block, the person copies the answer and
+presses **Paste & Run** in the top bar (next to `Run`). There is no import step in between.
+
+| door | what it does |
+|---|---|
+| the button | `navigator.clipboard.readText()`, the answer stripped to its code, `main.lua` replaced, the toy runs |
+| the fallback box | shown when the page has no clipboard, the read is refused, or the clipboard is empty: the note says why, the box takes the paste, its own **Paste & Run** runs it |
+| a dropped file | a `.lua` becomes the new `main.lua` (the toy's assets are kept); a `.pce.json` toy loads its whole file set, the same as `Open… → From file…`; either way it runs at once |
+
+**One rule, one place.** `stripCodeFence()` takes the first fenced block anywhere in the text — prose above
+and below is dropped — accepts ```lua / ```luau or a bare fence, normalises CRLF, and **keeps a leading blank
+line**: line numbers must stay the toy's, because the error line quotes them. A fence that names another
+language is `paste-language`, an opening fence with no close is `paste-fence`, and nothing to run is
+`paste-empty`.
+
+**The previous source is one undo away.** In a real browser the replacement is a single CodeMirror
+`replaceRange` with its own change origin, so `Ctrl/Cmd+Z` restores the old `main.lua` in one step.
+
+**When it fails, the line says where.** `showError()` reports `code: main.lua line N: …` on the output
+column's error line, cleared by the next run that starts, and CONSOLE repeats it on a `last error:` line. The
+runtime loads the chunk as `toy.lua`, and the studio renames the location to the file tab the person is
+looking at. Compile errors, `init()` errors and an error in frame 0 all land there: `Run` and `Paste & Run`
+share `runToy()`, which wraps the first frame too.
+
+API: `studio.paste()` (the button), `studio.pasteText(text)` (the same work with the text in hand),
+`studio.stripFence(text)`, `studio.pasteBox()` / `setPasteBoxText()` / `openPasteBox(note)`,
+`studio.lastError()` and `studio.lastDrop()` (`{status, name, error}` — a drop is async, so the evidence polls
+it). CONSOLE reads `studio.render.lastError()`.
+
+Evidence: `tests/check-studio.js` checks the fence rule and every refusal by code, a good paste running and
+visible (57,344 non-backdrop pixels at frame 60), and a broken one naming `main.lua line 2` in the error line
+and in CONSOLE; `--browser` stands in for `navigator.clipboard`, clicks the real button, counts the pixels,
+undoes with CodeMirror's own `undo()`, drops a real `File` through a `DragEvent`, and takes the fallback box
+when the stub refuses. The tests were written by this card's builder, so RULES rule 2 (a different seat
+breaks it) is owed by @review.
+
+### 3.5 REGISTERS as a visual editor, and the pokes (#79)
 
 ppu.toys' REGISTERS panel is the working example (shown to us on 2026-10-29; recorded on #79 in
 `docs/PLAN.md`): one searchable table of every register, with editable HEX and DECIMAL, clickable bits, the
@@ -472,7 +564,7 @@ The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel u
 
 Every ppu.toys shortcut that has a PCE meaning is implemented. The poke undo/redo is real since #79: the
 REGISTERS panel's HEX, DECIMAL and bit edits are keyframed pokes, `Ctrl/Cmd+Z`/`Shift+Z` move them between
-the two stacks outside a text field (§3.2, §3.4), and SCREEN's BXR/BYR curve buttons open their curves.
+the two stacks outside a text field (§3.2, §3.5), and SCREEN's BXR/BYR curve buttons open their curves.
 Deliberately not: the SNES `hdma()` shortcut vocabulary (the PCE's per-line mechanism is `raster(line)`
 and the RCR interrupt).
 
@@ -613,7 +705,7 @@ claims a file it cannot make.
 
 ```
 PASS  822 checks, 40 frames diff 0 vs check-toys' expected state, Lua == IL for 3 examples,
-      editor/files/shortcuts, output column, every button's handler executed (115 buttons) (… ms)
+      editor/files/shortcuts, output column, every button's handler executed (120 buttons) (… ms)
 ```
 
 What it does, in order:
@@ -635,7 +727,7 @@ What it does, in order:
    on all 40, frame numbers and 256×224 dimensions intact; a second 40-frame run is byte-identical.
 5. Runs the same 40 frames through the page's Lua/IL switch for all three examples: state, raster table and
    pixels equal, so the IL path is exercised through the studio, not just imported.
-6. Clicks **every button** the page builds (115 at this revision: top bar, Docs/close/Guide, code tabs, file
+6. Clicks **every button** the page builds (120 at this revision: top bar, Docs/close/Guide, code tabs, file
    tabs, asset `Edit` buttons, dock tabs, the SCREEN tools/zooms and its two curve buttons, the SPRITES tools/zooms/picker/slots, transport,
    layers/CRT/SND, settings, open, export, and every dynamically built panel-menu and example entry),
    asserts each has a click handler and none throws;
@@ -853,6 +945,18 @@ that page matches `before/` the same way, so the difference between `refactor/` 
 dock's Map column — is the two curve buttons and the two pickers, and nothing else. The diff images
 (`cmp-screen-dock.png`) and the pixel counts are what was measured, not a claim.
 
+**#85's PANELS and VRAM captures.** `$TMPDIR/pce85/shots/ours-palettes-85.png` and `ours-vram-85.png`
+(1600×1000 each) are headless Chrome's command line on
+`renderer/studio.html?demo=palette&frame=30&panel=palettes|vram`, no synthetic input. PALETTES shows the
+32×16 swatch table with the background/sprite split, entry 0 dashed, the selected entry ringed, the readout
+`background palette 0 · entry 1 / CRAM $001 · word $000 · G0 R0 B0 · rgb(0,0,0)`, the 512-colour picker as
+eight labelled B-planes, and the note that the example's `palettes.json` is still all black. VRAM shows the
+page bar (`$0000–$0FFF`), the preview palette, the five jump buttons, the 384-px sheet with the BAT tinted
+and labelled and the tile region's own pixels, the legend (`BAT $0000-$03FF · 1024 words`, `tiles …`,
+`SAT …`, `free …`) and the click readout line. Theirs' equivalent panels are inactive tabs in the captured
+ppu.toys DOM, so no side-by-side pair is claimed for this card — the comparison is the component read from
+the served bundle (§3.4), which is a source, not a pixel match.
+
 ---
 
 ## 12. Not proven, and what comes next
@@ -885,13 +989,13 @@ dock's Map column — is the two curve buttons and the two pickers, and nothing 
   fails the suite, but a change to the fallback alone is caught only in the stub.
 * **SCREEN, SPRITES and REGISTERS are editors so far.** ppu.toys' panels are all editors with pokes and
   keyframes. #84 made SCREEN an editor of the toy's *assets* (§3.1), #86 did the same for SPRITES (§3.3),
-  and #79 made REGISTERS an editor of **keyframed register pokes** (§3.4) — which are the view's, not the
+  and #79 made REGISTERS an editor of **keyframed register pokes** (§3.5) — which are the view's, not the
   toy's, until `Write to toy` puts them into `main.lua`. Still read-only: VRAM, PALETTES (#85),
   SCANLINES, CONSOLE. #102 puts each panel in its own file and the API in §3.2, so those cards can run in
   parallel.
 * **#79's pokes reach the toy only through three registers.** BXR, BYR and CR are the registers a toy may
   set (`docs/TOYS.md`), so a poke of MWR, HSR, a PSG register or the timer is a view override that
-  `Write to toy` reports as `reg-forbidden` and does not write (§3.4). Widening the toy's register set is a
+  `Write to toy` reports as `reg-forbidden` and does not write (§3.5). Widening the toy's register set is a
   toy-API decision, not a panel one. The view itself honours the VDC registers the renderer reads (MWR, HSR,
   HDR, VPR, VDR, VCR, VCECR) but nothing in the renderer reads a PSG, timer or IRQ override, so those pokes
   are stored and written back (or refused) but change no pixel.
