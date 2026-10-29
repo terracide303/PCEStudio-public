@@ -92,7 +92,14 @@ python3 -I tools/movframes.py "$MOV" --all "$DUMPDIR/frames" 256 224 4
 if [ -n "${TRIM_FRAMES:-}" ]; then
   n=$(ls "$DUMPDIR/frames"/frame*.png | wc -l | tr -d ' ')
   if [ "$n" -gt "$TRIM_FRAMES" ]; then
-    ls "$DUMPDIR/frames"/frame*.png | head -n "$((n - TRIM_FRAMES))" | while read -r f; do rm -f "$f"; done
+    # A bash array, not `ls | head`: under `set -o pipefail` the SIGPIPE from
+    # head aborted the script before meta.json was rewritten, leaving a
+    # recaptured dump beside the old measurement (found re-running #100's
+    # evidence with TRIM_FRAMES set).
+    frames=( "$DUMPDIR"/frames/frame*.png )
+    for ((i = 0; i < ${#frames[@]} - TRIM_FRAMES; i++)); do
+      rm -f "${frames[i]}"
+    done
   fi
 fi
 cp "$LOGDIR/mdfn-$NAME.log" "$DUMPDIR/mednafen.log"
