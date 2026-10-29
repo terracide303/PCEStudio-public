@@ -21,10 +21,16 @@
  * shows one finding where the toy has a dozen kinds of blocker.  This tool
  * prints both: the page's report verbatim, then the complete inventory of
  * every IL instruction kind either backend cannot carry, counted over the
- * toy's whole IL rather than stopping at the first hit.
+ * toy's whole IL rather than stopping at the first hit — and the refusals
+ * that name an operand rather than a kind (cgen-global's typed globals),
+ * which is what the C backend would reach next after #132's four table
+ * kinds are carried.
  *
  * Exit status is 0 whatever the verdict: this is a measuring instrument, not
- * a pass/fail check.  Read the tables.
+ * a pass/fail check.  Read the tables.  tests/check-starfall-console.js is
+ * the pass/fail check: it pins what this prints.
+ *
+ * require()ing the file gives { analyse, report } and runs nothing.
  */
 "use strict";
 
@@ -38,28 +44,57 @@ const cgen = require(path.join(ROOT, "renderer/pce-cgen.js"));
 const ilbc = require(path.join(ROOT, "renderer/pce-ilbc.js"));
 const romLib = require(path.join(ROOT, "renderer/pce-rom.js"));
 
-const REL = process.argv[2] || "toys/demo-game/main.lua";
-const SRC = path.resolve(ROOT, REL);
+const DEFAULT_TOY = "toys/demo-game/main.lua";
 const FRAMES = 8;              /* renderer/studio-panel-console.js's run length */
 
-/* The accepted sets, read off the two backends' own dispatch tables:
- * pce-ilbc.js's OPS (its `default` refuses ilbc-op) and pce-cgen.js's
- * `switch (ins.t)` in the lowering pass (its `default` refuses cgen-op).
- * The tool does not trust this list: it also RUNS both encoders below and
- * prints their own refusals. */
+/* The accepted sets, read off the two backends' own sources rather than
+ * retyped: pce-ilbc.js's OPS (its `default` refuses ilbc-op), pce-cgen.js's
+ * `switch (ins.t)` in the lowering pass (its `default` refuses cgen-op) and
+ * pce-ilbc.js's BUILTIN map.  A hard-coded copy went stale silently when
+ * #124 moved code; a parse that cannot find the switch refuses loudly. */
 const ILBC_OPS = new Set(Object.keys(ilbc.OPS || {}));
-const CGEN_OPS = new Set(["const", "move", "getupval", "jmp", "pal", "vset",
-  "forprep", "fornext", "closure", "ret", "getglobal", "setglobal", "reg",
-  "arith", "cmp", "br", "call", "sat", "padget", "padref", "timer",
-  "builtin"]);
 const ILBC_ARITH = new Set(["add", "sub", "mul", "mod", "idiv", "band",
   "bor", "bxor", "shl", "shr"]);
 const ILBC_CMP = new Set(["eq", "lt", "le"]);
 const ILBC_REG = new Set(["BXR", "BYR", "CR"]);
-const ILBC_BUILTIN = new Set(["rgb"]);
 const KEY_OK = new Set(["int", "bool", "nil"]);
+/* cgen's getglobal/setglobal allow-list (pce-cgen.js:399).  A global of any
+ * other type is a cgen-global refusal, which is an operand's type, not an
+ * instruction kind — see `cgenExtra` below. */
+const CGEN_GLOBAL_OK = /^(fn|vram|int|bool|padset)$/;
 
-const source = fs.readFileSync(SRC, "utf8");
+function cgenAcceptedKinds() {
+  const src = fs.readFileSync(path.join(ROOT, "renderer/pce-cgen.js"), "utf8");
+  const m = /switch\s*\(ins\.t\)\s*\{([\s\S]*?)\n\s*default:/.exec(src);
+  if (!m) {
+    throw new Error("starfall-console: pce-cgen.js's `switch (ins.t)` was " +
+                    "not found; the accepted-kind set cannot be read");
+  }
+  const set = new Set();
+  const re = /case\s+"([^"]+)":/g;
+  let hit;
+  while ((hit = re.exec(m[1]))) set.add(hit[1]);
+  if (!set.size) {
+    throw new Error("starfall-console: pce-cgen.js's switch parsed to no cases");
+  }
+  return set;
+}
+
+function ilbcBuiltinNames() {
+  const src = fs.readFileSync(path.join(ROOT, "renderer/pce-ilbc.js"), "utf8");
+  const m = /var BUILTIN = \{([^}]*)\}/.exec(src);
+  if (!m) {
+    throw new Error("starfall-console: pce-ilbc.js's BUILTIN map was not found");
+  }
+  const set = new Set();
+  const re = /([A-Za-z_$][\w$]*)\s*:/g;
+  let hit;
+  while ((hit = re.exec(m[1]))) set.add(hit[1]);
+  return set;
+}
+
+const CGEN_OPS = cgenAcceptedKinds();
+const ILBC_BUILTIN = ilbcBuiltinNames();
 
 function stage(fn) {
   try { return { ok: true, value: fn() }; }
@@ -67,205 +102,390 @@ function stage(fn) {
 }
 function oneLine(s) { return String(s == null ? "" : s).replace(/\s+/g, " "); }
 
-console.log("toy: " + REL + " (" + source.length + " bytes)");
-console.log("");
-
-/* ---- stage 1: the CONSOLE tab's checks ---------------------------------- */
-const comp = stage(() => il.compile(source, { chunkName: "@main.lua" }));
-if (!comp.ok) {
-  console.log("IL compile refused: " + comp.code + ": " + oneLine(comp.message));
-  process.exit(0);
-}
-const program = comp.value;
-const vr = stage(() => validate.validateProgram(program, {
-  chunkName: "@main.lua", frames: FRAMES }));
-const report = vr.ok ? vr.value : null;
-const cgenR = stage(() => cgen.emitC(program, { target: "llvm" }));
-
-console.log("== 1. the CONSOLE tab's checks (what the page shows) ==");
-console.log("   validator: " + (report
-  ? (report.ok ? "ok (no error)" : "REFUSED, code " + report.code) +
-    ", " + report.problems.length + " problem(s)"
-  : "threw " + vr.code));
-if (report && report.problems.length) {
-  for (const p of report.problems)
-    console.log("     " + p.severity + " " + p.code + " line " + p.line +
-                ": " + oneLine(p.message));
-}
-console.log("   C emitter: " + (cgenR.ok ? "lowered " + cgenR.value.length +
-  " bytes of C" : cgenR.code + ": " + oneLine(cgenR.message)));
-const errors = (report ? report.problems.filter((p) =>
-  p.severity !== "warn").length : 1) + (cgenR.ok ? 0 : 1);
-console.log("   page verdict: " + (errors
-  ? "BLOCKED (" + errors + " error) - renderer/studio.html:3494 returns here, " +
-    "so pce-ilbc.js is never run"
-  : "proceeds to the encoder"));
-console.log("");
-
-if (report) {
-  const b = report.budgets;
-  console.log("   budgets (the model's estimate, NOT a capture):");
-  console.log("     frame(): " + b.frameCycles + " cycles");
-  console.log("     collection (frame() plus the 224 raster() calls): " +
-              b.collectionCycles + " cycles, " +
-              (b.ratio60 * 100).toFixed(2) + "% of a 60 Hz frame, " +
-              b.hz.toFixed(1) + " Hz on the COMPILED route's model");
-  console.log("     route 1 (the interpreter, what the Export builds): " +
-              b.route1.collectionCycles + " cycles = " +
-              b.route1.ratio60.toFixed(3) + " display frames, " +
-              b.route1.hz.toFixed(1) + " Hz, meets60 " + b.route1.meets60 +
-              " (factor " + b.route1.factor + ", " + b.route1.shape + ")");
-  console.log("     sprites " + b.sprites.sprites + " / " + b.sprites.strips +
-              " strips, busiest line " + b.sprites.line + "; VRAM " +
-              b.vram.maxWord + " words; blank " + b.blank.cycles + " cycles; " +
-              "ROM ~" + b.rom.bytes + " B (" + b.rom.banks + " banks)");
-  console.log("");
-}
-
-/* ---- stage 3: the encoder, when the page would reach it ----------------- */
-const enc = stage(() => ilbc.encode(program));
-console.log("== 3. the encoder (reached only when the console tab is clean) ==");
-if (!enc.ok) {
-  console.log("   pce-ilbc.js refused: " + enc.code + ": " + oneLine(enc.message));
-} else {
-  const rom = stage(() => romLib.buildToyRom({
-    bank0: fs.readFileSync(path.join(ROOT, "renderer/ilvm.bin")),
-    bytecode: enc.value.bytes }));
-  console.log(rom.ok
-    ? "   bytecode " + enc.value.bytes.length + " B -> .pce " +
-      rom.value.length + " B"
-    : "   buildToyRom refused: " + rom.code + ": " + oneLine(rom.message));
-}
-console.log("");
-
-/* ---- the complete inventory, by KIND ------------------------------------ */
-const kinds = new Map();
-function note(kind, line, backend) {
-  const key = kind + " | " + backend;
-  if (!kinds.has(key)) kinds.set(key, { kind, backend, n: 0, lines: new Set() });
-  const k = kinds.get(key);
-  k.n++;
-  if (line != null) k.lines.add(line);
-}
-
-let total = 0;
-const refused = new Set();     /* one entry per instruction, both backends */
-for (const fn of program.functions) {
-  fn.code.forEach((ins, pc) => {
-    total++;
-
-    if (!ILBC_OPS.has(ins.t)) note(ins.t, ins.line, "route 1 (ilbc)");
-    if (!CGEN_OPS.has(ins.t)) note(ins.t, ins.line, "C backend (cgen)");
-    if (ins.t === "builtin" && !ILBC_BUILTIN.has(ins.name)) {
-      note("builtin " + ins.name, ins.line, "C backend (cgen)");
-    }
-    if (!ILBC_OPS.has(ins.t) || !CGEN_OPS.has(ins.t) ||
-        (ins.t === "builtin" && !ILBC_BUILTIN.has(ins.name))) {
-      refused.add(fn.id + ":" + pc);
-    }
-    if (ins.t === "arith" && !ILBC_ARITH.has(ins.op))
-      note("arith " + ins.op, ins.line, "route 1 (ilbc)");
-    if (ins.t === "cmp" && !ILBC_CMP.has(ins.op))
-      note("cmp " + ins.op, ins.line, "route 1 (ilbc)");
-    if (ins.t === "reg" && !ILBC_REG.has(ins.name))
-      note("reg " + ins.name, ins.line, "route 1 (ilbc)");
-    if (ins.t === "builtin" && !ILBC_BUILTIN.has(ins.name))
-      note("builtin " + ins.name, ins.line, "route 1 (ilbc)");
-    for (const f of ["k", "src", "a", "b", "cond", "value"]) {
-      const v = ins[f];
-      if (v && v.k && !KEY_OK.has(v.k.t))
-        note("constant " + v.k.t, ins.line, "route 1 (ilbc)");
-    }
-  });
-}
-
-console.log("== every instruction kind a backend cannot carry ==");
-console.log("   " + program.functions.length + " IL functions, " + total +
-            " instructions");
-const rows = Array.from(kinds.values()).sort((a, b) => b.n - a.n);
-for (const k of rows) {
-  const ls = Array.from(k.lines).sort((a, b) => a - b);
-  console.log("   " + k.kind.padEnd(16) + String(k.n).padStart(4) + "  " +
-              k.backend + ", first main.lua:" + (ls[0] == null ? "-" : ls[0]) +
-              ", " + ls.length + " distinct line(s)");
-}
-console.log("   " + refused.size + " of " + total + " instructions (" +
-            (100 * refused.size / total).toFixed(1) + "%) are refused by at " +
-            "least one backend");
-console.log("");
-
-/* ---- capacity: would the bytecode fit the one 8 KiB data bank? ---------- *
- * The container layout is renderer/pce-ilbc.js's own (its header comment and
- * the per-op sizes at renderer/pce-ilbc.js:195).  The model is checked
- * against the two committed containers before it is used: it must reproduce
- * them to within a few bytes (it lands 1 B and 4 B short).  A kind route 1
- * cannot carry has no defined size, so it is counted at an assumed size and
- * the answer is reported across a range; the smallest assumption that is
- * still realistic is 3 B. */
-const ILBC_SIZE = {
-  const: 3, move: 3, getglobal: 3, setglobal: 3, getupval: 3, setupval: 3,
-  closure: 3, ret: 2, jmp: 3, br: 5, forprep: 2, fornext: 4, arith: 5,
-  unm: 3, bnot: 3, cmp: 5, pal: 3, reg: 3, vset: 3, vget: 3
-};
-function opSize(ins) {
-  if (ins.t === "call") return 4 + ins.args.length;
-  if (ins.t === "builtin") return 3 + ins.args.length;
-  return ILBC_SIZE[ins.t] || 0;
-}
-function projectSize(prog, unknownSize) {
-  const consts = [], seen = new Set();
-  let ups = 0, code = 0, unknown = 0;
-  const add = (o) => {
-    if (!o || !o.k) return;
-    const key = o.k.t + ":" + JSON.stringify(o.k.v);
-    if (seen.has(key)) return;
-    seen.add(key); consts.push(o.k);
+/* ---- the analysis ------------------------------------------------------
+ * Everything the report prints, as data, so tests/check-starfall-console.js
+ * can pin it.  Nothing here writes to a file. */
+function analyse(rel) {
+  rel = rel || DEFAULT_TOY;
+  const src = path.resolve(ROOT, rel);
+  const source = fs.readFileSync(src, "utf8");
+  const out = {
+    rel: rel, bytes: source.length,
+    compile: null, program: null, validator: null, report: null,
+    cgen: null, page: null, encode: null, rom: null,
+    inventory: null, cgenExtra: null, capacity: null
   };
-  for (const fn of prog.functions) {
-    ups += fn.upvalues.length;
-    for (const ins of fn.code) {
-      const s = opSize(ins);
-      if (s) code += s; else { unknown++; code += unknownSize; }
-      if (ins.k) add({ k: ins.k });
-      for (const f of ["dst", "src", "callee", "cond", "value", "a", "b",
-                       "addr", "word", "lineArg"]) {
-        if (ins[f] && typeof ins[f] === "object") add(ins[f]);
+
+  const comp = stage(() => il.compile(source, { chunkName: "@main.lua" }));
+  out.compile = comp;
+  if (!comp.ok) return out;
+  const program = comp.value;
+  out.program = program;
+
+  const vr = stage(() => validate.validateProgram(program, {
+    chunkName: "@main.lua", frames: FRAMES }));
+  out.validator = vr;
+  const report = vr.ok ? vr.value : null;
+  out.report = report;
+
+  const cgenR = stage(() => cgen.emitC(program, { target: "llvm" }));
+  out.cgen = cgenR;
+
+  const errors = (report ? report.problems.filter((p) =>
+    p.severity !== "warn").length : 1) + (cgenR.ok ? 0 : 1);
+  out.page = {
+    errors: errors,
+    blocked: errors > 0,
+    earlyReturn: "renderer/studio.html:3494"
+  };
+
+  const enc = stage(() => ilbc.encode(program));
+  out.encode = enc;
+  if (enc.ok) {
+    out.rom = stage(() => romLib.buildToyRom({
+      bank0: fs.readFileSync(path.join(ROOT, "renderer/ilvm.bin")),
+      bytecode: enc.value.bytes }));
+  }
+
+  /* ---- the complete inventory, by KIND -------------------------------- */
+  const kinds = new Map();
+  function note(kind, line, backend) {
+    const key = kind + " | " + backend;
+    if (!kinds.has(key)) {
+      kinds.set(key, { kind: kind, backend: backend, n: 0, lines: new Set() });
+    }
+    const k = kinds.get(key);
+    k.n++;
+    if (line != null) k.lines.add(line);
+  }
+
+  let total = 0;
+  const refused = new Set();     /* one entry per instruction, both backends */
+  for (const fn of program.functions) {
+    fn.code.forEach((ins, pc) => {
+      total++;
+      if (!ILBC_OPS.has(ins.t)) note(ins.t, ins.line, "route 1 (ilbc)");
+      if (!CGEN_OPS.has(ins.t)) note(ins.t, ins.line, "C backend (cgen)");
+      if (ins.t === "builtin" && !ILBC_BUILTIN.has(ins.name)) {
+        note("builtin " + ins.name, ins.line, "C backend (cgen)");
       }
-      for (const f of ["args", "addrs"]) {
-        if (Array.isArray(ins[f])) for (const o of ins[f]) add(o);
+      if (!ILBC_OPS.has(ins.t) || !CGEN_OPS.has(ins.t) ||
+          (ins.t === "builtin" && !ILBC_BUILTIN.has(ins.name))) {
+        refused.add(fn.id + ":" + pc);
+      }
+      if (ins.t === "arith" && !ILBC_ARITH.has(ins.op)) {
+        note("arith " + ins.op, ins.line, "route 1 (ilbc)");
+      }
+      if (ins.t === "cmp" && !ILBC_CMP.has(ins.op)) {
+        note("cmp " + ins.op, ins.line, "route 1 (ilbc)");
+      }
+      if (ins.t === "reg" && !ILBC_REG.has(ins.name)) {
+        note("reg " + ins.name, ins.line, "route 1 (ilbc)");
+      }
+      if (ins.t === "builtin" && !ILBC_BUILTIN.has(ins.name)) {
+        note("builtin " + ins.name, ins.line, "route 1 (ilbc)");
+      }
+      for (const f of ["k", "src", "a", "b", "cond", "value"]) {
+        const v = ins[f];
+        if (v && v.k && !KEY_OK.has(v.k.t)) {
+          note("constant " + v.k.t, ins.line, "route 1 (ilbc)");
+        }
+      }
+    });
+  }
+
+  out.inventory = {
+    functions: program.functions.length,
+    total: total,
+    refusedCount: refused.size,
+    rows: Array.from(kinds.values()).sort((a, b) => b.n - a.n).map((k) => ({
+      kind: k.kind, backend: k.backend, n: k.n,
+      lines: Array.from(k.lines).sort((a, b) => a - b)
+    }))
+  };
+
+  /* ---- refusals that name an operand, not a kind ---------------------- *
+   * pce-cgen.js:395-401 refuses getglobal/setglobal unless the global's
+   * declared type is fn/vram/int/bool/padset.  The inventory above cannot
+   * see this: getglobal/setglobal ARE carried kinds.  STARFALL's drawings
+   * live in table-typed globals (DIGIT, bl, bx, by, ex, ey, es), so this is
+   * the C backend's next refusal once #132 carries the four table kinds. */
+  const typeOf = {};
+  for (const g of program.globals || []) typeOf[g.name] = g.type;
+  const extra = { n: 0, get: 0, set: 0, names: {}, first: null,
+                  otherChecks: { fixed: 0, cond: 0, arity: 0, closure: 0 } };
+  function condType(op) {
+    if (!op) return "int";
+    if (op.r != null) return op.tt || "int";
+    if (op.k) return op.k.t;
+    return "int";
+  }
+  for (const fn of program.functions) {
+    fn.code.forEach((ins, pc) => {
+      if (ins.t === "arith" && ins.type !== "int") extra.otherChecks.fixed++;
+      if (ins.t === "cmp" && ins.type === "fixed") extra.otherChecks.fixed++;
+      if (ins.t === "br" && condType(ins.cond) !== "bool") {
+        extra.otherChecks.cond++;
+      }
+      if (ins.t === "call" && ins.args.length > 4) extra.otherChecks.arity++;
+      if ((ins.t === "getglobal" || ins.t === "setglobal") &&
+          (!typeOf[ins.name] || !CGEN_GLOBAL_OK.test(typeOf[ins.name]))) {
+        const t = typeOf[ins.name] || "untyped";
+        extra.n++;
+        if (ins.t === "getglobal") extra.get++; else extra.set++;
+        extra.names[ins.name + ":" + t] =
+          (extra.names[ins.name + ":" + t] || 0) + 1;
+        if (!extra.first) {
+          extra.first = { fn: fn.id, fnName: fn.name, pc: pc, line: ins.line,
+                          kind: ins.t, name: ins.name, type: t };
+        }
+      }
+    });
+    if (fn.params.length > 4) extra.otherChecks.arity++;   /* once per fn */
+  }
+  /* With #132's four table kinds carried in cgen, what is the first refusal
+   * left in traversal order?  Table instructions are skipped, not fixed;
+   * every other kind and the global-type check are applied as the code is
+   * today.  This is the claim the write-up has to make, so it is data. */
+  let next = null;
+  for (const fn of program.functions) {
+    fn.code.forEach((ins, pc) => {
+      if (next) return;
+      if (ins.t === "table" || ins.t === "setlist" || ins.t === "tget" ||
+          ins.t === "tset") return;
+      let code = null;
+      if (!CGEN_OPS.has(ins.t)) code = "cgen-op";
+      else if (ins.t === "builtin" && ins.name !== "rgb") code = "cgen-op";
+      else if ((ins.t === "getglobal" || ins.t === "setglobal") &&
+               (!typeOf[ins.name] ||
+                !CGEN_GLOBAL_OK.test(typeOf[ins.name]))) code = "cgen-global";
+      if (code) {
+        next = { code: code, fn: fn.id, fnName: fn.name, pc: pc,
+                 line: ins.line, kind: ins.t, name: ins.name || null,
+                 type: typeOf[ins.name] || null };
+      }
+    });
+  }
+  extra.nextAfterTables = next;
+  out.cgenExtra = extra;
+
+  /* ---- capacity: would the bytecode fit the one 8 KiB data bank? ------ *
+   * The container layout is renderer/pce-ilbc.js's own (its header comment
+   * and the per-op sizes at renderer/pce-ilbc.js:195).  The model is checked
+   * against the two committed containers before it is used: it must
+   * reproduce them to within a few bytes (it lands 1 B and 4 B short).  A
+   * kind route 1 cannot carry has no defined size, so it is counted at an
+   * assumed size and the answer is reported across a range; the smallest
+   * assumption that is still realistic is 3 B. */
+  const ILBC_SIZE = {
+    const: 3, move: 3, getglobal: 3, setglobal: 3, getupval: 3, setupval: 3,
+    closure: 3, ret: 2, jmp: 3, br: 5, forprep: 2, fornext: 4, arith: 5,
+    unm: 3, bnot: 3, cmp: 5, pal: 3, reg: 3, vset: 3, vget: 3
+  };
+  function opSize(ins) {
+    if (ins.t === "call") return 4 + ins.args.length;
+    if (ins.t === "builtin") return 3 + ins.args.length;
+    return ILBC_SIZE[ins.t] || 0;
+  }
+  function projectSize(prog, unknownSize) {
+    const consts = [], seen = new Set();
+    let ups = 0, code = 0;
+    const add = (o) => {
+      if (!o || !o.k) return;
+      const key = o.k.t + ":" + JSON.stringify(o.k.v);
+      if (seen.has(key)) return;
+      seen.add(key); consts.push(o.k);
+    };
+    for (const fn of prog.functions) {
+      ups += fn.upvalues.length;
+      for (const ins of fn.code) {
+        const s = opSize(ins);
+        if (s) code += s; else code += unknownSize;
+        if (ins.k) add({ k: ins.k });
+        for (const f of ["dst", "src", "callee", "cond", "value", "a", "b",
+                         "addr", "word", "lineArg"]) {
+          if (ins[f] && typeof ins[f] === "object") add(ins[f]);
+        }
+        for (const f of ["args", "addrs"]) {
+          if (Array.isArray(ins[f])) for (const o of ins[f]) add(o);
+        }
       }
     }
+    let constSize = 0;
+    for (const k of consts) {
+      if (k.t === "int") constSize += 5;
+      else if (k.t === "bool") constSize += 2;
+      else if (k.t === "nil") constSize += 1;
+      else if (k.t === "string") constSize += 2 + k.v.length;
+    }
+    let globalSize = 0;
+    for (const g of prog.globals || []) globalSize += 1 + g.name.length;
+    return 24 + prog.functions.length * 10 + ups * 2 + constSize + globalSize +
+           code;
   }
-  let constSize = 0;
-  for (const k of consts) {
-    if (k.t === "int") constSize += 5;
-    else if (k.t === "bool") constSize += 2;
-    else if (k.t === "nil") constSize += 1;
-    else if (k.t === "string") constSize += 2 + k.v.length;
+
+  /* the model's own control: the two committed containers */
+  const CONTROLS = [["tools/toys/palette.lua", 578],
+                    ["toys/parallax.lua", 1100]];
+  let worst = 0;
+  const controls = [];
+  for (const [crel, want] of CONTROLS) {
+    const p = il.compile(fs.readFileSync(path.join(ROOT, crel), "utf8"),
+                         { chunkName: "@main.lua" });
+    const got = projectSize(p, 3);
+    worst = Math.max(worst, Math.abs(got - want));
+    controls.push({ rel: crel, committed: want, modelled: got });
   }
-  let globalSize = 0;
-  for (const g of prog.globals || []) globalSize += 1 + g.name.length;
-  return 24 + prog.functions.length * 10 + ups * 2 + constSize + globalSize +
-         code;
+  out.capacity = {
+    bank: romLib.BANK,
+    worst: worst,
+    controls: controls,
+    projections: [3, 4, 6].map((assumed) => {
+      const n = projectSize(program, assumed);
+      return { assumed: assumed, bytes: n, over: n > romLib.BANK,
+               by: Math.abs(n - romLib.BANK) };
+    })
+  };
+
+  return out;
 }
 
-/* the model's own control: the two committed containers */
-const CONTROLS = [["tools/toys/palette.lua", 578], ["toys/parallax.lua", 1100]];
-let worst = 0;
-for (const [rel, want] of CONTROLS) {
-  const p = il.compile(fs.readFileSync(path.join(ROOT, rel), "utf8"),
-                       { chunkName: "@main.lua" });
-  worst = Math.max(worst, Math.abs(projectSize(p, 3) - want));
+/* ---- the report -------------------------------------------------------- */
+function report(r) {
+  console.log("toy: " + r.rel + " (" + r.bytes + " bytes)");
+  console.log("");
+
+  if (!r.compile.ok) {
+    console.log("IL compile refused: " + r.compile.code + ": " +
+                oneLine(r.compile.message));
+    return;
+  }
+
+  const reportVal = r.report;
+  console.log("== 1. the CONSOLE tab's checks (what the page shows) ==");
+  console.log("   validator: " + (reportVal
+    ? (reportVal.ok ? "ok (no error)" : "REFUSED, code " + reportVal.code) +
+      ", " + reportVal.problems.length + " problem(s)"
+    : "threw " + r.validator.code));
+  if (reportVal && reportVal.problems.length) {
+    for (const p of reportVal.problems) {
+      console.log("     " + p.severity + " " + p.code + " line " + p.line +
+                  ": " + oneLine(p.message));
+    }
+  }
+  console.log("   C emitter: " + (r.cgen.ok
+    ? "lowered " + r.cgen.value.length + " bytes of C"
+    : r.cgen.code + ": " + oneLine(r.cgen.message)));
+  console.log("   page verdict: " + (r.page.blocked
+    ? "BLOCKED (" + r.page.errors + " error) - " + r.page.earlyReturn +
+      " returns here, so pce-ilbc.js is never run"
+    : "proceeds to the encoder"));
+  console.log("");
+
+  if (reportVal) {
+    const b = reportVal.budgets;
+    console.log("   budgets (the model's estimate, NOT a capture):");
+    console.log("     frame(): " + b.frameCycles + " cycles");
+    console.log("     collection (frame() plus the 224 raster() calls): " +
+                b.collectionCycles + " cycles, " +
+                (b.ratio60 * 100).toFixed(2) + "% of a 60 Hz frame, " +
+                b.hz.toFixed(1) + " Hz on the COMPILED route's model");
+    console.log("     route 1 (the interpreter, what the Export builds): " +
+                b.route1.collectionCycles + " cycles = " +
+                b.route1.ratio60.toFixed(3) + " display frames, " +
+                b.route1.hz.toFixed(1) + " Hz, meets60 " + b.route1.meets60 +
+                " (factor " + b.route1.factor + ", " + b.route1.shape + ")");
+    console.log("     sprites " + b.sprites.sprites + " / " + b.sprites.strips +
+                " strips, busiest line " + b.sprites.line + "; VRAM " +
+                b.vram.maxWord + " words; blank " + b.blank.cycles +
+                " cycles; ROM ~" + b.rom.bytes + " B (" + b.rom.banks +
+                " banks)");
+    console.log("");
+  }
+
+  console.log("== 3. the encoder (reached only when the console tab is clean)" +
+              " ==");
+  if (!r.encode.ok) {
+    console.log("   pce-ilbc.js refused: " + r.encode.code + ": " +
+                oneLine(r.encode.message));
+  } else {
+    console.log(r.rom.ok
+      ? "   bytecode " + r.encode.value.bytes.length + " B -> .pce " +
+        r.rom.value.length + " B"
+      : "   buildToyRom refused: " + r.rom.code + ": " +
+        oneLine(r.rom.message));
+  }
+  console.log("");
+
+  const inv = r.inventory;
+  console.log("== every instruction kind a backend cannot carry ==");
+  console.log("   " + inv.functions + " IL functions, " + inv.total +
+              " instructions");
+  for (const k of inv.rows) {
+    console.log("   " + k.kind.padEnd(16) + String(k.n).padStart(4) + "  " +
+                k.backend + ", first main.lua:" +
+                (k.lines[0] == null ? "-" : k.lines[0]) + ", " +
+                k.lines.length + " distinct line(s)");
+  }
+  console.log("   " + inv.refusedCount + " of " + inv.total +
+              " instructions (" +
+              (100 * inv.refusedCount / inv.total).toFixed(1) +
+              "%) are refused by at least one backend");
+  console.log("");
+
+  const ex = r.cgenExtra;
+  console.log("== refusals that name an operand, not a kind ==");
+  console.log("   cgen-global (renderer/pce-cgen.js:399): " + ex.n +
+              " getglobal/setglobal on a typed global outside " +
+              "fn/vram/int/bool/padset (" + ex.get + " get, " + ex.set +
+              " set)");
+  for (const name of Object.keys(ex.names)) {
+    console.log("     " + name.padEnd(24) + String(ex.names[name]).padStart(4));
+  }
+  if (ex.first) {
+    console.log("   first: function " + ex.first.fn + " `" + ex.first.fnName +
+                "` pc " + ex.first.pc + ", main.lua:" + ex.first.line + " (" +
+                ex.first.kind + " " + ex.first.name + ":" + ex.first.type + ")");
+  } else {
+    console.log("   first: none (no global outside the allow-list is read)");
+  }
+  console.log("   after #132's four table kinds are skipped, the next cgen " +
+              "refusal is " + (ex.nextAfterTables
+                ? ex.nextAfterTables.code + " at function " + ex.nextAfterTables.fn +
+                  " pc " + ex.nextAfterTables.pc + ", main.lua:" +
+                  ex.nextAfterTables.line
+                : "none"));
+  console.log("   other operand checks that would refuse (none found on this " +
+              "toy): cgen-fixed " + ex.otherChecks.fixed + ", cgen-cond " +
+              ex.otherChecks.cond + ", cgen-arity " + ex.otherChecks.arity);
+  console.log("");
+
+  const cap = r.capacity;
+  console.log("== would the bytecode fit the interpreter's 8 KiB data bank? ==");
+  console.log("   size model checked on the two committed containers: worst " +
+              "error " + cap.worst + " B");
+  for (const p of cap.projections) {
+    console.log("   projected " + String(p.bytes).padStart(5) + " B with each " +
+                "of the " + inv.refusedCount + " uncarried instructions at " +
+                p.assumed + " B  (" + (p.over ? "OVER" : "fits") + " the " +
+                cap.bank + " B bank by " + p.by + " B)");
+  }
+  const last = cap.projections[cap.projections.length - 1];
+  console.log("   " + (last.over
+    ? "renderer/pce-rom.js:618 refuses such a build with toy-data-bank-full"
+    : "renderer/pce-rom.js:618 would accept this one"));
 }
-console.log("== would the bytecode fit the interpreter's 8 KiB data bank? ==");
-console.log("   size model checked on the two committed containers: worst " +
-            "error " + worst + " B");
-for (const assumed of [3, 4, 6]) {
-  const n = projectSize(program, assumed);
-  console.log("   projected " + String(n).padStart(5) + " B with each of the " +
-              refused.size + " uncarried instructions at " + assumed + " B  (" +
-              (n > romLib.BANK ? "OVER" : "fits") + " the " +
-              romLib.BANK + " B bank by " + Math.abs(n - romLib.BANK) + " B)");
+
+if (require.main === module) {
+  report(analyse(process.argv[2]));
 }
-console.log("   renderer/pce-rom.js:618 refuses such a build with " +
-            "toy-data-bank-full");
+
+module.exports = {
+  analyse: analyse,
+  report: report,
+  DEFAULT_TOY: DEFAULT_TOY,
+  CGEN_OPS: CGEN_OPS,
+  ILBC_OPS: ILBC_OPS,
+  ILBC_BUILTIN: ILBC_BUILTIN,
+  CGEN_GLOBAL_OK: CGEN_GLOBAL_OK
+};

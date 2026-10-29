@@ -34,6 +34,10 @@
  *      validator-clean, and move with the pad.
  *   7. The guide fits a chat: under 12,000 words, and it ends every code
  *      answer with the exact Paste & Run line.
+ *   8. The guide opens with the MCP route (#142): the download URL, the
+ *      `claude mcp add` line, the skill to link, and every tool
+ *      tools/mcp/server.js's TOOLS array has — the list is read from the
+ *      server, so a tool it gains without the guide naming it fails here.
  *
  * Written by @design because the card names this file.  Per workshop rule 2
  * a cold break by another seat is owed before it closes the card.
@@ -527,6 +531,55 @@ function checkSize() {
      "Copy this code, then press Paste & Run in the studio");
 }
 
+/* ---- 8. the MCP route near the top (#142) ----------------------------- */
+
+/* The tools the server really has, read out of tools/mcp/server.js's TOOLS
+ * array — not typed here, so a tool the server gains without the guide
+ * naming it fails this test. */
+function serverToolNames() {
+  const src = fs.readFileSync(path.join(ROOT, "tools", "mcp", "server.js"),
+                              "utf8");
+  const start = src.indexOf("const TOOLS = [");
+  const end = start < 0 ? -1 : src.indexOf("\n];", start);
+  const body = start < 0 ? "" : src.slice(start, end < 0 ? src.length : end);
+  const names = [];
+  for (const m of body.matchAll(/\bname:\s*"([a-z_]+)"/g)) names.push(m[1]);
+  return names;
+}
+
+function checkMcpSection() {
+  const g = guide.guide();
+  const idx = g.sections.findIndex((s) => s.id === "mcp");
+  check(idx >= 0, "the guide carries the MCP section (#142)");
+  check(idx === 0, "the MCP section is the guide's first section, near the " +
+        "top (it is at " + idx + ")");
+  if (idx < 0) return;
+
+  const md = guide.markdown();
+  const from = md.indexOf("## " + g.sections[idx].title);
+  const next = md.indexOf("\n## ", from + 1);
+  const sec = from < 0 ? "" : md.slice(from, next < 0 ? md.length : next);
+  check(sec.length > 0, "the MCP section is in the generated Markdown");
+
+  const url = guide.STUDIO_URL + "/pcestudio-mcp.zip";
+  check(sec.includes(url), "the section gives the download: " + url);
+  check(sec.includes("claude mcp add pcestudio -- node <folder>/tools/mcp/server.js"),
+        "the section gives the exact install command");
+  check(sec.includes("plugin/skills/creating-pce-toys"),
+        "the section says which skill to link");
+
+  const tools = serverToolNames();
+  check(tools.length >= 8, "tools/mcp/server.js's TOOLS was read (" +
+        tools.length + " tools)");
+  for (const t of tools) {
+    check(sec.includes(t), "the MCP section names the tool " + t);
+  }
+
+  check(/paste-and-run route/.test(sec),
+        "the section says the chat AI without tools keeps the paste-and-run " +
+        "route");
+}
+
 /* ---- main ------------------------------------------------------------- */
 
 function main() {
@@ -538,6 +591,7 @@ function main() {
   checkExamples();
   checkColdSeat();
   checkSize();
+  checkMcpSection();
 
   if (failures.length) {
     for (const f of failures) console.log("FAIL  " + f);
@@ -549,8 +603,9 @@ function main() {
   console.log("PASS  " + checks + " checks: the guide is the generator's " +
               "bytes, every API name and range is the code's, the 12 tables " +
               "move it, the starter and the five toys run visible and " +
-              "validator-clean, the cold seat's main.lua runs too, and it is " +
-              words + " words");
+              "validator-clean, the cold seat's main.lua runs too, the MCP " +
+              "section is first and names every tool the server has, and it " +
+              "is " + words + " words");
 }
 
 if (require.main === module) main();
