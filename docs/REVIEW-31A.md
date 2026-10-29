@@ -208,3 +208,15 @@ caught; #73: 3/5 caught; #29: 3/4 caught.)
 - The seven sha-only detections should get direct assertions or a
   non-skippable rebuild before this is treated as machine-independent
   evidence. The capture script remains outside all three checks.
+
+## Closed by #82 (2026-10-29)
+
+The four missing checks are added and the four breaks are re-run DETECTED:
+C03 in `tests/check-il-console.js` (an idiv toy's emitted helper compiled
+by the host C compiler and executed on negatives), P14/P16 in
+`tests/check-toys.js` (a forged check byte over valid value bytes; the
+200/201 code-length boundary and a 3.4 KB code that decodes cleanly), and
+E19 in `tests/check-examples.js` (a `pce-il` program, an IL-only refusal,
+and the IL's own instruction budget). Baselines, the measured mutant output
+and the blind spots of the new checks are in
+[`CHECK-82.md`](CHECK-82.md). Residual weaknesses 1–6 above are unchanged.

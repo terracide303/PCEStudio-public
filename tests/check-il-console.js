@@ -59,12 +59,20 @@
  *      save's RAM and reported; both must be sane, and the per-call cost
  *      must be above the ~123-cycle blanket budget the RCR write has.
  *
+ * #82 adds the floor-division fixture the palette toy could not reach
+ * (REVIEW-31A C03): an idiv toy's emitted il_lua_idiv helper is compiled by
+ * the host C compiler and executed on negative dividends and divisors.  The
+ * palette toy uses `%`, not `//`, so without this fixture deleting the
+ * sign correction changed the emitted C (and a toy's ROM) while every check
+ * stayed green.
+ *
  * Written by @design because the card names this evidence; per workshop
  * rule 2 a cold break by another seat is owed.
  */
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const zlib = require("zlib");
 const { spawnSync } = require("child_process");
@@ -79,6 +87,19 @@ const DUMP = path.join(ROOT, "tests/dumps/toypalette");
 const TOY_FILE = path.join(ROOT, "tools/toys/palette.lua");
 const RASTER_DUMP = path.join(ROOT, "tests/dumps/toyparallax");
 const RASTER_FILE = path.join(ROOT, "toys/parallax.lua");
+
+/* #82 / REVIEW-31A C03: the palette toy uses `%`, not `//`, so it never
+ * reaches il_lua_idiv and the C emitter's floor correction was unexercised.
+ * This toy does. pal() is offset so q + 8 is a legal colour word for the
+ * toy's own value (-7 // 2 = -4). */
+const TOY_IDIV = [
+  "function frame(t, f)",
+  "  local x = -7",
+  "  local q = x // 2",
+  "  pal(1, q + 8)",
+  "end",
+  ""
+].join("\n");
 const LLVM_DEFAULT = "/Volumes/External II/pce-tools/llvm-mos/llvm-mos";
 const FRAMES = 8;                              /* one palette cycle */
 const RASTER_RUNS = 8;                         /* consecutive raster frames */
@@ -180,6 +201,105 @@ function checkEmitter() {
   check(/il_fn_4/.test(c) && /il_lua_mod\(/.test(c),
         "the frame function and Lua's modulo helper are emitted");
   check(!/\b(double|float)\b/.test(c), "the C carries no floating-point type");
+}
+
+/* ---- 1b. the emitter's floor division, executed ---------------------- */
+
+/* #82 / REVIEW-31A C03.  The console's C has no Lua `//`; the emitter emits
+ * il_lua_idiv and relies on a sign correction, because C truncates toward
+ * zero: (-7) / 2 is -3 while Lua's (-7) // 2 is -4.  A text assertion alone
+ * could pass on a comment, so the helper is extracted from the emitted C,
+ * compiled by the host C compiler and run on negative divisors and negative
+ * dividends.  The expected values are cross-checked against the Lua runtime
+ * (the oracle for Lua semantics), not typed in from memory alone. */
+const IDIV_CASES = [
+  [-7, 2, -4], [7, 2, 3], [-7, -2, 3], [7, -2, -4],
+  [-8, 2, -4], [-1, 2, -1], [1, -2, -1], [0, -3, 0], [-9, 4, -3]
+];
+
+function extractIdivHelper(c) {
+  const start = c.indexOf("static int32_t il_lua_idiv(");
+  if (start < 0) return null;
+  const end = c.indexOf("\n}\n", start);
+  if (end < 0) return null;
+  return c.slice(start, end + 3);
+}
+
+function checkIdivEmitter() {
+  const program = il.compile(TOY_IDIV, { chunkName: "idiv.lua" });
+  const c = cgen.emitC(program);
+  eq("the idiv C emitter is deterministic", c, cgen.emitC(program));
+  check(/r\[\d+\] = il_lua_idiv\(r\[\d+\],/.test(c),
+        "the idiv toy lowers `//` to il_lua_idiv()");
+  const helper = extractIdivHelper(c);
+  check(!!helper, "the emitted C carries the il_lua_idiv helper");
+  check(!!helper && /if \(r != 0 && \(\(r < 0\) != \(y < 0\)\)\) q--;/.test(helper),
+        "the helper carries Lua's floor correction for a negative quotient");
+
+  /* The Lua runtime is the oracle: its own `//` must produce the values the
+   * C helper is held to. */
+  const lua = toys.create(
+    "function frame(t, f) print(-7 // 2, 7 // 2, -7 // -2, 7 // -2) end",
+    { budgetMs: 250 });
+  lua.load();
+  lua.frame(0);
+  eq("the Lua runtime floors -7 // 2, 7 // 2, -7 // -2, 7 // -2",
+     lua.log, ["-4\t3\t3\t-4"]);
+  lua.dispose();
+
+  if (!helper) return;
+
+  /* Compile and run the emitted helper.  cc is the host's compiler, not
+   * llvm-mos: this checks the C semantics the console build also uses. */
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pce-idiv82-"));
+  const src = path.join(dir, "idiv.c");
+  const exe = path.join(dir, "idiv");
+  const cases = IDIV_CASES.map(function (k) {
+    return "  { " + k[0] + ", " + k[1] + ", " + k[2] + " }";
+  }).join(",\n");
+  fs.writeFileSync(src, [
+    "#include <stdint.h>",
+    "#include <stdio.h>",
+    helper,
+    "int main(void) {",
+    "  static const struct { int32_t x, y, want; } cases[] = {",
+    cases,
+    "  };",
+    "  int bad = 0;",
+    "  for (unsigned i = 0; i < sizeof cases / sizeof cases[0]; i++) {",
+    "    int32_t got = il_lua_idiv(cases[i].x, cases[i].y);",
+    "    if (got != cases[i].want) {",
+    "      printf(\"il_lua_idiv(%d, %d) = %d, want %d\\n\",",
+    "             (int)cases[i].x, (int)cases[i].y, (int)got,",
+    "             (int)cases[i].want);",
+    "      bad = 1;",
+    "    }",
+    "  }",
+    "  return bad;",
+    "}",
+    ""
+  ].join("\n"));
+  try {
+    const cc = process.env.CC || "cc";
+    const build = spawnSync(cc, ["-std=c99", "-O0", "-o", exe, src],
+                            { encoding: "utf8" });
+    if (build.error && build.error.code === "ENOENT") {
+      skipped.push("idiv helper execution (no host C compiler)");
+      console.log("SKIP  idiv helper execution: no host C compiler (" + cc +
+                  ")");
+    } else {
+      check(build.status === 0, "the emitted il_lua_idiv helper compiles (" +
+            (build.stderr || "").trim().split("\n").slice(-1)[0] + ")");
+      if (build.status === 0) {
+        const run = spawnSync(exe, [], { encoding: "utf8" });
+        check(run.status === 0,
+              "the emitted il_lua_idiv floors negatives, executed: " +
+              ((run.stdout || "").trim() || "exit " + run.status));
+      }
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /* ---- 2. the emitter refuses by code ----------------------------------- */
@@ -569,6 +689,7 @@ function checkRasterDump(meta) {
 
 function main() {
   checkEmitter();
+  checkIdivEmitter();
   checkRefusals();
   checkRasterEmitter();
 

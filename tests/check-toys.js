@@ -26,6 +26,11 @@
  *   runtime frame  ==  sprites.renderFrame(hand-built state)   (diff 0)
  * and the two states are compared byte for byte as well.
  *
+ * #82 (REVIEW-31A P14/P16): a forged code keeps pack({score=10})'s value
+ * bytes and changes only the check byte, so the check-byte guard is the one
+ * that must fire; and the 200-character code cap is pinned at its boundary
+ * (200 accepted, 201 refused) with a 3 KB table that decodes cleanly.
+ *
  * Written by @design because the card names this file. Per workshop rule 2 a
  * cold break by another seat is owed before this closes the card.
  */
@@ -548,13 +553,25 @@ function refusal(name, source, code, opts, expect) {
 /* A P1 code built here from arbitrary value bytes, with the check byte the
  * runtime computes. Only a forged code can carry a number `pack` would have
  * refused, so card #73's decoder edge needs one that is built by hand. The
- * encoder mirrors the prelude's p_b32; the check byte mirrors pack's. */
+ * encoder mirrors the prelude's p_b32; the check byte mirrors pack's.
+ * #82 (REVIEW-31A P14): an explicit checkByte overrides the computed one, so
+ * a code can be forged with valid value bytes and only the guard byte wrong. */
 const P_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-function p1code(valueBytes) {
-  const bytes = valueBytes.slice();
-  let sum = 0;
-  for (const b of bytes) sum = (sum * 31 + b) % 256;
-  bytes.push(sum);
+
+/* p_int from renderer/pce-toys.js: zig-zag, 7 bits per byte, high bit means
+ * "more".  Used to forge value bytes pack itself would refuse (a table past
+ * the 96-byte cap). */
+function p_int(bytes, n) {
+  let z = n < 0 ? 2 * (-n - 1) + 1 : n * 2;
+  do {
+    let b = z % 128;
+    z = Math.floor(z / 128);
+    if (z > 0) b += 128;
+    bytes.push(b);
+  } while (z > 0);
+}
+
+function p1encode(bytes) {
   let acc = 0, bits = 0, out = "";
   for (const b of bytes) {
     acc = acc * 256 + b;
@@ -566,7 +583,31 @@ function p1code(valueBytes) {
     acc %= Math.pow(2, bits);
   }
   if (bits > 0) out += P_ALPHA[(acc * Math.pow(2, 5 - bits)) % 32];
-  return "P1" + out;
+  return out;
+}
+
+function p1code(valueBytes, checkByte) {
+  const bytes = valueBytes.slice();
+  let sum = 0;
+  for (const b of bytes) sum = (sum * 31 + b) % 256;
+  bytes.push(checkByte == null ? sum : checkByte);
+  return "P1" + p1encode(bytes);
+}
+
+/* A table of strings, built as its value bytes: tag 5, len, 0 keys, then
+ * `len` strings (tag 4, length, bytes).  pack refuses past 96 value bytes,
+ * so a code longer than the 200-character cap can only be a forged one. */
+function tableCode(lens) {
+  const value = [5];
+  p_int(value, lens.length);
+  p_int(value, 0);
+  let k = 0;
+  for (const len of lens) {
+    value.push(4);
+    p_int(value, len);
+    for (let i = 0; i < len; i++) value.push(65 + (k++ % 26));
+  }
+  return p1code(value);
 }
 
 function checkRefusals() {
@@ -714,6 +755,7 @@ end`, { budgetMs: 250 });
   again.dispose();
 
   checkPasswordCaps();
+  checkPasswordGuards();
 }
 
 /* ---- card #73: the round trip holds at every documented maximum -------- */
@@ -773,6 +815,63 @@ end`, { budgetMs: 500 });
   eq("a table 6 deep round-trips", log[8], "depth\t6\ttrue");
   eq("the cap still packs to a P1 base32 code", log[9], "code\tP1\ttrue");
   rt.dispose();
+}
+
+/* ---- #82: the two password guards REVIEW-31A found unexercised -------- */
+
+/* The value bytes of pack({score = 10}), measured against the runtime below.
+ * p1code appends the check byte the runtime computes, so a code built from
+ * these bytes is genuine. */
+const SCORE10_BYTES = [5, 0, 2, 4, 10, 115, 99, 111, 114, 101, 3, 20];
+
+function checkPasswordGuards() {
+  /* P14. The existing "mistyped password" fixture changes the first payload
+   * character - the type tag - so it is refused by the tag guard, not the
+   * check-byte guard.  This forged code keeps pack({score=10})'s value bytes
+   * (the tag and every value decode) and changes only the check byte.
+   * REVIEW-31A deleted the check-byte guard and the whole suite stayed green. */
+  const genuine = toys.create(
+    "function init() print(password.pack({ score = 10 })) end");
+  genuine.load();
+  genuine.frame(0);
+  eq("the forged fixture's value bytes are those of pack({score=10})",
+     p1code(SCORE10_BYTES), genuine.log[0]);
+  genuine.dispose();
+  let sum = 0;
+  for (const b of SCORE10_BYTES) sum = (sum * 31 + b) % 256;
+  const forged = p1code(SCORE10_BYTES, (sum + 1) % 256);
+  refusal("a forged check byte (the values still decode)", `
+function init() password.unpack("${forged}") end`, "password-code", null,
+          /check byte/);
+
+  /* P16. No fixture was longer than the 200-character cap, and pack refuses
+   * at 96 value bytes, so only a forged code can test it.  Three strings of
+   * 37/37/39 bytes are 122 value bytes = a 199-character code; one "A" pads
+   * it to exactly 200.  The boundary is pinned: 200 accepted, 201 refused. */
+  const boundary = tableCode([37, 37, 39]) + "A";
+  eq("the boundary code is exactly 200 characters", boundary.length, 200);
+  const accept = toys.create(`
+function init()
+  local v = password.unpack("${boundary}")
+  print(type(v), #v)
+end`);
+  accept.load();
+  accept.frame(0);
+  eq("a 200-character code is accepted (the cap is inclusive)",
+     accept.log, ["table\t3"]);
+  accept.dispose();
+  refusal("a 201-character code", `
+function init() password.unpack("${boundary}A") end`, "password-code", null,
+          /longer than any password/);
+
+  /* The review's own probe: a 32 x 64-byte table, valid to the decoder and
+   * far past the cap.  With the cap removed the decoder accepted it. */
+  const huge = tableCode(new Array(32).fill(64));
+  check(huge.length > 2000,
+        "the long-but-valid code is " + huge.length + " characters");
+  refusal("a long code that decodes cleanly", `
+function init() password.unpack("${huge}") end`, "password-code", null,
+          /longer than any password/);
 }
 
 /* ---- the runtime asks the same model the tests ask ------------------- */

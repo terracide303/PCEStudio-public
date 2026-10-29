@@ -36,6 +36,11 @@
  * cold break by another seat (and a cold review of the pictures) is owed
  * before this closes the card.
  *
+ * #82 (REVIEW-31A E19): checkILIdentity() asserts the IL side is the IL - a
+ * pce-il program, a construct the IL refuses and the Lua runtime accepts, and
+ * the IL's own instruction budget - because a comparison of two runtimes
+ * cannot tell a real agreement from one runtime compared with itself.
+ *
  *   node tests/check-examples.js          # run everything, rewrite the PNGs
  */
 "use strict";
@@ -212,6 +217,67 @@ function decodePng(buf) {
   return { width: width, height: height, pixels: out };
 }
 
+/* ---- #82/E19: the IL side is the IL, not the Lua runtime -------------- */
+
+/* This suite compares two runtimes.  If il.create delegated to
+ * renderer/pce-toys.js's create (REVIEW-31A E19), both sides would be the
+ * same run and all 4,288 comparisons would agree trivially.  These are the
+ * identity assertions the comparison cannot make:
+ *
+ *   - il.create's runtime carries a compiled pce-il program (the Lua
+ *     runtime has no .program at all);
+ *   - a construct the IL refuses by its own code - pairs is a generic for,
+ *     il-for-in - while the Lua runtime accepts it: a real, deliberate
+ *     difference between the two sides;
+ *   - the IL's own instruction budget counts its own instructions: a busy
+ *     hook stops with a toy-timeout naming the instruction count, which only
+ *     the IL interpreter's step loop produces (the Lua side names
+ *     milliseconds). */
+function checkILIdentity() {
+  const program = il.compile("function frame(t, f) pal(1, 1) end");
+  check(program && program.lang === "pce-il",
+        "il.compile returns a pce-il program");
+  check(program.functions.length >= 1 && program.hooks.frame != null,
+        "the pce-il program has functions and a frame hook");
+
+  let ilCode = "accepted";
+  try {
+    il.create("function frame(t, f) for k in pairs({}) do end end");
+  } catch (e) {
+    ilCode = e && e.code;
+  }
+  eq("the IL refuses generic iteration by its own code", ilCode, "il-for-in");
+
+  const lua = toys.create(
+    "function frame(t, f) local n = 0 for k in pairs({ a = 1 }) do n = n + 1 end end");
+  let luaAccepted = true;
+  try {
+    lua.load();
+    lua.frame(0);
+  } catch (e) {
+    luaAccepted = false;
+  }
+  lua.dispose();
+  check(luaAccepted,
+        "the Lua runtime accepts pairs, so the refusal above is the IL's own");
+
+  let budget = null;
+  try {
+    const rt = il.create(
+      "function frame(t, f) local i = 0 while true do i = i + 1 end end",
+      { maxInstructions: 1000 });
+    rt.load();
+    rt.frame(0);
+  } catch (e) {
+    budget = { code: e && e.code, message: String(e && e.message) };
+  }
+  eq("the IL's own instruction budget stops a busy hook",
+     budget && budget.code, "toy-timeout");
+  check(/ran longer than 1000 instructions/.test(budget && budget.message || ""),
+        "the IL interpreter counted its own instructions (>1000): " +
+        (budget && budget.message || "it did not stop"));
+}
+
 /* ---- the run ----------------------------------------------------------- */
 
 function runToy(spec) {
@@ -222,6 +288,8 @@ function runToy(spec) {
   ilRT.load();
   check(luaRT.initialized === true, spec.name + ": the Lua runtime loaded");
   check(ilRT.initialized === true, spec.name + ": the IL runtime loaded");
+  check(!!ilRT.program && ilRT.program.lang === "pce-il",
+        spec.name + ": the IL runtime carries a pce-il program, not the Lua one");
   eq(spec.name + ": both runtimes agree on the raster form",
      ilRT.callbackRaster, luaRT.callbackRaster);
   eq(spec.name + ": it uses the form the toy is meant to teach",
@@ -459,6 +527,7 @@ eq("toys/ holds exactly the five example toys", names,
    TOYS.map(function (t) { return t.file; }).sort());
 
 const rows = [];
+checkILIdentity();
 for (const spec of TOYS) rows.push(runToy(spec));
 
 console.log("");
