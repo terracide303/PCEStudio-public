@@ -12,7 +12,10 @@
  *      lists on local arrays, declarations before statements, and the same
  *      IL lowering.  The default dialect's output is untouched (asserted by
  *      part A/C's committed ROMs rebuilding, in check-il-console.js).  The
- *      refusals still come back by code.
+ *      refusals still come back by code.  #91 (REVIEW-78 H01/H04/H05) adds
+ *      the dialect's three edges: 65535 emitted as (-1), the `>>` helper's
+ *      guard at 16 bits, and four argument slots for a three-parameter
+ *      function — the first and third also compiled through vendor HuC.
  *
  *   2. The ROMs rebuild.  tools/build-huc.sh (vendor/huc's own compiler and
  *      PCEAS, external under /Volumes/External II/pce-tools) builds the
@@ -41,6 +44,7 @@
 "use strict";
 
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const zlib = require("zlib");
 const crypto = require("crypto");
@@ -220,6 +224,92 @@ function init() end`, "cgen-hook");
 local function f(a, b, c, d, e) return a end
 function init() f(1, 2, 3, 4, 5) end
 function frame(t, f) end`, "cgen-arity");
+
+  /* ---- #91 / REVIEW-78 H01/H04/H05: the dialect's edges -------------- *
+   * The two shipped toys never reach these branches — they use no `>>`, no
+   * function with exactly three parameters, and no constant at the 16-bit
+   * boundary — so the pinned ROM shas proved the two ROMs, not the dialect.
+   * One fixture per edge, at the emitter (always) and through vendor HuC
+   * where the toolchain is present. */
+  function emitHuc(source, chunkName) {
+    try {
+      return { c: cgen.emitC(il.compile(source, { chunkName: chunkName }),
+                             { target: "huc" }) };
+    } catch (e) {
+      return { error: e };
+    }
+  }
+
+  /* H01: HuC's `int` is a 16-bit signed int, so 65535 is the bit pattern of
+   * -1.  The range check's top value is 65535; dropping it refuses a
+   * constant HuC represents legally. */
+  /* The constant rides in a local and is reduced to a legal BXR so the
+   * validator's range checks have nothing to refuse: the edge under test is
+   * the emitter's 16-bit width, not a register's range. */
+  const boundary = emitHuc(`function frame(t, f)
+  local v = 65535
+  reg("BXR", v % 1024)
+end`, "huc-const.lua");
+  check(!boundary.error,
+        "H01: the HuC emitter accepts 65535 (the 16-bit boundary)" +
+        (boundary.error ? ": refused with " +
+          (boundary.error.code || boundary.error.message) : ""));
+  check(!!boundary.c && /r\[\d+\] = \(-1\);/.test(boundary.c),
+        "H01: 65535 is emitted as (-1), the 16-bit value HuC compiles" +
+        (boundary.c ? "" : " (no C was emitted)"));
+
+  /* H04: a runtime right shift.  The helper's guard is the dialect's width
+   * (16 for HuC, 32 for llvm-mos); 32 leaves a count the 16-bit int cannot
+   * hold.  Both guards compile, so the emitter's text is the witness. */
+  const shr = emitHuc(`local function half(x) return x >> 1 end
+function frame(t, f) local v = half(20) reg("BXR", v) end`, "huc-shr.lua");
+  const shrGuard = shr.c &&
+    /static int il_lua_shr\(int x, int n\) \{\s*if \(n < 0 \|\| n >= (\d+)\)/.exec(shr.c);
+  check(!!shrGuard && shrGuard[1] === "16",
+        "H04: the HuC right-shift guard refuses a count >= 16 (HuC's int is " +
+        "16 bits)" + (shrGuard ? ", got " + shrGuard[1] : ", no helper emitted"));
+
+  /* H05: exactly three parameters.  The argument-slot rule is "more than
+   * two", so a three-parameter function must get all four slots; at "> 3"
+   * it gets two, and `r[2] = a2` names a variable its signature lacks. */
+  const three = emitHuc(`local function mix(a, b, c) return a + b + c end
+function frame(t, f) reg("BXR", mix(1, 2, 3)) end`, "huc-three.lua");
+  check(!!three.c &&
+        /static int il_fn_0\(struct il_closure \*cl, int a0, int a1, int a2, int a3\) \{/.test(three.c),
+        "H05: a three-parameter function gets four argument slots" +
+        (three.c ? "" : " (no C was emitted)"));
+
+  /* The two programs whose evidence is the compiler itself.  H04's guard
+   * is an emitter branch both values compile through, so it stays above. */
+  const tool = hucToolchain();
+  if (!tool) {
+    skipped.push("the H01/H05 edge programs' HuC build");
+    console.log("SKIP  the H01/H05 edge programs' HuC build: HuC not found");
+  } else {
+    const programs = [
+      ["huc-edge-const", `function frame(t, f)
+  local v = 65535
+  reg("BXR", v % 1024)
+end`],
+      ["huc-edge-three", `local function mix(a, b, c) return a + b + c end
+function frame(t, f) reg("BXR", mix(1, 2, 3)) end`]
+    ];
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pce91-huc-"));
+    for (const [name, source] of programs) {
+      const file = path.join(dir, name.replace("huc-edge-", "") + ".lua");
+      fs.writeFileSync(file, source);
+      const r = spawnSync(path.join(ROOT, "tools/build-huc.sh"),
+                          [file, name],
+                          { cwd: ROOT, encoding: "utf8",
+                            env: Object.assign({}, process.env,
+                                               { HUC_DIR: tool }) });
+      check(r.status === 0, "the " + name + " edge program compiles through " +
+            "HuC (" + (r.status === 0 ? "built" :
+              (r.stderr || r.stdout || "").trim().split("\n").slice(-1)[0]) +
+            ")");
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /* ---- 2. the ROMs rebuild --------------------------------------------- */

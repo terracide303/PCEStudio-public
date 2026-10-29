@@ -55,7 +55,15 @@ node tests/check-toys.js        # #30: three Lua toys run live in Node for 40 fr
 node tests/check-examples.js    # #29: the five example toys in toys/ for 120 frames
                                 # through the Lua runtime AND the IL, budgets, effect
                                 # checks, and frame-60 PNGs in dumps/examples/
+node tests/check-breaker-78.js  # #91: REVIEW-78's E01/E05 — setVideoMode refuses
+                                # an illegal dot clock, and the wide viewer's boot
+                                # writes HDR from $5F04 (assembled, then read back
+                                # from a Mednafen save state)
 ```
+
+`check-breaker-78.js` also needs `pceas` (through `make -C tools`) and
+`mednafen` for its capture; without `mednafen` it prints `SKIP`, runs the
+assembled-ROM half and is reported SKIP, not PASS, by `tests/all.sh`.
 
 The audio suites' models and limits are documented in `docs/PSG.md`,
 `docs/WAVE.md` and (HuTrack, #35 step 1) `docs/HUTRACK.md`;

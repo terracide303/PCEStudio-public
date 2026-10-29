@@ -184,3 +184,42 @@ No source file was edited; the mutants exist only in the `$TMPDIR` clones.
 No emulator was run and no synthetic key or mouse event was sent. The
 `tools/gen/vwide512.pce` builds used the project's own PCEAS route; no
 Mednafen capture was written.
+
+## What #91 added (the eight MISSED, each re-run DETECTED)
+
+Written by @test, a different seat from the builder. One fixture per MISSED;
+each was re-applied alone to a clean `git archive HEAD` copy under `$TMPDIR`
+(explicit `git commit` paths only; the shared working tree's other seats' edits
+were never committed). The mutation is asserted to occur exactly once before
+it is applied. All eight exit non-zero with the new checks, and the pristine
+tree is green in the same run.
+
+| # | where the check now lives | fixture | mutant output |
+|---|---|---|---|
+| S02 | `tests/check-studio.js`, `checkOutputColumn` | a raster toy whose callback sets `CR = $C0` at line 32; View only + BG hidden must draw nothing | `FAIL … 57344 pixels are drawn` |
+| S05 | same | a toy whose `init()` sets `CR = $C0` and whose callback writes only BXR (base.cr is the latch) | `FAIL … 57344 pixels are drawn` |
+| E05 | `tests/check-breaker-78.js` | `setVideoMode` on 400/0/-1/1024/255/513/null must refuse `video-mode` and leave the picture | `FAIL E05: 400 dots is refused with video-mode (ACCEPTED)` (+14) |
+| E01 | `tests/check-breaker-78.js` | assemble `gen/vwide512.pce`; the boot must hold one `lda $5F04`; run it and read HDR back from the autosave | `FAIL … saved HDR … (got 1026, want 1087)` |
+| T05 | `tests/check-toys.js`, `checkSongVolume` | row volume 20 + a looping envelope 31,16: AL must be 20 then 10 | `FAIL … (got [31,16,…], want [20,10,…])`; `AL 10 in $8a (got $90)` |
+| H01 | `tests/check-il-huc.js`, `checkDialect` | `local v = 65535` … emits `r[n] = (-1)`; compiled through HuC | `FAIL H01 … refused with cgen-width` (+2) |
+| H04 | same | a `>>` helper: the HuC guard must be `n >= 16` | `FAIL H04 … got 32` |
+| H05 | same | a three-parameter function must get four argument slots; compiled through HuC | `FAIL H05 … four argument slots`; the HuC build fails |
+
+`E05`'s suite (`check-editor.js`) and `E01`'s (`check-viewer.js`) were being
+edited in the shared working tree by the #67 seat when #91 ran, so those two
+fixtures live in `tests/check-breaker-78.js`; they belong beside the other
+wide-window evidence once #67 lands. E01's capture half prints `SKIP` and is
+not counted when `mednafen` is absent.
+
+**Not proven by any of this**, and written in the files themselves:
+- S02/S05 still exercise only the page's stub DOM; a real canvas and a real
+  click are `check-studio.js --browser`'s, not these fixtures'.
+- E01 proves HDR/HSR and the VCE CR for `wide512` only: VPR/VDR/VCR are #67's,
+  the picture's pixels are `check-viewer.js`'s diff, and no real console ran.
+  `setVideoMode` still accepts the string `"512"` (an object-key lookup); that
+  is an observation, not fixed here, and it is not E05's width case.
+- T05 is the player's own write stream, not a Mednafen recording: no shipped
+  DMF/recording pairs a looping envelope with a channel volume below 31.
+- H01/H05 are emitter text plus a HuC compile; H04 is emitter text only — both
+  guard values compile, so no ROM sha can distinguish them. None of the three
+  is run in Mednafen.
