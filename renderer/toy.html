@@ -115,6 +115,10 @@
 <script src="pce-sprites.js"></script>
 <script src="pce-song.js"></script>
 <script src="pce-psg.js"></script>
+<!-- the picture models the #117 importer needs for a toy with asset files -->
+<script src="pce-editor.js"></script>
+<script src="pce-screen.js"></script>
+<script src="pce-sat.js"></script>
 <script src="pce-toyhost.js"></script>
 <script src="pce-toys.js"></script>
 <script src="gallery-toys.js"></script>
@@ -208,6 +212,7 @@
 
   player = gallery.player(canvas, toy.source, {
     songs: toy.songs,
+    files: toy.files,
     onFrame(frame, index) {
       if (index % 10 === 0 || index < 3) status(index);
     },

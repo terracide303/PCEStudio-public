@@ -66,6 +66,10 @@ const panels = require(path.join(RENDERER, "pce-panels.js"));
 const validate = require(path.join(RENDERER, "pce-validate.js"));
 const dmf = require(path.join(RENDERER, "pce-dmf.js"));
 const psg = require(path.join(RENDERER, "pce-psg.js"));
+/* #156: the importer the sources' placement is checked against — the same
+ * public call pce-toyhost.js's #117 import makes */
+const satM = require(path.join(RENDERER, "pce-sat.js"));
+const edM = require(path.join(RENDERER, "pce-editor.js"));
 
 let checks = 0;
 const failures = [];
@@ -355,7 +359,194 @@ function checkSongs() {
         "#99: a blank song is marked as having no music yet");
 }
 
-/* ---- 5. the bars are measured ----------------------------------------- */
+/* ---- 5. the named sources (#156) --------------------------------------- */
+
+/* A small picture the panels' models accept: two tiles, one background
+ * palette row, one sprite pattern on one sprite row.  The expected numbers
+ * below are recomputed here, not read from pce-assets.js. */
+function sourcesFixture() {
+  const blank = new Array(64).fill(0);
+  const cross = new Array(64).fill(0);
+  cross[0] = 1; cross[63] = 15;         /* colour indexes into the bg row */
+  const bgRow = new Array(16).fill(0);
+  bgRow[1] = 0x1FF; bgRow[15] = 0x0FF;
+  const sprRow = new Array(16).fill(0);
+  sprRow[1] = 0x1C0;
+  const background = new Array(16).fill(null);
+  background[0] = bgRow;
+  const sprites = new Array(16).fill(null);
+  sprites[0] = sprRow;
+  const tilesDoc = {
+    version: 1, video: 256,
+    tiles: [{ char: 64, palette: 0, pixels: blank },
+            { char: 65, palette: 0, pixels: cross }],
+    map: { mwr: 0, bxr: 0, byr: 0, cells: new Array(1024).fill(64) }
+  };
+  const palsDoc = { version: 1, backdrop: 0, background, sprites };
+  const spritesDoc = {
+    version: 1,
+    patterns: [{ width: 16, height: 16, pixels: new Array(256).fill(0) }],
+    sprites: []
+  };
+  const sourcesDoc = {
+    version: 1,
+    sources: [
+      { name: "hill", kind: "bg",
+        tiles: { first: 0, count: 2 }, map: true,
+        palettes: { side: "bg", first: 0, count: 1 } },
+      { name: "dot", kind: "sprites",
+        patterns: { first: 0, count: 1 }, sprites: { first: 0, count: 0 },
+        palettes: { side: "spr", first: 0, count: 1 } }
+    ]
+  };
+  return [
+    { name: "tiles.json", source: JSON.stringify(tilesDoc) + "\n" },
+    { name: "palettes.json", source: JSON.stringify(palsDoc) + "\n" },
+    { name: "sprites.json", source: JSON.stringify(spritesDoc) + "\n" },
+    { name: "sources.json", source: JSON.stringify(sourcesDoc) + "\n" }
+  ];
+}
+
+function checkSources() {
+  console.log("== the named sources, at the importer's placement");
+  const files = sourcesFixture();
+
+  /* no sources.json at all: an empty list, no refusal — the common case */
+  const none = A.sources([{ name: "tiles.json", source: "{}" }]);
+  eq("#156: no sources.json is an empty list, not an error",
+     none, { sources: [], notes: [] });
+
+  const r = A.sources(files);
+  eq("#156: the list is the document's order",
+     r.sources.map((s) => [s.name, s.kind]),
+     [["hill", "bg"], ["dot", "sprites"]]);
+  eq("#156: no notes for ranges the files hold", r.notes, []);
+
+  /* the placement, recomputed independently from the importer's own calls */
+  const pic = satM.pictureFromFiles(files);
+  const codes = edM.patternLayout(pic).codes;
+  const hill = r.sources[0], dot = r.sources[1];
+  eq("#156: a bg source owns its tiles' words (char*16) and the BAT",
+     hill.vram.segments,
+     [{ what: "tiles", first: 64 * 16, count: 2 * 16 },
+      { what: "map", first: 0, count: 1024 }]);
+  eq("#156: its palette rows are the bg CRAM entries",
+     hill.cram.segments,
+     [{ what: "palettes", side: "bg", first: 0, count: 16 }]);
+  eq("#156: a sprites source owns the importer's pattern cells and no SAT",
+     dot.vram.segments,
+     [{ what: "patterns", first: codes[0] * 64, count: 64 }]);
+  eq("#156: its palette rows are the sprite CRAM entries",
+     dot.cram.segments,
+     [{ what: "palettes", side: "spr", first: 256, count: 16 }]);
+  eq("#156: the size and placement are the words and entries",
+     [hill.size, hill.placement],
+     ["1,056 words · 16 colours",
+      "VRAM 0x400-0x41f tiles · VRAM 0x0-0x3ff map · CRAM 0-15"]);
+
+  /* the preview: the files' own cells, laid out as a sheet */
+  check(!!hill.preview && !!dot.preview, "#156: both previews are built eagerly");
+  eq("#156: the tiles preview is a 16-column sheet of the source's cells",
+     [hill.preview.cols, hill.preview.cells.length,
+      hill.preview.cells[1].char, hill.preview.cells[1].x,
+      hill.preview.cells[1].y],
+     [16, 2, 65, 8, 0]);
+  eq("#156: the tiles preview carries the importer's own pixels",
+     hill.preview.cells[1].pixels[63], 15);
+  eq("#156: the patterns preview carries the importer's cell and size",
+     [dot.preview.cells.length, dot.preview.cells[0].cell,
+      dot.preview.cells[0].w, dot.preview.cells[0].h],
+     [1, codes[0], 16, 16]);
+  eq("#156: each preview names the palette rows it uses",
+     [hill.preview.palettes.map((p) => p.side + p.row),
+      dot.preview.palettes.map((p) => p.side + p.row)],
+     [["bg0"], ["spr0"]]);
+  eq("#156: the preview's row is the file's row",
+     hill.preview.palettes[0].words[1], 0x1FF);
+
+  /* the bars carry the sources as their parts */
+  const bar = A.bars({
+    map: { segments: [{ kind: "map", words: 1024 },
+                      { kind: "tiles", words: 32 },
+                      { kind: "patterns", words: 64 },
+                      { kind: "sat", words: 512 },
+                      { kind: "free", words: 100 }] },
+    state: { cram: new Uint8Array(1024) },
+    files: files,
+    sources: r.sources
+  });
+  eq("#156: the VRAM bar's parts are the sources plus the rest",
+     bar[0].parts.map((p) => [p.label, p.used, p.source]),
+     [["hill", 1056, true], ["dot", 64, true], ["other", 512, false]]);
+  check(bar[0].parts[0].first === 1024 && bar[0].parts[1].first === codes[0] * 64,
+        "#156: ... each part marked with its range's first word (" +
+        bar[0].parts[0].first + ", " + bar[0].parts[1].first + ")");
+  eq("#156: the CRAM bar's parts are the sources",
+     bar[1].parts.map((p) => [p.label, p.used, p.first]),
+     [["hill", 16, 0], ["dot", 16, 256]]);
+
+  /* stale ranges: noted and dropped, not refused */
+  const stale = sourcesFixture();
+  const staleDoc = JSON.parse(stale[3].source);
+  staleDoc.sources[0].tiles.count = 5000;
+  staleDoc.sources[1].patterns = { first: 30, count: 10 };
+  stale[3].source = JSON.stringify(staleDoc);
+  const r2 = A.sources(stale);
+  eq("#156: a range past the files is dropped with a note, once",
+     r2.notes,
+     ["hill: 0+5000 runs past 2 — dropped",
+      "dot: 30+10 runs past 1 — dropped"]);
+  eq("#156: what remains still lists the source",
+     r2.sources[0].vram.segments.map((s) => s.what), ["map"]);
+  eq("#156: ... and a source keeps what still fits (its palette rows)",
+     r2.sources.map((s) => [s.name, s.vram.segments.length,
+                            s.cram.segments.length]),
+     [["hill", 1, 1], ["dot", 0, 1]]);
+
+  /* refusals */
+  const bad = sourcesFixture();
+  bad[3].source = "{nope";
+  refuses("source-json", () => A.sources(bad), "#156: sources.json that is not JSON");
+  bad[3].source = '{"version":1}';
+  refuses("source-shape", () => A.sources(bad), "#156: no sources array");
+  bad[3].source = JSON.stringify({ version: 1, sources: [{ name: "x", kind: "bg" }] });
+  refuses("source-shape", () => A.sources(bad), "#156: an entry with no ranges");
+  bad[3].source = JSON.stringify({
+    version: 1,
+    sources: [{ name: "x", kind: "bg", tiles: { first: 0, count: 1 },
+                palettes: { side: "mid", first: 0, count: 1 } }]
+  });
+  refuses("source-shape", () => A.sources(bad), "#156: a palette side that is not bg/spr");
+  bad[3].source = JSON.stringify({
+    version: 1,
+    sources: [{ name: "x", kind: "song", tiles: { first: 0, count: 1 } }]
+  });
+  refuses("source-kind", () => A.sources(bad), "#156: a kind the studio does not know");
+  bad[3].source = JSON.stringify({
+    version: 1, sources: [42]
+  });
+  refuses("source-shape", () => A.sources(bad), "#156: an entry that is not an object");
+  check(A.REFUSALS["source-json"] && A.REFUSALS["source-shape"] &&
+        A.REFUSALS["source-kind"] && A.REFUSALS["no-import"],
+        "#156: the new refusals are documented in REFUSALS");
+
+  /* mergeSource: the Add Source entry, replaced by name, else appended */
+  const entry = { name: "hill", kind: "bg", tiles: { first: 0, count: 2 },
+                  map: true, palettes: { side: "bg", first: 0, count: 1 } };
+  const m1 = A.mergeSource(null, entry);
+  eq("#156: mergeSource makes the file and joins the entry",
+     JSON.parse(m1.text).sources.map((s) => s.name),
+     ["hill"]);
+  const m2 = A.mergeSource(m1.text, Object.assign({}, entry, { tiles: { first: 0, count: 9 } }));
+  eq("#156: ... a second add of the same name replaces the entry",
+     JSON.parse(m2.text).sources.map((s) => s.tiles.count), [9]);
+  const m3 = A.mergeSource(m2.text, { name: "dot", kind: "sprites",
+                                      patterns: { first: 0, count: 1 } });
+  eq("#156: ... a different name is appended",
+     JSON.parse(m3.text).sources.map((s) => s.name), ["hill", "dot"]);
+}
+
+/* ---- 6. the bars are measured ----------------------------------------- */
 
 const SAT_ADDR = 0x7F00;
 
@@ -501,7 +692,7 @@ function checkBars() {
      empty[2].parts[0].used, 0);
 }
 
-/* ---- 6. the panel module, against the studio API ---------------------- */
+/* ---- 7. the panel module, against the studio API ---------------------- */
 
 /* A stub DOM: only what studio-panel-assets.js uses.  Elements are records
  * with the listeners kept so the check can click them. */
@@ -511,19 +702,21 @@ function makeDom() {
     const e = {
       tagName: tag, children: [], className: "", id: "", type: "",
       textContent: "", title: "", disabled: false, hidden: false,
-      style: {}, dataset: {}, listeners: {},
-      appendChild(c) { this.children.push(c); this.firstChild = this.children[0]; return c; },
+      style: {}, dataset: {}, listeners: {}, parentNode: null,
+      appendChild(c) { this.children.push(c); this.firstChild = this.children[0]; c.parentNode = this; return c; },
       insertBefore(c, before) {
         const i = this.children.indexOf(before);
         if (i < 0) return this.appendChild(c);
         this.children.splice(i, 0, c);
         this.firstChild = this.children[0];
+        c.parentNode = this;
         return c;
       },
       removeChild(c) {
         const i = this.children.indexOf(c);
         if (i >= 0) this.children.splice(i, 1);
         this.firstChild = this.children[0];
+        c.parentNode = null;
         return c;
       },
       addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); },
@@ -536,6 +729,7 @@ function makeDom() {
   }
   const doc = {
     head: element("head"),
+    body: element("body"),
     createElement: element,
     getElementById: (id) => byId[id] || null,
     getElementsByTagName: (t) => (t === "head" ? [doc.head] : [])
@@ -668,11 +862,89 @@ function checkPanel() {
   const bars = api.bars();
   eq("#99: three bars, VRAM / CRAM / ROM", bars.map((b) => b.label),
      ["VRAM", "CRAM", "ROM"]);
+  /* one fill per part (VRAM kinds + CRAM halves + ROM files), each with a
+   * percentage width */
   const fills = findAll(pane, (e) => e.className === "asx-fill");
-  eq("#99: one fill per bar", fills.length, 3);
-  check(fills.every((f) => /%$/.test(f.style.width) && parseFloat(f.style.width) > 0),
-        "#99: each fill has a width from the measurement (" +
+  eq("#99: one fill per bar part",
+     fills.length, bars[0].parts.length + bars[1].parts.length + bars[2].parts.length);
+  check(fills.every((f) => /%$/.test(f.style.width) &&
+                          parseFloat(f.style.width) >= 0),
+        "#99: every part fill has a width (" +
         fills.map((f) => f.style.width).join(" · ") + ")");
+
+  /* #156: no sources.json yet — the list says so */
+  eq("#156: the pane's sources list is empty without sources.json",
+     api.sources(), []);
+  check(textOf(pane).indexOf("no named sources") >= 0,
+        "#156: ... and says how to get one");
+
+  /* #156: with the files carrying sources.json, the pane lists them by name
+   * with kind, size and placement, and "…" opens the grid */
+  const fixture = sourcesFixture();
+  for (const f of fixture) {
+    const at = studio.files.findIndex((x) => x.name === f.name);
+    if (at >= 0) studio.files[at] = f;
+    else studio.files.push(f);
+  }
+  api.refresh();
+  const sources = api.sources();
+  eq("#156: the pane lists the named sources",
+     sources.map((s) => [s.name, s.kind]),
+     [["hill", "bg"], ["dot", "sprites"]]);
+  eq("#156: each row carries size and placement",
+     [sources[0].size, sources[0].placement],
+     ["1,056 words · 16 colours",
+      "VRAM 0x400-0x41f tiles · VRAM 0x0-0x3ff map · CRAM 0-15"]);
+  check(textOf(pane).indexOf("SOURCES") >= 0,
+        "#156: the pane has the SOURCES section");
+
+  /* the bars now colour the sources' ranges */
+  const sbars = api.bars();
+  eq("#156: the VRAM bar's parts begin with the sources",
+     sbars[0].parts.slice(0, 2).map((p) => [p.label, p.source]),
+     [["hill", true], ["dot", true]]);
+  const sfills = findAll(pane, (e) => e.className === "asx-fill" &&
+                          /hsl\(/.test(e.style.background || ""));
+  check(sfills.length >= 2, "#156: each source's fill is its own hue (" +
+        sfills.length + " coloured fills)");
+  check(sbars[0].parts[0].first === 1024 && sbars[0].parts[1].first === 17 * 64,
+        "#156: the source's fill sits at its range's address (" +
+        sbars[0].parts[0].first + ", " + sbars[0].parts[1].first + ")");
+
+  /* the "…" preview: the grid's pixels, drawn from the files */
+  const px = api.sourcePixels(sources[0]);
+  check(!!px && px.width === 16 && px.height === 8,
+        "#156: the tiles preview is the sheet's size (" +
+        (px && px.width + "x" + px.height) + ")");
+  /* cell 1's top-left pixel is colour 1 of the bg row: 0x1FF = white */
+  eq("#156: a preview pixel is the row's colour (0x1FF is white)",
+     Array.from(px.rgba.slice(32, 36)), [252, 252, 252, 255]);
+  /* the blank tile's colour 0 is the backdrop, not transparent */
+  eq("#156: colour 0 on a bg row is the backdrop colour",
+     Array.from(px.rgba.slice(0, 4)), [0, 0, 0, 255]);
+  /* sprite colour 0 is transparent, the way the VDC shows it */
+  const dotPx = api.sourcePixels(sources[1]);
+  check(!!dotPx && dotPx.width === 16 && dotPx.height === 16 &&
+        dotPx.rgba.every((v) => v === 0),
+        "#156: colour 0 on a sprite row is transparent");
+
+  /* clicking "…" opens the modal with the palette strip */
+  const openHill = findAll(pane, (e) => e.id === "assets-source-open-hill")[0];
+  check(!!openHill, "#156: each source row has a … button");
+  click(openHill);
+  const modal = findAll(dom.doc.body, (e) => e.id === "assets-source-preview")[0];
+  check(!!modal, "#156: … opens the source's preview modal");
+  check(textOf(modal).indexOf("hill · bg") >= 0,
+        "#156: ... titled with the name and kind");
+  const swatches = findAll(modal, (e) => e.className === "asx-swat");
+  eq("#156: the strip shows the source's 16-entry row", swatches.length, 16);
+  eq("#156: ... with the row's colours (entry 1 is white)",
+     swatches[1].style.background, "rgb(252,252,252)");
+  const closeBtn = findAll(modal, (e) => e.id === "assets-source-close")[0];
+  check(!!closeBtn, "#156: the modal has a Close button");
+  click(closeBtn);
+  check(dom.doc.body.children.indexOf(modal) < 0,
+        "#156: Close removes the modal");
 
   /* Add to toy: piano */
   const piano = adds.find((b) => b.id === "assets-add-piano");
@@ -737,13 +1009,15 @@ checkEnvelopes();
 checkPlaying();
 checkAdd();
 checkSongs();
+checkSources();
 checkBars();
 checkPanel();
 
 if (failures.length === 0) {
   console.log(`PASS: ${checks} checks — fifteen built-ins play through ` +
               `pce-psg.js at their register's pitch, the bars are the toy's ` +
-              `measured use, and Add to toy writes instruments.json`);
+              `measured use, the named sources sit where the importer put ` +
+              `them, and Add to toy writes instruments.json`);
   process.exitCode = 0;
 } else {
   console.log(`FAIL: ${failures.length} of ${checks} checks failed`);

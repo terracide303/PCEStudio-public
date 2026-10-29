@@ -89,9 +89,11 @@
    * A fresh runtime, disposed afterwards: a card does not keep five Lua VMs. */
   function still(canvas, source, frameNo, opts) {
     var last = frameNo === undefined ? THUMB_FRAME : frameNo;
-    /* opts.songs: a toy whose music(0) needs a song (OAK WOODS, #128) */
+    /* opts.songs: a toy whose music(0) needs a song (OAK WOODS, #128);
+     * opts.files: a demo toy whose picture is its asset files (#156) */
     var rt = toyRuntime.create(source, { budgetMs: 200,
-                                        songs: (opts && opts.songs) || [] });
+                                        songs: (opts && opts.songs) || [],
+                                        files: (opts && opts.files) || [] });
     try {
       rt.load();
       var frame = null;
@@ -130,7 +132,8 @@
     function start() {
       disposeRuntime();
       rt = toyRuntime.create(source, { budgetMs: opts.budgetMs || 120,
-                                       songs: opts.songs || [] });
+                                       songs: opts.songs || [],
+                                       files: opts.files || [] });
       rt.load();
       index = 0;
       error = null;

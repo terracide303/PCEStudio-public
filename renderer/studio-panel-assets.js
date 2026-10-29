@@ -79,7 +79,13 @@
     ".asx-preview .asx-cap{font:10px var(--mono);color:var(--muted);margin-top:4px}",
     ".asx-warn{color:#f6c46a;font:11px var(--mono);margin:6px 0 0}",
     ".asx-err{color:#f78a8a;font:11px var(--mono);margin:6px 0 0}",
-    ".asx-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}"
+    ".asx-foot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}",
+
+    /* #156 — the named sources' "…" preview: the grid, then the palette rows
+     * it uses as swatches. */
+    ".asx-strip{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px}",
+    ".asx-swatches{display:flex;gap:2px;margin-top:4px}",
+    ".asx-swat{width:14px;height:14px;border:1px solid rgba(255,255,255,.14);box-sizing:border-box}"
   ].join("\n");
 
   P.studioPanelModules.push({
@@ -95,6 +101,7 @@
         bars: [],
         instruments: [],         /* the toy's own, from instruments.json */
         songs: [],               /* the toy's, from songs.json */
+        sources: { sources: [], notes: [] },  /* the named art (#156) */
         toyName: "",
         error: "",
         report: null
@@ -173,12 +180,19 @@
           state.error = state.error || (e2.code || "asset") + ": " + e2.message;
         }
         state.toyName = toyFileName();
+        var list = files();
+        try {
+          state.sources = A.sources(list);
+        } catch (e3) {
+          state.sources = { sources: [], notes: [] };
+          state.error = state.error || (e3.code || "asset") + ": " + e3.message;
+        }
         var st = studio.render.state();
         var map = st && P.panels && P.panels.vramMap ? P.panels.vramMap(st) : null;
         var priced = reportFor(studio.toy.source());
         state.report = priced.report;
         state.bars = A.bars({ state: st, map: map, report: priced.report,
-                              files: files() });
+                              files: list, sources: state.sources.sources });
       }
 
       /* ---- writing the toy ------------------------------------------------ */
@@ -928,6 +942,30 @@
         return state;
       }
 
+      /* The sources.json entry an import produced: the ranges the files it
+       * replaces start at 0, so the entry records exactly what was written
+       * (card #156).  A sample or a song has no picture ranges. */
+      function sourceEntryOf(result) {
+        if (!result || !result.stats) return null;
+        if (result.kind === "bg" || result.kind === "tilesheet")
+          return { name: result.name, kind: result.kind,
+                   tiles: { first: 0, count: result.stats.tiles },
+                   map: result.kind === "bg" ? true : undefined,
+                   palettes: { side: "bg", first: 0,
+                               count: result.stats.palettes } };
+        if (result.kind === "sprites")
+          return { name: result.name, kind: "sprites",
+                   patterns: { first: 0, count: result.patterns.length },
+                   sprites: { first: 0, count: result.sprites.length },
+                   palettes: { side: "spr", first: 0,
+                               count: result.stats.palettes } };
+        if (result.kind === "palette")
+          return { name: result.name, kind: "palette",
+                   palettes: { side: "bg", first: 0,
+                               count: result.stats.palettes } };
+        return null;
+      }
+
       /* "Add source": write the files the preview measured into the toy, so
        * the panels open what was imported. */
       function commitAdd() {
@@ -940,6 +978,10 @@
         var files = filesFor(result);
         var names = Object.keys(files);
         for (var i = 0; i < names.length; i++) putFile(names[i], files[i]);
+        var entry = sourceEntryOf(result);
+        if (entry)
+          putFile("sources.json",
+                  A.mergeSource(A.fileText(files(), "sources.json"), entry).text);
         var what = result.kind === "sample"
           ? result.samples.length + " samples at " + result.rate + " Hz in samples.json"
           : result.kind === "song"
@@ -990,6 +1032,12 @@
         els.bars = el("div", "asx-bars");
         box.appendChild(els.bars);
 
+        /* the named sources (#156): the toy's art by name, as ppu.toys lists
+         * it — each with its kind, size, where it sits, and a "…" preview */
+        h(box, "SOURCES");
+        els.sources = el("div", "asx-list");
+        box.appendChild(els.sources);
+
         /* songs */
         h(below, "SONGS");
         els.songs = el("div", "asx-list");
@@ -1015,6 +1063,15 @@
         below.appendChild(els.error);
       }
 
+      /* A stable hue per source name, so the same source is the same colour
+       * in the bars and wherever else it appears. */
+      function hueOf(name) {
+        var h = 0;
+        for (var i = 0; i < name.length; i++)
+          h = (h * 31 + name.charCodeAt(i)) % 360;
+        return h;
+      }
+
       function drawBars() {
         var host = els.bars;
         clear(host);
@@ -1023,20 +1080,163 @@
           var row = el("div", "asx-bar");
           row.appendChild(el("span", "asx-lab", b.label));
           var track = el("div", "asx-track");
-          var fill = el("div", "asx-fill");
-          var pct = b.cap ? Math.max(0, Math.min(100, 100 * b.used / b.cap)) : 0;
-          fill.style.width = pct.toFixed(2) + "%";
-          track.appendChild(fill);
+          var at = 0;
+          for (var k = 0; k < b.parts.length; k++) {
+            var part = b.parts[k];
+            var f = el("div", "asx-fill");
+            /* a source's fill sits where its range sits: the address is the
+             * position, so the bar IS the memory map (#156) */
+            var left = part.source && part.first !== undefined
+              ? 100 * part.first / b.cap : at;
+            var w = 100 * part.used / b.cap;
+            f.style.left = left.toFixed(3) + "%";
+            f.style.width = w.toFixed(3) + "%";
+            if (part.source) {
+              f.style.background = "hsl(" + hueOf(part.label) + ",60%,55%)";
+              f.style.border = "1px solid rgba(0,0,0,.45)";
+            } else if (part.label === "other") {
+              f.style.background = "rgba(255,255,255,.28)";
+            } else {
+              f.style.background = "var(--accent,#6cf)";
+            }
+            f.title = part.label + " " + part.used + " " + b.unit +
+              (part.source && part.first !== undefined
+                ? " · first " + part.first : "");
+            track.appendChild(f);
+            at = left + w;
+          }
           row.appendChild(track);
           row.appendChild(el("span", "asx-val",
             b.used + " / " + b.cap + " " + b.unit + " (" +
-            (b.measured ? Math.round(pct) + "%" : "?") + ")"));
+            (b.measured ? Math.round(100 * b.used / b.cap) + "%" : "?") + ")"));
           var parts = el("div", "asx-parts");
           var text = b.parts.map(function (p) { return p.label + " " + p.used; }).join(" · ");
           parts.textContent = text + (b.note ? "  — " + b.note : "");
           row.appendChild(parts);
           host.appendChild(row);
         }
+      }
+
+      /* ---- the named sources (#156) ---------------------------------------
+       * ppu.toys' list: each source is a name, a kind, its size and where it
+       * sits in VRAM/CRAM, and "…" opens the tile/pattern grid with its
+       * palette.  The pixels are the files' own (the importer's output), so
+       * the preview is the art the toy shows, not a re-render of it. */
+
+      /* The grid as drawable RGBA: colour 0 on a sprite row is transparent
+       * (the VDC shows the background there); on a background row it is the
+       * row's entry 0, the backdrop. */
+      function sourcePixels(src) {
+        var preview = src && src.preview;
+        if (!preview || !preview.cells.length) return null;
+        var w = 0, h = 0, i, c;
+        for (i = 0; i < preview.cells.length; i++) {
+          c = preview.cells[i];
+          w = Math.max(w, c.x + c.w);
+          h = Math.max(h, c.y + c.h);
+        }
+        var rgba = new Uint8Array(w * h * 4);
+        var rows = {};
+        for (i = 0; i < preview.palettes.length; i++)
+          rows[preview.palettes[i].side + preview.palettes[i].row] =
+            preview.palettes[i];
+        for (i = 0; i < preview.cells.length; i++) {
+          c = preview.cells[i];
+          var pal = rows["bg" + c.palette] || rows["spr" + c.palette] || null;
+          var words = pal ? pal.words : null;
+          for (var y = 0; y < c.h; y++) for (var x = 0; x < c.w; x++) {
+            var idx = c.pixels[y * c.w + x];
+            var o = ((c.y + y) * w + (c.x + x)) * 4;
+            if (!idx && (!pal || pal.side === "spr")) continue;  /* transparent */
+            var rgb = A.rgbOf(words ? words[idx] : 0);
+            rgba[o] = rgb[0]; rgba[o + 1] = rgb[1]; rgba[o + 2] = rgb[2];
+            rgba[o + 3] = 255;
+          }
+        }
+        return { width: w, height: h, rgba: rgba };
+      }
+
+      function previewSource(src) {
+        closePop();
+        var modal = el("div", "asx-modal");
+        modal.id = "assets-source-preview";
+        var dialog = el("div", "asx-dialog");
+        modal.appendChild(dialog);
+        dialog.appendChild(el("h2", null, src.name + " · " + src.kind));
+
+        var grid = el("div", "asx-preview");
+        var px = sourcePixels(src);
+        if (px) {
+          var canvas = el("canvas");
+          canvas.id = "assets-source-canvas";
+          if (paint(canvas, px.width, px.height, px.rgba)) grid.appendChild(canvas);
+        }
+        dialog.appendChild(grid);
+
+        /* the palette rows the cells use, as swatches, with their CRAM home */
+        var strip = el("div", "asx-strip");
+        ((src.preview && src.preview.palettes) || []).forEach(function (pal) {
+          var col = el("div");
+          var sw = el("div", "asx-swatches");
+          var first = pal.side === "bg" ? pal.row * 16 : 256 + pal.row * 16;
+          for (var e = 0; e < 16; e++) {
+            var s = el("span", "asx-swat");
+            var rgb = A.rgbOf(pal.words[e] & 0x1FF);
+            s.style.background = "rgb(" + rgb.join(",") + ")";
+            s.title = "CRAM " + (first + e);
+            sw.appendChild(s);
+          }
+          col.appendChild(sw);
+          col.appendChild(el("div", "asx-cap",
+            (pal.side === "bg" ? "bg row " : "sprite row ") + pal.row +
+            " · CRAM " + first + "-" + (first + 15)));
+          strip.appendChild(col);
+        });
+        dialog.appendChild(strip);
+
+        dialog.appendChild(el("p", "asx-sub",
+          src.size + (src.placement ? " · " + src.placement : "")));
+
+        var foot = el("div", "asx-foot");
+        var close = button("btn-mini", "Close", function () {
+          if (modal.parentNode) modal.parentNode.removeChild(modal);
+        });
+        close.id = "assets-source-close";
+        foot.appendChild(close);
+        dialog.appendChild(foot);
+        (doc.body || doc.documentElement).appendChild(modal);
+        return modal;
+      }
+
+      function drawSources() {
+        var host = els.sources;
+        clear(host);
+        if (!state.sources.sources.length) {
+          var none = el("div", "asx-row");
+          none.appendChild(el("span", "asx-what",
+            "no named sources — Add Source imports one, and sources.json " +
+            "names them"));
+          host.appendChild(none);
+        }
+        for (var i = 0; i < state.sources.sources.length; i++) {
+          (function (src) {
+            var row = el("div", "asx-row");
+            row.appendChild(el("span", "asx-name", src.name));
+            row.appendChild(el("span", "asx-tag", src.kind.toUpperCase()));
+            var what = el("span", "asx-what");
+            what.appendChild(el("span", "asx-sub", src.size));
+            what.appendChild(el("br"));
+            what.appendChild(el("span", "asx-sub", src.placement));
+            row.appendChild(what);
+            var b = button("btn-mini", "…", function () { previewSource(src); });
+            b.id = "assets-source-open-" + src.name;
+            b.title = "Open " + src.name + " — the " + src.kind + " grid with its palette";
+            row.appendChild(b);
+            host.appendChild(row);
+          })(state.sources.sources[i]);
+        }
+        for (var n = 0; n < state.sources.notes.length; n++)
+          host.appendChild(el("p", "asx-note", state.sources.notes[n]));
       }
 
       function drawSongs() {
@@ -1175,6 +1375,7 @@
         closePop();
         readToy();
         drawBars();
+        drawSources();
         drawSongs();
         drawInstruments();
         drawToyList();
@@ -1197,7 +1398,7 @@
       studio.toy.onAssetEdit(function (name) {
         if (name === "instruments.json" || name === "songs.json" ||
             name === "tiles.json" || name === "palettes.json" ||
-            name === "sprites.json") refresh();
+            name === "sprites.json" || name === "sources.json") refresh();
       });
 
       refresh();
@@ -1228,6 +1429,13 @@
         bars: function () { return state.bars; },
         instruments: function () { return state.instruments.slice(); },
         songs: function () { return state.songs.map(function (s) { return s; }); },
+        /* #156: the named sources, the grid as drawable RGBA, and the "…"
+         * modal.  The checks read sources() and render sourcePixels() into a
+         * canvas stub to compare the preview with the VRAM after init. */
+        sources: function () { return state.sources.sources.map(function (s) { return s; }); },
+        sourceNotes: function () { return state.sources.notes.slice(); },
+        sourcePixels: sourcePixels,
+        sourcePreview: previewSource,
         addToToy: addToToy,
         removeFromToy: removeFromToy,
         addBlankSong: addBlankSong,

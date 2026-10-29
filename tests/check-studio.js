@@ -5217,6 +5217,81 @@ function checkPanelModules(page) {
      S.studio.docsChapter(), "budgets");
   studio.closeDocs();
   studio.panels.select("screen");
+
+  /* #156: a toy whose sources.json names its art — the ASSETS pane lists the
+   * source, and "…" paints the tile grid onto a canvas the stub records, so
+   * the preview's pixels are read back without a browser.  The toy's files
+   * are put back afterwards for the checks that follow. */
+  const assetsDef = studio.panels.get("assets");
+  if (assetsDef && assetsDef.api) {
+    const api = assetsDef.api;
+    /* studio.files() returns a copy; the panel reads toy.files(), the live
+     * array (studio.html's evidence API), so the fixture goes in there. */
+    const live = studio.toy.files();
+    const before = live.map((f) => ({ name: f.name, source: f.source }));
+    const setFile = (name, text) => {
+      const f = live.find((x) => x.name === name);
+      if (f) f.source = text;
+      else live.push({ name: name, kind: "json", source: text });
+    };
+    const blank = new Array(64).fill(0);
+    const cross = new Array(64).fill(0);
+    cross[0] = 1;
+    const bgRow = new Array(16).fill(0);
+    bgRow[1] = 0x1FF;          /* white: the pixel the evidence reads back */
+    setFile("tiles.json", JSON.stringify({
+      version: 1, video: 256,
+      tiles: [{ char: 64, palette: 0, pixels: blank },
+              { char: 65, palette: 0, pixels: cross }],
+      map: { mwr: 0, bxr: 0, byr: 0, cells: new Array(1024).fill(64) }
+    }) + "\n");
+    setFile("palettes.json", JSON.stringify({
+      version: 1, backdrop: 0, background: [bgRow],
+      sprites: [new Array(16).fill(0)]
+    }) + "\n");
+    setFile("sources.json", JSON.stringify({
+      version: 1,
+      sources: [{ name: "hill", kind: "bg",
+                  tiles: { first: 0, count: 2 }, map: true,
+                  palettes: { side: "bg", first: 0, count: 1 } }]
+    }) + "\n");
+    api.refresh();
+    eq("#156: the studio's ASSETS pane lists the named source",
+       api.sources().map((s) => [s.name, s.kind]), [["hill", "bg"]]);
+    eq("#156: ... with the importer's placement",
+       api.sources()[0].placement,
+       "VRAM 0x400-0x41f tiles · VRAM 0x0-0x3ff map · CRAM 0-15");
+    const openBtn = page.dom.get("assets-source-open-hill");
+    check((openBtn.listeners.click || []).length === 1,
+          "#156: each source row's … button has a handler");
+    clickOne(page, "assets-source-open-hill");
+    const canvas = page.dom.get("assets-source-canvas");
+    const calls = (canvas.__ctx && canvas.__ctx.__calls) || [];
+    const put = calls.filter((c) => c.name === "putImageData");
+    check(put.length === 1,
+          "#156: … paints the tile grid onto the canvas (" +
+          put.length + " putImageData)");
+    const img = put[0] && put[0].args[0];
+    check(!!img && img.width === 16 && img.height === 8,
+          "#156: ... at the sheet's size (" +
+          (img && img.width + "x" + img.height) + ")");
+    eq("#156: the painted pixel is the palette row's colour (0x1FF is white)",
+       Array.from(img.data.slice(32, 36)), [252, 252, 252, 255]);
+    clickOne(page, "assets-source-close");
+    check(page.dom.get("body").children.indexOf(canvas.parentNode) < 0 ||
+          canvas.parentNode === null,
+          "#156: the preview modal's Close removes it");
+    /* the toy's own files again */
+    const list = live;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const was = before.find((x) => x.name === list[i].name);
+      if (was) list[i].source = was.source;
+      else list.splice(i, 1);
+    }
+    api.refresh();
+    eq("#156: the pane is back to no named sources",
+       api.sources(), []);
+  }
 }
 
 /* ---- #102 closes #84's visual gaps ------------------------------------ *
@@ -7015,6 +7090,45 @@ function checkGallery(page) {
         "each card's Open in Studio links to the studio with the toy");
   check(cards.every((c) => c.rawHref === "../toys/" + c.file),
         "each card names the toy's own file");
+
+  /* #156: the deployed gallery (tools/gallery.js --with-demo-art, what
+   * tools/deploy.sh builds) carries each demo's art as the studio's named
+   * files — main.lua first, sources.json last, the envelope's order — and
+   * the card the page draws from them is a picture.  The committed gallery
+   * never does; where the art is not on the machine this block skips. */
+  {
+    const demo = process.env.DEMO_ART ||
+      "/Volumes/External/agent-workshop-demo/demo-art";
+    const present = ["oak-woods", "cave", "city"].every((id) =>
+      fs.existsSync(path.join(demo, id, "sources.json")));
+    if (present) {
+      const gdata = require(path.join(RENDERER, "..", "tools", "gallery.js"))
+        .data(true);
+      const G = require(path.join(RENDERER, "pce-gallery.js"));
+      for (const id of ["oak-woods", "cave", "city"]) {
+        const t = gdata.toys.find((x) => x.id === id) || {};
+        eq("#156: the deployed gallery's " + id + " is a folder of five",
+           (t.files || []).map((f) => f.name),
+           ["main.lua", "tiles.json", "palettes.json", "sprites.json",
+            "sources.json"]);
+        const sdoc = JSON.parse(
+          ((t.files || []).find((f) => f.name === "sources.json") || {})
+            .source || "{\"sources\":[]}");
+        check(sdoc.sources.length >= 2 &&
+              sdoc.sources.every((s) => s.name && s.kind),
+              "#156: " + id + "'s gallery entry names its sources (" +
+              sdoc.sources.map((s) => s.name).join(", ") + ")");
+        const thumb = G.still(null, t.source, 60,
+                              { songs: t.songs, files: t.files });
+        check(thumb && G.countInk(thumb) > 1000,
+              "#156: the deployed " + id + " card draws the art's frame 60 (" +
+              (thumb ? G.countInk(thumb) : 0) + " pixels)");
+      }
+    } else {
+      console.log("      demo art is not on this machine — the deployed " +
+                  "gallery's #156 files check skips");
+    }
+  }
 
   /* #121: STARFALL's card is one of the wall's, drawn at frame 60 and
    * linked both ways like the rest. */
