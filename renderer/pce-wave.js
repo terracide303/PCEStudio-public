@@ -37,6 +37,7 @@
  *   balance-range   a balance or main volume outside 0..255
  *   noise-channel   noise on channels 0-3 (only 4 and 5 have the generator)
  *   noise-range     NF outside 0..31
+ *   dda-range       a DDA held level outside 0..31 (#97's mode)
  *   lfo-range       LFO frequency outside 0..255 or control outside 0..3
  *   channel-range   a channel outside 0..5
  *   rom-full        the instruction stream would not fit the 8 KiB bank
@@ -142,7 +143,14 @@
       al: AL_MAX,
       balance: BAL_MAX,
       on: index === 0,
-      noise: index >= 4 ? { on: false, nf: 0x0F } : null
+      noise: index >= 4 ? { on: false, nf: 0x0F } : null,
+      /* #97: DDA.  null is waveform mode; an integer 0..31 puts the channel
+       * in DDA mode (R4 bit 6) holding that level written to R6 — the mode
+       * the mixer's VOICE detail offers beside wave and noise.  A real DDA
+       * sample needs a timer-IRQ writer to step it, which is #71's, so the
+       * model holds one level and the AUDIO panel counts the bytes a stepped
+       * sample would occupy. */
+      dda: null
     };
   }
 
@@ -296,6 +304,16 @@
     return s.channels[c];
   }
 
+  /* #97: switch a channel between waveform mode (level null) and DDA mode
+   * holding `level` (R4 bit 6, the level in R6). */
+  function setDda(s, c, level) {
+    var ch = channel(s, c);
+    if (level === null || level === undefined) { ch.dda = null; return ch; }
+    checkInt(level, 0, WAVE_MAX, "dda-range", "DDA level");
+    ch.dda = level;
+    return ch;
+  }
+
   function setLfo(s, spec) {
     if (!spec || !spec.ctl) { s.lfo = { freq: s.lfo.freq, ctl: 0 }; return s; }
     checkInt(spec.freq, 0, LFREQ_MAX, "lfo-range", "LFO frequency");
@@ -336,7 +354,10 @@
       checkInt(ch.al, 0, AL_MAX, "al-range", "channel level (AL)");
       checkInt(ch.balance, 0, BAL_MAX, "balance-range", "balance");
       ins.push(write(0, c));                    /* select */
-      ins.push(write(4, 0x00));                 /* off, waveform mode */
+      /* DDA (R4 bit 6) is selected while the channel is still off; R6 writes
+       * do nothing until bit 7 enables the channel, so the held level is
+       * written after the enable pass below. */
+      ins.push(write(4, ch.dda != null ? 0x40 : 0x00));
       ins.push(write(2, ch.freq & 0xFF));       /* frequency LSB */
       ins.push(write(3, (ch.freq >> 8) & 0x0F));/* frequency MSB */
       if (c >= 4 && ch.noise && ch.noise.on) {
@@ -345,12 +366,16 @@
       }
       if (c >= 4 && ch.noise && !ch.noise.on)
         ins.push(write(7, ch.noise.nf & NOISE_MAX));   /* waveform mode */
-      for (var i = 0; i < STEPS; i++) {
-        var v = ch.wave[i];
-        if (!isInt(v) || v < 0 || v > WAVE_MAX)
-          refuse("wave-range", "channel " + c + " step " + i +
-                 " must be 0.." + WAVE_MAX);
-        ins.push(write(6, v));
+      if (ch.dda != null) {
+        checkInt(ch.dda, 0, WAVE_MAX, "dda-range", "DDA level");
+      } else {
+        for (var i = 0; i < STEPS; i++) {
+          var v = ch.wave[i];
+          if (!isInt(v) || v < 0 || v > WAVE_MAX)
+            refuse("wave-range", "channel " + c + " step " + i +
+                   " must be 0.." + WAVE_MAX);
+          ins.push(write(6, v));
+        }
       }
       ins.push(write(5, ch.balance));
     }
@@ -362,9 +387,14 @@
       ch = sound.channels[c];
       /* with the LFO running, ch2 is its silent carrier (psg6) */
       var control = (lfoOn && c === 1) ? 0x80
-        : (ch.on ? (0x80 | (ch.al & AL_MAX)) : 0x00);
+        : ch.dda != null
+          ? (ch.on ? (0xC0 | (ch.al & AL_MAX)) : 0x40)
+          : (ch.on ? (0x80 | (ch.al & AL_MAX)) : 0x00);
       ins.push(write(0, c));
       ins.push(write(4, control));
+      /* the held DDA level, after bit 7 so PSG R6 latches `dda` not a wave
+       * step (psg.cpp:305) */
+      if (ch.dda != null && ch.on) ins.push(write(6, ch.dda & WAVE_MAX));
     }
     if (lfoOn) {
       checkInt(sound.lfo.freq, 0, LFREQ_MAX, "lfo-range", "LFO frequency");
@@ -568,6 +598,7 @@
     setMainVolume: setMainVolume,
     setNoise: setNoise,
     setChannelOn: setChannelOn,
+    setDda: setDda,
     setLfo: setLfo,
     toneHz: toneHz,
     instructions: instructions,

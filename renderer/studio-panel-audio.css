@@ -1,0 +1,112 @@
+/*
+ * studio-panel-audio.css — the AUDIO panel's own styles (card #97).
+ *
+ * The panel's chrome (heads, lines, the hint text, .btn-mini) is the page's,
+ * which studio.html already defines; this file holds only what #97 adds, so
+ * the AUDIO tab looks like the rest of the dock and the page's style block
+ * keeps nothing of this panel (#102's split).  Colours come from the page's
+ * tokens, so both themes work.
+ */
+
+.aud-top, .aud-live, .aud-master {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font: 11px var(--mono); color: var(--text2);
+}
+.aud-top { margin-bottom: 4px; }
+.aud-top b { color: var(--text); font-weight: 600; letter-spacing: .04em; }
+.aud-sub { color: var(--dim); }
+.aud-kicker {
+  color: var(--accent, #5fc9e8); font: 600 10px var(--mono);
+  letter-spacing: .10em; text-transform: uppercase;
+}
+.aud-live { margin: 6px 0 8px; }
+.aud-status { color: var(--dim); margin-left: auto; }
+
+.aud-cols { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.aud-mixcol { min-width: 0; flex: 1 1 380px; }
+.aud-detail { flex: 0 1 320px; min-width: 0; }
+
+.aud-row {
+  display: grid;
+  grid-template-columns: 26px 88px 72px 34px 70px 84px 120px 54px 24px 24px;
+  align-items: center; gap: 6px; padding: 2px 0;
+  border-bottom: 1px solid var(--line2, #202532);
+}
+.aud-headrow { color: var(--dim); font: 10px var(--mono); }
+.aud-cell { font: 10px var(--mono); color: var(--dim); }
+.aud-headrow .aud-cell { text-transform: uppercase; letter-spacing: .06em; }
+
+.aud-vname {
+  width: 22px; height: 20px; padding: 0; border: 1px solid var(--line);
+  background: var(--panel2, #10131b); color: var(--text2);
+  font: 600 11px var(--mono); cursor: pointer; border-radius: 3px;
+}
+.aud-vname.is-on { border-color: var(--accent, #5fc9e8); color: var(--text); }
+
+.aud-mode {
+  width: 88px; font: 10px var(--mono); color: var(--text2);
+  background: var(--panel2, #10131b); border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
+.aud-mini {
+  display: block; image-rendering: pixelated;
+  background: #08090c; border: 1px solid var(--line);
+}
+
+.aud-metercell { display: flex; flex-direction: column; gap: 2px; width: 34px; }
+.aud-meter {
+  display: block; height: 5px; width: 100%;
+  background: var(--accent, #5fc9e8); border-radius: 1px;
+  transform-origin: left center; transition: width .08s linear;
+}
+.aud-meter.is-off { background: transparent; }
+
+.aud-vol { width: 70px; }
+.aud-balcell { display: flex; gap: 2px; }
+.aud-bal { width: 38px; }
+.aud-pitchcell { display: flex; align-items: center; gap: 2px; width: 120px; }
+.aud-pitch { color: var(--text); font: 600 11px var(--mono); min-width: 30px; }
+.aud-note { color: var(--mid, #9aa1ae); font: 10px var(--mono); min-width: 34px; }
+
+.aud-ms.is-on { border-color: var(--accent, #5fc9e8); color: var(--text); }
+.aud-play { width: 24px; }
+
+.aud-master { margin-top: 8px; }
+.aud-master input { width: 46px; }
+
+.aud-detail {
+  border-left: 1px solid var(--line); padding-left: 14px;
+}
+.aud-vname {
+  width: auto; height: auto; border: 0; background: none; cursor: default;
+  color: var(--text); font: 600 11px var(--mono); margin-bottom: 6px;
+}
+.aud-vbuttons { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.aud-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.aud-tab {
+  padding: 3px 9px; border: 1px solid var(--line); border-radius: 3px;
+  background: var(--panel2, #10131b); color: var(--text2);
+  font: 10px var(--mono); cursor: pointer;
+}
+.aud-tab.is-on { border-color: var(--accent, #5fc9e8); color: var(--text); }
+.aud-line { display: flex; align-items: center; gap: 6px;
+            font: 10px var(--mono); color: var(--text2); margin: 4px 0; }
+.aud-line input[type="range"] { width: 90px; }
+.aud-note { font: 10px/1.5 var(--mono); color: var(--dim); margin: 6px 0 0; }
+.aud-vals {
+  font: 10px/1.5 var(--mono); color: var(--text2); white-space: pre-wrap;
+  margin: 6px 0 0; max-height: 190px; overflow: auto;
+}
+#aud-waveedit, #aud-env-meter {
+  display: block; width: 100%; background: #08090c;
+  border: 1px solid var(--line); image-rendering: pixelated;
+}
+#aud-waveedit { cursor: crosshair; }
+
+.aud-fold { margin-top: 10px; border-top: 1px solid var(--line2, #202532);
+            padding-top: 6px; }
+.aud-fold summary {
+  cursor: pointer; color: var(--text2); font: 10px var(--mono);
+  letter-spacing: .06em; text-transform: uppercase;
+}

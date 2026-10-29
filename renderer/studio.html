@@ -69,6 +69,8 @@
 <link rel="stylesheet" href="studio-panel-sprites.css">
 <!-- #98: the CONSOLE panel's own styles, beside its module -->
 <link rel="stylesheet" href="studio-panel-console.css">
+<!-- #97: the AUDIO panel's own styles, beside its module -->
+<link rel="stylesheet" href="studio-panel-audio.css">
 <style>
   :root {
     /* ppu.toys' design tokens, adapted (source URL in the credit block). */
@@ -1172,12 +1174,96 @@
             </div>
           </div>
           <div class="panel" id="panel-audio" data-panel="audio" hidden>
-            <h3>THE PSG IS ITS OWN CARD</h3>
-            <p>The PC Engine's sound chip is modelled in
-              <code>renderer/pce-psg.js</code>, proven against the hardware
-              tests in <code>tests/check-psg.js</code>. Toys have no sound
-              surface yet: that is card #71. <code>note()</code> already
-              returns the PSG's 12-bit F word, so the vocabulary is in place.</p>
+            <!-- #97: ppu.toys' AUDIO panel as the PSG allows it — six voices,
+                 wave / noise / DDA, a meter the rendered PCM agrees with, and
+                 a mix that saves with the toy as waves.json. -->
+            <div class="aud-top">
+              <b>THE SOUND CHIP</b>
+              <span class="aud-sub">six PSG voices · 32-step 5-bit waves ·
+                no sample playback, no echo</span>
+              <button type="button" class="btn-mini" id="aud-playall"
+                      title="Render the mix through pce-psg.js and play it">▶ Play mix</button>
+              <button type="button" class="btn-mini" id="aud-stop"
+                      title="Stop the mix">■ Stop</button>
+              <span class="aud-status" id="aud-status"></span>
+            </div>
+            <div class="aud-live">
+              <span class="aud-kicker">LIVE MIX</span>
+              <button type="button" class="btn-mini" id="aud-releaseall"
+                      title="Release every voice (a driver ramps R4 to 0)">Release all</button>
+              <button type="button" class="btn-mini" id="aud-load"
+                      title="Throw the panel's copy away and read waves.json again">Load saved</button>
+              <button type="button" class="btn-mini" id="aud-save"
+                      title="Write the mix into the toy's waves.json">Save mix</button>
+            </div>
+            <div class="aud-cols">
+              <div class="aud-mixcol">
+                <div id="aud-rows"></div>
+                <div class="aud-master">
+                  <span class="aud-kicker">MASTER</span>
+                  <label>L <input type="number" id="aud-master-l" min="0" max="15"></label>
+                  <label>R <input type="number" id="aud-master-r" min="0" max="15"></label>
+                  <span id="aud-master-readout"></span>
+                </div>
+                <p class="hint" id="aud-budget"></p>
+              </div>
+              <div class="aud-detail">
+                <div class="aud-vname" id="aud-vname">VOICE 1</div>
+                <div class="aud-vbuttons">
+                  <button type="button" class="btn-mini" id="aud-trigger"
+                          title="Start the note: R4 = on | the first envelope level">Trigger</button>
+                  <button type="button" class="btn-mini" id="aud-relnote"
+                          title="Release the note: the driver ramps R4 down to 0">Release note</button>
+                  <button type="button" class="btn-mini" id="aud-reset"
+                          title="Put the voice back to the mixer's defaults">Reset voice</button>
+                </div>
+                <div class="aud-tabs" role="tablist" aria-label="Voice detail">
+                  <button type="button" class="aud-tab" id="aud-tabbtn-wave">wave</button>
+                  <button type="button" class="aud-tab" id="aud-tabbtn-envelope">envelope</button>
+                  <button type="button" class="aud-tab" id="aud-tabbtn-lfo">LFO</button>
+                  <button type="button" class="aud-tab" id="aud-tabbtn-registers">registers</button>
+                </div>
+                <div id="aud-tab-wave">
+                  <canvas id="aud-waveedit" width="256" height="96"
+                          aria-label="The voice's 32-step wave: click a column to set its value"></canvas>
+                  <div class="aud-line">preset
+                    <select id="aud-preset" aria-label="Load a wave shape"></select></div>
+                  <pre class="aud-vals" id="aud-wavevals"></pre>
+                </div>
+                <div id="aud-tab-envelope" hidden>
+                  <div class="aud-line">attack <input type="range" id="aud-env-a" min="0" max="15">
+                    decay <input type="range" id="aud-env-d" min="0" max="15"></div>
+                  <div class="aud-line">sustain <input type="range" id="aud-env-s" min="0" max="31">
+                    rate <input type="range" id="aud-env-r" min="0" max="15"></div>
+                  <canvas id="aud-env-meter" width="256" height="48"
+                          aria-label="The driver's R4 sequence"></canvas>
+                  <p class="aud-note" id="aud-env-readout"></p>
+                  <p class="aud-note" id="aud-env-release"></p>
+                </div>
+                <div id="aud-tab-lfo" hidden>
+                  <div class="aud-line">LFCTL (R9)
+                    <select id="aud-lfo-ctl" aria-label="LFO depth">
+                      <option value="0">off</option>
+                      <option value="1">1 · shift 0</option>
+                      <option value="2">2 · shift 2</option>
+                      <option value="3">3 · shift 4</option>
+                    </select>
+                    R8 <input type="range" id="aud-lfo-freq" min="0" max="255"></div>
+                  <p class="aud-note" id="aud-lfo-readout"></p>
+                </div>
+                <div id="aud-tab-registers" hidden>
+                  <pre class="aud-vals" id="aud-regs"></pre>
+                </div>
+              </div>
+            </div>
+            <details class="aud-fold" id="aud-fold">
+              <summary>Master registers &amp; echo</summary>
+              <p class="aud-note" id="aud-echo"></p>
+              <p class="aud-note">R1 is the one master volume: a 4-bit level
+                per side, 15 full and 0 silent. There is no per-line volume
+                register and no echo register to fold — the PSG's nine
+                registers are all in the voice detail's registers tab.</p>
+            </details>
           </div>
           <div class="panel" id="panel-scanlines" data-panel="scanlines" hidden>
             <!-- #92: ppu.toys' SCANLINES, on the PCE's line interrupt. A
@@ -1516,6 +1602,14 @@
      stops a toy reaching a real console.  pce-cgen.js has no dependencies. -->
 <script src="pce-cgen.js"></script>
 <script src="pce-assets.js"></script>
+<!-- #97: the AUDIO panel's mixer — the mix document over pce-wave.js's PSG
+     shape, its register writes, its meter and waves.json.  pce-song.js is
+     here because the toy host's sound (#71) resolves the song player through
+     it: without it a toy's sfx() is refused no-psg, and the panel's live view
+     has nothing to read. -->
+<script src="pce-wave.js"></script>
+<script src="pce-song.js"></script>
+<script src="pce-mix.js"></script>
 <script src="pce-docs.js"></script>
 <!-- #87: the generated pceglobals.lua document, built from the register,
      pad and helper tables above (the ppuglobals.lua tab ppu.toys has). -->
@@ -4072,6 +4166,15 @@ function writePalettesAssets(pic) {
   return changed;
 }
 
+/* #97: the AUDIO panel's write-back — waves.json only, the file every toy
+ * already carries, so the mix travels with the toy's one JSON envelope. */
+function writeWavesAssets(mix) {
+  if (!PCEStudio.mix) return [];
+  const changed = writeAssetsWith(PCEStudio.mix, mix);
+  for (const name of changed) notifyAssetEdit(name);
+  return changed;
+}
+
 function registerPanelModules() {
   const modules = (PCEStudio && PCEStudio.studioPanelModules) || [];
   for (const m of modules) {
@@ -4127,6 +4230,8 @@ const studio = {
     writeSpritesAssets: writeSpritesAssets,
     /* #85: palettes.json only, for the PALETTES panel */
     writePalettesAssets: writePalettesAssets,
+    /* #97: waves.json only, for the AUDIO panel */
+    writeWavesAssets: writeWavesAssets,
     persist: persistToy,
     saved: setSaved,
     refreshAssets: renderAssets,
@@ -4376,7 +4481,44 @@ const studio = {
   vramDescribe: (word) => panelApi("vram").describe(word),
   vramImage: () => panelApi("vram").image(),
   vramAt: (x, y) => panelApi("vram").wordAt(x, y),
-  vramCharPixels: (ch) => panelApi("vram").charPixels(ch)
+  vramCharPixels: (ch) => panelApi("vram").charPixels(ch),
+
+  /* #97 — the AUDIO panel's mixer. The module owns these; the evidence
+   * drives the same functions the panel's DOM handlers call. */
+  audio: () => { const a = panelApi("audio"); return a ? a.state() : null; },
+  audioMix: () => { const a = panelApi("audio"); return a ? a.mix() : null; },
+  audioSelect: (i) => panelApi("audio").select(i),
+  audioTab: (name) => panelApi("audio").tab(name),
+  audioMode: (i, mode) => panelApi("audio").mode(i, mode),
+  audioOn: (i, on) => panelApi("audio").on(i, on),
+  audioLevel: (i, al) => panelApi("audio").level(i, al),
+  audioBalance: (i, v) => panelApi("audio").balance(i, v),
+  audioMute: (i, on) => panelApi("audio").mute(i, on),
+  audioSolo: (i, on) => panelApi("audio").solo(i, on),
+  audioPitch: (i, f) => panelApi("audio").pitch(i, f),
+  audioStep: (i, semis) => panelApi("audio").step(i, semis),
+  audioNote: (i, name) => panelApi("audio").note(i, name),
+  audioWaveStep: (i, step, v) => panelApi("audio").waveStep(i, step, v),
+  audioPreset: (i, name) => panelApi("audio").preset(i, name),
+  audioDdaLevel: (i, level) => panelApi("audio").ddaLevel(i, level),
+  audioEnv: (i, env) => panelApi("audio").env(i, env),
+  audioTrigger: (i) => panelApi("audio").trigger(i),
+  audioRelease: (i) => panelApi("audio").release(i),
+  audioReset: (i) => panelApi("audio").reset(i),
+  audioLfo: (ctl, freq) => panelApi("audio").lfo(ctl, freq),
+  audioMaster: (v) => panelApi("audio").master(v),
+  audioWrites: () => panelApi("audio").writes(),
+  audioWritesOf: (reg) => panelApi("audio").writesOf(reg),
+  audioEnvelope: (i) => panelApi("audio").envelope(i),
+  audioLive: () => panelApi("audio").live(),
+  audioLivePcm: () => panelApi("audio").livePcm(),
+  audioRender: (seconds) => panelApi("audio").render(seconds),
+  audioPlay: (seconds) => panelApi("audio").play(seconds),
+  audioStop: () => panelApi("audio").stop(),
+  audioSaveMix: () => panelApi("audio").saveMix(),
+  audioLoadSaved: () => panelApi("audio").loadSaved(),
+  audioReleaseAll: () => panelApi("audio").releaseAll(),
+  audioText: () => panelApi("audio").text()
 };
 
 /* The registry's methods live on the chip-panel array, so `studio.panels` is
