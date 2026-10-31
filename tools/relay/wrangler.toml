@@ -11,7 +11,7 @@
 # file; it has no npm dependencies.
 
 name = "pcestudio-relay"
-main = "worker.js"
+main = "entry.mjs"
 compatibility_date = "2025-03-15"
 
 # One Durable Object per token: env.ROOM.idFromName(token).  The Room
