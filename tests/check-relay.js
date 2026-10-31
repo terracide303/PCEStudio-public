@@ -580,8 +580,8 @@ async function run() {
 
   const toml = fs.readFileSync(
     path.join(ROOT, "tools", "relay", "wrangler.toml"), "utf8");
-  check(/^main\s*=\s*"worker\.js"\s*$/m.test(toml),
-        "wrangler.toml names worker.js as main");
+  check(/^main\s*=\s*"entry\.mjs"\s*$/m.test(toml),
+        "wrangler.toml names entry.mjs as main");
   check(/class_name\s*=\s*"Room"/.test(toml) &&
         /name\s*=\s*"ROOM"/.test(toml),
         "wrangler.toml binds ROOM to the Room class");
