@@ -694,14 +694,16 @@ function checkSize() {
 
 /* ---- 8. the MCP route near the top (#142) ----------------------------- */
 
-/* The tools the server really has, read out of tools/mcp/server.js's TOOLS
- * array — not typed here, so a tool the server gains without the guide
- * naming it fails this test. */
+/* The tools the server really has, read out of renderer/pce-agent-tools.js's
+ * TOOLS array — not typed here, so a tool the core gains without the guide
+ * naming it fails this test.  (#166: the TOOLS array moved from
+ * tools/mcp/server.js into the one tool core; the server takes it from its
+ * session now, and this extraction follows it.) */
 function serverToolNames() {
-  const src = fs.readFileSync(path.join(ROOT, "tools", "mcp", "server.js"),
+  const src = fs.readFileSync(path.join(ROOT, "renderer", "pce-agent-tools.js"),
                               "utf8");
   const start = src.indexOf("const TOOLS = [");
-  const end = start < 0 ? -1 : src.indexOf("\n];", start);
+  const end = start < 0 ? -1 : src.indexOf("\n  ];", start);
   const body = start < 0 ? "" : src.slice(start, end < 0 ? src.length : end);
   const names = [];
   for (const m of body.matchAll(/\bname:\s*"([a-z_]+)"/g)) names.push(m[1]);
