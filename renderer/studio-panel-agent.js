@@ -448,7 +448,29 @@
             var name = (req.name || "toy") + ".pce";
             download(new Uint8Array(req.bytes), name, "application/octet-stream");
             return { path: name };
-          }
+          },
+          /* project_save (#163): a browser has no folder to stay inside, so
+           * the file route is the download's name and the folder route has
+           * no meaning — the reply says folder:false and the archive is
+           * downloaded under the name the caller gave.  A browser tab cannot
+           * OPEN a project by path (no file system), so there is no
+           * readProject; the core refuses project_open with project-host and
+           * the person uses Project… → Open instead. */
+          projectPath: function (p) {
+            var name = String(p || "").replace(/\\/g, "/").split("/").pop()
+              .trim() || "project";
+            if (!/\.pcestudio$/i.test(name)) name += ".pcestudio";
+            return { path: name, name: name, folder: false };
+          },
+          writeProject: function (req) {
+            var name = req.name || "project.pcestudio";
+            download(new Uint8Array(req.zip || []), name, "application/zip");
+            return { path: name, name: name, folder: false,
+                     files: (req.entries || []).map(function (e) {
+                       return e.name;
+                     }) };
+          },
+          now: function () { return new Date().toISOString(); }
         };
       }
 

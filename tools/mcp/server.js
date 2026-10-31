@@ -38,6 +38,11 @@
  *     started in — for Claude Code, the person's project folder — or
  *     PCE_MCP_WORKDIR when it names one, with a path outside it refused
  *     (save-path), and a failed write refused (save-io);
+ *   - the file system for project_save/project_open (#163): one .pcestudio,
+ *     or the SAME layout unpacked into a folder (a trailing / on the name or
+ *     an existing folder) so git can hold the history; opening reads either
+ *     the archive or the folder's project.json, main.lua, art/ and versions/.
+ *     The same folder fence applies (save-path / open-path);
  *   - the file system for export_pce's .pce: $TMPDIR/pce-mcp/<name>.pce by
  *     default, `out` when the caller names one;
  *   - renderer/ilvm.bin for export_pce's committed interpreter image.
@@ -86,6 +91,85 @@ function saveInside(work, outPath) {
   }
 }
 
+/* project_open's fence: the same one, with its own code, so a reply says
+ * which tool refused. */
+function openInside(work, inPath) {
+  const rel = path.relative(work, inPath);
+  if (rel === "" || rel === ".." || path.isAbsolute(rel) ||
+      rel.split(path.sep)[0] === "..") {
+    agentTools.refuse("open-path", "project_open reads inside the working " +
+           "folder only: " + JSON.stringify(inPath) + " is outside " +
+           JSON.stringify(work) + "; pass a path inside it (PCE_MCP_WORKDIR " +
+           "names another folder)");
+  }
+}
+
+/* ---- the project folder (#163) -----------------------------------------
+ * The unpacked route is the SAME layout as the archive (docs/PROJECT-
+ * FORMAT.md): root files, art/ originals and versions/<n>-<label>/.  A
+ * folder is a git repository, so it also holds .git/, a README and whatever
+ * else the person keeps there — and README.md would be read as a project
+ * file, a committed screenshot would not even decode.  The manifest is the
+ * answer: project.json lists every file the project has, so the reader takes
+ * exactly those (and its absence is what the core then refuses).  A file the
+ * manifest lists but the folder lacks is simply not there, and the format's
+ * own check (main.lua required) says whether that matters. */
+function isFile(abs) {
+  try { return fs.statSync(abs).isFile(); } catch (e) { return false; }
+}
+
+function readProjectFolder(root) {
+  const manifest = path.join(root, "project.json");
+  if (!isFile(manifest)) return [];
+  const out = [{ name: "project.json", bytes: fs.readFileSync(manifest) }];
+  let doc = null;
+  try { doc = JSON.parse(fs.readFileSync(manifest, "utf8")); }
+  catch (e) { return out; }               /* the core refuses project-json */
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return out;
+
+  const put = function (rel) {
+    const abs = path.join(root, rel);
+    if (isFile(abs)) out.push({ name: rel, bytes: fs.readFileSync(abs) });
+  };
+  const leaf = function (name) {
+    return typeof name === "string" && name && name !== "." && name !== ".." &&
+           name.indexOf("/") < 0 && name.indexOf("\\") < 0;
+  };
+
+  /* the root files: main.lua, the asset files, NOTES.md */
+  for (const f of (Array.isArray(doc.files) ? doc.files : [])) {
+    if (f && leaf(f.name)) put(f.name);
+  }
+  /* art/<name>: the originals, flat */
+  for (const a of (Array.isArray(doc.art) ? doc.art : [])) {
+    if (a && leaf(a.name)) put("art/" + a.name);
+  }
+  /* versions/<n>-<label>/<file> */
+  for (const v of (Array.isArray(doc.versions) ? doc.versions : [])) {
+    if (!v || typeof v.dir !== "string") continue;
+    const dir = v.dir.replace(/\/+$/, "");
+    if (!dir || dir.indexOf("..") >= 0) continue;
+    for (const f of (Array.isArray(v.files) ? v.files : [])) {
+      if (f && leaf(f.name)) put(dir + "/" + f.name);
+    }
+  }
+  return out;
+}
+
+/* A project entry's name is one the format built (renderer/pce-project.js
+ * safeName), so this is the second lock on the same door: nothing a project
+ * carries may land outside the folder it names. */
+function entryPath(base, name) {
+  const dest = path.resolve(base, name);
+  const rel = path.relative(base, dest);
+  if (rel === "" || rel === ".." || path.isAbsolute(rel) ||
+      rel.split(path.sep)[0] === "..") {
+    agentTools.refuse("save-path", "project entry " + JSON.stringify(name) +
+                       " is outside " + JSON.stringify(base));
+  }
+  return dest;
+}
+
 const host = {
   /* the PNG steps: the core builds the container, zlib does the one step
    * plain JavaScript does not */
@@ -124,6 +208,77 @@ const host = {
     return { path: req.path, name: path.basename(req.path) };
   },
 
+  /* project_save's path rules (#163): a trailing separator or an EXISTING
+   * folder is the unpacked route; any other name is one .pcestudio (the
+   * extension is added, as toy_save adds .pce.json). */
+  projectPath: async function (p) {
+    const work = saveWorkdir();
+    const raw = String(p == null ? "" : p).trim();
+    let full = path.resolve(work, raw);
+    const folder = /[\\/]$/.test(raw) ||
+      (fs.existsSync(full) && fs.statSync(full).isDirectory());
+    if (!folder && !/\.pcestudio$/i.test(full)) full += ".pcestudio";
+    saveInside(work, full);
+    return { path: full, name: path.basename(full), folder: folder };
+  },
+
+  /* project_save's write: the archive's bytes for the file route, each entry
+   * as a file for the folder route. */
+  writeProject: async function (req) {
+    const base = req.path;
+    if (req.folder) {
+      const wrote = [];
+      try {
+        for (const e of (req.entries || [])) {
+          const dest = entryPath(base, e.name);
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          fs.writeFileSync(dest, Buffer.from(e.bytes));
+          wrote.push(e.name);
+        }
+      } catch (e) {
+        if (e instanceof agentTools.Refusal) throw e;
+        agentTools.refuse("save-io", base + " could not be written: " +
+                          agentTools.errorMessage(e));
+      }
+      return { path: base, name: req.name, folder: true, files: wrote };
+    }
+    try {
+      fs.mkdirSync(path.dirname(base), { recursive: true });
+      fs.writeFileSync(base, Buffer.from(req.zip || []));
+    } catch (e) {
+      agentTools.refuse("save-io", base + " could not be written: " +
+                        agentTools.errorMessage(e));
+    }
+    return { path: base, name: req.name, folder: false,
+             files: (req.entries || []).map(function (e) { return e.name; }) };
+  },
+
+  /* project_open's read (#163): a folder is its entries, a .pcestudio its
+   * bytes.  The parse is the core's (renderer/pce-project.js), so the
+   * format's own refusals are the ones a bad file gets. */
+  readProject: async function (p) {
+    const work = saveWorkdir();
+    const full = path.resolve(work, String(p == null ? "" : p).trim());
+    openInside(work, full);
+    if (!fs.existsSync(full)) {
+      agentTools.refuse("open-path", JSON.stringify(full) +
+                         " does not exist (the path is relative to " +
+                         JSON.stringify(work) + ")");
+    }
+    if (fs.statSync(full).isDirectory()) {
+      return { path: full, folder: true, entries: readProjectFolder(full) };
+    }
+    try {
+      return { path: full, folder: false, bytes: fs.readFileSync(full) };
+    } catch (e) {
+      agentTools.refuse("open-path", full + " could not be read: " +
+                        agentTools.errorMessage(e));
+    }
+  },
+
+  /* project.json's created/modified: the format never reads the clock. */
+  now: function () { return new Date().toISOString(); },
+
   /* export_pce's write: the core built the .pce bytes; this side only picks
    * the path and writes it.  A failed write throws the file system's own
    * error and the core wraps it (errorCode), as it always did. */
@@ -155,6 +310,9 @@ const INSTRUCTIONS =
   "look with frame_png, read or poke registers with registers_get/" +
   "register_set, check it with validate, save the whole toy for the studio " +
   "with toy_save (one .pce.json the person opens with Open… → From file), " +
+  "save or resume a whole project over sessions with project_save/" +
+  "project_open (project_open answers with NOTES.md's text first — read it " +
+  "before anything else, and pass the updated NOTES.md to project_save), " +
   "export a .pce with export_pce, and read the toy language with docs. " +
   "Every tool wraps the same modules the studio and the tests use; there is " +
   "no second model.";

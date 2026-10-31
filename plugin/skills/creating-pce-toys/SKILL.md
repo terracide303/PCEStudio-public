@@ -81,6 +81,19 @@ Or in `.mcp.json` at the repository root:
     pick `<name>.pce.json`" (dropping it on the page works too). Without this
     step the person has only the code you printed, and the art you imported
     stays behind.
+11. **A project is what a later session resumes.** **If the person gives you a
+    project, read NOTES.md before anything else; at the end of the session
+    update NOTES.md — what you did, what works, what is next — and save the
+    project.** `project_open {path}` opens a `.pcestudio` file or an unpacked
+    project folder into the session and returns NOTES.md's text as the reply's
+    first block: read it before you read the code. `project_save {path, notes}`
+    writes it back — ONE `.pcestudio`, or, when `path` is a folder (a trailing
+    `/` on the name, or an existing folder), the same layout unpacked, which
+    is the route for Claude Code because **git can hold the history**. The
+    `notes` argument is the whole updated NOTES.md; leave it out and a missing
+    NOTES.md gets the studio's template. The person opens the file with
+    **Project… → Open**. `toy_save` stays for the plain toy file; a project is
+    the thing to hand over when the session will be picked up again.
 
 Write in visible increments — backdrop, then a layer, then motion, then sound —
 not one giant file. The person is watching; a picture appears at step two.
