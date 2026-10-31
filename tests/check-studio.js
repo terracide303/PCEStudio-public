@@ -138,11 +138,27 @@
  * canvas records calls) and does not exercise the browser driver for these
  * eight beyond what --browser already covers.
  *
+ * #167 (checkAgentPanel): the AGENT drawer and the agent link.  A fake
+ * WebSocket stands in for the relay's socket and every call goes in as the
+ * relay sends it, so renderer/studio-panel-agent.js and the one tool core
+ * (renderer/pce-agent-tools.js) run for real.  RELAY_URL empty -> the
+ * not-switched-on sentence and no button; Connect -> a 32-hex token in
+ * localStorage, the relay's /ws/<token>, then live with hello v1 and the
+ * command; toy_write -> the editor, the file tabs and the ASSETS list;
+ * toy_run -> the OUTPUT canvas draws and the CONSOLE gets the reply's log;
+ * a person's edit between calls -> the tool core's next run carries the
+ * edited number; source_add -> its named source in ASSETS; validate -> the
+ * CONSOLE CHECK block; frame_png -> the studio seeks there; Disconnect,
+ * Reconnect, an unexpected close's backoff, taken over with no reconnect;
+ * a reload keeps the token and the command; New link rotates both.  Blind
+ * spots: the fake socket is not the network (the relay's own side is
+ * tests/check-relay.js), and the stub canvas records draw calls, not pixels.
+ *
  * Not measured here: layout and CSS (a screenshot is the evidence, under
  * $TMPDIR and described in docs/STUDIO.md), a real canvas's pixels (the stub
  * context records the calls, not the rendered result), the toy
- * compiler/export (#31, second half of #75), sound (#71), the asset importer
- * (#24/#71), and the agent link (#24).
+ * compiler/export (#31, second half of #75), sound (#71), and the asset
+ * importer (#24/#71).
  *
  *   node tests/check-studio.js
  *   node tests/check-studio.js --browser
@@ -7270,6 +7286,38 @@ async function checkAgentPanel() {
                        png.result.content[0]) + ")");
   eq("#167: the studio seeks to the frame Claude asked for",
      studio.render.currentFrame(), 5);
+
+  /* 8b. a validate WITH findings is an isError answer, and its report
+   * still fills the CONSOLE CHECK block — it is the one mirror that runs
+   * on a failed call, because that is the report the person needs */
+  const seventeen = ["function init()"];
+  for (let i = 0; i < 17; i++) {
+    seventeen.push("  sprite(" + i + ", {x = " + (40 + i) +
+                   ", y = 80, pattern = 0, palette = 0})");
+  }
+  seventeen.push("end", "function frame(t, f)", "end", "");
+  const bw = await agentCall(page, ws, "toy_write", {
+    files: [{ name: "main.lua", source: seventeen.join("\n") }].concat(
+      toyFiles.filter((f) => f.name !== "main.lua"))
+  }, "c6");
+  check(!!bw && bw.result.isError !== true,
+        "#167: a toy with 17 sprites on one line writes (" +
+        JSON.stringify(bw && bw.result && bw.result.content &&
+                       bw.result.content[0]) + ")");
+  const bv = await agentCall(page, ws, "validate", { frames: 8 }, "c7");
+  check(!!bv && bv.result.isError === true,
+        "#167: a validate with findings answers isError true");
+  const bad = con.checkReport();
+  check(!!bad && bad.ok === false &&
+        (bad.problems || []).some((p) => p.code === "validate-sprite-line"),
+        "#167: ... and its findings fill the CONSOLE CHECK block (" +
+        JSON.stringify(bad && { ok: bad.ok, code: bad.code,
+          problems: (bad.problems || []).map((p) => p.code) }) + ")");
+  const feedLast = api.feed()[api.feed().length - 1];
+  check(feedLast.name === "validate" && feedLast.ok === false &&
+        /finding/.test(feedLast.summary),
+        "#167: the FEED marks it an error with its findings (" +
+        JSON.stringify(feedLast) + ")");
 
   /* 9. Disconnect, Reconnect, an unexpected close and its backoff */
   const disc = nodeById(drawer, "btn-agent-disconnect");
