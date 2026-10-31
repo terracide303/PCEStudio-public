@@ -9,7 +9,8 @@
  * Loads one bytecode container, runs toy_boot(), then `frames` frames the
  * way the console's main loop does (frame, then raster(0..223) when the toy
  * has a callback), and writes vram.bin (65536 B, words little-endian),
- * cram.bin (1024 B), sat.bin (512 B) and regs.txt.  Those are the same
+ * cram.bin (1024 B), sat.bin (512 B), regs.txt and pool.bin (the table
+ * pool, one int32 per cell, #174's fault evidence).  Those are the same
  * layouts the Mednafen dump uses, so a host run can be compared with the
  * browser before an emulator is involved.
  *
@@ -33,6 +34,10 @@ int ilvm_has_raster(void);
 void toy_boot(void);
 void toy_frame(int32_t f);
 void toy_raster(int32_t line);
+
+/* the interpreter's table pool (tools/ilvm/ilvm.c), dumped as pool.bin */
+const int32_t *ilvm_table_cells(void);
+int ilvm_table_cell_count(void);
 
 static uint16_t vram[32768];
 static uint16_t cram[512];
@@ -66,6 +71,17 @@ static void put_u16(FILE *f, const uint16_t *w, int n) {
   for (i = 0; i < n; i++) {
     fputc(w[i] & 0xFF, f);
     fputc((w[i] >> 8) & 0xFF, f);
+  }
+}
+
+static void put_u32(FILE *f, const int32_t *w, int n) {
+  int i;
+  for (i = 0; i < n; i++) {
+    uint32_t v = (uint32_t)w[i];
+    fputc(v & 0xFF, f);
+    fputc((v >> 8) & 0xFF, f);
+    fputc((v >> 16) & 0xFF, f);
+    fputc((v >> 24) & 0xFF, f);
   }
 }
 
@@ -112,6 +128,10 @@ int main(int argc, char **argv) {
   snprintf(path, sizeof path, "%s/regs.txt", argv[2]);
   f = fopen(path, "w");
   fprintf(f, "BXR %d\nBYR %d\nCR %d\n", regs[0], regs[1], regs[2]);
+  fclose(f);
+  snprintf(path, sizeof path, "%s/pool.bin", argv[2]);
+  f = fopen(path, "wb");
+  put_u32(f, ilvm_table_cells(), ilvm_table_cell_count());
   fclose(f);
   free(buf);
   return 0;
