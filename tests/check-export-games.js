@@ -66,11 +66,12 @@ const BROWSER_FRAMES = 60;          /* the browser frames a capture may match */
 const CAPTURE_TAIL = 12;            /* the movie's last frames, like check-ilvm */
 const ROM_BYTES = 24576;            /* 16 KiB interpreter + one data bank */
 
-/* The card's five games and the outcome docs/ROM_SPEED.md records on
- * 2026-10-31.  `where` is the source line the table names; null is what the
- * validator's own finding can say (it names no line for a frame-wide
- * budget).  `message` is a substring of the refusal the suite insists on,
- * so a message that loses its detail fails too. */
+/* The card's five games and the outcome docs/ROM_SPEED.md records (2026-10-31;
+ * DUSK RUN moved to the encoder's refusal by #184, 2026-11-01).  `where` is
+ * the source line the table names; null is what the validator's own finding
+ * can say (it names no line for a frame-wide budget).  `message` is a substring
+ * of the refusal the suite insists on, so a message that loses its detail
+ * fails too. */
 const GAMES = [
   {
     name: "STARFALL", toy: "toys/demo-game/main.lua",
