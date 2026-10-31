@@ -243,10 +243,11 @@ if (DUMP_NAMES.length === 0) {
   process.exit(2);
 }
 
-const OK_RE = /^(\w+): OK \((\d+)x(\d+), diff 0\)$/gm;
-const DIFF_RE = /^(\w+): (\d+) differing pixels of (\d+) bytes$/gm;
-const DISAGREE_RE = /^(\w+): sprites renderer disagrees with bg renderer on a sprite-free dump$/gm;
-const RASTER_ERR_RE = /^(\w+): raster\.json does not match the save state:$/gm;
+/* #175: a dump name may carry a hyphen (tableops-ilvm); \w does not. */
+const OK_RE = /^([\w-]+): OK \((\d+)x(\d+), diff 0\)$/gm;
+const DIFF_RE = /^([\w-]+): (\d+) differing pixels of (\d+) bytes$/gm;
+const DISAGREE_RE = /^([\w-]+): sprites renderer disagrees with bg renderer on a sprite-free dump$/gm;
+const RASTER_ERR_RE = /^([\w-]+): raster\.json does not match the save state:$/gm;
 /* #28: a tree that carries the flicker capture adds " and N flicker
  * capture(s)" to the summary; the count and the FAIL line are unchanged. */
 const PASS_RE = /^PASS: renderer matches Mednafen pixel for pixel on (\d+) scene\(s\)(?: and \d+ flicker capture\(s\))?$/m;
