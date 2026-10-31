@@ -22,6 +22,8 @@ ln -s <folder>/plugin/skills/creating-pce-toys ~/.claude/skills/creating-pce-toy
 
 The server needs Node and nothing else: no npm install, no compiler. The link is the skill that ships beside it (SKILL.md and seven worked recipes). Skills load when a session starts, so start a new Claude Code session after this.
 
+**A third way needs nothing installed.** If the person has PCEStudio open, the AGENT drawer (bottom right) has a Connect button. Pressing it gives one line to run — claude mcp add --transport http pcestudio <relay>/mcp/<token> — and from then on the tools above drive THAT tab: the person watches every call in the drawer's feed, and toy_write, source_add, toy_run and frame_png appear in the editor, the ASSETS list, the OUTPUT canvas and the CONSOLE as you go. toy_run runs the files in the studio's editor, so anything the person changed between calls is what you get. When the drawer says the agent link is not switched on yet, no relay is deployed: use the local server above.
+
 ### The tools
 
 | tool | what it does |

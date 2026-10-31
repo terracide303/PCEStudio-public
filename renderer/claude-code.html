@@ -51,24 +51,46 @@
   <span class="kicker">Manual · beta 1</span>
   <h1>PCEStudio with Claude Code</h1>
   <p class="lede">With a chat AI, you copy code back and forth. Claude Code can do the whole loop itself: write the toy,
-  run it, look at the frames, fix what it sees, check it against the console's limits, and export a ROM. It does this
-  through PCEStudio's <b>MCP server</b>, a small program on your computer that runs the same engine as the studio.</p>
+  run it, look at the frames, fix what it sees, check it against the console's limits, and export a ROM. Two routes
+  reach it: <b>connect a studio tab</b> (one line, nothing installed), or run PCEStudio's <b>MCP server</b>, a small
+  program on your computer that runs the same engine as the studio.</p>
 
   <ul class="toc">
-    <li><a href="#need">1. What you need</a></li>
-    <li><a href="#install">2. Install (macOS, Linux, Windows)</a></li>
-    <li><a href="#check">3. Check that it works</a></li>
-    <li><a href="#how">4. How a session goes</a></li>
-    <li><a href="#tools">5. The tools</a></li>
-    <li><a href="#examples">6. Worked examples</a></li>
-    <li><a href="#art">7. Art: pixel grids and PNGs</a></li>
-    <li><a href="#sound">8. Sound and music</a></li>
-    <li><a href="#studio">9. From Claude Code to the studio</a></li>
-    <li><a href="#trouble">10. Troubleshooting</a></li>
-    <li><a href="#limits">11. What doesn't work yet</a></li>
+    <li><a href="#connect">1. Connect from the studio — nothing to install</a></li>
+    <li><a href="#need">2. What you need</a></li>
+    <li><a href="#install">3. Install (macOS, Linux, Windows)</a></li>
+    <li><a href="#check">4. Check that it works</a></li>
+    <li><a href="#how">5. How a session goes</a></li>
+    <li><a href="#tools">6. The tools</a></li>
+    <li><a href="#examples">7. Worked examples</a></li>
+    <li><a href="#art">8. Art: pixel grids and PNGs</a></li>
+    <li><a href="#sound">9. Sound and music</a></li>
+    <li><a href="#studio">10. From Claude Code to the studio</a></li>
+    <li><a href="#trouble">11. Troubleshooting</a></li>
+    <li><a href="#limits">12. What doesn't work yet</a></li>
   </ul>
 
-  <h2 id="need">1. What you need</h2>
+  <h2 id="connect">1. Connect from the studio — nothing to install</h2>
+  <p>If PCEStudio is open in your browser, you do not need the server on your computer at all. The studio
+  carries the agent link itself:</p>
+  <ol>
+    <li>In the <a href="studio.html">studio</a>, open the <b>AGENT</b> drawer at the bottom right.</li>
+    <li>Press <b>Connect</b>. The drawer makes a secret link for this tab and shows one line.</li>
+    <li>Copy that line into your terminal and run it. It looks like:
+<pre>claude mcp add --transport http pcestudio https://&lt;relay&gt;/mcp/&lt;token&gt;</pre></li>
+    <li>Start Claude Code and ask for a game. Every tool call appears in the drawer's feed while it happens.</li>
+  </ol>
+  <p>The tools are the ones this manual describes below: Claude writes and runs the toy in the tab you are
+  watching — the editor and the ASSETS list fill in, the OUTPUT canvas plays the run, and the CONSOLE shows the
+  validator's findings. Your own edits between calls are respected: <code>toy_run</code> runs what is in the
+  editor.</p>
+  <div class="box">This section appears only when the site's relay is switched on (<code>RELAY_URL</code> in
+  <code>renderer/relay-config.js</code>). If the drawer says <i>the agent link is not switched on yet</i>, use the
+  local server in sections 2 and 3 instead — it does the same work, with nothing to deploy.</div>
+  <p>The link is a password: anyone who has it can drive that tab. Press <b>Disconnect</b> when you are done, and
+  <b>New link</b> if it has been shared — the old link stops working at once. There are no accounts.</p>
+
+  <h2 id="need">2. What you need</h2>
   <ul>
     <li><b>Claude Code</b>, signed in (<a href="https://claude.com/claude-code">claude.com/claude-code</a>).</li>
     <li><b>Node.js</b>, a current LTS version, from <a href="https://nodejs.org">nodejs.org</a>. The server uses
@@ -79,7 +101,7 @@
   been <b>tested on macOS</b>. If you're on Linux or Windows, please tell us how it goes, whether it works or not
   (<a href="testers.html#report">how to report</a>).</div>
 
-  <h2 id="install">2. Install</h2>
+  <h2 id="install">3. Install</h2>
   <p>Do this once. Open a terminal (on Windows: PowerShell), go to the folder where you keep projects, and run:</p>
   <div class="os">
     <div><b>macOS / Linux</b>
@@ -112,7 +134,7 @@ Copy-Item -Recurse plugin\skills\creating-pce-toys `
   <p><code>claude mcp add</code> registers the server for the folder you run it in. To have it everywhere, add
   <code>--scope user</code> right after <code>add</code>.</p>
 
-  <h2 id="check">3. Check that it works</h2>
+  <h2 id="check">4. Check that it works</h2>
   <ol>
     <li>Run <code>claude mcp list</code>. It should show <code>pcestudio</code> as connected.</li>
     <li>Start Claude Code (<code>claude</code>) and type <code>/mcp</code>. You should see <b>pcestudio</b> with its
@@ -124,24 +146,24 @@ Copy-Item -Recurse plugin\skills\creating-pce-toys `
   <p>Claude will call <code>toy_write</code>, <code>toy_run</code> and <code>frame_png</code>, and show you the
   picture. If it says it has no such tools, see <a href="#trouble">troubleshooting</a>.</p>
 
-  <h2 id="how">4. How a session goes</h2>
+  <h2 id="how">5. How a session goes</h2>
   <p>Describe the game the way you'd describe it to a friend. Claude works in a loop:</p>
   <ol>
     <li><b>Read the rules</b>: the skill, and <code>docs</code> for the chapter it needs (sprites, raster, sound…).</li>
     <li><b>Write</b> the toy with <code>toy_write</code>. If the code doesn't compile, the reply names the line.</li>
-    <li><b>Add art</b> with <code>source_add</code>, as a pixel grid or a PNG (section 7).</li>
+    <li><b>Add art</b> with <code>source_add</code>, as a pixel grid or a PNG (section 8).</li>
     <li><b>Run</b> it with <code>toy_run</code>, with a scripted pad if it's a game ("hold Right for 2 seconds, then
     press I").</li>
     <li><b>Look</b> at frames with <code>frame_png</code>. Running without errors doesn't mean it looks right, so a
     good session looks at several frames.</li>
     <li><b>Check</b> it with <code>validate</code>: sprites per line, VRAM, the frame budget.</li>
     <li><b>Export</b> a <code>.pce</code> with <code>export_pce</code> (simple toys only for now), and
-    <b>save</b> it for the studio (section 9).</li>
+    <b>save</b> it for the studio (section 10).</li>
   </ol>
   <p>Good habits to ask for: <i>"look at frames 0, 60 and 300 before you tell me it's done"</i>, and <i>"run
   validate and fix every finding"</i>.</p>
 
-  <h2 id="tools">5. The tools</h2>
+  <h2 id="tools">6. The tools</h2>
   <table>
     <tr><th>Tool</th><th>What it does</th></tr>
     <tr><td><code>docs</code></td><td>The toy API reference, by chapter: the-toy, registers, palettes, sprites, raster,
@@ -163,10 +185,10 @@ Copy-Item -Recurse plugin\skills\creating-pce-toys `
     <tr><td><code>toy_save</code></td><td>Saves the whole toy — <code>main.lua</code>, the art
       <code>source_add</code> made, the named sources and the songs — as one <code>.pce.json</code> in the studio's
       own format, inside the folder you started it in. You open that file with <b>Open… → From file…</b>
-      (section 9).</td></tr>
+      (section 10).</td></tr>
   </table>
 
-  <h2 id="examples">6. Worked examples</h2>
+  <h2 id="examples">7. Worked examples</h2>
   <p>Things to say to Claude Code. Each one is a good test of the setup.</p>
 
   <h3>A first game</h3>
@@ -189,7 +211,7 @@ Copy-Item -Recurse plugin\skills\creating-pce-toys `
   <p class="say">Export this as a .pce. If the export refuses it, tell me which lines it can't carry yet and whether
   you can rewrite them without tables.</p>
 
-  <h2 id="art">7. Art: pixel grids and PNGs</h2>
+  <h2 id="art">8. Art: pixel grids and PNGs</h2>
   <p>Two ways to give a toy art through <code>source_add</code>:</p>
   <ul>
     <li><b>A pixel grid</b>: Claude draws it as numbers, each one a colour index into a small palette, with
@@ -218,7 +240,7 @@ function frame(t, f) end</code></pre>
     game.</li>
   </ul>
 
-  <h2 id="sound">8. Sound and music</h2>
+  <h2 id="sound">9. Sound and music</h2>
   <ul>
     <li><b>Sound effects and notes work now</b>: <code>sfx(channel, freq, volume, frames)</code> plays a note on one
     of the PSG's six voices, and <code>note(midi)</code> turns a MIDI note number into its frequency. The skill's
@@ -231,7 +253,7 @@ function frame(t, f) end</code></pre>
     sound is active, then listen yourself in the studio.</li>
   </ul>
 
-  <h2 id="studio">9. From Claude Code to the studio</h2>
+  <h2 id="studio">10. From Claude Code to the studio</h2>
   <ul>
     <li><b>Code and art — the usual way</b>: ask Claude to finish with <b><code>toy_save</code></b>. It writes
     ONE <code>&lt;name&gt;.pce.json</code> holding <code>main.lua</code>, the art <code>source_add</code> made
@@ -250,7 +272,7 @@ function frame(t, f) end</code></pre>
     cart.</li>
   </ul>
 
-  <h2 id="trouble">10. Troubleshooting</h2>
+  <h2 id="trouble">11. Troubleshooting</h2>
   <table>
     <tr><th>What you see</th><th>What to do</th></tr>
     <tr><td><code>claude mcp list</code> shows pcestudio as failed</td><td>Run <code>node --version</code>. If that
@@ -274,14 +296,14 @@ function frame(t, f) end</code></pre>
       again.</td></tr>
   </table>
 
-  <h2 id="limits">11. What doesn't work yet</h2>
+  <h2 id="limits">12. What doesn't work yet</h2>
   <ul>
     <li><b>Export</b>: games that use Lua tables, <code>sprite()</code>, the pad or <code>sfx()</code> don't export
     to <code>.pce</code> yet. They run in the studio and through the server.</li>
-    <li><b>Songs through the server</b> are being built (section 8); a song already in a toy's file set is carried
+    <li><b>Songs through the server</b> are being built (section 9); a song already in a toy's file set is carried
     by <code>toy_save</code> all the same.</li>
     <li><b>Real hardware</b>: exports are checked in an emulator only.</li>
-    <li><b>Linux and Windows</b> haven't been tested yet (section 1).</li>
+    <li><b>Linux and Windows</b> haven't been tested yet (section 2).</li>
   </ul>
   <p>More: the <a href="testers.html">testers' guide</a>, the <a href="docs.html">toy API</a>, and the source at
   <a href="https://github.com/terracide303/PCEStudio-public">github.com/terracide303/PCEStudio-public</a>.

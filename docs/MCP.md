@@ -9,6 +9,14 @@ the toy author's reference. It is a **thin wrapper**: every pixel comes from
 refusal from the module that owns it, every document from
 `renderer/pce-docs.js`. There is no second model.
 
+Since #166, the tools themselves live in `renderer/pce-agent-tools.js` — the
+one tool core, a UMD module like its neighbours. The server keeps only the
+stdio JSON-RPC wire and the Node host adapter (`createSession(host)`: zlib
+for the PNG steps, the file system for `toy_save`'s envelope under the
+working-folder fence and for `export_pce`'s `.pce`, and
+`renderer/ilvm.bin`); the studio's AGENT panel (#167) loads the same core
+with a browser host, so the page and the server run the same tools.
+
 > Status: **part 1 of card #36** (the headless server). The studio's AGENT
 > panel that connects to it is part 3 (#104); the agent skill with recipes is
 > part 2 (#103), and it is in `plugin/skills/creating-pce-toys/` — read
