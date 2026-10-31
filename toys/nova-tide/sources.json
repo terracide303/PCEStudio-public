@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "name": "sea",
+      "kind": "bg",
+      "tiles": {
+        "first": 0,
+        "count": 140
+      },
+      "map": true,
+      "palettes": {
+        "side": "bg",
+        "first": 0,
+        "count": 1
+      }
+    },
+    {
+      "name": "ships",
+      "kind": "sprites",
+      "patterns": {
+        "first": 0,
+        "count": 16
+      },
+      "sprites": {
+        "first": 0,
+        "count": 16
+      },
+      "palettes": {
+        "side": "spr",
+        "first": 0,
+        "count": 1
+      }
+    }
+  ]
+}
