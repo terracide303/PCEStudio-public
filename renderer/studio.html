@@ -979,6 +979,52 @@
     color: var(--dim); font: 10px/1.5 var(--mono);
     border-top: 1px solid var(--line); padding-top: 8px; margin: 12px 0 0;
   }
+  /* #162 — the Project dialog: one window for Save and Open.  The two panes
+   * are tabs; the checklist rows are the groups the archive carries and their
+   * sizes; OPEN lists what a chosen file holds before anything is loaded. */
+  .modal-card.is-project { width: min(620px, 94vw); }
+  .modal-card.is-project h2 { position: relative; padding-right: 26px; }
+  .proj-tabs { display: flex; gap: 6px; margin: 4px 0 12px; }
+  .proj-tabs .ctab { padding: 5px 12px; }
+  .proj-pane { min-width: 0; }
+  .proj-row {
+    display: flex; align-items: center; gap: 8px; padding: 5px 2px;
+    border-bottom: 1px solid var(--line); color: var(--text2);
+    font: 11px/1.4 var(--mono);
+  }
+  .proj-row:last-child { border-bottom: 0; }
+  .proj-row input[type="checkbox"] { flex: none; }
+  .proj-row .proj-size { margin-left: auto; color: var(--dim); }
+  .proj-row .proj-tag { color: var(--faint); }
+  .proj-field {
+    display: flex; align-items: center; gap: 8px; margin: 0 0 10px;
+    color: var(--text2); font: 11px var(--mono);
+  }
+  .proj-field input[type="text"] {
+    flex: 1; min-width: 0; background: var(--sunken); color: var(--text);
+    border: 1px solid var(--line); border-radius: 4px; padding: 5px 7px;
+    font: 12px var(--mono);
+  }
+  .proj-formats { display: flex; flex-direction: column; gap: 5px;
+    margin: 8px 0 0; color: var(--text2); font: 11px var(--mono); }
+  .proj-note { color: var(--dim); font: 10px/1.5 var(--mono); margin: 8px 0 0; }
+  .proj-warn { color: var(--accent); font: 10px/1.5 var(--mono); margin: 8px 0 0; }
+  .proj-info { color: var(--text2); font: 11px/1.5 var(--mono);
+    border: 1px solid var(--line); border-radius: 4px; padding: 8px;
+    margin: 8px 0; max-height: 190px; overflow: auto; }
+  .proj-info h3 { margin: 4px 0; color: var(--text); font: 600 11px var(--sans); }
+  .proj-info ul { margin: 2px 0 8px; padding-left: 16px; }
+  .proj-drop {
+    border: 1px dashed var(--line2); border-radius: 5px; padding: 10px;
+    color: var(--dim); font: 11px var(--mono); text-align: center;
+    margin: 0 0 8px; cursor: pointer;
+  }
+  .proj-drop.is-over { border-color: var(--accent); color: var(--text); }
+  .proj-recent { list-style: none; margin: 6px 0 0; padding: 0; }
+  .proj-recent li { display: flex; gap: 8px; align-items: center;
+    padding: 4px 2px; border-bottom: 1px solid var(--line);
+    color: var(--text2); font: 11px var(--mono); }
+  .proj-recent .proj-size { margin-left: auto; color: var(--dim); }
   .toast {
     position: fixed; z-index: 40; right: 16px; bottom: 16px;
     background: var(--pane); border: 1px solid var(--line); border-radius: 6px;
@@ -1054,6 +1100,8 @@
       <button type="button" class="btn" id="btn-docs"
               title="The toy author's reference (#61)">Docs</button>
       <button type="button" class="btn" id="btn-save">Save file</button>
+      <button type="button" class="btn" id="btn-project" aria-haspopup="dialog"
+              title="Project — save or open a .pcestudio: the game, Claude's notes, the original art and named versions (#162)">Project…</button>
       <button type="button" class="btn" id="btn-open" aria-haspopup="true"
               aria-expanded="false">Open…</button>
       <span class="account" title="The agent link is card #24">not signed in</span>
@@ -1858,8 +1906,82 @@
   </div>
 </div>
 
-<div class="toast" id="toast" role="status" hidden></div>
-<pre class="selftest" id="selftest" hidden></pre>
+<!-- #162 — the Project window.  One dialog for Save and Open instead of two
+     bare buttons (Dennis, 2026-10-29: "and have a window for saving loading
+     etc where to select what you want etc").  SAVE names the file, ticks what
+     goes in (each group with its size) and picks the format; OPEN shows what a
+     chosen .pcestudio/.pce.json/.lua/PNG/WAV/MID holds before anything is
+     loaded, ticks what to load, and asks replace-or-add.  The lists of
+     groups are built by initProjectDialog() so their checkboxes exist before
+     the evidence clicks every button. -->
+<div class="modal" id="project-modal" hidden>
+  <div class="modal-card is-project" role="dialog" aria-modal="true"
+       aria-labelledby="project-title">
+    <h2 id="project-title">Project
+      <button type="button" class="modal-x" id="project-close"
+              aria-label="Close the project dialog">×</button></h2>
+    <div class="proj-tabs" role="tablist" aria-label="Project">
+      <button type="button" class="ctab is-on" id="project-tab-save"
+              role="tab" aria-selected="true">SAVE</button>
+      <button type="button" class="ctab" id="project-tab-open"
+              role="tab" aria-selected="false">OPEN</button>
+    </div>
+    <div class="proj-pane" id="project-save">
+      <label class="proj-field" for="project-name">name
+        <input type="text" id="project-name" value="" spellcheck="false"
+               placeholder="my-game"></label>
+      <div id="project-groups"></div>
+      <div class="proj-field">
+        <button type="button" class="btn-mini" id="project-snapshot"
+                title="Make a named snapshot of the code and asset files (not art/)">Snapshot…</button>
+        <span class="proj-tag" id="project-version-count"></span>
+      </div>
+      <ul class="proj-recent" id="project-versions"></ul>
+      <div class="proj-formats">
+        <label><input type="radio" name="project-format"
+                      id="project-format-zip" value="pcestudio" checked>
+          project — <code>.pcestudio</code> (code, notes, original art,
+          versions)</label>
+        <label><input type="radio" name="project-format"
+                      id="project-format-json" value="pce.json">
+          plain toy — <code>.pce.json</code> (the file Save file writes)</label>
+        <label><input type="radio" name="project-format"
+                      id="project-format-rom" value="rom">
+          ROM — <code>.pce</code>, through Export…</label>
+      </div>
+      <p class="proj-note" id="project-save-note"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="project-save-cancel">Cancel</button>
+        <button type="button" class="btn btn-accent" id="project-save-go">Save project</button>
+      </div>
+    </div>
+    <div class="proj-pane" id="project-open" hidden>
+      <div class="proj-drop" id="project-open-drop">drop a .pcestudio,
+        .pce.json, .lua or a PNG/WAV/MID here, or click to pick</div>
+      <input type="file" id="project-open-file" hidden
+             accept=".pcestudio,.pce.json,.pce.studio,.json,.lua,.png,.wav,.mid,.midi">
+      <div class="proj-info" id="project-open-info">nothing chosen yet</div>
+      <div id="project-open-groups"></div>
+      <div class="proj-formats">
+        <label><input type="radio" name="project-mode"
+                      id="project-mode-replace" value="replace" checked>
+          replace the current toy</label>
+        <label><input type="radio" name="project-mode"
+                      id="project-mode-add" value="add">
+          add to it (take only what is ticked)</label>
+      </div>
+      <p class="proj-warn" id="project-open-warning" hidden></p>
+      <p class="proj-note">Recent projects (kept in this browser)</p>
+      <ul class="proj-recent" id="project-recent"></ul>
+      <div class="modal-actions">
+        <button type="button" class="btn" id="project-open-cancel">Cancel</button>
+        <button type="button" class="btn btn-accent" id="project-open-go">Open</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div><pre class="selftest" id="selftest" hidden></pre>
 
 <!-- CodeMirror 5.65.16, MIT (vendor/codemirror/LICENSE). Loaded only when the
      document can host it: the tests' stub DOM has no createRange/navigator,
@@ -1929,6 +2051,13 @@
      into the tiles and palettes the panels edit, a DDA sample, or a song.
      It reads pce-psg.js (the DDA preview) and pce-seq.js (the song), above. -->
 <script src="pce-source.js"></script>
+<!-- #162: the project file.  pce-zip.js is the ZIP reader/writer (stored
+     writes, store/deflate reads) and pce-project.js the .pcestudio layout
+     over it: project.json, NOTES.md, art/ and versions/.  Both are pure
+     modules with no dependency of their own, so they load before the page's
+     inline script without the editor or a panel. -->
+<script src="pce-zip.js"></script>
+<script src="pce-project.js"></script>
 <!-- #95: the SEQUENCER's staff view — a song spelled for a key, a clef, a
      note value and an octave mark, drawn by the SEQUENCER panel.  It reads
      renderer/pce-seq.js's song and changes none of it. -->
@@ -2488,6 +2617,16 @@ let files = [];
 let activeFile = "main.lua";
 let toyTitle = "palette-cycle";
 let toyDescription = "";
+/* #162: the project's extra layers, beside the text file set.  `artFiles` are
+ * the ORIGINAL PNG/WAV/MID bytes Add Source kept (so they can be re-imported
+ * with other settings), `projectVersions` are named snapshots of the code and
+ * asset files, and `projectMeta` is project.json's own author/created.  They
+ * travel in a .pcestudio; the old .pce.json envelope keeps only the text
+ * files, which is why opening one is "a project without notes". */
+let artFiles = [];            /* [{name, bytes, source}] */
+let projectVersions = [];     /* [{label, created, files:[{name,kind,source}]}] */
+let projectMeta = { author: "", created: null };
+let projectState = null;      /* the Project dialog's live state */
 let editor = null;            /* the CodeMirror instance, when mounted */
 let switchingFile = false;    /* setValue while switching is not an edit */
 let restoredFromStorage = false;
@@ -3429,10 +3568,15 @@ function mainSource() {
 
 function fileKind(name) {
   if (/\.lua$/.test(name)) return "lua";
+  if (/^NOTES\.md$/.test(name)) return "notes";
   if (/^tiles\.json$/.test(name)) return "tiles";
   if (/^palettes\.json$/.test(name)) return "palettes";
   if (/^sprites\.json$/.test(name)) return "sprites";
   if (/^waves\.json$/.test(name)) return "waves";
+  if (/^sources\.json$/.test(name)) return "sources";
+  if (/^samples\.json$/.test(name)) return "samples";
+  if (/^instruments\.json$/.test(name)) return "instruments";
+  if (/^songs?\.json$/.test(name)) return "song";
   return "json";
 }
 
@@ -3589,8 +3733,10 @@ function updateFileTabs() {
   if (!host) return;
   while (host.firstChild) host.removeChild(host.firstChild);
   /* ppu.toys' file bar carries the code files; an asset gets a tab while it
-   * is the file in the editor, and the ASSETS tab lists the whole set. */
+   * is the file in the editor, and the ASSETS tab lists the whole set.  #162:
+   * NOTES.md is a tab beside main.lua the moment a project has one. */
   const shown = files.filter((f) => fileKind(f.name) === "lua" ||
+                                    f.name === "NOTES.md" ||
                                     f.name === activeFile);
   for (const f of shown) {
     const b = document.createElement("button");
@@ -3706,6 +3852,10 @@ function loadExample(id, quiet, noApply) {
   files = folder
     ? ex.files.map((f) => ({ name: f.name, kind: f.kind, source: f.source }))
     : newToyFiles(ex.source);
+  /* #162: an example is a new project, with no originals and no versions. */
+  artFiles = [];
+  projectVersions = [];
+  projectMeta = { author: "", created: isoNow() };
   current.source = ex.source;
   activeFile = "main.lua";
   switchingFile = true;
@@ -3894,6 +4044,12 @@ function installToy(env, fileName, opts) {
   const o = opts || {};
   if (o.stash !== false) stashReplacedToy();
   files = env.files.map((f) => ({ name: f.name, kind: f.kind, source: f.source }));
+  /* #162: a new toy is a new project — the previous toy's originals and
+   * versions are not this one's.  (Opening a .pcestudio does not come through
+   * here; applyLoadedProject() sets all three explicitly.) */
+  artFiles = [];
+  projectVersions = [];
+  projectMeta = { author: "", created: isoNow() };
   toyTitle = o.title || env.title || String(fileName || "toy")
     .replace(/\.(pce\.json|pce\.studio|json|lua|txt)$/i, "");
   toyDescription = env.description || "";
@@ -4272,6 +4428,968 @@ function saveToyFile() {
   toast("Saved " + name + ".");
   return { name: name, text: text };
 }
+
+/* ======================================================================
+ * #162 — the project file: `<name>.pcestudio`, a ZIP whose layout is the
+ * same as an unpacked project folder (renderer/pce-project.js is the format,
+ * renderer/pce-zip.js the container; docs/PROJECT-FORMAT.md is the reference).
+ *
+ * The page keeps three things beside its text `files`:
+ *   artFiles        the ORIGINAL PNG/WAV/MID bytes Add Source kept, so the
+ *                   import can be redone with other settings; sources.json's
+ *                   `original` names which one each source came from.
+ *   projectVersions named snapshots of the code and asset files (never art/),
+ *                   at most a handful; the oldest is kept, never auto-dropped.
+ *   projectMeta     project.json's author/created.
+ * The old .pce.json envelope still opens (a project without notes) and Save
+ * file still writes it; the Project window is the one place that saves and
+ * opens a whole project.
+ * ==================================================================== */
+const PROJECT_RECENT_KEY = "pcestudio.projects.v1";
+const PROJECT_MAX_RECENT = 5;
+/* A recent project is kept in browser storage only while it fits: a .pcestudio
+ * can carry 1 MB of original art, and localStorage is not a disk.  A project
+ * too large to keep is still listed, and OPEN says so rather than failing
+ * silently. */
+const PROJECT_RECENT_BYTES = 2 * 1024 * 1024;
+const PROJECT_GROUPS = [
+  ["code", "code (.lua)"],
+  ["assets", "assets / sources"],
+  ["songs", "songs"],
+  ["notes", "NOTES.md"],
+  ["art", "original art (art/)"],
+  ["versions", "versions"]
+];
+
+function projectModel() { return PCEStudio.project || null; }
+function zipModel() { return PCEStudio.zip || null; }
+
+function isoNow() {
+  try { return new Date().toISOString(); } catch (e) { return ""; }
+}
+function todayStamp() { return isoNow().slice(0, 10); }
+
+function fmtBytes(n) {
+  const v = Number(n) || 0;
+  if (v < 1024) return v + " B";
+  if (v < 1024 * 1024) return (v / 1024).toFixed(v < 10240 ? 1 : 0) + " KB";
+  return (v / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function clearHost(host) {
+  if (!host) return;
+  while (host.firstChild) host.removeChild(host.firstChild);
+}
+
+/* base64 without btoa/atob: the stub DOM has neither, and browser storage
+ * keeps a recent project's bytes as base64 text. */
+const B64_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+function base64Encode(bytes) {
+  const b = bytes || new Uint8Array(0);
+  let out = "";
+  for (let i = 0; i < b.length; i += 3) {
+    const a = b[i], c = i + 1 < b.length ? b[i + 1] : 0;
+    const d = i + 2 < b.length ? b[i + 2] : 0;
+    out += B64_CHARS[a >> 2] + B64_CHARS[((a & 3) << 4) | (c >> 4)];
+    if (i + 1 < b.length) out += B64_CHARS[((c & 15) << 2) | (d >> 6)];
+    else out += "=";
+    if (i + 2 < b.length) out += B64_CHARS[d & 63];
+    else out += "=";
+  }
+  return out;
+}
+function base64Decode(text) {
+  const s = String(text || "").replace(/[^A-Za-z0-9+/=]/g, "");
+  const out = [];
+  for (let i = 0; i < s.length; i += 4) {
+    const a = B64_CHARS.indexOf(s[i]), b = B64_CHARS.indexOf(s[i + 1]);
+    const c = s[i + 2] === "=" ? -1 : B64_CHARS.indexOf(s[i + 2]);
+    const d = s[i + 3] === "=" ? -1 : B64_CHARS.indexOf(s[i + 3]);
+    if (a < 0 || b < 0) break;
+    out.push((a << 2) | (b >> 4));
+    if (c >= 0) out.push(((b & 15) << 4) | (c >> 2));
+    if (c >= 0 && d >= 0) out.push(((c & 3) << 6) | d);
+  }
+  return new Uint8Array(out);
+}
+
+/* A binary download needs a Blob URL: a 1 MB data: URI is refused by browsers
+ * and the stub DOM cannot build one anyway.  Returning false is honest — the
+ * caller keeps the bytes it built and says the browser could not save them. */
+function downloadBytes(name, bytes, type) {
+  try {
+    if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function" ||
+        typeof Blob !== "function") return false;
+    const blob = new Blob([bytes], { type: type || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.download = name;
+    a.href = url;
+    if (a.style) a.style.display = "none";
+    a.click();
+    if (typeof setTimeout === "function")
+      setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 1000);
+    return true;
+  } catch (e) { return false; }
+}
+
+/* ---- the live project ------------------------------------------------- */
+function syncActiveFileEditor() {
+  if (!showingGlobals) {
+    const cur = findFile(activeFile);
+    if (cur) cur.source = editorText();
+  }
+  current.source = mainSource();
+}
+
+/* The project as it would be saved.  A NOTES.md template is added when the
+ * project has none and notes are ticked — without touching the live file set
+ * (that happens only after a successful save, below). */
+function currentProject(opts) {
+  const o = opts || {};
+  const P = projectModel();
+  syncActiveFileEditor();
+  let list = files.map((f) => ({ name: f.name, kind: fileKind(f.name),
+                                 source: f.source }));
+  if (o.notesTemplate && !list.some((f) => f.name === P.NOTES_NAME))
+    list.push({ name: P.NOTES_NAME, kind: "notes",
+                source: P.notesTemplate({ title: o.title || toyTitle,
+                                          date: todayStamp() }) });
+  const created = projectMeta.created || isoNow();
+  projectMeta.created = created;
+  return {
+    title: o.title != null ? o.title : toyTitle,
+    author: projectMeta.author || "",
+    created: created,
+    modified: o.modified || isoNow(),
+    files: list,
+    art: artFiles.map((a) => ({ name: a.name, bytes: a.bytes,
+                                source: a.source || "" })),
+    versions: projectVersions.map((v) => ({ label: v.label,
+                                            created: v.created,
+                                            files: v.files.map((f) => ({
+                                              name: f.name, kind: f.kind,
+                                              source: f.source })) }))
+  };
+}
+
+/* Save a whole project.  `opts.include` is the dialog's checklist; `opts.name`
+ * names the file.  Returns the bytes whatever the download did, so the
+ * evidence can inspect the archive and a caller that cannot download (the
+ * stub DOM) still gets its project. */
+function saveProject(opts) {
+  const o = opts || {}, P = projectModel();
+  if (!P) return { ok: false, error: { code: "project-missing",
+    message: "renderer/pce-project.js did not load" } };
+  const title = String(o.name || o.title || toyTitle || "project").trim() || "project";
+  const include = P.defaultInclude(o.include);
+  let bytes;
+  try {
+    bytes = P.build(currentProject({ title: title, notesTemplate: include.notes }),
+                    include);
+  } catch (e) {
+    showError(e);
+    return { ok: false, error: { code: e.code || "error", message: e.message } };
+  }
+  const name = P.zipName(title);
+  const downloaded = downloadBytes(name, bytes, "application/zip");
+  if (downloaded) {
+    /* The project now exists on disk: NOTES.md becomes a real, editable tab
+     * if the template was in the archive, and the toy takes the project's
+     * title so the next save offers the same name. */
+    toyTitle = title;
+    if (include.notes && !findFile(P.NOTES_NAME)) {
+      files.push({ name: P.NOTES_NAME, kind: "notes",
+                   source: P.notesTemplate({ title: title, date: todayStamp() }) });
+      updateFileTabs();
+      renderAssets();
+    }
+    savePoint = toyEnvelopeText();
+    setSaved("saved " + name);
+    toast("Saved " + name + " (" + fmtBytes(bytes.length) + ").");
+  } else {
+    setSaved("built " + name);
+    toast("Built " + name + " (" + fmtBytes(bytes.length) + "): this browser " +
+          "cannot download a binary file, so it was not saved.");
+  }
+  persistToy();
+  rememberProject({ name: name, title: title, modified: isoNow(),
+                    size: bytes.length, bytes: bytes });
+  renderProjectVersions();
+  renderRecentProjects();
+  return { ok: true, name: name, title: title, bytes: bytes,
+           size: bytes.length, downloaded: downloaded, include: include };
+}
+
+/* ---- recent projects (browser storage, per viewer) -------------------- */
+function recentProjects() {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(PROJECT_RECENT_KEY);
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list : [];
+  } catch (e) { return []; }
+}
+
+function rememberProject(entry) {
+  if (typeof localStorage === "undefined") return [];
+  const keep = {
+    name: entry.name, title: entry.title || "",
+    modified: entry.modified || isoNow(), size: entry.size || 0,
+    bytes: (entry.bytes && entry.bytes.length <= PROJECT_RECENT_BYTES)
+      ? base64Encode(entry.bytes) : null
+  };
+  const list = recentProjects().filter((e) => e && e.name !== keep.name);
+  list.unshift(keep);
+  while (list.length > PROJECT_MAX_RECENT) list.pop();
+  try { localStorage.setItem(PROJECT_RECENT_KEY, JSON.stringify(list)); }
+  catch (e) { /* storage full: the project is on disk, the list is a convenience */ }
+  return list;
+}
+
+function openRecentProject(index) {
+  const list = recentProjects(), entry = list[index];
+  if (!entry) return { ok: false, error: { code: "recent-missing",
+    message: "no recent project " + index } };
+  if (!entry.bytes) {
+    toast(entry.name + " is too large to keep in this browser — open the " +
+          "file from disk instead.");
+    return { ok: false, error: { code: "recent-large", message: entry.name } };
+  }
+  const out = projectLoadBytes(entry.name, base64Decode(entry.bytes),
+    { apply: true,
+      mode: ($("project-mode-add") && $("project-mode-add").checked) ? "add" : "replace",
+      load: projectGroupsState("project-load") });
+  if (out && out.ok) closeProjectDialog();
+  return out;
+}
+
+function renderRecentProjects() {
+  const host = $("project-recent");
+  if (!host) return;
+  clearHost(host);
+  const list = recentProjects();
+  if (!list.length) {
+    const li = document.createElement("li");
+    li.textContent = "no projects saved in this browser yet";
+    host.appendChild(li);
+    return;
+  }
+  list.forEach((entry, i) => {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "btn-mini";
+    b.textContent = "Open";
+    b.addEventListener("click", () => openRecentProject(i));
+    const name = document.createElement("span");
+    name.textContent = entry.name;
+    const size = document.createElement("span");
+    size.className = "proj-size";
+    size.textContent = fmtBytes(entry.size) + (entry.bytes ? "" : " · not kept");
+    li.appendChild(b); li.appendChild(name); li.appendChild(size);
+    host.appendChild(li);
+  });
+}
+
+/* ---- versions (named snapshots) --------------------------------------- */
+function snapshotVersion(label) {
+  const P = projectModel();
+  if (!P) return { ok: false, error: { code: "project-missing",
+    message: "renderer/pce-project.js did not load" } };
+  if (projectVersions.length >= P.MAX_VERSIONS)
+    return { ok: false, error: { code: "version-limit",
+      message: "there are already " + P.MAX_VERSIONS + " versions — delete one first" } };
+  syncActiveFileEditor();
+  const snap = [];
+  for (const f of files) {
+    if (P.groupOf({ name: f.name }) === "notes") continue;
+    snap.push({ name: f.name, kind: fileKind(f.name), source: f.source });
+  }
+  const v = { label: String(label || ("snapshot " + (projectVersions.length + 1))),
+              created: isoNow(), files: snap };
+  projectVersions.push(v);
+  renderProjectVersions();
+  toast("Snapshot \"" + v.label + "\" — " + snap.length + " files.");
+  return { ok: true, version: v, count: projectVersions.length };
+}
+
+function deleteVersion(index) {
+  if (!projectVersions[index])
+    return { ok: false, error: { code: "version-missing", message: "no version " + index } };
+  const gone = projectVersions.splice(index, 1)[0];
+  renderProjectVersions();
+  toast("Deleted version \"" + gone.label + "\".");
+  return { ok: true, deleted: gone.label, count: projectVersions.length };
+}
+
+/* Restoring a version puts its code and asset files back INTO the current
+ * project.  The newer state is not destroyed silently: an unsaved studio
+ * asks first, and the displaced toy also goes to Open… → Recover. */
+function restoreVersion(index, opts) {
+  const o = opts || {}, P = projectModel();
+  const v = projectVersions[index];
+  if (!v) return { ok: false, error: { code: "version-missing",
+    message: "no version " + index } };
+  if (!o.force && hasUnsavedEdits())
+    return { ok: false, needsConfirm: true, label: v.label };
+  stashReplacedToy();
+  const changed = [];
+  for (const f of v.files) {
+    const cur = findFile(f.name);
+    if (cur) { cur.source = f.source; cur.kind = fileKind(f.name); }
+    else files.push({ name: f.name, kind: fileKind(f.name), source: f.source });
+    changed.push(f.name);
+  }
+  current.source = mainSource();
+  if (changed.indexOf(activeFile) >= 0) {
+    const cur = findFile(activeFile);
+    if (cur) {
+      switchingFile = true;
+      setEditorText(cur.source);
+      switchingFile = false;
+    }
+  }
+  notifyAssetEdit("tiles.json");
+  notifyAssetEdit("song.json");
+  applySource();
+  persistToy();
+  updateFileTabs();
+  renderAssets();
+  savePoint = toyEnvelopeText();
+  toast("Restored version \"" + v.label + "\" into the project.");
+  return { ok: true, label: v.label, changed: changed };
+}
+
+function renderProjectVersions() {
+  const host = $("project-versions");
+  const count = $("project-version-count");
+  if (count) count.textContent = projectVersions.length + " of " +
+    (projectModel() ? projectModel().MAX_VERSIONS : 0) + " versions";
+  if (!host) return;
+  clearHost(host);
+  projectVersions.forEach((v, i) => {
+    const li = document.createElement("li");
+    const restore = document.createElement("button");
+    restore.type = "button";
+    restore.className = "btn-mini";
+    restore.textContent = "Restore";
+    restore.addEventListener("click", () => {
+      const answer = restoreVersion(i, {});
+      if (answer.needsConfirm) {
+        restore.textContent = "Confirm restore";
+        restore.title = "The studio has unsaved edits; pressing again replaces them";
+        restore.addEventListener("click", () => restoreVersion(i, { force: true }),
+                                 { once: true });
+      }
+    });
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn-mini";
+    del.textContent = "×";
+    del.title = "Delete this version";
+    del.addEventListener("click", () => deleteVersion(i));
+    const name = document.createElement("span");
+    name.textContent = v.label;
+    const size = document.createElement("span");
+    size.className = "proj-size";
+    size.textContent = (v.files || []).length + " files";
+    li.appendChild(restore); li.appendChild(del); li.appendChild(name);
+    li.appendChild(size);
+    host.appendChild(li);
+  });
+}
+
+/* ---- the originals Add Source keeps ----------------------------------- */
+function keepArtOriginal(name, bytes, source) {
+  if (!(bytes && bytes.length)) return null;
+  let leaf = String(name || "original").split(/[\\/]/).pop();
+  leaf = leaf.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[-.]+|[-.]+$/g, "");
+  if (!leaf) leaf = "original";
+  let base = leaf, ext = "";
+  const m = /^(.*?)(\.[A-Za-z0-9]+)$/.exec(leaf);
+  if (m) { base = m[1]; ext = m[2]; }
+  let candidate = leaf, n = 2;
+  const used = {};
+  for (const a of artFiles) used[a.name.toLowerCase()] = true;
+  while (used[candidate.toLowerCase()])
+    candidate = base + "-" + (n++) + ext;
+  artFiles.push({ name: candidate, bytes: new Uint8Array(bytes),
+                  source: source == null ? "" : String(source) });
+  return { name: candidate, path: "art/" + candidate, bytes: bytes.length };
+}
+
+function findArt(name) {
+  for (const a of artFiles) if (a.name === name) return a;
+  return null;
+}
+
+/* ---- reading a file for OPEN ------------------------------------------ */
+function readFileBytes(file, cb) {
+  try {
+    if (file && typeof file.arrayBuffer === "function") {
+      const p = file.arrayBuffer();
+      if (p && typeof p.then === "function") {
+        p.then((b) => cb(null, new Uint8Array(b)), (e) => cb(e));
+        return;
+      }
+    }
+    if (typeof FileReader === "function") {
+      const reader = new FileReader();
+      reader.onload = () => cb(null, new Uint8Array(reader.result));
+      reader.onerror = () => cb(reader.error || new Error("the file could not be read"));
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+    cb(new Error("this browser cannot read a file"));
+  } catch (e) { cb(e); }
+}
+
+function isPngBytes(b) {
+  return !!(b && b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 &&
+            b[2] === 0x4E && b[3] === 0x47);
+}
+function isWaveBytes(b) {
+  return !!(b && b.length >= 12 && b[0] === 0x52 && b[1] === 0x49 &&
+            b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 &&
+            b[9] === 0x41 && b[10] === 0x56 && b[11] === 0x45);
+}
+function isMidiBytes(b) {
+  return !!(b && b.length >= 4 && b[0] === 0x4D && b[1] === 0x54 &&
+            b[2] === 0x68 && b[3] === 0x64);
+}
+function leafName(name) {
+  return String(name || "original").split(/[\\/]/).pop();
+}
+
+function projectFromToy(env, name) {
+  const filesOut = env.files.map((f) => ({ name: f.name,
+                                           kind: fileKind(f.name),
+                                           source: f.source }));
+  let notes = null;
+  for (const f of filesOut) if (f.name === "NOTES.md") notes = f.source;
+  return { format: projectModel().FORMAT,
+           title: env.title || projectModel().titleFromName(name),
+           author: "", created: "", modified: "", files: filesOut,
+           notes: notes, art: [], versions: [] };
+}
+
+function projectFromLua(text, name) {
+  return { format: projectModel().FORMAT,
+           title: projectModel().titleFromName(name),
+           author: "", created: "", modified: "",
+           files: newToyFiles(String(text)), notes: null,
+           art: [], versions: [] };
+}
+
+function projectFromOriginal(name, bytes) {
+  const P = projectModel();
+  return { format: P.FORMAT, title: P.titleFromName(name), author: "",
+           created: "", modified: "", files: [], notes: null,
+           art: [{ name: leafName(name), bytes: bytes, source: "" }],
+           versions: [] };
+}
+
+/* What a chosen OPEN file is: a zipped project, an old toy envelope, a .lua,
+ * or one original image/audio file.  Reading is done before any page state
+ * changes, so a bad file leaves the studio alone. */
+function sniffProjectFile(name, bytes) {
+  const P = projectModel(), Z = zipModel();
+  const n = String(name || "file"), lower = n.toLowerCase();
+  if (!P || !Z) throw toyRefuse("project-missing", "the project modules did not load");
+  if (bytes && bytes.length >= 2 && bytes[0] === 0x50 && bytes[1] === 0x4B)
+    return { kind: "project", name: n, bytes: bytes,
+             project: P.parseBytes(bytes) };
+  if (isPngBytes(bytes) || isWaveBytes(bytes) || isMidiBytes(bytes) ||
+      /\.(png|wav|mid|midi)$/.test(lower))
+    return { kind: "original", name: n, bytes: bytes,
+             project: projectFromOriginal(n, bytes) };
+  const text = Z.utf8Decode(bytes || new Uint8Array(0));
+  if (/\.lua$/i.test(lower))
+    return { kind: "lua", name: n, bytes: bytes,
+             project: projectFromLua(text, n) };
+  let doc;
+  try { doc = JSON.parse(text); }
+  catch (e) {
+    throw toyRefuse("project-format", n + " is not a .pcestudio, a .pce.json, " +
+      "a .lua or an original PNG/WAV/MID");
+  }
+  if (doc && doc.version === TOY_VERSION)
+    return { kind: "toy", name: n, bytes: bytes,
+             project: projectFromToy(parseToyFile(text, n), n) };
+  throw toyRefuse("project-format", n + " has no pce.studio/1 envelope and is " +
+    "not a .pcestudio (docs/PROJECT-FORMAT.md)");
+}
+
+/* ---- opening ----------------------------------------------------------
+ * Replace: the studio becomes the project.  Add: only the ticked groups are
+ * taken into the current toy (a song from another project, only its art).
+ * Unsaved work is the one thing that makes replace ask first. */
+function applyLoadedProject(loaded, opts) {
+  const o = opts || {}, P = projectModel();
+  const load = P.defaultInclude(o.load);
+  const mode = o.mode === "add" ? "add" : "replace";
+  const proj = loaded.project;
+  const title = proj.title || P.titleFromName(loaded.name);
+
+  if (mode === "replace") {
+    if (!load.code)
+      return { ok: false, error: { code: "project-code",
+        message: "replace needs code: main.lua is the toy" } };
+    if (!o.force && hasUnsavedEdits())
+      return { ok: false, needsConfirm: true, mode: mode, title: title };
+    stashReplacedToy();
+    const kept = [];
+    for (const f of proj.files)
+      if (load[P.groupOf(f)])
+        kept.push({ name: f.name, kind: fileKind(f.name), source: f.source });
+    files = kept;
+    artFiles = load.art ? proj.art.map((a) => ({
+      name: a.name, bytes: new Uint8Array(a.bytes), source: a.source || ""
+    })) : [];
+    projectVersions = load.versions ? proj.versions.map((v) => ({
+      label: v.label, created: v.created,
+      files: (v.files || []).map((f) => ({ name: f.name,
+                                           kind: fileKind(f.name),
+                                           source: f.source }))
+    })) : [];
+    projectMeta = { author: proj.author || "",
+                    created: proj.created || isoNow() };
+    toyTitle = title;
+    toyDescription = "";
+    current.example = null;
+    activeFile = "main.lua";
+    current.source = mainSource();
+    switchingFile = true;
+    setEditorText(current.source);
+    switchingFile = false;
+    if (editor) editor.setOption("mode", "lua");
+    $("doc-title").textContent = "main.lua";
+    updateFileTabs();
+    renderAssets();
+    notifyAssetEdit("tiles.json");
+    notifyAssetEdit("song.json");
+    if (scanlinesApi()) scanlinesApi().invalidate();
+    panelDirty = true;
+    applySource();
+    persistToy();
+    savePoint = toyEnvelopeText();
+    renderProjectVersions();
+    toast("Opened " + loaded.name + ".");
+    return { ok: true, mode: mode, title: title,
+             files: files.map((f) => f.name), art: artFiles.length,
+             versions: projectVersions.length };
+  }
+
+  /* add to the current toy: each ticked group is merged by name, so taking a
+   * song from another project leaves main.lua alone */
+  const changed = [];
+  const put = (f) => {
+    const cur = findFile(f.name);
+    if (cur) { cur.source = f.source; cur.kind = fileKind(f.name); }
+    else files.push({ name: f.name, kind: fileKind(f.name), source: f.source });
+    if (changed.indexOf(f.name) < 0) changed.push(f.name);
+  };
+  for (const f of proj.files) if (load[P.groupOf(f)]) put(f);
+  if (load.art) {
+    for (const a of proj.art) {
+      const cur = findArt(a.name);
+      if (cur) cur.bytes = new Uint8Array(a.bytes);
+      else artFiles.push({ name: a.name, bytes: new Uint8Array(a.bytes),
+                           source: a.source || "" });
+      changed.push("art/" + a.name);
+    }
+  }
+  if (load.versions) {
+    for (const v of proj.versions) {
+      if (projectVersions.length >= P.MAX_VERSIONS) break;
+      projectVersions.push({
+        label: v.label, created: v.created,
+        files: (v.files || []).map((f) => ({ name: f.name,
+                                             kind: fileKind(f.name),
+                                             source: f.source }))
+      });
+      changed.push("version " + v.label);
+    }
+  }
+  if (load.code) {
+    current.source = mainSource();
+    if (activeFile === "main.lua") {
+      const main = findFile("main.lua");
+      if (main) {
+        switchingFile = true;
+        setEditorText(main.source);
+        switchingFile = false;
+      }
+    }
+  }
+  if (load.assets || load.songs) {
+    notifyAssetEdit("tiles.json");
+    notifyAssetEdit("song.json");
+  }
+  if (load.code) applySource();
+  persistToy();
+  updateFileTabs();
+  renderAssets();
+  renderProjectVersions();
+  panelDirty = true;
+  toast("Added " + changed.length + " file(s) from " + loaded.name + ".");
+  return { ok: true, mode: "add", changed: changed,
+           files: files.map((f) => f.name) };
+}
+
+function openProjectBytes(bytes, opts) {
+  const o = opts || {};
+  let parsed;
+  try { parsed = projectModel().parseBytes(bytes); }
+  catch (e) {
+    showError(e);
+    return { ok: false, error: { code: e.code || "error", message: e.message } };
+  }
+  return applyLoadedProject({ kind: "project", name: o.name || "project",
+                              bytes: bytes, project: parsed },
+                            { load: o.load, mode: o.mode, force: o.force });
+}
+
+/* OPEN's pick/drop path: sniff, describe, then wait for the Open button (or
+ * apply at once when the evidence passes {apply:true}). */
+function projectLoadBytes(name, bytes, opts) {
+  const o = opts || {};
+  let loaded;
+  try { loaded = sniffProjectFile(name, bytes); }
+  catch (e) {
+    showError(e);
+    return { ok: false, error: { code: e.code || "error", message: e.message } };
+  }
+  projectState = projectState || {};
+  projectState.loaded = loaded;
+  projectState.confirmReplace = false;
+  renderProjectOpenInfo(loaded);
+  updateProjectOpenSizes(loaded.project);
+  /* An original has no toy to replace: it can only join the art.  Tick that
+   * group and pick "add", so the default action is the one that works. */
+  if (loaded.kind === "original") {
+    if ($("project-mode-add")) $("project-mode-add").checked = true;
+    if ($("project-mode-replace")) $("project-mode-replace").checked = false;
+    PROJECT_GROUPS.forEach((g) => {
+      const el = $("project-load-" + g[0]);
+      if (el) el.checked = g[0] === "art";
+    });
+  }
+  updateProjectOpenWarning();
+  if (o.apply)
+    return applyLoadedProject(loaded, { load: o.load, mode: o.mode,
+                                        force: o.force });
+  return { ok: true, kind: loaded.kind, name: name,
+           described: projectModel().describe(loaded.project) };
+}
+
+/* ---- the Project dialog ----------------------------------------------- */
+/* Each group is one row: what goes in, and its size.  Built once at init so
+ * the checklist exists in the page's own DOM (the evidence clicks every
+ * button, and a row that appeared only later would be invisible to it). */
+function projectGroupRows(hostId, prefix, withSizes) {
+  const host = $(hostId);
+  if (!host) return;
+  clearHost(host);
+  PROJECT_GROUPS.forEach((g) => {
+    const row = document.createElement("label");
+    row.className = "proj-row";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.id = prefix + "-" + g[0];
+    box.checked = true;
+    const name = document.createElement("span");
+    name.textContent = g[1];
+    row.appendChild(box);
+    row.appendChild(name);
+    if (withSizes) {
+      const size = document.createElement("span");
+      size.className = "proj-size";
+      size.id = prefix + "-size-" + g[0];
+      size.textContent = "0 B";
+      row.appendChild(size);
+    }
+    host.appendChild(row);
+  });
+}
+
+function projectGroupsState(prefix) {
+  const out = {};
+  PROJECT_GROUPS.forEach((g) => {
+    const el = $(prefix + "-" + g[0]);
+    out[g[0]] = el ? !!el.checked : true;
+  });
+  return out;
+}
+
+function projectSetGroupSizes(prefix, sizes) {
+  PROJECT_GROUPS.forEach((g) => {
+    const el = $(prefix + "-size-" + g[0]);
+    if (el) el.textContent = fmtBytes((sizes && sizes[g[0]]) || 0);
+  });
+}
+
+function updateProjectSaveSizes() {
+  const P = projectModel();
+  if (!P) return;
+  const include = projectGroupsState("project-inc");
+  const proj = currentProject({ title: $("project-name") ? $("project-name").value
+                                                 : toyTitle,
+                                notesTemplate: include.notes });
+  const s = P.sizes(proj);
+  projectSetGroupSizes("project-inc", s);
+  const note = $("project-save-note");
+  if (note) {
+    const total = (include.code ? s.code : 0) + (include.assets ? s.assets : 0) +
+                  (include.songs ? s.songs : 0) + (include.notes ? s.notes : 0) +
+                  (include.art ? s.art : 0) + (include.versions ? s.versions : 0);
+    note.textContent = "this project: " + fmtBytes(total) +
+      " · " + projectSaveFormatNote();
+  }
+}
+function projectSaveFormatNote() {
+  const fmt = $("project-format-rom") && $("project-format-rom").checked ? "rom"
+    : ($("project-format-json") && $("project-format-json").checked ? "pce.json"
+       : "pcestudio");
+  if (fmt === "rom") return "Export… builds the ROM; this window closes";
+  if (fmt === "pce.json") return "the plain toy file Save file writes (no art/, no versions)";
+  return "one ZIP: the game, NOTES.md, the original art and the versions";
+}
+
+function updateProjectOpenSizes(project) {
+  if (!project) return;
+  projectSetGroupSizes("project-load", projectModel().sizes(project));
+}
+
+function projectTab(which) {
+  const save = which !== "open";
+  if ($("project-save")) $("project-save").hidden = !save;
+  if ($("project-open")) $("project-open").hidden = save;
+  if ($("project-tab-save")) {
+    $("project-tab-save").classList.toggle("is-on", save);
+    $("project-tab-save").setAttribute("aria-selected", String(save));
+  }
+  if ($("project-tab-open")) {
+    $("project-tab-open").classList.toggle("is-on", !save);
+    $("project-tab-open").setAttribute("aria-selected", String(!save));
+  }
+  if (!save) {
+    renderRecentProjects();
+    updateProjectOpenWarning();
+  }
+}
+
+function openProjectDialog(which) {
+  projectState = projectState || {};
+  projectState.open = true;
+  projectState.confirmReplace = false;
+  if ($("project-modal")) $("project-modal").hidden = false;
+  if ($("project-name") && !$("project-name").value)
+    $("project-name").value = toyTitle || "project";
+  projectTab(which === "open" ? "open" : "save");
+  updateProjectSaveSizes();
+  renderProjectVersions();
+  renderRecentProjects();
+  updateProjectOpenWarning();
+  return projectState;
+}
+
+function closeProjectDialog() {
+  if ($("project-modal")) $("project-modal").hidden = true;
+  if (projectState) projectState.open = false;
+}
+
+function renderProjectOpenInfo(loaded) {
+  const host = $("project-open-info");
+  if (!host) return;
+  clearHost(host);
+  const project = loaded.project;
+  const add = (tag, cls, text) => {
+    const el = document.createElement(tag);
+    if (cls) el.className = cls;
+    if (text != null) el.textContent = text;
+    host.appendChild(el);
+    return el;
+  };
+  add("h3", null, loaded.name + (project.title ? " — " + project.title : ""));
+  if (loaded.kind === "original") {
+    add("p", null, "one original " + leafName(loaded.name) + " (" +
+                   fmtBytes(loaded.bytes.length) + "): tick original art to add it");
+  }
+  const d = projectModel().describe(project);
+  if (d.files.length) {
+    add("h3", null, "files");
+    const ul = document.createElement("ul");
+    d.files.forEach((f) => {
+      const li = document.createElement("li");
+      li.textContent = f.name + " (" + f.kind + ", " + fmtBytes(f.bytes) + ")";
+      ul.appendChild(li);
+    });
+    host.appendChild(ul);
+  }
+  if (d.notes.length) {
+    add("h3", null, "NOTES.md");
+    const ul = document.createElement("ul");
+    d.notes.forEach((line) => {
+      const li = document.createElement("li");
+      li.textContent = line;
+      ul.appendChild(li);
+    });
+    host.appendChild(ul);
+  }
+  if (d.versions.length) {
+    add("h3", null, "versions (" + d.versions.length + ")");
+    const ul = document.createElement("ul");
+    d.versions.forEach((v) => {
+      const li = document.createElement("li");
+      li.textContent = v.label + " — " + v.files + " files";
+      ul.appendChild(li);
+    });
+    host.appendChild(ul);
+  }
+  if (d.art.length) {
+    add("h3", null, "original art (" + d.art.length + ")");
+    const ul = document.createElement("ul");
+    d.art.forEach((a) => {
+      const li = document.createElement("li");
+      li.textContent = a.name + " (" + fmtBytes(a.bytes) + ")";
+      ul.appendChild(li);
+    });
+    host.appendChild(ul);
+  }
+}
+
+function updateProjectOpenWarning() {
+  const el = $("project-open-warning");
+  if (!el) return;
+  const replace = !$("project-mode-add") || !$("project-mode-add").checked;
+  if (replace && hasUnsavedEdits() && projectState && projectState.loaded) {
+    el.hidden = false;
+    el.textContent = "The studio's toy has unsaved edits. Opening replaces it; " +
+      "the toy it replaces goes to Open… → Recover.";
+  } else {
+    el.hidden = true;
+    el.textContent = "";
+  }
+}
+
+function saveProjectFromDialog() {
+  if (!projectState || !projectState.open) return { ok: false };
+  const name = $("project-name") ? $("project-name").value : "";
+  if ($("project-format-rom") && $("project-format-rom").checked) {
+    closeProjectDialog();
+    $("export-modal").hidden = false;
+    exportToy();
+    return { ok: true, format: "rom" };
+  }
+  if ($("project-format-json") && $("project-format-json").checked) {
+    const out = saveToyFile();
+    closeProjectDialog();
+    return { ok: true, format: "pce.json", name: out.name };
+  }
+  const out = saveProject({ name: name,
+                            include: projectGroupsState("project-inc") });
+  if (out.ok) closeProjectDialog();
+  return out;
+}
+
+function openProjectFromDialog() {
+  if (!projectState || !projectState.loaded) {
+    toast("Choose a project file first.");
+    return { ok: false, error: { code: "project-none",
+      message: "nothing chosen" } };
+  }
+  const mode = $("project-mode-add") && $("project-mode-add").checked
+    ? "add" : "replace";
+  const load = projectGroupsState("project-load");
+  const force = !!projectState.confirmReplace;
+  const out = applyLoadedProject(projectState.loaded,
+                                 { mode: mode, load: load, force: force });
+  if (out.needsConfirm) {
+    projectState.confirmReplace = true;
+    const el = $("project-open-warning");
+    if (el) {
+      el.hidden = false;
+      el.textContent = "The studio's toy has unsaved edits. Opening this " +
+        "project replaces it; the old toy goes to Open… → Recover. " +
+        "Press Open again to confirm.";
+    }
+    return out;
+  }
+  if (out.ok) closeProjectDialog();
+  return out;
+}
+
+function snapshotProjectFromUi() {
+  let label = null;
+  if (typeof window !== "undefined" && typeof window.prompt === "function") {
+    label = window.prompt("Version name", "snapshot " +
+                          (projectVersions.length + 1));
+    if (label === null) return { ok: false, error: { code: "cancelled",
+      message: "cancelled" } };
+  }
+  return snapshotVersion(label || ("snapshot " + (projectVersions.length + 1)));
+}
+
+/* Bind the dialog once.  The group lists are built here, not on open, so the
+ * page has one set of checkboxes to drive. */
+function initProjectDialog() {
+  if (!projectModel() || !zipModel()) return false;
+  projectGroupRows("project-groups", "project-inc", true);
+  projectGroupRows("project-open-groups", "project-load", true);
+
+  $("btn-project").addEventListener("click", () => openProjectDialog("save"));
+  $("project-close").addEventListener("click", closeProjectDialog);
+  $("project-save-cancel").addEventListener("click", closeProjectDialog);
+  $("project-open-cancel").addEventListener("click", closeProjectDialog);
+  $("project-tab-save").addEventListener("click", () => projectTab("save"));
+  $("project-tab-open").addEventListener("click", () => projectTab("open"));
+  $("project-save-go").addEventListener("click", saveProjectFromDialog);
+  $("project-open-go").addEventListener("click", openProjectFromDialog);
+  $("project-snapshot").addEventListener("click", snapshotProjectFromUi);
+  ["project-format-zip", "project-format-json", "project-format-rom"]
+    .forEach((id) => { if ($(id)) $(id).addEventListener("change", updateProjectSaveSizes); });
+  ["project-mode-replace", "project-mode-add"].forEach((id) => {
+    if ($(id)) $(id).addEventListener("change", updateProjectOpenWarning);
+  });
+  if ($("project-name"))
+    $("project-name").addEventListener("input", updateProjectSaveSizes);
+
+  const pick = () => { if ($("project-open-file")) $("project-open-file").click(); };
+  $("project-open-drop").addEventListener("click", pick);
+  $("project-open-file").addEventListener("change", () => {
+    const file = $("project-open-file").files && $("project-open-file").files[0];
+    if (!file) return;
+    readFileBytes(file, (err, bytes) => {
+      if (err) { showError({ code: "project-read", message: String(err.message || err) }); return; }
+      projectLoadBytes(file.name, bytes, {});
+    });
+  });
+  $("project-open-drop").addEventListener("dragover", (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    $("project-open-drop").classList.add("is-over");
+  });
+  $("project-open-drop").addEventListener("dragleave", () => {
+    $("project-open-drop").classList.remove("is-over");
+  });
+  $("project-open-drop").addEventListener("drop", (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    $("project-open-drop").classList.remove("is-over");
+    const file = e && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    readFileBytes(file, (err, bytes) => {
+      if (err) { showError({ code: "project-read", message: String(err.message || err) }); return; }
+      projectLoadBytes(file.name, bytes, {});
+    });
+  });
+  projectTab("save");
+  renderProjectVersions();
+  renderRecentProjects();
+  return true;
+}
+
 
 /* Autosave: the whole file set and the editor settings, so a reload restores
  * the toy the author was looking at, not just one Lua string. */
@@ -4724,6 +5842,10 @@ function pasteFromClipboard() {
 function droppedFileKind(name) {
   const n = String(name || "").toLowerCase();
   if (/\.lua$/.test(n)) return "lua";
+  /* #162: a .pcestudio is a whole project (notes, original art, versions). */
+  if (/\.pcestudio$/.test(n)) return "project";
+  /* #162: an original image/audio file joins the project's art/. */
+  if (/\.(png|wav|mid|midi)$/.test(n)) return "original";
   /* #145: the envelope's own extension (the version string is pce.studio/1,
    * docs/STUDIO.md §3.7a) is the toy file, beside the older .pce.json. */
   if (/\.pce\.studio$/.test(n)) return "toy";
@@ -4763,14 +5885,60 @@ function dropRunFile(file) {
   if (!kind) {
     dropRun = { status: "failed", name: name,
                 error: { code: "drop-kind", message: name + " is not a .lua, " +
-                  "a .pce.studio or a .pce.json toy file" } };
+                  "a .pcestudio, a .pce.studio or a .pce.json toy file" } };
     showError(dropRun.error);
-    toast("Cannot run " + name + " — drop a .lua, a .pce.studio or a " +
-          ".pce.json toy file.");
+    toast("Cannot run " + name + " — drop a .lua, a .pcestudio, a " +
+          ".pce.studio, a .pce.json or an original PNG/WAV/MID.");
     return;
   }
   const settle = (status) => { dropRun = { status: status, name: name,
                                            error: lastError }; };
+  /* #162: a .pcestudio and an original are binary; the text path below would
+   * corrupt them.  A project opens (asking first if that loses edits); an
+   * original joins art/ and nothing else changes. */
+  if (kind === "project" || kind === "original") {
+    readFileBytes(file, (err, bytes) => {
+      if (err) {
+        dropRun = { status: "failed", name: name,
+                    error: { code: "drop-read", message: name + ": " +
+                      (err.message || err) } };
+        showError(dropRun.error);
+        return;
+      }
+      try {
+        if (kind === "original") {
+          const out = projectLoadBytes(name, bytes,
+            { apply: true, mode: "add", load: { code: false, assets: false,
+              songs: false, notes: false, art: true, versions: false } });
+          settle(out && out.ok ? "done" : "failed");
+          if (out && out.ok)
+            toast("Kept " + name + " as an original in art/ — Add Source can " +
+                  "re-import it.");
+        } else {
+          const out = projectLoadBytes(name, bytes,
+            { apply: true, mode: "replace" });
+          if (out && out.needsConfirm) {
+            /* an unsaved toy: the Project window shows it and asks, rather
+             * than the drop throwing the edits away */
+            openProjectDialog("open");
+            settle("asked");
+            toast("This project replaces a toy with unsaved edits — press " +
+                  "Open to confirm.");
+          } else {
+            settle(out && out.ok ? "done" : "failed");
+            if (out && out.ok) {
+              play();
+              toast("Opened " + name + " and running.");
+            }
+          }
+        }
+      } catch (e) {
+        showError(e);
+        settle("failed");
+      }
+    });
+    return;
+  }
   readFileText(file, (err, text) => {
     if (err) {
       dropRun = { status: "failed", name: name,
@@ -5169,6 +6337,9 @@ function init() {
   buildDocs();
   closeDocs();
   bind();
+  /* #162: the Project window's group checklists and buttons.  Built before
+   * the first paint so its rows are part of the page's own DOM. */
+  initProjectDialog();
   /* #139: the divider sizes are restored before the first paint, so a
    * reload comes back at the sizes the author left. */
   loadSplits();
@@ -5755,6 +6926,88 @@ const studio = {
   saveToy: saveToyFile,
   openToy: openToy,
   parseToy: parseToyFile,
+  /* #162 — the project file and the Project window.  `save()` returns the
+   * archive's bytes whether or not the page could download them, so the
+   * evidence can read what was saved; `open()`/`openBytes()` apply a project
+   * to the page; `openFile()` is OPEN's pick/drop path (sniff, describe, then
+   * wait for the dialog) unless it is given {apply:true}.  `include` and
+   * `load` are the two checklists; `snapshot`/`restore`/`versions` are the
+   * named versions. */
+  project: {
+    FORMAT: "pcestudio/1",
+    save: saveProject,
+    open: openProjectBytes,
+    openBytes: openProjectBytes,
+    openFile: projectLoadBytes,
+    openText: (text, name, opts) => {
+      const o = opts || {}, n = String(name || "toy.pce.json");
+      let loaded;
+      try { loaded = sniffProjectFile(n, zipModel().utf8Encode(String(text))); }
+      catch (e) {
+        showError(e);
+        return { ok: false, error: { code: e.code || "error",
+                                     message: e.message } };
+      }
+      return applyLoadedProject(loaded, { load: o.load, mode: o.mode,
+                                          force: o.force !== false });
+    },
+    applyLoaded: applyLoadedProject,
+    sniff: sniffProjectFile,
+    snapshot: snapshotVersion,
+    versions: () => projectVersions.map((v) => ({
+      label: v.label, created: v.created,
+      files: (v.files || []).map((f) => f.name) })),
+    restore: restoreVersion,
+    deleteVersion: deleteVersion,
+    art: () => artFiles.map((a) => ({ name: a.name, bytes: a.bytes.length,
+                                      source: a.source })),
+    artBytes: (name) => { const a = findArt(name); return a ? a.bytes.slice(0) : null; },
+    keepOriginal: keepArtOriginal,
+    sizes: () => projectModel().sizes(currentProject({ notesTemplate: true })),
+    notesTemplate: () => projectModel().notesTemplate({ title: toyTitle,
+                                                        date: todayStamp() }),
+    dialog: () => ({
+      open: !!(projectState && projectState.open),
+      tab: ($("project-open") && !$("project-open").hidden) ? "open" : "save",
+      confirmReplace: !!(projectState && projectState.confirmReplace),
+      loaded: projectState && projectState.loaded
+        ? { name: projectState.loaded.name, kind: projectState.loaded.kind }
+        : null
+    }),
+    openDialog: openProjectDialog,
+    closeDialog: closeProjectDialog,
+    saveFromDialog: saveProjectFromDialog,
+    openFromDialog: openProjectFromDialog,
+    setTab: projectTab,
+    include: () => projectGroupsState("project-inc"),
+    setInclude: (include) => {
+      PROJECT_GROUPS.forEach((g) => {
+        const el = $("project-inc-" + g[0]);
+        if (el && include && include[g[0]] !== undefined)
+          el.checked = !!include[g[0]];
+      });
+      updateProjectSaveSizes();
+      return projectGroupsState("project-inc");
+    },
+    loadGroups: () => projectGroupsState("project-load"),
+    setLoad: (load) => {
+      PROJECT_GROUPS.forEach((g) => {
+        const el = $("project-load-" + g[0]);
+        if (el && load && load[g[0]] !== undefined) el.checked = !!load[g[0]];
+      });
+      return projectGroupsState("project-load");
+    },
+    setMode: (mode) => {
+      if ($("project-mode-add")) $("project-mode-add").checked = mode === "add";
+      if ($("project-mode-replace")) $("project-mode-replace").checked = mode !== "add";
+      updateProjectOpenWarning();
+      return mode === "add" ? "add" : "replace";
+    },
+    recent: () => recentProjects().map((e) => ({ name: e.name, title: e.title,
+                                                 size: e.size, kept: !!e.bytes })),
+    openRecent: openRecentProject,
+    download: downloadBytes
+  },
   handleShortcut: handleShortcut,
   /* #107 — Paste & Run. paste() is the button (clipboard, then the box);
    * pasteText(text) is the same action with the text in hand (a drop, the

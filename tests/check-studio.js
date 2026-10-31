@@ -182,6 +182,10 @@ const il = require("../renderer/pce-il.js");
 const ilbc = require("../renderer/pce-ilbc.js");
 const romLib = require("../renderer/pce-rom.js");
 const ILVM = path.join(__dirname, "..", "renderer", "ilvm.bin");
+/* #162 — the project format: the page's Save is parsed here with the same
+ * module it used, so "the archive is a project" is measured, not assumed. */
+const projectFormat = require("../renderer/pce-project.js");
+const zipFormat = require("../renderer/pce-zip.js");
 
 /* The three toy sources are read from tests/check-il.js's own text instead of
  * requiring it: at this revision check-il.js runs its whole suite when
@@ -7387,8 +7391,254 @@ async function checkAgentPanel() {
      "wss://relay.test/ws/" + rotated);
 }
 
-function checkGallery(page) {
+/* #162 — the project file and the Project window, driven headlessly.
+ *
+ * The page's own functions do the work (the dialog's buttons call these), and
+ * the archives they build are read back with the same pce-project.js this
+ * file required, so the checks measure the bytes rather than the page's word
+ * for them:
+ *   - Save project round-trips: every text file is byte-identical, NOTES.md
+ *     is there, a 1 MB PNG original survives, and a snapshot version is
+ *     restored into the current project;
+ *   - save with art/ unticked leaves art/ out of the archive;
+ *   - a .pce.json still opens as a project without notes;
+ *   - OPEN with only "songs" ticked (add mode) adds the song and leaves
+ *     main.lua unchanged;
+ *   - the Project dialog's own state drives the same two saves and opens.
+ */
+async function checkProject(page) {
   const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const PR = studio.project;
+  const fileOf = (n) => studio.toy.file(n);
+  /* #162: Add Source's own dialog, exercised below with a real WAV. */
+  const assetsDef = studio.panels.get("assets");
+  const addApi = assetsDef && assetsDef.api && assetsDef.api.addSource;
+  function makeWav() {
+    /* 8-bit mono PCM, 64 frames: a valid RIFF/WAVE pce-source.js imports */
+    const data = new Uint8Array(64);
+    for (let i = 0; i < data.length; i++) data[i] = 128 + Math.round(64 * Math.sin(i / 4));
+    const out = new Uint8Array(44 + data.length);
+    const v = new DataView(out.buffer);
+    out.set([0x52, 0x49, 0x46, 0x46], 0);       /* RIFF */
+    v.setUint32(4, 36 + data.length, true);
+    out.set([0x57, 0x41, 0x56, 0x45], 8);       /* WAVE */
+    out.set([0x66, 0x6D, 0x74, 0x20], 12);      /* fmt  */
+    v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true);                   /* PCM */
+    v.setUint16(22, 1, true);                   /* mono */
+    v.setUint32(24, 8000, true);                /* rate */
+    v.setUint32(28, 8000, true);                /* byte rate */
+    v.setUint16(32, 1, true);                   /* block align */
+    v.setUint16(34, 8, true);                   /* bits */
+    out.set([0x64, 0x61, 0x74, 0x61], 36);      /* data */
+    v.setUint32(40, data.length, true);
+    out.set(data, 44);
+    return out;
+  }
+
+  const eqBytes = (a, b) => {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  };
+  const namesIn = (bytes) => zipFormat.read(bytes).map((e) => e.name);
+
+  check(!!PR && typeof PR.save === "function",
+        "#162: the page exposes studio.project");
+  check(!!S.zip && typeof S.zip.read === "function",
+        "#162: renderer/pce-zip.js loaded into the page");
+  check(PR.FORMAT === "pcestudio/1", "#162: the format is pcestudio/1");
+
+  studio.selectFile("main.lua");
+  const mainBefore = fileOf("main.lua").source;
+
+  /* 1. a 1 MB original is kept, and survives Save -> parse */
+  const png = new Uint8Array(1024 * 1024);
+  for (let i = 0; i < png.length; i++) png[i] = (i * 13 + 7) & 255;
+  const kept = studio.project.keepOriginal("hero.png", png, "hero");
+  check(kept && kept.name === "hero.png" && kept.bytes === png.length,
+        "#162: Add Source's original is kept as art/" + (kept && kept.name));
+  check(studio.project.art().length === 1 &&
+        studio.project.art()[0].bytes === png.length,
+        "#162: the original art is in the project");
+
+  const full = studio.project.save({ name: "demo", include: {
+    code: true, assets: true, songs: true, notes: true, art: true,
+    versions: true } });
+  check(full.ok && full.bytes && full.bytes.length > png.length,
+        "#162: Save project builds a .pcestudio");
+  check(full.name === "demo.pcestudio", "#162: the file is named demo.pcestudio");
+  const parsed = projectFormat.parseBytes(full.bytes);
+  check(parsed.files.some((f) => f.name === "NOTES.md"),
+        "#162: the project carries the NOTES.md template");
+  check(/## Goal/.test(parsed.notes || "") &&
+        /## Next steps/.test(parsed.notes || ""),
+        "#162: ... with the resume note's four questions");
+  const art = parsed.art.find((a) => a.name === "hero.png");
+  check(!!art && art.bytes.length === png.length && eqBytes(art.bytes, png),
+        "#162: the 1 MB PNG original survives byte for byte");
+  check(parsed.art[0].source === "hero",
+        "#162: sources.json's original names the source it came from");
+  const names = namesIn(full.bytes);
+  check(names.indexOf("project.json") >= 0 &&
+        names.indexOf("main.lua") >= 0 &&
+        names.indexOf("NOTES.md") >= 0 &&
+        names.indexOf("art/hero.png") >= 0,
+        "#162: the zip's layout is the unpacked project folder");
+
+  /* 2. round-trip: save -> open -> the text files are byte-identical */
+  const again = projectFormat.parseEntries(zipFormat.read(full.bytes));
+  const beforeText = {};
+  parsed.files.forEach((f) => { beforeText[f.name] = f.source; });
+  let roundTrip = true;
+  for (const f of again.files)
+    if (beforeText[f.name] !== f.source) roundTrip = false;
+  check(roundTrip && again.files.length === parsed.files.length,
+        "#162: save -> open gives byte-identical files");
+
+  /* 3. save with art/ unticked leaves art/ out */
+  const noArt = studio.project.save({ name: "no-art", include: {
+    code: true, assets: true, songs: true, notes: true, art: false,
+    versions: true } });
+  const noArtNames = namesIn(noArt.bytes);
+  check(noArt.ok && !noArtNames.some((n) => n.indexOf("art/") === 0),
+        "#162: save with art/ unticked leaves art/ out");
+  check(noArtNames.indexOf("main.lua") >= 0 &&
+        noArtNames.indexOf("NOTES.md") >= 0,
+        "#162: ... and keeps the code and the notes");
+
+  /* 4. a version is a named snapshot, and restoring puts it back */
+  const snap = studio.project.snapshot("first look");
+  check(snap.ok && studio.project.versions().length === 1 &&
+        studio.project.versions()[0].label === "first look",
+        "#162: Snapshot makes a named version");
+  studio.setEditorText("-- changed after the snapshot\n");
+  check(fileOf("main.lua").source !== mainBefore,
+        "#162: the toy is changed after the snapshot");
+  const restore = studio.project.restore(0, { force: true });
+  check(restore.ok && fileOf("main.lua").source === mainBefore,
+        "#162: Restore puts the version's code back into the current project");
+
+  /* 5. opening a project replaces the toy; NOTES.md is a tab */
+  const otherText = "-- the other project\nfunction frame(t, f) end\n";
+  const other = projectFormat.build({
+    title: "other", author: "Dennis", created: "2026-10-31T00:00:00.000Z",
+    modified: "2026-10-31T00:00:00.000Z",
+    files: [{ name: "main.lua", source: otherText },
+            { name: "tiles.json", source: "{\n  \"version\": 1,\n  \"tiles\": []\n}\n" },
+            { name: "NOTES.md", source: "# other\n\n## Goal\n\nthe other game\n" }],
+    art: [], versions: []
+  });
+  const opened = studio.project.openBytes(other, { force: true });
+  check(opened.ok && fileOf("main.lua").source === otherText,
+        "#162: Open project replaces the toy with the project's main.lua");
+  check(studio.fileNames().indexOf("NOTES.md") >= 0,
+        "#162: NOTES.md opens as a file beside main.lua");
+  check(fileOf("NOTES.md").source.indexOf("the other game") >= 0,
+        "#162: ... and its text is the project's note");
+
+  /* 6. OPEN only "songs", add mode: the song arrives, main.lua does not move */
+  const songsOnly = projectFormat.build({
+    title: "songs", files: [
+      { name: "main.lua", source: "-- a main.lua we must NOT take\n" },
+      { name: "songs.json", source: JSON.stringify({
+        version: 1,
+        songs: [{ name: "BORROWED", notes: [{ channel: 1, step: 0,
+                                             note: 60, length: 6 }] }]
+      }, null, 2) + "\n" }
+    ], art: [], versions: []
+  });
+  const beforeAdd = fileOf("main.lua").source;
+  const added = studio.project.openBytes(songsOnly, {
+    mode: "add", load: { code: false, assets: false, songs: true,
+                         notes: false, art: false, versions: false } });
+  check(added.ok && added.mode === "add",
+        "#162: OPEN can add to the current toy instead of replacing it");
+  check(fileOf("main.lua").source === beforeAdd,
+        "#162: add with only songs leaves main.lua unchanged");
+  check(fileOf("songs.json") &&
+        fileOf("songs.json").source.indexOf("BORROWED") >= 0,
+        "#162: ... and adds the song");
+
+  /* 7. the old .pce.json still opens (a project without notes) */
+  const toyText = JSON.stringify({
+    version: "pce.studio/1", title: "old toy", description: "",
+    files: [{ name: "main.lua", source: "-- old toy\n" }], sources: []
+  });
+  const toyOpen = studio.project.openText(toyText, "old.pce.json",
+                                          { force: true });
+  check(toyOpen.ok && fileOf("main.lua").source === "-- old toy\n",
+        "#162: a .pce.json still opens (a project without notes)");
+  check(studio.fileNames().indexOf("NOTES.md") < 0,
+        "#162: ... and it has no NOTES.md");
+
+  /* 8. the Project dialog itself: Save with art unticked, then Open songs.
+   * The opens above replaced the project, so give it an original again —
+   * the dialog's own checklist is what this step measures. */
+  studio.project.keepOriginal("hero2.png", png.subarray(0, 2048), "hero2");
+  const dlg = studio.project.openDialog("save");
+  check(studio.project.dialog().open && studio.project.dialog().tab === "save",
+        "#162: the Project window opens on SAVE");
+  studio.project.setInclude({ code: true, assets: true, songs: true,
+                              notes: true, art: false, versions: true });
+  check(studio.project.include().art === false,
+        "#162: the checklist's art tick is off");
+  const dlgSaved = studio.project.saveFromDialog();
+  check(dlgSaved.ok && dlgSaved.bytes &&
+        !namesIn(dlgSaved.bytes).some((n) => n.indexOf("art/") === 0),
+        "#162: the dialog's Save with art/ unticked leaves art/ out");
+  studio.project.setInclude({ art: true });
+  studio.project.openDialog("save");
+  const dlgSaved2 = studio.project.saveFromDialog();
+  check(dlgSaved2.ok &&
+        namesIn(dlgSaved2.bytes).some((n) => n.indexOf("art/") === 0),
+        "#162: the dialog's Save with art/ ticked includes it");
+  studio.project.closeDialog();
+  check(!studio.project.dialog().open, "#162: the Project window closes");
+
+  studio.project.openDialog("open");
+  check(studio.project.dialog().tab === "open",
+        "#162: the Project window's OPEN tab");
+  const picked = studio.project.openFile("songs.pcestudio", songsOnly, {});
+  check(picked.ok && picked.described &&
+        picked.described.files.some((f) => f.name === "songs.json"),
+        "#162: OPEN shows what the file holds before loading anything");
+  studio.project.setMode("add");
+  studio.project.setLoad({ code: false, assets: false, songs: true,
+                           notes: false, art: false, versions: false });
+  const beforeDialogAdd = fileOf("main.lua").source;
+  const dialogAdd = studio.project.openFromDialog();
+  check(dialogAdd.ok && dialogAdd.mode === "add" &&
+        fileOf("main.lua").source === beforeDialogAdd,
+        "#162: the dialog's Open with only songs adds the song and leaves main.lua");
+  check(!studio.project.dialog().open,
+        "#162: the dialog closes after Open");
+
+  /* 9. recent projects are listed, per browser */
+  const recent = studio.project.recent();
+  check(recent.length > 0 && recent.some((r) => /\.pcestudio$/.test(r.name)),
+        "#162: the Project window lists recent projects from browser storage");
+
+  /* 10. Add Source keeps the ORIGINAL it read, in art/ (for re-import) */
+  check(!!addApi, "#162: the ASSETS panel exposes its Add Source dialog");
+  if (addApi) {
+    const wav = makeWav();
+    addApi.open();
+    await addApi.feed({ name: "blip.wav",
+      arrayBuffer: () => Promise.resolve(wav.buffer.slice(0)) });
+    const imported = addApi.commit();
+    check(!!imported, "#162: Add Source imports the WAV");
+    const orig = studio.project.art().find((a) => a.name === "blip.wav");
+    check(!!orig && orig.bytes === wav.length,
+          "#162: Add Source keeps the original in art/");
+    const back = studio.project.artBytes("blip.wav");
+    check(!!back && Buffer.from(back).equals(Buffer.from(wav)),
+          "#162: ... byte for byte, ready to re-import");
+  }
+}
+
+function checkGallery(page) {  const S = page.sandbox.PCEStudio;
   const studio = S.studio;
 
   /* 1. the data is the generator's, and the generator reads toys/*.lua */
@@ -7985,6 +8235,7 @@ async function main() {
   checkStudioApi(page);
   await checkAgentPanel();
   checkGallery(page);
+  await checkProject(page);
 
   let browser = "not-requested";
   let galleryBrowser = "not-requested";

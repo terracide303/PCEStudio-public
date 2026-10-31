@@ -97,6 +97,14 @@ The studio compiles a toy to a small bytecode and glues it to a fixed interprete
 tables, `sprite()`, the pad or `sfx()` run in the studio but are refused by the export, with a message naming the line.
 Carrying those is the next big piece of work. The ROMs are checked in an emulator; nothing has run on a real console yet.
 
+## Project files
+
+**Project…** saves and opens a whole project as one `.pcestudio` file: the code and asset files, a
+`NOTES.md` written for whoever continues the game, the original PNG/WAV/MID files that Add Source imported,
+and named snapshots of the code and assets. It is a ZIP underneath, so it can also be opened with any unzip
+tool. The old **Save file** still writes the plainer `.pce.json` toy envelope, and that still opens. Format,
+layout and the Save/Open window: [`docs/PROJECT-FORMAT.md`](docs/PROJECT-FORMAT.md).
+
 ## Repository map
 
 | Path | What's in it |
@@ -126,8 +134,6 @@ and the mutation suites break the engine on purpose to show the tests notice.
 
 - **Export** of games that use tables, `sprite()`, the pad or `sfx()` (see above).
 - **Real hardware**: nothing has been tried on a console or a flash cart.
-- **Project files**: saving a whole project (code, art, songs and notes) as one file you can pick up again later is
-  being built.
 - **Phones and tablets**, **CD-ROM, Arcade Card and SuperGrafx** are not designed for.
 - The MCP server and the studio have been tested on **macOS** only. Linux and Windows should work (plain Node.js and
   static files); reports are welcome.

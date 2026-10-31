@@ -99,7 +99,7 @@ pixel, not eyeballed at another scale.
 |---|---|---|
 | left | purple chip mark, `ppu.toys` | our tile mark, `PCE·studio` in Pixelify Sans (links to `renderer/index.html`) |
 | title | `untitled toy` + `saved in this browser` | the active file (`main.lua`) + `saved in this browser` / `edited — Run to apply` / `restored from this browser` |
-| right | Export to ROM (orange), Raw output, Panels ▾, gear, Docs, Save file, Open…, Sign in to publish | Run, Paste & Run, Check, Export… (orange), Panels ▾, gear, Download for Claude, **Browse**, Docs, Save file, Open…, not signed in |
+| right | Export to ROM (orange), Raw output, Panels ▾, gear, Docs, Save file, Open…, Sign in to publish | Run, Paste & Run, Check, Export… (orange), Panels ▾, gear, Download for Claude, **Browse**, Docs, Save file, **Project…**, Open…, not signed in |
 
 Measured: both bars are 0…49 with a 1 px border at y=49. The orange primary action is the export in both;
 ours opens the honest `needs #31` dialog (§9). `Docs` opens the in-studio Docs panel (§4); `not signed in` is
@@ -1163,6 +1163,20 @@ silently dropped.
 `localStorage["pcestudio.settings.v1"]`; the top bar says `saved in this browser`, and a reload restores the
 files, the active file and the editor's text (`restored from this browser`). A legacy single-string
 `pcestudio.toy` is migrated to a five-file toy. Storage failing is a convenience lost, never a broken toy.
+
+**The whole project is a `.pcestudio` (#162).** `Project…` opens one window for Save and Open
+(Dennis, 2026-10-29: *"and have a window for saving loading etc where to select what you want etc"*). A
+project is a ZIP whose layout is an unpacked project folder — `project.json`, the code and asset files,
+`NOTES.md` (the resume note: goal, what works, what does not, decisions with who/why, next steps),
+`art/` (the original PNG/WAV/MID Add Source kept, so it can be re-imported with other settings) and
+`versions/<n>-<label>/` (named snapshots of the code and assets, never of `art/`). SAVE has a checklist of
+the groups with their sizes (all on), and can also write the plain `.pce.json` or hand off to Export…;
+OPEN lists what a chosen `.pcestudio`, `.pce.json`, `.lua` or original holds before loading it, and loads
+either by replacing the current toy or adding only the ticked groups to it. NOTES.md is a tab beside
+`main.lua`; `Snapshot…` makes a version and the SAVE pane's list restores or deletes one, asking before a
+restore would replace unsaved edits. The old `.pce.json` still opens (a project without notes) and Save
+file still writes it. The format is [`docs/PROJECT-FORMAT.md`](PROJECT-FORMAT.md); the evidence is
+`tests/check-project.js` and `tests/check-studio.js`'s #162 section.
 
 **Vim keys are opt-in** in Settings (`Plain` is the default); choosing `Vim` sets CodeMirror's `keyMap` to
 `vim` and persists the choice. The file bar's status reads `plain keys` or `vim on`.
