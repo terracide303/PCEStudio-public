@@ -651,14 +651,19 @@
       }
 
       function mirror(name, args, result, info) {
-        if (!result || result.isError) return;
+        if (!result) return undefined;
+        /* validate is answered with isError:true exactly when the toy has
+         * findings — that is the report the person most needs to see, so it
+         * is mirrored before the refusal check.  Everything else that fails
+         * changed nothing in the session, so there is nothing to mirror. */
+        if (name === "validate") return mirrorValidate(info);
+        if (result.isError) return undefined;
         if (name === "toy_write" || name === "source_add" ||
             name === "song_write") {
           return mirrorFiles(name, info);
         }
         if (name === "toy_run") return mirrorRun(info, args);
         if (name === "frame_png") return mirrorFrame(result);
-        if (name === "validate") return mirrorValidate(info);
         return undefined;
       }
 
@@ -676,6 +681,14 @@
       }
       function summarise(name, args, result) {
         var info = resultJson(result);
+        /* a validator report is an answer, not a refusal, even when it
+         * carries findings (the tool core marks ok:false as isError) */
+        if (name === "validate" && info) {
+          var n = (info.problems || []).length;
+          return info.ok ? "ok · no findings"
+                         : n + " finding" + (n === 1 ? "" : "s") +
+                           (info.code ? " · " + info.code : "");
+        }
         if (!result || result.isError) {
           return "refused · " + failed(info || { message: "no reply" });
         }
@@ -703,11 +716,6 @@
                  info.height + " PNG";
         case "toy_save":
           return "saved " + info.path;
-        case "validate":
-          return info.ok ? "ok · no findings"
-                         : (info.problems || []).length + " finding" +
-                           ((info.problems || []).length === 1 ? "" : "s") +
-                           (info.code ? " · " + info.code : "");
         case "export_pce":
           return info.bytes + " bytes · " + info.path;
         case "docs":
