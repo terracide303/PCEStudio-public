@@ -120,6 +120,12 @@ raster_sum = struct.unpack_from("<I", ram, 0x108)[0]
 raster_count = struct.unpack_from("<H", ram, 0x10C)[0]
 collect_sum = struct.unpack_from("<I", ram, 0x110)[0]
 collect_count = struct.unpack_from("<H", ram, 0x114)[0]
+# #169: the update as a whole (frame() + the 224-call collection for a raster
+# toy), counted by the interpreter ROM itself; docs/ROM_LAYOUT.md.
+updates = struct.unpack_from("<H", ram, 0x120)[0]
+overruns = struct.unpack_from("<H", ram, 0x122)[0]
+worst_update_lines = struct.unpack_from("<H", ram, 0x124)[0]
+total_update_lines = struct.unpack_from("<I", ram, 0x126)[0]
 meas = {
     "count": count,
     "sum_ticks": sum_ticks,
@@ -134,8 +140,15 @@ meas = {
     "raster_max_ticks": ram[0x10E],
     "collections": collect_count,
     "collect_sum_ticks_7bit": collect_sum,
-    "cycles_per_collection": (raster_sum / collect_count * 1024)
+    # #169: the collection's own sum.  Before this fix this used raster_sum,
+    # the per-call sum, which reported 8,157,505 cycles for parallax against
+    # the bracket's real 4,431,000 (docs/ROM_SPEED.md).
+    "cycles_per_collection": (collect_sum / collect_count * 1024)
                              if collect_count else None,
+    "updates": updates,
+    "overruns": overruns,
+    "worst_update_lines": worst_update_lines,
+    "mean_update_lines": (total_update_lines / updates) if updates else None,
     "flags": ram[0x10F],
 }
 frames = sorted(os.listdir(os.path.join(dumpdir, "frames")))
@@ -151,8 +164,12 @@ with open(os.path.join(dumpdir, "meta.json"), "w") as fh:
 print("frames: %d; timer: %d frames, mean %.3f ticks = %.1f cycles/frame"
       % (len(frames), count, meas["mean_ticks"] or 0,
          meas["cycles_per_frame"] or 0))
-print("raster: %d calls, %.1f cycles/call, %d collections"
-      % (raster_count, meas["cycles_per_raster_call"] or 0, collect_count))
+print("raster: %d calls, %.1f cycles/call, %d collections, %.1f cycles/collection"
+      % (raster_count, meas["cycles_per_raster_call"] or 0, collect_count,
+         meas["cycles_per_collection"] or 0))
+print("update: %d updates, %d overruns, worst %d lines, mean %.1f lines"
+      % (updates, overruns, worst_update_lines,
+         meas["mean_update_lines"] or 0))
 PY
 
 if [ -z "${KEEP_MOV:-}" ]; then rm -f "$MOV"; fi
