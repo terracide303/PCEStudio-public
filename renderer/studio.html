@@ -796,13 +796,21 @@
     font: 11px var(--mono); padding: 1px 0;
   }
   .marker:hover { color: #d5ecff; }
-  /* The AGENT drawer, ppu.toys' `.agent-panel` pre-connection state (#87):
-   * a dot and a title, the intro text, and the Sign-in placeholder. */
+  /* The AGENT drawer (#167).  A state dot and its word, the Connect /
+   * Disconnect / New link buttons, the one command with its Copy button,
+   * the help text, and the FEED of Claude's calls.  Drawn by
+   * studio-panel-agent.js; ppu.toys' `.agent-panel` is the shape. */
   .agent-head { display: flex; align-items: center; gap: 7px; margin: 0 0 7px; }
+  .agent-head-spacer { flex: 1; }
   .agent-dot {
     width: 7px; height: 7px; flex: none; border-radius: 50%;
     background: var(--dim);
   }
+  .agent-dot.is-ready { background: var(--dim); }
+  .agent-dot.is-connecting { background: var(--accent); }
+  .agent-dot.is-live { background: var(--green); }
+  .agent-dot.is-taken { background: var(--bad); }
+  .agent-dot.is-disconnected { background: var(--bad); }
   .agent-state {
     color: var(--text2); font: 11px var(--mono); letter-spacing: 0.06em;
   }
@@ -814,6 +822,44 @@
     color: var(--accent-ink); cursor: pointer;
   }
   .agent-connect:hover { background: color-mix(in srgb, var(--accent) 85%, #fff); }
+  .agent-cmd-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    margin: 0 0 8px;
+  }
+  .agent-cmd {
+    font: 11px/1.5 var(--mono); color: var(--text);
+    background: var(--code); border: 1px solid var(--line2);
+    border-radius: 4px; padding: 5px 8px; max-width: 100%;
+    overflow-x: auto; white-space: nowrap;
+  }
+  .agent-help {
+    margin: 0 0 6px; color: var(--text2); font: 12px/1.5 var(--sans);
+    max-width: 52rem;
+  }
+  .agent-edits {
+    margin: 0 0 8px; color: var(--dim); font: 11px/1.5 var(--sans);
+    max-width: 52rem;
+  }
+  .agent-note {
+    margin: 0 0 8px; color: var(--accent); font: 11px/1.5 var(--mono);
+    max-width: 52rem;
+  }
+  .agent-feed {
+    list-style: none; margin: 8px 0 0; padding: 0; max-height: 150px;
+    overflow: auto; border-top: 1px solid var(--line);
+  }
+  .agent-entry {
+    display: flex; align-items: baseline; gap: 8px;
+    font: 11px/1.5 var(--mono); padding: 3px 2px;
+    border-bottom: 1px solid var(--line);
+  }
+  .agent-entry.is-empty { color: var(--dim); }
+  .agent-mark { flex: none; width: 3.4rem; color: var(--dim); }
+  .agent-entry.is-ok .agent-mark { color: var(--green); }
+  .agent-entry.is-error .agent-mark { color: var(--bad); }
+  .agent-time { flex: none; color: var(--dim); }
+  .agent-tool { flex: none; min-width: 8rem; color: var(--cyan); }
+  .agent-summary { min-width: 0; color: var(--text2); word-break: break-word; }
 
   /* ---------- popovers, modal, toast ---------- */
   .popover {
@@ -1601,6 +1647,12 @@
               machine-code half; the picture editor's <b>Download .pce</b> is
               the working ROM path.</p>
             <pre class="table" id="console-table"></pre>
+            <!-- #167: what the agent link ran and checked.  The RUN LOG is
+                 toy_run's own log (the tool core's reply); the CHECK block is
+                 validate's report.  Both are drawn by studio-panel-console.js
+                 from what the AGENT panel mirrored, not re-derived here. -->
+            <pre class="table con-log" id="console-log" hidden></pre>
+            <div class="con-check" id="console-check" hidden></div>
           </div>
         </div>
       </section>
@@ -1683,23 +1735,12 @@
           <button type="button" class="btn" id="btn-addmarker">Add marker at frame 0</button>
           <div class="marker-list" id="marker-list"></div>
         </div>
-        <div class="panel" id="bottom-agent" hidden>
-          <p class="agent-head"><span class="agent-dot" aria-hidden="true"></span>
-            <span class="agent-state">NOT CONNECTED</span></p>
-          <div class="agent-intro">
-            <p>Let your coding agent drive this studio over MCP: it writes the
-              Lua, runs it, screenshots the frame, checks it and builds a
-              <code>.pce</code> while you watch. The server is
-              <code>tools/mcp/server.js</code> (card #36), a local process on
-              this machine.</p>
-            <p>Your agent signs in as you, so sign in first — accounts and
-              publishing are card #37, and the local MCP server needs no
-              account.</p>
-            <button type="button" class="agent-connect"
-                    id="btn-agent-signin"
-                    title="Sign in is a placeholder: accounts and publishing are card #37; the MCP server (#36) is local.">Sign in</button>
-          </div>
-        </div>
+        <!-- #167: the AGENT drawer is studio-panel-agent.js's.  It draws the
+             Connect state, the one command to run and the FEED of Claude's
+             calls here; while RELAY_URL (renderer/relay-config.js) is empty
+             it says the link is not switched on yet and offers nothing else.
+             There are no accounts, so the old Sign-in placeholder is gone. -->
+        <div class="panel" id="bottom-agent" hidden></div>
       </div>
     </section>
   </main>
@@ -1893,6 +1934,13 @@
      renderer/pce-seq.js's song and changes none of it. -->
 <script src="pce-staff.js"></script>
 <script src="pce-docs.js"></script>
+<!-- #167: the agent link.  relay-config.js holds the one constant, RELAY_URL
+     (empty until a relay is deployed: tools/relay/).  pce-agent-tools.js is
+     the tool core (#166) — the same UMD module tools/mcp/server.js requires —
+     and the AGENT panel runs Claude's calls through it.  It reads every module
+     above at load, so it comes after them. -->
+<script src="relay-config.js"></script>
+<script src="pce-agent-tools.js"></script>
 <!-- #87: the generated pceglobals.lua document, built from the register,
      pad and helper tables above (the ppuglobals.lua tab ppu.toys has). -->
 <script src="pce-globals.js"></script>

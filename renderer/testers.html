@@ -116,9 +116,17 @@
   <b>ASSETS → Add Source</b> in the studio. Drop a PNG there, and tell the AI which pattern number it got.</p>
 
   <h3>With Claude Code (it drives the studio itself)</h3>
-  <p>PCEStudio has an MCP server, so Claude Code can write a toy, run it, look at the frames, add art from a PNG
-  and check it, without you copying anything. You need <a href="https://nodejs.org">Node.js</a>. The full manual,
-  with installation for macOS, Linux and Windows, examples and troubleshooting, is here:
+  <p><b>Nothing to install: connect the studio.</b> Open <a href="studio.html">the studio</a>, open the
+  <b>AGENT</b> drawer at the bottom right and press <b>Connect</b>. It shows one line; run it in your terminal
+  (<code>claude mcp add --transport http pcestudio …</code>), start Claude Code and ask for a game. Claude writes
+  and runs the toy <i>in the tab you are watching</i>: the editor and ASSETS fill in, the OUTPUT canvas plays the
+  run, and the drawer lists every call with its outcome. Your own edits between calls are respected — the next run
+  uses what is in the editor. Press <b>Disconnect</b> when you are done; <b>New link</b> changes the secret link.
+  There are no accounts. If the drawer says <i>the agent link is not switched on yet</i>, use the server route
+  below (or tell us — see <a href="#report">how to report</a>).</p>
+  <p>PCEStudio also has an MCP server, so Claude Code can write a toy, run it, look at the frames, add art from a
+  PNG and check it, without you copying anything. You need <a href="https://nodejs.org">Node.js</a>. The full
+  manual, with installation for macOS, Linux and Windows, examples and troubleshooting, is here:
   <a href="claude-code.html"><b>PCEStudio with Claude Code</b></a>. The short version (macOS/Linux):</p>
 <pre>git clone https://github.com/terracide303/PCEStudio-public.git
 cd PCEStudio-public
@@ -152,6 +160,8 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
     sounds wrong, or ignores a key.</li>
     <li><b>Make one toy with an AI</b> using the guide. Did the AI's first try run? What error did you get?
     Where did you get stuck? This is the most useful report of all.</li>
+    <li><b>Connect Claude Code to the studio</b> (section 3): did Connect, the command and the feed work? Did the
+    toy appear in the editor while Claude worked? Did pressing Disconnect really stop it?</li>
     <li><b>Change something</b> in a game's code and press Run. Does the studio tell you clearly what's wrong
     when you break it?</li>
     <li><b>Export</b> a simple toy (try <i>Sky gradient</i>) and run the <code>.pce</code> in an emulator
