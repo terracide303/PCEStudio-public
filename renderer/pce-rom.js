@@ -613,7 +613,11 @@
     need(bytecode[0] === 0x49 && bytecode[1] === 0x4C &&
          bytecode[2] === 0x42 && bytecode[3] === 0x43,
          "bytecode must start with the ILBC magic (renderer/pce-ilbc.js)");
-    need(bytecode[4] === 1, "bytecode version must be 1");
+    /* #172's container version 2 carries the table section; the committed
+     * interpreter image reads it since #175.  Version 1 stays byte-identical
+     * (a table-free toy is unaffected). */
+    need(bytecode[4] === 1 || bytecode[4] === 2,
+         "bytecode version must be 1 or 2");
     var dataLen = bytecode.length + (assets ? assets.length : 0);
     if (dataLen > BANK) {
       refuse("toy-data-bank-full", "the bytecode (" + bytecode.length +

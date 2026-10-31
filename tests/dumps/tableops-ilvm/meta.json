@@ -1,0 +1,52 @@
+{
+ "bytecode": {
+  "bytes": 594,
+  "code_bytes": 407,
+  "constants": 16,
+  "data_bank": 2,
+  "functions": 2,
+  "globals": 7,
+  "hooks": {
+   "frame": 5,
+   "init": 255,
+   "raster": 255
+  },
+  "sha256": "2196ddf4b77cf5537793338839a0dafc389aa1e4b73f933e1a598bba05797e33"
+ },
+ "capture": {
+  "frames": 150,
+  "last_frame": "frame0426.png",
+  "measure": {
+   "collect_sum_ticks_7bit": 0,
+   "collections": 0,
+   "count": 418,
+   "cycles_per_collection": null,
+   "cycles_per_frame": 73985.22488038277,
+   "cycles_per_raster_call": null,
+   "flags": 0,
+   "max_ticks": 75,
+   "mean_ticks": 72.2511961722488,
+   "mean_update_lines": 163.44258373205741,
+   "min_ticks": 65,
+   "overruns": 0,
+   "raster_calls": 0,
+   "raster_max_ticks": 0,
+   "raster_sum_ticks": 0,
+   "sum_ticks": 30201,
+   "updates": 418,
+   "worst_update_lines": 169
+  },
+  "slend": 234,
+  "slstart": 3
+ },
+ "ilvm": {
+  "bytes": 16384,
+  "sha256": "a152a83f41621415c03974b58adfeba82a4ba939a8031adda8017c217f377c10"
+ },
+ "name": "tableops-ilvm",
+ "rom": "tools/gen/tableops-ilvm.pce",
+ "rom_bytes": 24576,
+ "rom_sha256": "4ba681d07fb4731db8ab8f14d17f6eefa6dc636df8470cf97a0ef50bca440864",
+ "source": "tools/toys/tables.lua",
+ "source_sha256": "746bfbeece78ec9c5e98b83bc5b882efdc688a2aad594b3b109f41a601c432ad"
+}

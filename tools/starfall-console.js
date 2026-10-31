@@ -476,8 +476,8 @@ function report(r) {
   }
   const last = cap.projections[cap.projections.length - 1];
   console.log("   " + (last.over
-    ? "renderer/pce-rom.js:618 refuses such a build with toy-data-bank-full"
-    : "renderer/pce-rom.js:618 would accept this one"));
+    ? "renderer/pce-rom.js:622 refuses such a build with toy-data-bank-full"
+    : "renderer/pce-rom.js:622 would accept this one"));
 }
 
 if (require.main === module) {

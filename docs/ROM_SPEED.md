@@ -203,7 +203,15 @@ collections (the wrong-`sum` bug above).
   pre-existing `$2100` measurement block, below the linker's RAM at `$2200`
   and below the soft stack's deepest use. A canary at `$2116`–`$211F`
   survived all four toys (palette, parallax, status-bar, sky-gradient); the
-  safety argument is in docs/ROM_LAYOUT.md.
+  safety argument is in docs/ROM_LAYOUT.md. **Re-run by #175 on the image
+  that carries the table pool** (256 int32 cells, 1,024 B in `.bss`;
+  `tools/gen/ilvm.json`'s `section_sizes`/`table_pool`, `.bss` 6,529 B): a
+  scratch build of the same sources wrote `A5 A4 A7 A6 A1 A0 A3 A2 AD AC` at
+  `$2116` in `main()` before `toy_boot()`, and the save-state BaseRAM after a
+  Mednafen run of each toy held those ten bytes unchanged (palette 121
+  updates, parallax 8, status-bar 18, sky-gradient 7). Control: the same
+  build with one deliberate write to `$2116+3` after `toy_boot()` read back
+  `A5 A4 A7 00 A1 A0 A3 A2 AD AC`, so the instrument does see a breach.
 - **Rule 2 is owed.** Per the workshop rule, this suite's breaks were written
   by the same seat that wrote it (`tests/check-measure-rom.js`: a heavy toy,
   a light toy, a middle-band toy, and two pictures). A cold break by another
