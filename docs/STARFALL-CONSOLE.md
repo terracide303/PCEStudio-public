@@ -18,7 +18,10 @@ missing instruction were carried, route 1 (the IL interpreter in
 frame at 23.4 Hz, not 60 Hz.** So closing #132–#137 makes STARFALL
 *carriable* by route 1; the page's own C-emitter gate (#143) and the one 8 KiB
 data bank (#138) would still refuse the export, and even then it is not
-60 fps.
+60 fps. *(2026-10-31: #176 carried the four table kinds and the `table`
+global type in the C emitter, closing #132's cgen half and #143; the page's
+finding is now the `sprite` at `main.lua:406` — §3.  The route-1 half of
+#132 closed with #174.)*
 
 ---
 
@@ -52,20 +55,21 @@ node tools/starfall-console.js toys/parallax.lua    # the control: it builds
 
 The control matters. On a toy that is known to export (parallax) the tool
 prints **0 refusals** and **`bytecode 1,100 B -> .pce 24,576 B`**; on
-STARFALL it prints **246 refusals** and no `.pce`. The two outcomes are
+STARFALL it printed **246 refusals** and no `.pce` (49 as of #176,
+2026-10-31 — see §4's dated note). The two outcomes are
 distinguishable, so "blocked" here is not a check that cannot pass.
 
 **(c) `tests/check-starfall-console.js`** — the PASS/FAIL check: it executes
 the **CONSOLE panel's own `analyse()`** (`renderer/studio-panel-console.js`,
 the function `exportAnalysis()` reads through `panelApi("console")`) in a
 `vm` with a fake studio, then pins every number, refusal code and `file:line`
-in this write-up. 95 checks; the two controls are parallax (0 errors, builds)
-and a mutant whose one int global is retyped `table` (the C emitter must
+in this write-up. 91 checks; the two controls are parallax (0 errors, builds)
+and a mutant whose one int global is retyped `str` (the C emitter must
 refuse it with `cgen-global`). Its breaks are recorded in §9. It runs in a
 fresh clone with no browser and no external tool:
 
 ```sh
-node tests/check-starfall-console.js     # 95 checks, 0 failed, PASS
+node tests/check-starfall-console.js     # 91 checks, 0 failed, PASS
 ```
 
 ---
@@ -109,10 +113,11 @@ as the gate:
 
 Two first-hit aborts sit between the page and the truth:
 
-1. `pce-cgen.js:489` refuses the **first** IL instruction it cannot lower and
-   throws. STARFALL's first is the `table` for the `DIGIT` digit-code array at
-   `main.lua:47`.
-2. That error sets `errors > 0`, and `renderer/studio.html:4039` returns
+1. `pce-cgen.js:600` refuses the **first** IL instruction it cannot lower and
+   throws. STARFALL's first was the `table` for the `DIGIT` digit-code array at
+   `main.lua:47`; #176 (2026-10-31) carried the four table kinds and the
+   table-typed globals, so the first is now the `sprite` at `main.lua:406`.
+2. That error sets `errors > 0`, and `renderer/studio.html:4196` returns
    before the encoder is ever called — so the page never reports what
    `pce-ilbc.js` (route 1, the backend the Export actually uses) would say.
    Asked directly, `pce-ilbc.js` refuses with `ilbc-op: instruction table
@@ -122,8 +127,10 @@ So the page's single line is the first of many. The rest are below — and one
 of them is not an instruction kind at all: if #132 carried the four table
 kinds in the C emitter, the very next thing it lowers is
 `setglobal DIGIT` at function 0 **pc 14** (`main.lua:47`), and
-`renderer/pce-cgen.js:399` refuses a global typed `table`. That gate is
+`renderer/pce-cgen.js:478` refuses a global typed `table`. That gate is
 [#143](#143); the ordered list in `tools/starfall-console.js` prints it.
+(#176 closed both: the allow-list is now `fn|vram|int|bool|padset|table`, so
+the ordered list's next refusal is the `sprite` at `main.lua:406`.)
 
 ---
 
@@ -150,11 +157,12 @@ than stopping at the first hit. "Route 1" is `pce-ilbc.js` + `renderer/ilvm.bin`
 **246 of 1,919 instructions (12.8%)** are refused by at least one backend.
 Nine of the eleven kinds are refused by both; pad reads are a
 **route-1-only** gap (the C backend lowers `padref`/`padget` —
-`pce-cgen.js:457 and 466` — so the two backends disagree about what a toy can
-do).
+`pce-cgen.js:536 and 545` — so the two backends disagree about what a toy can
+do). (#174 and #176 carried the four table kinds on both backends, so as of
+2026-10-31 the count is **49 of 1,919 (2.6%)** over seven kinds.)
 
 **A twelfth gate is not an instruction kind** and the table cannot hold it.
-`renderer/pce-cgen.js:399` refuses `getglobal`/`setglobal` unless the global's
+`renderer/pce-cgen.js:478` refuses `getglobal`/`setglobal` unless the global's
 declared type is `fn|vram|int|bool|padset`; STARFALL's drawings live in seven
 `table`-typed globals (`DIGIT`, `bl`, `bx`, `by`, `ex`, `ey`, `es`), read or
 written by **36 instructions** — 29 `getglobal`, 7 `setglobal`. Both kinds
@@ -190,10 +198,10 @@ The cards filed, one per kind — and one for the operand gate:
   instructions.
 - <a id="137"></a>**#137** — builtins beyond `rgb`: `abs()` and `sr()`.
 - <a id="143"></a>**#143** — the C emitter's global-type allow-list
-  (`pce-cgen.js:399`), 36 instructions. Not a kind, and not route 1: it gates
+  (`pce-cgen.js:478`), 36 instructions. Not a kind, and not route 1: it gates
   the **page**, because `exportAnalysis()` stops on any C-emitter error. #132
   carrying the four table kinds does not carry the globals that hold the
-  tables.
+  tables. (#176 closed this gate, 2026-10-31: the allow-list carries `table`.)
 - <a id="138"></a>**#138** — the 8 KiB data bank (§6). Not an instruction
   kind; it would block the export with all of the above closed.
 
@@ -260,7 +268,12 @@ two committed containers to **within 4 bytes** (palette 1 B short, parallax
 
 and #132–#137 will add their own format bytes on top. STARFALL is a
 1,919-instruction game; the only toys proven on route 1 are 213 (parallax) and
-a handful (palette). **The 8 KiB bank is the wrong size class for a game**, and
+a handful (palette). *2026-10-31, #176: the model now counts the table ops at
+their real sizes and the version 2 table section (1 B + 5 B per slot), and it
+reproduces the two containers to within 3 B (palette exact, parallax 3 B
+short).  With #174/#176's kinds carried, the projections over the 49
+remaining uncarried instructions are 9,147 B (at 3 B), 9,193 B (4 B) and
+9,285 B (6 B) — still over by 955–1,093 B.* **The 8 KiB bank is the wrong size class for a game**, and
 closing the six instruction cards without deciding this leaves the Export
 refusing STARFALL two refusals later — #143's `cgen-global` on the C path,
 then `toy-data-bank-full` on route 1 — instead of `ilbc-op`.
@@ -298,6 +311,10 @@ then `toy-data-bank-full` on route 1 — instead of `ilbc-op`.
   #132's card asks for tables "in the same four in cgen", and its implementer
   may widen the global-type allow-list as part of that; if so #143 closes with
   #132. Until then the page stays blocked, which is the fact recorded here.
+  (#176 did exactly that on 2026-10-31: the four table kinds and the
+  `table` global type are carried, #143 is closed, and the page now stops at
+  the `sprite` at `main.lua:406` instead.  The finding the panel showed on
+  2026-10-29 stays as recorded in §2.)
 - **Not the model's sound.** `sfx()` writes PSG events that render silent with
   no `music()` (#113); `tests/check-demo-game.js` prints that NOTE itself.
 - **Not the page's download wiring.** The export was blocked before the
@@ -312,7 +329,7 @@ then `toy-data-bank-full` on route 1 — instead of `ilbc-op`.
 ```sh
 node tools/starfall-console.js                    # STARFALL: the whole report
 node tools/starfall-console.js toys/parallax.lua  # control: 0 refusals, builds
-node tests/check-starfall-console.js              # 95 checks, the page panel included
+node tests/check-starfall-console.js              # 91 checks, the page panel included
 node tests/check-demo-game.js                     # the model route: PASS 38
 ```
 
@@ -336,7 +353,7 @@ chrome-headless-shell is absent.
 
 ## 9. Rule 1's breaks (the check has been seen to fail)
 
-`tests/check-starfall-console.js` runs on the tree as it stands (95 checks, 0
+`tests/check-starfall-console.js` runs on the tree as it stands (91 checks, 0
 failed). Before it was trusted, four breaks were applied **one at a time to a
 scratch copy** (`git archive HEAD` plus this card's two files, under
 `$TMPDIR`), the unmodified check re-run against each, and the intended check

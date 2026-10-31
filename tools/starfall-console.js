@@ -14,7 +14,7 @@
  *   1. the CONSOLE tab's checks: pce-il.js compile, pce-validate.js budgets,
  *      pce-cgen.js emitC (the C backend, llvm-mos)
  *   2. if stage 1 reported any error, STOP: the encoder is never reached
- *      (renderer/studio.html:3823)
+ *      (renderer/studio.html:4196)
  *   3. pce-ilbc.js encode -> pce-rom.js buildToyRom over renderer/ilvm.bin
  *
  * Stage 1's cgen refuses the FIRST instruction it cannot lower, so the page
@@ -23,8 +23,8 @@
  * every IL instruction kind either backend cannot carry, counted over the
  * toy's whole IL rather than stopping at the first hit — and the refusals
  * that name an operand rather than a kind (cgen-global's typed globals),
- * which is what the C backend would reach next after #132's four table
- * kinds are carried.
+ * which is what the C backend would reach next after the table kinds
+ * #176 carried.
  *
  * Exit status is 0 whatever the verdict: this is a measuring instrument, not
  * a pass/fail check.  Read the tables.  tests/check-starfall-console.js is
@@ -58,10 +58,10 @@ const ILBC_ARITH = new Set(["add", "sub", "mul", "mod", "idiv", "band",
 const ILBC_CMP = new Set(["eq", "lt", "le"]);
 const ILBC_REG = new Set(["BXR", "BYR", "CR"]);
 const KEY_OK = new Set(["int", "bool", "nil"]);
-/* cgen's getglobal/setglobal allow-list (pce-cgen.js:399).  A global of any
- * other type is a cgen-global refusal, which is an operand's type, not an
- * instruction kind — see `cgenExtra` below. */
-const CGEN_GLOBAL_OK = /^(fn|vram|int|bool|padset)$/;
+/* cgen's getglobal/setglobal allow-list (pce-cgen.js validate()).  A global
+ * of any other type is a cgen-global refusal, which is an operand's type,
+ * not an instruction kind — see `cgenExtra` below. */
+const CGEN_GLOBAL_OK = /^(fn|vram|int|bool|padset|table)$/;
 
 function cgenAcceptedKinds() {
   const src = fs.readFileSync(path.join(ROOT, "renderer/pce-cgen.js"), "utf8");
@@ -140,7 +140,7 @@ function analyse(rel, opts) {
   out.page = {
     errors: errors,
     blocked: errors > 0,
-    earlyReturn: "renderer/studio.html:3823"
+    earlyReturn: "renderer/studio.html:4196"
   };
 
   const enc = stage(() => ilbc.encode(program));
@@ -209,11 +209,13 @@ function analyse(rel, opts) {
   };
 
   /* ---- refusals that name an operand, not a kind ---------------------- *
-   * pce-cgen.js:395-401 refuses getglobal/setglobal unless the global's
-   * declared type is fn/vram/int/bool/padset.  The inventory above cannot
-   * see this: getglobal/setglobal ARE carried kinds.  STARFALL's drawings
-   * live in table-typed globals (DIGIT, bl, bx, by, ex, ey, es), so this is
-   * the C backend's next refusal once #132 carries the four table kinds. */
+   * pce-cgen.js's validate() refuses getglobal/setglobal unless the
+   * global's declared type is fn/vram/int/bool/padset/table.  The inventory
+   * above cannot see this: getglobal/setglobal ARE carried kinds.  #176
+   * carried the table kind too, so STARFALL's table-typed drawings globals
+   * (DIGIT, bl, bx, by, ex, ey, es) no longer refuse — this section now
+   * reads zero for them, and its purpose is holding the code reachable for
+   * the next type cgen puts in C. */
   const typeOf = {};
   for (const g of program.globals || []) typeOf[g.name] = g.type;
   const extra = { n: 0, get: 0, set: 0, names: {}, first: null,
@@ -247,16 +249,13 @@ function analyse(rel, opts) {
     });
     if (fn.params.length > 4) extra.otherChecks.arity++;   /* once per fn */
   }
-  /* With #132's four table kinds carried in cgen, what is the first refusal
-   * left in traversal order?  Table instructions are skipped, not fixed;
-   * every other kind and the global-type check are applied as the code is
-   * today.  This is the claim the write-up has to make, so it is data. */
+  /* The first cgen refusal left in traversal order — what the page's Export
+   * reports after #176 carried the four table kinds and the table-typed
+   * globals.  This is the claim the write-up has to make, so it is data. */
   let next = null;
   for (const fn of program.functions) {
     fn.code.forEach((ins, pc) => {
       if (next) return;
-      if (ins.t === "table" || ins.t === "setlist" || ins.t === "tget" ||
-          ins.t === "tset") return;
       let code = null;
       if (!CGEN_OPS.has(ins.t)) code = "cgen-op";
       else if (ins.t === "builtin" && ins.name !== "rgb") code = "cgen-op";
@@ -270,7 +269,7 @@ function analyse(rel, opts) {
       }
     });
   }
-  extra.nextAfterTables = next;
+  extra.nextRefusal = next;
   out.cgenExtra = extra;
 
   /* ---- capacity: would the bytecode fit the one 8 KiB data bank? ------ *
@@ -280,15 +279,19 @@ function analyse(rel, opts) {
    * reproduce them to within a few bytes (it lands 1 B and 4 B short).  A
    * kind route 1 cannot carry has no defined size, so it is counted at an
    * assumed size and the answer is reported across a range; the smallest
-   * assumption that is still realistic is 3 B. */
+   * assumption that is still realistic is 3 B.  #176 gave cgen the table
+   * kinds; the model already sized them for route 1, which carried them
+   * since #174. */
   const ILBC_SIZE = {
     const: 3, move: 3, getglobal: 3, setglobal: 3, getupval: 3, setupval: 3,
     closure: 3, ret: 2, jmp: 3, br: 5, forprep: 2, fornext: 4, arith: 5,
-    unm: 3, bnot: 3, cmp: 5, pal: 3, reg: 3, vset: 3, vget: 3
+    unm: 3, bnot: 3, cmp: 5, pal: 3, reg: 3, vset: 3, vget: 3,
+    table: 3, tget: 5, tset: 5
   };
   function opSize(ins) {
     if (ins.t === "call") return 4 + ins.args.length;
     if (ins.t === "builtin") return 3 + ins.args.length;
+    if (ins.t === "setlist") return 4 + (ins.values ? ins.values.length : 0);
     return ILBC_SIZE[ins.t] || 0;
   }
   function projectSize(prog, unknownSize) {
@@ -324,8 +327,11 @@ function analyse(rel, opts) {
     }
     let globalSize = 0;
     for (const g of prog.globals || []) globalSize += 1 + g.name.length;
+    /* The version 2 table section: one byte of slot count, five per slot
+     * (base u16, cap u8, nfields u8). */
+    const layout = ilbc.tableLayout(prog);
     return 24 + prog.functions.length * 10 + ups * 2 + constSize + globalSize +
-           code;
+           code + 1 + layout.nslots * 5;
   }
 
   /* the model's own control: the two committed containers */
@@ -439,9 +445,9 @@ function report(r) {
 
   const ex = r.cgenExtra;
   console.log("== refusals that name an operand, not a kind ==");
-  console.log("   cgen-global (renderer/pce-cgen.js:399): " + ex.n +
+  console.log("   cgen-global (renderer/pce-cgen.js validate()): " + ex.n +
               " getglobal/setglobal on a typed global outside " +
-              "fn/vram/int/bool/padset (" + ex.get + " get, " + ex.set +
+              "fn/vram/int/bool/padset/table (" + ex.get + " get, " + ex.set +
               " set)");
   for (const name of Object.keys(ex.names)) {
     console.log("     " + name.padEnd(24) + String(ex.names[name]).padStart(4));
@@ -453,12 +459,11 @@ function report(r) {
   } else {
     console.log("   first: none (no global outside the allow-list is read)");
   }
-  console.log("   after #132's four table kinds are skipped, the next cgen " +
-              "refusal is " + (ex.nextAfterTables
-                ? ex.nextAfterTables.code + " at function " + ex.nextAfterTables.fn +
-                  " pc " + ex.nextAfterTables.pc + ", main.lua:" +
-                  ex.nextAfterTables.line
-                : "none"));
+  console.log("   the next cgen refusal is " + (ex.nextRefusal
+    ? ex.nextRefusal.code + " at function " + ex.nextRefusal.fn +
+      " pc " + ex.nextRefusal.pc + ", main.lua:" +
+      ex.nextRefusal.line + " (" + ex.nextRefusal.kind + ")"
+    : "none"));
   console.log("   other operand checks that would refuse (none found on this " +
               "toy): cgen-fixed " + ex.otherChecks.fixed + ", cgen-cond " +
               ex.otherChecks.cond + ", cgen-arity " + ex.otherChecks.arity);

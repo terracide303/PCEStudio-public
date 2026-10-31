@@ -11,27 +11,30 @@
  *      the Export button's `exportAnalysis()` read — is loaded in a vm with a
  *      fake studio whose toy source is toys/demo-game/main.lua.  It reports
  *      banner "bad", errors 1, warnings 0 and exactly one finding: cgen-op at
- *      line 47, the `table` for the DIGIT array.  The same panel on
- *      toys/parallax.lua reports 0 errors (the control), so "refused" is not a
- *      panel that cannot pass.
+ *      line 406, the `sprite` the sfx() call at main.lua:405's spec argument
+ *      lowered to (#176 carried the four table kinds and the table-typed
+ *      globals, so the finding moved off the `table` at line 47).  The same
+ *      panel on toys/parallax.lua reports 0 errors (the control), so
+ *      "refused" is not a panel that cannot pass.
  *   2. THE VALIDATOR DOES NOT REFUSE IT.  pce-validate.js returns ok with 0
  *      problems, 8 frames of 9,530–9,637 cycles, 6 sprites / 6 strips with 4
  *      on the busiest line, 2,010 VRAM words, 100 blank cycles, a ~30,480 B
  *      ROM.  A green check-demo-game says nothing about the console.
- *   3. THE FULL REFUSAL INVENTORY, by kind, for both backends: 246 of 1,919
- *      instructions (12.8%) over the 11 kinds the write-up names, with the
+ *   3. THE FULL REFUSAL INVENTORY, by kind, for both backends: 49 of 1,919
+ *      instructions (2.6%) over the 7 kinds the write-up names, with the
  *      first main.lua line of each and the two route-1-only pad kinds.
- *   4. THE NEXT BLOCKER AFTER #132 (#143).  cgen refuses getglobal/setglobal
- *      on a global whose declared type is outside fn/vram/int/bool/padset
- *      (pce-cgen.js:400).  STARFALL has 36 such instructions over 7 table
- *      globals; the first is `setglobal DIGIT` at function 0 pc 14,
- *      main.lua:47 — the instruction right after the table constructor.  So
- *      #132 carrying the four table kinds still leaves the page blocked.  A
- *      mutation probe (parallax's g_f retyped table) proves that refusal is
- *      live code, not a source reading.
+ *      (#174 carried the four table kinds on route 1; #176 carried them in
+ *      cgen, so their four rows are gone from this table.)
+ *   4. THE NEXT BLOCKER AFTER #176.  #176 widened cgen's global-type
+ *      allow-list to fn/vram/int/bool/padset/table (pce-cgen.js validate()),
+ *      so the #143 gate is closed: STARFALL has 0 getglobal/setglobal outside
+ *      the list, and the first cgen refusal left is the `sprite` at function
+ *      2 pc 6, main.lua:406.  A mutation probe (parallax's g_f retyped str)
+ *      proves that refusal is live code, not a source reading.
  *   5. THE 8 KiB DATA BANK (#138).  The size model reproduces the two
- *      committed containers to ≤4 B; STARFALL projects 8,585/8,828/9,314 B at
- *      3/4/6 B per uncarried instruction, all over 8,192.  The limit itself is
+ *      committed containers to ≤3 B (the table section is counted since
+ *      route 1 carries it); STARFALL projects 9,147/9,193/9,285 B at 3/4/6 B
+ *      per uncarried instruction, all over 8,192.  The limit itself is
  *      exercised behaviourally: a valid container of exactly 8,192 B builds,
  *      8,193 B is refused with toy-data-bank-full.
  *   6. THE WRITE-UP'S CITATIONS.  Every file:line the report names still
@@ -42,7 +45,8 @@
  *
  *   - No .pce was built for STARFALL and no emulator ran, because the export
  *     refuses.  There is no 20-frame browser/Mednafen diff and no TMA-timer
- *     cycle count; those stay conditional on #132–#143.
+ *     cycle count; those stay conditional on the sprite/sfx kinds, the route
+ *     1 pad kinds and the 8 KiB bank.
  *   - The page's `exportAnalysis()` was not executed here: this machine has
  *     no chrome-headless-shell (#114), so the real-page run in the write-up
  *     is not re-verified.  The panel function it reads was executed, and the
@@ -55,11 +59,16 @@
  *
  * Rule 1 — the check has been run against breaks (scratch copies under
  * $TMPDIR, each mutation applied to one file, the unmodified check re-run):
- *   M1 pce-ilbc.js OPS gains `table`      -> the ilbc-op finding check fails
- *   M2 pce-cgen.js's allow-list gains table -> the cgen-global probe fails
- *   M3 studio.html's early return disabled  -> the page verdict / citation fails
- *   M4 pce-rom.js BANK 8192 -> 16384        -> the capacity checks fail
- * The results are in the #131 commit message.
+ *   M1 pce-cgen.js's allow-list loses `table`  -> the panel finding reverts to
+ *      cgen-global at line 47 (this check) and the table toy's determinism
+ *      pin fails (check-il-console)
+ *   M2 pce-cgen.js lowers a field tget as an int key -> the table toy's emitC
+ *      throws (check-il-console)
+ *   M3 pce-cgen.js drops the escapes-and-repeats check -> the held-table
+ *      refusal toy is accepted (check-il-console)
+ *   M4 starfall-console.js sizes tget 5 B as 4 B -> the capacity projections
+ *      move to 9,129/9,175/9,267 (this check)
+ * The results are in the #176 commit message.
  *
  *   node tests/check-starfall-console.js
  */
@@ -151,9 +160,9 @@ function checkPanel() {
   const f = S.findings[0] || {};
   eq("the one finding's severity", f.severity, "error");
   eq("the one finding's code", f.code, "cgen-op");
-  eq("the one finding's line", f.line, 47);
-  ok("the finding names the `table` instruction",
-     /instruction `table`/.test(String(f.message)), String(f.message));
+  eq("the one finding's line", f.line, 406);
+  ok("the finding names the `sprite` instruction",
+     /instruction `sprite`/.test(String(f.message)), String(f.message));
   ok("the finding says it is not lowered", /not lowered by this backend/
      .test(String(f.message)));
 
@@ -206,12 +215,8 @@ function checkBudgets() {
 /* ---- 3. the refusal inventory ------------------------------------------ */
 const INVENTORY = [
   /* kind, count, route-1 count, cgen count, first main.lua line.
-   * #172 carries the four table kinds on route 1, so their ilbc counts are
-   * 0; the C backend still refuses them (#176). */
-  ["tset", 124, 0, 124, 406],
-  ["table", 44, 0, 44, 47],
-  ["setlist", 11, 0, 11, 47],
-  ["tget", 18, 0, 18, 444],
+   * #174 carried the four table kinds on route 1 and #176 carried them in
+   * cgen, so their rows are gone from both backends. */
   ["sprite", 31, 31, 31, 406],
   ["padref", 5, 5, 0, 649],
   ["padget", 5, 5, 0, 649],
@@ -227,8 +232,8 @@ function checkInventory() {
   const inv = r.inventory;
   eq("IL functions", inv.functions, 18);
   eq("IL instructions", inv.total, 1919);
-  eq("refused instructions", inv.refusedCount, 246);
-  near("refused percentage", 100 * inv.refusedCount / inv.total, 12.8, 0.05);
+  eq("refused instructions", inv.refusedCount, 49);
+  near("refused percentage", 100 * inv.refusedCount / inv.total, 2.6, 0.05);
 
   for (const [kind, n, ilbcN, cgenN, first] of INVENTORY) {
     const rows = inv.rows.filter(function (x) { return x.kind === kind; });
@@ -254,34 +259,31 @@ function checkInventory() {
   const route1Only = INVENTORY.filter(function (x) {
     return x[2] && !x[3];
   }).map(function (x) { return x[0]; });
-  eq("kinds in the table", kinds, 11);
+  eq("kinds in the table", kinds, 7);
   eq("kinds refused by both backends", both, 5);
   eq("route-1-only kinds", route1Only, ["padref", "padget"]);
 }
 
-/* ---- 4. the next blocker after #132 (#143) ----------------------------- */
+/* ---- 4. the next blocker after #176 ------------------------------------ */
 function checkGlobals() {
-  console.log("\n== 4. refusals that name an operand: the next blocker ==");
+  console.log("\n== 4. refusals that name an operand: closed by #176 ==");
   const r = tool.analyse(STARFALL);
   const ex = r.cgenExtra;
-  eq("getglobal/setglobal outside cgen's allow-list", ex.n, 36);
-  eq("of those, getglobal", ex.get, 29);
-  eq("of those, setglobal", ex.set, 7);
-  eq("the typed globals they name", ex.names,
-     { "DIGIT:table": 2, "bl:table": 8, "bx:table": 4, "by:table": 7,
-       "ex:table": 5, "ey:table": 8, "es:table": 2 });
-  eq("the first one", ex.first,
-     { fn: 0, fnName: "main", pc: 14, line: 47, kind: "setglobal",
-       name: "DIGIT", type: "table" });
-  eq("with #132's four table kinds skipped, the next refusal", ex.nextAfterTables,
-     { code: "cgen-global", fn: 0, fnName: "main", pc: 14, line: 47,
-       kind: "setglobal", name: "DIGIT", type: "table" });
+  eq("getglobal/setglobal outside cgen's allow-list", ex.n, 0);
+  eq("of those, getglobal", ex.get, 0);
+  eq("of those, setglobal", ex.set, 0);
+  eq("the typed globals they name", ex.names, {});
+  eq("the first one", ex.first, null);
+  eq("the next cgen refusal, in traversal order", ex.nextRefusal,
+     { code: "cgen-op", fn: 2, fnName: "fn@405", pc: 6, line: 406,
+       kind: "sprite", name: null, type: null });
   eq("other operand checks that would fire", ex.otherChecks,
      { fixed: 0, cond: 0, arity: 0, closure: 0 });
 
   /* the refusal is live code, not a reading of pce-cgen.js: retype the
-   * control's one int global as a table and the emitter must refuse it with
-   * cgen-global; unmutated, it emits C. */
+   * control's one int global as a str and the emitter must refuse it with
+   * cgen-global; unmutated, it emits C.  (Retyping to `table` no longer
+   * refuses: #176 carried table-typed globals.) */
   const prog = il.compile(read(CONTROL), { chunkName: "@main.lua" });
   try {
     cgen.emitC(prog, { target: "llvm" });
@@ -294,14 +296,14 @@ function checkGlobals() {
   ok("the control has exactly one int global to retype", g.length === 1,
      "got " + g.length);
   if (g.length === 1) {
-    g[0].type = "table";
+    g[0].type = "str";
     let threw = null;
     try { cgen.emitC(mutant, { target: "llvm" }); } catch (e) { threw = e; }
-    ok("a table-typed global is refused with cgen-global",
+    ok("a str-typed global is refused with cgen-global",
        threw && threw.code === "cgen-global",
        threw ? threw.code : "the emitter accepted it");
     ok("that refusal names pce-cgen.js's allow-list",
-       threw && /this backend carries fn\/vram\/int\/bool\/pad/
+       threw && /this backend carries fn\/vram\/int\/bool\/pad\/table/
          .test(String(threw.message)), threw && threw.message);
   }
 }
@@ -311,14 +313,14 @@ function checkCapacity() {
   console.log("\n== 5. the interpreter's one 8 KiB data bank (#138) ==");
   const r = tool.analyse(STARFALL);
   const cap = r.capacity;
-  eq("the model's worst error on the two committed containers", cap.worst, 4);
+  eq("the model's worst error on the two committed containers", cap.worst, 3);
   eq("palette: committed vs modelled", [cap.controls[0].committed,
-     cap.controls[0].modelled], [578, 577]);
+     cap.controls[0].modelled], [578, 578]);
   eq("parallax: committed vs modelled", [cap.controls[1].committed,
-     cap.controls[1].modelled], [1115, 1111]);
+     cap.controls[1].modelled], [1115, 1112]);
   eq("projection at 3/4/6 B per uncarried instruction",
      cap.projections.map(function (p) { return [p.assumed, p.bytes, p.over]; }),
-     [[3, 8585, true], [4, 8828, true], [6, 9314, true]]);
+     [[3, 9147, true], [4, 9193, true], [6, 9285, true]]);
 
   /* the limit itself, behaviourally: 8 KiB exactly builds, 8 KiB + 1 refuses */
   const bank0 = fs.readFileSync(path.join(ROOT, "renderer/ilvm.bin"));
@@ -348,14 +350,14 @@ function checkCapacity() {
 
 /* ---- 6. the write-up's citations --------------------------------------- */
 const CITATIONS = [
-  ["renderer/studio.html", 4195, "if (errors) return"],
+  ["renderer/studio.html", 4196, "if (errors) return"],
   ["renderer/studio-panel-console.js", 145, "emitC"],
   ["renderer/studio-panel-console.js", 148, "severity: \"error\""],
-  ["renderer/pce-cgen.js", 400, "fn|vram|int|bool|padset"],
-  ["renderer/pce-cgen.js", 458, "case \"padget\""],
-  ["renderer/pce-cgen.js", 467, "case \"padref\""],
-  ["renderer/pce-cgen.js", 485, "builtin `"],
-  ["renderer/pce-cgen.js", 490, "refuse(\"cgen-op\""],
+  ["renderer/pce-cgen.js", 478, "fn|vram|int|bool|padset|table"],
+  ["renderer/pce-cgen.js", 536, "case \"padget\""],
+  ["renderer/pce-cgen.js", 545, "case \"padref\""],
+  ["renderer/pce-cgen.js", 563, "builtin `"],
+  ["renderer/pce-cgen.js", 600, "refuse(\"cgen-op\""],
   ["renderer/pce-ilbc.js", 150, "var OPS = {"],
   ["renderer/pce-ilbc.js", 163, "var BUILTIN = {"],
   ["renderer/pce-ilbc.js", 259, "refuse(\"ilbc-op\""],
@@ -396,7 +398,8 @@ function main() {
   console.log("\nNOTE  nothing was built for STARFALL and no emulator ran: the " +
               "export refuses, so there is no Mednafen run, no 20-frame " +
               "browser diff and no TMA-timer cycles. Those stay conditional " +
-              "on #132-#143.");
+              "on the sprite/sfx kinds, the route-1 pad kinds and the 8 KiB " +
+              "bank.");
   console.log("NOTE  the page's exportAnalysis() was not executed here (no " +
               "chrome-headless-shell on this machine, #114). The CONSOLE " +
               "panel's own analyse() was, over the same three modules; the " +
