@@ -241,7 +241,10 @@ function listZip(zip) {
                    "renderer/pce-panels.js", "renderer/pce-bg.js",
                    "renderer/pce-vram.js", "renderer/pce-editor.js",
                    "renderer/pce-toys.js", "renderer/pce-song.js",
-                   "renderer/pce-sat.js", "renderer/pce-screen.js"]) {
+                   "renderer/pce-sat.js", "renderer/pce-screen.js",
+                   /* #166: the one tool core the server's tools come from;
+                    * the walk follows ITS requires from here */
+                   "renderer/pce-agent-tools.js"]) {
     check(listing.has(f), "the require walk put " + f + " in the pack");
   }
   check(!listing.entries.some((e) => e.indexOf("/tests/") >= 0 ||
