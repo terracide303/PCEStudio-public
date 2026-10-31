@@ -91,6 +91,10 @@
  *   ilbc-jump     a branch target that is not an instruction
  *   ilbc-builtin  a builtin other than rgb
  *
+ * tableLayout() reads the table sites a program has (shape, escape, repeat)
+ * for the console's static table pool (#171).  It encodes nothing and
+ * changes no byte.
+ *
  * UMD like pce-rom.js: CommonJS in Node, PCEStudio.ilbc in the page.
  */
 (function (root, factory) {
@@ -112,6 +116,7 @@
   var MAX_REGS = 128;          /* operand encoding: 0x00..0x7F */
   var MAX_CONST = 127;         /* 0x80..0xFE */
   var MAX_ARGS = 4;            /* the interpreter's signature */
+  var TABLE_ARRAY_CAP = 16;    /* a register-key array's first-cut capacity */
 
   var OPS = {
     const: 0x01, move: 0x02, getglobal: 0x03, setglobal: 0x04,
@@ -558,14 +563,297 @@
     }
   }
 
+  /* ---- table layout: what each table site needs (#171) ------------------ *
+   * The console gives every `table` instruction one static slot, reused every
+   * time that site runs (docs/TABLES-PLAN.md §2.1).  This reads the IL and
+   * reports, per site, the shape and lifetime that slot must serve:
+   *
+   *   cap       array cells: the site's setlist end, else the largest
+   *             constant int key written through it, else TABLE_ARRAY_CAP
+   *             when a write uses a register key, else 0
+   *   fields    the field ids written through it, ascending
+   *   nfields   the field cells reserved: the largest id written + 1
+   *   cells     cap + nfields
+   *   base      the site's first cell in the pool (sites are packed in order,
+   *             which is the table section's `base` in docs/TABLES-PLAN.md
+   *             §2.3; #172 is the card that writes it)
+   *   escapes   setglobal/setupval/ret, an argument to a call, or stored in
+   *             a table that escapes (the taint follows containment)
+   *   repeats   the site is not in the chunk or init(), or it sits inside a
+   *             back-edge loop
+   *
+   * Field ids are program-wide and assigned by first appearance of the
+   * string key, so a name means the same field at every site.  A value is
+   * followed through its register until that register is written again,
+   * through a `move`, and through a table-typed global a site stores into
+   * (every `getglobal` of that global is followed the same way).  A table
+   * passed to a sprite()/raster() instruction does NOT escape: the runtime
+   * copies the fields it needs.  Reading only; the encoder's bytes and the
+   * encoder's refusals are unchanged.
+   */
+  function tableLayout(program) {
+    if (!program || program.lang !== "pce-il" || program.version !== 1) {
+      refuse("ilbc-program", "not a pce-il version 1 program");
+    }
+    var functions = program.functions || [];
+    var globals = program.globals || [];
+    var globalTypes = {};
+    var g;
+    for (g = 0; g < globals.length; g++) {
+      globalTypes[globals[g].name] = globals[g].type;
+    }
+
+    /* Loops are back edges: a branch whose target is at or before it. */
+    var loops = [], f, pc;
+    for (f = 0; f < functions.length; f++) {
+      var fnCode = functions[f].code || [];
+      var ranges = [];
+      for (pc = 0; pc < fnCode.length; pc++) {
+        var lins = fnCode[pc];
+        if ((lins.t === "jmp" || lins.t === "br" || lins.t === "fornext") &&
+            lins.target != null && lins.target <= pc) {
+          ranges.push([lins.target, pc]);
+        }
+      }
+      loops.push(ranges);
+    }
+    function insideLoop(fid, at) {
+      for (var r = 0; r < loops[fid].length; r++) {
+        if (at >= loops[fid][r][0] && at <= loops[fid][r][1]) return true;
+      }
+      return false;
+    }
+    var initFid = program.hooks && program.hooks.init;
+
+    /* One site per `table` instruction, in program order. */
+    var sites = [], siteAt = [];
+    for (f = 0; f < functions.length; f++) {
+      var code = functions[f].code || [];
+      siteAt.push(new Array(code.length));
+      for (pc = 0; pc < code.length; pc++) {
+        if (code[pc].t !== "table") continue;
+        siteAt[f][pc] = sites.length;
+        sites.push({
+          id: sites.length, fid: f, pc: pc, line: code[pc].line,
+          setlistEnd: null, constKeyMax: null, registerKey: false,
+          fields: [], globals: [], escapes: false,
+          repeats: (f !== 0 && f !== initFid) || insideLoop(f, pc)
+        });
+      }
+    }
+
+    var fieldIds = [], fieldIdOf = {};
+    function fieldId(name) {
+      if (fieldIdOf[name] == null) {
+        fieldIdOf[name] = fieldIds.length;
+        fieldIds.push(name);
+      }
+      return fieldIdOf[name];
+    }
+
+    /* A table-typed global's uses, gathered from the getglobal windows, and
+     * the sites that stored into it.  The two are joined after the walk. */
+    var globalUses = {}, globalStores = {};
+    function globalUse(name) {
+      if (!globalUses[name]) {
+        globalUses[name] = { setlistEnd: null, constKeyMax: null,
+                             registerKey: false, fields: [] };
+      }
+      return globalUses[name];
+    }
+
+    var edges = [];   /* containment: [child site, container site] */
+
+    function opReg(op) { return op != null && op.r != null; }
+    function opStr(op) { return op != null && op.k != null && op.k.t === "str"; }
+    function opInt(op) { return op != null && op.k != null && op.k.t === "int"; }
+    function descOf(regs, op) {
+      if (!opReg(op)) return null;
+      return regs[op.r] || null;
+    }
+    function targetOf(desc) {
+      if (!desc) return null;
+      if (desc.site != null) return sites[desc.site];
+      if (desc.global != null) return globalUse(desc.global);
+      return null;
+    }
+    /* Record one use of `desc`: a key written into it and/or a table value
+     * stored in it.  A table typed as a global's table is itself escaping. */
+    function readTarget(regs, desc, key, value) {
+      var tgt = targetOf(desc);
+      if (!tgt) return;
+      if (key != null) {
+        if (opStr(key)) {
+          var id = fieldId(key.k.v);
+          if (tgt.fields.indexOf(id) < 0) tgt.fields.push(id);
+        } else if (opInt(key)) {
+          var k = key.k.v | 0;
+          if (tgt.constKeyMax == null || k > tgt.constKeyMax) {
+            tgt.constKeyMax = k;
+          }
+        } else if (opReg(key)) {
+          tgt.registerKey = true;
+        }
+      }
+      if (value != null && opReg(value)) {
+        var child = regs[value.r];
+        if (child && child.site != null) {
+          if (desc.site != null) edges.push([child.site, desc.site]);
+          /* A table-typed global's table is stored in a global, so it
+           * escapes; a table inside it therefore escapes too. */
+          else if (desc.global != null) sites[child.site].escapes = true;
+        }
+      }
+    }
+    function markEscapes(desc) {
+      if (desc && desc.site != null) sites[desc.site].escapes = true;
+    }
+
+    for (f = 0; f < functions.length; f++) {
+      var fcode = functions[f].code || [];
+      var regs = {};    /* reg -> { site: id } | { global: name } | absent */
+
+      for (pc = 0; pc < fcode.length; pc++) {
+        var ins = fcode[pc];
+
+        /* Uses, before this instruction's own write. */
+        if (ins.t === "setlist") {
+          var sd = descOf(regs, ins.base);
+          var st = targetOf(sd);
+          if (st) {
+            var end = ins.index + (ins.values ? ins.values.length : 0) - 1;
+            if (st.setlistEnd == null || end > st.setlistEnd) st.setlistEnd = end;
+          }
+          for (var vi = 0; ins.values && vi < ins.values.length; vi++) {
+            readTarget(regs, sd, null, ins.values[vi]);
+          }
+        } else if (ins.t === "tset") {
+          readTarget(regs, descOf(regs, ins.base), ins.key, ins.value);
+        } else if (ins.t === "setglobal") {
+          var gd = descOf(regs, ins.src);
+          if (gd && gd.site != null) {
+            var gsite = sites[gd.site];
+            gsite.escapes = true;
+            if (gsite.globals.indexOf(ins.name) < 0) gsite.globals.push(ins.name);
+            var stores = globalStores[ins.name] ||
+                         (globalStores[ins.name] = []);
+            if (stores.indexOf(gd.site) < 0) stores.push(gd.site);
+          }
+        } else if (ins.t === "setupval" || ins.t === "ret") {
+          markEscapes(descOf(regs, ins.src));
+        } else if (ins.t === "call" || ins.t === "builtin") {
+          var args = ins.args || [];
+          for (var ai = 0; ai < args.length; ai++) {
+            markEscapes(descOf(regs, args[ai]));
+          }
+        }
+
+        /* The write: a later read of this register is a different value. */
+        if (ins.t === "table") {
+          regs[ins.dst] = { site: siteAt[f][pc] };
+        } else if (ins.t === "move") {
+          regs[ins.dst] = descOf(regs, ins.src) || null;
+        } else if (ins.t === "getglobal") {
+          regs[ins.dst] = globalTypes[ins.name] === "table"
+            ? { global: ins.name } : null;
+        } else if (ins.t === "forprep") {
+          regs[ins.base] = null;
+        } else if (ins.t === "fornext") {
+          regs[ins.base] = null;
+          regs[ins.base + 3] = null;
+        } else if (ins.dst != null) {
+          regs[ins.dst] = null;
+        }
+      }
+    }
+
+    /* Join a table-typed global to the sites that stored into it. */
+    for (var name in globalStores) {
+      if (!Object.prototype.hasOwnProperty.call(globalStores, name)) continue;
+      var use = globalUses[name];
+      if (!use) continue;
+      var ids = globalStores[name];
+      for (var si = 0; si < ids.length; si++) {
+        var s = sites[ids[si]];
+        if (use.setlistEnd != null &&
+            (s.setlistEnd == null || use.setlistEnd > s.setlistEnd)) {
+          s.setlistEnd = use.setlistEnd;
+        }
+        if (use.constKeyMax != null &&
+            (s.constKeyMax == null || use.constKeyMax > s.constKeyMax)) {
+          s.constKeyMax = use.constKeyMax;
+        }
+        if (use.registerKey) s.registerKey = true;
+        for (var fi = 0; fi < use.fields.length; fi++) {
+          if (s.fields.indexOf(use.fields[fi]) < 0) s.fields.push(use.fields[fi]);
+        }
+      }
+    }
+
+    /* Escape follows containment: a table in a table that escapes escapes. */
+    var changed = true;
+    while (changed) {
+      changed = false;
+      for (var e = 0; e < edges.length; e++) {
+        var childSite = sites[edges[e][0]], parentSite = sites[edges[e][1]];
+        if (parentSite.escapes && !childSite.escapes) {
+          childSite.escapes = true;
+          changed = true;
+        }
+      }
+    }
+
+    var out = [], arrayCells = 0, fieldCells = 0;
+    var escaping = 0, reexecuting = 0, at = 0;
+    for (var oi = 0; oi < sites.length; oi++) {
+      var site = sites[oi];
+      var cap = site.setlistEnd != null ? site.setlistEnd
+              : site.constKeyMax != null ? site.constKeyMax
+              : site.registerKey ? TABLE_ARRAY_CAP : 0;
+      var nfields = 0;
+      for (var fj = 0; fj < site.fields.length; fj++) {
+        if (site.fields[fj] + 1 > nfields) nfields = site.fields[fj] + 1;
+      }
+      var rec = {
+        id: site.id, fid: site.fid, pc: site.pc, line: site.line,
+        base: at,
+        cap: cap,
+        fields: site.fields.slice().sort(function (a, b) { return a - b; }),
+        nfields: nfields, cells: cap + nfields,
+        escapes: site.escapes, repeats: site.repeats,
+        globals: site.globals.slice()
+      };
+      out.push(rec);
+      at += rec.cells;
+      arrayCells += cap;
+      fieldCells += nfields;
+      if (rec.escapes) escaping++;
+      if (rec.repeats) reexecuting++;
+    }
+
+    return {
+      sites: out,
+      fieldIds: fieldIds.slice(),
+      arrayCap: TABLE_ARRAY_CAP,
+      nslots: out.length,
+      arrayCells: arrayCells,
+      fieldCells: fieldCells,
+      cells: arrayCells + fieldCells,
+      escaping: escaping,
+      reexecuting: reexecuting
+    };
+  }
+
   return {
     VERSION: VERSION,
     MAGIC: MAGIC,
     HEADER: HEADER,
     FUNC_ENTRY: FUNC_ENTRY,
     OPS: OPS,
+    TABLE_ARRAY_CAP: TABLE_ARRAY_CAP,
     ILBCError: ILBCError,
     encode: encode,
+    tableLayout: tableLayout,
     /* exported for tests: the refusal codes the encoder can raise */
     CODES: ["ilbc-program", "ilbc-op", "ilbc-fixed", "ilbc-key",
             "ilbc-arity", "ilbc-range", "ilbc-jump", "ilbc-builtin"]
