@@ -16,10 +16,11 @@ and `GET /api/me` (401, unauthenticated). The HTML shell makes every route clien
 routes below come from the served bundles, not from page HTML. Hash of `App`: `d91d6d04…b045c0`.
 
 **Freshness.** The latest entry in their "What's new" page (the `zS` constant in `App`) is dated
-**2026-10-26** and is the agent sign-in change already known to `docs/STUDIO.md`. The content-hashed
-Studio files `App-DUnSytDh.js` and `App-6Y57MjOu.css` are the **same names** our 2026-10-28 study cites
-(`docs/STUDIO.md` §0), so no change is detectable since that study. The GitHub repository behind the
-site (`docs/PPU-TOYS.md` read commit `0b07767`, 2026-10-18) was **not** re-read; that part is not verified.
+**2026-10-26** and is the Discord agent sign-in change (already known from the #168 brief and cards
+#165–#167). The content-hashed Studio files `App-DUnSytDh.js` and `App-6Y57MjOu.css` are the **same
+names** our 2026-10-28 study cites (`docs/STUDIO.md` §0), so no change is detectable since that study.
+The GitHub repository behind the site (`docs/PPU-TOYS.md` read commit `0b07767`, 2026-10-18) was
+**not** re-read; that part is not verified.
 
 **Our side.** Read only: `renderer/studio.html`, `renderer/studio-panel-*.js`, `renderer/browse.html`,
 `renderer/toy.html`, `renderer/docs.html`, `renderer/testers.html`, `renderer/claude-code.html`,
