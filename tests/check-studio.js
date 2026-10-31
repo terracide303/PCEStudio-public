@@ -6996,19 +6996,24 @@ function openPopoverMarkup(html) {
  * Measured: RELAY_URL empty -> the not-switched-on sentence and no button at
  * all; Connect -> connecting, a 32-hex token in localStorage and the socket's
  * /ws/<token>; open -> live, hello v1, the command with the token, the help
- * and the edits line; a toy_write call -> the editor, the file tabs and the
- * ASSETS list; toy_run -> the OUTPUT canvas draws and the CONSOLE gets the
- * tool core's own log; source_add -> the named source in the ASSETS list;
- * validate -> the report in the CONSOLE CHECK block; frame_png -> the studio
- * seeks to that frame; Disconnect -> disconnected with no retry; Reconnect ->
- * a live link again; an unexpected close -> disconnected with the first
- * backoff step; taken -> "taken over" and no reconnect; a second page with the
- * same storage -> the same token and command; New link -> a new 32-hex token,
- * stored, and a new socket.
+ * and the edits line; Copy -> the command on the (stub) clipboard; a toy_write
+ * call -> the editor, the file tabs, the ASSETS list and a drawn FEED row;
+ * toy_run -> the OUTPUT canvas draws N frames and lands on N-1, and the
+ * CONSOLE gets the tool core's own log; source_add -> the named source in the
+ * ASSETS list; validate -> the report in the CONSOLE CHECK block; frame_png ->
+ * the studio seeks to that frame; Disconnect -> the socket is CLOSED and
+ * answers no further call, with no retry; Reconnect -> a live link again; an
+ * unexpected close -> disconnected with the first backoff step, escalating to
+ * 2000 without a healthy open and resetting to 1000 after one; taken ->
+ * "taken over" and no reconnect; a second page with the same storage -> the
+ * same token and command; New link -> a new 32-hex token, stored, a new socket,
+ * and a Copy of the new command.
  *
  * Blind spots: the fake socket is not the network (the relay's own side is
- * tests/check-relay.js), and the stub canvas records draw calls rather than
- * showing pixels. */
+ * tests/check-relay.js), the stub canvas records draw calls rather than
+ * showing pixels, and the stub timers never fire (reconnects are button
+ * presses).  The #179 additions are the five checks named "#179:"; the full
+ * mutation table and the remaining blind spots are docs/CHECK-167.md. */
 
 const AGENT_TOY = [
   "function init()",
@@ -7114,6 +7119,12 @@ function countButtons(node) {
   return n;
 }
 
+/* The stub DOM records a class as one string; a row's meaning is in it. */
+function childrenByClass(node, cls) {
+  return (node && node.children ? node.children : [])
+    .filter((k) => String(k.className || "").split(/\s+/).indexOf(cls) >= 0);
+}
+
 function pressNode(page, node) {
   check(!!node, "a button the test presses is on the page");
   if (!node) return;
@@ -7131,11 +7142,21 @@ async function agentCall(page, ws, name, args, id) {
 async function checkAgentPanel() {
   const storage = makeStorage();
   const WS = agentSocket();
+  /* #179: what Copy actually put on the clipboard — the stub reads it back */
+  const copied = [];
   const page = runPage("", storage, {
     WebSocket: WS,
     crypto: agentCrypto(7),
     CompressionStream: agentDeflate(),
-    DecompressionStream: agentDeflate()
+    DecompressionStream: agentDeflate(),
+    navigator: {
+      clipboard: {
+        writeText(text) {
+          copied.push(String(text));
+          return Promise.resolve();
+        }
+      }
+    }
   });
   const S = page.sandbox.PCEStudio;
   const studio = S.studio;
@@ -7193,6 +7214,27 @@ async function checkAgentPanel() {
   check(!!edits && /editor/.test(edits.textContent),
         "#167: the help says the person's edits are what Claude's run uses");
 
+  /* 3b. #179: Copy's clipboard text, read back from the stub clipboard.
+   * The button is not "it did not throw": the line it copied must be the
+   * command with THIS tab's token. */
+  const copyBtn = nodeById(drawer, "btn-agent-copy");
+  check(!!copyBtn, "#179: a live link has a Copy button");
+  pressNode(page, copyBtn);
+  eq("#179: Copy puts the command with this token on the clipboard",
+     copied[copied.length - 1], wantCmd);
+
+  /* 3c. #179: the FEED is drawn, not only held.  Before any call the drawer's
+   * <ol> holds the one empty row; the drawn-call assertions below would let a
+   * weakened "a row exists" pass both states — this one would not. */
+  const feed0 = nodeById(drawer, "agent-feed");
+  check(!!feed0 && feed0.tagName === "OL",
+        "#179: the FEED is an <ol> in the drawer");
+  const emptyRows = childrenByClass(feed0, "agent-entry");
+  check(emptyRows.length === 1 && /is-empty/.test(emptyRows[0].className) &&
+        /no calls yet/.test(emptyRows[0].textContent),
+        "#179: control — before any call the FEED's one row is the empty one (" +
+        JSON.stringify(emptyRows.map((r) => r.className)) + ")");
+
   /* 4. toy_write: the editor, the file tabs and the ASSETS list */
   const starter = studio.files();
   const toyFiles = [{ name: "main.lua", source: AGENT_TOY }].concat(
@@ -7213,6 +7255,25 @@ async function checkAgentPanel() {
         feed1[0].ok === true && /files?/.test(feed1[0].summary),
         "#167: the FEED shows the call, its tool and its outcome (" +
         JSON.stringify(feed1) + ")");
+  /* #179: the DRAWN FEED, not just api.feed() — one <li> per call, its tool
+   * name and summary, a real clock time, and the is-ok class.  A drawer that
+   * keeps the state and draws no rows (or draws them with no time) fails. */
+  const feedEl = nodeById(drawer, "agent-feed");
+  const feedRows = feedEl ? feedEl.children : [];
+  eq("#179: the FEED draws one row per call", feedRows.length, 1);
+  const row0 = feedRows[0] || {};
+  const rowTimes = childrenByClass(row0, "agent-time");
+  const rowTools = childrenByClass(row0, "agent-tool");
+  const rowSums = childrenByClass(row0, "agent-summary");
+  check(/is-ok/.test(String(row0.className || "")) &&
+        rowTools.length === 1 && rowTools[0].textContent === "toy_write" &&
+        rowSums.length === 1 && /files?/.test(rowSums[0].textContent),
+        "#179: ... drawn with its tool name and summary (" +
+        JSON.stringify((row0.children || []).map((k) => k.textContent)) + ")");
+  check(rowTimes.length === 1 &&
+        /^\d{2}:\d{2}:\d{2}$/.test(rowTimes[0].textContent),
+        "#179: ... and a non-empty clock time (" +
+        JSON.stringify(rowTimes.map((k) => k.textContent)) + ")");
 
   /* 5. toy_run: the OUTPUT canvas draws and the CONSOLE gets the log */
   const outEl = page.dom.get("out");
@@ -7228,6 +7289,27 @@ async function checkAgentPanel() {
   check(con.runLog().lines.join("\n").indexOf("42") >= 0,
         "#167: ... and its own log lines (" +
         JSON.stringify(con.runLog().lines) + ")");
+  /* #179: the canvas is on the frame count the CONSOLE reported.  Drawing
+   * "something" is not the mirror: one frame drawn while the CONSOLE says 12
+   * still passes that. */
+  eq("#179: the canvas is on the 12-frame run's last frame",
+     studio.render.currentFrame(), 11);
+  check(draws1 - draws0 >= 12,
+        "#179: ... and at least 12 frames were drawn (" +
+        draws0 + " -> " + draws1 + ")");
+  /* #179 control: a one-frame run leaves the canvas on frame 0 and draws a
+   * single frame, so an assertion that only says "it drew / position > 0"
+   * cannot satisfy both this and the 12-frame assertions above. */
+  const dBefore1 = outEl.__ctx ? outEl.__ctx.__calls.length : 0;
+  const one = await agentCall(page, ws, "toy_run", { frames: 1 }, "c2-1");
+  const dAfter1 = outEl.__ctx ? outEl.__ctx.__calls.length : 0;
+  check(!!one && one.result && one.result.isError !== true,
+        "#179: control — a one-frame run answers");
+  eq("#179: control — a one-frame run leaves the canvas on frame 0",
+     studio.render.currentFrame(), 0);
+  check(dAfter1 - dBefore1 >= 1 && dAfter1 - dBefore1 < 12,
+        "#179: control — a one-frame run draws one frame's worth (" +
+        dBefore1 + " -> " + dAfter1 + ")");
 
   /* 6. the person's edit between calls is what Claude's next run uses:
    * the edit changes what the toy PRINTS, and the tool core's own reply has
@@ -7270,8 +7352,17 @@ async function checkAgentPanel() {
         JSON.stringify(assetsApi.sources().map((s) => s.name)) + ")");
 
   /* 8. toy_run again (source_add cleared the run), validate, frame_png */
+  const dBefore24 = outEl.__ctx ? outEl.__ctx.__calls.length : 0;
   const r3 = await agentCall(page, ws, "toy_run", { frames: 24 }, "c3b");
   check(!!r3 && r3.result.isError !== true, "#167: the merged toy runs");
+  /* #179: the second run has a different N, and the canvas follows THAT N —
+   * so neither a hard-wired 12 nor a hard-wired 1 can pass. */
+  eq("#179: a 24-frame run leaves the canvas on frame 23",
+     studio.render.currentFrame(), 23);
+  const dAfter24 = outEl.__ctx ? outEl.__ctx.__calls.length : 0;
+  check(dAfter24 - dBefore24 >= 24,
+        "#179: ... and at least 24 frames were drawn (" +
+        dBefore24 + " -> " + dAfter24 + ")");
   const val = await agentCall(page, ws, "validate", { frames: 8 }, "c4");
   check(!!val && val.result.isError !== true, "#167: validate answers");
   const report = con.checkReport();
@@ -7322,14 +7413,38 @@ async function checkAgentPanel() {
         /finding/.test(feedLast.summary),
         "#167: the FEED marks it an error with its findings (" +
         JSON.stringify(feedLast) + ")");
+  /* #179: the DRAWN error row — the is-error class and the findings summary
+   * are the drawer's, not api.feed()'s. */
+  const errRows = (nodeById(drawer, "agent-feed") || { children: [] }).children;
+  const errRow = errRows[errRows.length - 1] || {};
+  const errSums = childrenByClass(errRow, "agent-summary");
+  check(/is-error/.test(String(errRow.className || "")) &&
+        errSums.length === 1 && /finding/.test(errSums[0].textContent),
+        "#179: the FEED's last drawn row is the error, with its findings (" +
+        JSON.stringify(errRow.className) + ")");
 
   /* 9. Disconnect, Reconnect, an unexpected close and its backoff */
+  /* #179 control: a call sent while the link is live IS answered, so "a
+   * call after Disconnect is answered" is an observable fact, not a probe
+   * that can never see a reply. */
+  const dpre = await agentCall(page, ws, "docs", {}, "dpre");
+  check(!!dpre && dpre.result && dpre.result.isError !== true,
+        "#179: control — the live socket answers a call before Disconnect");
   const disc = nodeById(drawer, "btn-agent-disconnect");
   check(!!disc, "#167: a live link has Disconnect");
   pressNode(page, disc);
   eq("#167: Disconnect closes the link", api.status(), "disconnected");
   eq("#167: ... and does not schedule a reconnect",
      api.state().reconnectScheduled, false);
+  /* #179: Disconnect CLOSES the socket.  The status word alone is not the
+   * link being gone: the tab must stop answering Claude. */
+  eq("#179: Disconnect closes the socket", ws.readyState, 3);
+  const sentBefore = ws.sent.length;
+  ws.message({ type: "call", id: "dpost", name: "docs", arguments: {} });
+  await api.idle();
+  check(!ws.sent.slice(sentBefore).some((m) =>
+          m.type === "result" && m.id === "dpost"),
+        "#179: ... and a call after Disconnect is not answered");
   const again = nodeById(drawer, "btn-agent-reconnect");
   check(!!again, "#167: a closed link has Reconnect");
   pressNode(page, again);
@@ -7347,12 +7462,34 @@ async function checkAgentPanel() {
   ws3.open();
   eq("#167: Reconnect tries now", api.status(), "live");
 
+  /* 9b. #179: the backoff RESETS after a healthy connection and still
+   * escalates while unhealthy.  Control: two drops with no successful open
+   * between go 1000 then 2000, so a constant 1000 fails as well. */
+  ws3.drop();
+  eq("#179: a drop after a healthy open waits the first step (1000 ms)",
+     api.state().reconnectIn, 1000);
+  pressNode(page, nodeById(drawer, "btn-agent-reconnect"));
+  const ws3b = WS.last();
+  ws3b.drop();          /* dropped while connecting: no healthy open between */
+  eq("#179: control — two drops with no healthy open between go 1000, then 2000",
+     api.state().reconnectIn, 2000);
+  pressNode(page, nodeById(drawer, "btn-agent-reconnect"));
+  const ws3c = WS.last();
+  ws3c.open();
+  eq("#179: ... the healthy reconnect is live", api.status(), "live");
+  ws3c.drop();
+  eq("#179: a drop after a healthy reconnect is back to 1000 ms, not 2000",
+     api.state().reconnectIn, 1000);
+  pressNode(page, nodeById(drawer, "btn-agent-reconnect"));
+  const ws3d = WS.last();
+  ws3d.open();
+
   /* 10. a second tab with the same token: taken over, no reconnect */
-  ws3.message({ type: "taken" });
+  ws3d.message({ type: "taken" });
   eq("#167: a second tab takes the link over", api.status(), "taken");
   eq("#167: the status word is taken over",
      nodeById(drawer, "agent-status").textContent, "taken over");
-  ws3.drop();
+  ws3d.drop();
   eq("#167: ... and this tab stays taken over", api.status(), "taken");
   eq("#167: ... with no reconnect scheduled",
      api.state().reconnectScheduled, false);
@@ -7362,7 +7499,15 @@ async function checkAgentPanel() {
   const page2 = runPage("", storage, {
     WebSocket: WS2,
     crypto: agentCrypto(99),
-    CompressionStream: agentDeflate()
+    CompressionStream: agentDeflate(),
+    navigator: {
+      clipboard: {
+        writeText(text) {
+          copied.push(String(text));
+          return Promise.resolve();
+        }
+      }
+    }
   });
   const S2 = page2.sandbox.PCEStudio;
   S2.RELAY_URL = "https://relay.test";
@@ -7389,6 +7534,15 @@ async function checkAgentPanel() {
   check(ws5 !== ws4, "#167: ... and reopens the socket with it");
   eq("#167: ... at the new token's URL", ws5.url,
      "wss://relay.test/ws/" + rotated);
+  /* #179 control: Copy after New link copies the NEW command.  Together with
+   * the exact-line check above, "something was copied" cannot pass both. */
+  pressNode(page2, nodeById(drawer2, "btn-agent-copy"));
+  const wantCmd2 = "claude mcp add --transport http pcestudio " +
+                   "https://relay.test/mcp/" + rotated;
+  eq("#179: control — Copy after New link copies the new command",
+     copied[copied.length - 1], wantCmd2);
+  check(copied[copied.length - 1] !== wantCmd,
+        "#179: ... and not the old one");
 }
 
 /* #162 — the project file and the Project window, driven headlessly.

@@ -203,3 +203,81 @@ line by line:
 - `renderer/pce-guide.js` has the Claude Code paragraph and the generated
   `renderer/pcestudio-for-claude.md` carries it (line 25).
 - No "Sign in" text remains in `renderer/studio.html` or the panel.
+
+---
+
+# #179 — the five blind spots, now checked (2026-10-31)
+
+The check was strengthened; nothing in `renderer/studio-panel-agent.js` was
+changed. Base commit `292dd60` (pushed `main`), same worktree, same fake
+WebSocket and full suite:
+
+```
+HEAD (before these checks):  PASS 1725 checks
+with these checks:           PASS 1754 checks
+```
+
+The #167 doc's 1685 was the count at `04b6333`; `main` had gained 40 checks
+between that read and this one.
+
+## What was added
+
+| #167 break | check that now fails | control that fails if the assertion is weakened |
+|---|---|---|
+| **M1** `onDisconnect` stops calling `closeSocket()` | `#179: Disconnect closes the socket` (the current fake socket's `readyState` is 3) and `#179: ... and a call after Disconnect is not answered` (a `docs` `call` sent on the old socket after `api.idle()` produces no `result`) | the same `docs` call one step earlier, while live, **is** answered — `#179: control — the live socket answers a call before Disconnect` |
+| **M2** `onCopy` copies `""` | `#179: Copy puts the command with this token on the clipboard` — a stub `navigator.clipboard.writeText` records its argument and the text must equal the drawer's command, byte for byte | after **New link** the next Copy must be the new token's command and must differ from the old — `#179: control — Copy after New link copies the new command` / `... and not the old one` |
+| **M3** `mirrorRun` calls `runFrames(1)` | `#179: the canvas is on the 12-frame run's last frame` (`currentFrame()` is 11) and `#179: ... and at least 12 frames were drawn`; a second run of 24 must land on 23 and draw 24 | a one-frame run leaves the canvas on frame 0 and draws fewer than twelve — `#179: control — a one-frame run ...`; so "it drew something" cannot pass both |
+| **M4** the FEED's rows / time spans are never drawn | reads the drawer's own `<ol id="agent-feed">`: one `<li>` per call, `agent-tool` and `agent-summary` text, an `agent-time` matching `HH:MM:SS`, and `is-ok` / `is-error`; the last drawn row must be the failed validate | before any call the one drawn row is the `is-empty` sentence — `#179: control — before any call the FEED's one row is the empty one`; so "a row exists" cannot pass both states |
+| **M5** `onopen` drops `state.attempt = 0` | `#179: a drop after a healthy open waits the first step (1000 ms)` — drop, Reconnect, open (healthy), drop again: 1000 ms, not 2000 | two drops with **no** successful open between must go 1000 then 2000 (`#179: control — ...`), so a constant 1000 also fails; a third healthy cycle asserts 1000 again |
+
+Every new check's name begins `#179:` so a mutation run can attribute the red.
+
+## Evidence: each break on the pristine tree
+
+Six exact-string replacements, one at a time, each asserted to occur exactly
+once, source restored between runs; `node tests/check-studio.js` from the same
+worktree:
+
+| mutant | exit | checks it turned red |
+|---|---|---|
+| M1 remove `closeSocket();` from `onDisconnect` | 1 | `#179: Disconnect closes the socket (got 1, want 3)`; `#179: ... and a call after Disconnect is not answered` |
+| M2 `onCopy`'s `line` becomes `""` | 1 | `#179: Copy puts the command with this token on the clipboard (got "", want …)`; the New-link control |
+| M3 `runFrames(frames)` → `runFrames(1)` | 1 | `#179: the canvas is on the 12-frame run's last frame (got 0, want 11)`; `... at least 12 frames were drawn (2 -> 3)`; the 24-frame pair |
+| M4a the FEED loop runs zero times (`i < 0`) | 1 | `#179: the FEED draws one row per call (got 0, want 1)`; tool/summary; time; the drawn error row |
+| M4b the `agent-time` span is not appended | 1 | `#179: ... and a non-empty clock time ([])` |
+| M5 remove `state.attempt = 0;` from `onopen` | 1 | `#179: a drop after a healthy open waits the first step (got 2000, want 1000)`; the two-drop control (4000); the third cycle (8000) |
+
+The pristine tree afterwards: `PASS 1754 checks, 0 failed`.
+
+## What these new checks still cannot see
+
+- **The close is the stub's, not the network's.** M1's check proves the tab
+  nulled its handler and called `close()` on the current fake socket. It says
+  nothing about the real WebSocket close handshake or a relay that keeps
+  answering on a half-closed connection, and nothing about the scheduled
+  reconnect landing on a *new* socket after the person pressed Disconnect
+  (the timers never fire in the stub; see below).
+- **The clipboard is a recorder, not the clipboard.** The stub's
+  `writeText` records the exact line, so a wrong or empty line is caught. A
+  browser that denies the permission, the failure toast (`Copy it from the
+  line above: …`), and the OS clipboard are not exercised; a real rejection
+  would still leave the correct line recorded and pass.
+- **The frame position is the studio's own claim; the stub draws calls, not
+  pixels.** `currentFrame()` and the number of `putImageData` calls catch the
+  named `runFrames(1)` break. They do not prove the twelve frames are the tool
+  core's twelve pictures: a mirror that drew one frame and then `seek()`ed to
+  N−1 would land on the right frame and draw the missing ones through `seek()`.
+  Pixel equality is still not asserted.
+- **The backoff check presses Reconnect; it never lets the timer run.**
+  `setTimeout` in the stub returns 0 and never fires, so the reset is proved
+  on `onopen`, not on the delayed retry: a `scheduleReconnect` that computed
+  the right delay but scheduled the wrong one is not seen.
+- **The FEED is read after `api.idle()`.** The drawer's render is synchronous
+  inside the queue, which is what makes that a complete read; a render moved
+  asynchronously after the queue would not be seen by this check.
+- **Unchanged from the #167 list:** the real relay and a real tab↔relay pair,
+  real two-tab takeover, the 25 s keepalive, `export_pce`/`toy_save` downloads,
+  the real `navigator.clipboard`/`localStorage`, `RELAY_URL` edge cases
+  (`http://`, trailing slash, malformed), and overlapping calls. Those remain
+  fixture blind spots, not something #179 claims.
+
