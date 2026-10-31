@@ -35,6 +35,8 @@ The server needs Node and nothing else: no npm install, no compiler. The link is
 | frame_png | the picture at a frame, as a PNG you can look at |
 | validate | check it against the hardware's limits, with file:line findings |
 | toy_save | save the whole toy — code, art, songs — as one .pce.json the person opens in the studio |
+| project_open | resume a project: a .pcestudio file or an unpacked project folder, with NOTES.md's text returned first |
+| project_save | save the session as a project — one .pcestudio, or the same layout unpacked into a folder so git holds the history; pass the updated NOTES.md as notes |
 | export_pce | build the HuCard .pce from the same IL the studio runs |
 | docs | the reference chapters, generated from the runtime's tables |
 | registers_get | read a VDC, VCE or PSG register with its range |
@@ -43,6 +45,8 @@ The server needs Node and nothing else: no npm install, no compiler. The link is
 Work the loop the skill teaches: docs(topic) for the API (do not guess names), toy_write, toy_run, frame_png to look, validate, export_pce. Add art with source_add before toy_run: a base64 PNG or a pixel grid with its palette becomes the toy's tiles, sprites, a tilesheet or a palette, merged into its asset files, and the reply is the VRAM/CRAM budget — toy_run imports those files into VRAM, CRAM and the SAT before init(), exactly as the studio does. Add music with song_write (or source_add kind song for a .mid): it writes song.json and music(0) plays it, while toy_run's sound report says what started on each channel. A toy that runs without errors does not mean it looks right: look at the frame.
 
 **Finish with toy_save.** It writes one .pce.json holding every file — main.lua, the art source_add made, the named sources and the songs — in the studio's own Save format, inside the folder the server runs in (a path outside it is refused). Then tell the person: open PCEStudio, press Open… → From file…, pick that file — or drop it on the page — and the game plays with its art. Without this step you can only hand over the code, and everything source_add imported stays behind.
+
+**If the person gives you a project, read NOTES.md before anything else; at the end of the session update NOTES.md — what you did, what works, what is next — and save the project.** project_open {path} opens a .pcestudio file or an unpacked project folder into the session and answers with NOTES.md's text first: it is what the last session learned, and nothing in the code repeats it. Then project_save {path, notes}: one .pcestudio, or — when path is a folder (a trailing / on the name, or an existing folder) — the same layout unpacked, which is the route for Claude Code, because git can hold the history. Pass the whole updated NOTES.md as notes; with no notes and none in the toy, the project gets the studio's template. The person opens the file with Project… → Open. toy_save stays for the plain toy file, a project is what a later session resumes.
 
 No tools at all? Ignore this section. Sections 1 to 11 are the paste-and-run route and work the same.
 
@@ -1142,6 +1146,8 @@ The limits a toy lives inside, each enforced where the table says.
 ## 11. Before you answer
 
 Check the code against this list before sending it: the whole file; only calls from section 4; integers; reg("CR", 0xC0) before the first sprite; the BAT filled; sprite patterns through putsprite; the raster callback a few writes per line; no string values; no table reads if the toy must export.
+
+If the person has a project already, it carries NOTES.md, the resume note: what the game is, what works, what does not, the decisions and the next step. Read it before you change anything. At the end of the session, give the person the updated NOTES.md and the code, and tell them to Save project (Project… → Save project): the one file holds the game and the note, so the next session starts where this one stopped.
 
 Then end with the line the person needs in order to run it:
 

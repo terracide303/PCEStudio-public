@@ -7,11 +7,15 @@
  *      text refuses the Node-only tokens (require("fs"), and the words
  *      process / Buffer / os), so a Node dependency smuggled back in fails
  *      this test;
- *   2. tools/list is byte-identical before and after the split: the
- *      committed tests/dumps/mcp-tools-list.json was captured from the OLD
- *      tools/mcp/server.js (the whole TOOLS table, before the tools moved),
- *      and the new server must send the same JSON, byte for byte — and the
- *      core's own TOOLS table, in both its branches, must match it;
+ *   2. tools/list is byte-identical in both branches of the core: the
+ *      committed tests/dumps/mcp-tools-list.json is a capture of the
+ *      server's tools/list, and the new server must send the same JSON, byte
+ *      for byte — and the core's own TOOLS table, in both its branches, must
+ *      match it.  (The capture was taken from the old tools/mcp/server.js
+ *      the day of the #166 split, to prove the split changed nothing; #163
+ *      added project_save and project_open, and the fixture was re-taken
+ *      then.  A tool the core gains without the fixture being re-taken fails
+ *      here.)
  *   3. the core RUNS in a node:vm context that has nothing but the renderer
  *      modules: no require, no process, no fs, no Buffer, no module — the
  *      browser branch of the UMD, the one the studio tab will load (#167).
@@ -153,7 +157,8 @@ function buildSandbox() {
     source: require(path.join(ROOT, "renderer", "pce-source.js")),
     sat: require(path.join(ROOT, "renderer", "pce-sat.js")),
     editor: require(path.join(ROOT, "renderer", "pce-editor.js")),
-    seq: require(path.join(ROOT, "renderer", "pce-seq.js"))
+    seq: require(path.join(ROOT, "renderer", "pce-seq.js")),
+    project: require(path.join(ROOT, "renderer", "pce-project.js"))
   };
   ctx.PCEStudio = PCEStudio;
   vm.runInContext(core, ctx, { filename: "pce-agent-tools.js" });
@@ -260,7 +265,7 @@ async function runSequence(call, seq) {
 (async function main() {
   checkBannedTokens();
 
-  /* the fixture is the 'before' capture, committed beside the split */
+  /* the fixture is the committed tools/list capture */
   const wantTools = fs.readFileSync(FIXTURE, "utf8");
   check(wantTools.length > 1000, "the fixture is a real tools/list capture");
 
@@ -281,7 +286,7 @@ async function runSequence(call, seq) {
     });
     const list = await client.request("tools/list", {});
     check(!list.error, "the new server answers tools/list");
-    eq("the new server's tools/list is the old server's, byte for byte",
+    eq("the new server's tools/list is the committed capture, byte for byte",
        JSON.stringify(list.result && list.result.tools), wantTools);
 
     const sandbox = buildSandbox();
@@ -330,7 +335,7 @@ async function runSequence(call, seq) {
   }
   console.log("PASS  " + checks + " checks: the one tool core carries no " +
               "Node tokens, tools/list is byte-identical to the committed " +
-              "'before' capture in both of the core's branches, and " +
+              "capture in both of the core's branches, and " +
               "recipes 02 and 06 run in a node:vm context with nothing but " +
               "the renderer modules, reply for byte-identical reply with the " +
               "stdio server — frame hashes included");
