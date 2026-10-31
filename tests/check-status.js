@@ -187,7 +187,7 @@ function dumpNames() {
 const TOY_CAPTURES = new Set(["toypalette", "toyparallax",
                               "palette-huc", "parallax-huc",
                               "toypalette-ilvm", "toyparallax-ilvm",
-                              "toystatusbar-ilvm"]);
+                              "toystatusbar-ilvm", "tableops-ilvm"]);
 
 /* ---- the independent status oracle (raw bytes only) -------------------- */
 

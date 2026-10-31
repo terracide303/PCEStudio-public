@@ -374,6 +374,10 @@ const EXPECTED_SCENES = [
    * viewer's rotation frames); #74: raster13/vraster13 (colour-only and BYR
    * steps alternating) */
   "sprite13", "flicker", "raster13", "vraster13",
+  /* #175: the table toy's bytecode capture (all four table ops); its saved
+   * picture is one frame of a running animation, and check.js renders it
+   * diff 0 at the capture's crop like the other still saves. */
+  "tableops-ilvm",
 ];
 
 function outputProblems(stdout, status) {
@@ -391,7 +395,8 @@ function outputProblems(stdout, status) {
    * that stops reporting diff 0 must be named, even if another's count keeps
    * the total steady. */
   const reported = new Set();
-  for (const hit of stdout.matchAll(/^([A-Za-z0-9_]+): OK \(\d+x\d+, diff 0\)$/gm))
+  for (const hit of stdout.matchAll(/* #175: dump names may carry a hyphen (tableops-ilvm). */
+             /^([A-Za-z0-9_-]+): OK \(\d+x\d+, diff 0\)$/gm))
     reported.add(hit[1]);
   const missing = EXPECTED_SCENES.filter((n) => !reported.has(n));
   const extra = [...reported].filter((n) => EXPECTED_SCENES.indexOf(n) < 0);
