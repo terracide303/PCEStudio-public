@@ -28,7 +28,11 @@
  * Written by @design because the card names this evidence.  Per workshop
  * rule 2 a cold break by another seat and model is owed: the operand
  * encoding, the loop arithmetic, the closure copies, the timer
- * reconstruction and the browser glue are what to attack.
+ * reconstruction and the browser glue are what to attack.  #171's part has
+ * its own targets: follow a site's value through a `move`, through a
+ * table-typed global's every getglobal, containment taint (a pair stored in
+ * a cram field), the setlist/constant-key/register-key capacity order, and
+ * the chunk/init/back-edge repeat rule.
  */
 "use strict";
 
@@ -211,7 +215,141 @@ function checkArityRefusal() {
   eq("five parameters is ilbc-arity", code, "ilbc-arity");
 }
 
+/* ---- #171: the table layout ------------------------------------------- *
+ * tableLayout() reads each table's shape from its uses: one slot per `table`
+ * instruction, its array capacity, the program-wide field ids written into
+ * it, whether the value escapes, and whether the site can run more than
+ * once.  This pins the three games' measured inventories (docs/
+ * TABLES-PLAN.md §1) and two controls: a frame-built table stored in a
+ * global (escaping and re-executing), and the nested cram pair, which
+ * escapes only with its outer.  NOVA is pinned at the cap rule's 349 cells;
+ * #177 is the card that turns its register-key sites into 183. */
+function layoutToy(file) {
+  const source = fs.readFileSync(path.join(ROOT, file), "utf8");
+  return ilbc.tableLayout(il.compile(source, { chunkName: path.basename(file) }));
+}
+
+function checkTableLayout() {
+  const star = layoutToy("toys/demo-game/main.lua");
+  eq("STARFALL has 44 table sites", star.nslots, 44);
+  eq("STARFALL's tables need 172 cells", star.cells, 172);
+  eq("STARFALL's field cells are 126", star.fieldCells, 126);
+  eq("STARFALL's array cells are 46", star.arrayCells, 46);
+  check(star.sites.every(function (s, i) {
+    return s.base === (i ? star.sites[i - 1].base + star.sites[i - 1].cells : 0);
+  }), "STARFALL's slots are packed in site order");
+  eq("STARFALL's sites fill the pool exactly",
+     star.sites[star.sites.length - 1].base +
+     star.sites[star.sites.length - 1].cells, star.cells);
+  eq("STARFALL's field ids are first-appearance order", star.fieldIds,
+     ["x", "y", "pattern", "palette", "byr", "cram"]);
+  eq("the register-key array cap is 16", star.arrayCap, 16);
+  eq("STARFALL's 7 escaping sites are its table globals",
+     star.sites.filter(function (s) { return s.escapes; })
+       .map(function (s) { return s.globals[0]; }),
+     ["DIGIT", "bl", "bx", "by", "ex", "ey", "es"]);
+  eq("37 STARFALL spec sites do not escape",
+     star.sites.filter(function (s) {
+       return !s.escapes && s.globals.length === 0;
+     }).length, 37);
+  check(star.sites.filter(function (s) { return s.escapes; })
+        .every(function (s) { return !s.repeats; }),
+        "the escaping globals are built once (chunk/init), so they cannot " +
+        "re-execute");
+
+  /* The two raster specs at main.lua:498 and :646: an outer spec writing
+   * `byr` and `cram` (ids 4 and 5), a one-cell list wrapper, and the
+   * two-cell pair.  The pair escapes only if the outer does; neither does,
+   * because raster() copies the fields it needs. */
+  const outers = star.sites.filter(function (s) {
+    return s.fields.length === 2 && s.fields[0] === 4 && s.fields[1] === 5;
+  });
+  eq("STARFALL builds two raster outer specs", outers.length, 2);
+  eq("each raster outer reserves six field cells",
+     outers.map(function (s) { return s.nfields; }), [6, 6]);
+  for (const outer of outers) {
+    const nested = star.sites.filter(function (s) {
+      return s.line === outer.line && s.cap === 2;
+    });
+    eq("the raster at line " + outer.line + " has a two-cell nested pair",
+       nested.length, 1);
+    if (nested.length === 1) {
+      eq("the nested pair at line " + outer.line +
+         " escapes only with its outer", nested[0].escapes, outer.escapes);
+      check(!outer.escapes,
+            "the raster spec at line " + outer.line + " does not escape");
+    }
+  }
+
+  const tower = layoutToy("toys/tower/main.lua");
+  eq("TOWER has 6 table sites", tower.nslots, 6);
+  eq("TOWER's tables need 33 cells", tower.cells, 33);
+  eq("TOWER has no field cells", tower.fieldCells, 0);
+  eq("TOWER has no field ids", tower.fieldIds, []);
+  eq("TOWER's 6 escaping sites are its table globals", tower.escaping, 6);
+
+  const nova = layoutToy("toys/nova-tide/main.lua");
+  eq("NOVA has 27 table sites", nova.nslots, 27);
+  eq("NOVA at the cap rule needs 349 cells (#177: 183)", nova.cells, 349);
+  eq("NOVA's array cells at the cap rule are 344", nova.arrayCells, 344);
+  eq("NOVA's only field name is bxr", nova.fieldIds, ["bxr"]);
+  eq("NOVA's 5 raster specs do not escape",
+     nova.sites.filter(function (s) { return !s.escapes; }).length, 5);
+  console.log("      table layout: STARFALL " + star.nslots + " sites/" +
+              star.cells + " cells (" + star.fieldCells + " field), TOWER " +
+              tower.nslots + "/" + tower.cells + ", NOVA " + nova.nslots +
+              "/" + nova.cells + " at the cap rule");
+
+  /* A table built in frame() and stored in a global: one slot could not
+   * carry two Lua tables, so it is both escaping and re-executing. */
+  const held = ilbc.tableLayout(il.compile([
+    "held = nil",
+    "function frame(t, f)",
+    "  local s = {x = f}",
+    "  held = s",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "held.lua" }));
+  eq("a frame-built table stored in a global is one site", held.nslots, 1);
+  eq("it is flagged escaping", held.sites[0].escapes, true);
+  eq("it is flagged re-executing", held.sites[0].repeats, true);
+  eq("it is stored in the table global `held`", held.sites[0].globals, ["held"]);
+
+  /* The same nested cram shape, with the outer spec escaping (a call
+   * argument) and not escaping (a raster spec).  The pair follows its
+   * outer both ways. */
+  const pairCall = ilbc.tableLayout(il.compile([
+    "local function sink(spec)",
+    "  spec.byr = 0",
+    "end",
+    "function frame(t, f)",
+    "  sink({byr = 1, cram = {{0, 5}}})",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "pair-call.lua" }));
+  eq("a call-passed raster spec is three sites", pairCall.nslots, 3);
+  eq("their array caps are 0, 1 and 2",
+     pairCall.sites.map(function (s) { return s.cap; }), [0, 1, 2]);
+  check(pairCall.sites.every(function (s) { return s.escapes; }),
+        "the nested pair escapes with an outer passed to a call");
+
+  const pairRaster = ilbc.tableLayout(il.compile([
+    "function frame(t, f)",
+    "  raster(1, {byr = 1, cram = {{0, 5}}})",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "pair-raster.lua" }));
+  eq("a raster-consumed spec is three sites", pairRaster.nslots, 3);
+  check(pairRaster.sites.every(function (s) { return !s.escapes; }),
+        "the nested pair does not escape when its outer is a raster spec");
+
+  eq("tableLayout refuses a non-pce-il program",
+     refuseCode(function () { ilbc.tableLayout({ lang: "x" }); }),
+     "ilbc-program");
+}
+
 /* ---- 2. the browser glue ---------------------------------------------- */
+
 
 function checkRom() {
   const bank0 = fs.readFileSync(ILVM);
@@ -547,6 +685,7 @@ console.log("check-ilvm: #100 the IL as bytecode, interpreted");
 
 checkEncoder();
 checkArityRefusal();
+checkTableLayout();
 checkRom();
 checkRebuild();
 
