@@ -16,6 +16,11 @@
  * The host is not the console: it does not model the VDC's timing, the RCR
  * chain or the base deferral.  It answers "does the interpreter compute the
  * toy's writes", not "does the console show them".
+ *
+ * The state starts where the browser IL run starts it (renderer/pce-toyhost.js
+ * createHost): VRAM/CRAM/SAT zeroed and CR already on (BB, 0x80).  A toy that
+ * never writes CR must report 0x80 here, not 0, or tests/check-ilvm.js's
+ * checkHostParity would compare two different power-on states.
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -32,7 +37,9 @@ void toy_raster(int32_t line);
 static uint16_t vram[32768];
 static uint16_t cram[512];
 static uint16_t sat[256];
-static int32_t regs[3];
+/* regs[0..2] is BXR, BYR, CR (encoder's ids, docs/IL.md §14); CR starts on
+ * as the browser host starts it. */
+static int32_t regs[3] = { 0, 0, 0x80 };
 
 void toy_vram_set(int32_t addr, int32_t word) {
   vram[addr & 0x7FFF] = (uint16_t)word;
