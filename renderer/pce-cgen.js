@@ -43,6 +43,18 @@
  *                   closure site)
  *   cgen-key        a constant operand that is neither int nor bool
  *   cgen-target     a jump target that is not an instruction
+ *   cgen-table-ram      the table slots need more than TABLE_POOL_CELLS, or a
+ *                   constant array key / field id is past its slot's shape
+ *   cgen-table-escape   an escaping table site that can run more than once
+ *                   (one static slot would alias two Lua tables)
+ *
+ * Tables (#176): the four instructions table/setlist/tget/tset lower into
+ * the same static pool model as the interpreter (docs/TABLES-PLAN.md §2):
+ * `static int32_t il_table_cells[IL_TABLE_CELLS]` plus const base/cap/fields
+ * arrays, one slot per `table` site, and il_globals[i] holds a slot id for a
+ * table-typed global.  The layout is the encoder's own tableLayout()
+ * (pce-ilbc.js), so the two backends cannot drift.  The HuC dialect refuses
+ * tables: its int is 16 bits and the pool cells are the IL's 32-bit int32_t.
  *
  * The emitted program runs under tools/toyc/toy_runtime.c, which owns the
  * console: the VDC/VCE setup, the frame flow (wait for VBlank, run frame),
@@ -54,15 +66,19 @@
 
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require("./pce-ilbc.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
-    root.PCEStudio.cgen = factory();
+    root.PCEStudio.cgen = factory(root.PCEStudio.ilbc);
   }
-})(typeof self !== "undefined" ? self : this, function () {
+})(typeof self !== "undefined" ? self : this, function (ilbc) {
   "use strict";
 
   var VERSION = 1;
+  /* The four table instructions this backend lowers (#176); the layout they
+   * share with the encoder is ilbc.tableLayout, so this file carries no
+   * second copy of the pool rule (docs/TABLES-PLAN.md §5). */
+  var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
 
   function CGenError(code, message) {
     this.name = "CGenError";
@@ -216,6 +232,64 @@
       }
     }
 
+    /* Tables (#176): one static slot per `table` instruction site in the
+     * fixed pool, zeroed and reused each time the site runs — the same model
+     * the interpreter runs (docs/TABLES-PLAN.md §2).  The layout is the
+     * encoder's own tableLayout(), so the encoder and this backend report
+     * the same sites and cells for the same IL; the refusals mirror the
+     * encoder's rule (pce-ilbc.js buildTableSection) with this backend's
+     * codes. */
+    var usesTables = false;
+    for (f = 0; f < functions.length && !usesTables; f++) {
+      for (pc = 0; pc < functions[f].code.length; pc++) {
+        if (TABLE_OPS[functions[f].code[pc].t]) { usesTables = true; break; }
+      }
+    }
+    var table = null;
+    var tableSiteAt = [];
+    var tableFieldIds = {};
+    if (usesTables) {
+      table = ilbc.tableLayout(program);
+      for (var si = 0; si < table.sites.length; si++) {
+        var site = table.sites[si];
+        /* A slot's cap/fields are emitted as uint8_t arrays, so a shape
+         * that does not fit one byte would silently truncate in the C. */
+        if (site.cap > 255 || site.nfields > 255) {
+          refuse("cgen-table-ram", "the table at function " + site.fid +
+                 " pc " + site.pc + " (line " + site.line + ") needs " +
+                 site.cap + " array cells and " + site.nfields +
+                 " field cells; the pool's cap/fields are one byte");
+        }
+        if (site.escapes && site.repeats) {
+          refuse("cgen-table-escape", "the table at function " + site.fid +
+                 " pc " + site.pc + " (line " + site.line + ") can run more " +
+                 "than once and escapes; one static slot would alias two " +
+                 "tables");
+        }
+        if (site.maxKey != null && (site.maxKey > site.cap || site.maxKey < 1)) {
+          refuse("cgen-table-ram", "a constant key " + site.maxKey + " at " +
+                 "function " + site.fid + " pc " + site.pc + " is outside " +
+                 "its slot's array part (cap " + site.cap + ")");
+        }
+        if (site.readMaxField != null && site.readMaxField >= site.nfields) {
+          refuse("cgen-table-ram", "a field id " + site.readMaxField +
+                 " read at function " + site.fid + " pc " + site.pc +
+                 " is past the slot's " + site.nfields + " field cells");
+        }
+        if (tableSiteAt[site.fid] == null) {
+          tableSiteAt[site.fid] = new Array(functions[site.fid].code.length);
+        }
+        tableSiteAt[site.fid][site.pc] = site.id;
+      }
+      for (var fi = 0; fi < table.fieldIds.length; fi++) {
+        tableFieldIds[table.fieldIds[fi]] = fi;
+      }
+      if (table.cells > ilbc.TABLE_POOL_CELLS) {
+        refuse("cgen-table-ram", "the table slots need " + table.cells +
+               " cells; the fixed pool is " + ilbc.TABLE_POOL_CELLS);
+      }
+    }
+
     /* Globals: the IL declares their types.  This backend carries function
      * values and the int/bool scalars a toy keeps between frames (the greedy
      * global `g_f` the raster toys use); the surface names are
@@ -246,7 +320,7 @@
          * getglobal lowers to a defined zero. */
         if ((gi.t === "getglobal" || gi.t === "setglobal") &&
             (typeOf[gi.name] === "fn" || typeOf[gi.name] === "int" ||
-             typeOf[gi.name] === "bool")) {
+             typeOf[gi.name] === "bool" || typeOf[gi.name] === "table")) {
           globalId(gi.name);
         }
       }
@@ -274,7 +348,11 @@
       globalNames: globalNames,
       hookInit: program.hooks.init != null,
       hookFrame: program.hooks.frame,
-      hookRaster: hookRaster
+      hookRaster: hookRaster,
+      usesTables: usesTables,
+      table: table,
+      tableSiteAt: tableSiteAt,
+      tableFieldIds: tableFieldIds
     };
   }
 
@@ -350,7 +428,7 @@
 
   /* ---- validation: refuse outside part A, naming the construct --------- */
 
-  function validate(program, a) {
+  function validate(program, a, huc) {
     var uses = { mod: false, idiv: false, shl: false, shr: false };
     var i, j;
     for (i = 0; i < a.functions.length; i++) {
@@ -397,10 +475,10 @@
             refuse("cgen-global", where + ": global `" + ins.name +
                    "` has no declared type");
           }
-          if (!/^(fn|vram|int|bool|padset)$/.test(a.typeOf[ins.name])) {
+          if (!/^(fn|vram|int|bool|padset|table)$/.test(a.typeOf[ins.name])) {
             refuse("cgen-global", where + ": global `" + ins.name + "` is " +
                    a.typeOf[ins.name] + "; this backend carries fn/vram/" +
-                   "int/bool/pad");
+                   "int/bool/pad/table");
           }
           break;
         case "reg":
@@ -486,10 +564,42 @@
                    "lowers rgb only)");
           }
           break;
+        case "table":
+        case "setlist":
+        case "tget":
+        case "tset":
+          /* #176: the four table ops lower to the fixed pool.  HuC's int is
+           * 16 bits (defs.h, INTSIZE 2), so the pool's 32-bit cells cannot
+           * round-trip a value there — the dialect refuses all four. */
+          if (huc) {
+            refuse("cgen-op", where + ": HuC's int is 16 bits and the table " +
+                   "pool's cells are 32");
+          }
+          /* The base operand is a register in every IL this compiler
+           * produces (pce-il.js loads an upvalue table into a scratch
+           * register first); refusing the impossible shape mirrors the
+           * encoder's ilbc-table-key. */
+          if ((ins.t === "setlist" || ins.t === "tget" || ins.t === "tset") &&
+              (!ins.base || ins.base.r == null)) {
+            refuse("cgen-op", where + ": a table base must be a register");
+          }
+          if (ins.t === "tget" || ins.t === "tset") {
+            /* A string key is a field, an int constant/register an array
+             * index — anything else (fixed, bool, missing) is cgen-op or
+             * falls out of constLitImpl as cgen-fixed/cgen-key. */
+            var kt = !ins.key ? "none"
+                   : ins.key.r != null ? "register"
+                   : ins.key.k ? ins.key.k.t : "none";
+            if (kt !== "str" && kt !== "int" && kt !== "register") {
+              refuse("cgen-op", where + ": a table key must be a string " +
+                     "field or an int operand");
+            }
+          }
+          break;
         default:
           refuse("cgen-op", where + ": not lowered by this backend (" +
                  "init/frame/raster and reg/pal/vset/sat/pad and the timer " +
-                 "only; no sprites, tables or fixed point)");
+                 "only; no sprites or fixed point)");
         }
         var t = (ins.t === "jmp" || ins.t === "br" || ins.t === "fornext")
                 ? ins.target : null;
@@ -506,7 +616,7 @@
   function emitC(program, options) {
     var huc = !!(options && options.target === "huc");
     var a = analyse(program);
-    var uses = validate(program, a);
+    var uses = validate(program, a, huc);
     var out = [];
     var i;
     function line(s) { out.push(s); }
@@ -768,6 +878,40 @@
         line("  " + d + " = toy_rgb(" + operand(ins.args[0]) + ", " +
              operand(ins.args[1]) + ", " + operand(ins.args[2]) + ");");
         break;
+      case "table":
+        /* #176: one static slot per `table` site (docs/TABLES-PLAN.md §2.1),
+         * zeroed every time the site runs, so a repeating site's new table
+         * starts empty.  il_globals carries the slot id of a table global. */
+        line("  " + d + " = il_table_new(" + a.tableSiteAt[fid][pc] + ");");
+        break;
+      case "setlist":
+        /* One guarded write per value: a write past the slot's array part
+         * writes nothing (the interpreter faults; the console cannot). */
+        for (var vi = 0; vi < ins.values.length; vi++) {
+          line("  il_table_set(" + operand(ins.base) + ", " +
+               (ins.index + vi) + ", " + operand(ins.values[vi]) + ");");
+        }
+        break;
+      case "tget":
+        if (ins.key.k && ins.key.k.t === "str") {
+          /* A string key is a field: its program-wide id (first-appearance
+           * order) indexes the slot's field cells. */
+          line("  " + d + " = il_table_getf(" + operand(ins.base) + ", " +
+               a.tableFieldIds[ins.key.k.v] + ");");
+        } else {
+          line("  " + d + " = il_table_get(" + operand(ins.base) + ", " +
+               operand(ins.key) + ");");
+        }
+        break;
+      case "tset":
+        if (ins.key.k && ins.key.k.t === "str") {
+          line("  il_table_setf(" + operand(ins.base) + ", " +
+               a.tableFieldIds[ins.key.k.v] + ", " + operand(ins.value) + ");");
+        } else {
+          line("  il_table_set(" + operand(ins.base) + ", " +
+               operand(ins.key) + ", " + operand(ins.value) + ");");
+        }
+        break;
       default:
         refuse("cgen-op", "instruction " + ins.t);
       }
@@ -826,6 +970,24 @@
      * instruction and read by the pump the frame flow calls (#45). */
     if (a.usesTimer) {
       line("static " + T + " il_timer_cb = -1;");
+    }
+    /* #176: the tables' fixed pool, the interpreter's model
+     * (docs/TABLES-PLAN.md §2.1): IL_TABLE_CELLS 32-bit cells shared by
+     * every toy, one static slot per `table` site, zeroed and reused each
+     * time the site runs.  The per-slot shape is the encoder's own
+     * tableLayout() (pce-ilbc.js), so both backends report the same sites
+     * and cells for the same IL. */
+    if (a.usesTables) {
+      line("#define IL_TABLE_CELLS " + ilbc.TABLE_POOL_CELLS);
+      line("#define IL_NSLOTS " + a.table.nslots);
+      line("static " + T + " il_table_cells[IL_TABLE_CELLS]");
+      line("    __attribute__((section(\".bss\")));");
+      line("static const uint16_t il_slot_base[IL_NSLOTS] = { " +
+           a.table.sites.map(function (s) { return s.base; }).join(", ") + " };");
+      line("static const uint8_t il_slot_cap[IL_NSLOTS] = { " +
+           a.table.sites.map(function (s) { return s.cap; }).join(", ") + " };");
+      line("static const uint8_t il_slot_fields[IL_NSLOTS] = { " +
+           a.table.sites.map(function (s) { return s.nfields; }).join(", ") + " };");
     }
     line("");
     for (i = 0; i < a.functions.length; i++) {
@@ -897,6 +1059,46 @@
       line("");
     }
 
+    /* ---- the table pool's helpers (#176) ------------------------------- */
+    /* The same guards the interpreter runs (tools/ilvm/ilvm.c): an invalid
+     * slot or an access outside the slot's shape reads 0 and writes
+     * nothing.  A field key indexes the slot's field cells after its array
+     * cells; an int key indexes the array cells 1-based. */
+    if (a.usesTables) {
+      line("static " + T + " il_table_new(" + T + " s) {");
+      line("  " + T + " i;");
+      line("  if (s < 0 || s >= IL_NSLOTS) return s;");
+      line("  for (i = 0; i < il_slot_cap[s] + il_slot_fields[s]; i++)");
+      line("    il_table_cells[il_slot_base[s] + i] = 0;");
+      line("  return s;");
+      line("}");
+      line("");
+      line("static " + T + " il_table_get(" + T + " s, " + T + " i) {");
+      line("  if (s < 0 || s >= IL_NSLOTS) return 0;");
+      line("  if (i < 1 || i > il_slot_cap[s]) return 0;");
+      line("  return il_table_cells[il_slot_base[s] + i - 1];");
+      line("}");
+      line("");
+      line("static void il_table_set(" + T + " s, " + T + " i, " + T + " v) {");
+      line("  if (s < 0 || s >= IL_NSLOTS) return;");
+      line("  if (i < 1 || i > il_slot_cap[s]) return;");
+      line("  il_table_cells[il_slot_base[s] + i - 1] = v;");
+      line("}");
+      line("");
+      line("static " + T + " il_table_getf(" + T + " s, " + T + " f) {");
+      line("  if (s < 0 || s >= IL_NSLOTS) return 0;");
+      line("  if (f >= il_slot_fields[s]) return 0;");
+      line("  return il_table_cells[il_slot_base[s] + il_slot_cap[s] + f];");
+      line("}");
+      line("");
+      line("static void il_table_setf(" + T + " s, " + T + " f, " + T + " v) {");
+      line("  if (s < 0 || s >= IL_NSLOTS) return;");
+      line("  if (f >= il_slot_fields[s]) return;");
+      line("  il_table_cells[il_slot_base[s] + il_slot_cap[s] + f] = v;");
+      line("}");
+      line("");
+    }
+
     /* ---- the functions ------------------------------------------------- */
     for (i = 0; i < a.functions.length; i++) {
       emitFunction(a.functions[i], i);
@@ -962,13 +1164,13 @@
     /* exported for the test: the refusal codes part A can raise */
     CODES: ["cgen-op", "cgen-fixed", "cgen-cond", "cgen-global",
             "cgen-arity", "cgen-hook", "cgen-closure-loop", "cgen-key",
-            "cgen-target", "cgen-width"],
-    /* The same ten codes with their meanings, for the toy author's reference
-     * (#61) and the chat-AI guide's error table: one table, so a code added
-     * above is described here or the reference test notices. */
+            "cgen-target", "cgen-width", "cgen-table-ram", "cgen-table-escape"],
+    /* The same twelve codes with their meanings, for the toy author's
+     * reference (#61) and the chat-AI guide's error table: one table, so a
+     * code added above is described here or the reference test notices. */
     REFUSALS: {
       "cgen-op": "an IL instruction this backend has no C lowering for " +
-                 "(tables, sprite(), fixed point, some builtins)",
+                 "(sprite(), fixed point, some builtins)",
       "cgen-fixed": "fixed-point arithmetic or a fixed-point constant",
       "cgen-cond": "a branch whose condition the IL did not type as bool",
       "cgen-global": "a global whose type this backend cannot put in C",
@@ -978,7 +1180,11 @@
       "cgen-closure-loop": "a closure created inside a loop",
       "cgen-key": "a constant operand that is neither int nor bool",
       "cgen-target": "a jump target that is not an instruction",
-      "cgen-width": "a constant that does not fit the C dialect's width"
+      "cgen-width": "a constant that does not fit the C dialect's width",
+      "cgen-table-ram": "a table access or slot shape the fixed cell pool " +
+                        "cannot serve",
+      "cgen-table-escape": "a table site that can run more than once and " +
+                           "escapes; one static slot would alias two tables"
     }
   };
 });

@@ -2032,7 +2032,8 @@
      pce-il.js, pce-sprites.js and pce-toyhost.js, all loaded above. -->
 
 <!-- #98: the CONSOLE panel runs the C emitter too, so the tab can say what
-     stops a toy reaching a real console.  pce-cgen.js has no dependencies. -->
+     stops a toy reaching a real console.  pce-cgen.js depends on
+     pce-ilbc.js for the tables' shared pool layout (#176), loaded above. -->
 <script src="pce-cgen.js"></script>
 <script src="pce-assets.js"></script>
 <!-- #97: the AUDIO panel's mixer — the mix document over pce-wave.js's PSG

@@ -71,6 +71,21 @@
  * program its exported API accepts: a hand-built two-int-parameter hook must
  * be refused cgen-hook, and the one-parameter control must emit toy_raster.
  *
+ * #176 adds the table half (docs/TABLES-PLAN.md §2):
+ *
+ *   8. The emitter lowers the four table ops into the fixed pool.
+ *      tools/toys/tablepool.lua — an int array, a bool array and a record,
+ *      all table-typed globals — emits C with no cgen-op/cgen-global, and the
+ *      text carries the pool and the four lowerings.  The pool's per-slot
+ *      base/cap/fields are compared with pce-ilbc.js's own tableLayout() of
+ *      the same IL, and the encoder reports the same site count and cells
+ *      (agreement by construction, pinned here).  The four refusals mirror
+ *      the encoder's rule: cgen-table-escape for a re-running site whose
+ *      table escapes, cgen-table-ram for a slot past one byte or the pool,
+ *      cgen-global for a str global, and cgen-op for the HuC dialect (its
+ *      16-bit int cannot hold the pool's 32-bit cells).  With llvm-mos the
+ *      toy also builds to a ROM (SKIP otherwise, like §2/§6).
+ *
  * Written by @design because the card names this evidence; per workshop
  * rule 2 a cold break by another seat is owed.
  */
@@ -85,11 +100,13 @@ const { spawnSync } = require("child_process");
 const toys = require("../renderer/pce-toys.js");
 const il = require("../renderer/pce-il.js");
 const cgen = require("../renderer/pce-cgen.js");
+const ilbc = require("../renderer/pce-ilbc.js");
 const ilTest = require("./check-il.js");      /* the one toy source */
 
 const ROOT = path.join(__dirname, "..");
 const DUMP = path.join(ROOT, "tests/dumps/toypalette");
 const TOY_FILE = path.join(ROOT, "tools/toys/palette.lua");
+const TABLEPOOL_FILE = path.join(ROOT, "tools/toys/tablepool.lua");
 const RASTER_DUMP = path.join(ROOT, "tests/dumps/toyparallax");
 const RASTER_FILE = path.join(ROOT, "toys/parallax.lua");
 
@@ -309,12 +326,12 @@ function checkIdivEmitter() {
 
 /* ---- 2. the emitter refuses by code ----------------------------------- */
 
-function refusal(name, source, code, mutate) {
+function refusal(name, source, code, mutate, opts) {
   let program = null;
   try {
     program = il.compile(source, { chunkName: "refusal.lua" });
     if (mutate) mutate(program);
-    cgen.emitC(program);
+    cgen.emitC(program, opts);
     check(false, "cgen refusal " + name + " was accepted (wanted " + code + ")");
   } catch (e) {
     check(e instanceof cgen.CGenError && e.code === code,
@@ -419,6 +436,110 @@ function frame(t, f) g = g + 1 end`, "cgen-global", function (p) {
           function (p) {
     p.functions[p.hooks.raster].params = ["int", "int"];
   });
+}
+
+/* ---- 2d. the table emitter (#176) -------------------------------------- */
+
+function checkTableEmitter() {
+  const source = fs.readFileSync(TABLEPOOL_FILE, "utf8");
+  const program = il.compile(source, { chunkName: "tablepool.lua" });
+  const c = cgen.emitC(program);
+  eq("the table C emitter is deterministic", c, cgen.emitC(program));
+  check(!/\b(double|float)\b/.test(c), "the table C carries no float type");
+
+  /* The card's close-out shape: a table-only toy (int array, bool array,
+   * record — all table-typed globals) emits C, and the text carries the
+   * fixed pool and the four lowerings. */
+  check(/static int32_t il_table_cells\[IL_TABLE_CELLS\]/.test(c),
+        "the C carries the fixed cell pool");
+  check(/static const uint16_t il_slot_base\[IL_NSLOTS\]/.test(c) &&
+        /static const uint8_t il_slot_cap\[IL_NSLOTS\]/.test(c) &&
+        /static const uint8_t il_slot_fields\[IL_NSLOTS\]/.test(c),
+        "the C carries the pool's per-slot base/cap/fields arrays");
+  check(/il_table_new\(/.test(c), "the table op lowers to il_table_new()");
+  check(/il_table_set\(/.test(c), "setlist and tset lower to il_table_set()");
+  check(/il_table_get\(/.test(c), "an int-key tget lowers to il_table_get()");
+  check(/il_table_getf\(/.test(c), "a field tget lowers to il_table_getf()");
+  check(/il_table_setf\(/.test(c), "a field tset lowers to il_table_setf()");
+  check(/r\[\d+\] = il_globals\[\d+\];/.test(c) &&
+        /il_globals\[\d+\] = r\[\d+\];/.test(c),
+        "a table global's slot id travels through il_globals");
+  eq("the three table globals each get a C slot", (c.match(/#define IL_NGLOBALS (\d+)/) || [])[1], "5");
+
+  /* The pool's shape is the encoder's own tableLayout() of the same IL:
+   * same sites, same cells, same per-slot base/cap/fields — agreement by
+   * construction (both read pce-ilbc.js), pinned here so a drift fails. */
+  const layout = ilbc.tableLayout(program);
+  eq("the toy has the three planned sites", layout.nslots, 3);
+  eq("the toy's three sites need 9 cells", layout.cells, 9);
+  eq("the toy's field ids are first-appearance order", layout.fieldIds,
+     ["x", "y", "z"]);
+  check(layout.sites.every(function (s, i) {
+    return s.base === (i ? layout.sites[i - 1].base +
+                            layout.sites[i - 1].cells : 0);
+  }), "the toy's slots are packed in site order");
+  eq("the toy's sites fill the pool exactly",
+     layout.sites[layout.sites.length - 1].base +
+     layout.sites[layout.sites.length - 1].cells, layout.cells);
+  check(layout.cells <= ilbc.TABLE_POOL_CELLS,
+        "the toy's cells fit the pool (" + layout.cells + " of " +
+        ilbc.TABLE_POOL_CELLS + ")");
+  eq("the encoder reports the same site count and cells",
+     ilbc.encode(program).tables, { nslots: layout.nslots, cells: layout.cells });
+
+  const arrayOf = function (name) {
+    const m = c.match(new RegExp(name + "\\[IL_NSLOTS\\] = \\{ ([^}]*)\\};"));
+    return m ? m[1].split(",").map(function (s) { return parseInt(s.trim(), 10); }) : null;
+  };
+  eq("the C's IL_NSLOTS is the layout's",
+     Number((c.match(/#define IL_NSLOTS (\d+)/) || [])[1]), layout.nslots);
+  eq("the C's il_slot_base is the layout's per-site base",
+     arrayOf("il_slot_base"),
+     layout.sites.map(function (s) { return s.base; }));
+  eq("the C's il_slot_cap is the layout's per-site cap",
+     arrayOf("il_slot_cap"),
+     layout.sites.map(function (s) { return s.cap; }));
+  eq("the C's il_slot_fields is the layout's per-site nfields",
+     arrayOf("il_slot_fields"),
+     layout.sites.map(function (s) { return s.nfields; }));
+
+  /* The refusals mirror the encoder's rule (pce-ilbc.js buildTableSection),
+   * with this backend's codes. */
+  refusal("a table that escapes a re-running site", `
+held = {x = 0}
+function frame(t, f)
+  local s = {x = f}
+  held = s
+end`, "cgen-table-escape");
+  {
+    const big = [];
+    for (let i = 0; i < 300; i++) big.push("0");
+    refusal("a setlist whose 300 cells do not fit one byte", [
+      "BIG = {" + big.join(", ") + "}",
+      "function frame(t, f) end",
+      ""
+    ].join("\n"), "cgen-table-ram");
+  }
+  refusal("a str global the C cannot put in a slot", `
+s = "hi"
+function frame(t, f) end`, "cgen-global");
+  refusal("a table toy on the HuC dialect (16-bit int)", `
+g = {1, 2}
+function frame(t, f) pal(1, g[1]) end`, "cgen-op", null, { target: "huc" });
+
+  /* With llvm-mos present the toy also builds to a ROM — the card's close-
+   * out names the build.  Same SKIP rule as checkRebuild/checkRasterDump. */
+  const llvm = process.env.LLVM_MOS || LLVM_DEFAULT;
+  if (!fs.existsSync(path.join(llvm, "bin/mos-pce-clang"))) {
+    skipped.push("table toy ROM build (llvm-mos not found)");
+    console.log("SKIP  table toy ROM build: llvm-mos not found");
+    return;
+  }
+  const r = spawnSync(path.join(ROOT, "tools/build-toyc.sh"),
+                      [TABLEPOOL_FILE, "toytablepool"],
+                      { cwd: ROOT, encoding: "utf8", env: process.env });
+  check(r.status === 0, "tools/build-toyc.sh builds the table toy (" +
+        (r.stderr || "").trim().split("\n").slice(-1)[0] + ")");
 }
 
 /* ---- 3. the ROM is reproducible --------------------------------------- */
@@ -750,6 +871,7 @@ function main() {
   checkEmitter();
   checkIdivEmitter();
   checkRefusals();
+  checkTableEmitter();
   checkRasterEmitter();
 
   const metaPath = path.join(DUMP, "meta.json");
