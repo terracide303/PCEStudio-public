@@ -37,6 +37,12 @@
  *      pool byte-equal to the eight-frame run's (the write touched no
  *      cell); the pool's own cells are pinned; MAX_TABLE_CELLS is read from
  *      ilvm.c and compared with the encoder's TABLE_POOL_CELLS.
+ *   8. #177: a register-key write through a constant numeric for's control
+ *      variable (the body reads the control copy base+3) takes the loop's
+ *      reachable maximum index as the capacity; anything the pass cannot
+ *      bound keeps TABLE_ARRAY_CAP.  NOVA's 21 empty-then-loop arrays get
+ *      8/10/8/6 instead of 16 each: 183 cells, which fits the pool (349 at
+ *      the cap rule did not).
  *
  * Written by @design because the card names this evidence.  Per workshop
  * rule 2 a cold break by another seat and model is owed: the operand
@@ -45,7 +51,10 @@
  * its own targets: follow a site's value through a `move`, through a
  * table-typed global's every getglobal, containment taint (a pair stored in
  * a cram field), the setlist/constant-key/register-key capacity order, and
- * the chunk/init/back-edge repeat rule.  #173's own target is the harness:
+ * the chunk/init/back-edge repeat rule.  #177's own targets: the
+ * constant-loop bound (an upval-captured limit, a descending loop, a
+ * never-run loop, a non-constant limit, a register the parent writes after
+ * the closure, an inner loop's control).  #173's own target is the harness:
  * its artefacts, its frame count and its control mutation.  #174's targets:
  * the four ops' 1-based indexing and field ids, the pool bounds, the fault
  * rule and what a fault stops.
@@ -312,15 +321,15 @@ function checkTableLayout() {
 
   const nova = layoutToy("toys/nova-tide/main.lua");
   eq("NOVA has 27 table sites", nova.nslots, 27);
-  eq("NOVA at the cap rule needs 349 cells (#177: 183)", nova.cells, 349);
-  eq("NOVA's array cells at the cap rule are 344", nova.arrayCells, 344);
+  eq("NOVA needs 183 cells (#177; 349 at the cap rule)", nova.cells, 183);
+  eq("NOVA's array cells are 178 (344 at the cap rule)", nova.arrayCells, 178);
   eq("NOVA's only field name is bxr", nova.fieldIds, ["bxr"]);
   eq("NOVA's 5 raster specs do not escape",
      nova.sites.filter(function (s) { return !s.escapes; }).length, 5);
   console.log("      table layout: STARFALL " + star.nslots + " sites/" +
               star.cells + " cells (" + star.fieldCells + " field), TOWER " +
               tower.nslots + "/" + tower.cells + ", NOVA " + nova.nslots +
-              "/" + nova.cells + " at the cap rule");
+              "/" + nova.cells + " cells");
 
   /* A table built in frame() and stored in a global: one slot could not
    * carry two Lua tables, so it is both escaping and re-executing. */
@@ -368,6 +377,119 @@ function checkTableLayout() {
   eq("tableLayout refuses a non-pce-il program",
      refuseCode(function () { ilbc.tableLayout({ lang: "x" }); }),
      "ilbc-program");
+}
+
+/* ---- #177: constant for-loop bounds size the arrays --------------------- *
+ * A register-key write through a constant numeric for's control variable
+ * takes the loop's reachable maximum index as the capacity (fornext's test
+ * is inclusive); any register-key write the pass cannot bound keeps
+ * TABLE_ARRAY_CAP = 16.  NOVA's 21 empty-then-loop arrays were the point:
+ * 183 cells instead of 349, which fits the interpreter's pool. */
+function checkTableCapacity() {
+  const nova = layoutToy("toys/nova-tide/main.lua");
+
+  /* The four loop shapes, one family per line of table declarations: the
+   * family sizes are PB_N/EB_N/EN_N/EX_N = 8/10/8/6 (main.lua:24), so
+   * line 485's four tables (pb*) are 8, 486's five (eb*) are 10, 487's
+   * eight (en*) are 8 and 488's four (ex*) are 6. */
+  const loop = nova.sites.filter(function (s) {
+    return s.loopKeyMax != null;
+  });
+  eq("NOVA has 21 loop-bounded sites", loop.length, 21);
+  eq("the four loop shapes are 8/10/8/6",
+     loop.reduce(function (m, s) {
+       m[s.cap] = (m[s.cap] || 0) + 1;
+       return m;
+     }, {}),
+     { 6: 4, 8: 12, 10: 5 });
+  eq("line 485's four tables are PB_N's 8",
+     loop.filter(function (s) { return s.line === 485; })
+       .map(function (s) { return s.cap; }), [8, 8, 8, 8]);
+  eq("line 486's five are EB_N's 10",
+     loop.filter(function (s) { return s.line === 486; })
+       .map(function (s) { return s.cap; }), [10, 10, 10, 10, 10]);
+  eq("line 487's eight are EN_N's 8",
+     loop.filter(function (s) { return s.line === 487; })
+       .map(function (s) { return s.cap; }), [8, 8, 8, 8, 8, 8, 8, 8]);
+  eq("line 488's four are EX_N's 6",
+     loop.filter(function (s) { return s.line === 488; })
+       .map(function (s) { return s.cap; }), [6, 6, 6, 6]);
+  eq("NOVA needs 183 cells", nova.cells, 183);
+  eq("NOVA's array cells are 178", nova.arrayCells, 178);
+  check(nova.cells <= ilbc.TABLE_POOL_CELLS,
+        "NOVA's 183 cells fit TABLE_POOL_CELLS (" + ilbc.TABLE_POOL_CELLS + ")");
+
+  /* The cap rule's number is what #177 replaced: recomputed from the site
+   * records themselves (16 per register-key site), it exceeds the pool, so
+   * the pre-#177 encoder refused NOVA with ilbc-table-ram. */
+  const capRule = nova.sites.reduce(function (a, s) {
+    return a + s.nfields +
+      (s.setlistEnd != null ? s.setlistEnd
+       : s.constKeyMax != null ? s.constKeyMax
+       : s.registerKey ? 16 : 0);
+  }, 0);
+  eq("at the cap rule NOVA needed 349 cells", capRule, 349);
+  check(capRule > ilbc.TABLE_POOL_CELLS,
+        "the pre-#177 349 exceeds TABLE_POOL_CELLS (" +
+        ilbc.TABLE_POOL_CELLS + ")");
+
+  /* The rule itself, on synthetic toys. */
+  const asc = ilbc.tableLayout(il.compile([
+    "function frame(t, f)",
+    "  local a = {}",
+    "  for i = 1, 8 do a[i] = i end",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "asc.lua" }));
+  eq("a 1..8 loop sizes the array to 8", asc.sites[0].cap, 8);
+  eq("it is loop-bounded", asc.sites[0].loopKeyMax, 8);
+
+  const desc = ilbc.tableLayout(il.compile([
+    "function frame(t, f)",
+    "  local a = {}",
+    "  for i = 7, 0, -1 do a[i] = i end",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "desc.lua" }));
+  eq("a descending 7..0 loop's largest index is 7", desc.sites[0].cap, 7);
+
+  const nrun = ilbc.tableLayout(il.compile([
+    "function frame(t, f)",
+    "  local a = {}",
+    "  for i = 5, 1 do a[i] = i end",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "nrun.lua" }));
+  eq("a loop that never runs reserves no cells", nrun.sites[0].cap, 0);
+
+  /* A limit read from an int global is not a constant to this pass, so the
+   * write stays unbounded and keeps the cap. */
+  const nconst = ilbc.tableLayout(il.compile([
+    "g = {}",
+    "N = 0",
+    "local function fill()",
+    "  for i = 1, N do g[i] = 0 end",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "nconst.lua" }));
+  eq("a loop with a non-constant limit keeps the cap", nconst.sites[0].cap, 16);
+  eq("it is not loop-bounded", nconst.sites[0].loopKeyMax, null);
+
+  const unbounded = ilbc.tableLayout(il.compile([
+    "function frame(t, f)",
+    "  local a = {}",
+    "  a[f] = 1",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "unbounded.lua" }));
+  eq("an unbounded register key stays at 16", unbounded.sites[0].cap, 16);
+  eq("it is not loop-bounded either", unbounded.sites[0].loopKeyMax, null);
+
+  /* STARFALL's register-key writes are not loop-control writes, so #177
+   * must not move its totals (checkTableLayout pins them too). */
+  const star = layoutToy("toys/demo-game/main.lua");
+  eq("STARFALL's totals are unchanged at 172", star.cells, 172);
+  eq("STARFALL's array cells are unchanged at 46", star.arrayCells, 46);
 }
 
 /* ---- #172: the version 2 container and the four table ops -------------- *
@@ -1170,6 +1292,7 @@ console.log("check-ilvm: #100 the IL as bytecode, interpreted");
 checkEncoder();
 checkArityRefusal();
 checkTableLayout();
+checkTableCapacity();
 checkTableEncoding();
 checkRom();
 checkRebuild();
