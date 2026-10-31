@@ -8,7 +8,7 @@ resulting hardware state it reports:
 
 | question | how | refusal code |
 |---|---|---|
-| frame time at 60 Hz | cycles of `frame()` and of every `raster(line)` call, per IL op, plus one fixed cost per compiled hook call | `validate-frame-budget` (error) above 8 display frames; `validate-slow-frame` (warn) below 60 Hz |
+| frame time at 60 Hz | cycles of `frame()` and of every `raster(line)` call, per IL op, plus one fixed cost per compiled hook call; the frame is sampled from the run's last frame, extended to the studio's 300-frame performance when the probe's frame is over the ceiling (#184) | `validate-frame-budget` (error) above 8 display frames; `validate-slow-frame` (warn) below 60 Hz |
 | sprites per line, 256-px rule | `renderer/pce-sprites.js` `status()` — #50's model: 16-px strips, 16 a line, the rest dropped, OR | `validate-sprite-line` |
 | VRAM fit | the highest word written by `vset`, and every sprite's pattern cell, against 32,768 words | `validate-vram` |
 | ROM fit | bytes per static IL op + the runtime baseline, against the HuCard's 1 MB (#57) | `validate-rom` |
@@ -97,6 +97,24 @@ frames); the model's 314,443 (2.64) is the same story: **the IL → C route runs
 these raster toys at 17–26 Hz, not 60**. The 60 Hz budget (119,318 clocks) is
 reported; a toy is refused only past **8 display frames**, where it cannot
 animate at all.
+
+**Which frame the budget is judged on (#184).** The frame-time finding is about
+one toy frame, so it is sampled from a run of the toy: `validate()`'s
+`options.frames` (the export and the CONSOLE panel use 8), and the last frame
+of that run. For a toy that draws its assets over a long startup, that frame
+is a **build** frame, not the toy's animation — DUSK RUN's `BUILD_STEPS` is
+137, so frame 7 is its seventh drawing step (675,190 cycles of `frame()` plus
+the 379,102-cycle raster collection = 1,054,292, over the ceiling). The
+validator now treats a refused probe as inconclusive and runs on to the
+studio's default performance length (**300 frames**: `Length` in
+`renderer/studio.html`, #144), judging the last frame of that run. DUSK RUN's
+steady state there is 390,744 cycles = 3.27 display frames (18.3 Hz), the
+figure `tests/check-dusk-run.js` already pinned at 600 frames; the same model
+over the probe's build frame is what refused it. `budgets.probeFrames` and
+`budgets.sampledFrame` record the probe and the frame judged. The 8-frame
+ceiling, `OP_CYCLES` and the raster pricing do not change: a toy that is over
+the ceiling in its steady state is still refused with the same finding and the
+same numbers (`tests/check-validate.js` V07's 20,000-line fixture).
 
 ## 2. Sprites per line and the 256-px rule (#50)
 

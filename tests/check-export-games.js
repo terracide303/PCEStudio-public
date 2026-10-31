@@ -93,13 +93,22 @@ const GAMES = [
     where: "main.lua:124"
   },
   {
-    /* Still the validator's refusal: #183 changed neither the frame cost nor
-     * the 8-display-frame ceiling.  The encoder behind it would next refuse
-     * sat (function 33, pc 3, main.lua:325), not arity. */
+    /* #184's decision: the 8-display-frame ceiling keeps its number, the
+     * per-op/raster pricing is unchanged (part C's held-out 1,510 cycles a
+     * call, -7.4%), and DUSK RUN's frame() is unchanged.  What moved is the
+     * frame the ceiling is applied to: at an 8-frame probe the validator
+     * sampled the toy's BUILD (BUILD_STEPS = 137; frame 7 is build step 7,
+     * 675,190 cycles of frame() plus 379,102 of raster), not its animation.
+     * The same model over the studio's default 300-frame performance puts
+     * the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz) —
+     * the number toys/dusk-run/README.md and tests/check-dusk-run.js already
+     * record at 600 frames — so the validator now extends a refused probe to
+     * the performance before refusing.  The encoder behind it refuses sat
+     * (function 33, pc 3, main.lua:325), which is the toy's real blocker. */
     name: "DUSK RUN", toy: "toys/dusk-run/main.lua",
-    expect: { code: "validate-frame-budget",
-              message: "over the 8-display-frame ceiling" },
-    where: null
+    expect: { code: "ilbc-op",
+              message: "instruction sat (function 33, pc 3) has no bytecode form" },
+    where: "main.lua:325"
   },
   {
     name: "PLATFORMER", toy: "toys/platformer/main.lua",
