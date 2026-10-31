@@ -197,12 +197,16 @@ at 8:7; ours reads `--frame-w`/`--frame-h` from the frame `paint()` receives, so
 (#27) gets its own ratio instead of being letterboxed into 256:224. Measured in headless Chrome at
 1600×1000: the frame box is 466×408 px in a 580×460 content box, i.e. `min(580, 460*256/224) = 466.3`.
 
-**The AGENT drawer's text and Sign-in placeholder (#87).** The drawer is ppu.toys' pre-connection
-`.agent-panel` state in this page's tokens: a status dot, `NOT CONNECTED`, the intro paragraph and the
-`Sign in` pill. The text names what PCEStudio actually has — card #36's local MCP server,
-`tools/mcp/server.js` — and keeps ppu.toys' sentence ("Your agent signs in as you, so sign in first"); the
-button is a placeholder that says accounts and publishing are #37 and the local server needs no account.
-The live link into this tab is #104.
+**The AGENT drawer — the agent link (#167, on #87's placeholder).** The drawer began (#87) as ppu.toys'
+pre-connection `.agent-panel` state in this page's tokens: a status dot, `NOT CONNECTED`, the intro and a
+`Sign in` pill. #167 replaced that with the live link of `docs/AGENT-LINK.md` (#165): with `RELAY_URL`
+(`renderer/relay-config.js`) naming a relay, Connect mints a 32-hex token in `localStorage`, opens the
+relay's `wss://<relay>/ws/<token>`, and shows the one line to run — `claude mcp add --transport http
+pcestudio <RELAY_URL>/mcp/<token>` — beside a Copy button, the help text (including "your edits are what
+the next run uses") and the FEED of Claude's calls (time, tool, one-line summary, ok/error). The status is
+connecting / live / taken over / disconnected, with reconnect and backoff. While `RELAY_URL` is empty the
+drawer says the agent link is not switched on yet and offers nothing else. There are no accounts, so the
+Sign-in pill is gone.
 
 ### 2.4 Resizable regions — the three dividers (#139)
 

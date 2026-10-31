@@ -38,6 +38,11 @@
     register: function (studio) {
       var cache = { source: null, state: null };
       var last = null;
+      /* #167: what the agent link put here.  toy_run's log is the tool
+       * core's own (what Claude was told), and validate's report is the
+       * validator's — the studio mirrors both, it does not re-derive them. */
+      var runLog = { lines: [], frames: 0, at: null };
+      var checkReport = null;
 
       function el(tag, cls, text) {
         var e = studio.document.createElement(tag);
@@ -352,18 +357,92 @@
                                    "none this session");
       }
 
+      /* #167 — the agent link's two blocks.  The RUN LOG is the toy's own
+       * print() output from a toy_run the AGENT panel mirrored: the lines
+       * are the tool core's reply, so they are what Claude was told.  The
+       * CHECK block is the validator's report from a validate call (file,
+       * line, code, message), the same findings the Export dialog reads. */
+      function drawLog() {
+        var host = studio.$("console-log");
+        if (!host) return;
+        if (!runLog.lines.length) { host.hidden = true; host.textContent = ""; return; }
+        host.hidden = false;
+        host.textContent = "RUN LOG · " + runLog.frames + " frame" +
+          (runLog.frames === 1 ? "" : "s") + " through the agent link\n" +
+          runLog.lines.join("\n");
+      }
+
+      function drawCheck() {
+        var host = studio.$("console-check");
+        if (!host) return;
+        while (host.firstChild) host.removeChild(host.firstChild);
+        if (!checkReport) { host.hidden = true; return; }
+        host.hidden = false;
+        var head = el("p", "con-check-head",
+          "VALIDATE · from the agent link · " +
+          (checkReport.ok ? "ok, no findings" : "not ok"));
+        host.appendChild(head);
+        var problems = checkReport.problems || [];
+        if (!problems.length && checkReport.ok) {
+          host.appendChild(el("p", "con-check-none",
+            "The validator found nothing to fix."));
+          return;
+        }
+        var list = el("ul", "con-check-list");
+        for (var i = 0; i < problems.length; i++) {
+          var p = problems[i];
+          var li = el("li", "con-check-row is-" + (p.severity || "error"));
+          li.appendChild(el("span", "con-line is-plain",
+                             p.location || p.file || "main.lua"));
+          li.appendChild(el("span", "con-code", p.code || ""));
+          li.appendChild(el("span", "con-msg", String(p.message || "")));
+          list.appendChild(li);
+        }
+        host.appendChild(list);
+      }
+
       function draw(st) {
         var S = state();
         drawBanner(S);
         drawFindings(S);
         drawStats(S);
         drawRig(S, st);
+        drawLog();
+        drawCheck();
       }
 
       var api = {
         state: function () { return state(); },
         refresh: function () { cache.source = null; return state(); },
-        goto: gotoLine
+        goto: gotoLine,
+        /* #167: the AGENT panel's mirror — toy_run's log and validate's
+         * report, as the tool core answered them */
+        setRunLog: function (lines, frames) {
+          runLog = {
+            lines: Array.isArray(lines) ? lines.slice() : [],
+            frames: Number(frames) || 0,
+            at: Date.now()
+          };
+          if (studio.panels && studio.panels.get) {
+            var def = studio.panels.get("console");
+            if (def && def.id === "console" && studio.$("panel-console") &&
+                !studio.$("panel-console").hidden) draw(studio.render.state());
+          }
+          return runLog;
+        },
+        runLog: function () {
+          return { lines: runLog.lines.slice(), frames: runLog.frames };
+        },
+        setCheck: function (report) {
+          checkReport = report && typeof report === "object" ? report : null;
+          if (studio.panels && studio.panels.get) {
+            var def = studio.panels.get("console");
+            if (def && def.id === "console" && studio.$("panel-console") &&
+                !studio.$("panel-console").hidden) draw(studio.render.state());
+          }
+          return checkReport;
+        },
+        checkReport: function () { return checkReport; }
       };
 
       studio.panels.register({
