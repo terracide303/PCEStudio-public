@@ -1120,6 +1120,13 @@ by first appearance of the string key, so a name means the same field
 everywhere. The shapes come from `tableLayout()` (#171); the sizing rule is
 docs/TABLES-PLAN.md §2.2.
 
+Since #175 the committed `renderer/ilvm.bin` reads both versions (before
+that rebuild it stopped at boot on version 2: a blank screen, not a crash).
+`tools/toys/tables.lua` exercises all four ops, exports as a version 2
+container (7 slots, 32 cells), and its Mednafen capture
+(`tests/dumps/tableops-ilvm`) matches the browser: after 418 updates the
+saved VRAM, CRAM and SAT are byte-equal to the browser's frame 416.
+
 A **function entry** (10 bytes, one per function id in order) is
 `codeOff u16, codeEnd u16, upOff u16, nregs u8, nparams u8, nups u8, reserved
 u8`. Each **upvalue descriptor** is `kind u8, index u8`: 0 captures the

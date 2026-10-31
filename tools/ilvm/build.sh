@@ -75,26 +75,50 @@ for line in run([llvm + "/bin/llvm-size", elf]).splitlines():
                  "bss": int(parts[2])}
         break
 
+# llvm-mos 24's `llvm-objdump -h` prints five columns (idx name size vma
+# type); older builds print flags as well.  Read the size from column 2 and
+# require only that column to be present, so a toolchain with or without the
+# trailing columns records the same table (#175: before this fix the whole
+# section_sizes map came out empty on llvm-mos 24).
 section_sizes = {}
 for line in run([llvm + "/bin/llvm-objdump", "-h", elf]).splitlines():
     parts = line.split()
-    if len(parts) >= 6 and parts[0].isdigit() and parts[1].startswith("."):
+    if len(parts) >= 3 and parts[0].isdigit() and parts[1].startswith("."):
         try:
             section_sizes[parts[1]] = int(parts[2], 16)
         except ValueError:
             pass
 
-functions = {}
+symbols = {}
 for line in run([llvm + "/bin/llvm-nm", "--print-size", "--size-sort",
                  elf]).splitlines():
     parts = line.split()
-    if len(parts) >= 4 and parts[3] in (
-            "exec", "toy_boot", "toy_frame", "toy_raster", "main",
-            "ilvm_has_raster", "operand", "lua_mod", "lua_idiv"):
+    if len(parts) >= 4:
         try:
-            functions[parts[3]] = int(parts[1], 16)
+            symbols[parts[3]] = {"size": int(parts[1], 16),
+                                 "address": int(parts[0], 16),
+                                 "section": parts[2]}
         except ValueError:
             pass
+
+functions = {name: symbols[name]["size"] for name in symbols if name in (
+    "exec", "toy_boot", "toy_frame", "toy_raster", "main",
+    "ilvm_has_raster", "operand", "lua_mod", "lua_idiv")}
+
+# #175: the table pool is ilvm.c's static `cells` array, placed by the linker
+# in .bss.  Record it by name so the section sizes can be read as
+# "heap + pool": 256 int32 cells = 1024 B.
+table_pool = {"symbol": "cells", "section": None, "address": None,
+              "bytes": 0, "cells": None}
+if "cells" in symbols:
+    table_pool.update(section=symbols["cells"]["section"],
+                      address=symbols["cells"]["address"],
+                      bytes=symbols["cells"]["size"])
+    table_pool["cells"] = table_pool["bytes"] // 4
+    # nm prints a section letter; spell it so the report reads without nm.
+    table_pool["section"] = {"b": ".bss", "d": ".data",
+                             "t": ".text"}.get(table_pool["section"],
+                                               table_pool["section"])
 
 out = {
     "image": binpath,
@@ -106,6 +130,7 @@ out = {
     "data_bank": "physical 2, appended per toy by renderer/pce-rom.js",
     "sizes": sizes,
     "section_sizes": section_sizes,
+    "table_pool": table_pool,
     "functions": functions,
     "cc": run([llvm + "/bin/mos-pce-clang", "--version"]).splitlines()[0],
     "flags": "-Os -Wl,--defsym,__rom_bank0=0xc000 "

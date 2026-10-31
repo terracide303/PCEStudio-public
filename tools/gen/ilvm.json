@@ -1,0 +1,48 @@
+{
+ "bank0": "physical 0 ($E000-$FFFF: vectors, startup, runtime)",
+ "bank1": "physical 1 ($C000-$DFFF: the interpreter)",
+ "bytes": 16384,
+ "cc": "clang version 24.0.0git (https://github.com/llvm-mos/llvm-mos a40207a371b60ff787ece46817d9c0f62eada719)",
+ "data_bank": "physical 2, appended per toy by renderer/pce-rom.js",
+ "flags": "-Os -Wl,--defsym,__rom_bank0=0xc000 -Wl,--defsym,__rom_bank0_size=0x4000",
+ "functions": {
+  "exec": 8381,
+  "lua_idiv": 120,
+  "lua_mod": 170,
+  "main": 2431,
+  "operand": 107,
+  "toy_frame": 198
+ },
+ "image": "renderer/ilvm.bin",
+ "rom": "tools/gen/ilvm.pce",
+ "section_sizes": {
+  ".bss": 6529,
+  ".comment": 204,
+  ".data": 0,
+  ".early_start": 2070,
+  ".llvm_sympart": 30,
+  ".noinit": 5,
+  ".rodata": 82,
+  ".shstrtab": 125,
+  ".strtab": 8469,
+  ".symtab": 9104,
+  ".text": 14222,
+  ".vector": 10,
+  ".zp": 8,
+  ".zp.bss": 216,
+  ".zp.data": 0
+ },
+ "sha256": "a152a83f41621415c03974b58adfeba82a4ba939a8031adda8017c217f377c10",
+ "sizes": {
+  "bss": 6758,
+  "data": 0,
+  "text": 16384
+ },
+ "table_pool": {
+  "address": 16267137,
+  "bytes": 1024,
+  "cells": 256,
+  "section": ".bss",
+  "symbol": "cells"
+ }
+}

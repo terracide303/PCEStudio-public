@@ -361,7 +361,7 @@ const CITATIONS = [
   ["renderer/pce-ilbc.js", 259, "refuse(\"ilbc-op\""],
   ["renderer/pce-ilbc.js", 284, "refuse(\"ilbc-builtin\""],
   ["renderer/pce-ilbc.js", 336, "hookSlot(\"raster\""],
-  ["renderer/pce-rom.js", 618, "if (dataLen > BANK)"],
+  ["renderer/pce-rom.js", 622, "if (dataLen > BANK)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];
 
