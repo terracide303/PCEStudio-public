@@ -11,9 +11,9 @@
  *
  * The format is defined in docs/IL.md §14.  A short version:
  *
- *   header 24 bytes:
+ *   header 24 bytes (version 1) or 28 bytes (version 2):
  *     0  "ILBC"               magic
- *     4  u8 version (= 1)
+ *     4  u8 version (1, or 2 when the program has a table instruction)
  *     5  u8 flags             bit 0: the toy has a raster() callback
  *     6  u8 initSlot          0xFF when the toy has no init()
  *     7  u8 frameSlot         0xFF when the toy has no frame()
@@ -25,8 +25,17 @@
  *    14  u16 upTabOff        upvalue descriptors
  *    16  u16 constTabOff     constants
  *    18  u16 globalTabOff    global names
- *    20  u16 codeOff         first instruction
- *    22  u16 codeEnd         one past the last instruction
+ *    20  u16 codeOff         first instruction   (v1)
+ *    22  u16 codeEnd         one past the last instruction (v1)
+ *
+ *   A version 2 header is 28 bytes: bytes 0..19 mean the same, then
+ *    20  u16 tabTabOff       table section (u8 nslots, then per slot
+ *                            u16 base, u8 cap, u8 nfields)
+ *    22  u16 codeOff
+ *    24  u16 codeEnd
+ *    26  u16 reserved (0)
+ *   The table section sits between the global names and the code.  A toy
+ *   with no table instruction stays version 1, byte for byte.
  *
  *   function entry (10 bytes), one per function id in order:
  *     u16 codeOff, u16 codeEnd, u16 upOff, u8 nregs, u8 nparams,
@@ -72,6 +81,14 @@
  *   15 reg    regid:u8 value:op
  *   16 vset   addr:op word:op
  *   17 vget   dst:reg addr:op
+ *   18 table  dst:reg slot:u8
+ *   19 setlist base:reg first:u8 n:u8 values:n*op
+ *   1A tget   dst:reg base:op key:u8 kind:u8
+ *   1B tset   base:op key:u8 kind:u8 value:op
+ *
+ * A table operand is a slot id from the table section.  `kind` is 0 for an
+ * array key (the key byte is an operand: a register or an int constant) and
+ * 1 for a field id (a string key is a field id, never a value constant).
  *
  * arith opcodes: 0 add, 1 sub, 2 mul, 3 mod, 4 idiv, 5 band, 6 bor,
  *                7 bxor, 8 shl, 9 shr
@@ -90,10 +107,17 @@
  *   ilbc-range    more registers/constants/functions than a byte can index
  *   ilbc-jump     a branch target that is not an instruction
  *   ilbc-builtin  a builtin other than rgb
+ *   ilbc-table-ram    the slots need more than TABLE_POOL_CELLS cells, or a
+ *                     constant array key / field id is past its slot's shape
+ *   ilbc-table-escape an escaping table site that can run more than once
+ *                     (one static slot would alias two Lua tables)
+ *   ilbc-table-key    a tget/tset base that is not a register, or a table key
+ *                     that is neither a constant string nor an int operand
  *
  * tableLayout() reads the table sites a program has (shape, escape, repeat)
- * for the console's static table pool (#171).  It encodes nothing and
- * changes no byte.
+ * for the console's static table pool (#171).  buildTableSection() writes the
+ * version 2 table section (#172) so a test can pin it without encoding a
+ * whole toy.
  *
  * UMD like pce-rom.js: CommonJS in Node, PCEStudio.ilbc in the page.
  */
@@ -108,8 +132,10 @@
   "use strict";
 
   var VERSION = 1;
+  var VERSION_TABLES = 2;
   var MAGIC = "ILBC";
   var HEADER = 24;
+  var HEADER_TABLES = 28;
   var FUNC_ENTRY = 10;
   var OP_NONE = 0xFF;
   var OP_CONST = 0x80;
@@ -117,14 +143,19 @@
   var MAX_CONST = 127;         /* 0x80..0xFE */
   var MAX_ARGS = 4;            /* the interpreter's signature */
   var TABLE_ARRAY_CAP = 16;    /* a register-key array's first-cut capacity */
+  var TABLE_POOL_CELLS = 256;  /* the interpreter's fixed pool (docs/TABLES-PLAN.md §2.1) */
+  var MAX_SLOTS = 255;         /* a slot id is one byte */
+  var MAX_FIELDS = 255;        /* field ids 0..254; nfields is one byte */
 
   var OPS = {
     const: 0x01, move: 0x02, getglobal: 0x03, setglobal: 0x04,
     getupval: 0x05, setupval: 0x06, closure: 0x07, call: 0x08,
     ret: 0x09, jmp: 0x0A, br: 0x0B, forprep: 0x0C, fornext: 0x0D,
     arith: 0x0E, unm: 0x0F, bnot: 0x10, cmp: 0x12, builtin: 0x13,
-    pal: 0x14, reg: 0x15, vset: 0x16, vget: 0x17
+    pal: 0x14, reg: 0x15, vset: 0x16, vget: 0x17,
+    table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B
   };
+  var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
   var ARITH = { add: 0, sub: 1, mul: 2, mod: 3, idiv: 4, band: 5,
                 bor: 6, bxor: 7, shl: 8, shr: 9 };
   var CMP = { eq: 0, lt: 1, le: 2 };
@@ -208,6 +239,9 @@
     if (t === "forprep") return 2;
     if (t === "fornext") return 4;
     if (t === "arith" || t === "cmp") return 5;
+    if (t === "table") return 3;
+    if (t === "setlist") return 4 + (ins.values || []).length;
+    if (t === "tget" || t === "tset") return 5;
     if (t === "call" || t === "builtin") {
       var n = (ins.args || []).length;
       if (n > MAX_ARGS) {
@@ -251,6 +285,17 @@
                "` has no bytecode form");
       }
     }
+    /* `first` is one byte, and the table pool is far smaller than 255. */
+    if (ins.t === "setlist") {
+      if (ins.index == null || ins.index < 1 || ins.index > 255) {
+        refuse("ilbc-range", "setlist first index " + ins.index +
+               " does not fit one byte (1..255)");
+      }
+      if ((ins.values || []).length > 255) {
+        refuse("ilbc-range", "a setlist of " + ins.values.length +
+               " values; n is one byte");
+      }
+    }
   }
 
   /* ---- encode ---------------------------------------------------------- */
@@ -290,6 +335,31 @@
     var frameSlot = hookSlot("frame", program.hooks && program.hooks.frame);
     var rasterSlot = hookSlot("raster", program.hooks && program.hooks.raster);
 
+    /* A program with a table instruction gets version 2 and a table section.
+     * Everything else keeps version 1, byte for byte. */
+    var usesTables = false;
+    for (f = 0; f < functions.length && !usesTables; f++) {
+      var scanCode = functions[f].code || [];
+      for (pc = 0; pc < scanCode.length; pc++) {
+        if (TABLE_OPS[scanCode[pc].t]) { usesTables = true; break; }
+      }
+    }
+    var layout = usesTables ? tableLayout(program) : null;
+    var section = usesTables ? buildTableSection(program, layout) : null;
+    var siteIdOf = [], fieldIds = {};
+    if (usesTables) {
+      for (f = 0; f < functions.length; f++) {
+        siteIdOf.push(new Array((functions[f].code || []).length));
+      }
+      for (var si = 0; si < layout.sites.length; si++) {
+        siteIdOf[layout.sites[si].fid][layout.sites[si].pc] =
+          layout.sites[si].id;
+      }
+      for (var fi = 0; fi < layout.fieldIds.length; fi++) {
+        fieldIds[layout.fieldIds[fi]] = fi;
+      }
+    }
+
     /* Pass 1: constants and per-function instruction offsets. */
     var constKeys = [];
     var constIndex = {};
@@ -328,6 +398,12 @@
         at += size;
         if (ins.k) seeOperand({ k: ins.k });
         eachOperand(ins, seeOperand);
+        /* An int table key is an operand byte; a string key is a field id
+         * and must never enter the value constant pool. */
+        if ((ins.t === "tget" || ins.t === "tset") &&
+            ins.key && ins.key.k && ins.key.k.t === "int") {
+          seeOperand({ k: ins.key.k });
+        }
       }
       fnOffsets.push(offsets);
       fnSizes.push(at);
@@ -350,11 +426,12 @@
       globalTableSize += 1 + globals[g].name.length;
     }
 
-    var funcTabOff = HEADER;
+    var funcTabOff = usesTables ? HEADER_TABLES : HEADER;
     var upTabOff = funcTabOff + functions.length * FUNC_ENTRY;
     var constTabOff = upTabOff + upCount * 2;
     var globalTabOff = constTabOff + constTableSize;
-    var codeOff = globalTabOff + globalTableSize;
+    var tabTabOff = globalTabOff + globalTableSize;
+    var codeOff = tabTabOff + (section ? section.bytes.length : 0);
 
     /* Absolute code offsets, then instruction targets. */
     var fnCodeOff = [];
@@ -368,12 +445,17 @@
     var buf = new Buf();
     buf.bytes([MAGIC.charCodeAt(0), MAGIC.charCodeAt(1),
                MAGIC.charCodeAt(2), MAGIC.charCodeAt(3)]);
-    buf.u8(VERSION);
+    buf.u8(usesTables ? VERSION_TABLES : VERSION);
     buf.u8(program.hooks && program.hooks.raster != null ? 1 : 0);
     buf.u8(initSlot); buf.u8(frameSlot); buf.u8(rasterSlot);
     buf.u8(functions.length); buf.u8(globals.length); buf.u8(constKeys.length);
     buf.u16(funcTabOff); buf.u16(upTabOff); buf.u16(constTabOff);
-    buf.u16(globalTabOff); buf.u16(codeOff); buf.u16(codeEnd);
+    buf.u16(globalTabOff);
+    if (usesTables) {
+      buf.u16(tabTabOff); buf.u16(codeOff); buf.u16(codeEnd); buf.u16(0);
+    } else {
+      buf.u16(codeOff); buf.u16(codeEnd);
+    }
 
     /* Function table + upvalue descriptors. */
     var upAt = upTabOff;
@@ -425,6 +507,15 @@
       for (var nc = 0; nc < name.length; nc++) buf.u8(name.charCodeAt(nc) & 0xFF);
     }
 
+    /* Table section (version 2 only). */
+    if (section) {
+      if (buf.a.length !== tabTabOff) {
+        refuse("ilbc-program", "internal: tabTabOff " + tabTabOff + " but " +
+               "the global names end at " + buf.a.length);
+      }
+      buf.bytes(section.bytes);
+    }
+
     /* Code. */
     if (buf.a.length !== codeOff) {
       refuse("ilbc-program", "internal: codeOff " + codeOff + " but the " +
@@ -432,7 +523,7 @@
     }
     for (f = 0; f < functions.length; f++) {
       encodeFunction(buf, functions[f], f, fnOffsets[f], fnCodeOff[f],
-                     constIndex, globalIds);
+                     constIndex, globalIds, siteIdOf[f], fieldIds);
     }
     if (buf.a.length !== codeEnd) {
       refuse("ilbc-program", "internal: codeEnd " + codeEnd + " but the " +
@@ -442,18 +533,21 @@
     return {
       bytes: Uint8Array.from(buf.a),
       magic: MAGIC,
-      version: VERSION,
+      version: usesTables ? VERSION_TABLES : VERSION,
       functions: functions.length,
       globals: globals.length,
       constants: constKeys.length,
       codeBytes: codeEnd - codeOff,
       hooks: { init: initSlot, frame: frameSlot, raster: rasterSlot },
+      tables: usesTables
+        ? { nslots: layout.nslots, cells: layout.cells }
+        : { nslots: 0, cells: 0 },
       size: buf.a.length
     };
   }
 
   function encodeFunction(buf, fn, fid, offsets, codeOff, constIndex,
-                          globalIds) {
+                          globalIds, siteIds, fieldIds) {
     function reg(r) {
       if (r == null || r < 0 || r >= MAX_REGS) {
         refuse("ilbc-range", "register " + r + " in function " + fid);
@@ -472,6 +566,40 @@
                " (only " + offsets.length + " instructions)");
       }
       return codeOff + offsets[pc];
+    }
+    /* A table value is a register; a key is either an operand byte (array
+     * part, kind 0) or a field id (kind 1).  A string key never becomes a
+     * value constant. */
+    function tableBase(opnd) {
+      if (!opnd || opnd.r == null) {
+        refuse("ilbc-table-key", "a table base must be a register in " +
+               "function " + fid);
+      }
+      return reg(opnd.r);
+    }
+    function tableKey(opnd) {
+      if (!opnd) {
+        refuse("ilbc-table-key", "a table access with no key in function " +
+               fid);
+      }
+      if (opnd.r != null) return { kind: 0, byte: reg(opnd.r) };
+      if (opnd.k && opnd.k.t === "str") {
+        var id = fieldIds[opnd.k.v];
+        if (id == null) {
+          refuse("ilbc-table-key", "field `" + opnd.k.v + "` has no id");
+        }
+        if (id > 254) {
+          refuse("ilbc-range", "field `" + opnd.k.v + "` has id " + id +
+                 "; one byte holds 0..254");
+        }
+        return { kind: 1, byte: id };
+      }
+      if (opnd.k && opnd.k.t === "int") {
+        return { kind: 0, byte: OP_CONST | constIndex[kKey(opnd.k)] };
+      }
+      refuse("ilbc-table-key", "a table key must be a string field or an " +
+             "int operand in function " + fid);
+      return null;
     }
 
     var code = fn.code;
@@ -557,6 +685,37 @@
       case "vget":
         buf.u8(reg(ins.dst)); buf.u8(op(ins.addr));
         break;
+      case "table": {
+        var slot = siteIds == null ? null : siteIds[pc];
+        if (slot == null) {
+          refuse("ilbc-program", "internal: the table at function " + fid +
+                 " pc " + pc + " has no slot");
+        }
+        buf.u8(reg(ins.dst)); buf.u8(slot);
+        break;
+      }
+      case "setlist": {
+        var values = ins.values || [];
+        buf.u8(tableBase(ins.base));
+        buf.u8(ins.index);
+        buf.u8(values.length);
+        for (var vi = 0; vi < values.length; vi++) buf.u8(op(values[vi]));
+        break;
+      }
+      case "tget": {
+        var gk = tableKey(ins.key);
+        buf.u8(reg(ins.dst));
+        buf.u8(tableBase(ins.base));
+        buf.u8(gk.byte); buf.u8(gk.kind);
+        break;
+      }
+      case "tset": {
+        var sk = tableKey(ins.key);
+        buf.u8(tableBase(ins.base));
+        buf.u8(sk.byte); buf.u8(sk.kind);
+        buf.u8(op(ins.value));
+        break;
+      }
       default:
         refuse("ilbc-op", "instruction " + ins.t);
       }
@@ -591,6 +750,74 @@
    * copies the fields it needs.  Reading only; the encoder's bytes and the
    * encoder's refusals are unchanged.
    */
+  /* ---- the version 2 table section (#172) ------------------------------ *
+   * u8 nslots, then per slot u16 base, u8 cap, u8 nfields — the shapes
+   * tableLayout() measured.  Refuses a slot set the interpreter's fixed pool
+   * cannot hold, a constant key/field past its slot, and an escaping site
+   * that can run more than once (one static slot would alias two tables).
+   * Exported so a test can pin STARFALL's section without encoding the whole
+   * toy (STARFALL still has instructions route 1 does not carry). */
+  function buildTableSection(program, layout) {
+    if (!program || program.lang !== "pce-il" || program.version !== 1) {
+      refuse("ilbc-program", "not a pce-il version 1 program");
+    }
+    layout = layout || tableLayout(program);
+    if (layout.nslots > MAX_SLOTS) {
+      refuse("ilbc-range", layout.nslots + " table sites; a slot id is one " +
+             "byte");
+    }
+    if (layout.fieldIds.length > MAX_FIELDS) {
+      refuse("ilbc-range", layout.fieldIds.length + " field names; a field " +
+             "id is one byte");
+    }
+    for (var i = 0; i < layout.sites.length; i++) {
+      var s = layout.sites[i];
+      if (s.escapes && s.repeats) {
+        refuse("ilbc-table-escape", "the table at function " + s.fid +
+               " pc " + s.pc + " (line " + s.line + ") can run more than " +
+               "once and escapes; one static slot would alias two tables");
+      }
+      if (s.maxKey != null && (s.maxKey > s.cap || s.maxKey < 1)) {
+        refuse("ilbc-table-ram", "a constant key " + s.maxKey + " at " +
+               "function " + s.fid + " pc " + s.pc + " is outside its slot's " +
+               "array part (cap " + s.cap + ")");
+      }
+      if (s.readMaxField != null && s.readMaxField >= s.nfields) {
+        refuse("ilbc-table-ram", "a field id " + s.readMaxField + " read at " +
+               "function " + s.fid + " pc " + s.pc + " is past the slot's " +
+               s.nfields + " field cells");
+      }
+      if (s.cap > 255) {
+        refuse("ilbc-range", "the table at function " + s.fid + " pc " + s.pc +
+               " needs " + s.cap + " array cells; cap is one byte");
+      }
+      if (s.nfields > 255) {
+        refuse("ilbc-range", "the table at function " + s.fid + " pc " + s.pc +
+               " needs " + s.nfields + " field cells; nfields is one byte");
+      }
+      if (s.base > 65535) {
+        refuse("ilbc-range", "the table at function " + s.fid + " pc " + s.pc +
+               " starts at cell " + s.base + "; base is two bytes");
+      }
+    }
+    if (layout.cells > TABLE_POOL_CELLS) {
+      refuse("ilbc-table-ram", "the table slots need " + layout.cells +
+             " cells; the interpreter's pool is " + TABLE_POOL_CELLS);
+    }
+    var buf = new Buf();
+    buf.u8(layout.nslots);
+    for (i = 0; i < layout.sites.length; i++) {
+      buf.u16(layout.sites[i].base);
+      buf.u8(layout.sites[i].cap);
+      buf.u8(layout.sites[i].nfields);
+    }
+    return {
+      bytes: Uint8Array.from(buf.a),
+      nslots: layout.nslots,
+      cells: layout.cells
+    };
+  }
+
   function tableLayout(program) {
     if (!program || program.lang !== "pce-il" || program.version !== 1) {
       refuse("ilbc-program", "not a pce-il version 1 program");
@@ -636,6 +863,7 @@
         sites.push({
           id: sites.length, fid: f, pc: pc, line: code[pc].line,
           setlistEnd: null, constKeyMax: null, registerKey: false,
+          readKeyMax: null, readFields: [],
           fields: [], globals: [], escapes: false,
           repeats: (f !== 0 && f !== initFid) || insideLoop(f, pc)
         });
@@ -657,7 +885,8 @@
     function globalUse(name) {
       if (!globalUses[name]) {
         globalUses[name] = { setlistEnd: null, constKeyMax: null,
-                             registerKey: false, fields: [] };
+                             registerKey: false, fields: [],
+                             readKeyMax: null, readFields: [] };
       }
       return globalUses[name];
     }
@@ -705,6 +934,18 @@
         }
       }
     }
+    /* A read is not a write: reading a field does not make the slot reserve
+     * it, but a constant key past the shape is still a build-time error. */
+    function readUse(regs, desc, key) {
+      var tgt = targetOf(desc);
+      if (!tgt || key == null) return;
+      if (opStr(key)) {
+        if (tgt.readFields.indexOf(key.k.v) < 0) tgt.readFields.push(key.k.v);
+      } else if (opInt(key)) {
+        var k = key.k.v | 0;
+        if (tgt.readKeyMax == null || k > tgt.readKeyMax) tgt.readKeyMax = k;
+      }
+    }
     function markEscapes(desc) {
       if (desc && desc.site != null) sites[desc.site].escapes = true;
     }
@@ -729,6 +970,8 @@
           }
         } else if (ins.t === "tset") {
           readTarget(regs, descOf(regs, ins.base), ins.key, ins.value);
+        } else if (ins.t === "tget") {
+          readUse(regs, descOf(regs, ins.base), ins.key);
         } else if (ins.t === "setglobal") {
           var gd = descOf(regs, ins.src);
           if (gd && gd.site != null) {
@@ -784,6 +1027,15 @@
           s.constKeyMax = use.constKeyMax;
         }
         if (use.registerKey) s.registerKey = true;
+        if (use.readKeyMax != null &&
+            (s.readKeyMax == null || use.readKeyMax > s.readKeyMax)) {
+          s.readKeyMax = use.readKeyMax;
+        }
+        for (var rfi = 0; rfi < use.readFields.length; rfi++) {
+          if (s.readFields.indexOf(use.readFields[rfi]) < 0) {
+            s.readFields.push(use.readFields[rfi]);
+          }
+        }
         for (var fi = 0; fi < use.fields.length; fi++) {
           if (s.fields.indexOf(use.fields[fi]) < 0) s.fields.push(use.fields[fi]);
         }
@@ -814,12 +1066,27 @@
       for (var fj = 0; fj < site.fields.length; fj++) {
         if (site.fields[fj] + 1 > nfields) nfields = site.fields[fj] + 1;
       }
+      /* Read field names get an id after every write has had one, so #171's
+       * first-appearance order of the written fields does not move. */
+      var readMaxField = null;
+      for (var rj = 0; rj < site.readFields.length; rj++) {
+        var rid = fieldId(site.readFields[rj]);
+        if (readMaxField == null || rid > readMaxField) readMaxField = rid;
+      }
+      var maxKey = site.constKeyMax;
+      if (site.readKeyMax != null &&
+          (maxKey == null || site.readKeyMax > maxKey)) {
+        maxKey = site.readKeyMax;
+      }
       var rec = {
         id: site.id, fid: site.fid, pc: site.pc, line: site.line,
         base: at,
         cap: cap,
         fields: site.fields.slice().sort(function (a, b) { return a - b; }),
         nfields: nfields, cells: cap + nfields,
+        setlistEnd: site.setlistEnd, constKeyMax: site.constKeyMax,
+        readKeyMax: site.readKeyMax, readMaxField: readMaxField,
+        maxKey: maxKey, registerKey: site.registerKey,
         escapes: site.escapes, repeats: site.repeats,
         globals: site.globals.slice()
       };
@@ -846,16 +1113,21 @@
 
   return {
     VERSION: VERSION,
+    VERSION_TABLES: VERSION_TABLES,
     MAGIC: MAGIC,
     HEADER: HEADER,
+    HEADER_TABLES: HEADER_TABLES,
     FUNC_ENTRY: FUNC_ENTRY,
     OPS: OPS,
     TABLE_ARRAY_CAP: TABLE_ARRAY_CAP,
+    TABLE_POOL_CELLS: TABLE_POOL_CELLS,
     ILBCError: ILBCError,
     encode: encode,
     tableLayout: tableLayout,
+    buildTableSection: buildTableSection,
     /* exported for tests: the refusal codes the encoder can raise */
     CODES: ["ilbc-program", "ilbc-op", "ilbc-fixed", "ilbc-key",
-            "ilbc-arity", "ilbc-range", "ilbc-jump", "ilbc-builtin"]
+            "ilbc-arity", "ilbc-range", "ilbc-jump", "ilbc-builtin",
+            "ilbc-table-ram", "ilbc-table-escape", "ilbc-table-key"]
   };
 });
