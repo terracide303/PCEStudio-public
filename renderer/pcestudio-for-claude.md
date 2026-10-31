@@ -870,7 +870,7 @@ Every refusal is a named failure, not a silent drop: the studio shows `code: fil
 | password-code | a password that is not one |
 | tile-space | no room for another tile: the ROM layout gives 1536, or the patterns would reach the SAT |
 | validate-rom | an estimated ROM past the HuCard's 1 MB |
-| cgen-op | an IL instruction this backend has no C lowering for (tables, sprite(), fixed point, some builtins) |
+| cgen-op | an IL instruction this backend has no C lowering for (sprite(), fixed point, some builtins) |
 | toy-timeout | a toy hook past the frame's Lua budget |
 | toy-error | a Lua error inside the toy, naming file:line |
 | il-syntax | Lua's own compile error, with file:line |
