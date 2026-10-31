@@ -41,7 +41,9 @@ drawing is done.  The hero appears on frame 137.
 - `validate-slow-frame` — one toy frame costs 390,897 cycles (3.28 of a
   60 Hz frame, 18.3 Hz).  The cost is the sunset: the backdrop colour is a
   palette write on ~152 sky lines, and the console's raster cost is counted
-  per line.  VRAM is 17,024 words (inside 32,768), the busiest line asks for
+  per line.  (This check runs 600 frames; the export's 300-frame run samples
+  the game at 390,744 cycles — 3.27 frames, the same 18.3 Hz.)  VRAM is 17,024
+  words (inside 32,768), the busiest line asks for
   3 sprite strips (inside 16), and no line overflows.
 
 That is a console-cycle estimate, not the browser's speed; the browser
@@ -50,9 +52,13 @@ runtime runs the toy at the page's frame rate.
 ## Browser only
 
 DUSK RUN keeps its rocks, birds, hearts and game state in Lua tables.  The
-console **Export** path cannot carry a table yet: `renderer/pce-ilbc.js`
-refuses the `table` instruction, so Export lists that as a finding instead
-of building a ROM.  It also reads `pad[1]` and calls `sfx()`, neither of
-which the encoder has a bytecode form for.  The toy runs fine in the browser
-studio (and in the IL runtime the validator uses); it is the bytecode
-encoder that is missing the op.  See `docs/IL.md`.
+console **Export** path cannot carry it yet: `renderer/pce-ilbc.js` refuses
+the `sat` instruction first (function 33, pc 3, `main.lua:325`), and
+`padref`/`padget` (the `pad[1]` reads), `sfx()` and the `table` instruction
+have no bytecode form either.  The toy runs fine in the browser studio (and
+in the IL runtime the validator uses); it is the bytecode encoder that is
+missing the ops.  See `docs/IL.md`.
+
+The export validates an 8-frame run; card #184 makes the validator run a
+refused probe on to the studio's default 300-frame performance, so it
+measures the game after the build instead of the build's seventh step.

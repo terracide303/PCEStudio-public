@@ -343,3 +343,32 @@ messages and file contents. This private repo stays the working repo, untouched 
 config commits as the no-reply address. `/Volumes/External/agent-tmp/publish-public.sh` refreshes the public copy
 (same filter every run, so it is a fast-forward; it refuses to push if any check fails). Issues are filed there
 (forms: bug report, idea, share a toy), described in `renderer/testers.html`.
+
+## 2026-11-01 — the frame budget is judged on the toy's steady state, not its build (card #184)
+
+DUSK RUN was the one game of the five `renderer/pce-validate.js` refused:
+`validate-frame-budget`, 1,054,292 cycles over the 954,544 eight-display-frame
+ceiling. The export validates with an 8-frame run and judges its **last**
+frame, and DUSK RUN draws its landscape over `BUILD_STEPS` = 137 frames: frame
+7 is build step 7 (`frame()` 675,190 cycles plus the 224-call raster
+collection 379,102). The same model over the studio's default 300-frame
+performance (`Length`, #144) samples the game at 390,744 cycles = 3.27 display
+frames (18.3 Hz) — the figure `tests/check-dusk-run.js` already pinned at 600
+frames and `toys/dusk-run/README.md` records.
+
+**Decision: the 8-display-frame ceiling keeps its number, `OP_CYCLES` and the
+raster pricing keep their values (part C's held-out 1,510 cycles a call is
+−7.4%), and DUSK RUN's `frame()` is unchanged. What moves is the frame the
+ceiling is applied to: a refused probe runs on to the studio's default
+300-frame performance before refusing.** A toy that is over the ceiling in its
+steady state is still refused, with the same finding and numbers
+(`tests/check-validate.js` V07).
+
+This is not a recalibration: the finding was on the model's own cycles, so
+#169's factors could not clear it either. It is also not a claim that DUSK RUN
+runs fast on the export route — its steady-state **route-1** projection is
+10,135,899 cycles = 84.95 display frames (0.71 Hz), and the export builds the
+interpreter. What the change fixes is which blocker the user is told about: the
+validator no longer masks the encoder's first refusal, `sat` (function 33,
+pc 3, `main.lua:325`; card #186). `tests/check-export-games.js` pins DUSK RUN
+there.

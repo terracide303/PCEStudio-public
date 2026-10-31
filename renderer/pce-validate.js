@@ -9,7 +9,11 @@
  *   frame time      cycles of frame() and of every raster(line) call, priced
  *                   per IL op (OP_CYCLES).  A 60 Hz frame is 119,318 CPU
  *                   clocks; a toy over that is reported with its rate, and
- *                   one over HARD_FRAMES frames is refused.
+ *                   one over HARD_FRAMES frames is refused.  #184: the frame
+ *                   is sampled from the studio's default 300-frame
+ *                   performance (Length, renderer/studio.html), not the last
+ *                   of the caller's probe, when the probe's frame is over the
+ *                   ceiling — a long startup/build is not the toy's animation.
  *   sprites/line    renderer/pce-sprites.js status() — #50's model: 16-px
  *                   strips, 16 per line (256 px), the rest dropped, OR.
  *   VRAM            the highest VRAM word written, and every sprite's
@@ -68,6 +72,15 @@
   var VDW_LINES = toyhost.VDW_LINES;
   var FRAME_CLOCKS = 119318;                 /* 7.15909 MHz / 60, docs/MANUALS.md */
   var HARD_FRAMES = 8;                       /* a toy frame must finish in 8 */
+  /* #184: the probe's frame count is not the ceiling.  If the requested run's
+   * last frame is over HARD_FRAMES, the validator runs on to the studio's
+   * default performance length (Length 300 frames, renderer/studio.html and
+   * #144) before refusing: the sampled frame of a toy that draws its assets
+   * over a long startup is a BUILD frame, not the toy's animation.  DUSK RUN
+   * builds for 137 frames and its 8th is the seventh.  A toy whose frame is
+   * over the ceiling in its steady state is still refused, with the same
+   * finding and numbers (tests/check-validate.js V07). */
+  var PERFORMANCE_FRAMES = 300;              /* the studio's default Length */
   var ROM_LIMIT = 1048576;                   /* the HuCard's 1 MB, #57 */
   var ROM_RUNTIME_BYTES = 6200;              /* part A/C's image without the toy */
   var TOLERANCE = 0.15;                      /* the stated model tolerance */
@@ -442,14 +455,52 @@
     } catch (e) {
       problems.push(finding("error", e.code || "toy-error",
         String(e && e.message || e)));
+      var lastRun = frameSums.length - 1;
       return { problems: problems, host: host, runtime: runtime,
                maxVram: maxVram, maxCram: maxCram,
-               frameSums: frameSums, rasterSums: rasterSums };
+               frameSums: frameSums, rasterSums: rasterSums,
+               sampledFrame: lastRun,
+               sampledFrameCycles: lastRun >= 0 ? frameSums[lastRun] : 0,
+               sampledRaster: lastRun >= 0 ? rasterSums[lastRun] : [] };
+    }
+
+    /* #184: the frame the budget is judged on.  It starts as the probe's
+     * last frame; when that frame is over the ceiling the run continues to
+     * PERFORMANCE_FRAMES, because an over-budget sample may be a startup
+     * frame (DUSK RUN's build) rather than the toy's animation.  The
+     * extension is best effort: a frame that throws (toy-timeout, a toy
+     * error) ends it, and the last frame that did run is the sample. */
+    var sampledFrame = frames - 1;
+    var sampledFrameCycles = frameSums[sampledFrame] || 0;
+    var sampledRaster = rasterSums[sampledFrame] || [];
+    function collectionAt(k) {
+      var list = rasterSums[k] || [];
+      var sum = frameSums[k] || 0;
+      for (var q = 0; q < list.length; q++) sum += list[q];
+      return sum;
+    }
+    if (frames < PERFORMANCE_FRAMES &&
+        collectionAt(sampledFrame) > HARD_FRAMES * FRAME_CLOCKS) {
+      for (var more = frames; more < PERFORMANCE_FRAMES; more++) {
+        frameCycles = 0;
+        rasterCalls = [];
+        try {
+          runtime.frame(more);
+        } catch (e) {
+          break;
+        }
+        sampledFrame = more;
+        sampledFrameCycles = frameCycles;
+        sampledRaster = rasterCalls.slice();
+      }
     }
 
     return { problems: problems, host: host, runtime: runtime,
              maxVram: maxVram, maxCram: maxCram,
              frameSums: frameSums, rasterSums: rasterSums,
+             sampledFrame: sampledFrame,
+             sampledFrameCycles: sampledFrameCycles,
+             sampledRaster: sampledRaster,
              vsetFromRaster: vsetFromRaster };
   }
 
@@ -485,13 +536,13 @@
       return finishReport(program, problems, null);
     }
 
-    /* frame time: frame() plus the 224 raster() calls of the last frame */
-    var lastRaster = run.rasterSums.length
-      ? run.rasterSums[run.rasterSums.length - 1] : [];
+    /* frame time: frame() plus the 224 raster() calls of the sampled frame.
+     * #184: the sample is the run's last frame, extended to the studio's
+     * default performance when the probe's frame is over the ceiling. */
+    var lastRaster = run.sampledRaster || [];
     var rasterTotal = 0;
     for (var i = 0; i < lastRaster.length; i++) rasterTotal += lastRaster[i];
-    var lastFrame = run.frameSums.length
-      ? run.frameSums[run.frameSums.length - 1] : 0;
+    var lastFrame = run.sampledFrameCycles || 0;
     var collection = lastFrame + rasterTotal;
     var rasterMean = lastRaster.length ? rasterTotal / lastRaster.length : 0;
     var rasterWorst = 0;
@@ -586,6 +637,11 @@
         return { frame: k, frameCycles: c,
                  rasterCycles: run.rasterSums[k] || [] };
       }),
+      /* #184: `frames` is the probe that ran (the caller's count); the budget
+       * is judged on `sampledFrame`, which is past the probe when the probe's
+       * last frame was over the ceiling. */
+      probeFrames: run.frameSums.length,
+      sampledFrame: run.sampledFrame,
       route1: route1,
       frameCycles: lastFrame,
       rasterMean: rasterMean,

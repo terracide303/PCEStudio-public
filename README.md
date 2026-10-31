@@ -97,8 +97,8 @@ The studio compiles a toy to a small bytecode and glues it to a fixed interprete
 (parallax, status bar, sky gradient, palette cycle) export today. **None of the five games** — STARFALL, TOWER,
 NOVA TIDE, DUSK RUN and PLATFORMER — does yet: each is stopped by a named finding, and
 [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five (STARFALL's 127-constant
-pool, the interpreter's four-parameter limit for TOWER and NOVA TIDE, DUSK RUN's frame budget, PLATFORMER's pad
-read), with the `sprite()`/`sat`/`sfx()`/`raster` instructions and the 8 KiB data bank behind those. Carrying them
+pool, the missing `sat` instruction for TOWER, NOVA TIDE and DUSK RUN, PLATFORMER's pad read), with the
+`sprite()`/`sat`/`sfx()`/`raster` instructions and the 8 KiB data bank behind those. Carrying them
 is the next big piece of work. The ROMs are checked in Mednafen; nothing has run on a real console yet.
 
 ## Project files
