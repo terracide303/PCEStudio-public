@@ -114,10 +114,10 @@
  *   ilbc-table-key    a tget/tset base that is not a register, or a table key
  *                     that is neither a constant string nor an int operand
  *
- * tableLayout() reads the table sites a program has (shape, escape, repeat)
- * for the console's static table pool (#171).  buildTableSection() writes the
- * version 2 table section (#172) so a test can pin it without encoding a
- * whole toy.
+ * tableLayout() reads the table sites a program has (shape, escape, repeat,
+ * capacity) for the console's static table pool (#171; the constant for-loop
+ * bound is #177).  buildTableSection() writes the version 2 table section
+ * (#172) so a test can pin it without encoding a whole toy.
  *
  * UMD like pce-rom.js: CommonJS in Node, PCEStudio.ilbc in the page.
  */
@@ -728,8 +728,11 @@
    * reports, per site, the shape and lifetime that slot must serve:
    *
    *   cap       array cells: the site's setlist end, else the largest
-   *             constant int key written through it, else TABLE_ARRAY_CAP
-   *             when a write uses a register key, else 0
+   *             constant int key written through it, else (#177) the
+   *             reachable maximum index of a numeric for whose start, limit
+   *             and step are constants, when every register-key write uses
+   *             that loop's control variable; else TABLE_ARRAY_CAP (a
+   *             register key this pass cannot bound), else 0
    *   fields    the field ids written through it, ascending
    *   nfields   the field cells reserved: the largest id written + 1
    *   cells     cap + nfields
@@ -863,6 +866,7 @@
         sites.push({
           id: sites.length, fid: f, pc: pc, line: code[pc].line,
           setlistEnd: null, constKeyMax: null, registerKey: false,
+          loopKeyMax: null, unboundedKey: false,
           readKeyMax: null, readFields: [],
           fields: [], globals: [], escapes: false,
           repeats: (f !== 0 && f !== initFid) || insideLoop(f, pc)
@@ -885,7 +889,8 @@
     function globalUse(name) {
       if (!globalUses[name]) {
         globalUses[name] = { setlistEnd: null, constKeyMax: null,
-                             registerKey: false, fields: [],
+                             registerKey: false, loopKeyMax: null,
+                             unboundedKey: false, fields: [],
                              readKeyMax: null, readFields: [] };
       }
       return globalUses[name];
@@ -906,9 +911,32 @@
       if (desc.global != null) return globalUse(desc.global);
       return null;
     }
+    /* The largest index a constant numeric for can reach: start + k*step for
+     * the k that stays inside the limit (fornext's test is inclusive).  A
+     * loop whose test fails at once never runs; it writes nothing, so 0.
+     * This is reasoning from fornext's execution in pce-il.js, not from
+     * the runtime: step 0 is refused there before the loop runs. */
+    function loopMaxIndex(start, limit, step) {
+      if (step > 0) {
+        return limit >= start
+          ? start + Math.floor((limit - start) / step) * step : 0;
+      }
+      return limit <= start ? start : 0;   /* step < 0: the first index is
+                                              the largest */
+    }
+    /* The innermost bounded loop (closest to the stack top) whose control
+     * register `r` is.  The body reads the control copy base+3, which
+     * fornext writes together with base (pce-il.js's fornext case). */
+    function boundingLoop(stack, r) {
+      for (var bi = stack.length - 1; bi >= 0; bi--) {
+        var lp = stack[bi];
+        if (lp.max != null && (lp.ctrl === r || lp.copy === r)) return lp;
+      }
+      return null;
+    }
     /* Record one use of `desc`: a key written into it and/or a table value
      * stored in it.  A table typed as a global's table is itself escaping. */
-    function readTarget(regs, desc, key, value) {
+    function readTarget(regs, desc, key, value, loopStack) {
       var tgt = targetOf(desc);
       if (!tgt) return;
       if (key != null) {
@@ -922,6 +950,14 @@
           }
         } else if (opReg(key)) {
           tgt.registerKey = true;
+          var lp = boundingLoop(loopStack, key.r);
+          if (lp) {
+            if (tgt.loopKeyMax == null || lp.max > tgt.loopKeyMax) {
+              tgt.loopKeyMax = lp.max;
+            }
+          } else {
+            tgt.unboundedKey = true;
+          }
         }
       }
       if (value != null && opReg(value)) {
@@ -950,9 +986,33 @@
       if (desc && desc.site != null) sites[desc.site].escapes = true;
     }
 
+    /* Constant ints the walker has proven: a `const`, a `move` of one, or a
+     * getupval whose captured value resolves to one (see `closure` below).
+     * They feed #177's constant for-loop bounds.  Only the const instruction
+     * and this resolution produce them; arith is deliberately not folded,
+     * so anything computed stays unbounded and keeps TABLE_ARRAY_CAP. */
+    var upvalConsts = [];   /* per function: constant per upval index */
+
     for (f = 0; f < functions.length; f++) {
       var fcode = functions[f].code || [];
-      var regs = {};    /* reg -> { site: id } | { global: name } | absent */
+      var regs = {};    /* reg -> { site: id } | { global: name }
+                         *      | { int: v } | absent */
+
+      /* A captured register is only a constant if the parent never writes
+       * it after the closure runs: Lua upvalues read the variable, so a
+       * later write would change what the child sees. */
+      var lastWrite = [];
+      for (pc = 0; pc < fcode.length; pc++) {
+        var w = fcode[pc];
+        if (w.dst != null) lastWrite[w.dst] = pc;
+        if (w.t === "forprep") lastWrite[w.base] = pc;
+        if (w.t === "fornext") {
+          lastWrite[w.base] = pc;
+          lastWrite[w.base + 3] = pc;
+        }
+      }
+      var loopStack = [];  /* active constant-bounds numeric fors, innermost
+                            * last; pushed at forprep, popped at its fornext */
 
       for (pc = 0; pc < fcode.length; pc++) {
         var ins = fcode[pc];
@@ -966,10 +1026,11 @@
             if (st.setlistEnd == null || end > st.setlistEnd) st.setlistEnd = end;
           }
           for (var vi = 0; ins.values && vi < ins.values.length; vi++) {
-            readTarget(regs, sd, null, ins.values[vi]);
+            readTarget(regs, sd, null, ins.values[vi], loopStack);
           }
         } else if (ins.t === "tset") {
-          readTarget(regs, descOf(regs, ins.base), ins.key, ins.value);
+          readTarget(regs, descOf(regs, ins.base), ins.key, ins.value,
+                     loopStack);
         } else if (ins.t === "tget") {
           readUse(regs, descOf(regs, ins.base), ins.key);
         } else if (ins.t === "setglobal") {
@@ -999,9 +1060,66 @@
         } else if (ins.t === "getglobal") {
           regs[ins.dst] = globalTypes[ins.name] === "table"
             ? { global: ins.name } : null;
+        } else if (ins.t === "const") {
+          regs[ins.dst] = ins.k && ins.k.t === "int"
+            ? { int: ins.k.v | 0 } : null;
+        } else if (ins.t === "getupval") {
+          var upc = upvalConsts[f];
+          regs[ins.dst] = upc && upc[ins.idx] != null
+            ? { int: upc[ins.idx] } : null;
+        } else if (ins.t === "closure") {
+          /* Resolve the child's int upvalues from this register state: a
+           * reg capture is the value here, an upval capture the resolved
+           * parent's own.  Only when nothing writes the register later. */
+          var cfn = functions[ins.fid];
+          if (cfn && cfn.upvalues) {
+            var cvs = [];
+            for (var cu = 0; cu < cfn.upvalues.length; cu++) {
+              var cup = cfn.upvalues[cu];
+              if (cup.from === "reg") {
+                var cr = regs[cup.index];
+                cvs[cu] = cr && cr.int != null &&
+                          (lastWrite[cup.index] == null ||
+                           lastWrite[cup.index] <= pc) ? cr.int : null;
+              } else if (cup.from === "upval") {
+                var pu = upvalConsts[f];
+                cvs[cu] = pu && pu[cup.index] != null ? pu[cup.index] : null;
+              } else {
+                cvs[cu] = null;
+              }
+            }
+            upvalConsts[ins.fid] = cvs;
+          }
+          regs[ins.dst] = null;
         } else if (ins.t === "forprep") {
+          /* A constant numeric for bounds a register-key write in its body.
+           * Its tail is the next fornext of the same base; the body between
+           * reads the control copy base+3.  The stack is the innermost
+           * ordering: an inner loop's fornext pops the inner record. */
+          var fpNext = null;
+          for (var fp = pc + 1; fp < fcode.length; fp++) {
+            if (fcode[fp].t === "fornext" && fcode[fp].base === ins.base) {
+              fpNext = fp;
+              break;
+            }
+          }
+          var fpMax = null;
+          var fv0 = regs[ins.base], fv1 = regs[ins.base + 1],
+              fv2 = regs[ins.base + 2];
+          if (fpNext != null && fv0 && fv0.int != null && fv1 &&
+              fv1.int != null && fv2 && fv2.int != null && fv2.int !== 0) {
+            fpMax = loopMaxIndex(fv0.int, fv1.int, fv2.int);
+          }
+          if (fpNext != null && fpMax != null) {
+            loopStack.push({ ctrl: ins.base, copy: ins.base + 3,
+                             fornext: fpNext, max: fpMax });
+          }
           regs[ins.base] = null;
         } else if (ins.t === "fornext") {
+          if (loopStack.length &&
+              loopStack[loopStack.length - 1].fornext === pc) {
+            loopStack.pop();
+          }
           regs[ins.base] = null;
           regs[ins.base + 3] = null;
         } else if (ins.dst != null) {
@@ -1027,6 +1145,11 @@
           s.constKeyMax = use.constKeyMax;
         }
         if (use.registerKey) s.registerKey = true;
+        if (use.loopKeyMax != null &&
+            (s.loopKeyMax == null || use.loopKeyMax > s.loopKeyMax)) {
+          s.loopKeyMax = use.loopKeyMax;
+        }
+        if (use.unboundedKey) s.unboundedKey = true;
         if (use.readKeyMax != null &&
             (s.readKeyMax == null || use.readKeyMax > s.readKeyMax)) {
           s.readKeyMax = use.readKeyMax;
@@ -1061,7 +1184,10 @@
       var site = sites[oi];
       var cap = site.setlistEnd != null ? site.setlistEnd
               : site.constKeyMax != null ? site.constKeyMax
-              : site.registerKey ? TABLE_ARRAY_CAP : 0;
+              : site.registerKey
+                ? (site.unboundedKey || site.loopKeyMax == null
+                   ? TABLE_ARRAY_CAP : site.loopKeyMax)
+                : 0;
       var nfields = 0;
       for (var fj = 0; fj < site.fields.length; fj++) {
         if (site.fields[fj] + 1 > nfields) nfields = site.fields[fj] + 1;
@@ -1087,6 +1213,7 @@
         setlistEnd: site.setlistEnd, constKeyMax: site.constKeyMax,
         readKeyMax: site.readKeyMax, readMaxField: readMaxField,
         maxKey: maxKey, registerKey: site.registerKey,
+        loopKeyMax: site.loopKeyMax,
         escapes: site.escapes, repeats: site.repeats,
         globals: site.globals.slice()
       };
