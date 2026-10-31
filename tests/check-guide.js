@@ -46,6 +46,11 @@
  *      the skill to link, and every tool tools/mcp/server.js's TOOLS array
  *      has — the list is read from the server, so a tool it gains without
  *      the guide naming it fails here.
+ *  10. Resuming a project (#163): the MCP section says to read NOTES.md
+ *      before anything else and to update it at the end of the session, and
+ *      names the folder route's reason (git); the chat-AI closing says to
+ *      hand the updated NOTES.md and the code over and to tell the person to
+ *      Save project.
  *
  * Written by @design because the card names this file.  Per workshop rule 2
  * a cold break by another seat is owed before it closes the card.
@@ -746,6 +751,42 @@ function checkMcpSection() {
         "route");
 }
 
+/* ---- 9. resuming a project (#163) ------------------------------------- */
+
+/* The guide is what an AI reads first, so the two sentences a resuming
+ * session must not miss are held here by their content: read NOTES.md before
+ * anything else and update it at the end (the tool route), and hand the note
+ * and the code over with "Save project" (the chat route).  The tool names are
+ * already checked from TOOLS above, so a new tool cannot go unnamed. */
+function checkSessionSections() {
+  const g = guide.guide();
+  const md = guide.markdown();
+  const section = (id) => {
+    const i = g.sections.findIndex((s) => s.id === id);
+    if (i < 0) return "";
+    const from = md.indexOf("## " + g.sections[i].title);
+    const next = md.indexOf("\n## ", from + 1);
+    return from < 0 ? "" : md.slice(from, next < 0 ? md.length : next);
+  };
+  const mcp = section("mcp");
+  check(mcp.includes("read NOTES.md before anything else"),
+        "the MCP section says to read NOTES.md before anything else");
+  check(mcp.includes("at the end of the session update NOTES.md"),
+        "the MCP section says to update NOTES.md at the end of the session");
+  check(mcp.includes("what you did, what works, what is next"),
+        "the MCP section says what the note carries");
+  check(mcp.includes("git can hold the history"),
+        "the MCP section names why the folder route exists: git");
+  check(mcp.includes("Project… → Open"),
+        "the MCP section says how the person opens a project in the studio");
+
+  const closing = section("closing");
+  check(closing.includes("give the person the updated NOTES.md and the code"),
+        "the chat-AI closing says to hand over the updated NOTES.md and the code");
+  check(closing.includes("Save project"),
+        "the chat-AI closing names the button: Save project");
+}
+
 /* ---- main ------------------------------------------------------------- */
 
 function main() {
@@ -760,6 +801,7 @@ function main() {
   checkLongExamples();
   checkSize();
   checkMcpSection();
+  checkSessionSections();
 
   if (failures.length) {
     for (const f of failures) console.log("FAIL  " + f);

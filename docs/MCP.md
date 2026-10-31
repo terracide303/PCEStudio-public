@@ -119,6 +119,12 @@ One toy at a time, in one process:
   file` path, and `renderer/pce-source.js importStudio` reads it. The songs
   ride in the same envelope: `song.json` is one of the files it writes, and
   the SEQUENCER opens it.
+- `project_save` / `project_open` (#163) are the multi-session route: the
+  studio's `.pcestudio` project (or the same layout unpacked into a folder, so
+  git holds the history), with `NOTES.md` as the resume note. `project_open`
+  returns the note's text first; `toy_write` edits the toy inside the project
+  and a `project_save` writes it back. `toy_save` stays for the plain toy
+  file.
 - `toy_run` imports the asset files into VRAM, CRAM and the SAT **before
   `init()`**, exactly as the studio does (#117, #153) — the one importer, no
   second model — and its reply carries the import's summary as `assets`.
@@ -237,6 +243,100 @@ is `[]`; the art travels as the text asset files, named by `sources.json`.
 
 Refusals: `no-toy`, `save-path` (a missing path, or one outside the working
 folder), `save-io` (the folder or file could not be written).
+
+### `project_save(path, title?, notes?)`
+
+Writes the session as a **project** (#163), the file a later session resumes
+from: the studio's `.pcestudio` (#162, `docs/PROJECT-FORMAT.md`) — a ZIP of
+`project.json`, `main.lua`, the asset files, `sources.json` and `NOTES.md` —
+built by `renderer/pce-project.js`, the module the studio's Save project uses,
+so there is one format, not two.
+
+When `path` is a **folder** — a trailing `/` on the name, or a folder that
+already exists — the same layout is written **unpacked** into it instead of as
+one archive. That is the route for Claude Code: the folder is a normal git
+repository, and committing after each session puts the game's history in git.
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `path` | string | the project to write, inside the working folder: a `.pcestudio` name (the extension is added when it has none) or a folder |
+| `title` | string, optional | the project's title; default: the opened project's title, else the file or folder's name |
+| `notes` | string, optional | the whole updated `NOTES.md` — goal, what works, what does not, decisions, next steps. With no `notes` and none in the toy, the project gets the studio's `notesTemplate()` |
+
+The session has no `art/` originals (source_add keeps the imported files, not
+the picture it read) and no named versions, so those two lists are empty; the
+studio's own Save project fills them. The saved `NOTES.md` becomes part of the
+session, so a following `toy_save` carries it too.
+
+Example call:
+
+```json
+{"name":"project_save","arguments":{"path":"my-game/","notes":"# My game — resume note\n…"}}
+```
+
+Example reply:
+
+```json
+{"ok":true,"format":"pcestudio/1","path":"/work/my-game","folder":true,
+ "title":"my-game","files":["main.lua","tiles.json","NOTES.md"],
+ "notes":"NOTES.md","created":"2026-10-31T10:00:00.000Z",
+ "modified":"2026-10-31T10:30:00.000Z","bytes":null,"entries":4,
+ "note":"the unpacked project folder — project.json, main.lua, the asset files and NOTES.md; commit it and git holds the history; project_open {path} resumes it"}
+```
+
+Refusals: `no-toy`, `save-path` (a missing path, or one outside the working
+folder), `save-io` (a folder or file could not be written), `project-host`
+(the host has no project support), and `renderer/pce-project.js`'s own
+`project-code` (a save that would leave out `main.lua`).
+
+### `project_open(path)`
+
+Resumes a project (#163): loads a `.pcestudio` file **or** an unpacked project
+folder into the session — `main.lua`, every asset file, `sources.json`, the
+songs and `NOTES.md` — through `renderer/pce-project.js`'s reader (the
+studio's own open path). The reply has **two text blocks**, and the first is
+`NOTES.md`'s text: a resuming session reads what the last one learned before
+it reads anything else. The second is the JSON summary (`files`, `songs`,
+`title`, `created`, `modified`, …).
+
+The toy is compiled before the session is replaced, so a project whose code or
+song file the runtime refuses leaves the loaded toy alone, as `toy_write`
+does. `toy_run` then plays the resumed toy, `toy_write` edits it, and
+`project_save` writes it back.
+
+A folder is read as the format's layout, and `project.json` is its manifest:
+the reader takes the files it lists, `art/` and `versions/<n>-<label>/`. A
+git repository's `.git/`, a `README.md` and a committed screenshot at the
+root are not project files and are not loaded (a binary file never reaches
+the text decoder).
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `path` | string | the `.pcestudio` file or the project folder, inside the working folder |
+
+Example call:
+
+```json
+{"name":"project_open","arguments":{"path":"my-game/"}}
+```
+
+Example reply (first block, then the JSON):
+
+```text
+# My game — resume note
+…
+```
+
+```json
+{"ok":true,"format":"pcestudio/1","path":"/work/my-game","folder":true,
+ "title":"my-game","notes":true,"files":["NOTES.md","main.lua","tiles.json"],
+ "songs":[],"language":"pce-il","created":"…","modified":"…"}
+```
+
+Refusals: `open-path` (a missing path, or one outside the working folder),
+`project-host` (the host cannot open by path — a browser tab), and the
+project format's own `project-format`, `project-json`, `project-main`,
+`project-name`, plus the toy's compile and song refusals (`il-…`, `seq-json`).
 
 ### `toy_run(frames, pad)`
 
@@ -664,9 +764,9 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
 ## Evidence
 
 `node tests/check-mcp.js` starts `tools/mcp/server.js`, speaks MCP over
-stdio, and asserts 257 checks:
+stdio, and asserts 313 checks:
 
-- `initialize`, `ping`, and `tools/list` with all eleven tools and their
+- `initialize`, `ping`, and `tools/list` with all thirteen tools and their
   schemas;
 - #29's parallax toy written, 60 frames run, and the PNG at frame 60 equal
   to `tests/dumps/examples/parallax.png` (check-examples' frame 60) pixel
@@ -708,6 +808,14 @@ stdio, and asserts 257 checks:
   the sky where the saved toy draws its sprite; `..` and absolute paths
   outside the working folder are refused with `save-path` and write nothing,
   and a server started in another folder saves into that folder;
+- resuming a project (#163): session 1 saves a toy with `source_add`'s art
+  and a `NOTES.md` as one `.pcestudio` and as an unpacked folder; the
+  studio's own project reader (`pce-project.js parseBytes`) opens the
+  archive and draws session 1's frame, diff 0; session 2, a **fresh server
+  process**, `project_open`s the file and the folder, gets `NOTES.md`'s text
+  as the reply's first block, and draws the same frame, diff 0; a project
+  with no `NOTES.md` gets the studio's template; `open-path` fences the
+  working folder and `project-format` refuses a ZIP that is not a project;
 - `docs` chapter list, a chapter's own numbers, and a refused unknown topic.
 
 Written by @design because the card names the file. Per workshop rule 2, a
