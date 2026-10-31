@@ -26,9 +26,18 @@
  * which is what the C backend would reach next after the table kinds
  * #176 carried.
  *
+ * #178 adds the table inventory any toy can be measured with: the encoder's
+ * own tableLayout() sites and cells (array plus field), their shapes (array,
+ * record, nested), the escaping and re-executing sites, the table ops the
+ * first frame actually executes (counted through the IL host's onOp, the
+ * same instrument docs/TABLES-PLAN.md used), and the projected version 2
+ * container size with the four table ops at their real sizes — beside the
+ * 8 KiB data-bank verdict.  A toy whose validator returns no blank budget
+ * (TOWER today) gets a NOTE instead of a crash.
+ *
  * Exit status is 0 whatever the verdict: this is a measuring instrument, not
- * a pass/fail check.  Read the tables.  tests/check-starfall-console.js is
- * the pass/fail check: it pins what this prints.
+ * a pass/fail check.  Read the tables.  tests/check-starfall-console.js and
+ * tests/check-tables.js are the pass/fail checks: they pin what this prints.
  *
  * require()ing the file gives { analyse, report } and runs nothing.
  */
@@ -101,6 +110,7 @@ function stage(fn) {
   catch (e) { return { ok: false, code: e.code || e.name, message: e.message }; }
 }
 function oneLine(s) { return String(s == null ? "" : s).replace(/\s+/g, " "); }
+function fmt(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
 
 /* ---- the analysis ------------------------------------------------------
  * Everything the report prints, as data, so tests/check-starfall-console.js
@@ -117,7 +127,7 @@ function analyse(rel, opts) {
     rel: rel, bytes: source.length,
     compile: null, program: null, validator: null, report: null,
     cgen: null, page: null, encode: null, rom: null,
-    inventory: null, cgenExtra: null, capacity: null
+    inventory: null, cgenExtra: null, capacity: null, tables: null
   };
 
   const comp = stage(() => il.compile(source, { chunkName: "@main.lua" }));
@@ -272,16 +282,91 @@ function analyse(rel, opts) {
   extra.nextRefusal = next;
   out.cgenExtra = extra;
 
+  /* ---- #178: the table inventory, and the first frame's table ops ----- *
+   * tableLayout() is the encoder's own reading of each site (shape, cells,
+   * escape, repeat); it changes no bytes.  The executed counts come from
+   * running the toy's first frame through the IL host with onOp — the same
+   * instrument docs/TABLES-PLAN.md used — and count only the frame after
+   * load() (the chunk and init() build the arrays once; they are not the
+   * frame the console pays every time).  Both are staged: a toy this tool
+   * cannot run still prints its inventory and says why the frame did not
+   * run, rather than taking the whole report down. */
+  let layout = null, layoutError = null;
+  try { layout = ilbc.tableLayout(program); }
+  catch (e) { layoutError = { code: e.code || e.name, message: e.message }; }
+
+  const exec = {
+    ok: false, code: null, message: null, il: 0,
+    table: 0, setlist: 0, tget: 0, tset: 0, total: 0
+  };
+  if (layout) {
+    let counting = false;
+    try {
+      const rt = il.create(source, {
+        chunkName: "@main.lua", songs: opts.songs || [],
+        onOp: (fid, ins) => {
+          if (!counting) return;
+          exec.il++;
+          if (ins.t === "table" || ins.t === "setlist" ||
+              ins.t === "tget" || ins.t === "tset") {
+            exec[ins.t]++;
+            exec.total++;
+          }
+        }
+      });
+      rt.load();
+      counting = true;
+      rt.frame(0);
+      exec.ok = true;
+    } catch (e) {
+      exec.code = e.code || e.name;
+      exec.message = e.message;
+    }
+  } else {
+    exec.code = layoutError.code;
+    exec.message = layoutError.message;
+  }
+
+  const shapes = { array: 0, record: 0, mixed: 0, empty: 0, nested: 0 };
+  if (layout) {
+    for (const s of layout.sites) {
+      const array = s.cap > 0, record = s.nfields > 0;
+      if (array && record) shapes.mixed++;
+      else if (array) shapes.array++;
+      else if (record) shapes.record++;
+      else shapes.empty++;
+      if (s.nested) shapes.nested++;
+    }
+  }
+  out.tables = {
+    ok: !!layout,
+    code: layoutError ? layoutError.code : null,
+    message: layoutError ? layoutError.message : null,
+    sites: layout ? layout.nslots : 0,
+    cells: layout ? layout.cells : 0,
+    arrayCells: layout ? layout.arrayCells : 0,
+    fieldCells: layout ? layout.fieldCells : 0,
+    shapes: shapes,
+    escaping: layout ? layout.escaping : 0,
+    reexecuting: layout ? layout.reexecuting : 0,
+    fieldIds: layout ? layout.fieldIds.slice() : [],
+    sitesList: layout ? layout.sites : [],
+    executed: exec
+  };
+
   /* ---- capacity: would the bytecode fit the one 8 KiB data bank? ------ *
    * The container layout is renderer/pce-ilbc.js's own (its header comment
-   * and the per-op sizes at renderer/pce-ilbc.js:195).  The model is checked
-   * against the two committed containers before it is used: it must
-   * reproduce them to within a few bytes (it lands 1 B and 4 B short).  A
-   * kind route 1 cannot carry has no defined size, so it is counted at an
-   * assumed size and the answer is reported across a range; the smallest
-   * assumption that is still realistic is 3 B.  #176 gave cgen the table
-   * kinds; the model already sized them for route 1, which carried them
-   * since #174. */
+   * and the per-op sizes at renderer/pce-ilbc.js:195).  A toy with a table
+   * instruction gets version 2: a 28-byte header (#172) and a table section
+   * of u8 nslots plus 4 B per slot (u16 base, u8 cap, u8 nfields).  A toy
+   * without one stays version 1 at 24 B.  The model is checked against the
+   * two committed v1 containers before it is used: it must reproduce them
+   * to within a few bytes (it lands 1 B and 4 B short).  A kind route 1
+   * cannot carry has no defined size, so it is counted at an assumed size
+   * and the answer is reported across a range; the smallest assumption that
+   * is still realistic is 3 B.  The projection that counts only the four
+   * table ops at their real sizes (everything uncarried at 0 B) is `exact`
+   * — #178's measurement. */
   const ILBC_SIZE = {
     const: 3, move: 3, getglobal: 3, setglobal: 3, getupval: 3, setupval: 3,
     closure: 3, ret: 2, jmp: 3, br: 5, forprep: 2, fornext: 4, arith: 5,
@@ -294,7 +379,7 @@ function analyse(rel, opts) {
     if (ins.t === "setlist") return 4 + (ins.values ? ins.values.length : 0);
     return ILBC_SIZE[ins.t] || 0;
   }
-  function projectSize(prog, unknownSize) {
+  function projectSize(prog, unknownSize, layout) {
     const consts = [], seen = new Set();
     let ups = 0, code = 0;
     const add = (o) => {
@@ -327,11 +412,13 @@ function analyse(rel, opts) {
     }
     let globalSize = 0;
     for (const g of prog.globals || []) globalSize += 1 + g.name.length;
-    /* The version 2 table section: one byte of slot count, five per slot
-     * (base u16, cap u8, nfields u8). */
-    const layout = ilbc.tableLayout(prog);
-    return 24 + prog.functions.length * 10 + ups * 2 + constSize + globalSize +
-           code + 1 + layout.nslots * 5;
+    /* The version 2 table section: one byte of slot count and four per
+     * slot — u16 base, u8 cap, u8 nfields (pce-ilbc.js's buildTableSection;
+     * #178 corrected an earlier 5 B-per-slot guess). */
+    layout = layout || ilbc.tableLayout(prog);
+    const header = layout.nslots > 0 ? ilbc.HEADER_TABLES : ilbc.HEADER;
+    return header + prog.functions.length * 10 + ups * 2 + constSize +
+           globalSize + code + 1 + layout.nslots * 4;
   }
 
   /* the model's own control: the two committed containers */
@@ -350,11 +437,16 @@ function analyse(rel, opts) {
     bank: romLib.BANK,
     worst: worst,
     controls: controls,
-    projections: [3, 4, 6].map((assumed) => {
-      const n = projectSize(program, assumed);
+    exact: (() => {
+      const n = layout ? projectSize(program, 0, layout) : null;
+      return n == null ? null
+        : { bytes: n, over: n > romLib.BANK, by: Math.abs(n - romLib.BANK) };
+    })(),
+    projections: layout ? [3, 4, 6].map((assumed) => {
+      const n = projectSize(program, assumed, layout);
       return { assumed: assumed, bytes: n, over: n > romLib.BANK,
                by: Math.abs(n - romLib.BANK) };
-    })
+    }) : []
   };
 
   return out;
@@ -407,11 +499,74 @@ function report(r) {
                 " (factor " + b.route1.factor + ", " + b.route1.shape + ")");
     console.log("     sprites " + b.sprites.sprites + " / " + b.sprites.strips +
                 " strips, busiest line " + b.sprites.line + "; VRAM " +
-                b.vram.maxWord + " words; blank " + b.blank.cycles +
-                " cycles; ROM ~" + b.rom.bytes + " B (" + b.rom.banks +
-                " banks)");
+                b.vram.maxWord + " words; blank " +
+                (b.blank ? b.blank.cycles + " cycles" : "n/a") + "; ROM ~" +
+                b.rom.bytes + " B (" + b.rom.banks + " banks)");
+    if (!b.blank) {
+      console.log("     NOTE this toy's validator returns no blank budget " +
+                  "(budgets.blank is null), so the pre-render blank cycles " +
+                  "are not shown; the rest of the budget is unaffected");
+    }
     console.log("");
   }
+
+  const tb = r.tables;
+  console.log("== 2. the table inventory (#178) ==");
+  if (!tb || !tb.ok) {
+    console.log("   NOTE pce-ilbc.js's tableLayout() refused this program (" +
+                (tb ? tb.code : "not run") + "), so no inventory is printed: " +
+                oneLine(tb && tb.message));
+  } else {
+    console.log("   " + tb.sites + " sites, " + tb.cells + " cells = " +
+                tb.arrayCells + " array + " + tb.fieldCells + " field");
+    console.log("   shapes: " + tb.shapes.array + " array, " +
+                tb.shapes.record + " record, " + tb.shapes.mixed +
+                " array+record, " + tb.shapes.empty + " empty; " +
+                tb.shapes.nested + " nested");
+    console.log("   escaping sites " + tb.escaping + ", re-executing sites " +
+                tb.reexecuting);
+    console.log("   field names (" + tb.fieldIds.length + "): " +
+                (tb.fieldIds.length
+                  ? tb.fieldIds.map((n, i) => n + "(" + i + ")").join(" ")
+                  : "none"));
+    const ex = tb.executed;
+    if (ex.ok) {
+      console.log("   first frame: " + ex.total + " table ops = " +
+                  ex.table + " table + " + ex.setlist + " setlist + " +
+                  ex.tget + " tget + " + ex.tset + " tset (" + ex.il +
+                  " IL instructions executed)");
+    } else {
+      console.log("   NOTE the first frame did not run (" + ex.code + ": " +
+                  oneLine(ex.message) + "), so no executed table ops are " +
+                  "counted");
+    }
+    if (r.capacity.exact) {
+      const e = r.capacity.exact;
+      console.log("   projected container: " + fmt(e.bytes) +
+                  " B with the four table ops at their real sizes and every " +
+                  "other uncarried kind at 0 B — " + (e.over ? "OVER" : "fits") +
+                  " the " + fmt(r.capacity.bank) + " B data bank" +
+                  (e.over ? " by " + fmt(e.by) + " B" : ""));
+    }
+    console.log("   per site (array cap, field count, cells):");
+    console.log("     id  line   shape          cap  fld  cells  flags");
+    for (const s of tb.sitesList) {
+      const array = s.cap > 0, record = s.nfields > 0;
+      const shape = array && record ? "array+record"
+                  : array ? "array" : record ? "record" : "empty";
+      const flags = [s.escapes ? "escapes" : null,
+                     s.repeats ? "repeats" : null,
+                     s.nested ? "nested" : null,
+                     s.globals.length ? "global:" + s.globals.join(",") : null]
+                    .filter(Boolean).join(" ");
+      console.log("     " + String(s.id).padStart(2) + "  " +
+                  String(s.line == null ? "-" : s.line).padStart(4) + "   " +
+                  shape.padEnd(14) + String(s.cap).padStart(3) + "  " +
+                  String(s.nfields).padStart(3) + "  " +
+                  String(s.cells).padStart(5) + "  " + flags);
+    }
+  }
+  console.log("");
 
   console.log("== 3. the encoder (reached only when the console tab is clean)" +
               " ==");
@@ -480,9 +635,11 @@ function report(r) {
                 cap.bank + " B bank by " + p.by + " B)");
   }
   const last = cap.projections[cap.projections.length - 1];
-  console.log("   " + (last.over
-    ? "renderer/pce-rom.js:622 refuses such a build with toy-data-bank-full"
-    : "renderer/pce-rom.js:622 would accept this one"));
+  console.log("   " + (last
+    ? (last.over
+       ? "renderer/pce-rom.js:622 refuses such a build with toy-data-bank-full"
+       : "renderer/pce-rom.js:622 would accept this one")
+    : "the size model could not be projected (tableLayout() refused)"));
 }
 
 if (require.main === module) {

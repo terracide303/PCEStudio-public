@@ -255,10 +255,12 @@ busiest line (no overflow), 2,010 VRAM words, 100 blank cycles against a
 `renderer/pce-rom.js:622` refuses a bytecode (plus asset tail) larger than
 `BANK` = **8,192 B** with code `toy-data-bank-full`: *"the interpreter reads one
 8 KiB data bank"*. A size model built from `pce-ilbc.js`'s own container
-layout — header 24 B, function entry 10 B, upvalue 2 B, the constant and
-global name tables, and the per-op sizes at `pce-ilbc.js:195` — reproduces the
-two committed containers to **within 4 bytes** (palette 1 B short, parallax
-4 B short). Applied to STARFALL:
+layout — header 24 B (28 B once a table instruction makes it version 2),
+function entry 10 B, upvalue 2 B, the constant and global name tables, the
+table section (1 B + 4 B per slot: `u16` base, `u8` cap, `u8` nfields), and
+the per-op sizes at `pce-ilbc.js:195` — reproduces the two committed
+containers to **within 4 bytes** (palette 1 B short, parallax 4 B short).
+Applied to STARFALL:
 
 | assumed size per uncarried instruction | projected bytecode | vs the 8,192 B bank |
 |----------------------------------------|-------------------:|--------------------:|
@@ -268,12 +270,18 @@ two committed containers to **within 4 bytes** (palette 1 B short, parallax
 
 and #132–#137 will add their own format bytes on top. STARFALL is a
 1,919-instruction game; the only toys proven on route 1 are 213 (parallax) and
-a handful (palette). *2026-10-31, #176: the model now counts the table ops at
-their real sizes and the version 2 table section (1 B + 5 B per slot), and it
-reproduces the two containers to within 3 B (palette exact, parallax 3 B
-short).  With #174/#176's kinds carried, the projections over the 49
-remaining uncarried instructions are 9,147 B (at 3 B), 9,193 B (4 B) and
-9,285 B (6 B) — still over by 955–1,093 B.* **The 8 KiB bank is the wrong size class for a game**, and
+a handful (palette). *2026-10-31, #176: the model counts the table ops at
+their real sizes and the version 2 table section, and reproduces the two
+containers to within 3 B (palette exact, parallax 3 B short). With #174/#176's
+kinds carried, the projections over the 49 remaining uncarried instructions
+are 9,107 B (at 3 B), 9,153 B (4 B) and 9,245 B (6 B) — still over by
+915–1,053 B. 2026-10-31, #178: the model's version 2 sizing was wrong — it
+used a 24 B header and 5 B per slot, where `pce-ilbc.js` writes a 28 B header
+and 4 B per slot; with the four table ops at their real sizes and every other
+uncarried kind at 0 B, STARFALL projects **8,969 B, over by 777 B** (TOWER
+8,379 / 187 B over, NOVA TIDE 9,287 / 1,095 B over), and the 3/4/6 B figures
+above move to 9,107/9,153/9,245 B. `tools/starfall-console.js` and
+`tests/check-tables.js` reproduce these numbers.* **The 8 KiB bank is the wrong size class for a game**, and
 closing the six instruction cards without deciding this leaves the Export
 refusing STARFALL two refusals later — #143's `cgen-global` on the C path,
 then `toy-data-bank-full` on route 1 — instead of `ilbc-op`.
@@ -330,6 +338,7 @@ then `toy-data-bank-full` on route 1 — instead of `ilbc-op`.
 node tools/starfall-console.js                    # STARFALL: the whole report
 node tools/starfall-console.js toys/parallax.lua  # control: 0 refusals, builds
 node tests/check-starfall-console.js              # 91 checks, the page panel included
+node tests/check-tables.js                        # #178: the three games' table inventories
 node tests/check-demo-game.js                     # the model route: PASS 38
 ```
 

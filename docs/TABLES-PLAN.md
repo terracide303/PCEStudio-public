@@ -354,6 +354,11 @@ so #138 is on the critical path for every one of them (TOWER is the closest,
 each toy's refusal inventory, measured on this tree after the four table kinds
 would be carried:
 
+Reproduce these rows on the current tree: `node tools/starfall-console.js
+<toys/demo-game/main.lua|toys/tower/main.lua|toys/nova-tide/main.lua>` prints
+each toy's inventory and its projection; `node tests/check-tables.js` pins the
+three rows above (#178).
+
 | toy | route 1 still refuses | cgen still refuses |
 |---|---|---|
 | STARFALL | `sprite` 31 (#133), `padref`/`padget` 5+5 (#134), `sfx` 3 (#135), `raster` table form 2 (#136), `abs` 2 + `sr` 1 (#137) | the same, once #143's typing change lands |
