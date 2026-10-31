@@ -77,8 +77,8 @@ field cells**; DIGIT 10, the three 4-cell and three 6-cell arrays, the two
 one-cell wrappers and two two-cell pairs = **46 array cells**; 172 in total.
 
 Per first frame: 128 table ops — 20 `table` (17 sprite specs + the raster
-spec's three), 2 `setlist`, 45 `tget`, 61 `tset`. Nearly all of the `tset`
-traffic is the spec tables' fields.
+spec's three), 2 `setlist`, 45 `tget`, 61 `tset`. Most of the `tset` traffic
+is the spec tables' fields; the rest is the game's array writes.
 
 ### TOWER
 
