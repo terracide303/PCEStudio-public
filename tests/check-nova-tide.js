@@ -54,13 +54,12 @@
  *     toy's own PAT 51.
  *
  * WHAT IT DOES NOT PROVE, and says so in a NOTE when it runs: the console
- * Export path currently refuses the toy — renderer/pce-ilbc.js has no
- * interpreter instruction for `table` (how NOVA TIDE keeps its bolts,
- * enemies, explosions and state) and its interpreter takes at most four
- * parameters where the toy's hit() takes eight — so the toy is
- * browser-only for now, as toys/nova-tide/README.md says.  Also per
- * workshop rule 2 a cold break by another seat is owed before this closes
- * the card.
+ * Export path currently refuses the toy — tables are carried (#172) and the
+ * interpreter now takes up to eight parameters, so `hit()`'s eight are fine
+ * (#183), but there is no interpreter instruction for `sat` yet (#133) — so
+ * the toy is browser-only for now, as toys/nova-tide/README.md says.  Also
+ * per workshop rule 2 a cold break by another seat is owed before this
+ * closes the card.
  */
 "use strict";
 

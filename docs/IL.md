@@ -595,7 +595,7 @@ without a shift.
 `renderer/pce-cgen.js` refuses by code rather than guessing: `cgen-op` (any
 instruction outside the palette toy's set — `reg`, `sat`, `sprite`, `raster`,
 `print`, `vget`, …), `cgen-fixed`, `cgen-cond`, `cgen-global`,
-`cgen-arity` (more than two parameters/arguments), `cgen-hook` (no `frame`),
+`cgen-arity` (more than eight parameters/arguments), `cgen-hook` (no `frame`),
 `cgen-closure-loop` (a closure created in a loop: part A has one static slot
 per site), `cgen-key`, and `cgen-target`.  (#176 carried the four table ops —
 `table`/`setlist`/`tget`/`tset` — into the fixed pool, docs/TABLES-PLAN.md
@@ -747,7 +747,7 @@ that does not fit; parallax uses one register and no colour in the chain.
 - the emitter lowers `reg` to `toy_reg()` with a register id, an int global
   to a C slot the frame and the callback share, and the raster hook to
   `toy_raster(line)`; the refusals still come back by code (`cgen-op` for
-  sprites/pads, `cgen-arity` at five parameters, `cgen-closure-loop` when a
+  sprites/pads, `cgen-arity` at nine parameters, `cgen-closure-loop` when a
   function value can escape, `cgen-global` for a pad global);
 - the measurements are read from the save's RAM and reported: frame()
   **1,204 cycles**, one raster call **1,510 cycles**, one collection
@@ -759,11 +759,13 @@ that does not fit; parallax uses one register and no colour in the chain.
 Refused by code rather than guessed: `reg` names outside BXR/BYR/CR
 (`cgen-op`); sprite/print/vget still (`cgen-op`/`cgen-global`); the four
 table ops lower into the fixed pool (#176), refused with `cgen-table-ram`/
-`cgen-table-escape` when a slot does not fit or aliases; more than four
-parameters (`cgen-arity`); a raster hook that is not one int
-parameter (`cgen-hook`); a closure inside a loop when a function value can
-be stored — returned, written to a function-typed global outside the chunk,
-or into an upvalue/table (`cgen-closure-loop`). `fixed` is still refused.
+`cgen-table-escape` when a slot does not fit or aliases; more than eight
+parameters (`cgen-arity`, #183: five to eight now travel through
+`il_xargs`, the interpreter's extra-argument block); a raster hook that is
+not one int parameter (`cgen-hook`); a closure inside a loop when a function
+value can be stored — returned, written to a function-typed global outside
+the chunk, or into an upvalue/table (`cgen-closure-loop`). `fixed` is still
+refused.
 
 Runtime limits, not compile-time refusals: at most **2 colour writes per
 raster line** and **32 colour/VRAM writes per `frame()`** (the flags byte
@@ -1008,7 +1010,7 @@ Every number below is from the committed captures (`tests/dumps/toypalette`,
 | one 224-call collection | **338,757 cycles** (2.84 frames) | **835,048 cycles** (7.00 frames) |
 | toy frame rate (raster) | one per ~5 video frames (~12 Hz) | one per ~12.5 (~4.8 Hz) |
 | build wall time (both toys) | 0.41–0.44 s | 0.22–0.24 s |
-| what it cannot compile | fixed point, sprites, pads, tables, strings, >4 parameters, a closure that escapes; 32-bit ints are exact | all of the above, **and any value wider than 16 bits**; the same refusal codes |
+| what it cannot compile | fixed point, sprites, pads, tables, strings, >8 parameters, a closure that escapes; 32-bit ints are exact | all of the above, **and any value wider than 16 bits**; the same refusal codes |
 | picture vs browser | diff 0, 8 (palette) and 40 (raster) frames | diff 0, 8 and 20 frames |
 
 **What the table says.** llvm-mos is a modern optimising compiler and HuC is
@@ -1156,7 +1158,7 @@ container offsets, patched after the layout is known.
 | 05 | `getupval` | `dst:r idx:u8` |
 | 06 | `setupval` | `idx:u8 src:op` |
 | 07 | `closure` | `dst:r fid:u8` |
-| 08 | `call` | `dst:op callee:op n:u8 args[n]:op` |
+| 08 | `call` | `dst:op callee:op n:u8 args[n]:op` — `n` is 0..8 (#183) |
 | 09 | `ret` | `src:op` |
 | 0A | `jmp` | `target:u16` |
 | 0B | `br` | `cond:op when:u8 target:u16` |
@@ -1182,6 +1184,17 @@ or a constant int index encoded `0x80|k`); `kind` 1 means the key byte is a
 constant pool, so `MAX_CONST = 127` is unaffected. A `table` value in a
 register is its slot id. `table` is 3 bytes, `setlist` 4+n, `tget`/`tset` 5.
 
+A **`call` carries up to eight arguments** (#183). The first four ride in the
+interpreter's C parameters (`exec(fid, clh, a0..a3)`, the same signature every
+other instruction's path uses); the fifth to eighth ride in a fixed
+extra-argument block in BaseRAM (`tools/ilvm/ilvm.c`'s `xargs`), which the call
+instruction writes and the callee copies into `r[4..7]` on entry, before it
+executes anything.  A call's encoding does not change with the argument count:
+opcode `08`, `dst`, `callee`, `n`, then `n` operand bytes.  A toy whose
+functions take four or fewer parameters encodes byte for byte as it did before
+#183, and so does the C backend's `il_xargs`-free output.  `ilbc-arity` now
+refuses only a ninth parameter or argument.
+
 `arith` ops are 0 add, 1 sub, 2 mul, 3 mod, 4 idiv, 5 band, 6 bor, 7 bxor,
 8 shl, 9 shr; `cmp` ops are 0 eq, 1 lt, 2 le; `reg` ids are 0 BXR, 1 BYR,
 2 CR; builtin 0 is `rgb` (the only one the interpreter implements).
@@ -1193,7 +1206,7 @@ exactly what the C backend's `toy_boot`/`toy_frame` do (§9.1).
 The encoder **refuses by code rather than guessing**, with the same spirit as
 `pce-cgen.js`: `ilbc-op` (sprites, pads, `print`, `music`, `vget`, `not`, …),
 `ilbc-fixed` (fixed-point arithmetic or constants),
-`ilbc-builtin` (a builtin other than `rgb`), `ilbc-arity` (more than four
+`ilbc-builtin` (a builtin other than `rgb`), `ilbc-arity` (more than eight
 parameters or arguments), `ilbc-range` (more than 127 constants, 128
 registers, 32 globals, a setlist `first` past 255, more than 255 slots or
 field names), `ilbc-jump`, `ilbc-key`, `ilbc-program`. The table work adds

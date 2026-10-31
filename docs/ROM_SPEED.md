@@ -204,11 +204,12 @@ under the dummy SDL driver, cropped to 256x224 and compared with
 | toy | exports? | picture matches? | overruns | worst update | verdict | validator's static estimate |
 |-----|----------|------------------|----------|--------------|---------|-----------------------------|
 | **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants`; the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
-| **TOWER** `toys/tower` | **no** — `ilbc-arity: fn@257 takes 7 parameters; the interpreter takes at most 4` (`main.lua:258`). Card **#183**. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
-| **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-arity: fn@44 takes 8 parameters; the interpreter takes at most 4` (`main.lua:45`). Card **#183**. | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
-| **DUSK RUN** `toys/dusk-run` | **no** — `validate-frame-budget` (frame-wide, no line): `frame()` + its 224 raster calls cost 1,054,292 cycles, over the 954,544 ceiling. Card **#184**. The encoder would next refuse `ilbc-arity: fn@71 takes 5 parameters` (`main.lua:72`, card #183). | — | — | — | — | 27,348,334 cycles · 229.2 frames · **0.26 Hz** |
+| **TOWER** `toys/tower` | **no** — `ilbc-op: instruction sat (function 29, pc 8) has no bytecode form` (`main.lua:261`). #183 lifted the old 4-parameter refusal (`spr` takes 7); `sat` is the next uncarried kind (#133). | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
+| **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction sat (function 14, pc 11) has no bytecode form` (`main.lua:124`). #183 lifted the old 4-parameter refusal (`hit` takes 8); `sat` is next (#133). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
+| **DUSK RUN** `toys/dusk-run` | **no** — `validate-frame-budget` (frame-wide, no line): `frame()` + its 224 raster calls cost 1,054,292 cycles, over the 954,544 ceiling. Card **#184**. #183 did not move this: the encoder behind it would next refuse `sat` (function 33, pc 3, `main.lua:325`), not arity. | — | — | — | — | 27,348,334 cycles · 229.2 frames · **0.26 Hz** |
 | **PLATFORMER** `toys/platformer` | **no** — `ilbc-op: instruction padref (function 10, pc 2) has no bytecode form`; the first padref is `main.lua:110`, padget follows. Card **#185** (the queue slice of #134). | — | — | — | — | 88,115 cycles · 0.74 frames · **81.2 Hz** |
-| *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `936b92dd9cfb2a01…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 110 | **653** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
+| *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `eee9c6ba257bd74a…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 112 | **628** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
+| *control #183* `tools/toys/arity.lua` | **yes** — 24,576 B, sha256 `c1e36d019505dfe6…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 112 | **785** lines | **too slow** | — |
 
 ### What this says, plainly
 
@@ -216,7 +217,10 @@ under the dummy SDL driver, cropped to 256x224 and compared with
   refusal, which is why the table has no speed number for any of them: the
   counters and the picture comparison have nothing to run. The control row
   proves both instruments work on a ROM the route does build, so "nothing
-  built" is a measurement, not a blind spot.
+  built" is a measurement, not a blind spot.  The #183 control
+  (`tools/toys/arity.lua`, five- to eight-parameter functions) is the
+  second: it exports and its Mednafen picture is diff 0 against the
+  browser's, which is the evidence that a wide call runs on the console.
 - **PLATFORMER is the closest.** The validator accepts it, the C emitter
   lowers it completely, and it is the one game the static model puts over
   60 Hz (81.2 Hz). Its remaining route-1 gaps are padref/padget and `sat`
@@ -228,11 +232,13 @@ under the dummy SDL driver, cropped to 256x224 and compared with
   a built ROM can, and none exists.
 - **The studio page refuses earlier than the MCP for four of the five.**
   Its Export runs `renderer/pce-cgen.js` first: STARFALL stops on
-  `cgen-op` `sprite` (`main.lua:406`), TOWER and NOVA TIDE on `cgen-arity`
-  (the same 4-parameter limit), DUSK RUN on both `validate-frame-budget` and
-  `cgen-arity`, and only PLATFORMER reaches the encoder. So the page's
-  one-line finding for those four is a C-emitter or validator finding, not
-  the bytecode refusal in the table.
+  `cgen-op` `sprite` (`main.lua:406`), TOWER on `cgen-op` `sfx`
+  (`main.lua:324`), NOVA TIDE and DUSK RUN on `cgen-op` `unm`
+  (`main.lua:29` and `:62`), and only PLATFORMER reaches the encoder.  #183
+  lifted the page's old `cgen-arity` refusal (the same 4-parameter ceiling),
+  so the finding for TOWER, NOVA and DUSK is now a different, later gap.
+  So the page's one-line finding for those four is a C-emitter or validator
+  finding, not the bytecode refusal in the table.
 - **Carrying the first refusals would not finish the job.** #178's
   projections put STARFALL at 8,969 B, TOWER at 8,379 B and NOVA TIDE at
   9,287 B — all over the interpreter's 8,192-byte data bank (#138), before
@@ -244,8 +250,10 @@ under the dummy SDL driver, cropped to 256x224 and compared with
 
 Per the card, nothing here is fixed in this one. The refusals that remain
 are on the board: **#148** (the 127-constant pool, already open),
-**#183** (the 4-parameter ceiling), **#184** (DUSK RUN's validator refusal)
-and **#185** (padref/padget, PLATFORMER's first). The uncarried kinds the
+**#183** (closed 2026-10-31: the 4-parameter ceiling is gone; TOWER and NOVA
+now stop on `sat`, DUSK still on the validator), **#184** (DUSK RUN's
+validator refusal) and **#185** (padref/padget, PLATFORMER's first). The
+uncarried kinds the
 inventory behind them names — with no card before this measurement — are
 **#186** (`sat`) and **#187** (logical `not`); the rest are the existing
 #133–#138 umbrellas.

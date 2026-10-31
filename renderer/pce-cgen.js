@@ -36,7 +36,7 @@
  *                   value; their frame(t, f) uses f, not t)
  *   cgen-cond       a branch whose condition the IL did not type as bool
  *   cgen-global     a global whose type this backend cannot put in C
- *   cgen-arity      more than two parameters/arguments
+ *   cgen-arity      more than eight parameters/arguments (#183)
  *   cgen-hook       no frame() hook, no top-level chunk, or a raster() hook
  *                   that is not one int parameter
  *   cgen-closure-loop  a closure created inside a loop (one static slot per
@@ -155,9 +155,9 @@
     var f, pc;
     for (f = 0; f < functions.length; f++) {
       var fn = functions[f];
-      if (fn.params.length > 4) {
+      if (fn.params.length > ilbc.MAX_ARGS) {
         refuse("cgen-arity", fn.name + " takes " + fn.params.length +
-               " parameters; this backend supports at most 4");
+               " parameters; this backend supports at most " + ilbc.MAX_ARGS);
       }
       maxUps = Math.max(maxUps, fn.upvalues.length);
       maxParams = Math.max(maxParams, fn.params.length);
@@ -522,7 +522,7 @@
           }
           break;
         case "call":
-          if (ins.args.length > 4) {
+          if (ins.args.length > ilbc.MAX_ARGS) {
             refuse("cgen-arity", where + ": " + ins.args.length + " arguments");
           }
           break;
@@ -634,8 +634,11 @@
     /* Two argument slots unless some function of the toy takes more (the
      * #29 examples' batfill takes four).  Keeping the two-slot signature for
      * toys that never need it is what leaves part A's palette ROM
-     * byte-identical. */
+     * byte-identical.  #183: a function of five to eight parameters keeps
+     * this four-slot signature and reads parameters 5..8 from il_xargs, the
+     * extra-argument block (tools/ilvm/ilvm.c's `xargs`). */
     var ARGS = a.maxParams > 2 ? ["a0", "a1", "a2", "a3"] : ["a0", "a1"];
+    var WIDE = a.maxParams > 4;
     var SIG = ARGS.map(function (n) { return T + " " + n; }).join(", ");
     function argOf(ins, k) {
       return ins.args[k] ? operand(ins.args[k]) : "0";
@@ -684,7 +687,8 @@
         }).join(" "));
       }
       for (pc = 0; pc < fn.params.length; pc++) {
-        line("  r[" + pc + "] = a" + pc + ";");
+        var psrc = pc < 4 ? "a" + pc : "il_xargs[" + (pc - 4) + "]";
+        line("  r[" + pc + "] = " + psrc + ";");
       }
       for (pc = 0; pc < fn.code.length; pc++) {
         if (labels[pc]) line("L" + pc + ": ;");
@@ -800,6 +804,14 @@
         line("  goto L" + ins.target + ";");
         break;
       case "call": {
+        /* #183: arguments 5..8 go through il_xargs, which the callee copies
+         * into r[4..7] at entry.  Always write all four cells so a callee
+         * with fewer than eight parameters never reads a stale argument. */
+        if (ins.args.length > 4) {
+          for (var xi = 0; xi < 4; xi++) {
+            line("  il_xargs[" + xi + "] = " + argOf(ins, 4 + xi) + ";");
+          }
+        }
         var call = "il_call(" + operand(ins.callee);
         for (var ci = 0; ci < ARGS.length; ci++) call += ", " + argOf(ins, ci);
         call += ")";
@@ -970,6 +982,12 @@
      * instruction and read by the pump the frame flow calls (#45). */
     if (a.usesTimer) {
       line("static " + T + " il_timer_cb = -1;");
+    }
+    /* #183: the extra-argument block parameters 5..8 travel through, the
+     * interpreter's `xargs`.  Emitted only for a toy with a wide function,
+     * so a <=4-parameter toy's C stays byte-identical. */
+    if (WIDE) {
+      line("static " + T + " il_xargs[4];");
     }
     /* #176: the tables' fixed pool, the interpreter's model
      * (docs/TABLES-PLAN.md §2.1): IL_TABLE_CELLS 32-bit cells shared by
@@ -1174,7 +1192,7 @@
       "cgen-fixed": "fixed-point arithmetic or a fixed-point constant",
       "cgen-cond": "a branch whose condition the IL did not type as bool",
       "cgen-global": "a global whose type this backend cannot put in C",
-      "cgen-arity": "more than two parameters or arguments",
+      "cgen-arity": "more than eight parameters or arguments",
       "cgen-hook": "no frame() hook, no top-level chunk, or a raster() hook " +
                    "that is not one int parameter",
       "cgen-closure-loop": "a closure created inside a loop",

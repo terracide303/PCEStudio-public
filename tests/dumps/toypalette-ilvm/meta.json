@@ -15,38 +15,38 @@
  },
  "capture": {
   "frames": 300,
-  "last_frame": "frame0476.png",
+  "last_frame": "frame0645.png",
   "measure": {
    "collect_sum_ticks_7bit": 0,
    "collections": 0,
-   "count": 132,
+   "count": 190,
    "cycles_per_collection": null,
-   "cycles_per_frame": 287875.8787878788,
+   "cycles_per_frame": 280344.25263157894,
    "cycles_per_raster_call": null,
    "flags": 0,
    "max_ticks": 255,
-   "mean_ticks": 281.1287878787879,
-   "mean_update_lines": 634.7575757575758,
-   "min_ticks": 255,
-   "overruns": 132,
+   "mean_ticks": 273.7736842105263,
+   "mean_update_lines": 618.1684210526316,
+   "min_ticks": 246,
+   "overruns": 190,
    "raster_calls": 0,
    "raster_max_ticks": 0,
    "raster_sum_ticks": 0,
-   "sum_ticks": 37109,
-   "updates": 132,
-   "worst_update_lines": 662
+   "sum_ticks": 52017,
+   "updates": 190,
+   "worst_update_lines": 644
   },
   "slend": 234,
   "slstart": 3
  },
  "ilvm": {
   "bytes": 16384,
-  "sha256": "a152a83f41621415c03974b58adfeba82a4ba939a8031adda8017c217f377c10"
+  "sha256": "b575b1f1444c3528f4ed4cf3c0ba450d2e6db9e92818a8de1216f0ff2f186a54"
  },
  "name": "toypalette-ilvm",
  "rom": "tools/gen/toypalette-ilvm.pce",
  "rom_bytes": 24576,
- "rom_sha256": "936b92dd9cfb2a01e692b63d08a70ddc6aa41cd8210ff39de22c65b4e3d3f7c4",
+ "rom_sha256": "eee9c6ba257bd74aa98e1feb3fe6b29cfe5e8d02047ef1a4b36840028ef6b351",
  "source": "tools/toys/palette.lua",
  "source_sha256": "458df4060eb9111db60241a0e1fac6a8f193c21a1543fa3d69899d4e7d8c7204"
 }

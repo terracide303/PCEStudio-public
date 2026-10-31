@@ -27,9 +27,12 @@
  *      (Mednafen, headless) and its picture is compared with the browser's
  *      frames of the same toy: the tail of a `-qtrecord` capture must be
  *      diff 0 against one of the browser's first BROWSER_FRAMES frames.
- *      With no game exporting today, the control (tools/toys/palette.lua)
- *      is what proves the capture-and-compare instrument works; its ROM sha
- *      and its eight-frame picture cycle are pinned.
+ *      With no game exporting today, two controls prove the capture-and-
+ *      compare instrument works: tools/toys/palette.lua (its ROM sha and
+ *      its eight-frame picture cycle are pinned) and, for #183,
+ *      tools/toys/arity.lua, whose five- to eight-parameter functions reach
+ *      the screen through the interpreter's extra-argument block (its ROM
+ *      sha and sixteen-frame picture cycle are pinned).
  *   3. The control's ROM bytes are the browser route's: emitted a second
  *      time from the same modules, byte-identical.
  *
@@ -75,18 +78,24 @@ const GAMES = [
     where: "main.lua:168"
   },
   {
+    /* #183 lifted the 4-parameter ceiling, so the arity refusal is gone and
+     * the next uncarried instruction is sat (#133).  The pin moved; the toy
+     * was not rewritten. */
     name: "TOWER", toy: "toys/tower/main.lua",
-    expect: { code: "ilbc-arity",
-              message: "fn@257 takes 7 parameters; the interpreter takes at most 4" },
-    where: "main.lua:258"
+    expect: { code: "ilbc-op",
+              message: "instruction sat (function 29, pc 8) has no bytecode form" },
+    where: "main.lua:261"
   },
   {
     name: "NOVA TIDE", toy: "toys/nova-tide/main.lua",
-    expect: { code: "ilbc-arity",
-              message: "fn@44 takes 8 parameters; the interpreter takes at most 4" },
-    where: "main.lua:45"
+    expect: { code: "ilbc-op",
+              message: "instruction sat (function 14, pc 11) has no bytecode form" },
+    where: "main.lua:124"
   },
   {
+    /* Still the validator's refusal: #183 changed neither the frame cost nor
+     * the 8-display-frame ceiling.  The encoder behind it would next refuse
+     * sat (function 33, pc 3, main.lua:325), not arity. */
     name: "DUSK RUN", toy: "toys/dusk-run/main.lua",
     expect: { code: "validate-frame-budget",
               message: "over the 8-display-frame ceiling" },
@@ -109,9 +118,24 @@ const GAME_PINS = {};
  * toy builds to one ROM and its picture repeats every eight frames. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "936b92dd9cfb2a01e692b63d08a70ddc6aa41cd8210ff39de22c65b4e3d3f7c4",
+  rom: "eee9c6ba257bd74aa98e1feb3fe6b29cfe5e8d02047ef1a4b36840028ef6b351",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
+};
+
+/* #183's second control: a toy with five-, six-, seven- and eight-parameter
+ * functions.  It exports (the interpreter's extra-argument block carries
+ * arguments 5..8), runs in Mednafen, and its picture is diff 0 against the
+ * browser's — the evidence the card asks for, on the route export_pce uses.
+ * Its picture repeats every 16 frames, so the 16 pinned hashes are the whole
+ * cycle. */
+const WIDE = {
+  toy: "tools/toys/arity.lua",
+  rom: "c1e36d019505dfe64c7a006fb1d760725bdc3742ec7ef39b7f66c7ea3292fc8a",
+  frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
+           77057856, 2598679444, 284441580, 4128389208, 3185272652,
+           1493917472, 1001242492, 3182251664, 971588316, 1975998004,
+           3998485784]
 };
 
 let checks = 0;
@@ -204,7 +228,7 @@ function constantCeiling(program) {
 
 /* The source line the table names, re-derived from the IL:
  *   - STARFALL's 128th constant (the encoder names no line),
- *   - the first function the encoder's arity pass refuses (fn@N's line),
+ *   - an ilbc-op refusal's "(function N, pc P)" instruction,
  *   - PLATFORMER's first padref, which the refusal names as fn 10 / pc 2. */
 function checkedWhere(game, program) {
   if (game.name === "STARFALL") {
@@ -212,17 +236,12 @@ function checkedWhere(game, program) {
     check(!!hit, "STARFALL: the constant scan finds the 128th constant");
     return hit ? "main.lua:" + hit.line : null;
   }
-  if (game.expect.code === "ilbc-arity") {
-    for (const fn of program.functions) {
-      if (fn.params.length > 4) {
-        return "main.lua:" + ((fn.code[0] || {}).line);
-      }
-    }
-    return null;
-  }
-  if (game.name === "PLATFORMER") {
-    const ins = program.functions[10] && program.functions[10].code[2];
-    check(ins && ins.t === "padref", "PLATFORMER: fn 10 pc 2 is a padref");
+  if (game.expect.code === "ilbc-op") {
+    const m = /function (\d+), pc (\d+)/.exec(game.expect.message);
+    if (!m) return null;
+    const fid = Number(m[1]), pc = Number(m[2]);
+    const ins = program.functions[fid] && program.functions[fid].code[pc];
+    check(!!ins, game.name + ": fn " + fid + " pc " + pc + " is an instruction");
     return ins ? "main.lua:" + ins.line : null;
   }
   return null;
@@ -486,6 +505,16 @@ async function main() {
        CONTROL.rom);
   }
 
+  /* #183: the 5-8 argument toy builds through the same route and is what
+   * proves the extra-argument block on the console, not just on the host. */
+  const wide = exportToy(WIDE.toy);
+  check(!!wide.rom, "wide: " + WIDE.toy + " exports (5-8 parameters)");
+  if (wide.rom) {
+    eq("wide: builds a " + ROM_BYTES + "-byte ROM", wide.rom.length,
+       ROM_BYTES);
+    eq("wide: the ROM is the pinned one", sha256(wide.rom), WIDE.rom);
+  }
+
   if (!fs.existsSync(MEDNAFEN)) {
     console.log("SKIP  mednafen not found at " + MEDNAFEN +
                 " (set MEDNAFEN to its path); the counters and the picture " +
@@ -505,6 +534,10 @@ async function main() {
     if (control.rom) {
       work.push({ name: "control", key: "control", toy: CONTROL.toy,
                   out: control });
+    }
+    if (wide.rom) {
+      work.push({ name: "wide-arity", key: "wide", toy: WIDE.toy,
+                  out: wide });
     }
     for (const b of builtGames) {
       work.push({ name: b.game.name, key: b.game.name, toy: b.game.toy,
@@ -550,11 +583,18 @@ async function main() {
              ", first differing line " + cmp.line + ", " + cmp.diff +
              " bytes differ)" : ""));
 
-      /* 3. the pin: the ROM sha, and for the control its picture cycle */
+      /* 3. the pin: the ROM sha, and for the controls their picture cycle */
       if (w.key === "control") {
         if (cmp.match >= 0) {
           check(CONTROL.frames.indexOf(want[cmp.match].hash) >= 0,
                 "control: the emulator matches one of the pinned eight " +
+                "pictures (browser frame " + cmp.match + ", " +
+                "hash " + want[cmp.match].hash + ")");
+        }
+      } else if (w.key === "wide") {
+        if (cmp.match >= 0) {
+          check(WIDE.frames.indexOf(want[cmp.match].hash) >= 0,
+                "wide-arity: the emulator matches one of the pinned sixteen " +
                 "pictures (browser frame " + cmp.match + ", " +
                 "hash " + want[cmp.match].hash + ")");
         }

@@ -5,9 +5,13 @@
  *
  *   1. The encoder (renderer/pce-ilbc.js) is deterministic, produces the
  *      documented container, and refuses by code: a fixed constant
- *      ilbc-fixed, five arguments ilbc-arity, a builtin other than rgb
+ *      ilbc-fixed, nine parameters ilbc-arity, a builtin other than rgb
  *      ilbc-builtin.  #172: a table instruction makes container version 2
  *      with a table section; a table-free toy stays version 1 byte for byte.
+ *      #183: a call carries up to eight arguments — opcode 0x08, n up to 8,
+ *      one operand byte each — and a toy of four or fewer keeps the bytes it
+ *      had; the interpreter passes arguments 5..8 through its extra-argument
+ *      block (tools/ilvm/ilvm.c's `xargs`).
  *   2. buildToyRom() glues renderer/ilvm.bin and the bytecode into a
  *      24,576-byte image; Node and a browser context (self, no module)
  *      produce the same bytes; the refusals fire.
@@ -230,20 +234,121 @@ function checkEncoder() {
     "ilbc-builtin");
 }
 
-/* `clamp` with five arguments is an IL arity refusal, so a function with
- * five parameters is the encoder's own ilbc-arity case. */
-function checkArityRefusal() {
-  const source = [
-    "local function five(a, b, c, d, e) return e end",
+/* ---- #183: the 5-8 argument call form --------------------------------- *
+ * The container's `call` (opcode 0x08) is unchanged: dst, callee, n, then n
+ * operand bytes.  n is now 0..8; the interpreter's exec() takes the first
+ * four as C parameters and copies the other four out of its extra-argument
+ * block.  This pins the byte layout directly rather than through a hash: the
+ * decoded instruction must have opcode 0x08, n at its fourth byte, and a
+ * length of 4+n.  A 4-parameter control is pinned the same way AND by its
+ * container sha, so a layout change that touched a <=4 toy is visible.
+ *
+ * The instruction lengths are docs/IL.md §14's table. */
+
+var INSN_LEN = {
+  0x01: 3, 0x02: 3, 0x03: 3, 0x04: 3, 0x05: 3, 0x06: 3, 0x07: 3,
+  0x09: 2, 0x0A: 3, 0x0B: 5, 0x0C: 2, 0x0D: 4, 0x0E: 5, 0x0F: 3,
+  0x10: 3, 0x12: 5, 0x14: 3, 0x15: 3, 0x16: 3, 0x17: 3,
+  0x18: 3, 0x1A: 5, 0x1B: 5
+};
+
+/* Walk every function's code and return each instruction with its byte
+ * offset and, for the three variable-length opcodes, its `n`. */
+function walkContainer(bytes) {
+  var nfunc = bytes[9];
+  var funcTabOff = bytes[12] | (bytes[13] << 8);
+  var out = [];
+  for (var f = 0; f < nfunc; f++) {
+    var at = funcTabOff + f * 10;
+    var codeOff = bytes[at] | (bytes[at + 1] << 8);
+    var codeEnd = bytes[at + 2] | (bytes[at + 3] << 8);
+    var pc = codeOff;
+    while (pc < codeEnd) {
+      var op = bytes[pc];
+      var len = INSN_LEN[op];
+      if (op === 0x08 || op === 0x13 || op === 0x19) len = 4 + bytes[pc + 3];
+      if (len == null) {
+        throw new Error("unknown opcode 0x" + op.toString(16) + " at " + pc);
+      }
+      out.push({ fid: f, at: pc, op: op, len: len,
+                 n: (op === 0x08 || op === 0x13) ? bytes[pc + 3] : null });
+      pc += len;
+    }
+    if (pc !== codeEnd) {
+      throw new Error("function " + f + " ends at " + pc + ", table says " +
+                      codeEnd);
+    }
+  }
+  return out;
+}
+
+var WIDE_TOY = [
+  "local function five(a, b, c, d, e) return e end",
+  "local function eight(a, b, c, d, e, g, h, i) return i end",
+  "function frame(t, f)",
+  "  pal(1, five(f, 1, 2, 3, 4))",
+  "  pal(2, eight(f, 1, 2, 3, 4, 5, 6, 7))",
+  "end",
+  ""
+].join("\n");
+
+/* A control with a four-parameter function: its bytes must not move. */
+var CONTROL4_TOY = [
+  "local function four(a, b, c, d) return (a * 7 + b * 3 + c * 5 + d) % 512 end",
+  "function frame(t, f)",
+  "  pal(1, four(f % 16, 1, 2, 3))",
+  "end",
+  ""
+].join("\n");
+
+/* Measured 2026-10-31: equal to HEAD's encoder (before #183) byte for byte. */
+var CONTROL4_SHA =
+  "80b5142d0bf88bff270922a7c5006621483949a90fa0f50cfa3fcc7c720ab444";
+
+function callsIn(source) {
+  var enc = ilbc.encode(il.compile(source, { chunkName: "arity.lua" }));
+  return { enc: enc, ins: walkContainer(enc.bytes),
+           calls: walkContainer(enc.bytes).filter(function (i) {
+             return i.op === 0x08;
+           }) };
+}
+
+function checkWideArity() {
+  var wide = callsIn(WIDE_TOY);
+  var ns = wide.calls.map(function (c) { return c.n; }).sort();
+  eq("a 5- and an 8-argument call encode (no ilbc-arity)", ns, [5, 8]);
+  wide.calls.forEach(function (c) {
+    check(c.len === 4 + c.n,
+          "call with " + c.n + " arguments is 4+n bytes (" + c.len + ")");
+    check(wide.enc.bytes[c.at] === 0x08,
+          "call with " + c.n + " arguments uses opcode 0x08");
+    check(wide.enc.bytes[c.at + 3] === c.n,
+          "call with " + c.n + " arguments puts n at its fourth byte");
+  });
+  eq("a 5-8 parameter toy stays container version 1", wide.enc.version, 1);
+
+  /* Nine parameters is past the new ceiling. */
+  var nine = [
+    "local function nine(a, b, c, d, e, g, h, i, j) return j end",
     "function frame(t, f)",
-    "  pal(1, five(1, 2, 3, 4, 5))",
+    "  pal(1, nine(1, 2, 3, 4, 5, 6, 7, 8, 9))",
     "end",
     ""
   ].join("\n");
-  const code = refuseCode(function () {
-    ilbc.encode(il.compile(source, { chunkName: "arity.lua" }));
-  });
-  eq("five parameters is ilbc-arity", code, "ilbc-arity");
+  eq("nine parameters is ilbc-arity", refuseCode(function () {
+    ilbc.encode(il.compile(nine, { chunkName: "arity9.lua" }));
+  }), "ilbc-arity");
+
+  /* The <=4 control: the same layout with n=4 and four operand bytes, and
+   * the container bytes a #183-less encoder produced. */
+  var c4 = callsIn(CONTROL4_TOY);
+  eq("the 4-parameter control's call has n=4",
+     c4.calls.map(function (c) { return c.n; }), [4]);
+  eq("the 4-parameter control's call is 4+4 bytes",
+     c4.calls.map(function (c) { return c.len; }), [8]);
+  eq("the 4-parameter control's bytes are unchanged", c4.enc.bytes.length, 188);
+  eq("the 4-parameter control's container sha is the pinned one",
+     sha256(Buffer.from(c4.enc.bytes)), CONTROL4_SHA);
 }
 
 /* ---- #171: the table layout ------------------------------------------- *
@@ -865,6 +970,129 @@ function checkHostParity() {
   }
 }
 
+/* ---- #183: the extra-argument block on the host ----------------------- *
+ * tools/toys/arity.lua has five-, six-, seven- and eight-parameter
+ * functions, and each calls the next one down, so every call writes the
+ * extra-argument block and every callee copies it before it calls again.
+ * Eight frames must match the browser IL run's four artefacts exactly.  The
+ * control zeroes the block's write in a scratch copy of ilvm.c: if the extra
+ * arguments do not reach the parameters, the picture must move. */
+const WIDE_HOST_TOY = "tools/toys/arity.lua";
+const XARGS_WRITE = "        else xargs[i - CALL_ARGS] = av;";
+
+function checkWideHostParity() {
+  const probe = spawnSync("cc", ["--version"], { encoding: "utf8" });
+  if (probe.error) {
+    skipped.push("wide call parity (no system cc)");
+    console.log("SKIP  wide call parity: no system cc");
+    return;
+  }
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ilvm-wide-"));
+  const toySource = fs.readFileSync(path.join(ROOT, WIDE_HOST_TOY), "utf8");
+  const program = il.compile(toySource, { chunkName: "arity.lua" });
+  const widths = program.functions.map(function (f) { return f.params.length; })
+    .filter(function (w) { return w > 4; }).sort();
+  eq("wide call parity: the toy has 5-, 6-, 7- and 8-parameter functions",
+     widths, [5, 6, 7, 8]);
+
+  const encoded = ilbc.encode(program);
+  eq("wide call parity: the toy is a version 1 container", encoded.bytes[4], 1);
+  const wideN = walkContainer(encoded.bytes)
+    .filter(function (i) { return i.op === 0x08 && i.n > 4; })
+    .map(function (i) { return i.n; });
+  check([5, 6, 7, 8].every(function (w) { return wideN.indexOf(w) >= 0; }),
+        "wide call parity: the toy makes 5-, 6-, 7- and 8-argument calls (" +
+        JSON.stringify(wideN) + ")");
+
+  const container = path.join(tmp, "arity.ilbc");
+  fs.writeFileSync(container, Buffer.from(encoded.bytes));
+
+  const rt = il.create(toySource);
+  rt.load();
+  let want = null;
+  for (let f = 0; f < HOST_FRAMES; f++) {
+    rt.frame(f);
+    want = { vram: rt.state.vram.slice(), cram: rt.state.cram.slice(),
+             sat: rt.state.sat.slice(),
+             regs: { BXR: rt.state.regs.BXR, BYR: rt.state.regs.BYR,
+                     CR: rt.state.regs.CR } };
+  }
+  const wantRegs = "BXR " + want.regs.BXR + "\nBYR " + want.regs.BYR +
+                   "\nCR " + want.regs.CR;
+
+  const hostvm = path.join(tmp, "hostvm");
+  check(buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c")),
+        "wide call parity: the system cc builds ilvm.c with hostvm.c");
+  if (!fs.existsSync(hostvm)) return;
+
+  const runDir = path.join(tmp, "run");
+  fs.mkdirSync(runDir);
+  const run = spawnSync(hostvm, [container, runDir, String(HOST_FRAMES)],
+                        { encoding: "utf8" });
+  check(run.status === 0, "wide call parity: hostvm exits 0 (" +
+        ((run.stderr || "").trim().split("\n").slice(-1)[0] || "ok") + ")");
+  if (run.status !== 0) return;
+
+  const got = {
+    vram: fs.readFileSync(path.join(runDir, "vram.bin")),
+    cram: fs.readFileSync(path.join(runDir, "cram.bin")),
+    sat: fs.readFileSync(path.join(runDir, "sat.bin"))
+  };
+  const regs = fs.readFileSync(path.join(runDir, "regs.txt"), "utf8").trim();
+  eq("wide call parity: vram.bin is the browser IL run's after " +
+     HOST_FRAMES + " frames", bytesDiff(want.vram, got.vram), 0);
+  eq("wide call parity: cram.bin is the browser IL run's after " +
+     HOST_FRAMES + " frames", bytesDiff(want.cram, got.cram), 0);
+  eq("wide call parity: sat.bin is the browser IL run's after " +
+     HOST_FRAMES + " frames", bytesDiff(want.sat, got.sat), 0);
+  eq("wide call parity: regs.txt is the browser IL run's registers",
+     regs, wantRegs);
+
+  /* The control: a scratch ilvm.c that does not write the block.  The
+   * substitution is asserted exactly once, so a moved line FAILS rather
+   * than quietly testing an unmutated interpreter. */
+  const ilvmSource = fs.readFileSync(path.join(ROOT, "tools", "ilvm",
+                                               "ilvm.c"), "utf8");
+  const hits = ilvmSource.split(XARGS_WRITE).length - 1;
+  eq("wide call parity: the control mutation's write is where the check " +
+     "expects it", hits, 1);
+  if (hits !== 1) return;
+  const mutantSource = path.join(tmp, "ilvm_wide_mutant.c");
+  fs.writeFileSync(mutantSource, ilvmSource.replace(XARGS_WRITE,
+    "        else xargs[i - CALL_ARGS] = 0;"));
+  const mutant = path.join(tmp, "hostvm-wide-mutant");
+  check(buildHostvm(mutant, mutantSource),
+        "wide call parity: the system cc builds the control mutation");
+  if (!fs.existsSync(mutant)) return;
+  const mutantDir = path.join(tmp, "mutant");
+  fs.mkdirSync(mutantDir);
+  const mrun = spawnSync(mutant, [container, mutantDir, String(HOST_FRAMES)],
+                         { encoding: "utf8" });
+  check(mrun.status === 0, "wide call parity: the control mutation exits 0");
+  if (mrun.status !== 0) return;
+  const brokenVram = bytesDiff(want.vram,
+    fs.readFileSync(path.join(mutantDir, "vram.bin")));
+  const brokenCram = bytesDiff(want.cram,
+    fs.readFileSync(path.join(mutantDir, "cram.bin")));
+  const brokenSat = bytesDiff(want.sat,
+    fs.readFileSync(path.join(mutantDir, "sat.bin")));
+  const mutantRegs = fs.readFileSync(path.join(mutantDir, "regs.txt"),
+                                     "utf8").trim();
+  const broken = brokenVram + brokenCram + brokenSat +
+                 (mutantRegs === wantRegs ? 0 : 1);
+  check(broken > 0, "wide call parity: zeroing the extra-argument write " +
+        "breaks the artefacts (vram " + brokenVram + ", cram " + brokenCram +
+        ", sat " + brokenSat + ", regs " +
+        (mutantRegs === wantRegs ? "same" : "different") + ")");
+  if (broken > 0) {
+    notes.push("wide call parity: the control mutation differs by " +
+               brokenVram + " vram bytes, " + brokenCram + " cram bytes, " +
+               brokenSat + " sat bytes" + (mutantRegs === wantRegs ? "" :
+               " and its registers") + " after " + HOST_FRAMES + " frames");
+  }
+}
+
 /* ---- #174: the table ops on the host ----------------------------------- *
  * The same compile/run as checkHostParity for a version 2 table toy.  Eight
  * frames must match the browser host's artefacts exactly — every value they
@@ -1290,13 +1518,14 @@ function checkStatusBarDump() {
 console.log("check-ilvm: #100 the IL as bytecode, interpreted");
 
 checkEncoder();
-checkArityRefusal();
+checkWideArity();
 checkTableLayout();
 checkTableCapacity();
 checkTableEncoding();
 checkRom();
 checkRebuild();
 checkHostParity();
+checkWideHostParity();
 checkTablesRun();
 
 const paletteMax = 300;

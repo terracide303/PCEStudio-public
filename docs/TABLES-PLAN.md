@@ -362,14 +362,14 @@ three rows above (#178).
 | toy | route 1 still refuses | cgen still refuses |
 |---|---|---|
 | STARFALL | `sprite` 31 (#133), `padref`/`padget` 5+5 (#134), `sfx` 3 (#135), `raster` table form 2 (#136), `abs` 2 + `sr` 1 (#137) | the same, once #143's typing change lands |
-| TOWER | `padref`/`padget` 10+10 (#134), `sfx` 6 (#135), `sat` 5, `not` 1, and `ilbc-arity` (`spr` has 7 parameters) | `sat` 5, `not` 1, and `cgen-arity` 12 |
-| NOVA TIDE | `sat` 6, `padref`/`padget` 7+7 (#134), `sfx` 5 (#135), `raster` 5 (#136), `note` 5 (#137), and `ilbc-arity` (`fn@44` has 8 parameters) | `sat`, `note`, `unm`, `cgen-arity` 10 |
+| TOWER | `padref`/`padget` 10+10 (#134), `sfx` 6 (#135), `sat` 5, `not` 1 | `sat` 5, `not` 1, `sfx` |
+| NOVA TIDE | `sat` 6, `padref`/`padget` 7+7 (#134), `sfx` 5 (#135), `raster` 5 (#136), `note` 5 (#137) | `sat`, `note`, `unm` |
 
-The arity refusals are not table work: the interpreter and the C backend both
-take at most four parameters (`pce-ilbc.js` `MAX_ARGS`, `pce-cgen.js`), and
-TOWER and NOVA TIDE pass seven and eight. They are named here so the export
-path is honest; they need their own small card, or a lowering that passes a
-spec in pieces.
+The arity refusals this table used to carry are gone (#183, 2026-10-31): a
+call now carries up to eight arguments, four in the interpreter's C
+parameters and four more through its extra-argument block, and the C backend
+lowers the same form with `il_xargs`. A toy of four or fewer parameters is
+byte-identical to before.
 
 So #132's children make the table work true and measurable — the
 `tools/starfall-console.js` inventory drops by 197 / 52 / 184 instructions —
