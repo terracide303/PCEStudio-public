@@ -205,11 +205,13 @@ function checkBudgets() {
 
 /* ---- 3. the refusal inventory ------------------------------------------ */
 const INVENTORY = [
-  /* kind, count, route-1 count, cgen count, first main.lua line */
-  ["tset", 124, 124, 124, 406],
-  ["table", 44, 44, 44, 47],
-  ["setlist", 11, 11, 11, 47],
-  ["tget", 18, 18, 18, 444],
+  /* kind, count, route-1 count, cgen count, first main.lua line.
+   * #172 carries the four table kinds on route 1, so their ilbc counts are
+   * 0; the C backend still refuses them (#176). */
+  ["tset", 124, 0, 124, 406],
+  ["table", 44, 0, 44, 47],
+  ["setlist", 11, 0, 11, 47],
+  ["tget", 18, 0, 18, 444],
   ["sprite", 31, 31, 31, 406],
   ["padref", 5, 5, 0, 649],
   ["padget", 5, 5, 0, 649],
@@ -253,7 +255,7 @@ function checkInventory() {
     return x[2] && !x[3];
   }).map(function (x) { return x[0]; });
   eq("kinds in the table", kinds, 11);
-  eq("kinds refused by both backends", both, 9);
+  eq("kinds refused by both backends", both, 5);
   eq("route-1-only kinds", route1Only, ["padref", "padget"]);
 }
 
@@ -354,11 +356,11 @@ const CITATIONS = [
   ["renderer/pce-cgen.js", 467, "case \"padref\""],
   ["renderer/pce-cgen.js", 485, "builtin `"],
   ["renderer/pce-cgen.js", 490, "refuse(\"cgen-op\""],
-  ["renderer/pce-ilbc.js", 116, "var OPS = {"],
-  ["renderer/pce-ilbc.js", 127, "var BUILTIN = {"],
-  ["renderer/pce-ilbc.js", 220, "refuse(\"ilbc-op\""],
-  ["renderer/pce-ilbc.js", 245, "refuse(\"ilbc-builtin\""],
-  ["renderer/pce-ilbc.js", 286, "hookSlot(\"raster\""],
+  ["renderer/pce-ilbc.js", 150, "var OPS = {"],
+  ["renderer/pce-ilbc.js", 163, "var BUILTIN = {"],
+  ["renderer/pce-ilbc.js", 259, "refuse(\"ilbc-op\""],
+  ["renderer/pce-ilbc.js", 284, "refuse(\"ilbc-builtin\""],
+  ["renderer/pce-ilbc.js", 336, "hookSlot(\"raster\""],
   ["renderer/pce-rom.js", 618, "if (dataLen > BANK)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];

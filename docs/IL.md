@@ -1086,12 +1086,14 @@ toy.lua --(pce-il.js)--> IL --(pce-ilbc.js)--> bytecode --(pce-rom.js)--> .pce
 
 `renderer/pce-ilbc.js` encodes a `pce-il` version 1 program into one container
 that fits in a single 8 KiB data bank. All offsets are byte offsets from the
-start of the container. Little-endian.
+start of the container. Little-endian. The container is **version 1** unless
+the program has a table instruction; then it is **version 2**, with a 28-byte
+header and a table section (#172). A table-free toy's bytes are unchanged.
 
 | offset | size | field |
 |---|---|---|
 | 0 | 4 | `"ILBC"` |
-| 4 | 1 | version (1) |
+| 4 | 1 | version (1, or 2 when the program has a table instruction) |
 | 5 | 1 | flags — bit 0: the toy has a `raster()` callback |
 | 6 | 1 | `init` slot (0xFF = none) |
 | 7 | 1 | `frame` slot |
@@ -1103,8 +1105,20 @@ start of the container. Little-endian.
 | 14 | 2 | upvalue descriptor table offset |
 | 16 | 2 | constant table offset |
 | 18 | 2 | global name table offset |
-| 20 | 2 | first instruction |
-| 22 | 2 | one past the last instruction |
+| 20 | 2 | **v1:** first instruction · **v2:** table section offset |
+| 22 | 2 | **v1:** one past the last instruction · **v2:** first instruction |
+| 24 | 2 | **v2 only:** one past the last instruction |
+| 26 | 2 | **v2 only:** reserved (0) |
+
+The **v2 table section** (at the offset in header byte 20, between the global
+names and the code) is `nslots u8`, then one entry per table site in program
+order: `base u16, cap u8, nfields u8`. `base` is the slot's first cell in the
+interpreter's fixed pool of `TABLE_POOL_CELLS` (256) 4-byte cells; the array
+part is `cap` cells (1-based index `i` at `base+i-1`), then `nfields` field
+cells (field id `f` at `base+cap+f`). Field ids are program-wide and assigned
+by first appearance of the string key, so a name means the same field
+everywhere. The shapes come from `tableLayout()` (#171); the sizing rule is
+docs/TABLES-PLAN.md §2.2.
 
 A **function entry** (10 bytes, one per function id in order) is
 `codeOff u16, codeEnd u16, upOff u16, nregs u8, nparams u8, nups u8, reserved
@@ -1143,6 +1157,16 @@ container offsets, patched after the layout is known.
 | 15 | `reg` | `regid:u8 value:op` |
 | 16 | `vset` | `addr:op word:op` |
 | 17 | `vget` | reserved; the encoder refuses it in this half |
+| 18 | `table` | `dst:r slot:u8` — zero the slot, store its id |
+| 19 | `setlist` | `base:r first:u8 n:u8 values[n]:op` — `first` is 1-based |
+| 1A | `tget` | `dst:r base:op key:u8 kind:u8` |
+| 1B | `tset` | `base:op key:u8 kind:u8 value:op` |
+
+For `tget`/`tset`, `kind` 0 means the key byte is an **operand** (a register,
+or a constant int index encoded `0x80|k`); `kind` 1 means the key byte is a
+**field id**. A string key becomes a field id and never enters the value
+constant pool, so `MAX_CONST = 127` is unaffected. A `table` value in a
+register is its slot id. `table` is 3 bytes, `setlist` 4+n, `tget`/`tset` 5.
 
 `arith` ops are 0 add, 1 sub, 2 mul, 3 mod, 4 idiv, 5 band, 6 bor, 7 bxor,
 8 shl, 9 shr; `cmp` ops are 0 eq, 1 lt, 2 le; `reg` ids are 0 BXR, 1 BYR,
@@ -1153,11 +1177,17 @@ in `init`, `frame` or `raster`, and the runtime calls whatever is there —
 exactly what the C backend's `toy_boot`/`toy_frame` do (§9.1).
 
 The encoder **refuses by code rather than guessing**, with the same spirit as
-`pce-cgen.js`: `ilbc-op` (tables, sprites, pads, `print`, `music`, `vget`,
-`not`, …), `ilbc-fixed` (fixed-point arithmetic or constants),
+`pce-cgen.js`: `ilbc-op` (sprites, pads, `print`, `music`, `vget`, `not`, …),
+`ilbc-fixed` (fixed-point arithmetic or constants),
 `ilbc-builtin` (a builtin other than `rgb`), `ilbc-arity` (more than four
 parameters or arguments), `ilbc-range` (more than 127 constants, 128
-registers or 32 globals), `ilbc-jump`, `ilbc-key`, `ilbc-program`.
+registers, 32 globals, a setlist `first` past 255, more than 255 slots or
+field names), `ilbc-jump`, `ilbc-key`, `ilbc-program`. The table work adds
+`ilbc-table-ram` (the slots need more than `TABLE_POOL_CELLS`, or a constant
+array key / field id is past its slot's shape), `ilbc-table-escape` (a table
+that escapes the site *and* can run more than once — one static slot would
+alias two Lua tables), and `ilbc-table-key` (a `tget`/`tset` base that is not
+a register, or a key that is neither a string field nor an int operand).
 
 ### 14.2 The interpreter image (`renderer/ilvm.bin`)
 

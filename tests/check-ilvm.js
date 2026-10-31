@@ -4,9 +4,10 @@
  * the console.
  *
  *   1. The encoder (renderer/pce-ilbc.js) is deterministic, produces the
- *      documented container, and refuses by code: a table is ilbc-op, a
- *      fixed constant ilbc-fixed, five arguments ilbc-arity, a builtin other
- *      than rgb ilbc-builtin.
+ *      documented container, and refuses by code: a fixed constant
+ *      ilbc-fixed, five arguments ilbc-arity, a builtin other than rgb
+ *      ilbc-builtin.  #172: a table instruction makes container version 2
+ *      with a table section; a table-free toy stays version 1 byte for byte.
  *   2. buildToyRom() glues renderer/ilvm.bin and the bytecode into a
  *      24,576-byte image; Node and a browser context (self, no module)
  *      produce the same bytes; the refusals fire.
@@ -24,11 +25,20 @@
  *      browser; its playfield is the known four-line phase, printed as a
  *      note rather than asserted away.  The raster hook is in the container
  *      and the TMA measured its calls.
+ *   6. #173: the host harness.  tools/ilvm/ilvm.c compiled with
+ *      tools/ilvm/hostvm.c by the system cc (SKIP without cc), run for
+ *      eight frames, and its vram/cram/sat/regs diffed against the browser
+ *      IL run.  A scratch control mutation of operand() must break it.
  *
  * Written by @design because the card names this evidence.  Per workshop
  * rule 2 a cold break by another seat and model is owed: the operand
  * encoding, the loop arithmetic, the closure copies, the timer
- * reconstruction and the browser glue are what to attack.
+ * reconstruction and the browser glue are what to attack.  #171's part has
+ * its own targets: follow a site's value through a `move`, through a
+ * table-typed global's every getglobal, containment taint (a pair stored in
+ * a cram field), the setlist/constant-key/register-key capacity order, and
+ * the chunk/init/back-edge repeat rule.  #173's own target is the harness:
+ * its artefacts, its frame count and its control mutation.
  */
 "use strict";
 
@@ -184,9 +194,15 @@ function checkEncoder() {
       ilbc.encode(il.compile(source, { chunkName: "refusal.lua" }));
     });
   }
-  eq("a table is ilbc-op", codeFor(
-    "function frame(t, f)\n  local a = {1, 2}\n  a[1] = f\nend\n"),
-    "ilbc-op");
+  /* #172: a table is carried now, so the old `ilbc-op` case is the smallest
+   * table toy and it must encode as version 2. */
+  const tableToy = ilbc.encode(il.compile(
+    "function frame(t, f)\n  local a = {1, 2}\n  a[1] = f\nend\n",
+    { chunkName: "table.lua" }));
+  eq("a table is no longer ilbc-op: it encodes version 2",
+     tableToy.version, 2);
+  eq("the table toy has one slot and two cells",
+     tableToy.tables, { nslots: 1, cells: 2 });
   eq("a fixed constant is ilbc-fixed", codeFor(
     "function frame(t, f)\n  local x = 1.5\n  pal(1, floor(x))\nend\n"),
     "ilbc-fixed");
@@ -211,7 +227,297 @@ function checkArityRefusal() {
   eq("five parameters is ilbc-arity", code, "ilbc-arity");
 }
 
+/* ---- #171: the table layout ------------------------------------------- *
+ * tableLayout() reads each table's shape from its uses: one slot per `table`
+ * instruction, its array capacity, the program-wide field ids written into
+ * it, whether the value escapes, and whether the site can run more than
+ * once.  This pins the three games' measured inventories (docs/
+ * TABLES-PLAN.md §1) and two controls: a frame-built table stored in a
+ * global (escaping and re-executing), and the nested cram pair, which
+ * escapes only with its outer.  NOVA is pinned at the cap rule's 349 cells;
+ * #177 is the card that turns its register-key sites into 183. */
+function layoutToy(file) {
+  const source = fs.readFileSync(path.join(ROOT, file), "utf8");
+  return ilbc.tableLayout(il.compile(source, { chunkName: path.basename(file) }));
+}
+
+function checkTableLayout() {
+  const star = layoutToy("toys/demo-game/main.lua");
+  eq("STARFALL has 44 table sites", star.nslots, 44);
+  eq("STARFALL's tables need 172 cells", star.cells, 172);
+  eq("STARFALL's field cells are 126", star.fieldCells, 126);
+  eq("STARFALL's array cells are 46", star.arrayCells, 46);
+  check(star.sites.every(function (s, i) {
+    return s.base === (i ? star.sites[i - 1].base + star.sites[i - 1].cells : 0);
+  }), "STARFALL's slots are packed in site order");
+  eq("STARFALL's sites fill the pool exactly",
+     star.sites[star.sites.length - 1].base +
+     star.sites[star.sites.length - 1].cells, star.cells);
+  eq("STARFALL's field ids are first-appearance order", star.fieldIds,
+     ["x", "y", "pattern", "palette", "byr", "cram"]);
+  eq("the register-key array cap is 16", star.arrayCap, 16);
+  eq("STARFALL's 7 escaping sites are its table globals",
+     star.sites.filter(function (s) { return s.escapes; })
+       .map(function (s) { return s.globals[0]; }),
+     ["DIGIT", "bl", "bx", "by", "ex", "ey", "es"]);
+  eq("37 STARFALL spec sites do not escape",
+     star.sites.filter(function (s) {
+       return !s.escapes && s.globals.length === 0;
+     }).length, 37);
+  check(star.sites.filter(function (s) { return s.escapes; })
+        .every(function (s) { return !s.repeats; }),
+        "the escaping globals are built once (chunk/init), so they cannot " +
+        "re-execute");
+
+  /* The two raster specs at main.lua:498 and :646: an outer spec writing
+   * `byr` and `cram` (ids 4 and 5), a one-cell list wrapper, and the
+   * two-cell pair.  The pair escapes only if the outer does; neither does,
+   * because raster() copies the fields it needs. */
+  const outers = star.sites.filter(function (s) {
+    return s.fields.length === 2 && s.fields[0] === 4 && s.fields[1] === 5;
+  });
+  eq("STARFALL builds two raster outer specs", outers.length, 2);
+  eq("each raster outer reserves six field cells",
+     outers.map(function (s) { return s.nfields; }), [6, 6]);
+  for (const outer of outers) {
+    const nested = star.sites.filter(function (s) {
+      return s.line === outer.line && s.cap === 2;
+    });
+    eq("the raster at line " + outer.line + " has a two-cell nested pair",
+       nested.length, 1);
+    if (nested.length === 1) {
+      eq("the nested pair at line " + outer.line +
+         " escapes only with its outer", nested[0].escapes, outer.escapes);
+      check(!outer.escapes,
+            "the raster spec at line " + outer.line + " does not escape");
+    }
+  }
+
+  const tower = layoutToy("toys/tower/main.lua");
+  eq("TOWER has 6 table sites", tower.nslots, 6);
+  eq("TOWER's tables need 33 cells", tower.cells, 33);
+  eq("TOWER has no field cells", tower.fieldCells, 0);
+  eq("TOWER has no field ids", tower.fieldIds, []);
+  eq("TOWER's 6 escaping sites are its table globals", tower.escaping, 6);
+
+  const nova = layoutToy("toys/nova-tide/main.lua");
+  eq("NOVA has 27 table sites", nova.nslots, 27);
+  eq("NOVA at the cap rule needs 349 cells (#177: 183)", nova.cells, 349);
+  eq("NOVA's array cells at the cap rule are 344", nova.arrayCells, 344);
+  eq("NOVA's only field name is bxr", nova.fieldIds, ["bxr"]);
+  eq("NOVA's 5 raster specs do not escape",
+     nova.sites.filter(function (s) { return !s.escapes; }).length, 5);
+  console.log("      table layout: STARFALL " + star.nslots + " sites/" +
+              star.cells + " cells (" + star.fieldCells + " field), TOWER " +
+              tower.nslots + "/" + tower.cells + ", NOVA " + nova.nslots +
+              "/" + nova.cells + " at the cap rule");
+
+  /* A table built in frame() and stored in a global: one slot could not
+   * carry two Lua tables, so it is both escaping and re-executing. */
+  const held = ilbc.tableLayout(il.compile([
+    "held = nil",
+    "function frame(t, f)",
+    "  local s = {x = f}",
+    "  held = s",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "held.lua" }));
+  eq("a frame-built table stored in a global is one site", held.nslots, 1);
+  eq("it is flagged escaping", held.sites[0].escapes, true);
+  eq("it is flagged re-executing", held.sites[0].repeats, true);
+  eq("it is stored in the table global `held`", held.sites[0].globals, ["held"]);
+
+  /* The same nested cram shape, with the outer spec escaping (a call
+   * argument) and not escaping (a raster spec).  The pair follows its
+   * outer both ways. */
+  const pairCall = ilbc.tableLayout(il.compile([
+    "local function sink(spec)",
+    "  spec.byr = 0",
+    "end",
+    "function frame(t, f)",
+    "  sink({byr = 1, cram = {{0, 5}}})",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "pair-call.lua" }));
+  eq("a call-passed raster spec is three sites", pairCall.nslots, 3);
+  eq("their array caps are 0, 1 and 2",
+     pairCall.sites.map(function (s) { return s.cap; }), [0, 1, 2]);
+  check(pairCall.sites.every(function (s) { return s.escapes; }),
+        "the nested pair escapes with an outer passed to a call");
+
+  const pairRaster = ilbc.tableLayout(il.compile([
+    "function frame(t, f)",
+    "  raster(1, {byr = 1, cram = {{0, 5}}})",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "pair-raster.lua" }));
+  eq("a raster-consumed spec is three sites", pairRaster.nslots, 3);
+  check(pairRaster.sites.every(function (s) { return !s.escapes; }),
+        "the nested pair does not escape when its outer is a raster spec");
+
+  eq("tableLayout refuses a non-pce-il program",
+     refuseCode(function () { ilbc.tableLayout({ lang: "x" }); }),
+     "ilbc-program");
+}
+
+/* ---- #172: the version 2 container and the four table ops -------------- *
+ * A toy with a table instruction gets version 2: a 28-byte header with
+ * tabTabOff, a table section (u8 nslots, then per slot u16 base, u8 cap,
+ * u8 nfields), and the four opcodes 0x18..0x1B.  A string key is a field id
+ * (kind 1), never a value constant.  The exact bytes are pinned; STARFALL's
+ * section is checked against tableLayout; the refusals have their own toys;
+ * and the three committed ILVM dumps stay version 1 and byte-identical. */
+function encodeSource(source) {
+  return ilbc.encode(il.compile(source, { chunkName: "toy.lua" }));
+}
+
+function u16At(bytes, off) { return bytes[off] | (bytes[off + 1] << 8); }
+
+function checkTableEncoding() {
+  /* The small four-op toy and its exact container bytes.  The four ops in
+   * the code section:
+   *   18 02 00          table   dst r2, slot 0
+   *   19 02 01 02 03 04 setlist base r2, first 1, n 2, values k3 k4
+   *   1b 02 01 00 82    tset    base r2, key r1 (kind 0), value k2
+   *   1a 05 02 01 00    tget    dst r5, base r2, key r1 (kind 0) */
+  const toy = encodeSource([
+    "function frame(t, f)",
+    "  local a = {7, 8}",
+    "  a[f] = 9",
+    "  pal(1, a[f])",
+    "end",
+    ""
+  ].join("\n"));
+  eq("the four-op toy is container version 2", toy.version, 2);
+  eq("its version 2 header is 28 bytes", u16At(toy.bytes, 12), 28);
+  eq("the table section is nslots + 4 B",
+     Array.from(toy.bytes.slice(u16At(toy.bytes, 20), u16At(toy.bytes, 22))),
+     [1, 0, 0, 2, 0]);   /* 1 slot: base 0, cap 2, nfields 0 */
+  eq("the four-op toy's exact container bytes",
+     Buffer.from(toy.bytes).toString("hex"),
+     "494c42430200ff00ff0202041c00300034004800520057008000000057005f" +
+     "003000020001005f0080003200060201000200020000070000000008000000" +
+     "00090000000001000000056672616d650370616c0100000200070001040000" +
+     "09ff1802000103000104011902010203041b020100820104031a0502010014" +
+     "040509ff");
+  const code = Buffer.from(toy.bytes).slice(u16At(toy.bytes, 22),
+                                          u16At(toy.bytes, 24));
+  function at(op) { return code.indexOf(op); }
+  eq("table opcode and operands", Array.from(code.slice(at(0x18), at(0x18) + 3)),
+     [0x18, 0x02, 0x00]);
+  eq("setlist opcode and operands",
+     Array.from(code.slice(at(0x19), at(0x19) + 6)),
+     [0x19, 0x02, 0x01, 0x02, 0x03, 0x04]);
+  eq("tset opcode and operands",
+     Array.from(code.slice(at(0x1B), at(0x1B) + 5)),
+     [0x1B, 0x02, 0x01, 0x00, 0x82]);
+  eq("tget opcode and operands",
+     Array.from(code.slice(at(0x1A), at(0x1A) + 5)),
+     [0x1A, 0x05, 0x02, 0x01, 0x00]);
+
+  /* A string key is a field id (kind 1) and never a value constant. */
+  const fieldToy = encodeSource([
+    "function frame(t, f)",
+    "  local s = {x = f}",
+    "  pal(1, s.x)",
+    "end",
+    ""
+  ].join("\n"));
+  const fcode = Buffer.from(fieldToy.bytes).slice(u16At(fieldToy.bytes, 22),
+                                                 u16At(fieldToy.bytes, 24));
+  const ti = fcode.indexOf(0x1B);
+  eq("a string key encodes kind 1 and its field id",
+     Array.from(fcode.slice(ti, ti + 5)), [0x1B, 0x02, 0x00, 0x01, 0x01]);
+  const gi = fcode.indexOf(0x1A);
+  eq("a string read encodes kind 1 too",
+     Array.from(fcode.slice(gi, gi + 5)), [0x1A, 0x05, 0x02, 0x00, 0x01]);
+  check(Buffer.from(fieldToy.bytes).toString("latin1").indexOf("x") < 0,
+        "the string key `x` is not in the value constant pool");
+  eq("the field toy's table section has one field cell",
+     Array.from(fieldToy.bytes.slice(u16At(fieldToy.bytes, 20),
+                                     u16At(fieldToy.bytes, 22))),
+     [1, 0, 0, 0, 1]);
+
+  /* STARFALL's table section against tableLayout(): 44 slots, 172 cells, in
+   * site order.  STARFALL still cannot encode (sprite/pad/sfx are not
+   * carried), so the section is built directly by the encoder's own
+   * builder — the bytes encode() writes. */
+  const starProg = il.compile(
+    fs.readFileSync(path.join(ROOT, "toys/demo-game/main.lua"), "utf8"),
+    { chunkName: "main.lua" });
+  const starLayout = ilbc.tableLayout(starProg);
+  const starSection = ilbc.buildTableSection(starProg, starLayout);
+  eq("STARFALL's section declares 44 slots", starSection.bytes[0], 44);
+  eq("STARFALL's section is 1 + 4 x 44 bytes",
+     starSection.bytes.length, 1 + 4 * 44);
+  let packed = true, cells = 0;
+  for (let i = 0; i < starLayout.sites.length; i++) {
+    const s = starLayout.sites[i], at = 1 + 4 * i;
+    packed = packed &&
+      u16At(starSection.bytes, at) === s.base &&
+      starSection.bytes[at + 2] === s.cap &&
+      starSection.bytes[at + 3] === s.nfields &&
+      s.base === cells;
+    cells += s.nfields + s.cap;
+  }
+  check(packed, "STARFALL's slots carry tableLayout's base/cap/nfields in " +
+        "site order");
+  eq("STARFALL's section covers its 172 cells", cells, 172);
+  eq("the builder agrees with the layout", starSection.cells,
+     starLayout.cells);
+
+  /* Refusals on their own toys. */
+  eq("a constant key past the array is ilbc-table-ram", refuseCode(
+    function () {
+      ilbc.encode(il.compile(
+        "function frame(t, f)\n  local a = {1, 2}\n  a[9] = 1\nend\n",
+        { chunkName: "ram.lua" }));
+    }), "ilbc-table-ram");
+  eq("an escaping re-executing table is ilbc-table-escape", refuseCode(
+    function () {
+      ilbc.encode(il.compile([
+        "held = nil",
+        "function frame(t, f)",
+        "  local s = {x = f}",
+        "  held = s",
+        "end",
+        ""
+      ].join("\n"), { chunkName: "escape.lua" }));
+    }), "ilbc-table-escape");
+  eq("a table key that is not a string or int operand is ilbc-table-key",
+     refuseCode(function () {
+       const p = il.compile(
+         "function frame(t, f)\n  local a = {1, 2}\n  a[1] = 1\nend\n",
+         { chunkName: "key.lua" });
+       const fn = p.functions.filter(function (x) {
+         return x.code.some(function (i) { return i.t === "tset"; });
+       })[0];
+       fn.code.filter(function (i) { return i.t === "tset"; })[0].key =
+         { k: { t: "bool", v: true } };
+       ilbc.encode(p);
+     }), "ilbc-table-key");
+  const big = new Array(300).fill("0").join(", ");
+  eq("a table past 255 array cells is ilbc-range", refuseCode(function () {
+    ilbc.encode(il.compile(
+      "function frame(t, f)\n  local a = {" + big + "}\n  pal(1, a[1])\n" +
+      "end\n", { chunkName: "big.lua" }));
+  }), "ilbc-range");
+
+  /* The three committed ILVM dumps stay version 1 and byte-identical. */
+  for (const spec of [PALETTE, PARALLAX, STATUS]) {
+    const enc = encodeToy(spec.toy);
+    eq(spec.name + " stays container version 1", enc.version, 1);
+    const meta = JSON.parse(fs.readFileSync(
+      path.join(ROOT, "tests", "dumps", spec.name, "meta.json"), "utf8"));
+    const rom = romLib.buildToyRom({
+      bank0: fs.readFileSync(ILVM), bytecode: enc.bytes });
+    eq(spec.name + "'s ROM is still the committed one",
+       sha256(Buffer.from(rom)), meta.rom_sha256);
+  }
+}
+
 /* ---- 2. the browser glue ---------------------------------------------- */
+
 
 function checkRom() {
   const bank0 = fs.readFileSync(ILVM);
@@ -287,7 +593,147 @@ function checkRebuild() {
      sha256(committed));
 }
 
-/* ---- 4. the dumps ----------------------------------------------------- */
+/* ---- 4. the host harness: ilvm.c runs on this machine ----------------- */
+
+/* #173's fast red/green loop, no Mednafen and no llvm-mos: compile the
+ * console interpreter for the host with the system cc, run one tableless
+ * toy's container for eight frames, and diff all four artefacts against the
+ * browser IL run (renderer/pce-il.js).  The control mutation is repeatable
+ * here as it was in the session: operand() returning r[0] always must break
+ * the diff, or this check would only prove that two things fail alike. */
+const HOST_TOY = "toys/parallax.lua";
+const HOST_FRAMES = 8;
+const OPERAND_BODY =
+  "  if (o == 0xFF) return 0;\n" +
+  "  if (o < 0x80) return o < MAX_REGS ? r[o] : 0;\n" +
+  "  return kvals[o & 0x7F];";
+
+function bytesDiff(a, b) {
+  return Math.abs(a.length - b.length) + diff(a, b);
+}
+
+function buildHostvm(bin, ilvmSource) {
+  const r = spawnSync("cc", [
+    "-DILVM_HOST", "-O2", "-I", path.join(ROOT, "tools", "toyc"),
+    ilvmSource, path.join(ROOT, "tools", "ilvm", "hostvm.c"), "-o", bin
+  ], { cwd: ROOT, encoding: "utf8" });
+  if (r.status !== 0) {
+    const out = ((r.stderr || "") + (r.stdout || "")).trim().split("\n");
+    console.log("      cc: " + out.slice(-3).join(" | "));
+  }
+  return r.status === 0;
+}
+
+function checkHostParity() {
+  const probe = spawnSync("cc", ["--version"], { encoding: "utf8" });
+  if (probe.error) {
+    skipped.push("host parity (no system cc)");
+    console.log("SKIP  host parity: no system cc");
+    return;
+  }
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ilvm-host-"));
+  const toySource = fs.readFileSync(path.join(ROOT, HOST_TOY), "utf8");
+  const encoded = ilbc.encode(il.compile(toySource,
+    { chunkName: path.basename(HOST_TOY) }));
+  eq("host parity: " + HOST_TOY + " is a tableless version 1 container",
+     encoded.bytes[4], 1);
+  const container = path.join(tmp, "toy.ilbc");
+  fs.writeFileSync(container, Buffer.from(encoded.bytes));
+
+  /* The browser IL run: eight frames, then the state the toy's writes left
+   * (the same eight frame numbers hostvm is given). */
+  const rt = il.create(toySource);
+  rt.load();
+  let want = null;
+  for (let f = 0; f < HOST_FRAMES; f++) {
+    rt.frame(f);
+    want = { vram: rt.state.vram.slice(), cram: rt.state.cram.slice(),
+             sat: rt.state.sat.slice(),
+             regs: { BXR: rt.state.regs.BXR, BYR: rt.state.regs.BYR,
+                     CR: rt.state.regs.CR } };
+  }
+  const wantRegs = "BXR " + want.regs.BXR + "\nBYR " + want.regs.BYR +
+                   "\nCR " + want.regs.CR;
+  check(want.regs.BXR !== 0,
+        "host parity: the toy wrote BXR before frame " + HOST_FRAMES +
+        " (the diff is not zero against zero)");
+
+  const hostvm = path.join(tmp, "hostvm");
+  check(buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c")),
+        "host parity: the system cc builds ilvm.c with hostvm.c");
+  if (!fs.existsSync(hostvm)) return;
+
+  const runDir = path.join(tmp, "run");
+  fs.mkdirSync(runDir);
+  const run = spawnSync(hostvm, [container, runDir, String(HOST_FRAMES)],
+                        { encoding: "utf8" });
+  check(run.status === 0, "host parity: hostvm exits 0 (" +
+        ((run.stderr || "").trim().split("\n").slice(-1)[0] || "ok") + ")");
+  if (run.status !== 0) return;
+
+  const got = {
+    vram: fs.readFileSync(path.join(runDir, "vram.bin")),
+    cram: fs.readFileSync(path.join(runDir, "cram.bin")),
+    sat: fs.readFileSync(path.join(runDir, "sat.bin"))
+  };
+  const regs = fs.readFileSync(path.join(runDir, "regs.txt"), "utf8").trim();
+  eq("host parity: vram.bin is the browser IL run's after " + HOST_FRAMES +
+     " frames", bytesDiff(want.vram, got.vram), 0);
+  eq("host parity: cram.bin is the browser IL run's after " + HOST_FRAMES +
+     " frames", bytesDiff(want.cram, got.cram), 0);
+  eq("host parity: sat.bin is the browser IL run's after " + HOST_FRAMES +
+     " frames", bytesDiff(want.sat, got.sat), 0);
+  eq("host parity: regs.txt is the browser IL run's registers", regs,
+     wantRegs);
+
+  /* The control: operand() always returns r[0].  Built from a copy of
+   * ilvm.c in the scratch directory; the committed interpreter is untouched.
+   * If the text ever moves, this FAILS instead of quietly not mutating. */
+  const ilvmSource = fs.readFileSync(path.join(ROOT, "tools", "ilvm",
+                                               "ilvm.c"), "utf8");
+  check(ilvmSource.indexOf(OPERAND_BODY) >= 0,
+        "host parity: the control mutation's operand() is still where the " +
+        "check expects it");
+  if (ilvmSource.indexOf(OPERAND_BODY) < 0) return;
+  const mutantSource = path.join(tmp, "ilvm_mutant.c");
+  fs.writeFileSync(mutantSource, ilvmSource.replace(OPERAND_BODY,
+    "  if (o == 0xFF) return r[0];\n" +
+    "  if (o < 0x80) return r[0];\n" +
+    "  return r[0];"));
+  const mutant = path.join(tmp, "hostvm-mutant");
+  check(buildHostvm(mutant, mutantSource),
+        "host parity: the system cc builds the control mutation");
+  if (!fs.existsSync(mutant)) return;
+  const mutantDir = path.join(tmp, "mutant");
+  fs.mkdirSync(mutantDir);
+  const mrun = spawnSync(mutant, [container, mutantDir, String(HOST_FRAMES)],
+                         { encoding: "utf8" });
+  check(mrun.status === 0, "host parity: the control mutation exits 0");
+  if (mrun.status !== 0) return;
+  const brokenVram = bytesDiff(want.vram,
+    fs.readFileSync(path.join(mutantDir, "vram.bin")));
+  const brokenCram = bytesDiff(want.cram,
+    fs.readFileSync(path.join(mutantDir, "cram.bin")));
+  const brokenSat = bytesDiff(want.sat,
+    fs.readFileSync(path.join(mutantDir, "sat.bin")));
+  const mutantRegs = fs.readFileSync(path.join(mutantDir, "regs.txt"),
+                                     "utf8").trim();
+  const broken = brokenVram + brokenCram + brokenSat +
+                 (mutantRegs === wantRegs ? 0 : 1);
+  check(broken > 0, "host parity: the control mutation (operand always " +
+        "r[0]) breaks the artefacts (vram " + brokenVram + ", cram " +
+        brokenCram + ", sat " + brokenSat + ", regs " +
+        (mutantRegs === wantRegs ? "same" : "different") + ")");
+  if (broken > 0) {
+    notes.push("host parity: the control mutation differs by " + brokenVram +
+               " vram bytes, " + brokenCram + " cram bytes, " + brokenSat +
+               " sat bytes" + (mutantRegs === wantRegs ? "" :
+               " and its registers") + " after " + HOST_FRAMES + " frames");
+  }
+}
+
+/* ---- 5. the dumps ----------------------------------------------------- */
 
 function emitFresh(toy, outPce) {
   const r = spawnSync(process.execPath,
@@ -547,8 +993,11 @@ console.log("check-ilvm: #100 the IL as bytecode, interpreted");
 
 checkEncoder();
 checkArityRefusal();
+checkTableLayout();
+checkTableEncoding();
 checkRom();
 checkRebuild();
+checkHostParity();
 
 const paletteMax = 300;
 checkDump(PALETTE, paletteMax, 96);
