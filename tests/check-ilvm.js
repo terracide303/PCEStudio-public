@@ -25,6 +25,10 @@
  *      browser; its playfield is the known four-line phase, printed as a
  *      note rather than asserted away.  The raster hook is in the container
  *      and the TMA measured its calls.
+ *   6. #173: the host harness.  tools/ilvm/ilvm.c compiled with
+ *      tools/ilvm/hostvm.c by the system cc (SKIP without cc), run for
+ *      eight frames, and its vram/cram/sat/regs diffed against the browser
+ *      IL run.  A scratch control mutation of operand() must break it.
  *
  * Written by @design because the card names this evidence.  Per workshop
  * rule 2 a cold break by another seat and model is owed: the operand
@@ -33,7 +37,8 @@
  * its own targets: follow a site's value through a `move`, through a
  * table-typed global's every getglobal, containment taint (a pair stored in
  * a cram field), the setlist/constant-key/register-key capacity order, and
- * the chunk/init/back-edge repeat rule.
+ * the chunk/init/back-edge repeat rule.  #173's own target is the harness:
+ * its artefacts, its frame count and its control mutation.
  */
 "use strict";
 
@@ -588,7 +593,147 @@ function checkRebuild() {
      sha256(committed));
 }
 
-/* ---- 4. the dumps ----------------------------------------------------- */
+/* ---- 4. the host harness: ilvm.c runs on this machine ----------------- */
+
+/* #173's fast red/green loop, no Mednafen and no llvm-mos: compile the
+ * console interpreter for the host with the system cc, run one tableless
+ * toy's container for eight frames, and diff all four artefacts against the
+ * browser IL run (renderer/pce-il.js).  The control mutation is repeatable
+ * here as it was in the session: operand() returning r[0] always must break
+ * the diff, or this check would only prove that two things fail alike. */
+const HOST_TOY = "toys/parallax.lua";
+const HOST_FRAMES = 8;
+const OPERAND_BODY =
+  "  if (o == 0xFF) return 0;\n" +
+  "  if (o < 0x80) return o < MAX_REGS ? r[o] : 0;\n" +
+  "  return kvals[o & 0x7F];";
+
+function bytesDiff(a, b) {
+  return Math.abs(a.length - b.length) + diff(a, b);
+}
+
+function buildHostvm(bin, ilvmSource) {
+  const r = spawnSync("cc", [
+    "-DILVM_HOST", "-O2", "-I", path.join(ROOT, "tools", "toyc"),
+    ilvmSource, path.join(ROOT, "tools", "ilvm", "hostvm.c"), "-o", bin
+  ], { cwd: ROOT, encoding: "utf8" });
+  if (r.status !== 0) {
+    const out = ((r.stderr || "") + (r.stdout || "")).trim().split("\n");
+    console.log("      cc: " + out.slice(-3).join(" | "));
+  }
+  return r.status === 0;
+}
+
+function checkHostParity() {
+  const probe = spawnSync("cc", ["--version"], { encoding: "utf8" });
+  if (probe.error) {
+    skipped.push("host parity (no system cc)");
+    console.log("SKIP  host parity: no system cc");
+    return;
+  }
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ilvm-host-"));
+  const toySource = fs.readFileSync(path.join(ROOT, HOST_TOY), "utf8");
+  const encoded = ilbc.encode(il.compile(toySource,
+    { chunkName: path.basename(HOST_TOY) }));
+  eq("host parity: " + HOST_TOY + " is a tableless version 1 container",
+     encoded.bytes[4], 1);
+  const container = path.join(tmp, "toy.ilbc");
+  fs.writeFileSync(container, Buffer.from(encoded.bytes));
+
+  /* The browser IL run: eight frames, then the state the toy's writes left
+   * (the same eight frame numbers hostvm is given). */
+  const rt = il.create(toySource);
+  rt.load();
+  let want = null;
+  for (let f = 0; f < HOST_FRAMES; f++) {
+    rt.frame(f);
+    want = { vram: rt.state.vram.slice(), cram: rt.state.cram.slice(),
+             sat: rt.state.sat.slice(),
+             regs: { BXR: rt.state.regs.BXR, BYR: rt.state.regs.BYR,
+                     CR: rt.state.regs.CR } };
+  }
+  const wantRegs = "BXR " + want.regs.BXR + "\nBYR " + want.regs.BYR +
+                   "\nCR " + want.regs.CR;
+  check(want.regs.BXR !== 0,
+        "host parity: the toy wrote BXR before frame " + HOST_FRAMES +
+        " (the diff is not zero against zero)");
+
+  const hostvm = path.join(tmp, "hostvm");
+  check(buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c")),
+        "host parity: the system cc builds ilvm.c with hostvm.c");
+  if (!fs.existsSync(hostvm)) return;
+
+  const runDir = path.join(tmp, "run");
+  fs.mkdirSync(runDir);
+  const run = spawnSync(hostvm, [container, runDir, String(HOST_FRAMES)],
+                        { encoding: "utf8" });
+  check(run.status === 0, "host parity: hostvm exits 0 (" +
+        ((run.stderr || "").trim().split("\n").slice(-1)[0] || "ok") + ")");
+  if (run.status !== 0) return;
+
+  const got = {
+    vram: fs.readFileSync(path.join(runDir, "vram.bin")),
+    cram: fs.readFileSync(path.join(runDir, "cram.bin")),
+    sat: fs.readFileSync(path.join(runDir, "sat.bin"))
+  };
+  const regs = fs.readFileSync(path.join(runDir, "regs.txt"), "utf8").trim();
+  eq("host parity: vram.bin is the browser IL run's after " + HOST_FRAMES +
+     " frames", bytesDiff(want.vram, got.vram), 0);
+  eq("host parity: cram.bin is the browser IL run's after " + HOST_FRAMES +
+     " frames", bytesDiff(want.cram, got.cram), 0);
+  eq("host parity: sat.bin is the browser IL run's after " + HOST_FRAMES +
+     " frames", bytesDiff(want.sat, got.sat), 0);
+  eq("host parity: regs.txt is the browser IL run's registers", regs,
+     wantRegs);
+
+  /* The control: operand() always returns r[0].  Built from a copy of
+   * ilvm.c in the scratch directory; the committed interpreter is untouched.
+   * If the text ever moves, this FAILS instead of quietly not mutating. */
+  const ilvmSource = fs.readFileSync(path.join(ROOT, "tools", "ilvm",
+                                               "ilvm.c"), "utf8");
+  check(ilvmSource.indexOf(OPERAND_BODY) >= 0,
+        "host parity: the control mutation's operand() is still where the " +
+        "check expects it");
+  if (ilvmSource.indexOf(OPERAND_BODY) < 0) return;
+  const mutantSource = path.join(tmp, "ilvm_mutant.c");
+  fs.writeFileSync(mutantSource, ilvmSource.replace(OPERAND_BODY,
+    "  if (o == 0xFF) return r[0];\n" +
+    "  if (o < 0x80) return r[0];\n" +
+    "  return r[0];"));
+  const mutant = path.join(tmp, "hostvm-mutant");
+  check(buildHostvm(mutant, mutantSource),
+        "host parity: the system cc builds the control mutation");
+  if (!fs.existsSync(mutant)) return;
+  const mutantDir = path.join(tmp, "mutant");
+  fs.mkdirSync(mutantDir);
+  const mrun = spawnSync(mutant, [container, mutantDir, String(HOST_FRAMES)],
+                         { encoding: "utf8" });
+  check(mrun.status === 0, "host parity: the control mutation exits 0");
+  if (mrun.status !== 0) return;
+  const brokenVram = bytesDiff(want.vram,
+    fs.readFileSync(path.join(mutantDir, "vram.bin")));
+  const brokenCram = bytesDiff(want.cram,
+    fs.readFileSync(path.join(mutantDir, "cram.bin")));
+  const brokenSat = bytesDiff(want.sat,
+    fs.readFileSync(path.join(mutantDir, "sat.bin")));
+  const mutantRegs = fs.readFileSync(path.join(mutantDir, "regs.txt"),
+                                     "utf8").trim();
+  const broken = brokenVram + brokenCram + brokenSat +
+                 (mutantRegs === wantRegs ? 0 : 1);
+  check(broken > 0, "host parity: the control mutation (operand always " +
+        "r[0]) breaks the artefacts (vram " + brokenVram + ", cram " +
+        brokenCram + ", sat " + brokenSat + ", regs " +
+        (mutantRegs === wantRegs ? "same" : "different") + ")");
+  if (broken > 0) {
+    notes.push("host parity: the control mutation differs by " + brokenVram +
+               " vram bytes, " + brokenCram + " cram bytes, " + brokenSat +
+               " sat bytes" + (mutantRegs === wantRegs ? "" :
+               " and its registers") + " after " + HOST_FRAMES + " frames");
+  }
+}
+
+/* ---- 5. the dumps ----------------------------------------------------- */
 
 function emitFresh(toy, outPce) {
   const r = spawnSync(process.execPath,
@@ -852,6 +997,7 @@ checkTableLayout();
 checkTableEncoding();
 checkRom();
 checkRebuild();
+checkHostParity();
 
 const paletteMax = 300;
 checkDump(PALETTE, paletteMax, 96);
