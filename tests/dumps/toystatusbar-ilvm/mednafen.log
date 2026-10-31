@@ -5,31 +5,31 @@ Starting Mednafen 1.32.1
    Compiled against libiconv 11.1, running with libiconv 11.1
    Compiled against SDL 2.32.10(SDL-release-2.32.10-0-g5d2495703), running with SDL 2.32.72(SDL-2.32.72-no-vcs)
    Running with libFLAC 1.5.0
- Base directory: /Volumes/External II/agent-tmp/mdfn-home-toystatusbar-ilvm
+ Base directory: /Volumes/External/agent-tmp/mdfn-home-toystatusbar-ilvm
  Emulation modules: apple2 nes snes gb gba pce lynx md pcfx ngp psx ss ssfplay vb wswan sms gg sasplay snes_faust pce_fast demo cdplay
  Opening lockfile...
- Loading settings from "/Volumes/External II/agent-tmp/mdfn-home-toystatusbar-ilvm/mednafen.cfg"...
+ Loading settings from "/Volumes/External/agent-tmp/mdfn-home-toystatusbar-ilvm/mednafen.cfg"...
   Loaded 7904 valid settings and 0 unknown settings.
  Initializing joysticks...
  Loading "tools/gen/toystatusbar-ilvm.pce"...
   Applying IPS file "tools/gen/toystatusbar-ilvm.pce.ips"...
    Failed: Error opening file "tools/gen/toystatusbar-ilvm.pce.ips" for reading: No such file or directory
   Using module: pce(PC Engine (CD)/TurboGrafx 16 (CD)/SuperGrafx)
-   Loading override settings from "/Volumes/External II/agent-tmp/mdfn-home-toystatusbar-ilvm/pce.cfg"...
-    Failed: Error opening file "/Volumes/External II/agent-tmp/mdfn-home-toystatusbar-ilvm/pce.cfg" for reading: No such file or directory
-   Loading override settings from "/Volumes/External II/agent-tmp/mdfn-home-toystatusbar-ilvm/pgconfig/toystatusbar-ilvm.pce.cfg"...
-    Failed: Error opening file "/Volumes/External II/agent-tmp/mdfn-home-toystatusbar-ilvm/pgconfig/toystatusbar-ilvm.pce.cfg" for reading: No such file or directory
+   Loading override settings from "/Volumes/External/agent-tmp/mdfn-home-toystatusbar-ilvm/pce.cfg"...
+    Failed: Error opening file "/Volumes/External/agent-tmp/mdfn-home-toystatusbar-ilvm/pce.cfg" for reading: No such file or directory
+   Loading override settings from "/Volumes/External/agent-tmp/mdfn-home-toystatusbar-ilvm/pgconfig/toystatusbar-ilvm.pce.cfg"...
+    Failed: Error opening file "/Volumes/External/agent-tmp/mdfn-home-toystatusbar-ilvm/pgconfig/toystatusbar-ilvm.pce.cfg" for reading: No such file or directory
 
    ROM:       24KiB
-   ROM CRC32: 0xfd39bd0b
-   ROM MD5:   0xeb8e898ea796b745a2e5b6458935426e
+   ROM CRC32: 0xac87c81e
+   ROM MD5:   0x1108ee1b8beec7bd61f1ea06dc772fc5
    PSG Revision: HuC6280
 
-  Loading custom palette from "/Volumes/External II/agent-tmp/mdfn-home-toystatusbar-ilvm/palettes/pce.pal"...
-   Error: Error opening file "/Volumes/External II/agent-tmp/mdfn-home-toystatusbar-ilvm/palettes/pce.pal" for reading: No such file or directory
+  Loading custom palette from "/Volumes/External/agent-tmp/mdfn-home-toystatusbar-ilvm/palettes/pce.pal"...
+   Error: Error opening file "/Volumes/External/agent-tmp/mdfn-home-toystatusbar-ilvm/palettes/pce.pal" for reading: No such file or directory
 
-  Loading cheats from "/Volumes/External II/agent-tmp/mdfn-home-toystatusbar-ilvm/cheats/pce.cht"...
-   Error opening file "/Volumes/External II/agent-tmp/mdfn-home-toystatusbar-ilvm/cheats/pce.cht" for reading: No such file or directory
+  Loading cheats from "/Volumes/External/agent-tmp/mdfn-home-toystatusbar-ilvm/cheats/pce.cht"...
+   Error opening file "/Volumes/External/agent-tmp/mdfn-home-toystatusbar-ilvm/cheats/pce.cht" for reading: No such file or directory
 
  Initializing sound...
   Using "SDL" audio driver with SexyAL's default device selection.
@@ -40,7 +40,7 @@ Starting Mednafen 1.32.1
    Latency: 1792 sample frames(37.333333 ms)
    Period size: 256 sample frames(5.333333 ms)
 
- Starting QuickTime recording to file "/Volumes/External II/agent-tmp/toystatusbar-ilvm.mov":
+ Starting QuickTime recording to file "/Volumes/External/agent-tmp/toystatusbar-ilvm.mov":
   Video width: 1024
   Video height: 232
   Video codec: png
@@ -48,21 +48,13 @@ Starting Mednafen 1.32.1
   Sound channels: 2
 
  Initializing video...
-  Driver: OpenGL
-  Display Mode: 2560 x 1440 x 32 bpp @ 60Hz  (Window: 288 x 232)
-  Shader: none
+Reverting to soft SDL driver because window is not OpenGL-capable.
+  Driver: Software SDL
+  Display Mode: 1024 x 768 x 24 bpp @ 60Hz  (Window: 288 x 232)
   Fullscreen: No
   Special Scaler: None
   Scanlines: Off
   Destination Rectangle: X=0, Y=0, W=288, H=232
-  OpenGL Implementation: Apple Apple M1 2.1 Metal - 90.5
-  Checking extensions:
-   GL_ARB_texture_non_power_of_two found.
-   GL_ARB_sync found.
-  Using non-power-of-2 sized textures.
-  Checking maximum texture size...
-   Apparently it is at least: 16384 x 16384
-  Using GL_RGBA - GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV for texture source data.
  OwlResampler.cpp debug info:
   Phases: 115, Output rate: 47999.968199, 4288 115
   Desired maximum rate error: 0.0000009000, Actual rate error: 0.0000006625

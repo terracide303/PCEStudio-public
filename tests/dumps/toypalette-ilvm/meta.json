@@ -15,35 +15,38 @@
  },
  "capture": {
   "frames": 300,
-  "last_frame": "frame0736.png",
+  "last_frame": "frame0526.png",
   "measure": {
    "collect_sum_ticks_7bit": 0,
    "collections": 0,
-   "count": 220,
+   "count": 150,
    "cycles_per_collection": null,
-   "cycles_per_frame": 238987.63636363635,
+   "cycles_per_frame": 281381.5466666667,
    "cycles_per_raster_call": null,
    "flags": 0,
    "max_ticks": 255,
-   "mean_ticks": 233.38636363636363,
-   "min_ticks": 199,
+   "mean_ticks": 274.7866666666667,
+   "mean_update_lines": 620.5133333333333,
+   "min_ticks": 249,
+   "overruns": 150,
    "raster_calls": 0,
    "raster_max_ticks": 0,
    "raster_sum_ticks": 0,
-   "sum_ticks": 51345
+   "sum_ticks": 41218,
+   "updates": 150,
+   "worst_update_lines": 648
   },
   "slend": 234,
-  "slstart": 3,
-  "trimmed": "the last 300 movie frames (the display frames near the save)"
+  "slstart": 3
  },
  "ilvm": {
   "bytes": 16384,
-  "sha256": "723a65e2b945957d7fce0f111391e62a6e3f481cc5b73d18c8704ed56bd570e9"
+  "sha256": "635f0e726f90a91704f1fcc0c8f0cf449ecef6f576f47829ce0099c2d1e4d330"
  },
  "name": "toypalette-ilvm",
  "rom": "tools/gen/toypalette-ilvm.pce",
  "rom_bytes": 24576,
- "rom_sha256": "05560021d7e3ff4f83295f1084f051a527dd1f7477a975bfbea9e048c121b0a9",
+ "rom_sha256": "f45e5bb4b16f451a3a34267229338836e967cd348a8fd69d41f0a51d1a01a170",
  "source": "tools/toys/palette.lua",
  "source_sha256": "458df4060eb9111db60241a0e1fac6a8f193c21a1543fa3d69899d4e7d8c7204"
 }
