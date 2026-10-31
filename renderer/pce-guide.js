@@ -377,7 +377,7 @@ function guide() {
         "the history. Pass the whole updated NOTES.md as notes; with no " +
         "notes and none in the toy, the project gets the studio's template. " +
         "The person opens the file with Project… → Open. toy_save stays for " +
-        "the plain toy file, a project is what a later session resumes."),
+        "the plain toy file; a project is what a later session resumes."),
       p("No tools at all? Ignore this section. Sections 1 to 11 are the " +
         "paste-and-run route and work the same.")
     ]
