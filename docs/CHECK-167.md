@@ -281,3 +281,240 @@ The pristine tree afterwards: `PASS 1754 checks, 0 failed`.
   (`http://`, trailing slash, malformed), and overlapping calls. Those remain
   fixture blind spots, not something #179 claims.
 
+---
+
+# #167 closing cold read — the strengthened check, broken independently (2026-10-31)
+
+Card #167, in `[c]`. This is the second, different-seat break of
+`tests/check-studio.js` checkAgentPanel: the panel is #ds-pro's and the #179
+instruments are @design #opus's; this seat (`@test`, `deepseek-flash[1m]`) wrote
+neither. It pays the card's last gate — "Rule-2 cold read of
+`tests/check-studio.js` checkAgentPanel owed" — against the pushed `main`,
+`5394cc1`, in this seat's own worktree.
+
+Baseline, pristine, before any mutant:
+
+```
+node tests/check-studio.js
+PASS  1754 checks, ... (24450 ms)
+```
+
+## Method
+
+44 valid break-mutants, **one at a time**, each a single exact-string
+replacement in `renderer/studio-panel-agent.js` (the harness asserts the string
+occurs exactly once), each followed by the **full** `node tests/check-studio.js`
+— the same fake WebSocket, page path and 1754 checks — then the pristine file
+restored. After the series `git status --short` was empty and the pristine
+re-run was `PASS 1754`. The harness and raw results live under
+`$TMPDIR/check167-cold/`, outside the repository. One batch-1 replacement left
+a dangling line (a harness syntax error, not a mutation); it is excluded from
+the 44 and was re-run corrected.
+
+DETECTED means the suite exited non-zero **and** a `FAIL` line named a
+`#167:`/`#179:` check. GREEN means the suite passed with the break in place.
+
+## Result: 44 mutants — 36 DETECTED, 8 stayed green
+
+| # | break | result | what caught it |
+|---|-------|--------|----------------|
+| 1 | the not-switched-on branch is never taken | DETECTED | `#167: it says the agent link is not switched on yet` |
+| 2 | the off sentence no longer says "not switched on yet" | DETECTED | `#167: it says the agent link is not switched on yet` |
+| 3 | Connect reports live before the socket opens | DETECTED | `#167: Connect opens the socket (connecting)` |
+| 4 | `https` is not rewritten to `wss` | DETECTED | `#167: the socket is the relay's /ws/<token>` |
+| 5 | `hello` carries protocol version 2 | DETECTED | `#167: the tab sends hello with the protocol version` |
+| 6 | the minted token is uppercase | DETECTED | `#167: the token is 32 lowercase hex` |
+| 7 | the token is not written to `localStorage` | DETECTED | `#167: the token is kept in localStorage` |
+| 8 | the command names a different MCP path | DETECTED | `#167: the drawer shows the one command` |
+| 9 | `toy_write` installs nothing in the studio | DETECTED | `#167: the editor holds Claude's main.lua` |
+| 10 | `toy_run` draws one frame while the core ran N | DETECTED | `#179: the canvas is on the 12-frame run's last frame` |
+| 11 | the CONSOLE gets no run log lines | DETECTED | `#167: ... and its own log lines` |
+| 12 | the CONSOLE frame count is N+1 | DETECTED | `#167: the CONSOLE gets the run's frame count` |
+| 13 | `toy_run` is not mirrored at all | DETECTED | `#167: the run plays in the OUTPUT canvas` |
+| 14 | `toy_run` skips the person's edit re-prime | DETECTED | `#167: the person's edit is the text Claude's run used` |
+| 15 | the session is never re-primed after the first files | DETECTED | `#167: the person's edit is the text Claude's run used` |
+| 16 | `source_add` does not record a named source | DETECTED | `#167: source_add records the source in sources.json` |
+| 17 | `sourceEntry` always returns nothing | DETECTED | `#167: source_add records the source in sources.json` |
+| 18 | `validate` is not mirrored | DETECTED | `#167: validate's report reaches the CONSOLE CHECK block` |
+| 19 | a validate with findings is not mirrored | DETECTED | `#167: ... and its findings fill the CONSOLE CHECK block` |
+| 20 | the CHECK block always says ok | DETECTED | `#167: ... and its findings fill the CONSOLE CHECK block` |
+| 21 | `frame_png` seeks to frame 0 | DETECTED | `#167: the studio seeks to the frame Claude asked for` |
+| 22 | `frame_png` seeks but leaves the playhead running | **GREEN** | — |
+| 23 | a `taken` message does not set the taken flag | DETECTED | `#167: ... and this tab stays taken over` |
+| 24 | a `taken` message leaves the status live | DETECTED | `#167: a second tab takes the link over` |
+| 25 | the first backoff step is 3000 ms | DETECTED | `#167: ... after the first backoff step` |
+| 26 | the attempt counter never increments | DETECTED | `#179: control — two drops with no healthy open between go 1000, then 2000` |
+| 27 | a healthy open does not reset the backoff | DETECTED | `#179: a drop after a healthy open waits the first step (1000 ms)` |
+| 28 | a reload mints a new token instead of reading the stored one | DETECTED | `#167: the token survives a reload` |
+| 29 | New link keeps the old token | DETECTED | `#167: New link makes a different 32-hex token` |
+| 30 | New link does not reopen the socket | DETECTED | `#167: ... and reopens the socket with it` |
+| 31 | New link does not store the new token | DETECTED | `#167: ... and stores it` |
+| 32 | every FEED row is drawn as ok | DETECTED | `#167: the FEED marks it an error with its findings` |
+| 33 | every FEED row is drawn at 00:00:00 | **GREEN** | — |
+| 34 | the FEED draws no empty row before any call | DETECTED | `#179: control — before any call the FEED's one row is the empty one` |
+| 35 | Disconnect stops calling `closeSocket()` | DETECTED | `#179: Disconnect closes the socket` |
+| 36 | `onCopy` copies the empty line | DETECTED | `#179: Copy puts the command with this token on the clipboard` |
+| 37 | the FEED loop draws zero rows | DETECTED | `#179: the FEED draws one row per call` |
+| 38 | the FEED draws no time span | DETECTED | `#179: ... and a non-empty clock time` |
+| 39 | every FEED row shows the epoch time, not the call's | **GREEN** | — |
+| 40 | a sprite source is recorded with the wrong kind | **GREEN** | — |
+| 41 | a thrown call sends no error frame | **GREEN** | — |
+| 42 | the status dot never changes | **GREEN** | — |
+| 43 | validate's mirror never redraws the CONSOLE | **GREEN** | — (not a break: the following `studio.panels.refresh(true)` redraws it) |
+| 44 | calls are run without the queue's serialisation | **GREEN** | — (already a known gap — calls are always awaited) |
+
+## The card's pins and the five #179 controls are all caught
+
+Every pin the card names turns the suite red when broken: the off state (1–2),
+Connect/connecting and the socket URL (3–4), hello v1 (5), lowercase and stored
+token (6–7), the command (8), the `toy_write` mirror (9), `toy_run`'s canvas,
+frames and log (10–13), the person's edit re-prime (14–15), `source_add`'s
+named source (16–17), validate ok, with findings, and the CHECK block (18–20),
+`frame_png`'s seek (21), `taken` (23–24), the backoff's first
+step/escalation/reset (25–27), the token across a reload (28), New link's
+rotation/store/reopen (29–31), and the FEED's error and empty rows (32, 34).
+
+The five breaks that blocked #167 are each caught by a #179 check:
+
+| #167 break | #179 control, caught |
+|---|---|
+| **M1** Disconnect stops closing the socket | `#179: Disconnect closes the socket` (and the call-after-Disconnect check) |
+| **M2** Copy copies an empty line | `#179: Copy puts the command with this token on the clipboard` |
+| **M3** `toy_run` draws one frame for N | `#179: the canvas is on the 12-frame run's last frame` / the 24-frame pair |
+| **M4a** the FEED draws no rows | `#179: the FEED draws one row per call` |
+| **M4b** the FEED draws no time span | `#179: ... and a non-empty clock time` |
+| **M5** a healthy open does not reset the backoff | `#179: a drop after a healthy open waits the first step (1000 ms)` |
+
+The controls that keep those assertions honest were exercised too: the live
+pre-Disconnect call is answered, Copy after New link copies the new command,
+the one-frame run leaves the canvas on 0, the two drops with no healthy open go
+1000 then 2000, and the empty-row control holds before any call.
+
+## What the strengthened check still does not prove
+
+These breaks stayed green. None is a pin the card names; each is written down
+so the next reader knows what the green means.
+
+- **The FEED's time is a shape, not the call's clock.** `agent-time` is only
+  matched against `^\d{2}:\d{2}:\d{2}$`; every row drawn at `00:00:00` (row 33)
+  or at the epoch, `clockTime(0)` (row 39), passes. #179's stated bar was "a
+  non-empty clock time", which is met. A value check can inject a controllable
+  `Date` into the page and require the drawn time to equal the call's clock,
+  with a second call at a different injected minute so a constant fails.
+- **`frame_png`'s pause (row 22).** `mirrorFrame` pauses before seeking so the
+  still frame stays on the canvas; the check reads the seek target
+  (`currentFrame()` 5) but never `studio.render.isPlaying()`. A seek that
+  leaves the playhead running passes. The real API exposes `isPlaying()`, so a
+  check can start `play()` first and require it false after the call — the
+  precondition is what stops the assertion being vacuous.
+- **`source_add`'s kind and ranges (row 40).** The check reads the name in
+  `sources.json`/ASSETS; a sprites entry recorded as a wrong but valid kind
+  (`palette`) still lists by name. The kind drives the ASSETS preview/ranges,
+  which the check does not read.
+- **The status dot's class (row 42).** `agent-dot is-<status>` is never read;
+  only the status word is asserted. A dot stuck on one colour passes.
+- **The error frame (row 41) is unreachable in this fixture.**
+  `{"type":"error"}` is sent only from `runCall`'s catch, and no public tool
+  call makes the core throw — an unknown tool answers an `isError` result, not
+  a throw. The wire message is therefore untested; reaching it needs a
+  stubbed/absent core.
+- **Overlapping calls (row 44).** Already in the #179 list: every call is
+  awaited, so removing the queue's serialisation stays green.
+- **Unchanged from the #179 list:** the real relay and a real tab↔relay pair,
+  real two-tab takeover, the 25 s keepalive and the timers,
+  `export_pce`/`toy_save` downloads, real `navigator.clipboard`/`localStorage`,
+  `RELAY_URL` edge cases, and pixels.
+
+## Verdict
+
+The card's named pins and the five rule-2 breaks that blocked it are each
+caught by a named check, and nothing in the feature was changed by this seat.
+The gaps above are instrumentation limits outside the pins, recorded here
+rather than closed over; the two cheapest to close (the FEED's drawn time and
+`frame_png`'s pause) are named for whoever next touches this check. **#167 is
+closable on its stated evidence.**
+
+
+---
+
+# #182 — a parallel rule-2 re-read: twelve more breaks the strengthened check cannot see (2026-10-31)
+
+Card #167's rule-2 gate asked for a cold read of the strengthened
+`checkAgentPanel` (the #179 checks included). This is that read, by @test
+(test seat, `deepseek-v4-pro`) — a different session and model from the
+check's two builders (`#ds-pro`, `#opus`). **Verdict: the strengthened check
+still misses twelve breaks of the feature it guards.** They are routed to
+#182 (@review, one kind up from the test's builder). Nothing in the feature
+or the check was changed by this seat.
+
+A parallel @test re-read (deepseek-flash[1m], the section above) closed #167
+the same day on the card's named pins, mutating only the panel js. This read
+also broke the page's markup, the console panel and the config file. Three of
+the twelve breaks below overlap gaps that read independently wrote as not
+proven (the FEED's drawn time, frame_png's pause, source_add's kind); the
+other nine are in files it never mutated. All twelve stand on #182.
+
+Baseline: pushed `main` 043d9a7, this seat's own worktree —
+`node tests/check-studio.js` PASS 1754 checks. The five #179 checks are
+alive on this tree (the `runFrames(1)` mutant reds four #179 checks).
+
+## Method
+
+Same discipline as the first read: 21 breaks, one at a time, each a single
+exact-string replacement asserted to occur exactly once (harness under
+`$TMPDIR/agent-mut/`, outside the repo), the full 1754-check suite per
+mutant, the pristine source restored after each; `git status --short` empty
+at the end of the series. A mutant counts as DETECTED only when the suite
+exits non-zero **and names a `#167:`/`#179:` check** as failing.
+
+## Results: 21 breaks — 4 DETECTED, 17 green
+
+### Detected
+
+| # | Break | What caught it |
+|---|---|---|
+| C1 | hello carries version 2 | `#167: the tab sends hello with the protocol version` |
+| C2 | relay-config.js ships a non-empty RELAY_URL | `#167: with RELAY_URL empty the panel is not switched on` (+2 checks) |
+| C3 | FEED rows drawn newest-first | `#167: the FEED marks it an error with its findings` / `#179: the FEED's last drawn row is the error` |
+| C5 | the CHECK block stays hidden even with a report | `#167: ... and draws there` |
+
+### The twelve new blind spots (green)
+
+| # | Break (exact string, applied once) | Why green | What would catch it |
+|---|---|---|---|
+| C4 | `id="bottom-agent"` renamed in studio.html:1791 | the stub DOM's `get()` fabricates a `<div>` for any id the markup did not seed (check-studio.js `makeStubDom`), so the whole drawer renders into a phantom element and all 1754 checks pass | pin the drawer's markup from source (the #157 section's static-grep precedent): the id list seeded from studio.html must contain `bottom-agent` |
+| M8 | `id="console-log"` renamed (studio.html:1702) | the RUN LOG block is never DOM-read; only `con.runLog()`'s api data is asserted | after a toy_run, read `#console-log`'s text: RUN LOG, the frame count, the "42" line |
+| M9 | `host.appendChild(list);` removed from `drawCheck` | the findings report's DOM is never read — only the ok report is ("... and draws there") and `con.checkReport()` | after the findings validate, read `console-check`'s `con-check-row` for `validate-sprite-line` |
+| M4 | the FEED's `agent-time` drawn as `"00:00:00"` | the time check is the regex `^\d{2}:\d{2}:\d{2}$`, which a constant satisfies; only the first row's time is read at all | eq each drawn time against `clockTime(entry.at)` recomputed in the check from `api.feed()`; a later row at a different time is the control |
+| M14 | feed entries stamped `at: 0` | `clockTime(0)` is a valid `HH:MM:SS`, and the drawn time agrees with the (wrong) stamp | assert `entry.at` is within a few seconds of `Date.now()` (the sandbox's real clock) |
+| M1 | `hello` drops its `title` | the check asserts `hello.version === 1` only, though the protocol table (docs/AGENT-LINK.md) pins `{"type":"hello","version":1,"title":"..."}` | assert `hello.title === "PCEStudio studio"` |
+| M5 | `syncFromStudio` also skips `validate` | the re-prime is observable only through toy_run's reply (42→43); in the suite every other call follows a write whose `syncedKey` already matches | edit main.lua to the 17-sprite toy, then validate, and require the report to carry the edited toy's finding; control: the unedited toy validates clean |
+| M15 | `song_write` dropped from `mirror()`'s file branch | no song_write call exists in the suite, though a step list needs no binary data (unlike a .mid) | song_write a step list, assert the studio gains song.json and `music(0)` plays |
+| M16 | the taken state's Connect branch removed (`ready \|\| taken` → `ready`) | section 10 reads only the status word and `reconnectScheduled` | after taken, assert Connect and New link exist; press Connect, assert live, then a later drop is a plain disconnect |
+| M6 | `studio.render.pause();` removed from `mirrorFrame` | the seek is pinned (`currentFrame() === 5`), the pause is not | assert the render is paused after frame_png |
+| M7 | sourceEntry's `tiles` count becomes 0 | the ASSETS check reads only the name (`sources().some(name === "square")`); and the fixture's only source_add is kind sprites, so the bg/tilesheet/palette branches are dead code in the suite | drive a bg-kind source_add and eq the entry's ranges; eq the sprites entry's patterns count |
+| M13 | relay-config.js defines `RELAY_URX` | an absent constant still yields the off state (section 1 passes), and the test assigns `S.RELAY_URL` itself for everything else | assert `S.RELAY_URL === ""` right after page load, before the test assigns it (or a source grep) |
+
+### Verified, previously documented holes (green, expected)
+
+M2 (http: no longer rewritten to ws:), M3 (trailing slashes no longer
+stripped), M10 (the retry scheduled at 2× the computed delay), M11 (the call
+queue bypassed) and M12 (the keepalive pings with type "pong") all stayed
+green, exactly as the earlier reads' "cannot see" lists say they would. They
+are re-confirmed by execution here, not new findings; #182 may close any of
+them (the two RELAY_URL edge cases are one fixture line each) or leave them
+"not proven".
+
+## What even #182's checks will not be able to see
+
+- **The stub-DOM fabrication is structural.** Any element's absence from
+  studio.html is invisible to every DOM assertion in this suite until ids
+  are pinned from source; pinning only `bottom-agent` leaves `console-log`,
+  `console-check` and every other block the same hole in kind.
+- Everything the earlier lists still carry: the real relay and two real
+  tabs, the real clipboard and its denial path, the keepalive/retry timers
+  (the stub's `setTimeout` never fires), pixels, `export_pce`/`toy_save`
+  downloads, overlapping calls.
+- `Date` is the sandbox's real clock, so a time can be checked only against
+  "now" or against the entry's own `at` — a panel that stamps a wrong `at`
+  and draws it faithfully is caught only by the freshness assertion above.
