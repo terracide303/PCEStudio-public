@@ -1,0 +1,807 @@
+#!/usr/bin/env node
+/*
+ * tests/check-nova-tide.js — the #164 evidence for toys/nova-tide.
+ *
+ *   node tests/check-nova-tide.js
+ *
+ * WHAT IT RUNS: the game through the host — renderer/pce-toys.js over
+ * Fengari — and through the IL runtime (renderer/pce-il.js) alongside it,
+ * every frame of every run.  Every frame must agree exactly: vram, cram,
+ * sat, the four register values, the raster table and the pixels.  The
+ * toy's asset files (tiles, palettes, sprites) ride along, as the studio
+ * carries them.
+ *
+ * WHAT IT PROVES, in the SAT and the BAT rather than the toy's words:
+ *
+ *   - IT PLAYS, THE TOUR: one 720-frame scripted pad flies the ship with
+ *     I/J/K/L — right 60 frames, up 50, left 60, down 50, each leg read
+ *     off the SAT — then parks at the bottom.  Three drone rams take the
+ *     lives 3 -> 2 -> 1 -> 0 (frames 87, 351, 538), the ship blinks
+ *     through its 120-frame shield after a hit, the GAME OVER text lands
+ *     in the BAT (cells 14..22, the toy's own glyphs), and P (Run) held
+ *     after the overt pause restarts the game: score 000000, stage 1,
+ *     three lives, and the first wave flying in — play has resumed.
+ *     Game over and the restart are the paths a person cannot drive by
+ *     hand in Browse; the scripted pad drives them here.
+ *   - IT SHOOTS: a second run parks the ship in the wave band at SAT y 140
+ *     and holds N: a bolt sits in the SAT flying right six pixels a frame,
+ *     and the score's BAT digits rise 0 -> 100 -> 200 as drones die (a
+ *     bolt that kills is a visible explosion, too).
+ *   - THE BOSS PATH: a derived source — stage_t starts at 2660, the one
+ *     change — skips the wait.  An autopilot pad, a function of the frame
+ *     and the boss's own SAT position, holds the ship on the fish's y.
+ *     The test watches the whole fight: the fish swims in, its bar drains
+ *     from 6 full cells to 1 as 40 hits land (score 2000), it dies in the
+ *     explosion blink, stage 2 and the score +5000 in one frame, and the
+ *     waves resume.  A boss kill is the other path a person cannot drive
+ *     by hand in Browse.
+ *   - CLEAN: no runtime error, every Lua frame inside the #30 budget, and
+ *     the #50 sprite budget on every line (16 strips, no overflow).  The
+ *     CC condition is the game's own collisions — a drone's 16x16 box over
+ *     the ship's — checked on every CC frame rather than hidden.
+ *   - VISIBLE: frame 599 is a picture, not the backdrop, and the SPRITES
+ *     draw the frozen enemies — the same frame with an empty SAT loses
+ *     them.  The check's own control is the empty SAT: the same threshold
+ *     rejects it (0 px), so "sprites off" cannot pass this test.
+ *   - THE VALIDATOR: renderer/pce-validate.js accepts the toy (ok),
+ *     frame() fits one 60 Hz frame, VRAM fits 32,768 words and no sprite
+ *     line overflows.
+ *   - THE ART IS NAMED SOURCES (card #156): toys/nova-tide/sources.json
+ *     names "sea" (the picture) and "ships" (the sheet), and the studio's
+ *     own model (renderer/pce-assets.js) places both inside the toy's
+ *     VRAM — the sea's tiles at word 1024, the ships' patterns at the
+ *     toy's own PAT 51.
+ *
+ * WHAT IT DOES NOT PROVE, and says so in a NOTE when it runs: the console
+ * Export path currently refuses the toy — renderer/pce-ilbc.js has no
+ * bytecode form for `table`, which is how NOVA TIDE keeps its bolts,
+ * enemies, explosions and state — so the toy is browser-only for now, as
+ * toys/nova-tide/README.md says.  Also per workshop rule 2 a cold break by
+ * another seat is owed before this closes the card.
+ */
+"use strict";
+
+const fs = require("fs");
+const path = require("path");
+const zlib = require("zlib");
+
+const ROOT = path.resolve(__dirname, "..");
+const toys = require(path.join(ROOT, "renderer", "pce-toys.js"));
+const il = require(path.join(ROOT, "renderer", "pce-il.js"));
+const sprites = require(path.join(ROOT, "renderer", "pce-sprites.js"));
+const validate = require(path.join(ROOT, "renderer", "pce-validate.js"));
+const ilbc = require(path.join(ROOT, "renderer", "pce-ilbc.js"));
+const assets = require(path.join(ROOT, "renderer", "pce-assets.js"));
+
+const TOY = path.join(ROOT, "toys", "nova-tide", "main.lua");
+const DIR = path.join(ROOT, "toys", "nova-tide");
+const DUMPS = path.join(__dirname, "dumps", "nova-tide");
+const FRAMES = 720;                 /* the tour, the game over, the restart */
+const PNG_FRAME = 599;
+const LUA_BUDGET_MS = 100;          /* renderer/pce-toys.js DEFAULT_BUDGET_MS */
+
+/* The toy's asset files, as the studio carries them. */
+const FILES = ["main.lua", "tiles.json", "palettes.json", "sprites.json"]
+  .map((name) => ({ name: name,
+    source: fs.readFileSync(path.join(DIR, name), "utf8") }));
+
+/* The toy's own constants (toys/nova-tide/main.lua). */
+const GB = 0x120;                   /* the first HUD glyph character */
+const PAT = 51;                     /* the first sprite pattern's VRAM cell */
+
+/* SAT slots, from main.lua's own comment: 0 the ship, 1..8 its bolts,
+ * 9..18 the enemies' orbs, 19..26 the enemies, 27..32 the explosions,
+ * 33 the capsule, 34..37 the boss, 38..40 the lives. */
+const SLOT_SHIP = 0;
+const SLOT_BOLT = 1;
+const SLOT_ENEMIES = 19;
+const SLOT_BOOMS = 27;
+const SLOT_BOSS = 34;
+const SLOT_LIVES = 38;
+
+/* Patterns in the sheet (main.lua's locals, after PAT). */
+const P_BOLT = 2;
+const P_BOOM = 8;                   /* P_BOOM, P_BOOM + 1, P_BOOM + 2 */
+const P_BOSS = 11;                  /* P_BOSS .. P_BOSS + 3 */
+
+let checks = 0;
+const failures = [];
+function check(ok, name) {
+  checks++;
+  if (!ok) { failures.push(name); console.log("FAIL  " + name); }
+}
+function eq(name, got, want) {
+  check(JSON.stringify(got) === JSON.stringify(want),
+        name + " (got " + JSON.stringify(got) + ", want " +
+        JSON.stringify(want) + ")");
+}
+function note(text) { console.log("NOTE  " + text); }
+
+/* ---- the SAT and BAT readers -------------------------------------------- *
+ * HuC6270 manual 2.4: each entry is four little-endian words — Y, X, the
+ * pattern code (stored shifted left one) and the attribute.  The BAT word
+ * at (row, col) is bytes (row*32+col)*2..+1 of the VRAM dump. */
+function satWord(state, slot, k) {
+  return state.sat[slot * 8 + k * 2] | (state.sat[slot * 8 + k * 2 + 1] << 8);
+}
+function spriteY(state, slot) { return satWord(state, slot, 0); }
+function spriteX(state, slot) { return satWord(state, slot, 1); }
+function spritePattern(state, slot) { return satWord(state, slot, 2) >> 1; }
+function visible(state, slot) { return spriteY(state, slot) !== 0; }
+function batCell(vram, row, col) {
+  return vram[(row * 32 + col) * 2] | (vram[(row * 32 + col) * 2 + 1] << 8);
+}
+
+/* The lives are SAT slots 38..40, one drawn per life (up to three). */
+function lives(state) {
+  let n = 0;
+  for (let k = 0; k < 3; k++) if (visible(state, SLOT_LIVES + k)) n++;
+  return n;
+}
+
+/* The score's digits are BAT cells 7..12, the toy's own glyphs (GB + 0..9). */
+function scoreValue(state) {
+  let v = 0, ok = true;
+  for (let c = 7; c <= 12; c++) {
+    const g = (batCell(state.vram, 0, c) & 0x3ff) - GB;
+    if (g < 0 || g > 9) ok = false; else v = v * 10 + g;
+  }
+  return { v: v, ok: ok };
+}
+
+/* The stage digit is cell 17; the GAME OVER text covers cells 14..22 with
+ * the toy's letters: G A M E blank O V E R (glyphs 15,16,17,14,20,12,18,14,13). */
+function stageGlyph(state) { return batCell(state.vram, 0, 17) & 0x3ff; }
+const GAME_OVER_GLYPHS = [15, 16, 17, 14, 20, 12, 18, 14, 13];
+function gameOverGlyphs(state) {
+  const out = [];
+  for (let c = 14; c <= 22; c++) out.push((batCell(state.vram, 0, c) & 0x3ff) - GB);
+  return out;
+}
+
+/* The boss's bar is six cells of BAT row 1 (cols 19..24): GB+21 while the
+ * hit points cover the cell, GB+22 once they do not. */
+function bossBar(state) {
+  let full = 0, empty = 0;
+  for (let k = 0; k < 6; k++) {
+    const w = batCell(state.vram, 1, 19 + k) & 0x3ff;
+    if (w === GB + 21) full++;
+    else if (w === GB + 22) empty++;
+  }
+  return { full: full, empty: empty };
+}
+
+function enemyCount(state) {
+  let n = 0;
+  for (let s = SLOT_ENEMIES; s < SLOT_ENEMIES + 8; s++)
+    if (visible(state, s)) n++;
+  return n;
+}
+
+/* An enemy whose 16x16 box overlaps the ship's, in SAT coordinates: what
+ * the VDC's CC condition sees on the line, and the game's own ram check. */
+function enemyOverShip(state) {
+  if (!visible(state, SLOT_SHIP)) return [];
+  const sx = spriteX(state, SLOT_SHIP), sy = spriteY(state, SLOT_SHIP);
+  const out = [];
+  for (let s = SLOT_ENEMIES; s < SLOT_ENEMIES + 8; s++) {
+    if (!visible(state, s)) continue;
+    if (Math.abs(spriteX(state, s) - sx) < 16 &&
+        Math.abs(spriteY(state, s) - sy) < 16)
+      out.push({ slot: s, pattern: spritePattern(state, s) });
+  }
+  return out;
+}
+
+function bossSlots(state) {
+  const patterns = [];
+  let vis = false;
+  for (let s = SLOT_BOSS; s < SLOT_BOSS + 4; s++) {
+    if (visible(state, s)) { vis = true; patterns.push(spritePattern(state, s)); }
+    else patterns.push(null);
+  }
+  return { vis: vis, patterns: patterns };
+}
+
+function boomCount(state) {
+  let n = 0;
+  for (let s = SLOT_BOOMS; s < SLOT_BOOMS + 6; s++) {
+    if (!visible(state, s)) continue;
+    const p = spritePattern(state, s) - PAT;
+    if (p >= P_BOOM && p <= P_BOOM + 2) n++;
+  }
+  return n;
+}
+
+/* ---- pixels ------------------------------------------------------------- */
+
+function cramWord(cram, i) { return cram[i * 2] | (cram[i * 2 + 1] << 8); }
+function cramRgb(cram, i) {
+  const w = cramWord(cram, i);
+  return [(w >> 3 & 7) * 36, (w >> 6 & 7) * 36, (w & 7) * 36];
+}
+
+/* The picture in a box, measured against ITS OWN most common colour: the
+ * backdrop is CRAM[0]'s sky, and a frame that is only sky is flat. */
+function pictureIn(pixels, width, height, box) {
+  const counts = new Map();
+  let n = 0;
+  for (let y = box[1]; y < box[3] && y < height; y++) {
+    for (let x = box[0]; x < box[2] && x < width; x++) {
+      const i = (y * width + x) * 3;
+      const key = (pixels[i] << 16) | (pixels[i + 1] << 8) |
+                  pixels[i + 2];
+      counts.set(key, (counts.get(key) || 0) + 1);
+      n++;
+    }
+  }
+  let modal = 0;
+  for (const c of counts.values()) if (c > modal) modal = c;
+  return { area: n, modal: modal, notModal: n - modal, distinct: counts.size };
+}
+
+/* The same frame with an empty SAT: what the sprites add, measured.  The
+ * background cannot fake this — it is the same VRAM and CRAM both times. */
+function spriteInk(frame, options) {
+  const opts = Object.assign({}, options,
+                             { raster: (frame && frame.raster) || undefined });
+  const withSprites = sprites.renderFrame(opts);
+  const without = sprites.renderFrame(Object.assign({}, opts,
+    { sat: new Uint8Array(opts.sat.length) }));
+  let n = 0;
+  for (let i = 0; i < withSprites.pixels.length; i++)
+    if (withSprites.pixels[i] !== without.pixels[i]) n++;
+  return n;
+}
+
+/* The visibility assertion as a function, so the control below exercises the
+ * same comparison the picture check uses (#90/#106): a frame passes when its
+ * sprites draw at least MIN_SPRITE pixels.  With the SAT emptied it draws 0,
+ * and that must fail — otherwise "the sprites are visible" is not tested. */
+const MIN_SPRITE = 100;
+function spriteVisible(n) { return n >= MIN_SPRITE; }
+
+/* ---- the scripted pads -------------------------------------------------- */
+
+/* The tour the card names: I/J/K/L fly the ship right, up, left, down; the
+ * idle park lets three waves ram it; P (Run) restarts after the game over.
+ * It runs in both runtimes, so the two runs are the same game. */
+function tourPad(f) {
+  if (f < 60) return { right: true };
+  if (f < 110) return { up: true };
+  if (f < 170) return { left: true };
+  if (f < 220) return { down: true };
+  if (f >= 630 && f < 700) return { run: true };
+  return {};
+}
+
+/* Parked firing: down to the wave band at SAT y 140 (screen y 76), then
+ * hold N — a bolt every eight frames, drones die, the score rises. */
+function firePad(f) {
+  if (f < 14) return { down: true };
+  return { i: true };
+}
+
+/* ---- the run ------------------------------------------------------------ */
+
+/* Both runtimes, frame for frame.  `keep` is the frames whose pixels are
+ * copied out for the dump and the visibility check.  `opts.after` gets the
+ * Lua runtime's state each frame, for pads that aim at the game. */
+function playTogether(padFn, frames, keep, opts) {
+  const o = opts || {};
+  const source = o.source || fs.readFileSync(TOY, "utf8");
+  const a = toys.create(source, { budgetMs: 250, files: FILES });
+  const b = il.create(source, { budgetMs: 250, files: FILES });
+  a.load();
+  b.load();
+  check(a.initialized === true, "the Lua runtime loaded");
+  check(b.initialized === true, "the IL runtime loaded");
+  check(!!b.program && b.program.lang === "pce-il",
+        "the IL runtime carries a pce-il program, not the Lua one");
+  eq("both runtimes agree on the raster form",
+     b.callbackRaster, a.callbackRaster);
+
+  const diffs = [];
+  const records = [];
+  const kept = new Map();
+  const ccFrames = [];
+  let worstMs = 0, worstFrame = -1, maxStrips = 0, overflowLines = 0;
+  let lastState = null;
+
+  for (let f = 0; f < frames; f++) {
+    const p = padFn(f);
+    a.setPad(1, p);
+    b.setPad(1, p);
+    const t0 = Date.now();
+    const ga = a.frame(f);
+    const ms = Date.now() - t0;
+    if (ms > worstMs) { worstMs = ms; worstFrame = f; }
+    const gb = b.frame(f);
+
+    for (const k of ["vram", "cram", "sat"]) {
+      if (!Buffer.from(ga.state[k]).equals(Buffer.from(gb.state[k])))
+        diffs.push(k + " @" + f);
+    }
+    if (!Buffer.from(ga.pixels).equals(Buffer.from(gb.pixels)))
+      diffs.push("pixels @" + f);
+    if (JSON.stringify(ga.state.regs) !== JSON.stringify(gb.state.regs))
+      diffs.push("regs @" + f);
+    if (JSON.stringify(ga.raster) !== JSON.stringify(gb.raster))
+      diffs.push("raster @" + f);
+
+    /* #50's sprite budget, from the model's own SAT search on this frame */
+    const st = sprites.status(Object.assign({}, a.options(),
+      { raster: ga.raster || undefined }));
+    let cc = false;
+    for (const line of st.lines) {
+      if (line.strips > maxStrips) maxStrips = line.strips;
+      if (line.OR) overflowLines++;
+      if (line.CC) cc = true;
+    }
+    if (cc) ccFrames.push(f);
+
+    records.push({
+      f: f,
+      shipVis: visible(ga.state, SLOT_SHIP),
+      shipY: visible(ga.state, SLOT_SHIP) ? spriteY(ga.state, SLOT_SHIP) : null,
+      shipX: visible(ga.state, SLOT_SHIP) ? spriteX(ga.state, SLOT_SHIP) : null,
+      boltX: visible(ga.state, SLOT_BOLT) ? spriteX(ga.state, SLOT_BOLT) : null,
+      boltY: visible(ga.state, SLOT_BOLT) ? spriteY(ga.state, SLOT_BOLT) : null,
+      boltPat: visible(ga.state, SLOT_BOLT) ? spritePattern(ga.state, SLOT_BOLT) : null,
+      lives: lives(ga.state),
+      score: scoreValue(ga.state),
+      stageG: stageGlyph(ga.state),
+      over: gameOverGlyphs(ga.state),
+      bar: bossBar(ga.state),
+      enemies: enemyCount(ga.state),
+      boss: bossSlots(ga.state),
+      booms: boomCount(ga.state),
+      overlap: enemyOverShip(ga.state)
+    });
+    if (o.after) o.after(ga.state, f);
+    if (keep && keep.includes(f)) kept.set(f, Uint8Array.from(ga.pixels));
+    lastState = {
+      vram: Uint8Array.from(ga.state.vram),
+      cram: Uint8Array.from(ga.state.cram),
+      sat: Uint8Array.from(ga.state.sat)
+    };
+  }
+
+  const counted = { lua: a.frameCount, il: b.frameCount };
+  const options = a.options();
+  const state = lastState;
+  a.dispose();
+  b.dispose();
+  return { diffs, records, kept, counted, worstMs, worstFrame, maxStrips,
+           overflowLines, ccFrames, options, state };
+}
+
+/* The checks every full run shares. */
+function checkClean(run, frames, name) {
+  eq("Lua == IL: frame-by-frame differences over " + frames + " frames (" +
+     name + ")", run.diffs.slice(0, 8), []);
+  eq("both runtimes ran every frame (" + name + ")",
+     [run.counted.lua, run.counted.il], [frames - 1, frames - 1]);
+  check(run.worstMs < LUA_BUDGET_MS,
+        "the worst Lua frame (" + run.worstMs + " ms at frame " +
+        run.worstFrame + ", " + name + ") is inside the #30 budget of " +
+        LUA_BUDGET_MS + " ms");
+  check(run.maxStrips <= 16, "no line asks for more than 16 sprite strips " +
+        "(#50), most seen (" + name + "): " + run.maxStrips);
+  check(run.overflowLines === 0, "no sprite overflow (OR) on any line (" +
+        name + ")");
+}
+
+/* ---- the play evidence -------------------------------------------------- */
+
+function checkPlay() {
+  const run = playTogether(tourPad, FRAMES, [0, 60, 110, 170, 220, 87, 88, 91,
+    351, 538, 539, 600, 629, 630, 631, 700, PNG_FRAME]);
+  const rec = run.records;
+  checkClean(run, FRAMES, "the tour");
+
+  /* NOVA TIDE is a game: the ship is SAT slot 0 and the drones that ram it
+   * are other sprites, so the CC condition is EXPECTED on those frames.
+   * What must hold is that every CC frame is the game's own hit — a
+   * drone's 16x16 box over the ship's — and not a stray sprite. */
+  const strayCC = run.ccFrames.filter((f) => !rec[f].overlap.length);
+  eq("every sprite-0 collision is a drone over the ship, not a stray " +
+     "sprite", strayCC.slice(0, 8), []);
+  check(run.ccFrames.length > 0,
+        "the model saw the game's collisions (CC on " + run.ccFrames.length +
+        " frame(s))");
+
+  /* I/J/K/L fly the ship: each leg of the tour read off the SAT (the
+   * screen position plus the 32/64 the SAT adds). */
+  eq("the ship starts at (24, 104) on the SAT (y/x)",
+     [rec[0].shipY, rec[0].shipX], [168, 56]);
+  eq("right 60 puts it at (144, 104)",
+     [rec[60].shipY, rec[60].shipX], [168, 176]);
+  eq("up 50 puts it at the top clamp (144, 18)",
+     [rec[110].shipY, rec[110].shipX], [82, 176]);
+  eq("left 60 puts it back to (24, 18)",
+     [rec[170].shipY, rec[170].shipX], [82, 56]);
+  eq("down 50 parks it at (24, 118)",
+     [rec[220].shipY, rec[220].shipX], [182, 56]);
+
+  /* a hit costs a life: three drone rams at the tour's own frames */
+  eq("three lives at the start", rec[0].lives, 3);
+  eq("the first drone ram costs a life at frame 87",
+     [rec[86].lives, rec[87].lives], [3, 2]);
+  eq("the second at frame 351", [rec[350].lives, rec[351].lives], [2, 1]);
+  eq("the third at frame 538", [rec[537].lives, rec[538].lives], [1, 0]);
+
+  /* and the ship blinks through its 120-frame shield after the hit: hidden
+   * on the first frames, shown again, both states through the shield */
+  check(!rec[88].shipVis, "the ship blinks off the frame after the hit");
+  check(rec[91].shipVis, "… and blinks back on");
+  let hidden = 0;
+  for (let f = 88; f <= 206; f++) if (!rec[f].shipVis) hidden++;
+  check(hidden >= 15, "the blink covers the shield (" + hidden +
+        " hidden frames of 88..206)");
+
+  /* game over after the third hit: the toy's own letters in the BAT, the
+   * E over the stage digit, the ship and the lives gone from the SAT */
+  eq("the GAME OVER text is the toy's glyphs in cells 14..22 at frame 539",
+     rec[539].over, GAME_OVER_GLYPHS);
+  eq("the E sits over the stage digit (cell 17)", rec[539].stageG, GB + 14);
+  check(!rec[600].shipVis, "the ship is off the SAT at game over");
+  eq("no lives icons at game over", rec[600].lives, 0);
+  eq("the score still reads 000000 at game over",
+     [rec[600].score.v, rec[600].score.ok], [0, true]);
+
+  /* P restarts: held from frame 630, past the game's own overt pause.  The
+   * state is back to play: score 000000, stage 1, three lives, the ship at
+   * the start — and the first wave flying in proves play has resumed. */
+  eq("the game over screen is still up at frame 629",
+     rec[629].over, GAME_OVER_GLYPHS);
+  check(rec[630].shipVis, "P restarts: the ship is back on the SAT");
+  check(!rec[631].shipVis,
+        "… blinking through the new game's own entry shield");
+  eq("the restart clears the score", [rec[630].score.v, rec[630].score.ok],
+     [0, true]);
+  eq("the restart is stage 1 again", rec[630].stageG, GB + 1);
+  eq("three lives again", rec[630].lives, 3);
+  eq("at frame 700 the ship is back at the start, drawn",
+     [rec[700].shipY, rec[700].shipX, rec[700].shipVis], [168, 56, true]);
+  eq("the first wave is flying in (5 drones at frame 700)",
+     rec[700].enemies, 5);
+  eq("the score is still 000000", [rec[700].score.v, rec[700].score.ok],
+     [0, true]);
+
+  /* VISIBLE: frame 599 is a picture, and the sprites are what makes the
+   * frozen enemies show.  The control is the same frame with an empty SAT
+   * (0 px). */
+  const frame = run.kept.get(PNG_FRAME);
+  const whole = pictureIn(frame, 256, 224, [0, 0, 256, 224]);
+  check(whole.distinct >= 5,
+        "VISIBILITY: frame " + PNG_FRAME + " holds " + whole.distinct +
+        " colours (at least 5)");
+  check(whole.notModal >= 3000,
+        "VISIBILITY: the sea bands and the HUD draw " + whole.notModal +
+        " pixels that are not the backdrop (at least 3000)");
+  const ink = spriteInk(frame, run.options);
+  check(spriteVisible(ink),
+        "VISIBILITY: the sprites draw " + ink + " pixels frame " +
+        PNG_FRAME + " shows (at least " + MIN_SPRITE + ")");
+  check(MIN_SPRITE > 0 && !spriteVisible(0),
+        "VISIBILITY control: the same threshold rejects a frame with sprites " +
+        "off (0 px)");
+  check(!spriteVisible(MIN_SPRITE - 1),
+        "VISIBILITY control: one pixel short of the threshold fails (" +
+        (MIN_SPRITE - 1) + " of " + MIN_SPRITE + ")");
+
+  console.log("  play: " + FRAMES + " frames, three drone rams (87, 351, 538), " +
+              "GAME OVER, P restarts; " + ink + " sprite pixels at frame " +
+              PNG_FRAME);
+  return { kept: run.kept, frame: frame };
+}
+
+/* ---- the shooting evidence --------------------------------------------- */
+
+function checkShooting() {
+  const run = playTogether(firePad, 240, [15, 30]);
+  const rec = run.records;
+  checkClean(run, 240, "parked firing");
+
+  /* the ship parks in the band (screen y 76, the SAT's 140) and stays */
+  eq("the ship parks at SAT y 140", rec[30].shipY, 140);
+  eq("… and stays there", rec[239].shipY, 140);
+
+  /* N puts a bolt in the SAT flying right: fired at frame 14 from the
+   * ship's nose (px + 14), six pixels a frame, the sheet's P_BOLT */
+  check(rec[15].boltX !== null, "a bolt is in the SAT the frame after N");
+  eq("the bolt's pattern is the sheet's P_BOLT (PAT + 2)",
+     rec[15].boltPat, PAT + P_BOLT);
+  eq("the bolt flies right six pixels a frame",
+     [rec[15].boltX, rec[30].boltX], [76, 166]);
+  eq("… at the ship's height", rec[15].boltY, 140);
+
+  /* the kills: two drones shot down, the score's BAT digits rising */
+  eq("the score reads 000000 before the first kill",
+     [rec[230].score.v, rec[230].score.ok], [0, true]);
+  eq("the first drone killed at frame 231 scores 100",
+     [rec[231].score.v, rec[231].score.ok], [100, true]);
+  eq("the second drone killed scores 200 by frame 239",
+     [rec[239].score.v, rec[239].score.ok], [200, true]);
+  check(rec.slice(231, 245).some((r) => r.booms > 0),
+        "a kill is a visible explosion");
+  eq("no hits on the ship: still three lives", rec[239].lives, 3);
+
+  console.log("  shooting: 240 frames, score 0 -> 100 -> 200, three lives");
+}
+
+/* ---- the boss evidence -------------------------------------------------- */
+
+function checkBoss() {
+  /* the derived source: stage_t starts at 2660 so the boss swims in 40
+   * frames in, the one change from the committed toy */
+  const source = fs.readFileSync(TOY, "utf8");
+  const NEW_GAME_LINE = "  stage_t = 0; boss = 0; bhp = 0; bhpmax = 1";
+  const derived = source.replace(NEW_GAME_LINE,
+                                "  stage_t = 2660; boss = 0; bhp = 0; bhpmax = 1");
+  check(derived !== source && !derived.includes(NEW_GAME_LINE),
+        "the boss path's source is derived: stage_t starts at 2660");
+
+  /* the autopilot: hold N, and fly at the fish's y plus a 21-frame lead at
+   * its own vertical speed (read off the SAT the frame before, so the pad
+   * is a function of the frame and the game state — deterministic). */
+  let shipY = null, lastBy = null, prevBy = null;
+  function autopilot(f) {
+    let target;
+    if (lastBy === null) target = 88;      /* the entry: by stays 80 */
+    else {
+      const v = prevBy === null ? 0 : lastBy - prevBy;
+      target = Math.max(18, Math.min(206, lastBy + 8 + v * 21));
+    }
+    return { i: true, up: shipY !== null && shipY > target,
+             down: shipY !== null && shipY < target };
+  }
+  const run = playTogether(autopilot, 750, [], {
+    source: derived,
+    after: (state) => {
+      shipY = visible(state, SLOT_SHIP) ? spriteY(state, SLOT_SHIP) - 64
+                                        : shipY;
+      const by = visible(state, SLOT_BOSS) ? spriteY(state, SLOT_BOSS) - 64
+                                           : null;
+      prevBy = lastBy; lastBy = by;
+    }
+  });
+  const rec = run.records;
+  checkClean(run, 750, "the boss fight");
+
+  /* the fish swims in at frame 39 and reaches its post at frame 78, all
+   * four 16x16 sprites on the SAT with the sheet's P_BOSS patterns */
+  check(rec[39].boss.vis, "the boss enters the SAT at frame 39");
+  eq("at frame 78 it is on its post, four sprites drawn",
+     rec[78].boss.patterns, [PAT + P_BOSS, PAT + P_BOSS + 1,
+                             PAT + P_BOSS + 2, PAT + P_BOSS + 3]);
+  eq("its bar starts full (6 cells of GB+21)", rec[78].bar,
+     { full: 6, empty: 0 });
+
+  /* the fight: 40 hits at 50 points each, the bar draining hit by hit */
+  eq("the first bolt hits at frame 79 (+50)", rec[79].score.v, 50);
+  eq("40 hits land by frame 496 (score 2000)", rec[496].score.v, 2000);
+  check(rec.slice(78, 586).some((r) => r.bar.empty >= 5),
+        "the bar drains to at least 5 empty cells");
+  let monotone = true;
+  for (let f = 79; f <= 585; f++)
+    if (rec[f].bar.empty < rec[f - 1].bar.empty) monotone = false;
+  check(monotone, "the bar only drains, never refills");
+  eq("the score reads through the toy's own digits",
+     rec[496].score.ok, true);
+
+  /* the death: the blink (2 frames on, 2 off), the explosions, then stage
+   * 2 and the score +5000 in one frame */
+  check(rec[497].boss.vis, "the dying boss blinks on");
+  check(!rec[498].boss.vis, "… and off");
+  check(rec.slice(496, 586).some((r) => r.booms > 0),
+        "the death is a string of explosions");
+  eq("stage 2 and the score +5000 land in one frame (586)",
+     [rec[585].score.v, rec[586].score.v,
+      rec[585].stageG, rec[586].stageG],
+     [2000, 7000, GB + 1, GB + 2]);
+
+  /* the waves resume, and the autopilot's ship was never hit */
+  eq("the waves resume after the boss (more kills by frame 724)",
+     rec[724].score.v, 7600);
+  check(rec[749].enemies > 0, "drones are flying at frame 749");
+  eq("the ship survived the fight on three lives", rec[749].lives, 3);
+
+  console.log("  boss: the fish enters at 39, 40 hits to 2000, dies, " +
+              "stage 2 and +5000 at frame 586, waves resume");
+}
+
+/* ---- the art is named sources (#156) ----------------------------------- */
+
+function checkSources() {
+  const files = FILES.concat([{ name: "sources.json",
+    source: fs.readFileSync(path.join(DIR, "sources.json"), "utf8") }]);
+  const doc = JSON.parse(files[files.length - 1].source);
+  const list = doc.sources || [];
+
+  eq("sources.json names the two sources", list.map((s) => s.name),
+     ["sea", "ships"]);
+  const sea = list[0], ships = list[1];
+  eq("sea is the background picture (140 tiles, the BAT, one palette row)",
+     [sea && sea.kind, sea && sea.tiles, sea && sea.map],
+     ["bg", { first: 0, count: 140 }, true]);
+  eq("ships is the sprite sheet (16 patterns, 16 SAT slots, one row)",
+     [ships && ships.kind, ships && ships.patterns, ships && ships.sprites],
+     ["sprites", { first: 0, count: 16 }, { first: 0, count: 16 }]);
+
+  /* the studio's own model places the ranges, so the ASSETS list and the
+   * toy's VRAM cannot drift apart */
+  const rep = assets.sources(files);
+  eq("the studio's ASSETS model lists both sources",
+     rep.sources.map((s) => s.name), ["sea", "ships"]);
+  const seaTiles = rep.sources[0].vram.segments.find((s) => s.what === "tiles");
+  eq("sea's tiles sit at the picture's VRAM word",
+     seaTiles && seaTiles.first, 64 * 16);
+  const shipPats = rep.sources[1].vram.segments.find((s) => s.what === "patterns");
+  eq("ships' patterns sit at the toy's own PAT " + PAT,
+     shipPats && shipPats.first, PAT * 64);
+  eq("sea's palette row is CRAM 0", rep.sources[0].cram.segments[0].first, 0);
+  eq("ships' palette row is CRAM 256", rep.sources[1].cram.segments[0].first, 256);
+  check(rep.sources.every((s) => s.preview && s.preview.cells.length),
+        "each source previews from its own files' pixels");
+}
+
+/* ---- the validator ------------------------------------------------------ */
+
+function checkBudgets() {
+  const source = fs.readFileSync(TOY, "utf8");
+  const rep = validate.validate(source, { chunkName: "nova-tide/main.lua",
+                                          frames: FRAMES });
+  check(rep.ok, "the validator accepts the toy" +
+        (rep.ok ? "" : ": " + rep.code + " " + rep.message));
+  if (!rep.ok || !rep.budgets) return;
+  const b = rep.budgets;
+  check(b.ratio60 < 4, "frame() and its raster() stay inside the callback " +
+        "toys' band (" + b.ratio60.toFixed(2) + "x, " + b.hz.toFixed(0) +
+        " Hz)");
+  check(b.vram.words <= 32768, "VRAM " + b.vram.words + " words inside 32,768");
+  eq("no sprite line overflows", b.spriteOverflowLines, []);
+  console.log("  validator: frame " + b.frameCycles + " cycles (" +
+              b.ratio60.toFixed(2) + "x60 Hz, " + b.hz.toFixed(0) + " Hz), " +
+              "VRAM " + b.vram.words + " words, " + b.sprites.requested +
+              " strips on the busiest line");
+
+  /* the browser-only finding, recorded rather than failed: the console
+   * encoder cannot carry a Lua table yet. */
+  try {
+    ilbc.encode(il.compile(source));
+    note("the console export carries this toy now — toys/nova-tide/README.md " +
+         "says it is browser-only for tables; update it");
+  } catch (e) {
+    note("browser-only for now: the console export refuses the toy (" +
+         e.code + ": " + e.message + ") — toys/nova-tide/README.md says so");
+  }
+  return rep;
+}
+
+/* ---- the dump ----------------------------------------------------------- */
+
+const CRC_TABLE = (function () {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+function crc32(buf) {
+  let crc = 0xFFFFFFFF;
+  for (const b of buf) crc = CRC_TABLE[(crc ^ b) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function encodePng(rgb, width, height) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type, "latin1"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(td));
+    return Buffer.concat([len, td, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  const stride = width * 3;
+  const raw = Buffer.alloc((stride + 1) * height);
+  for (let y = 0; y < height; y++) {
+    raw[y * (stride + 1)] = 0;
+    Buffer.from(rgb.buffer, rgb.byteOffset + y * stride, stride)
+      .copy(raw, y * (stride + 1) + 1);
+  }
+  return Buffer.concat([
+    Buffer.from("\x89PNG\r\n\x1a\n", "latin1"),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", zlib.deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+function decodePng(buf) {
+  if (buf.slice(0, 8).toString("latin1") !== "\x89PNG\r\n\x1a\n")
+    throw new Error("not a PNG");
+  let pos = 8, width = 0, height = 0, bitDepth = 0, colourType = 0;
+  const idat = [];
+  while (pos < buf.length) {
+    const len = buf.readUInt32BE(pos);
+    const type = buf.slice(pos + 4, pos + 8).toString("latin1");
+    const data = buf.slice(pos + 8, pos + 8 + len);
+    pos += 12 + len;
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0); height = data.readUInt32BE(4);
+      bitDepth = data[8]; colourType = data[9];
+    } else if (type === "IDAT") idat.push(data);
+    else if (type === "IEND") break;
+  }
+  if (bitDepth !== 8 || colourType !== 2)
+    throw new Error("expected an 8-bit RGB PNG");
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * 3;
+  const out = new Uint8Array(width * height * 3);
+  const prev = Buffer.alloc(stride);
+  let p = 0;
+  for (let y = 0; y < height; y++) {
+    const f = raw[p++];
+    const line = Buffer.from(raw.slice(p, p + stride));
+    p += stride;
+    for (let i = 0; i < stride; i++) {
+      const a = i >= 3 ? line[i - 3] : 0;
+      const b = prev[i];
+      const c = i >= 3 ? prev[i - 3] : 0;
+      if (f === 1) line[i] = (line[i] + a) & 0xFF;
+      else if (f === 2) line[i] = (line[i] + b) & 0xFF;
+      else if (f === 3) line[i] = (line[i] + ((a + b) >> 1)) & 0xFF;
+      else if (f === 4) {
+        const pa = Math.abs(a + b - c - a), pb = Math.abs(a + b - c - b),
+              pc = Math.abs(a + b - c - c);
+        line[i] = (line[i] + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 0xFF;
+      }
+    }
+    line.copy(prev);
+    out.set(line, y * stride);
+  }
+  return { width: width, height: height, pixels: out };
+}
+
+function writeDump(kept) {
+  fs.mkdirSync(DUMPS, { recursive: true });
+  const frame = kept.get(PNG_FRAME);
+  const file = path.join(DUMPS, "frame-" + PNG_FRAME + ".png");
+  fs.writeFileSync(file, encodePng(frame, 256, 224));
+  const back = decodePng(fs.readFileSync(file));
+  eq("the dump's size is the frame's", [back.width, back.height], [256, 224]);
+  let same = back.pixels.length === frame.length;
+  if (same) for (let i = 0; i < frame.length; i++)
+    if (back.pixels[i] !== frame[i]) same = false;
+  check(same, "the dump reads back pixel-for-pixel as frame " + PNG_FRAME);
+  console.log("  dump: " + path.relative(ROOT, file));
+}
+
+/* ---- main --------------------------------------------------------------- */
+
+function main() {
+  console.log("check-nova-tide — toys/nova-tide (NOVA TIDE), card #164\n");
+  const play = checkPlay();
+  checkShooting();
+  checkBoss();
+  checkSources();
+  checkBudgets();
+  writeDump(play.kept);
+
+  console.log("\n" + checks + " checks, " + failures.length + " failed");
+  if (failures.length) {
+    for (const f of failures) console.log("  FAILED: " + f);
+    return 1;
+  }
+  console.log("PASS  check-nova-tide");
+  return 0;
+}
+
+process.exit(main());

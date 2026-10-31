@@ -6983,12 +6983,12 @@ function checkGallery(page) {
    * and took the other four #29 effects out of Browse (their toys stay in
    * toys/); #159 removed CAVE.  Browse and the studio read the same
    * generated list. */
-  check(data.length === 7,
+  check(data.length === 8,
         "the gallery carries the sky gradient, STARFALL, OAK WOODS, CITY, " +
-        "PLATFORMER, TOWER and DUSK RUN (got " + data.length + ")");
+        "PLATFORMER, TOWER, DUSK RUN and NOVA TIDE (got " + data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
      ["sky-gradient", "starfall", "oak-woods", "city", "platformer",
-      "tower", "dusk-run"]);
+      "tower", "dusk-run", "nova-tide"]);
   /* #125: the committed gallery carries CITY's art-free toy — the playable
    * file with the pack's picture is demo-art/city/main.lua and only the
    * deploy reads it (tools/gallery.js --with-demo-art). */
@@ -7181,7 +7181,7 @@ function checkGallery(page) {
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
      ["sky-gradient", "starfall", "oak-woods", "city", "platformer",
-      "tower", "dusk-run"]);
+      "tower", "dusk-run", "nova-tide"]);
   /* #125: the committed CITY card runs the art-free toy, so it draws no
    * picture here; the deployed gallery carries the playable file and does.
    * Every other card must have ink. */
@@ -7418,7 +7418,7 @@ function checkGallery(page) {
 
   B.setTag("raster");
   eq("the raster tag shows the raster toys", B.visible(),
-     ["sky-gradient", "starfall", "oak-woods", "dusk-run"]);
+     ["sky-gradient", "starfall", "oak-woods", "dusk-run", "nova-tide"]);
   B.setTag("");
   B.setQuery("sky");
   eq("the search box filters to the sky gradient", B.visible(),
@@ -7429,14 +7429,14 @@ function checkGallery(page) {
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["city", "dusk-run", "oak-woods", "platformer", "sky-gradient",
-      "starfall", "tower"]);
+     ["city", "dusk-run", "nova-tide", "oak-woods", "platformer",
+      "sky-gradient", "starfall", "tower"]);
   B.setSort("written");
 
   const bt = runBarePage(BROWSE_PAGE, "?tag=raster");
   eq("?tag=raster opens the page filtered",
      bt.sandbox.PCEStudio.browse.visible(),
-     ["sky-gradient", "starfall", "oak-woods", "dusk-run"]);
+     ["sky-gradient", "starfall", "oak-woods", "dusk-run", "nova-tide"]);
 
   /* 4. a toy's own page */
   const t = runBarePage(TOY_PAGE, "?id=sky-gradient&paused=1");

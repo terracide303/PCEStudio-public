@@ -149,6 +149,30 @@ const TOYS_META = [
       "higher) over the rocks, under the birds, and through the hearts; after " +
       "a game over, N runs again.",
     effect: "a playable endless runner"
+  },
+  /* #164: a game whose art IS in the repository: every picture in it was drawn
+   * for it (tools/nova-tide-art.py), so no art pack and no demo-art folder.
+   * It carries the studio's named files, STARFALL's shape plus sources.json
+   * (#156), so ASSETS lists "sea" and "ships". */
+  {
+    id: "nova-tide",
+    file: "nova-tide/main.lua",
+    title: "NOVA TIDE",
+    author: "PCEStudio examples · written with Claude",
+    badge: "#164 demo game",
+    tags: ["playable", "sprites", "raster", "parallax"],
+    blurb: "A side-scrolling shoot-'em-up over a night sea: drones weave in, " +
+      "gunships fire back, P capsules power up the ship, and an armoured " +
+      "fish waits at the end of every stage. IJKL flies, N fires (hold it), " +
+      "P starts again after a game over.",
+    effect: "a playable shoot-'em-up with real assets",
+    files: [
+      { name: "main.lua", kind: "lua" },
+      { name: "tiles.json", kind: "tiles" },
+      { name: "palettes.json", kind: "palettes" },
+      { name: "sprites.json", kind: "sprites" },
+      { name: "sources.json", kind: "sources" }
+    ]
   }
 ];
 
