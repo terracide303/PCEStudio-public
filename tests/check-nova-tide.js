@@ -23,10 +23,10 @@
  *     three lives, and the first wave flying in — play has resumed.
  *     Game over and the restart are the paths a person cannot drive by
  *     hand in Browse; the scripted pad drives them here.
- *   - IT SHOOTS: a second run parks the ship in the wave band at SAT y 140
- *     and holds N: a bolt sits in the SAT flying right six pixels a frame,
- *     and the score's BAT digits rise 0 -> 100 -> 200 as drones die (a
- *     bolt that kills is a visible explosion, too).
+ *   - IT SHOOTS: a second run parks the ship at SAT y 196 (screen y 132,
+ *     under wave 2's band) and holds N: a bolt sits in the SAT flying right
+ *     six pixels a frame, and the score's BAT digits rise 0 -> 100 -> 200
+ *     as drones die (a bolt that kills is a visible explosion, too).
  *   - THE BOSS PATH: a derived source — stage_t starts at 2660, the one
  *     change — skips the wait.  An autopilot pad, a function of the frame
  *     and the boss's own SAT position, holds the ship on the fish's y.
@@ -37,8 +37,9 @@
  *     by hand in Browse.
  *   - CLEAN: no runtime error, every Lua frame inside the #30 budget, and
  *     the #50 sprite budget on every line (16 strips, no overflow).  The
- *     CC condition is the game's own collisions — a drone's 16x16 box over
- *     the ship's — checked on every CC frame rather than hidden.
+ *     CC condition is the game's own collisions — an enemy's, an aimed
+ *     orb's or an explosion's 16x16 box over the ship's — checked on every
+ *     CC frame rather than hidden.
  *   - VISIBLE: frame 599 is a picture, not the backdrop, and the SPRITES
  *     draw the frozen enemies — the same frame with an empty SAT loses
  *     them.  The check's own control is the empty SAT: the same threshold
@@ -54,10 +55,12 @@
  *
  * WHAT IT DOES NOT PROVE, and says so in a NOTE when it runs: the console
  * Export path currently refuses the toy — renderer/pce-ilbc.js has no
- * bytecode form for `table`, which is how NOVA TIDE keeps its bolts,
- * enemies, explosions and state — so the toy is browser-only for now, as
- * toys/nova-tide/README.md says.  Also per workshop rule 2 a cold break by
- * another seat is owed before this closes the card.
+ * interpreter instruction for `table` (how NOVA TIDE keeps its bolts,
+ * enemies, explosions and state) and its interpreter takes at most four
+ * parameters where the toy's hit() takes eight — so the toy is
+ * browser-only for now, as toys/nova-tide/README.md says.  Also per
+ * workshop rule 2 a cold break by another seat is owed before this closes
+ * the card.
  */
 "use strict";
 
@@ -178,13 +181,16 @@ function enemyCount(state) {
   return n;
 }
 
-/* An enemy whose 16x16 box overlaps the ship's, in SAT coordinates: what
- * the VDC's CC condition sees on the line, and the game's own ram check. */
-function enemyOverShip(state) {
+/* A game sprite whose 16x16 box overlaps the ship's, in SAT coordinates:
+ * the orbs, the enemies, the explosions, the capsule and the boss (SAT
+ * slots 9..37) — the sprites the game draws over the ship, and what the
+ * VDC's CC condition sees on the line.  The lives icons (38..40) are not
+ * among them, so a collision with a stray lives icon fails below. */
+function spritesOverShip(state) {
   if (!visible(state, SLOT_SHIP)) return [];
   const sx = spriteX(state, SLOT_SHIP), sy = spriteY(state, SLOT_SHIP);
   const out = [];
-  for (let s = SLOT_ENEMIES; s < SLOT_ENEMIES + 8; s++) {
+  for (let s = SLOT_ENEMIES - 10; s <= SLOT_BOSS + 3; s++) {
     if (!visible(state, s)) continue;
     if (Math.abs(spriteX(state, s) - sx) < 16 &&
         Math.abs(spriteY(state, s) - sy) < 16)
@@ -275,8 +281,8 @@ function tourPad(f) {
   return {};
 }
 
-/* Parked firing: down to the wave band at SAT y 140 (screen y 76), then
- * hold N — a bolt every eight frames, drones die, the score rises. */
+/* Parked firing: down to SAT y 196 (screen y 132, under wave 2's band),
+ * then hold N — a bolt every eight frames, drones die, the score rises. */
 function firePad(f) {
   if (f < 14) return { down: true };
   return { i: true };
@@ -356,7 +362,7 @@ function playTogether(padFn, frames, keep, opts) {
       enemies: enemyCount(ga.state),
       boss: bossSlots(ga.state),
       booms: boomCount(ga.state),
-      overlap: enemyOverShip(ga.state)
+      overlap: spritesOverShip(ga.state)
     });
     if (o.after) o.after(ga.state, f);
     if (keep && keep.includes(f)) kept.set(f, Uint8Array.from(ga.pixels));
@@ -400,29 +406,36 @@ function checkPlay() {
   const rec = run.records;
   checkClean(run, FRAMES, "the tour");
 
-  /* NOVA TIDE is a game: the ship is SAT slot 0 and the drones that ram it
-   * are other sprites, so the CC condition is EXPECTED on those frames.
-   * What must hold is that every CC frame is the game's own hit — a
-   * drone's 16x16 box over the ship's — and not a stray sprite. */
+  /* NOVA TIDE is a game: the ship is SAT slot 0 and the sprites that fly
+   * over it — drones, aimed orbs, its own explosion after a hit — are
+   * others, so the CC condition is EXPECTED on those frames.  What must
+   * hold is that every CC frame is one of the game's own sprites over the
+   * ship's box, never a stray sprite (a lives icon, a stale SAT slot). */
   const strayCC = run.ccFrames.filter((f) => !rec[f].overlap.length);
-  eq("every sprite-0 collision is a drone over the ship, not a stray " +
-     "sprite", strayCC.slice(0, 8), []);
+  eq("every sprite-0 collision is one of the game's own sprites over the " +
+     "ship, not a stray sprite", strayCC.slice(0, 8), []);
   check(run.ccFrames.length > 0,
         "the model saw the game's collisions (CC on " + run.ccFrames.length +
         " frame(s))");
 
   /* I/J/K/L fly the ship: each leg of the tour read off the SAT (the
-   * screen position plus the 32/64 the SAT adds). */
-  eq("the ship starts at (24, 104) on the SAT (y/x)",
-     [rec[0].shipY, rec[0].shipX], [168, 56]);
+   * screen position plus the 32/64 the SAT adds).  The ship starts OFF
+   * the SAT — the entry shield's first blink hides it — and new_game's
+   * (24, 104) is only seen once it is drawn, already moving.  Each leg
+   * ends on the frame the pad is first released (the pad applies on the
+   * frame it is held). */
+  check(!rec[0].shipVis,
+        "the ship starts off the SAT (the entry shield's first blink)");
+  eq("its first drawn frame is (32, 104) — px already moved right",
+     [rec[3].shipY, rec[3].shipX], [168, 64]);
   eq("right 60 puts it at (144, 104)",
-     [rec[60].shipY, rec[60].shipX], [168, 176]);
+     [rec[59].shipY, rec[59].shipX], [168, 176]);
   eq("up 50 puts it at the top clamp (144, 18)",
-     [rec[110].shipY, rec[110].shipX], [82, 176]);
+     [rec[109].shipY, rec[109].shipX], [82, 176]);
   eq("left 60 puts it back to (24, 18)",
-     [rec[170].shipY, rec[170].shipX], [82, 56]);
+     [rec[169].shipY, rec[169].shipX], [82, 56]);
   eq("down 50 parks it at (24, 118)",
-     [rec[220].shipY, rec[220].shipX], [182, 56]);
+     [rec[219].shipY, rec[219].shipX], [182, 56]);
 
   /* a hit costs a life: three drone rams at the tour's own frames */
   eq("three lives at the start", rec[0].lives, 3);
@@ -504,18 +517,19 @@ function checkShooting() {
   const rec = run.records;
   checkClean(run, 240, "parked firing");
 
-  /* the ship parks in the band (screen y 76, the SAT's 140) and stays */
-  eq("the ship parks at SAT y 140", rec[30].shipY, 140);
-  eq("… and stays there", rec[239].shipY, 140);
+  /* the ship parks at screen y 132 (the SAT's 196) and stays */
+  eq("the ship parks at SAT y 196", rec[28].shipY, 196);
+  eq("… and stays there", rec[239].shipY, 196);
 
   /* N puts a bolt in the SAT flying right: fired at frame 14 from the
-   * ship's nose (px + 14), six pixels a frame, the sheet's P_BOLT */
+   * ship's nose (px + 14) and moved six pixels in that same frame's bolt
+   * pass, six a frame after, the sheet's P_BOLT */
   check(rec[15].boltX !== null, "a bolt is in the SAT the frame after N");
   eq("the bolt's pattern is the sheet's P_BOLT (PAT + 2)",
      rec[15].boltPat, PAT + P_BOLT);
   eq("the bolt flies right six pixels a frame",
-     [rec[15].boltX, rec[30].boltX], [76, 166]);
-  eq("… at the ship's height", rec[15].boltY, 140);
+     [rec[14].boltX, rec[30].boltX], [76, 172]);
+  eq("… at the ship's height", rec[14].boltY, 196);
 
   /* the kills: two drones shot down, the score's BAT digits rising */
   eq("the score reads 000000 before the first kill",
@@ -602,11 +616,13 @@ function checkBoss() {
       rec[585].stageG, rec[586].stageG],
      [2000, 7000, GB + 1, GB + 2]);
 
-  /* the waves resume, and the autopilot's ship was never hit */
+  /* the waves resume, and the autopilot's ship took one aimed orb */
   eq("the waves resume after the boss (more kills by frame 724)",
-     rec[724].score.v, 7600);
+     rec[724].score.v, 7700);
   check(rec[749].enemies > 0, "drones are flying at frame 749");
-  eq("the ship survived the fight on three lives", rec[749].lives, 3);
+  eq("one aimed orb hit the ship mid-fight (frame 172)",
+     [rec[171].lives, rec[172].lives], [3, 2]);
+  eq("the ship finished the fight on two lives", rec[749].lives, 2);
 
   console.log("  boss: the fish enters at 39, 40 hits to 2000, dies, " +
               "stage 2 and +5000 at frame 586, waves resume");

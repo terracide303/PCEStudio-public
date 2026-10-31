@@ -29,15 +29,31 @@ names the two sources for the studio's ASSETS panel (card #156).
 
 ## Changes
 
-**No changes were made to `main.lua`**: the game as it came back from the
-studio passed every test.  `tests/check-nova-tide.js` plays it through both
-runtimes — 720 frames of the scripted tour (which flies the ship, takes
-three hits, sees GAME OVER and restarts on P), 240 frames of parked firing
-(two drones shot down, the score rising 0 → 100 → 200), and 750 frames of
-the boss path from `stage_t` 2660 (the fish enters, the bar drains hit by
-hit, it dies, stage 2 and the score +5000) — with the Lua runtime and the
-IL runtime agreeing on every frame's VRAM, CRAM, SAT, registers, raster
-table and pixels.
+**No changes were made to `main.lua`** — the game as it came back from the
+studio was right; the test's first draft was not, and
+`tests/check-nova-tide.js` now asserts what the game does:
+
+- the ship starts **off** the SAT — the entry shield's first blink — and
+  its first drawn frame is already moving (the tour's legs end on frames
+  59 / 109 / 169 / 219, because the pad applies on the frame it is held);
+- the parked-firing run parks at SAT y **196** (screen y 132, under wave
+  2's band), and a bolt fired at frame 14 is already six pixels right of
+  the nose (the bolt pass runs in the same frame as the fire);
+- a sprite-0 collision is any of the game's own sprites over the ship —
+  a drone, an aimed orb, an explosion after a hit — never a stray sprite;
+- the boss path's autopilot takes one aimed orb (lives 3 → 2 at frame
+  172), and the waves-after-boss score reads **7700** by frame 724.
+
+The test plays the game through both runtimes — 720 frames of the
+scripted tour (which flies the ship, takes three hits, sees GAME OVER and
+restarts on P), 240 frames of parked firing (two drones shot down, the
+score rising 0 → 100 → 200), and 750 frames of the boss path from
+`stage_t` 2660 (the fish enters, the bar drains hit by hit, it dies,
+stage 2 and the score +5000) — with the Lua runtime and the IL runtime
+agreeing on every frame's VRAM, CRAM, SAT, registers, raster table and
+pixels.  It also proves frame 599 is a picture (not the backdrop) and
+that the sprites draw it: the same frame with an empty SAT fails its own
+threshold.
 
 ## The trick, in the toy's own words
 
@@ -48,8 +64,9 @@ then sky, hills, city and sea each move faster than the one above.
 ## Browser only
 
 NOVA TIDE keeps its bolts, enemies, explosions and state in Lua tables.
-The console **Export** path cannot carry a table yet: `renderer/pce-ilbc.js`
-refuses the `table` instruction, so Export lists that as a finding instead
-of building a ROM.  The toy runs fine in the browser studio (and in the IL
-runtime the validator uses); it is the bytecode encoder that is missing the
-op.  See `docs/IL.md`.
+The console **Export** path cannot carry this toy yet: `renderer/pce-ilbc.js`
+refuses both the `table` instruction and calls with more than four
+parameters (the interpreter's limit — the toy's `hit()` takes eight), so
+Export lists those as findings instead of building a ROM.  The toy runs
+fine in the browser studio (and in the IL runtime the validator uses).
+See `docs/IL.md`.
