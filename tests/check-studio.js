@@ -6961,6 +6961,384 @@ function openPopoverMarkup(html) {
   return html.slice(start);
 }
 
+/* ---- #167: the AGENT panel and the agent link -------------------------- *
+ *
+ * The drawer is driven through the page's real code path.  A fake WebSocket
+ * stands in for the relay's socket (the browser object's own shape: url,
+ * readyState, send, onopen/onmessage/onclose), and every call goes in as the
+ * relay sends it ({"type":"call"}) and out as the tab answers it
+ * ({"type":"result"}) — renderer/studio-panel-agent.js runs the tool through
+ * renderer/pce-agent-tools.js, the one tool core, and mirrors the result into
+ * the studio.  RELAY_URL is the page's real constant from
+ * renderer/relay-config.js (empty in the repository); the test sets it the
+ * way a deployment does and renders again.
+ *
+ * Measured: RELAY_URL empty -> the not-switched-on sentence and no button at
+ * all; Connect -> connecting, a 32-hex token in localStorage and the socket's
+ * /ws/<token>; open -> live, hello v1, the command with the token, the help
+ * and the edits line; a toy_write call -> the editor, the file tabs and the
+ * ASSETS list; toy_run -> the OUTPUT canvas draws and the CONSOLE gets the
+ * tool core's own log; source_add -> the named source in the ASSETS list;
+ * validate -> the report in the CONSOLE CHECK block; frame_png -> the studio
+ * seeks to that frame; Disconnect -> disconnected with no retry; Reconnect ->
+ * a live link again; an unexpected close -> disconnected with the first
+ * backoff step; taken -> "taken over" and no reconnect; a second page with the
+ * same storage -> the same token and command; New link -> a new 32-hex token,
+ * stored, and a new socket.
+ *
+ * Blind spots: the fake socket is not the network (the relay's own side is
+ * tests/check-relay.js), and the stub canvas records draw calls rather than
+ * showing pixels. */
+
+const AGENT_TOY = [
+  "function init()",
+  "  print(42)",
+  "end",
+  "function frame(t, f)",
+  "  vram[0] = f",
+  "end",
+  ""
+].join("\n");
+
+function agentSocket() {
+  const sockets = [];
+  function Fake(url) {
+    this.url = String(url);
+    this.readyState = 0;
+    this.sent = [];
+    this.onopen = null;
+    this.onmessage = null;
+    this.onclose = null;
+    this.onerror = null;
+    sockets.push(this);
+  }
+  Fake.prototype.open = function () {
+    this.readyState = 1;
+    if (this.onopen) this.onopen({ type: "open" });
+  };
+  Fake.prototype.send = function (text) { this.sent.push(JSON.parse(text)); };
+  Fake.prototype.message = function (msg) {
+    if (this.onmessage) this.onmessage({ data: JSON.stringify(msg) });
+  };
+  /* the relay closing the socket: the tab's onclose is what hears it */
+  Fake.prototype.drop = function () {
+    this.readyState = 3;
+    if (this.onclose) this.onclose({ type: "close" });
+  };
+  Fake.prototype.close = function () {
+    this.readyState = 3;
+    if (this.onclose) this.onclose({ type: "close" });
+  };
+  Fake.sockets = sockets;
+  Fake.last = () => sockets[sockets.length - 1];
+  return Fake;
+}
+
+/* crypto.getRandomValues, deterministic so the token can be compared */
+function agentCrypto(seed) {
+  let n = seed || 1;
+  return {
+    getRandomValues(arr) {
+      for (let i = 0; i < arr.length; i++) {
+        n = (n * 1103515245 + 12345) & 0x7fffffff;
+        arr[i] = (n >> 16) & 0xff;
+      }
+      return arr;
+    }
+  };
+}
+
+/* The PNG's zlib step in the stub DOM: the tool core's encoder only puts the
+ * deflated bytes in the container, so an identity stand-in is enough for
+ * frame_png to answer with a PNG the mirror can read. */
+function agentDeflate() {
+  return function Stream() {
+    return {
+      writable: {
+        getWriter() {
+          return { write() { return Promise.resolve(); },
+                   close() { return Promise.resolve(); } };
+        }
+      },
+      readable: {
+        getReader() {
+          let done = false;
+          return {
+            read() {
+              if (done) return Promise.resolve({ done: true });
+              done = true;
+              return Promise.resolve({ done: false,
+                                       value: new Uint8Array([120, 156, 0]) });
+            }
+          };
+        }
+      }
+    };
+  };
+}
+
+function nodeById(node, id) {
+  if (!node) return null;
+  if (node.id === id) return node;
+  for (const k of node.children || []) {
+    const hit = nodeById(k, id);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function countButtons(node) {
+  if (!node) return 0;
+  let n = node.tagName === "BUTTON" ? 1 : 0;
+  for (const k of node.children || []) n += countButtons(k);
+  return n;
+}
+
+function pressNode(page, node) {
+  check(!!node, "a button the test presses is on the page");
+  if (!node) return;
+  for (const fn of node.listeners.click || []) fn(page.dom.fakeEvent(node));
+}
+
+async function agentCall(page, ws, name, args, id) {
+  const api = page.sandbox.PCEStudio.studio.panels.get("agent").api;
+  ws.message({ type: "call", id: id, name: name, arguments: args || {} });
+  await api.idle();
+  const replies = ws.sent.filter((m) => m.type === "result" && m.id === id);
+  return replies.length ? replies[0] : null;
+}
+
+async function checkAgentPanel() {
+  const storage = makeStorage();
+  const WS = agentSocket();
+  const page = runPage("", storage, {
+    WebSocket: WS,
+    crypto: agentCrypto(7),
+    CompressionStream: agentDeflate(),
+    DecompressionStream: agentDeflate()
+  });
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  const api = studio.panels.get("agent").api;
+  const drawer = page.dom.get("bottom-agent");
+
+  check(!!api && typeof api.connect === "function" &&
+        typeof api.newLink === "function" && typeof api.idle === "function",
+        "#167: the AGENT panel exposes the drawer's own functions");
+
+  /* 1. nothing switched on: the sentence, and nothing to press */
+  api.render();
+  eq("#167: with RELAY_URL empty the panel is not switched on",
+     api.status(), "off");
+  const off = nodeById(drawer, "agent-off");
+  check(!!off && /not switched on yet/i.test(off.textContent),
+        "#167: it says the agent link is not switched on yet (" +
+        (off && off.textContent) + ")");
+  eq("#167: and it offers nothing else (no button in the drawer)",
+     countButtons(drawer), 0);
+
+  /* 2. a deployment sets RELAY_URL: Connect appears and opens the socket */
+  S.RELAY_URL = "https://relay.test";
+  api.render();
+  eq("#167: a configured relay is ready to connect", api.status(), "ready");
+  const connect = nodeById(drawer, "btn-agent-connect");
+  check(!!connect, "#167: the drawer has a Connect button");
+  pressNode(page, connect);
+  eq("#167: Connect opens the socket (connecting)", api.status(), "connecting");
+  const token = api.state().token;
+  check(/^[0-9a-f]{32}$/.test(token),
+        "#167: the token is 32 lowercase hex (" + token + ")");
+  const ws = WS.last();
+  eq("#167: the socket is the relay's /ws/<token>", ws.url,
+     "wss://relay.test/ws/" + token);
+  eq("#167: the token is kept in localStorage",
+     page.sandbox.localStorage.getItem("pcestudio.agent.token.v1"), token);
+
+  /* 3. live: the command, the help, the edits line */
+  ws.open();
+  eq("#167: the socket opening makes the link live", api.status(), "live");
+  const hello = ws.sent.filter((m) => m.type === "hello")[0];
+  check(!!hello && hello.version === 1,
+        "#167: the tab sends hello with the protocol version");
+  const wantCmd = "claude mcp add --transport http pcestudio " +
+                  "https://relay.test/mcp/" + token;
+  eq("#167: the drawer shows the one command",
+     nodeById(drawer, "agent-cmd").textContent, wantCmd);
+  const help = nodeById(drawer, "agent-help");
+  check(!!help && /^Run this once in your terminal/.test(help.textContent) &&
+        /until you disconnect/.test(help.textContent),
+        "#167: ... with the one-line explanation (" +
+        (help && help.textContent) + ")");
+  const edits = nodeById(drawer, "agent-edits");
+  check(!!edits && /editor/.test(edits.textContent),
+        "#167: the help says the person's edits are what Claude's run uses");
+
+  /* 4. toy_write: the editor, the file tabs and the ASSETS list */
+  const starter = studio.files();
+  const toyFiles = [{ name: "main.lua", source: AGENT_TOY }].concat(
+    starter.filter((f) => f.name !== "main.lua")
+           .map((f) => ({ name: f.name, source: f.source })));
+  const w = await agentCall(page, ws, "toy_write", { files: toyFiles }, "c1");
+  check(!!w && w.result && w.result.isError !== true,
+        "#167: toy_write's reply is the tool core's result (isError false)");
+  eq("#167: the editor holds Claude's main.lua", studio.editorText(), AGENT_TOY);
+  eq("#167: the toy's files are the studio's (editor tabs)",
+     studio.fileNames(), toyFiles.map((f) => f.name));
+  eq("#167: the ASSETS list lists them",
+     page.dom.get("asset-list").children.map(
+       (row) => row.children[0].textContent),
+     toyFiles.map((f) => f.name));
+  const feed1 = api.feed();
+  check(feed1.length === 1 && feed1[0].name === "toy_write" &&
+        feed1[0].ok === true && /files?/.test(feed1[0].summary),
+        "#167: the FEED shows the call, its tool and its outcome (" +
+        JSON.stringify(feed1) + ")");
+
+  /* 5. toy_run: the OUTPUT canvas draws and the CONSOLE gets the log */
+  const outEl = page.dom.get("out");
+  const draws0 = outEl.__ctx ? outEl.__ctx.__calls.length : 0;
+  const r1 = await agentCall(page, ws, "toy_run", { frames: 12 }, "c2");
+  check(!!r1 && r1.result && r1.result.isError !== true,
+        "#167: toy_run answers with the tool core's run");
+  const draws1 = outEl.__ctx ? outEl.__ctx.__calls.length : 0;
+  check(draws1 > draws0, "#167: the run plays in the OUTPUT canvas (" +
+        draws0 + " -> " + draws1 + " draw calls)");
+  const con = studio.panels.get("console").api;
+  eq("#167: the CONSOLE gets the run's frame count", con.runLog().frames, 12);
+  check(con.runLog().lines.join("\n").indexOf("42") >= 0,
+        "#167: ... and its own log lines (" +
+        JSON.stringify(con.runLog().lines) + ")");
+
+  /* 6. the person's edit between calls is what Claude's next run uses:
+   * the edit changes what the toy PRINTS, and the tool core's own reply has
+   * to carry the edited number — proof the session was re-primed, not that
+   * the studio merely kept the text on screen */
+  studio.selectFile("main.lua");
+  studio.setEditorText(AGENT_TOY.replace("print(42)", "print(43)"));
+  const r2 = await agentCall(page, ws, "toy_run", { frames: 12 }, "c2b");
+  const reply2 = JSON.parse(r2.result.content[0].text);
+  check(!!r2 && r2.result.isError !== true && reply2.frames === 12,
+        "#167: a run after an edit still runs");
+  check(JSON.stringify(reply2.log).indexOf("43") >= 0,
+        "#167: the person's edit is the text Claude's run used (" +
+        JSON.stringify(reply2.log) + ")");
+  const edited = studio.toy.file("main.lua").source;
+  check(/print\(43\)/.test(edited),
+        "#167: ... and the studio still holds the person's text");
+
+  /* 7. source_add: the toy's files and a named source in ASSETS */
+  const pixels = [];
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      pixels.push(x === 0 || y === 0 || x === 15 || y === 15 ? 1 : 0);
+    }
+  }
+  const added = await agentCall(page, ws, "source_add", {
+    kind: "sprites", name: "square",
+    grid: { width: 16, height: 16, pixels: pixels },
+    palette: [[0, 0, 0], [255, 220, 120]]
+  }, "c3");
+  check(!!added && added.result && added.result.isError !== true,
+        "#167: source_add answers ok (" +
+        JSON.stringify(added && added.result && added.result.content &&
+                       added.result.content[0]) + ")");
+  check(studio.fileNames().indexOf("sources.json") >= 0,
+        "#167: source_add records the source in sources.json");
+  const assetsApi = studio.panels.get("assets").api;
+  check(assetsApi.sources().some((s) => s.name === "square"),
+        "#167: ... and the ASSETS list shows it by name (" +
+        JSON.stringify(assetsApi.sources().map((s) => s.name)) + ")");
+
+  /* 8. toy_run again (source_add cleared the run), validate, frame_png */
+  const r3 = await agentCall(page, ws, "toy_run", { frames: 24 }, "c3b");
+  check(!!r3 && r3.result.isError !== true, "#167: the merged toy runs");
+  const val = await agentCall(page, ws, "validate", { frames: 8 }, "c4");
+  check(!!val && val.result.isError !== true, "#167: validate answers");
+  const report = con.checkReport();
+  check(!!report && report.ok === true,
+        "#167: validate's report reaches the CONSOLE CHECK block (" +
+        JSON.stringify(report && { ok: report.ok, code: report.code }) + ")");
+  studio.panels.select("console");
+  const checkHost = page.dom.get("console-check");
+  check(checkHost.hidden === false &&
+        /VALIDATE/.test((checkHost.children[0] || {}).textContent || ""),
+        "#167: ... and draws there");
+  const png = await agentCall(page, ws, "frame_png", { frame: 5 }, "c5");
+  check(!!png && png.result.isError !== true,
+        "#167: frame_png answers (" +
+        JSON.stringify(png && png.result && png.result.content &&
+                       png.result.content[0]) + ")");
+  eq("#167: the studio seeks to the frame Claude asked for",
+     studio.render.currentFrame(), 5);
+
+  /* 9. Disconnect, Reconnect, an unexpected close and its backoff */
+  const disc = nodeById(drawer, "btn-agent-disconnect");
+  check(!!disc, "#167: a live link has Disconnect");
+  pressNode(page, disc);
+  eq("#167: Disconnect closes the link", api.status(), "disconnected");
+  eq("#167: ... and does not schedule a reconnect",
+     api.state().reconnectScheduled, false);
+  const again = nodeById(drawer, "btn-agent-reconnect");
+  check(!!again, "#167: a closed link has Reconnect");
+  pressNode(page, again);
+  eq("#167: Reconnect opens the socket again", api.status(), "connecting");
+  const ws2 = WS.last();
+  check(ws2 !== ws, "#167: ... on a new socket");
+  ws2.open();
+  eq("#167: ... and the link is live", api.status(), "live");
+  ws2.drop();
+  eq("#167: a socket that drops is disconnected", api.status(), "disconnected");
+  eq("#167: ... with a reconnect scheduled", api.state().reconnectScheduled, true);
+  eq("#167: ... after the first backoff step", api.state().reconnectIn, 1000);
+  pressNode(page, nodeById(drawer, "btn-agent-reconnect"));
+  const ws3 = WS.last();
+  ws3.open();
+  eq("#167: Reconnect tries now", api.status(), "live");
+
+  /* 10. a second tab with the same token: taken over, no reconnect */
+  ws3.message({ type: "taken" });
+  eq("#167: a second tab takes the link over", api.status(), "taken");
+  eq("#167: the status word is taken over",
+     nodeById(drawer, "agent-status").textContent, "taken over");
+  ws3.drop();
+  eq("#167: ... and this tab stays taken over", api.status(), "taken");
+  eq("#167: ... with no reconnect scheduled",
+     api.state().reconnectScheduled, false);
+
+  /* 11. a reload: the same token, the same command */
+  const WS2 = agentSocket();
+  const page2 = runPage("", storage, {
+    WebSocket: WS2,
+    crypto: agentCrypto(99),
+    CompressionStream: agentDeflate()
+  });
+  const S2 = page2.sandbox.PCEStudio;
+  S2.RELAY_URL = "https://relay.test";
+  const api2 = S2.studio.panels.get("agent").api;
+  const drawer2 = page2.dom.get("bottom-agent");
+  api2.render();
+  pressNode(page2, nodeById(drawer2, "btn-agent-connect"));
+  eq("#167: the token survives a reload", api2.state().token, token);
+  const ws4 = WS2.last();
+  eq("#167: ... and the socket is the same /ws/<token>", ws4.url,
+     "wss://relay.test/ws/" + token);
+  ws4.open();
+  eq("#167: ... and the command is the same one",
+     nodeById(drawer2, "agent-cmd").textContent, wantCmd);
+
+  /* 12. New link rotates the token and reconnects with it */
+  pressNode(page2, nodeById(drawer2, "btn-agent-newlink"));
+  const rotated = api2.state().token;
+  check(rotated !== token && /^[0-9a-f]{32}$/.test(rotated),
+        "#167: New link makes a different 32-hex token (" + rotated + ")");
+  eq("#167: ... and stores it",
+     page2.sandbox.localStorage.getItem("pcestudio.agent.token.v1"), rotated);
+  const ws5 = WS2.last();
+  check(ws5 !== ws4, "#167: ... and reopens the socket with it");
+  eq("#167: ... at the new token's URL", ws5.url,
+     "wss://relay.test/ws/" + rotated);
+}
+
 function checkGallery(page) {
   const S = page.sandbox.PCEStudio;
   const studio = S.studio;
@@ -7557,6 +7935,7 @@ async function main() {
   checkAudioVoicePicker(page);
   checkSequencerPanel(page);
   checkStudioApi(page);
+  await checkAgentPanel();
   checkGallery(page);
 
   let browser = "not-requested";
