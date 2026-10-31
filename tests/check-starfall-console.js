@@ -46,7 +46,7 @@
  *   - The page's `exportAnalysis()` was not executed here: this machine has
  *     no chrome-headless-shell (#114), so the real-page run in the write-up
  *     is not re-verified.  The panel function it reads was executed, and the
- *     early return at studio.html:3991 is asserted from source.
+ *     early return at studio.html:4039 is asserted from source.
  *   - The inventory is dispatch-table membership plus the operand checks
  *     modelled here.  A refusal raised only deeper in cgen's lowering
  *     (cgen-target, cgen-hook, the closure rules) would not be counted.
@@ -346,9 +346,9 @@ function checkCapacity() {
 
 /* ---- 6. the write-up's citations --------------------------------------- */
 const CITATIONS = [
-  ["renderer/studio.html", 3991, "if (errors) return"],
-  ["renderer/studio-panel-console.js", 140, "emitC"],
-  ["renderer/studio-panel-console.js", 143, "severity: \"error\""],
+  ["renderer/studio.html", 4039, "if (errors) return"],
+  ["renderer/studio-panel-console.js", 145, "emitC"],
+  ["renderer/studio-panel-console.js", 148, "severity: \"error\""],
   ["renderer/pce-cgen.js", 400, "fn|vram|int|bool|padset"],
   ["renderer/pce-cgen.js", 458, "case \"padget\""],
   ["renderer/pce-cgen.js", 467, "case \"padref\""],

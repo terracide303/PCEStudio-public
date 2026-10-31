@@ -96,8 +96,8 @@ as the gate:
 - `PCEStudio.validate.validateProgram` returns `ok: true` with **0 problems**
   for STARFALL. It prices the game and likes the price.
 - The CONSOLE tab's third stage, `PCEStudio.cgen.emitC` (the C backend,
-  llvm-mos), refuses. `renderer/studio-panel-console.js:140` calls it and the
-  catch at `:143` pushes its result with `severity: "error"`, so the banner
+  llvm-mos), refuses. `renderer/studio-panel-console.js:145` calls it and the
+  catch at `:148` pushes its result with `severity: "error"`, so the banner
   goes red — but only because the C emitter is in the panel's pipeline, not
   because the validator found anything.
 - `tests/check-demo-game.js` asserts exactly this validator's `ok`, so a green
@@ -112,7 +112,7 @@ Two first-hit aborts sit between the page and the truth:
 1. `pce-cgen.js:489` refuses the **first** IL instruction it cannot lower and
    throws. STARFALL's first is the `table` for the `DIGIT` digit-code array at
    `main.lua:47`.
-2. That error sets `errors > 0`, and `renderer/studio.html:3991` returns
+2. That error sets `errors > 0`, and `renderer/studio.html:4039` returns
    before the encoder is ever called — so the page never reports what
    `pce-ilbc.js` (route 1, the backend the Export actually uses) would say.
    Asked directly, `pce-ilbc.js` refuses with `ilbc-op: instruction table
@@ -346,7 +346,7 @@ watched to go red. The real repo was never edited for this.
 |-------|------|--------------|----------|
 | M1 | `pce-ilbc.js` `OPS` gains `table` | `table` is no longer route-1-refused | FAIL: `table: … got 44 instructions, ilbc 0` (and the four citation guards on that file, shifted by the insert) |
 | M2 | `pce-cgen.js` allow-list gains `table` | the `cgen-global` probe accepts | FAIL: "a table-typed global is refused with cgen-global — the emitter accepted it" |
-| M3 | `studio.html` early return disabled | the page-verdict citation | FAIL: `studio.html:3991 holds 'if (errors) return'` and "early return comes before the encoder — return at -1" |
+| M3 | `studio.html` early return disabled | the page-verdict citation | FAIL: `studio.html:4039 holds 'if (errors) return'` and "early return comes before the encoder — return at -1" |
 | M4 | `pce-rom.js` `BANK` 8 KiB → 16 KiB | the capacity projection | FAIL: projections are no longer OVER (`[[3,8585,false],…]`) |
 
 M1's cascade is the citation guard doing its job: a one-line insert in
