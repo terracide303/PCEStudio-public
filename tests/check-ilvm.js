@@ -29,6 +29,14 @@
  *      tools/ilvm/hostvm.c by the system cc (SKIP without cc), run for
  *      eight frames, and its vram/cram/sat/regs diffed against the browser
  *      IL run.  A scratch control mutation of operand() must break it.
+ *   7. #174: the table ops on the host, through the same harness.  A
+ *      version 2 table toy (int array, bool array, record read by field id,
+ *      nested pair) diffs 0 against the browser host for eight frames; the
+ *      ninth frame's write to cell 9 of an 8-cell array faults with the
+ *      frame's pre-fault pal landed, its post-fault pal absent, and the
+ *      pool byte-equal to the eight-frame run's (the write touched no
+ *      cell); the pool's own cells are pinned; MAX_TABLE_CELLS is read from
+ *      ilvm.c and compared with the encoder's TABLE_POOL_CELLS.
  *
  * Written by @design because the card names this evidence.  Per workshop
  * rule 2 a cold break by another seat and model is owed: the operand
@@ -38,7 +46,9 @@
  * table-typed global's every getglobal, containment taint (a pair stored in
  * a cram field), the setlist/constant-key/register-key capacity order, and
  * the chunk/init/back-edge repeat rule.  #173's own target is the harness:
- * its artefacts, its frame count and its control mutation.
+ * its artefacts, its frame count and its control mutation.  #174's targets:
+ * the four ops' 1-based indexing and field ids, the pool bounds, the fault
+ * rule and what a fault stops.
  */
 "use strict";
 
@@ -733,6 +743,172 @@ function checkHostParity() {
   }
 }
 
+/* ---- #174: the table ops on the host ----------------------------------- *
+ * The same compile/run as checkHostParity for a version 2 table toy.  Eight
+ * frames must match the browser host's artefacts exactly — every value they
+ * carry comes out of a table read, so a wrong 1-based index, field id or
+ * cell shows in the diff.  The ninth frame writes cell 9 of an 8-cell
+ * array: the interpreter faults, the frame's first pal has landed and its
+ * last has not (the toy stopped exactly there), and pool.bin is byte-equal
+ * to the eight-frame run's — the write touched no cell, inside or outside
+ * the slot.  The browser host does not fault there (its JS array grows),
+ * which is the difference this check proves. */
+const TABLES_TOY = [
+  "INT = {3, 1, 4, 1, 5}",
+  "BOOL = {true, false, true}",
+  "REC = {x = 2, y = 3}",
+  "PAIR = {{0, 7}, {4, 1}}",
+  "BOX = {0, 0, 0, 0, 0, 0, 0, 0}",
+  "function frame(t, f)",
+  "  pal(1, INT[f % 5 + 1])",
+  "  if BOOL[f % 3 + 1] then",
+  "    pal(2, 200)",
+  "  else",
+  "    pal(2, 100)",
+  "  end",
+  "  pal(3, REC.x + REC.y * 10)",
+  "  pal(4, PAIR[(f % 2) + 1][2])",
+  "  pal(5, f)",
+  "  BOX[f + 1] = f",
+  "  pal(6, f + 1)",
+  "end",
+  ""
+].join("\n");
+
+function cramWord(cram, i) { return cram[i * 2] | (cram[i * 2 + 1] << 8); }
+
+function checkTablesRun() {
+  const probe = spawnSync("cc", ["--version"], { encoding: "utf8" });
+  if (probe.error) {
+    skipped.push("tables run (no system cc)");
+    console.log("SKIP  tables run: no system cc");
+    return;
+  }
+
+  /* The pool constant, from both sources: the interpreter's MAX_TABLE_CELLS
+   * and the encoder's exported TABLE_POOL_CELLS.  One pool, two readers. */
+  const ilvmSource = fs.readFileSync(path.join(ROOT, "tools", "ilvm",
+                                               "ilvm.c"), "utf8");
+  const cellMatch = /#define\s+MAX_TABLE_CELLS\s+(\d+)/.exec(ilvmSource);
+  check(!!cellMatch, "tables: ilvm.c defines MAX_TABLE_CELLS");
+  if (!cellMatch) return;
+  eq("tables: MAX_TABLE_CELLS equals the encoder's TABLE_POOL_CELLS",
+     cellMatch[1], String(ilbc.TABLE_POOL_CELLS));
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ilvm-tables-"));
+  const program = il.compile(TABLES_TOY, { chunkName: "tables.lua" });
+  const encoded = ilbc.encode(program);
+  eq("tables: the toy is a version 2 container", encoded.bytes[4], 2);
+  const layout = ilbc.tableLayout(program);
+  eq("tables: the toy has seven sites", layout.nslots, 7);
+  const siteOf = function (name) {
+    return layout.sites.filter(function (s) {
+      return s.globals.indexOf(name) >= 0;
+    })[0];
+  };
+  const container = path.join(tmp, "tables.ilbc");
+  fs.writeFileSync(container, Buffer.from(encoded.bytes));
+
+  /* The browser IL run: eight frames, then the state the toy's writes left
+   * (the same eight frame numbers hostvm is given). */
+  const rt = il.create(TABLES_TOY);
+  rt.load();
+  let want = null;
+  for (let f = 0; f < 8; f++) {
+    rt.frame(f);
+    want = { vram: rt.state.vram.slice(), cram: rt.state.cram.slice(),
+             sat: rt.state.sat.slice(),
+             regs: { BXR: rt.state.regs.BXR, BYR: rt.state.regs.BYR,
+                     CR: rt.state.regs.CR } };
+  }
+  const wantRegs = "BXR " + want.regs.BXR + "\nBYR " + want.regs.BYR +
+                   "\nCR " + want.regs.CR;
+  check(want.cram[2] !== 0 && want.cram[4] !== 0 && want.cram[6] !== 0,
+        "tables: the toy wrote cram before frame 8 (the diff is not zero " +
+        "against zero)");
+  eq("tables: the record read drives cram word 3 with 32 (REC.x + REC.y " +
+     "* 10)", cramWord(want.cram, 3), 32);
+
+  const hostvm = path.join(tmp, "hostvm");
+  check(buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c")),
+        "tables: the system cc builds ilvm.c with hostvm.c");
+  if (!fs.existsSync(hostvm)) return;
+
+  const runDir = path.join(tmp, "run8");
+  fs.mkdirSync(runDir);
+  const run8 = spawnSync(hostvm, [container, runDir, "8"],
+                         { encoding: "utf8" });
+  check(run8.status === 0, "tables: hostvm exits 0 for eight frames (" +
+        ((run8.stderr || "").trim().split("\n").slice(-1)[0] || "ok") + ")");
+  if (run8.status !== 0) return;
+
+  const got = {
+    vram: fs.readFileSync(path.join(runDir, "vram.bin")),
+    cram: fs.readFileSync(path.join(runDir, "cram.bin")),
+    sat: fs.readFileSync(path.join(runDir, "sat.bin"))
+  };
+  const regs = fs.readFileSync(path.join(runDir, "regs.txt"), "utf8").trim();
+  eq("tables: vram.bin is the browser host's after 8 frames",
+     bytesDiff(want.vram, got.vram), 0);
+  eq("tables: cram.bin is the browser host's after 8 frames",
+     bytesDiff(want.cram, got.cram), 0);
+  eq("tables: sat.bin is the browser host's after 8 frames",
+     bytesDiff(want.sat, got.sat), 0);
+  eq("tables: regs.txt is the browser host's registers", regs, wantRegs);
+
+  /* The pool the interpreter built, pinned at the cells the toy's tables
+   * used — the pool file is proven live before the fault check reads it. */
+  const pool8 = fs.readFileSync(path.join(runDir, "pool.bin"));
+  eq("tables: pool.bin is 256 int32 cells", pool8.length,
+     ilbc.TABLE_POOL_CELLS * 4);
+  function poolWord(pool, cell) { return pool.readInt32LE(cell * 4); }
+  const intSite = siteOf("INT"), boolSite = siteOf("BOOL");
+  const recSite = siteOf("REC"), pairSite = siteOf("PAIR");
+  const boxSite = siteOf("BOX");
+  const inners = layout.sites.filter(function (s) {
+    return s.cap === 2 && s.globals.length === 0;
+  }).sort(function (a, b) { return a.base - b.base; });
+  eq("tables: the int array's cell 1 holds 3", poolWord(pool8, intSite.base),
+     3);
+  eq("tables: the bool array's cells hold 1, 0, 1",
+     [poolWord(pool8, boolSite.base), poolWord(pool8, boolSite.base + 1),
+      poolWord(pool8, boolSite.base + 2)], [1, 0, 1]);
+  eq("tables: the record's field cells hold x=2, y=3",
+     [poolWord(pool8, recSite.base + recSite.cap),
+      poolWord(pool8, recSite.base + recSite.cap + 1)], [2, 3]);
+  eq("tables: the pair's cells hold its inner slot ids",
+     [poolWord(pool8, pairSite.base), poolWord(pool8, pairSite.base + 1)],
+     [inners[0].id, inners[1].id]);
+  eq("tables: the nested pair's own cells hold its [2] values 7 and 1",
+     [poolWord(pool8, inners[0].base + 1), poolWord(pool8, inners[1].base + 1)],
+     [7, 1]);
+  eq("tables: BOX's eight cells hold frames 0..7",
+     [0, 1, 2, 3, 4, 5, 6, 7].map(function (f) {
+       return poolWord(pool8, boxSite.base + f);
+     }), [0, 1, 2, 3, 4, 5, 6, 7]);
+
+  /* The ninth frame (f = 8) writes BOX[9], one past its 8 cells: the
+   * interpreter faults, so pal(5, 8) has landed but pal(6, 9) has not, and
+   * the pool is exactly the eight-frame run's — the write touched nothing. */
+  const faultDir = path.join(tmp, "run9");
+  fs.mkdirSync(faultDir);
+  const run9 = spawnSync(hostvm, [container, faultDir, "9"],
+                         { encoding: "utf8" });
+  check(run9.status === 0, "tables: hostvm exits 0 for nine frames");
+  if (run9.status !== 0) return;
+  const cram9 = fs.readFileSync(path.join(faultDir, "cram.bin"));
+  eq("tables: the faulting frame's first pal landed (cram word 5 is 8)",
+     cramWord(cram9, 5), 8);
+  eq("tables: the write after the fault never ran (cram word 6 stays 8)",
+     cramWord(cram9, 6), 8);
+  eq("tables: the faulting write touched no pool cell (pool after 9 frames " +
+     "is the eight-frame run's)",
+     bytesDiff(pool8, fs.readFileSync(path.join(faultDir, "pool.bin"))), 0);
+  rt.frame(8);
+  eq("tables: the browser host does not fault there (its cram word 6 is 9)",
+     cramWord(rt.state.cram, 6), 9);
+}
+
 /* ---- 5. the dumps ----------------------------------------------------- */
 
 function emitFresh(toy, outPce) {
@@ -998,6 +1174,7 @@ checkTableEncoding();
 checkRom();
 checkRebuild();
 checkHostParity();
+checkTablesRun();
 
 const paletteMax = 300;
 checkDump(PALETTE, paletteMax, 96);

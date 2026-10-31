@@ -19,6 +19,14 @@
  * Lua's floor `%` and `//`, shifts out of range 0, Lua truthiness for a
  * branch), because the two backends must produce the same picture.
  *
+ * Container version 2 adds the table section (#172, docs/TABLES-PLAN.md
+ * §2): every `table` instruction site owns one static slot in the fixed
+ * pool, zeroed and reused each time the site runs.  A register holds a
+ * table as its slot id; a slot's cells are its array part (cap cells,
+ * 1-based index i at cell base+i-1) then its field part (nfields cells,
+ * field id f at cell base+cap+f).  Writing past a slot or holding an id
+ * past nslots sets `fault` and touches nothing; reading out of range is 0.
+ *
  * Calls are C recursion over a bytecode function: the toys' call trees are
  * shallow (the deepest here is chunk -> init -> puttile -> callback).  A
  * deeper tree is bounded by the mos soft stack; a general backend must
@@ -57,6 +65,12 @@ int32_t toy_rgb(int32_t r, int32_t g, int32_t b);
 #define MAX_GLOBALS 32
 #define MAX_FUNCS 32
 #define MAX_ARGS 4
+#define MAX_SLOTS 32           /* first cut: the table toys need 7; the
+                                * encoder's limit is 255 */
+#define MAX_TABLE_CELLS 256    /* the fixed table pool: 1 KiB of BaseRAM
+                                * (docs/TABLES-PLAN.md §2.1).  Must equal
+                                * renderer/pce-ilbc.js's TABLE_POOL_CELLS;
+                                * checkTablesRun asserts the two are equal. */
 
 struct fninfo {
   uint16_t codeOff;
@@ -76,6 +90,22 @@ static struct fninfo fns[MAX_FUNCS];
 static struct closure clos[MAX_CLOS];
 static int32_t kvals[128];
 static int32_t globals[MAX_GLOBALS];
+
+/* The table pool (docs/TABLES-PLAN.md §2.1): each `table` instruction site
+ * owns one static slot, zeroed every time the site runs.  The slot's shape
+ * comes from the container's table section; its cells live in the fixed
+ * pool.  Static, so the linker places the pool in BaseRAM like fns/clos. */
+static uint16_t slot_base[MAX_SLOTS];
+static uint8_t slot_cap[MAX_SLOTS];
+static uint8_t slot_nfields[MAX_SLOTS];
+static uint8_t nslots;
+static int32_t cells[MAX_TABLE_CELLS];
+
+#ifdef ILVM_HOST
+/* The host harness dumps the pool (checkTablesRun's fault evidence). */
+const int32_t *ilvm_table_cells(void) { return cells; }
+int ilvm_table_cell_count(void) { return MAX_TABLE_CELLS; }
+#endif
 
 static uint8_t nfunc, nglobal, nconst;
 static uint16_t constTabOff;
@@ -151,8 +181,8 @@ static int32_t exec(uint8_t fid, uint8_t clh,
                     int32_t a0, int32_t a1, int32_t a2, int32_t a3) {
   int32_t r[MAX_REGS];
   const struct fninfo *fn;
-  uint16_t pc, tgt;
-  uint8_t op, d, g, u, k, i, n, aa, bb;
+  uint16_t pc, tgt, base;
+  uint8_t op, d, g, u, k, i, n, aa, bb, s, kind;
   int32_t av, bv, v;
 
   if (fault || fid >= nfunc) { fault = 1; return 0; }
@@ -331,6 +361,68 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       bv = operand(r, rb(pc++));
       toy_vram_set(av, bv);
       break;
+    case 0x18: {                   /* table: zero the slot, hold its id */
+      d = rb(pc++);
+      s = rb(pc++);
+      if (s >= nslots) { fault = 1; return 0; }
+      base = slot_base[s];
+      for (v = 0; v < (int32_t)slot_cap[s] + slot_nfields[s]; v++) {
+        cells[base + (uint16_t)v] = 0;
+      }
+      r[d] = s;
+      break;
+    }
+    case 0x19: {                   /* setlist: array part, first is 1-based */
+      uint8_t first;
+      v = r[rb(pc++)];             /* base register's value: a slot id */
+      if (v < 0 || v >= nslots) { fault = 1; return 0; }
+      s = (uint8_t)v;
+      first = rb(pc++);
+      n = rb(pc++);
+      base = slot_base[s];
+      for (i = 0; i < n; i++) {
+        int32_t idx = (int32_t)first + i;
+        if (idx < 1 || idx > slot_cap[s]) { fault = 1; return 0; }
+        cells[base + (uint16_t)(idx - 1)] = operand(r, rb(pc++));
+      }
+      break;
+    }
+    case 0x1A: {                   /* tget: unset or out of range is 0 */
+      d = rb(pc++);
+      v = operand(r, rb(pc++));    /* the base's value: a slot id */
+      if (v < 0 || v >= nslots) { fault = 1; return 0; }
+      s = (uint8_t)v;
+      k = rb(pc++);
+      kind = rb(pc++);
+      base = slot_base[s];
+      if (kind == 0) {
+        av = operand(r, k);        /* 1-based array key */
+        if (av < 1 || av > slot_cap[s]) { r[d] = 0; break; }
+        r[d] = cells[base + (uint16_t)(av - 1)];
+      } else if (kind == 1) {      /* field id */
+        if (k >= slot_nfields[s]) { r[d] = 0; break; }
+        r[d] = cells[base + (uint16_t)slot_cap[s] + k];
+      } else { fault = 1; return 0; }
+      break;
+    }
+    case 0x1B: {                   /* tset: out of range faults, nothing written */
+      v = operand(r, rb(pc++));    /* the base's value: a slot id */
+      if (v < 0 || v >= nslots) { fault = 1; return 0; }
+      s = (uint8_t)v;
+      k = rb(pc++);
+      kind = rb(pc++);
+      bv = operand(r, rb(pc++));   /* the value */
+      base = slot_base[s];
+      if (kind == 0) {
+        av = operand(r, k);        /* 1-based array key */
+        if (av < 1 || av > slot_cap[s]) { fault = 1; return 0; }
+        cells[base + (uint16_t)(av - 1)] = bv;
+      } else if (kind == 1) {      /* field id */
+        if (k >= slot_nfields[s]) { fault = 1; return 0; }
+        cells[base + (uint16_t)slot_cap[s] + k] = bv;
+      } else { fault = 1; return 0; }
+      break;
+    }
     default:
       /* Every other opcode is refused by the encoder, so reaching one is
        * a corrupt container: stop rather than run a wrong toy. */
@@ -343,17 +435,22 @@ static int32_t exec(uint8_t fid, uint8_t clh,
 /* ---- the runtime's three entry points --------------------------------- */
 
 void toy_boot(void) {
-  uint16_t funcTabOff, off;
-  uint8_t i;
+  uint16_t funcTabOff, off, tabOff;
+  uint8_t i, ver;
 
   fault = 0;
   clos_next = 1;
-  nfunc = 0; nglobal = 0; nconst = 0;
+  nfunc = 0; nglobal = 0; nconst = 0; nslots = 0;
   init_slot = 0xFF; frame_slot = 0xFF; raster_slot = 0xFF;
 
   map_bank2(2);
-  if (rb(0) != 'I' || rb(1) != 'L' || rb(2) != 'B' || rb(3) != 'C' ||
-      rb(4) != 1) {
+  if (rb(0) != 'I' || rb(1) != 'L' || rb(2) != 'B' || rb(3) != 'C') {
+    fault = 1;
+    toy_display_on();
+    return;
+  }
+  ver = rb(4);
+  if (ver != 1 && ver != 2) {
     fault = 1;
     toy_display_on();
     return;
@@ -400,6 +497,27 @@ void toy_boot(void) {
     else if (t == 3) { kvals[i] = 0; off = (uint16_t)(off + 1); }
     else if (t == 2) { kvals[i] = 0; off = (uint16_t)(off + 2 + rb((uint16_t)(off + 1))); }
     else { fault = 1; toy_display_on(); return; }
+  }
+
+  /* The table section (version 2): every slot's place and shape in the fixed
+   * pool.  A slot whose cells end past the pool is a corrupt container, not
+   * a toy: stop before anything runs, the way an oversized function does. */
+  if (ver == 2) {
+    tabOff = rw(20);
+    nslots = rb(tabOff);
+    if (nslots > MAX_SLOTS) { fault = 1; toy_display_on(); return; }
+    for (i = 0; i < nslots; i++) {
+      off = (uint16_t)(tabOff + 1 + i * 4);
+      slot_base[i] = rw(off);
+      slot_cap[i] = rb((uint16_t)(off + 2));
+      slot_nfields[i] = rb((uint16_t)(off + 3));
+      if ((int32_t)slot_base[i] + slot_cap[i] + slot_nfields[i] >
+          MAX_TABLE_CELLS) {
+        fault = 1;
+        toy_display_on();
+        return;
+      }
+    }
   }
 
   for (i = 0; i < MAX_GLOBALS; i++) globals[i] = -1;
