@@ -180,6 +180,74 @@ collections (the wrong-`sum` bug above).
   `STATUS_MEASURED` (3,780,450) is a pre-#169 number and should move to
   1,994,069 with the factor.
 
+## The real games, measured (card #180)
+
+The #169 table above measures four example toys. This one asks the question a
+person asks about the *games*: **does the export build STARFALL, TOWER, NOVA
+TIDE, DUSK RUN and PLATFORMER, and if it did, what would the console do with
+the ROM?** It is measured by `tests/check-export-games.js`, which makes the
+same calls as the MCP's `export_pce` and the studio's Export:
+
+```
+renderer/pce-validate.js (8 frames)
+  -> renderer/pce-il.js -> renderer/pce-ilbc.js -> renderer/pce-rom.js buildToyRom
+```
+
+over the committed `renderer/ilvm.bin`; no compiler is called. The static
+estimate is `renderer/pce-validate.js`'s `budgets.route1` for the same source.
+"overruns", "worst update" and the verdict are `tools/measure-rom.js
+--frames 300` (the #169 instrument) and the picture is a `-qtrecord` capture
+under the dummy SDL driver, cropped to 256x224 and compared with
+`renderer/pce-toys.js`'s frame of the same toy — the
+`tools/capture-ilvm.sh`/`tests/check-ilvm.js` route, no input sent.
+
+| toy | exports? | picture matches? | overruns | worst update | verdict | validator's static estimate |
+|-----|----------|------------------|----------|--------------|---------|-----------------------------|
+| **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants`; the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
+| **TOWER** `toys/tower` | **no** — `ilbc-arity: fn@257 takes 7 parameters; the interpreter takes at most 4` (`main.lua:258`). Card **#183**. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
+| **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-arity: fn@44 takes 8 parameters; the interpreter takes at most 4` (`main.lua:45`). Card **#183**. | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
+| **DUSK RUN** `toys/dusk-run` | **no** — `validate-frame-budget` (frame-wide, no line): `frame()` + its 224 raster calls cost 1,054,292 cycles, over the 954,544 ceiling. Card **#184**. The encoder would next refuse `ilbc-arity: fn@71 takes 5 parameters` (`main.lua:72`, card #183). | — | — | — | — | 27,348,334 cycles · 229.2 frames · **0.26 Hz** |
+| **PLATFORMER** `toys/platformer` | **no** — `ilbc-op: instruction padref (function 10, pc 2) has no bytecode form`; the first padref is `main.lua:110`, padget follows. Card **#185** (the queue slice of #134). | — | — | — | — | 88,115 cycles · 0.74 frames · **81.2 Hz** |
+| *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `936b92dd9cfb2a01…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 110 | **653** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
+
+### What this says, plainly
+
+- **No game exports today.** The five games stop on four different kinds of
+  refusal, which is why the table has no speed number for any of them: the
+  counters and the picture comparison have nothing to run. The control row
+  proves both instruments work on a ROM the route does build, so "nothing
+  built" is a measurement, not a blind spot.
+- **PLATFORMER is the closest.** The validator accepts it, the C emitter
+  lowers it completely, and it is the one game the static model puts over
+  60 Hz (81.2 Hz). Its remaining route-1 gaps are padref/padget and `sat`
+  (4 at `main.lua:142`) — and its projected container is 2,351 B, inside
+  the 8 KiB data bank.
+- **The static estimate is still an estimate.** It is the same
+  `pce-validate.js` factor pair #169 measured to be 20 % low (no raster) and
+  1.3–3.5× high (raster). It orders the games but cannot give a verdict; only
+  a built ROM can, and none exists.
+- **The studio page refuses earlier than the MCP for four of the five.**
+  Its Export runs `renderer/pce-cgen.js` first: STARFALL stops on
+  `cgen-op` `sprite` (`main.lua:406`), TOWER and NOVA TIDE on `cgen-arity`
+  (the same 4-parameter limit), DUSK RUN on both `validate-frame-budget` and
+  `cgen-arity`, and only PLATFORMER reaches the encoder. So the page's
+  one-line finding for those four is a C-emitter or validator finding, not
+  the bytecode refusal in the table.
+- **Carrying the first refusals would not finish the job.** #178's
+  projections put STARFALL at 8,969 B, TOWER at 8,379 B and NOVA TIDE at
+  9,287 B — all over the interpreter's 8,192-byte data bank (#138), before
+  the still-uncarried kinds (`sprite` #133, `sat`, `sfx` #135, `raster`
+  table #136, builtins #137, `not`) are counted. DUSK RUN (7,385 B) and
+  PLATFORMER (2,351 B) do fit.
+
+### The cards this measurement added
+
+Per the card, nothing here is fixed in this one. The refusals that remain
+are on the board: **#148** (the 127-constant pool, already open),
+**#183** (the 4-parameter ceiling), **#184** (DUSK RUN's validator refusal)
+and **#185** (padref/padget, PLATFORMER's first). The kinds behind them are
+the existing #133–#138 umbrellas.
+
 ## What is not proven
 
 - **Mednafen only.** No real hardware (Tang Nano / flash cart: a later card),
@@ -218,3 +286,12 @@ collections (the wrong-`sum` bug above).
   seat and model is owed before the card closes; the places to attack are
   the timer-direction probe, the `$0C00`/`$1C00` distinction, the
   `after_vblank` window, and the verdict thresholds.
+- **#180 has no game ROM to prove anything with.** Every game row in the
+  table above is a refusal, so the picture comparison is exercised only on
+  the control (`tools/toys/palette.lua`) and the overrun/worst-update cells
+  are empty by construction. The refusals are pinned in
+  `tests/check-export-games.js` (code, message, and the line re-derived from
+  the IL), and the control's ROM sha and eight-frame picture cycle are
+  pinned, but a game's first *measurement* still needs its blockers to
+  land. The capture runs one emulator (Mednafen) with no input and no real
+  hardware; a pad-driven playthrough of a game ROM is not in this table.

@@ -93,9 +93,13 @@ Each toy's own `README.md` says how it was made and which keys it uses. A toy's 
 ## Export to a ROM
 
 The studio compiles a toy to a small bytecode and glues it to a fixed interpreter ROM, all in the browser
-([`docs/EXPORT.md`](docs/EXPORT.md), [`docs/IL.md`](docs/IL.md)). That route handles simple toys today. Games that use Lua
-tables, `sprite()`, the pad or `sfx()` run in the studio but are refused by the export, with a message naming the line.
-Carrying those is the next big piece of work. The ROMs are checked in an emulator; nothing has run on a real console yet.
+([`docs/EXPORT.md`](docs/EXPORT.md), [`docs/IL.md`](docs/IL.md)). The simple example toys in `toys/*.lua`
+(parallax, status bar, sky gradient, palette cycle) export today. **None of the five games** — STARFALL, TOWER,
+NOVA TIDE, DUSK RUN and PLATFORMER — does yet: each is stopped by a named finding, and
+[`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five (STARFALL's 127-constant
+pool, the interpreter's four-parameter limit for TOWER and NOVA TIDE, DUSK RUN's frame budget, PLATFORMER's pad
+read), with the `sprite()`/`sat`/`sfx()`/`raster` instructions and the 8 KiB data bank behind those. Carrying them
+is the next big piece of work. The ROMs are checked in Mednafen; nothing has run on a real console yet.
 
 ## Project files
 
@@ -132,7 +136,8 @@ and the mutation suites break the engine on purpose to show the tests notice.
 
 ## What does not work yet
 
-- **Export** of games that use tables, `sprite()`, the pad or `sfx()` (see above).
+- **Export of the five games**: STARFALL, TOWER, NOVA TIDE, DUSK RUN and PLATFORMER are all refused today. The
+  exact code and line for each is in [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md); the simple `toys/*.lua` examples do export.
 - **Real hardware**: nothing has been tried on a console or a flash cart.
 - **Phones and tablets**, **CD-ROM, Arcade Card and SuperGrafx** are not designed for.
 - The MCP server and the studio have been tested on **macOS** only. Linux and Windows should work (plain Node.js and
