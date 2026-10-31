@@ -335,6 +335,11 @@ function guide() {
                      "findings"],
         ["toy_save", "save the whole toy — code, art, songs — as one " +
                      ".pce.json the person opens in the studio"],
+        ["project_open", "resume a project: a .pcestudio file or an unpacked " +
+                         "project folder, with NOTES.md's text returned first"],
+        ["project_save", "save the session as a project — one .pcestudio, or " +
+                         "the same layout unpacked into a folder so git holds " +
+                         "the history; pass the updated NOTES.md as notes"],
         ["export_pce", "build the HuCard .pce from the same IL the studio runs"],
         ["docs", "the reference chapters, generated from the runtime's tables"],
         ["registers_get", "read a VDC, VCE or PSG register with its range"],
@@ -360,6 +365,19 @@ function guide() {
         "the page — and the game plays with its art. Without this step you " +
         "can only hand over the code, and everything source_add imported " +
         "stays behind."),
+      p("**If the person gives you a project, read NOTES.md before anything " +
+        "else; at the end of the session update NOTES.md — what you did, what " +
+        "works, what is next — and save the project.** project_open {path} " +
+        "opens a .pcestudio file or an unpacked project folder into the " +
+        "session and answers with NOTES.md's text first: it is what the last " +
+        "session learned, and nothing in the code repeats it. Then project_save " +
+        "{path, notes}: one .pcestudio, or — when path is a folder (a " +
+        "trailing / on the name, or an existing folder) — the same layout " +
+        "unpacked, which is the route for Claude Code, because git can hold " +
+        "the history. Pass the whole updated NOTES.md as notes; with no " +
+        "notes and none in the toy, the project gets the studio's template. " +
+        "The person opens the file with Project… → Open. toy_save stays for " +
+        "the plain toy file, a project is what a later session resumes."),
       p("No tools at all? Ignore this section. Sections 1 to 11 are the " +
         "paste-and-run route and work the same.")
     ]
@@ -675,6 +693,13 @@ function guide() {
         "first sprite; the BAT filled; sprite patterns through putsprite; " +
         "the raster callback a few writes per line; no string values; no " +
         "table reads if the toy must export."),
+      p("If the person has a project already, it carries NOTES.md, the resume " +
+        "note: what the game is, what works, what does not, the decisions " +
+        "and the next step. Read it before you change anything. At the end " +
+        "of the session, give the person the updated NOTES.md and the code, " +
+        "and tell them to Save project (Project… → Save project): the one " +
+        "file holds the game and the note, so the next session starts where " +
+        "this one stopped."),
       p("Then end with the line the person needs in order to run it:"),
       p("**" + COPY_LINE + "**"),
       p("Ask what they see. You are done when the picture on their screen is " +

@@ -162,6 +162,25 @@ dropped `.pcestudio` takes the same path; a dropped PNG/WAV/MID is kept as an
 original with nothing else changed. Recent projects are listed from browser
 storage (per viewer); one too large for storage is listed as *not kept*.
 
+## From Claude Code — the folder route (#163)
+
+The MCP server writes and reads the same format. `project_save {path, notes}`
+writes one `.pcestudio`, and **when `path` is a folder** (a trailing `/` on
+the name, or a folder that already exists) it writes the layout **unpacked**
+into it — the same files this document lists, one level of `art/` and
+`versions/` included. That is the route Claude Code is meant to use: the
+folder is a normal git repository, so committing after each session puts the
+game's history in git, one readable diff at a time.
+
+`project_open {path}` reads either form back into the session, and answers
+with `NOTES.md`'s text **first**. A folder is read through its manifest:
+`project.json` names the root files, the `art/` originals and the
+`versions/<n>-<label>/` files, and those are what loads — a repository's
+`.git/`, its `README.md`, a committed screenshot or anything else the
+manifest does not list is not a project file. The MCP session has no
+originals in `art/` and no named versions (source_add keeps the imported
+files, not the picture it read); the studio's Save project fills them.
+
 ## API
 
 `renderer/pce-project.js` (UMD: Node `require`, browser `PCEStudio.project`):

@@ -73,6 +73,19 @@
  *      climb or an absolute one) is refused with save-path and nothing is
  *      written; a second server started in another folder with nothing set
  *      saves into that folder, so the fence is the process's own.
+ *  12. `project_save` / `project_open` (#163): session 1 writes a toy with
+ *      source_add's art and a NOTES.md and saves it as a project — one
+ *      .pcestudio file and, through a trailing /, the same layout unpacked
+ *      into a folder (the route for Claude Code, so git holds the history);
+ *      the studio's own project reader (renderer/pce-project.js parseBytes)
+ *      opens the archive and draws the MCP run's frame, diff 0.  Session 2
+ *      is a FRESH server process: project_open loads the file (and then the
+ *      folder) and answers with NOTES.md's text as the reply's first block,
+ *      and its run draws session 1's frame, diff 0.  A project without a
+ *      NOTES.md gets the studio's template; a path outside the working
+ *      folder (open-path), a missing project (open-path) and a ZIP that is
+ *      not a project (project-format) are refused, and a refused open leaves
+ *      the loaded toy alone.
  *
  * The test writes its .pce and .pce.json files under $TMPDIR (the server's
  * working folder is PCE_MCP_WORKDIR under it), never into the repository.
@@ -97,6 +110,7 @@ const romLib = require("../renderer/pce-rom.js");
 const sprites = require("../renderer/pce-sprites.js");
 const seqLib = require("../renderer/pce-seq.js");
 const sourceLib = require("../renderer/pce-source.js");
+const projectLib = require("../renderer/pce-project.js");
 
 const ROOT = path.join(__dirname, "..");
 const SERVER = path.join(ROOT, "tools", "mcp", "server.js");
@@ -333,6 +347,26 @@ function imageOf(result) {
   return decodePng(Buffer.from(img.data, "base64"));
 }
 
+/* project_open answers with NOTES.md's text as the FIRST text block and the
+ * JSON summary as the second, so the generic call() — which reads the first
+ * text block as the body — does not fit.  This reads both. */
+async function openProject(client, p) {
+  const msg = await client.request("tools/call",
+                                   { name: "project_open",
+                                     arguments: { path: p } });
+  const res = msg.result || {};
+  const texts = (res.content || []).filter((c) => c.type === "text");
+  if (res.isError) {
+    let body = null;
+    try { body = JSON.parse(texts[0].text); } catch (e) { body = null; }
+    return { isError: true, head: null, body: body, content: res.content || [] };
+  }
+  let body = null;
+  try { body = JSON.parse(texts[1] && texts[1].text); } catch (e) { body = null; }
+  return { isError: false, head: texts[0] ? texts[0].text : null,
+           body: body, content: res.content || [] };
+}
+
 /* ---- #29 toy helpers --------------------------------------------------- */
 
 function writeToy(client, name) {
@@ -547,10 +581,10 @@ function usedChannels(song) {
     check(!list.error, "tools/list answers without a JSON-RPC error");
     const tools = list.result.tools || [];
     const names = tools.map((t) => t.name).sort();
-    eq("tools/list lists exactly the server's eleven tools", names, [
-      "docs", "export_pce", "frame_png", "register_set", "registers_get",
-      "song_write", "source_add", "toy_run", "toy_save", "toy_write",
-      "validate"
+    eq("tools/list lists exactly the server's thirteen tools", names, [
+      "docs", "export_pce", "frame_png", "project_open", "project_save",
+      "register_set", "registers_get", "song_write", "source_add", "toy_run",
+      "toy_save", "toy_write", "validate"
     ]);
     for (const t of tools) {
       const schema = t.inputSchema;
@@ -571,6 +605,15 @@ function usedChannels(song) {
            .inputSchema.required, ["kind"]);
     eq("toy_save requires path",
        list.result.tools.filter((t) => t.name === "toy_save")[0]
+           .inputSchema.required, ["path"]);
+    eq("project_save requires path",
+       list.result.tools.filter((t) => t.name === "project_save")[0]
+           .inputSchema.required, ["path"]);
+    eq("project_save takes the updated NOTES.md as notes",
+       list.result.tools.filter((t) => t.name === "project_save")[0]
+           .inputSchema.properties.notes.type, "string");
+    eq("project_open requires path",
+       list.result.tools.filter((t) => t.name === "project_open")[0]
            .inputSchema.required, ["path"]);
     eq("source_add's kinds are the picture kinds and song",
        list.result.tools.filter((t) => t.name === "source_add")[0]
@@ -1362,6 +1405,227 @@ function usedChannels(song) {
       client2.close();
     }
 
+    /* 12 — project_save / project_open (#163): a game over two sessions ----
+     * Session 1: a toy with art from source_add and a NOTES.md, saved as a
+     * project — one .pcestudio AND the same layout unpacked into a folder
+     * (the route for Claude Code, so git holds the history); at the end of
+     * the session the note is updated through project_save's `notes`.
+     * Session 2 is a NEW server process: project_open must answer with
+     * NOTES.md's text FIRST and then run to session 1's frame, diff 0.  The
+     * studio's own open path (renderer/pce-project.js parseBytes, which is
+     * what the page's OPEN calls) reads the same file and draws the same
+     * frame, so the person can open what Claude saved.
+     */
+    const projectNotes = "# Red square — resume note\n\n" +
+      "## Goal\nA red square that draws at (68, 36).\n\n" +
+      "## What works\n- the square is on screen\n\n" +
+      "## Next steps\n1. make it move with the pad\n";
+    const projectNotes2 = "# Red square — resume note\n\n" +
+      "## Goal\nA red square that draws at (68, 36).\n\n" +
+      "## What I did\n- added the sprite with source_add\n\n" +
+      "## What works\n- the square is on screen (frame 0, pixel (68, 36))\n\n" +
+      "## Next steps\n1. make it move with the pad\n2. add a second square\n";
+
+    const projWrite = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: savedMain },
+              { name: "sources.json", source: namedSources },
+              { name: "NOTES.md", source: projectNotes }]
+    });
+    check(!projWrite.isError && projWrite.body.ok,
+          "session 1: the project's toy writes, with its NOTES.md");
+    const projAdd = await client.call("source_add", {
+      kind: "sprites", name: "red-square", png: redPng
+    });
+    check(!projAdd.isError && projAdd.body.ok, "session 1: its art is added");
+    const projRun = await client.call("toy_run", { frames: 1 });
+    check(!projRun.isError && projRun.body.ok, "session 1: the toy runs");
+    const projectFrame = imageOf(await client.call("frame_png", { frame: 0 }));
+    eq("session 1: the run draws the sprite",
+       pixelOf(projectFrame, 68, 36), [252, 0, 0]);
+
+    const projSave = await client.call("project_save",
+                                       { path: "red-project.pcestudio" });
+    check(!projSave.isError && projSave.body.ok,
+          "project_save writes the project" +
+          (projSave.isError ? " (" + JSON.stringify(projSave.body) + ")" : ""));
+    const projPath = path.join(WORK, "red-project.pcestudio");
+    eq("the reply names the file inside the working folder",
+       projSave.body.path, projPath);
+    check(fs.existsSync(projPath), "the .pcestudio is on disk");
+    eq("it is the studio's project format", projSave.body.format, "pcestudio/1");
+    eq("the project carries the session's every file",
+       (projSave.body.files || []).slice().sort(),
+       ["NOTES.md", "main.lua", "palettes.json", "sources.json",
+        "sprites.json"]);
+    eq("the reply says the notes went in", projSave.body.notes, "NOTES.md");
+
+    const projBytes = fs.readFileSync(projPath);
+    check(projBytes[0] === 0x50 && projBytes[1] === 0x4B,
+          "the project is a ZIP, as the format says");
+    const projRead = projectLib.parseBytes(projBytes);
+    eq("the studio's project reader opens it",
+       projRead.format, "pcestudio/1");
+    eq("... with every file",
+       projRead.files.map((f) => f.name).sort(),
+       ["NOTES.md", "main.lua", "palettes.json", "sources.json",
+        "sprites.json"]);
+    eq("... NOTES.md byte for byte", projRead.notes, projectNotes);
+    eq("... main.lua byte for byte",
+       projRead.files.filter((f) => f.name === "main.lua")[0].source,
+       savedMain);
+    const studioProjectFrame = independentArtFrames(
+      projRead.files.map((f) => ({ name: f.name, source: f.source })), 1, {});
+    sameImage("the studio's open path draws session 1's frame (diff 0)",
+              studioProjectFrame, projectFrame);
+
+    /* the folder route: a trailing / writes the SAME layout unpacked, so the
+     * folder can be a git repository */
+    const folderPath = path.join(WORK, "red-project");
+    const folderSave = await client.call("project_save", { path: "red-project/" });
+    check(!folderSave.isError && folderSave.body.ok,
+          "project_save writes the folder route" +
+          (folderSave.isError ? " (" + JSON.stringify(folderSave.body) + ")" : ""));
+    eq("the reply says it is the unpacked folder",
+       folderSave.body.folder, true);
+    check(fs.existsSync(folderPath) && fs.statSync(folderPath).isDirectory(),
+          "the folder is on disk");
+    eq("the folder is the project layout",
+       fs.readdirSync(folderPath).sort(),
+       ["NOTES.md", "main.lua", "palettes.json", "project.json",
+        "sources.json", "sprites.json"]);
+    eq("... with the project.json",
+       JSON.parse(fs.readFileSync(path.join(folderPath, "project.json"), "utf8"))
+         .format, "pcestudio/1");
+    eq("... and NOTES.md's own text",
+       fs.readFileSync(path.join(folderPath, "NOTES.md"), "utf8"),
+       projectNotes);
+
+    /* the end of session 1: update NOTES.md and save, in one call */
+    const notesSave = await client.call("project_save", {
+      path: "red-project.pcestudio", notes: projectNotes2
+    });
+    check(!notesSave.isError && notesSave.body.ok,
+          "project_save takes the updated NOTES.md");
+    const notesFolder = await client.call("project_save", {
+      path: "red-project/", notes: projectNotes2
+    });
+    check(!notesFolder.isError && notesFolder.body.ok,
+          "... on the folder route too");
+    eq("the .pcestudio now holds the updated note",
+       projectLib.parseBytes(fs.readFileSync(projPath)).notes, projectNotes2);
+    eq("and so does the folder",
+       fs.readFileSync(path.join(folderPath, "NOTES.md"), "utf8"),
+       projectNotes2);
+
+    /* session 2 — a fresh server process, started in the same folder */
+    const proc3 = spawn(process.execPath, [SERVER], {
+      cwd: WORK, stdio: ["pipe", "pipe", "pipe"]
+    });
+    const client3 = new Client(proc3);
+    try {
+      await client3.request("initialize", {
+        protocolVersion: "2024-11-05", capabilities: {}
+      });
+      client3.notify("notifications/initialized");
+
+      const opened = await openProject(client3, "red-project.pcestudio");
+      check(!opened.isError,
+            "session 2: project_open reads the .pcestudio" +
+            (opened.isError ? " (" + JSON.stringify(opened.body) + ")" : ""));
+      eq("... and NOTES.md's text is the reply's FIRST block",
+         opened.head, projectNotes2);
+      eq("... with the project loaded", opened.body && opened.body.title,
+         "red-project");
+      eq("... and every file in the session",
+         (opened.body.files || []).slice().sort(),
+         ["NOTES.md", "main.lua", "palettes.json", "sources.json",
+          "sprites.json"]);
+      check(opened.body.notes === true, "... and the reply says the notes are there");
+      const ran2 = await client3.call("toy_run", { frames: 1 });
+      check(!ran2.isError && ran2.body.ok, "session 2: the resumed toy runs");
+      const frame2 = imageOf(await client3.call("frame_png", { frame: 0 }));
+      sameImage("session 2 draws session 1's frame (diff 0)", frame2,
+                projectFrame);
+
+      /* the folder route opens the same way, with the note first */
+      const folderOpen = await openProject(client3, "red-project");
+      check(!folderOpen.isError && folderOpen.body.folder === true,
+            "session 2: project_open reads the unpacked folder" +
+            (folderOpen.isError ? " (" + JSON.stringify(folderOpen.body) + ")" : ""));
+      eq("... and still returns NOTES.md first", folderOpen.head, projectNotes2);
+      const ran3 = await client3.call("toy_run", { frames: 1 });
+      check(!ran3.isError && ran3.body.ok, "the folder's toy runs");
+      const frame3 = imageOf(await client3.call("frame_png", { frame: 0 }));
+      sameImage("the folder's toy draws session 1's frame (diff 0)", frame3,
+                projectFrame);
+
+      /* The folder is a git repository, so it holds files that are not the
+       * project's: .git/, a README, a committed screenshot.  project.json is
+       * the manifest — a root file it does not list is not loaded (and a
+       * binary file is never fed to the text decoder). */
+      fs.writeFileSync(path.join(folderPath, "README.md"), "# my game\n");
+      fs.writeFileSync(path.join(folderPath, "screenshot.png"),
+                       Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x00, 0xFF, 0x80]));
+      fs.mkdirSync(path.join(folderPath, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(folderPath, ".git", "HEAD"),
+                       "ref: refs/heads/main\n");
+      const gitFolder = await openProject(client3, "red-project");
+      check(!gitFolder.isError,
+            "a git folder opens with its other files present" +
+            (gitFolder.isError ? " (" + JSON.stringify(gitFolder.body) + ")" : ""));
+      eq("... loading only the files project.json lists",
+         (gitFolder.body.files || []).slice().sort(),
+         ["NOTES.md", "main.lua", "palettes.json", "sources.json",
+          "sprites.json"]);
+      check((gitFolder.body.files || []).indexOf("README.md") < 0 &&
+            (gitFolder.body.files || []).indexOf("screenshot.png") < 0,
+            "... and not the README or the screenshot");
+      eq("... still with NOTES.md first", gitFolder.head, projectNotes2);
+
+      /* a project with no NOTES.md gets the studio's template, so the next
+       * session has something to read */
+      const bareProjWrite = await client3.call("toy_write", {
+        files: [{ name: "main.lua", source: savedMain }]
+      });
+      check(!bareProjWrite.isError, "a toy without NOTES.md writes");
+      const bareProjSave = await client3.call("project_save",
+                                             { path: "templated",
+                                               title: "templated" });
+      check(!bareProjSave.isError && bareProjSave.body.ok,
+            "project_save without notes still writes");
+      const templated = projectLib.parseBytes(
+        fs.readFileSync(path.join(WORK, "templated.pcestudio")));
+      check(templated.notes && templated.notes.indexOf("resume note") >= 0,
+            "the project gets the studio's NOTES.md template");
+      contains("the template asks for the next step",
+               templated.notes || "", "## Next steps");
+
+      /* the fences and refusals */
+      const outsideOpen = await openProject(client3, "../escape.pcestudio");
+      check(outsideOpen.isError && outsideOpen.body &&
+            outsideOpen.body.code === "open-path",
+            "a project path outside the working folder is refused (open-path)");
+      const missingOpen = await openProject(client3, "no-such.pcestudio");
+      check(missingOpen.isError && missingOpen.body &&
+            missingOpen.body.code === "open-path",
+            "a missing project is refused (open-path)");
+      const notProjectPath = path.join(WORK, "no-project.pcestudio");
+      fs.writeFileSync(notProjectPath,
+                       Buffer.from(require("../renderer/pce-zip.js")
+                         .write([{ name: "main.lua",
+                                   bytes: Buffer.from("function frame(t, f) end\n") }])));
+      const notProject = await openProject(client3, "no-project.pcestudio");
+      check(notProject.isError && notProject.body &&
+            notProject.body.code === "project-format",
+            "a ZIP with no project.json is refused by the format " +
+            "(project-format)");
+      const stillRan = await client3.call("toy_run", { frames: 1 });
+      check(!stillRan.isError && stillRan.body.ok,
+            "a refused open leaves the loaded toy alone");
+    } finally {
+      client3.close();
+    }
+
     ok = true;
   } catch (e) {
     check(false, "the run threw: " + (e && e.stack || e));
@@ -1388,6 +1652,8 @@ function usedChannels(song) {
               "tune both playing and the SEQUENCER reading the saved song " +
               "back; and toy_save's one pce.studio/1 envelope opens through " +
               "the studio's own importStudio to the same frame, its art " +
-              "included");
+              "included; and a project saved as one .pcestudio or an unpacked " +
+              "folder reopens in a fresh process with NOTES.md first and the " +
+              "same frame");
   process.exit(0);
 })();

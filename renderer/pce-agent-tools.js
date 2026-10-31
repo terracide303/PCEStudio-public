@@ -30,6 +30,26 @@
  *                           export_pce's write: the Node adapter writes
  *                           $TMPDIR/pce-mcp/<name>.pce (or `out`); the
  *                           browser adapter downloads.
+ *   projectPath(path)       -> {path, name, folder}: project_save's path rules
+ *                           (#163) — a trailing separator or an existing
+ *                           folder is the UNPACKED route, any other name is
+ *                           one .pcestudio file (the extension is added);
+ *                           a path outside the working folder is refused
+ *                           (save-path).
+ *   writeProject({path, name, folder, entries, zip}) -> {path, files}
+ *                           project_save's write: the Node adapter writes the
+ *                           archive (bytes=zip) or, for a folder, each entry
+ *                           as a file (bytes=e.bytes); the browser adapter
+ *                           (#167) downloads the archive.
+ *   readProject(path)       -> {path, folder, entries} or {path, bytes}
+ *                           project_open's read (#163): a folder is its
+ *                           entries, a .pcestudio is its bytes (parsed by
+ *                           renderer/pce-project.js).  A host without it (a
+ *                           browser tab) cannot open by path and says so
+ *                           (project-host).
+ *   now()                   the ISO time a project.json's created/modified
+ *                           carry; a host without it writes "" (the project
+ *                           format never reads the clock itself).
  *
  * The core itself needs no files, no environment and no buffers of its
  * own: hashing (sha256), base64, UTF-8 sizes and the PNG container are
@@ -55,21 +75,22 @@
                              require("./pce-toyhost.js"), require("./pce-panels.js"),
                              require("./pce-psg.js"), require("./pce-source.js"),
                              require("./pce-sat.js"), require("./pce-editor.js"),
-                             require("./pce-seq.js"));
+                             require("./pce-seq.js"), require("./pce-project.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.agentTools = factory(root.PCEStudio.il, root.PCEStudio.ilbc,
       root.PCEStudio.rom, root.PCEStudio.docs, root.PCEStudio.validate,
       root.PCEStudio.sprites, root.PCEStudio.toyhost, root.PCEStudio.panels,
       root.PCEStudio.psg, root.PCEStudio.source, root.PCEStudio.sat,
-      root.PCEStudio.editor, root.PCEStudio.seq);
+      root.PCEStudio.editor, root.PCEStudio.seq, root.PCEStudio.project);
   }
 })(typeof self !== "undefined" ? self : this, function (il, ilbc, romLib, docs,
   validateLib, sprites, toyhost, panels, psg, sourceLib, satLib, editorLib,
-  seqLib) {
+  seqLib, projectLib) {
   "use strict";
 
   const MAIN = "main.lua";
+  const NOTES = "NOTES.md";             /* a project's resume note (#162/#163) */
   const MAX_FRAMES = 600;               /* 10 s at 60 Hz, the frame_png cap */
   const DEFAULT_FRAMES = 60;
 
@@ -816,6 +837,61 @@
       }
     },
     {
+      name: "project_save",
+      description: "Save the session as a whole PCEStudio project (#163), the " +
+        "file a later session resumes from: the studio's .pcestudio (#162) — " +
+        "project.json, main.lua, the asset files, sources.json and NOTES.md — " +
+        "as ONE .pcestudio file, or as the same layout UNPACKED into a folder " +
+        "when the path is a folder (a trailing / on the name, or an existing " +
+        "folder), so git can hold the history. Pass the updated NOTES.md text " +
+        "as notes (what you did, what works, what is next); with no notes and " +
+        "none in the toy, the project gets the studio's NOTES.md template. " +
+        "The person opens the file in the studio with Project… → Open (or " +
+        "drops it on the page); a folder opens in a fresh session with " +
+        "project_open. The path is relative to the folder the server was " +
+        "started in; a path outside it is refused (save-path).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string",
+                  description: "the project to write, inside the working " +
+                    "folder: a .pcestudio file name (the extension is added " +
+                    "when it has none) or a folder, written unpacked" },
+          title: { type: "string",
+                   description: "the project's title (default: the project " +
+                     "opened before, else the file or folder's own name)" },
+          notes: { type: "string",
+                   description: "the whole updated NOTES.md — the resume " +
+                     "note: goal, what works, what does not, decisions, next " +
+                     "steps" }
+        },
+        required: ["path"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "project_open",
+      description: "Resume a project saved by project_save or the studio " +
+        "(#163): load its .pcestudio file, or its UNPACKED folder, into the " +
+        "session — main.lua, every asset file, sources.json, the songs and " +
+        "NOTES.md — and answer with NOTES.md's text FIRST, before anything " +
+        "else, so the session starts from what the last one learned. Then " +
+        "toy_run/frame_png play the resumed toy; toy_write edits it; " +
+        "project_save writes it back. A path outside the folder the server " +
+        "was started in is refused (open-path), and a file that is not a " +
+        "project is refused with the project format's own code.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          path: { type: "string",
+                  description: "the .pcestudio file or the project folder, " +
+                    "inside the working folder" }
+        },
+        required: ["path"],
+        additionalProperties: false
+      }
+    },
+    {
       name: "toy_run",
       description: "Run the loaded toy's main.lua for `frames` video frames " +
         "(0..frames-1) through the IL runtime, with an optional pad script, and " +
@@ -1070,6 +1146,9 @@
       files: null,         /* [{name, source}] as written */
       source: null,        /* main.lua's text */
       songs: [],           /* the compiled songs the toy's files carry (#161) */
+      project: null,       /* {title, author, created, modified} once a
+                            * project was opened or saved (#163); toy_write
+                            * edits the toy inside it, so it survives one */
       runtime: null,       /* renderer/pce-il.js runtime after toy_run */
       frames: [],          /* per frame: {state, raster} — the run is canonical */
       pad: [],             /* intervals {from, to, pad, buttons} */
@@ -1536,6 +1615,211 @@
       };
     }
 
+    /* ---- project_save / project_open (#163): a game over many sessions ---
+     * The studio's .pcestudio (#162) is the file a later session resumes
+     * from; project_save writes it (or, for Claude Code, the SAME layout
+     * unpacked into a folder, so git holds the history), and project_open
+     * reads either back into the session and answers with NOTES.md's text
+     * before anything else.  Both are the project module's bytes
+     * (renderer/pce-project.js) — there is no second format.  The session
+     * has no art/ originals and no named versions (source_add keeps the
+     * imported files, not the picture it read), so those two lists are
+     * empty here and the studio's own Save project fills them.
+     *
+     * WHERE THE FILES GO is the host's rule: the Node adapter stays inside
+     * the folder the server was started in (save-path / open-path), and a
+     * browser tab has no folder to read, so it refuses project_open
+     * (project-host). */
+
+    function hasNotes(files) {
+      for (const f of files) if (f.name === NOTES) return true;
+      return false;
+    }
+
+    function withNotes(files, text) {
+      const out = [];
+      let put = false;
+      for (const f of files) {
+        if (f.name === NOTES) { out.push({ name: NOTES, source: text }); put = true; }
+        else out.push({ name: f.name, source: f.source });
+      }
+      if (!put) out.push({ name: NOTES, source: text });
+      return out;
+    }
+
+    function hostNow() {
+      return typeof host.now === "function" ? String(host.now() || "") : "";
+    }
+
+    /* NOTES.md's own "saved <date>" line is a date, not a timestamp. */
+    function dateOf(iso) {
+      const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(iso || ""));
+      return m ? m[1] : "";
+    }
+
+    async function toolProjectSave(args) {
+      requireToy();
+      if (!projectLib) {
+        refuse("project-host", "renderer/pce-project.js did not load, so the " +
+               "project format is missing");
+      }
+      if (typeof args.path !== "string" || !args.path.trim()) {
+        refuse("save-path", "path is the project to write: " +
+               "\"my-game.pcestudio\" for one file, or \"my-game/\" for the " +
+               "same layout unpacked into a folder");
+      }
+      if (typeof host.projectPath !== "function" ||
+          typeof host.writeProject !== "function") {
+        refuse("project-host", "this host cannot write a project; the MCP " +
+               "server can, and the studio tab saves with its own Project…");
+      }
+      /* The host owns the path rules: a trailing / or an existing folder is
+       * the unpacked route; any other name is one .pcestudio. */
+      const resolved = await host.projectPath(args.path);
+      const held = session.project || {};
+      const title = args.title != null ? String(args.title)
+        : (held.title || projectLib.titleFromName(resolved.name || resolved.path));
+      const now = hostNow();
+
+      /* The resume note is part of the save, not an afterthought: the text the
+       * caller passed, else the NOTES.md the toy already carries, else the
+       * studio's template (the same one its own Save project adds). */
+      let files = session.files;
+      if (typeof args.notes === "string") {
+        files = withNotes(files, args.notes);
+      } else if (!hasNotes(files)) {
+        files = withNotes(files, projectLib.notesTemplate({
+          title: title, date: dateOf(held.created || now)
+        }));
+      }
+
+      const project = {
+        title: title,
+        author: held.author || "",
+        created: held.created || now,
+        modified: now,
+        files: files,
+        art: [],
+        versions: []
+      };
+      let entries = null, zipBytes = null;
+      try {
+        entries = projectLib.entries(project);
+        if (!resolved.folder) zipBytes = projectLib.build(project);
+      } catch (e) {
+        refuse(errorCode(e), errorMessage(e));
+      }
+      const wrote = await host.writeProject({
+        path: resolved.path, name: resolved.name,
+        folder: !!resolved.folder, entries: entries, zip: zipBytes
+      });
+      /* The save happened: the note is the session's now, so a following
+       * toy_save carries it too, and the next project_save keeps the title,
+       * the author and the original created date. */
+      session.files = files;
+      session.project = { title: title, author: project.author,
+                          created: project.created, modified: now };
+      return {
+        ok: true,
+        format: projectLib.FORMAT,
+        path: wrote.path,
+        folder: !!resolved.folder,
+        title: title,
+        files: files.map(function (f) { return f.name; }),
+        notes: hasNotes(files) ? NOTES : null,
+        created: project.created,
+        modified: now,
+        bytes: zipBytes ? zipBytes.length : null,
+        entries: entries.length,
+        note: resolved.folder
+          ? "the unpacked project folder — project.json, main.lua, the asset " +
+            "files and NOTES.md; commit it and git holds the history; " +
+            "project_open {path} resumes it"
+          : "one .pcestudio (the studio's project format): the person opens " +
+            "it with Project… → Open (or drops it on the page), and a later " +
+            "session resumes it with project_open"
+      };
+    }
+
+    async function toolProjectOpen(args) {
+      if (!projectLib) {
+        refuse("project-host", "renderer/pce-project.js did not load, so the " +
+               "project format is missing");
+      }
+      if (typeof args.path !== "string" || !args.path.trim()) {
+        refuse("open-path", "path is the .pcestudio file or the project " +
+               "folder to open");
+      }
+      if (typeof host.readProject !== "function") {
+        refuse("project-host", "this host cannot open a project by path; the " +
+               "studio tab opens one with Project… → Open, and Claude Code's " +
+               "MCP server opens one with project_open");
+      }
+      const read = await host.readProject(args.path);
+      let proj;
+      try {
+        proj = read.folder ? projectLib.parseEntries(read.entries || [])
+                           : projectLib.parseBytes(read.bytes);
+      } catch (e) {
+        /* project-json / project-format / project-main / project-name — the
+         * format's own refusals, before the session is touched */
+        refuse(errorCode(e), errorMessage(e));
+      }
+      const main = proj.files.filter(function (f) { return f.name === MAIN; })[0];
+      if (!main) refuse("project-main", "the project has no main.lua");
+      /* same gate as toy_write: a project whose code does not compile, or
+       * whose song.json the sequencer refuses, leaves the session alone */
+      let program;
+      try {
+        program = compileToy(main.source);
+      } catch (e) {
+        refuse(errorCode(e), errorMessage(e));
+      }
+      const songs = toySongs(proj.files);
+      const files = proj.files.map(function (f) {
+        return { name: f.name, source: f.source };
+      });
+      resetToy();
+      session.files = files;
+      session.source = main.source;
+      session.songs = songs;
+      const title = proj.title || projectLib.titleFromName(read.path || args.path);
+      session.project = { title: title, author: proj.author,
+                          created: proj.created, modified: proj.modified };
+
+      /* NOTES.md's text is the FIRST content block: the resuming session
+       * reads what the last one learned before it reads anything else. */
+      const first = proj.notes == null
+        ? "This project has no NOTES.md yet. Before you change anything, " +
+          "write one — goal, what works, what does not, the decisions, the " +
+          "next step — and pass it to project_save as notes."
+        : String(proj.notes);
+      return {
+        content: [
+          { type: "text", text: first },
+          { type: "text", text: JSON.stringify({
+            ok: true,
+            format: proj.format,
+            path: read.path,
+            folder: !!read.folder,
+            title: title,
+            notes: proj.notes != null,
+            files: files.map(function (f) { return f.name; }),
+            songs: songSummary(songs),
+            language: program.lang,
+            hooks: program.hooks,
+            functions: program.functions.length,
+            created: proj.created,
+            modified: proj.modified,
+            note: "the project is loaded: toy_run plays it, toy_write edits " +
+                  "the toy in it, and project_save writes it back (pass the " +
+                  "updated NOTES.md as notes); the first text block of this " +
+                  "reply is NOTES.md"
+          }) }
+        ]
+      };
+    }
+
     function toolToyRun(args) {
       requireToy();
       const frames = args.frames == null ? DEFAULT_FRAMES
@@ -1941,6 +2225,8 @@
     const HANDLERS = {
       toy_write: toolToyWrite,
       toy_save: toolToySave,
+      project_save: toolProjectSave,
+      project_open: toolProjectOpen,
       toy_run: toolToyRun,
       source_add: toolSourceAdd,
       song_write: toolSongWrite,
