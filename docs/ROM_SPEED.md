@@ -245,8 +245,10 @@ under the dummy SDL driver, cropped to 256x224 and compared with
 Per the card, nothing here is fixed in this one. The refusals that remain
 are on the board: **#148** (the 127-constant pool, already open),
 **#183** (the 4-parameter ceiling), **#184** (DUSK RUN's validator refusal)
-and **#185** (padref/padget, PLATFORMER's first). The kinds behind them are
-the existing #133–#138 umbrellas.
+and **#185** (padref/padget, PLATFORMER's first). The uncarried kinds the
+inventory behind them names — with no card before this measurement — are
+**#186** (`sat`) and **#187** (logical `not`); the rest are the existing
+#133–#138 umbrellas.
 
 ## What is not proven
 
