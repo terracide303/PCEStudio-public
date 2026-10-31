@@ -342,7 +342,8 @@ function refusal(name, source, code, mutate, opts) {
 
 function checkRefusals() {
   /* Part C added reg() and int globals; what is still refused moves up:
-   * a sprite instruction, five parameters, a table global. */
+   * a sprite instruction, nine parameters (#183 moved the ceiling from four
+   * to eight), a table global. */
   refusal("a sprite instruction (no SAT writes on the console yet)", `
 function init() sprite(0, {x = 1, y = 2}) end
 function frame(t, f) end`, "cgen-op");
@@ -353,9 +354,9 @@ function frame(t, f) end`, "cgen-fixed");
 function frame(t, f) print(t) end`, "cgen-fixed");
   refusal("no frame hook", `
 function init() end`, "cgen-hook");
-  refusal("five parameters", `
-local function f(a, b, c, d, e) return a end
-function init() f(1, 2, 3, 4, 5) end
+  refusal("nine parameters", `
+local function f(a, b, c, d, e, g, h, i, j) return a end
+function init() f(1, 2, 3, 4, 5, 6, 7, 8, 9) end
 function frame(t, f) end`, "cgen-arity");
   /* A closure in a loop is allowed since part C when no function value can
    * escape its static slot; a global function assignment is an escape. */

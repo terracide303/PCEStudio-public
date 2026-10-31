@@ -221,9 +221,9 @@ function init() pal(1, 70000) end
 function frame(t, f) end`, "cgen-width");
   refusal("no frame hook", `
 function init() end`, "cgen-hook");
-  refusal("five parameters", `
-local function f(a, b, c, d, e) return a end
-function init() f(1, 2, 3, 4, 5) end
+  refusal("nine parameters", `
+local function f(a, b, c, d, e, g, h, i, j) return a end
+function init() f(1, 2, 3, 4, 5, 6, 7, 8, 9) end
 function frame(t, f) end`, "cgen-arity");
 
   /* ---- #91 / REVIEW-78 H01/H04/H05: the dialect's edges -------------- *

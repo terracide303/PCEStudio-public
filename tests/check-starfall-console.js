@@ -360,11 +360,11 @@ const CITATIONS = [
   ["renderer/pce-cgen.js", 545, "case \"padref\""],
   ["renderer/pce-cgen.js", 563, "builtin `"],
   ["renderer/pce-cgen.js", 600, "refuse(\"cgen-op\""],
-  ["renderer/pce-ilbc.js", 150, "var OPS = {"],
-  ["renderer/pce-ilbc.js", 163, "var BUILTIN = {"],
-  ["renderer/pce-ilbc.js", 259, "refuse(\"ilbc-op\""],
-  ["renderer/pce-ilbc.js", 284, "refuse(\"ilbc-builtin\""],
-  ["renderer/pce-ilbc.js", 336, "hookSlot(\"raster\""],
+  ["renderer/pce-ilbc.js", 157, "var OPS = {"],
+  ["renderer/pce-ilbc.js", 170, "var BUILTIN = {"],
+  ["renderer/pce-ilbc.js", 266, "refuse(\"ilbc-op\""],
+  ["renderer/pce-ilbc.js", 291, "refuse(\"ilbc-builtin\""],
+  ["renderer/pce-ilbc.js", 343, "hookSlot(\"raster\""],
   ["renderer/pce-rom.js", 622, "if (dataLen > BANK)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];

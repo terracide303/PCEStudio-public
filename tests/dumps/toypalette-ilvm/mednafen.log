@@ -9,7 +9,7 @@ Starting Mednafen 1.32.1
  Emulation modules: apple2 nes snes gb gba pce lynx md pcfx ngp psx ss ssfplay vb wswan sms gg sasplay snes_faust pce_fast demo cdplay
  Opening lockfile...
  Loading settings from "/Volumes/External/agent-tmp/mdfn-home-toypalette-ilvm/mednafen.cfg"...
-  Loaded 0 valid settings and 0 unknown settings.
+  Loaded 7904 valid settings and 0 unknown settings.
  Initializing joysticks...
  Loading "tools/gen/toypalette-ilvm.pce"...
   Applying IPS file "tools/gen/toypalette-ilvm.pce.ips"...
@@ -21,8 +21,8 @@ Starting Mednafen 1.32.1
     Failed: Error opening file "/Volumes/External/agent-tmp/mdfn-home-toypalette-ilvm/pgconfig/toypalette-ilvm.pce.cfg" for reading: No such file or directory
 
    ROM:       24KiB
-   ROM CRC32: 0xa79ea385
-   ROM MD5:   0x2342d56f2ea0228479c17263d09449c0
+   ROM CRC32: 0x915bd2f6
+   ROM MD5:   0x01cce13cd92124a1c4a72eba292dcaf3
    PSG Revision: HuC6280
 
   Loading custom palette from "/Volumes/External/agent-tmp/mdfn-home-toypalette-ilvm/palettes/pce.pal"...

@@ -67,6 +67,10 @@
  *   06 setupval  idx:u8 src:op
  *   07 closure   dst:reg fid:u8
  *   08 call   dst:op(none=0xFF) callee:op n:u8 args:n*op
+ *              n is 0..8 (#183).  Four arguments travel in the
+ *              interpreter's C parameters; a fifth to eighth travel in its
+ *              extra-argument block (tools/ilvm/ilvm.c's `xargs`).  A call
+ *              with four or fewer arguments is byte-identical to before.
  *   09 ret    src:op(none=0xFF)
  *   0A jmp    target:u16
  *   0B br     cond:op when:u8 target:u16
@@ -103,7 +107,7 @@
  *                 setupval is encoded but the toys do not use it, ...)
  *   ilbc-fixed    fixed-point arithmetic or a fixed constant
  *   ilbc-key      a constant that is not int/bool/nil
- *   ilbc-arity    more than four parameters or arguments
+ *   ilbc-arity    more than eight parameters or arguments
  *   ilbc-range    more registers/constants/functions than a byte can index
  *   ilbc-jump     a branch target that is not an instruction
  *   ilbc-builtin  a builtin other than rgb
@@ -141,7 +145,10 @@
   var OP_CONST = 0x80;
   var MAX_REGS = 128;          /* operand encoding: 0x00..0x7F */
   var MAX_CONST = 127;         /* 0x80..0xFE */
-  var MAX_ARGS = 4;            /* the interpreter's signature */
+  var MAX_ARGS = 8;            /* a call's n and a function's parameters:
+                                * four in the interpreter's C signature, the
+                                * rest through its extra-argument block (#183) */
+  var CALL_ARGS = 4;           /* what the C signature carries directly */
   var TABLE_ARRAY_CAP = 16;    /* a register-key array's first-cut capacity */
   var TABLE_POOL_CELLS = 256;  /* the interpreter's fixed pool (docs/TABLES-PLAN.md §2.1) */
   var MAX_SLOTS = 255;         /* a slot id is one byte */
@@ -1253,6 +1260,8 @@
     HEADER_TABLES: HEADER_TABLES,
     FUNC_ENTRY: FUNC_ENTRY,
     OPS: OPS,
+    MAX_ARGS: MAX_ARGS,
+    CALL_ARGS: CALL_ARGS,
     TABLE_ARRAY_CAP: TABLE_ARRAY_CAP,
     TABLE_POOL_CELLS: TABLE_POOL_CELLS,
     ILBCError: ILBCError,

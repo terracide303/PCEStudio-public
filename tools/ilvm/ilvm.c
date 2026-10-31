@@ -64,7 +64,14 @@ int32_t toy_rgb(int32_t r, int32_t g, int32_t b);
 #define MAX_CLOS 32
 #define MAX_GLOBALS 32
 #define MAX_FUNCS 32
-#define MAX_ARGS 4
+/* #183: a call carries up to eight arguments.  Four ride in exec()'s C
+ * parameters (a0..a3); a fifth to eighth ride in `xargs`, a fixed
+ * extra-argument block exec() copies into r[4..7] at entry.  The block is
+ * written by the call instruction and read by the callee before it executes
+ * anything, so a nested call cannot overwrite a callee's arguments.  A call
+ * with four or fewer arguments writes zeroes and keeps its old bytecode. */
+#define MAX_ARGS 8
+#define CALL_ARGS 4            /* the four exec() takes directly */
 #define MAX_SLOTS 32           /* first cut: the table toys need 7; the
                                 * encoder's limit is 255 */
 #define MAX_TABLE_CELLS 256    /* the fixed table pool: 1 KiB of BaseRAM
@@ -90,6 +97,10 @@ static struct fninfo fns[MAX_FUNCS];
 static struct closure clos[MAX_CLOS];
 static int32_t kvals[128];
 static int32_t globals[MAX_GLOBALS];
+/* #183's extra-argument block: call writes arguments 5..8 here, the callee
+ * copies them into r[4..7] on entry.  Static like the rest of the VM state,
+ * so it costs BaseRAM, not soft-stack depth. */
+static int32_t xargs[MAX_ARGS - CALL_ARGS];
 
 /* The table pool (docs/TABLES-PLAN.md §2.1): each `table` instruction site
  * owns one static slot, zeroed every time the site runs.  The slot's shape
@@ -194,6 +205,12 @@ static int32_t exec(uint8_t fid, uint8_t clh,
   if (fn->nparams > 1) r[1] = a1;
   if (fn->nparams > 2) r[2] = a2;
   if (fn->nparams > 3) r[3] = a3;
+  /* #183: parameters 5..8 from the extra-argument block.  nregs is at least
+   * nparams, so r[4..7] are inside the register file; writing all four even
+   * for a five-parameter function is harmless. */
+  if (fn->nparams > CALL_ARGS) {
+    r[4] = xargs[0]; r[5] = xargs[1]; r[6] = xargs[2]; r[7] = xargs[3];
+  }
 
   pc = fn->codeOff;
   for (;;) {
@@ -246,7 +263,7 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       break;
     }
     case 0x08: {                   /* call */
-      int32_t args[MAX_ARGS];
+      int32_t args[CALL_ARGS];
       int32_t ch;
       d = rb(pc++);
       /* The callee operand names a register (or a constant); its VALUE is
@@ -257,8 +274,13 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       u = (uint8_t)ch;
       n = rb(pc++);
       if (n > MAX_ARGS) { fault = 1; return 0; }
-      for (i = 0; i < MAX_ARGS; i++) args[i] = 0;
-      for (i = 0; i < n; i++) args[i] = operand(r, rb(pc++));
+      for (i = 0; i < CALL_ARGS; i++) args[i] = 0;
+      for (i = 0; i < MAX_ARGS - CALL_ARGS; i++) xargs[i] = 0;
+      for (i = 0; i < n; i++) {
+        av = operand(r, rb(pc++));
+        if (i < CALL_ARGS) args[i] = av;
+        else xargs[i - CALL_ARGS] = av;
+      }
       if (u >= MAX_CLOS || clos[u].fid >= nfunc) { fault = 1; return 0; }
       v = exec(clos[u].fid, u, args[0], args[1], args[2], args[3]);
       if (d != 0xFF) r[d] = v;
@@ -335,12 +357,14 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       r[d] = v;
       break;
     case 0x13: {                   /* builtin */
-      int32_t pargs[MAX_ARGS];
+      int32_t pargs[CALL_ARGS];
       aa = rb(pc++);               /* builtin id (0 = rgb) */
       d = rb(pc++);
       n = rb(pc++);
-      if (n > MAX_ARGS) { fault = 1; return 0; }
-      for (i = 0; i < MAX_ARGS; i++) pargs[i] = 0;
+      /* Every builtin the interpreter has takes at most four arguments,
+       * so a wide builtin is a corrupt container, not a wide call. */
+      if (n > CALL_ARGS) { fault = 1; return 0; }
+      for (i = 0; i < CALL_ARGS; i++) pargs[i] = 0;
       for (i = 0; i < n; i++) pargs[i] = operand(r, rb(pc++));
       if (aa == 0) v = toy_rgb(pargs[0], pargs[1], pargs[2]);
       else { fault = 1; return 0; }
