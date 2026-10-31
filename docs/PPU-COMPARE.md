@@ -38,9 +38,9 @@ code's own tables, a visible Check that runs the same toy in Lua and IL, an hone
 panel, a local-first studio that needs no account, and a written path for chat AIs and Claude Code. The
 distance between them is mostly **product surface, not engine**: the PCE-specific panels, importer,
 validator, sequencer and renderer are already here. Four absences dominate a first visit — no landing
-page, no publishing/sharing, silent toys, and no phone layout — and a handful of parity details (loop
-markers, light theme, multi-file toy pages, readable URLs, reduced-motion) are small, checked gaps that
-can be closed without touching the hardware model.
+page, no publishing/sharing, toys that model sound but play none in the player, and no phone
+layout — and a handful of parity details (loop markers, light theme, multi-file toy pages, readable
+URLs, reduced-motion) are small, checked gaps that can be closed without touching the hardware model.
 
 ---
 
@@ -56,7 +56,7 @@ public page does not settle it.
 | **Editor and code intelligence** | CodeMirror 6 in `App` (`cm-tooltip-autocomplete`, `cm-completionIcon`, `cm-tooltip-hover` classes; Vim is a Settings option: `ppu.editor.vim`). Whether a Lua completion/hover source is actually wired is not verified. | CodeMirror 5.65.16 vendored with the Lua mode, line numbers and opt-in Vim — `vendor/codemirror/`, `renderer/studio.html` §2.2/§5.2. No completion or hover source. | **EQUAL** on editing; their completion UI is present but its Lua source is unverified, ours has none. | No card until their completion source is confirmed. |
 | **Layout and panels** | 11 SNES panels (Backgrounds, VRAM, CGRAM, Sprites, Audio, Sequencer, Compose, Windows, Scanlines, Registers, SNES) on **dockview**: drag, float, pop-out, maximise, saved layout — `App` strings (`dockview-theme-ppu`, `api.addPopoutGroup`, `float`, `maximize`). | 10 PCE panels (SCREEN, VRAM, PALETTES, SPRITES, AUDIO, SEQUENCER, LAYERS, SCANLINES, REGISTERS, CONSOLE) plus workspace drawers; three accessible drag dividers, show/hide from Panels ▾, no float or pop-out — `renderer/studio.html`, `docs/STUDIO.md` §2.4/§3. | **GAP** on flexibility; count and purpose are equal. | Pop out a panel or the live output into its own window ~M. |
 | **Assets and Add Source** | `Add Source` dialog drops PNG, audio, `.mid` or `.ppusrc.json`; kinds BG, OBJ, Tilesheet, Sample, Mode 7; 2/4/8 bpp; dither none/Bayer/Floyd–Steinberg; EXTBG priority mask; sample trim; asset rows offer preview, export, remove; `dma(name)` places a source — `App` strings. | `Add Source` (#123) drops PNG, WAV, `.mid` or `.pce.studio`; kinds BG, Sprites, Tilesheet, Palette, Sample, Song; fixed 4 bpp/16 colours; the same three dithers; alpha threshold; no Mode 7 (PCE has none); `sources.json` gives each named source a `…` grid/palette preview (#156) — `renderer/studio-panel-assets.js`, `renderer/pce-source.js`, `renderer/pce-assets.js`. | **EQUAL** on the importer and preview; per-source export and remove are a small gap. | Per-source Remove and export as PNG or WAV ~S. |
-| **Audio and sequencer** | AUDIO panel, SEQUENCER and COMPOSE; `App` panel strings; audio chapter (`voice[]`, `dsp`, samples, timers, music kit); sound is part of a published toy. | AUDIO mixer (wave/noise/DDA, envelope, LFO, 6 voices), SEQUENCER grid + staff, LAYERS, DMF export — `renderer/studio-panel-audio.js`, `studio-panel-sequencer.js`, `pce-seq.js`, `pce-staff.js`, `pce-dmf.js`. **Toys have no sound surface yet** (#71); the SND button says so — `renderer/studio.html` line ~1625, `docs/STUDIO.md` §3.9/§12. | **GAP** — toys are silent; the editor-side audio is equal. | Existing card #71. |
+| **Audio and sequencer** | AUDIO panel, SEQUENCER and COMPOSE; `App` panel strings; audio chapter (`voice[]`, `dsp`, samples, timers, music kit); sound is part of a published toy and the gallery clips play audio. | AUDIO mixer (wave/noise/DDA, envelope, LFO, 6 voices), SEQUENCER grid + staff, LAYERS, DMF export — `renderer/studio-panel-audio.js`, `studio-panel-sequencer.js`, `pce-seq.js`, `pce-staff.js`, `pce-dmf.js`. Both runtimes expose `music(index)`, `sfx(channel, freq, volume, frames)` and `release(channel)` (#71/#161); songs load from `song.json` or a gallery module and the PSG model records the PCM — `renderer/pce-toys.js` lines 799–823, `renderer/pce-docs.js` sound chapter, `tests/check-toys.js`. **The studio has no AudioContext sink for the running toy**, so Run is silent, and its SND button still says "no toy sound surface", which is now stale — `renderer/studio.html` lines 1625, 4909–4913. | **GAP** on audible playback and the remaining effects/DDA; the toy API itself exists. | Existing card #71, plus a ~S card to retire the stale SND text and the `docs/STUDIO.md` §12 line. |
 | **Run, pause, scrub, markers** | Free-running clock; `Length` in seconds; named markers; timeline loop in/out markers (`App` timeline settings comment names `in=`/`out=`); Space/R, Ctrl+Enter, Ctrl+., Ctrl+,. | Play/pause/stop, −1/+1, frame scrubber, `Length` in frames (1–3600), numeric markers and Go to marker, plays past Length (#144) — `renderer/studio.html`, `renderer/studio-panel-markers.js`, `docs/STUDIO.md` §2.3. **No named markers, no loop in/out, no looping playback.** | **GAP** on loop and named markers; transport is equal. | Loop in/out and named markers on the timeline ~S. |
 | **Checks and budgets** | SNES tab: live cost per update, peak lines, findings with file:line, 65816 assembly, fixes with Apply, export; the agent tools are `check` and `snes_check`; no visible Check button in the top bar (`App` strings, top-bar JSX). | Visible `Check` button runs the toy in Lua and IL and compares; CONSOLE panel (#98) runs `pce-il.js` → `pce-validate.js` → `pce-cgen.js`: cycles, sprites per line, VRAM fit, findings, C output, ROM estimate; refusal codes are documented — `renderer/studio.html` (`btn-check`), `studio-panel-console.js`, `pce-validate.js`, `pce-docs.js`. | **EQUAL** — both expose findings. Live measured cost and emitted 65816 code are theirs; a visible dual-runtime Check is ours. | No new card; the missing half is #101 (native route). |
 | **Export** | `Export to ROM`: compiles and downloads a `.sfc`; dialog and compiler worker in `App`; "Download again"; `.sfc` filename. | `Export…` builds a `.pce` in the page from IL bytecode on the interpreter (route 1, #115); no compiler; static 60 Hz estimate; asset tail; route 2 (native code generator) is open card #101 — `renderer/studio.html` (`btn-export` title), `docs/STUDIO.md` §9/§12. | **GAP** on native code; equal in that a ROM file comes out and runs in an emulator. | Existing card #101. |
@@ -150,15 +150,17 @@ than duplicated. Sizes follow the board's ~S/~M/~L.
   (`renderer/studio.html`, `docs/STUDIO.md` §10.1).
 - **Size:** ~L. Do not split off the clip before the toy record exists.
 
-### 2. Sound in the toys — existing card #71, ~M
-- **Why:** a tester opens SEQUENCER, hears a song, runs a toy and the game is silent. The panel is
-  visible and the SND button explains the gap, but silence is still the first impression.
-- **How:** the browser toy host and both runtimes get `music(index)` and `sfx()` over `pce-song.js` /
-  `pce-psg.js`; songs come from `song.json` files and the MCP `song_write` path already exists (#161).
-  The docs sound chapter and the toy guide gain the calls.
-- **Evidence row:** **Audio and sequencer**. `renderer/studio-panel-audio.js` header and
-  `renderer/studio.html` line ~1625 ("No toy sound surface until #71").
-- **Size:** ~M; the models and the song compiler already exist.
+### 2. Make the toy's sound audible — existing card #71, ~M (plus a ~S label fix)
+- **Why:** the toy API already has `music()`, `sfx()` and `release()`, and the generated docs teach
+  them, but pressing Run in the studio makes no sound, and the SND button says toys have no sound
+  surface at all. A tester hears the sequencer, then hears nothing from the game.
+- **How:** feed the running toy's recorded PSG writes/PCM to an AudioContext on the live clock (silent
+  while paused or scrubbing), finish the remaining DDA/effect work, and replace the SND title/toast and
+  the stale `docs/STUDIO.md` §12 sentence with what is actually missing.
+- **Evidence row:** **Audio and sequencer**. `renderer/pce-toys.js` lines 799–823 (the three calls),
+  `renderer/pce-docs.js` sound chapter, `tests/check-toys.js` sound cases; `renderer/studio.html`
+  lines 1625 and 4909–4913 (the stale SND text); no AudioContext in `studio.html` or `toy.html`.
+- **Size:** ~M for the audible player and effects; a separate ~S for the stale text if #71 waits.
 
 ### 3. A home page that shows the thing — new, ~M
 - **Why:** `https://pcestudio.terracides.com` is a meta-refresh redirect to Browse (`tools/deploy.sh`).
