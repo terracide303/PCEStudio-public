@@ -868,7 +868,7 @@
           setlistEnd: null, constKeyMax: null, registerKey: false,
           loopKeyMax: null, unboundedKey: false,
           readKeyMax: null, readFields: [],
-          fields: [], globals: [], escapes: false,
+          fields: [], globals: [], escapes: false, nested: false,
           repeats: (f !== 0 && f !== initFid) || insideLoop(f, pc)
         });
       }
@@ -1165,6 +1165,12 @@
       }
     }
 
+    /* Containment (#178): a site used as a table value inside another site
+     * is nested.  The same edge that carries the escape taint records it. */
+    for (var ne = 0; ne < edges.length; ne++) {
+      if (sites[edges[ne][0]]) sites[edges[ne][0]].nested = true;
+    }
+
     /* Escape follows containment: a table in a table that escapes escapes. */
     var changed = true;
     while (changed) {
@@ -1214,7 +1220,7 @@
         readKeyMax: site.readKeyMax, readMaxField: readMaxField,
         maxKey: maxKey, registerKey: site.registerKey,
         loopKeyMax: site.loopKeyMax,
-        escapes: site.escapes, repeats: site.repeats,
+        escapes: site.escapes, repeats: site.repeats, nested: site.nested,
         globals: site.globals.slice()
       };
       out.push(rec);
@@ -1234,7 +1240,8 @@
       fieldCells: fieldCells,
       cells: arrayCells + fieldCells,
       escaping: escaping,
-      reexecuting: reexecuting
+      reexecuting: reexecuting,
+      nested: out.filter(function (s) { return s.nested; }).length
     };
   }
 

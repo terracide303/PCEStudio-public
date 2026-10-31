@@ -33,8 +33,10 @@
  *      proves that refusal is live code, not a source reading.
  *   5. THE 8 KiB DATA BANK (#138).  The size model reproduces the two
  *      committed containers to ≤3 B (the table section is counted since
- *      route 1 carries it); STARFALL projects 9,147/9,193/9,285 B at 3/4/6 B
- *      per uncarried instruction, all over 8,192.  The limit itself is
+ *      route 1 carries it); STARFALL projects 9,107/9,153/9,245 B at 3/4/6 B
+ *      per uncarried instruction, all over 8,192, and 8,969 B with the four
+ *      table ops at their real sizes and the rest at 0 B (#178 corrected the
+ *      model's v2 header and table-section sizing).  The limit itself is
  *      exercised behaviourally: a valid container of exactly 8,192 B builds,
  *      8,193 B is refused with toy-data-bank-full.
  *   6. THE WRITE-UP'S CITATIONS.  Every file:line the report names still
@@ -67,7 +69,7 @@
  *   M3 pce-cgen.js drops the escapes-and-repeats check -> the held-table
  *      refusal toy is accepted (check-il-console)
  *   M4 starfall-console.js sizes tget 5 B as 4 B -> the capacity projections
- *      move to 9,129/9,175/9,267 (this check)
+ *      move to 9,089/9,135/9,227 (this check)
  * The results are in the #176 commit message.
  *
  *   node tests/check-starfall-console.js
@@ -320,7 +322,7 @@ function checkCapacity() {
      cap.controls[1].modelled], [1115, 1112]);
   eq("projection at 3/4/6 B per uncarried instruction",
      cap.projections.map(function (p) { return [p.assumed, p.bytes, p.over]; }),
-     [[3, 9147, true], [4, 9193, true], [6, 9285, true]]);
+     [[3, 9107, true], [4, 9153, true], [6, 9245, true]]);
 
   /* the limit itself, behaviourally: 8 KiB exactly builds, 8 KiB + 1 refuses */
   const bank0 = fs.readFileSync(path.join(ROOT, "renderer/ilvm.bin"));
