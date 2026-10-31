@@ -281,3 +281,80 @@ The pristine tree afterwards: `PASS 1754 checks, 0 failed`.
   (`http://`, trailing slash, malformed), and overlapping calls. Those remain
   fixture blind spots, not something #179 claims.
 
+
+---
+
+# #182 — the second cold read: twelve more breaks the strengthened check cannot see (2026-10-31)
+
+Card #167's rule-2 gate asked for a cold read of the strengthened
+`checkAgentPanel` (the #179 checks included). This is that read, by @test
+(test seat, `deepseek-v4-pro`) — a different session and model from the
+check's two builders (`#ds-pro`, `#opus`). **Verdict: the strengthened check
+still misses twelve breaks of the feature it guards, so #167 is not
+closable.** They are routed to #182 (@review, one kind up from the test's
+builder). Nothing in the feature or the check was changed by this seat.
+
+Baseline: pushed `main` 043d9a7, this seat's own worktree —
+`node tests/check-studio.js` PASS 1754 checks. The five #179 checks are
+alive on this tree (the `runFrames(1)` mutant reds four #179 checks).
+
+## Method
+
+Same discipline as the first read: 21 breaks, one at a time, each a single
+exact-string replacement asserted to occur exactly once (harness under
+`$TMPDIR/agent-mut/`, outside the repo), the full 1754-check suite per
+mutant, the pristine source restored after each; `git status --short` empty
+at the end of the series. A mutant counts as DETECTED only when the suite
+exits non-zero **and names a `#167:`/`#179:` check** as failing.
+
+## Results: 21 breaks — 4 DETECTED, 17 green
+
+### Detected
+
+| # | Break | What caught it |
+|---|---|---|
+| C1 | hello carries version 2 | `#167: the tab sends hello with the protocol version` |
+| C2 | relay-config.js ships a non-empty RELAY_URL | `#167: with RELAY_URL empty the panel is not switched on` (+2 checks) |
+| C3 | FEED rows drawn newest-first | `#167: the FEED marks it an error with its findings` / `#179: the FEED's last drawn row is the error` |
+| C5 | the CHECK block stays hidden even with a report | `#167: ... and draws there` |
+
+### The twelve new blind spots (green)
+
+| # | Break (exact string, applied once) | Why green | What would catch it |
+|---|---|---|---|
+| C4 | `id="bottom-agent"` renamed in studio.html:1791 | the stub DOM's `get()` fabricates a `<div>` for any id the markup did not seed (check-studio.js `makeStubDom`), so the whole drawer renders into a phantom element and all 1754 checks pass | pin the drawer's markup from source (the #157 section's static-grep precedent): the id list seeded from studio.html must contain `bottom-agent` |
+| M8 | `id="console-log"` renamed (studio.html:1702) | the RUN LOG block is never DOM-read; only `con.runLog()`'s api data is asserted | after a toy_run, read `#console-log`'s text: RUN LOG, the frame count, the "42" line |
+| M9 | `host.appendChild(list);` removed from `drawCheck` | the findings report's DOM is never read — only the ok report is ("... and draws there") and `con.checkReport()` | after the findings validate, read `console-check`'s `con-check-row` for `validate-sprite-line` |
+| M4 | the FEED's `agent-time` drawn as `"00:00:00"` | the time check is the regex `^\d{2}:\d{2}:\d{2}$`, which a constant satisfies; only the first row's time is read at all | eq each drawn time against `clockTime(entry.at)` recomputed in the check from `api.feed()`; a later row at a different time is the control |
+| M14 | feed entries stamped `at: 0` | `clockTime(0)` is a valid `HH:MM:SS`, and the drawn time agrees with the (wrong) stamp | assert `entry.at` is within a few seconds of `Date.now()` (the sandbox's real clock) |
+| M1 | `hello` drops its `title` | the check asserts `hello.version === 1` only, though the protocol table (docs/AGENT-LINK.md) pins `{"type":"hello","version":1,"title":"..."}` | assert `hello.title === "PCEStudio studio"` |
+| M5 | `syncFromStudio` also skips `validate` | the re-prime is observable only through toy_run's reply (42→43); in the suite every other call follows a write whose `syncedKey` already matches | edit main.lua to the 17-sprite toy, then validate, and require the report to carry the edited toy's finding; control: the unedited toy validates clean |
+| M15 | `song_write` dropped from `mirror()`'s file branch | no song_write call exists in the suite, though a step list needs no binary data (unlike a .mid) | song_write a step list, assert the studio gains song.json and `music(0)` plays |
+| M16 | the taken state's Connect branch removed (`ready \|\| taken` → `ready`) | section 10 reads only the status word and `reconnectScheduled` | after taken, assert Connect and New link exist; press Connect, assert live, then a later drop is a plain disconnect |
+| M6 | `studio.render.pause();` removed from `mirrorFrame` | the seek is pinned (`currentFrame() === 5`), the pause is not | assert the render is paused after frame_png |
+| M7 | sourceEntry's `tiles` count becomes 0 | the ASSETS check reads only the name (`sources().some(name === "square")`); and the fixture's only source_add is kind sprites, so the bg/tilesheet/palette branches are dead code in the suite | drive a bg-kind source_add and eq the entry's ranges; eq the sprites entry's patterns count |
+| M13 | relay-config.js defines `RELAY_URX` | an absent constant still yields the off state (section 1 passes), and the test assigns `S.RELAY_URL` itself for everything else | assert `S.RELAY_URL === ""` right after page load, before the test assigns it (or a source grep) |
+
+### Verified, previously documented holes (green, expected)
+
+M2 (http: no longer rewritten to ws:), M3 (trailing slashes no longer
+stripped), M10 (the retry scheduled at 2× the computed delay), M11 (the call
+queue bypassed) and M12 (the keepalive pings with type "pong") all stayed
+green, exactly as the earlier reads' "cannot see" lists say they would. They
+are re-confirmed by execution here, not new findings; #182 may close any of
+them (the two RELAY_URL edge cases are one fixture line each) or leave them
+"not proven".
+
+## What even #182's checks will not be able to see
+
+- **The stub-DOM fabrication is structural.** Any element's absence from
+  studio.html is invisible to every DOM assertion in this suite until ids
+  are pinned from source; pinning only `bottom-agent` leaves `console-log`,
+  `console-check` and every other block the same hole in kind.
+- Everything the earlier lists still carry: the real relay and two real
+  tabs, the real clipboard and its denial path, the keepalive/retry timers
+  (the stub's `setTimeout` never fires), pixels, `export_pce`/`toy_save`
+  downloads, overlapping calls.
+- `Date` is the sandbox's real clock, so a time can be checked only against
+  "now" or against the entry's own `at` — a panel that stamps a wrong `at`
+  and draws it faithfully is caught only by the freshness assertion above.
