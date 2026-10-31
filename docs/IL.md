@@ -328,9 +328,11 @@ the IL is not:
   never set and the IL has no `nil` value, so such a read is a toy bug either
   runtime shows, not a typing guarantee.
 
-The C backend (`pce-cgen.js`) and the bytecode encoder (`pce-ilbc.js`) do not
-lower tables at all, so a toy that reads one is accepted by the IL and refused
-on the console routes (`cgen-op`, `ilbc-op`).
+The C backend (`pce-cgen.js`) and the bytecode encoder (`pce-ilbc.js`) lower
+tables into the same fixed pool model (docs/TABLES-PLAN.md §2) — #174 the
+encoder/interpreter, #176 the C backend — so a toy that reads one builds on
+both console routes; the shape a slot cannot hold is refused
+(`ilbc-table-ram`/`ilbc-table-escape`, `cgen-table-ram`/`cgen-table-escape`).
 
 ---
 
@@ -592,10 +594,13 @@ without a shift.
 
 `renderer/pce-cgen.js` refuses by code rather than guessing: `cgen-op` (any
 instruction outside the palette toy's set — `reg`, `sat`, `sprite`, `raster`,
-`print`, `vget`, tables, …), `cgen-fixed`, `cgen-cond`, `cgen-global`,
+`print`, `vget`, …), `cgen-fixed`, `cgen-cond`, `cgen-global`,
 `cgen-arity` (more than two parameters/arguments), `cgen-hook` (no `frame`),
 `cgen-closure-loop` (a closure created in a loop: part A has one static slot
-per site), `cgen-key`, and `cgen-target`.
+per site), `cgen-key`, and `cgen-target`.  (#176 carried the four table ops —
+`table`/`setlist`/`tget`/`tset` — into the fixed pool, docs/TABLES-PLAN.md
+§2.5, with their own two codes: `cgen-table-ram` for a slot the pool cannot
+hold, `cgen-table-escape` for an escaping re-running site.)
 
 Not proven, written down:
 
@@ -752,8 +757,10 @@ that does not fit; parallax uses one register and no colour in the chain.
 ### 10.4 What part C refuses, and what it does not prove
 
 Refused by code rather than guessed: `reg` names outside BXR/BYR/CR
-(`cgen-op`); sprite/pad/table/print/vget still (`cgen-op`/`cgen-global`);
-more than four parameters (`cgen-arity`); a raster hook that is not one int
+(`cgen-op`); sprite/print/vget still (`cgen-op`/`cgen-global`); the four
+table ops lower into the fixed pool (#176), refused with `cgen-table-ram`/
+`cgen-table-escape` when a slot does not fit or aliases; more than four
+parameters (`cgen-arity`); a raster hook that is not one int
 parameter (`cgen-hook`); a closure inside a loop when a function value can
 be stored — returned, written to a function-typed global outside the chunk,
 or into an upvalue/table (`cgen-closure-loop`). `fixed` is still refused.
