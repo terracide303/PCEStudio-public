@@ -282,6 +282,8 @@ second source. It is written down so a later seat does not mistake a guess for a
   our repo serves uncompressed files).
 - **Mobile.** The manifest, icons and touch components were read; neither site was opened on a phone or
   tablet, and no touch gesture was tested.
+- **Their icon art.** `/manifest.webmanifest` and the apple-touch link were read; the 192/512 PNGs and
+  `og.png` were not fetched, so nothing about their artwork is claimed or reproduced.
 - **Our own runtime.** The studio was read, not opened; claims about the current UIs are from the files
   and the existing tests in `tests/`, not a fresh browser run. No synthetic input was sent anywhere.
 - **The ppu.toys GitHub repository.** `docs/PPU-TOYS.md`'s commit `0b07767` (2026-10-18) was not
