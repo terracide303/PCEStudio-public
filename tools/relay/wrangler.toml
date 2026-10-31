@@ -1,0 +1,25 @@
+# tools/relay/wrangler.toml — the PCEStudio relay on Cloudflare (#165).
+#
+# Deploy (see README.md):
+#   cd tools/relay
+#   npx wrangler login
+#   npx wrangler deploy
+#
+# There is no package.json in this repository (by design), so wrangler
+# runs through npx and nothing is installed into the tree.  The worker
+# bundles tools/relay/worker.js + relay-core.js + tools.json into one
+# file; it has no npm dependencies.
+
+name = "pcestudio-relay"
+main = "worker.js"
+compatibility_date = "2025-03-15"
+
+# One Durable Object per token: env.ROOM.idFromName(token).  The Room
+# uses the WebSocket Hibernation API and writes NOTHING to storage, so
+# the key-value storage backend (new_classes) is the lightest choice.
+[durable_objects]
+bindings = [{ name = "ROOM", class_name = "Room" }]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["Room"]
