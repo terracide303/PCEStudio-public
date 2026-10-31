@@ -16,7 +16,9 @@
  *   3. Every MCP tool SKILL.md tells the agent to call is one tools/list
  *      publishes, and the loop's last step is the hand-off (#160): SKILL.md
  *      says to finish with toy_save and to tell the person Open… → From
- *      file.
+ *      file.  It also carries the multi-session rules (#163): read NOTES.md
+ *      before anything else, update it at the end and save the project, with
+ *      the folder route named for git and Project… → Open for the studio.
  *   4. Every recipe is run THROUGH tools/mcp/server.js, over stdio, as an
  *      agent would: toy_write compiles it, toy_run runs 60 frames, frame_png
  *      is VISIBLE (more than 1,000 pixels that are not CRAM[0], counted from
@@ -84,6 +86,13 @@ function eq(name, got, want) {
 }
 function contains(name, haystack, needle) {
   check(String(haystack).indexOf(needle) >= 0,
+        name + " (looked for " + JSON.stringify(needle) + ")");
+}
+/* Prose wraps, so a sentence's words can sit on two lines; a phrase check
+ * must not depend on where the wrap fell. */
+function containsFlat(name, haystack, needle) {
+  const flat = (s) => String(s).replace(/\s+/g, " ");
+  check(flat(haystack).indexOf(flat(needle)) >= 0,
         name + " (looked for " + JSON.stringify(needle) + ")");
 }
 function num(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
@@ -355,7 +364,7 @@ function firstLuaBlock(text) {
     const tools = (list.result.tools || []).map((t) => t.name);
     for (const tool of ["toy_write", "toy_run", "source_add", "song_write",
                         "frame_png", "validate", "toy_save", "export_pce",
-                        "docs"]) {
+                        "docs", "project_open", "project_save"]) {
       contains("SKILL.md tells the agent about " + tool, skillText, tool);
       check(tools.indexOf(tool) >= 0,
             "the server publishes the tool " + tool + " that SKILL.md names");
@@ -366,6 +375,18 @@ function firstLuaBlock(text) {
              "Finish with `toy_save`");
     contains("SKILL.md tells the agent what to say to the person", skillText,
              "Open… → From file");
+    /* #163: a project over several sessions — read the note first, update it
+     * last, and the folder route exists so git can hold the history */
+    containsFlat("SKILL.md says to read NOTES.md before anything else",
+             skillText, "read NOTES.md before anything else");
+    containsFlat("SKILL.md says to update NOTES.md at the end of the session",
+             skillText, "at the end of the session update NOTES.md");
+    containsFlat("SKILL.md says what the note carries", skillText,
+             "what you did, what works, what is next");
+    containsFlat("SKILL.md names the folder route's reason", skillText,
+             "git can hold the history");
+    containsFlat("SKILL.md says how the person opens a project", skillText,
+             "Project… → Open");
 
     /* 4 and 5 — every fixed recipe, through the server */
     for (const name of FIXED) {

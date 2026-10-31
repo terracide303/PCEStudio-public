@@ -16,7 +16,8 @@
  *      pcestudio-mcp/tools/mcp/server.js over stdio with that directory as
  *      the working directory: every module it loads comes out of the zip, not
  *      out of this checkout;
- *   3. it speaks MCP: initialize, tools/list (all 11 tools, each with a
+ *   3. it speaks MCP: initialize, tools/list (every tool the tree's server
+ *      has, each with a
  *      schema), then runs one recipe FROM THE UNPACKED SKILL through
  *      toy_write, toy_run and frame_png, and the frame it gets back is a
  *      visible 256x224 picture (more than 1000 non-backdrop pixels) — the
@@ -290,14 +291,15 @@ function listZip(zip) {
        "pcestudio");
     client.notify("notifications/initialized");
 
-    /* tools/list */
+    /* tools/list — every tool the tree's server has, read from it rather
+     * than typed here, so a tool the server gains (#163's project_save and
+     * project_open were the first) is in the pack too */
     const list = await client.request("tools/list", {});
     const tools = (list.result && list.result.tools) || [];
     const names = tools.map((t) => t.name).sort();
-    eq("the unpacked server lists every tool", names,
-       ["docs", "export_pce", "frame_png", "register_set", "registers_get",
-        "song_write", "source_add", "toy_run", "toy_save", "toy_write",
-        "validate"]);
+    const wantNames = require(path.join(ROOT, "tools", "mcp", "server.js"))
+      .TOOLS.map((t) => t.name).sort();
+    eq("the unpacked server lists every tool", names, wantNames);
     for (const t of tools) {
       check(t.inputSchema && t.inputSchema.type === "object" &&
             t.inputSchema.properties,
@@ -357,7 +359,8 @@ function listZip(zip) {
     process.exit(1);
   }
   console.log("PASS  " + checks + " checks: the pack builds, unzips alone " +
-              "into an empty folder, starts over stdio, lists all 11 tools, " +
+              "into an empty folder, starts over stdio, lists every tool the " +
+              "tree's server has, " +
               "and runs a recipe from the unpacked skill to a visible " +
               WIDTH + "x" + HEIGHT + " frame");
 })();

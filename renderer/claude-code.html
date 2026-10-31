@@ -66,8 +66,9 @@
     <li><a href="#art">8. Art: pixel grids and PNGs</a></li>
     <li><a href="#sound">9. Sound and music</a></li>
     <li><a href="#studio">10. From Claude Code to the studio</a></li>
-    <li><a href="#trouble">11. Troubleshooting</a></li>
-    <li><a href="#limits">12. What doesn't work yet</a></li>
+    <li><a href="#sessions">11. Working over several sessions</a></li>
+    <li><a href="#trouble">12. Troubleshooting</a></li>
+    <li><a href="#limits">13. What doesn't work yet</a></li>
   </ul>
 
   <h2 id="connect">1. Connect from the studio — nothing to install</h2>
@@ -187,6 +188,13 @@ Copy-Item -Recurse plugin\skills\creating-pce-toys `
       <code>source_add</code> made, the named sources and the songs — as one <code>.pce.json</code> in the studio's
       own format, inside the folder you started it in. You open that file with <b>Open… → From file…</b>
       (section 10).</td></tr>
+    <tr><td><code>project_save</code></td><td>Saves the session as a <b>project</b> — one <code>.pcestudio</code>,
+      or, when the path is a folder (a trailing <code>/</code> or an existing folder), the same layout unpacked into
+      it, so git can hold the history. The <code>notes</code> argument is the updated <code>NOTES.md</code>
+      (section 11).</td></tr>
+    <tr><td><code>project_open</code></td><td>Resumes a project from its <code>.pcestudio</code> file or its unpacked
+      folder, and answers with <code>NOTES.md</code>'s text <b>first</b> — what the last session learned
+      (section 11).</td></tr>
   </table>
 
   <h2 id="examples">7. Worked examples</h2>
@@ -273,7 +281,40 @@ function frame(t, f) end</code></pre>
     cart.</li>
   </ul>
 
-  <h2 id="trouble">11. Troubleshooting</h2>
+  <h2 id="sessions">11. Working over several sessions</h2>
+  <p>A game is rarely finished in one sitting, and a new Claude Code session starts knowing nothing about the last
+  one. A <b>project</b> fixes that: one file (or folder) holding the code, the art's asset files, the songs and —
+  the part that matters — <b><code>NOTES.md</code></b>, a short note written for whoever picks the game up next.</p>
+  <p><code>NOTES.md</code> says what the game is meant to be, what works, what does not, the decisions taken and
+  why, and the next step. The code says what; the note says why. <code>project_open</code> returns it as the very
+  first thing in its reply, so Claude reads it before it reads the code — and <code>project_save</code> takes the
+  updated note as its <code>notes</code> argument.</p>
+  <h3>The folder route — what git is for</h3>
+  <p>Give the path a trailing slash (or name a folder that already exists) and the project is written <b>unpacked</b>
+  into it: <code>project.json</code>, <code>main.lua</code>, the asset files, <code>NOTES.md</code>, and any
+  <code>art/</code> and <code>versions/</code>. That folder is a normal git repository — commit it after each session
+  and the history is the game's, one readable diff at a time. It is the route made for Claude Code.</p>
+  <p class="say">Make the game start as a project in this folder: create NOTES.md with the goal and what works, save
+  the project here, and commit it.</p>
+  <p>Claude calls <code>project_save {path: "./", notes: ...}</code> — the layout lands in that folder, which is the
+  git repository — and writes the updated <code>NOTES.md</code> with it. At the end of the session, ask it to write
+  down what it did and what is next:</p>
+  <p class="say">Before you finish, update NOTES.md with what you did this session, what works, what doesn't, and the
+  next step — then save the project and commit.</p>
+  <h3>The next session</h3>
+  <p>Start Claude Code in the same folder and point it at the project. It reads the note first, then runs the toy to
+  see it where the last session left it:</p>
+  <p class="say">Open the project in this folder: read NOTES.md, run the game, and then fix the next step in
+  NOTES.md.</p>
+  <p><code>project_open {path: "./"}</code> loads the folder, returns the note first, and the session carries on
+  with <code>toy_run</code>, <code>frame_png</code> and <code>toy_write</code> exactly as before. A project saved as
+  one file works the same way: <code>project_open {path: "my-game.pcestudio"}</code>.</p>
+  <div class="box">One <code>.pcestudio</code> or one folder is the whole game, so it also travels: the person opens
+  it in the studio with <b>Project… → Open</b>, and the same <code>NOTES.md</code> is a tab beside
+  <code>main.lua</code>. <code>toy_save</code> still writes the plain <code>.pce.json</code> toy file when there is
+  nothing to resume; a project is the thing to hand over when the session will be picked up again.</div>
+
+  <h2 id="trouble">12. Troubleshooting</h2>
   <table>
     <tr><th>What you see</th><th>What to do</th></tr>
     <tr><td><code>claude mcp list</code> shows pcestudio as failed</td><td>Run <code>node --version</code>. If that
@@ -297,7 +338,7 @@ function frame(t, f) end</code></pre>
       again.</td></tr>
   </table>
 
-  <h2 id="limits">12. What doesn't work yet</h2>
+  <h2 id="limits">13. What doesn't work yet</h2>
   <ul>
     <li><b>Export</b>: games that use Lua tables, <code>sprite()</code>, the pad or <code>sfx()</code> don't export
     to <code>.pce</code> yet. They run in the studio and through the server.</li>
