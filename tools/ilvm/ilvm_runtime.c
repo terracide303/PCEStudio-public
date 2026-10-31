@@ -129,10 +129,6 @@ volatile uint8_t toy_isr_line;    /* next VDW line to serve, 0..224 */
  * against the interrupt's increment (a 16-bit counter did, measured: a
  * skipped wait armed the chain mid-frame and mixed two collections). */
 volatile uint8_t toy_vblank_count;
-/* ilvm: the TMA counter at the last VBlank.  With it the measurement knows
- * the phase within the 116.5-tick (119,318-cycle) frame, so a multi-frame
- * frame() is reconstructed exactly instead of guessed (§14.5). */
-volatile uint8_t toy_vb_timer;
 
 /* The next frame's base: what frame() wrote while the display was running. */
 volatile uint8_t toy_pend_op;     /* bit0 BXR, bit1 BYR, bit2 CR */
@@ -314,41 +310,56 @@ void toy_display_on(void) {
 /* ilvm: an interpreted frame() can take several video frames, and the TMA
  * counter is seven bits: a delta past 128 ticks (131,072 CPU clocks) wraps
  * and reads as a small number (measured: the real ~300,000-cycle frame read
- * as 30 ticks).  The VBlank IRQ counts whole frames, so the elapsed ticks
- * are reconstructed as the measured remainder plus the multiple of 128
- * nearest the frame count's expected 116.5 ticks (one 60 Hz PCE frame is
- * 119,318 CPU clocks).  The candidates are 128 apart and the window is 116
- * wide, so the answer is unique.  A bracket with no VBlank in it (<128
- * ticks) is exact as measured.  docs/IL.md §14 states the quantisation. */
-static uint8_t measure_t0, measure_v0, measure_vb0;
+ * as 30 ticks).  The VBlank counter measures the whole frames; the seven-bit
+ * delta measures the remainder modulo 128, and the two together are exact.
+ *
+ * The TMA counter counts DOWN (probed on Mednafen: 127, 80, 32, 112, 64
+ * over a fixed spin) at one count per 1024 CPU clocks.  A frame() or a
+ * collection bracket starts just after a VBlank -- both frame flows wait on
+ * the VBlank counter before they begin -- so
+ *
+ *     elapsed = frames * 116.52 + phase,   phase in [0, 116.52)
+ *
+ * One frame is 119,318 CPU clocks = 116.52 ticks, doubled to keep the half.
+ * The candidates raw + 128k are 128 ticks apart and the window is 116.52
+ * wide, so exactly one fits.  The start is a few ticks after the VBlank
+ * (the wait returns from the IRQ), so the window is centred on
+ * frames * 116.52 + 53 ticks in half-ticks below rather than pinned to its
+ * lower edge; a candidate within 64 ticks of that centre is the answer.
+ *
+ * A per-raster-call bracket starts at an arbitrary phase in the 224-call
+ * loop, but a call is a fraction of a frame (< 128 ticks), so its raw delta
+ * is already exact and `after_vblank` is 0 for it.
+ *
+ * docs/IL.md §14.5 used the timer value recorded at each VBlank.  That read
+ * $1C00, which is $FF on Mednafen, so the phase term was noise; #169
+ * replaced it with this window and measured a palette frame() at 282 ticks
+ * where the noise had it at 233 (docs/ROM_SPEED.md). */
+static uint8_t measure_t0, measure_v0;
 
-static uint16_t elapsed_ticks(uint8_t t0, uint8_t v0, uint8_t vb0,
-                              uint8_t t1, uint8_t v1, uint8_t vb1) {
+static uint16_t elapsed_ticks(uint8_t t0, uint8_t v0,
+                              uint8_t t1, uint8_t v1, uint8_t after_vblank) {
   uint8_t d = (uint8_t)((t0 - t1) & 0x7F);
   uint8_t frames = (uint8_t)(v1 - v0);
-  uint8_t p0, p1;
-  int16_t total;
+  uint16_t e2, centre;
   if (frames == 0) return d;
-  /* Ticks since the last VBlank: the counter has wrapped at most once
-   * between a VBlank and the sample (116.5 ticks per frame < 128). */
-  p0 = (uint8_t)((t0 - vb0) & 0x7F);
-  p1 = (uint8_t)((t1 - vb1) & 0x7F);
-  /* One frame is 119,318 CPU clocks = 116.52 ticks; doubled to keep the
-   * half: elapsed*2 = frames*233 + 2*(p1 - p0). */
-  total = (int16_t)((int16_t)frames * 233 + (int16_t)(2 * ((int16_t)p1 - (int16_t)p0)));
-  return (uint16_t)((total + 1) >> 1);
+  if (!after_vblank) return d;
+  /* frames is u8: the largest is 255 * 233 + 254 < 65,536, so no overflow */
+  e2 = (uint16_t)((uint16_t)d << 1);
+  centre = (uint16_t)((uint16_t)frames * 233 + 106);
+  while ((uint16_t)(e2 + 128) < centre) e2 = (uint16_t)(e2 + 256);
+  return (uint16_t)((e2 + 1) >> 1);
 }
 
 void toy_measure_begin(void) {
   measure_t0 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
   measure_v0 = toy_vblank_count;
-  measure_vb0 = toy_vb_timer;
 }
 
 void toy_measure_end(void) {
   uint8_t t1 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
-  uint16_t d = elapsed_ticks(measure_t0, measure_v0, measure_vb0,
-                             t1, toy_vblank_count, toy_vb_timer);
+  uint16_t d = elapsed_ticks(measure_t0, measure_v0,
+                             t1, toy_vblank_count, 1);
   uint16_t count = (uint16_t)(MEAS[MEAS_COUNT] | (MEAS[MEAS_COUNT + 1] << 8));
   uint32_t sum = (uint32_t)MEAS[MEAS_SUM] |
                  ((uint32_t)MEAS[MEAS_SUM + 1] << 8) |
@@ -367,18 +378,17 @@ void toy_measure_end(void) {
 }
 
 #ifdef TOY_RASTER_BUILD
-static uint8_t raster_t0, raster_v0, raster_vb0;
+static uint8_t raster_t0, raster_v0;
 
 void toy_measure_raster_begin(void) {
   raster_t0 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
   raster_v0 = toy_vblank_count;
-  raster_vb0 = toy_vb_timer;
 }
 
 void toy_measure_raster_end(void) {
   uint8_t t1 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
-  uint16_t d = elapsed_ticks(raster_t0, raster_v0, raster_vb0,
-                             t1, toy_vblank_count, toy_vb_timer);
+  uint16_t d = elapsed_ticks(raster_t0, raster_v0,
+                             t1, toy_vblank_count, 0);
   uint16_t count = (uint16_t)(MEAS[MEAS_RCOUNT] |
                               (MEAS[MEAS_RCOUNT + 1] << 8));
   uint32_t sum = (uint32_t)MEAS[MEAS_RSUM] |
@@ -398,6 +408,95 @@ void toy_measure_raster_end(void) {
 #endif /* TOY_RASTER_BUILD */
 
 #ifdef TOY_RASTER_BUILD
+/* ---- #169: the toy update as a whole ----------------------------------
+ *
+ * The cells sit in BaseRAM at fixed addresses (docs/ROM_LAYOUT.md) so a
+ * host reads them from a save state without knowing this file:
+ *
+ *   $2120 u16 updates     toy frames measured
+ *   $2122 u16 overruns    updates that crossed a VBlank (> one video frame)
+ *   $2124 u16 worstLines  the longest update, in scanlines
+ *   $2126 u32 totalLines  the sum of the updates, in scanlines
+ *
+ * One update is frame() for a toy with no raster() callback, and frame()
+ * plus its 224-call raster collection for a toy that has one.  The TMA
+ * bracket is the same VBlank-aware reconstruction toy_measure_* uses, so a
+ * multi-frame update is measured, not read as the seven-bit remainder.
+ * Scanlines: one tick is 1024 CPU clocks and one of the console's 262
+ * scanlines is 119,318 / 262 = 455.4 clocks, so lines = ticks * 2.2485.
+ * The integer form is ticks * 9 / 4 (0.07% high), saturated at 65,535 lines
+ * (a 250-frame update is "too slow" at any rounding).  The update that
+ * starts a measurement is the one right after a VBlank (both frame flows
+ * wait on the VBlank counter before they begin), so a nonzero VBlank delta
+ * is exactly "the next VBlank arrived before the update finished". */
+#define UPD_OFF_UPDATES 0x20
+#define UPD_OFF_OVERRUNS 0x22
+#define UPD_OFF_WORST 0x24
+#define UPD_OFF_TOTAL 0x26
+
+static uint16_t meas16(uint8_t off) {
+  return (uint16_t)(MEAS[off] | ((uint16_t)MEAS[off + 1] << 8));
+}
+
+static void meas16_set(uint8_t off, uint16_t v) {
+  MEAS[off] = (uint8_t)v;
+  MEAS[off + 1] = (uint8_t)(v >> 8);
+}
+
+static uint32_t meas32(uint8_t off) {
+  return (uint32_t)MEAS[off] |
+         ((uint32_t)MEAS[off + 1] << 8) |
+         ((uint32_t)MEAS[off + 2] << 16) |
+         ((uint32_t)MEAS[off + 3] << 24);
+}
+
+static void meas32_set(uint8_t off, uint32_t v) {
+  MEAS[off] = (uint8_t)v;
+  MEAS[off + 1] = (uint8_t)(v >> 8);
+  MEAS[off + 2] = (uint8_t)(v >> 16);
+  MEAS[off + 3] = (uint8_t)(v >> 24);
+}
+
+static uint8_t upd_t0, upd_v0;
+
+/* One consistent (timer, VBlank count) sample.  The count is written by the
+ * IRQ, and a sample that straddles a VBlank mixes the old timer value with
+ * the new count, which reads one update short or long by a frame.  Re-reading
+ * until the count is unchanged across the timer read costs two compares and
+ * removes the tear; the loop cannot spin for long, because a VBlank happens
+ * once per 116 ticks. */
+static void upd_sample(uint8_t *t, uint8_t *v) {
+  uint8_t v0, t0;
+  do {
+    v0 = toy_vblank_count;
+    t0 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
+  } while (v0 != toy_vblank_count);
+  *t = t0;
+  *v = v0;
+}
+
+static void toy_update_begin(void) {
+  upd_sample(&upd_t0, &upd_v0);
+}
+
+static void toy_update_end(void) {
+  uint8_t t1, v1;
+  uint16_t d, lines;
+  upd_sample(&t1, &v1);
+  d = elapsed_ticks(upd_t0, upd_v0, t1, v1, 1);
+  if (d >= 29127) {
+    lines = 0xFFFF;
+  } else {
+    lines = (uint16_t)((uint16_t)(d << 1) + ((uint16_t)(d + 2) >> 2));
+  }
+  meas16_set(UPD_OFF_UPDATES, (uint16_t)(meas16(UPD_OFF_UPDATES) + 1));
+  if (v1 != upd_v0) {
+    meas16_set(UPD_OFF_OVERRUNS, (uint16_t)(meas16(UPD_OFF_OVERRUNS) + 1));
+  }
+  if (lines > meas16(UPD_OFF_WORST)) meas16_set(UPD_OFF_WORST, lines);
+  meas32_set(UPD_OFF_TOTAL, meas32(UPD_OFF_TOTAL) + (uint32_t)lines);
+}
+
 /* ---- the RCR chain ---------------------------------------------------
  *
  * The compiled raster() handler cannot run in the interrupt: measured from
@@ -507,9 +606,6 @@ __asm__(
 "  rti\n"
 "irq_vbl_near:\n"
 "  inc toy_vblank_count\n"
-"  lda $1C00\n"                 /* TMA counter at this VBlank: the phase */
-"  and #$7F\n"
-"  sta toy_vb_timer\n"
 "irq_vbl_done:\n"
 "  ply\n"
 "  plx\n"
@@ -670,9 +766,11 @@ int main(void) {
       }
       apply_base();
       toy_host_mode = MODE_BASE;
+      toy_update_begin();
       toy_measure_begin();
       toy_frame(f);
       toy_measure_end();
+      toy_update_end();
       toy_host_mode = MODE_DIRECT;
     }
     }
@@ -695,7 +793,7 @@ int main(void) {
     v = toy_vblank_count;
 
     for (f = 0;; f++) {
-      uint8_t c0, c1, cv0, cv1, cvb0, cvb1;
+      uint8_t c0, c1, cv0, cv1;
       uint16_t cd;
       uint32_t csum;
       uint16_t ccount;
@@ -705,6 +803,7 @@ int main(void) {
       toy_pend_npal = 0;
       toy_pend_nvram = 0;
       toy_host_mode = MODE_BASE;
+      toy_update_begin();
       toy_measure_begin();
       toy_frame(f);
       toy_measure_end();
@@ -712,14 +811,13 @@ int main(void) {
       toy_host_mode = MODE_RASTER;
       c0 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
       cv0 = toy_vblank_count;
-      cvb0 = toy_vb_timer;
       collect_all();
       c1 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
       cv1 = toy_vblank_count;
-      cvb1 = toy_vb_timer;
+      toy_update_end();
       toy_host_mode = MODE_DIRECT;
 
-      cd = elapsed_ticks(c0, cv0, cvb0, c1, cv1, cvb1);
+      cd = elapsed_ticks(c0, cv0, c1, cv1, 1);
       ccount = (uint16_t)(MEAS[MEAS_CCOUNT] | (MEAS[MEAS_CCOUNT + 1] << 8));
       csum = (uint32_t)MEAS[MEAS_CSUM] |
              ((uint32_t)MEAS[MEAS_CSUM + 1] << 8) |
