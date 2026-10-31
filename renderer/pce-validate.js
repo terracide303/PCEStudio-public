@@ -135,13 +135,24 @@
    *   tools/toys/palette.lua  238,988 cycles / 7,445   = 32.10x (no raster)
    *   toys/parallax.lua     8,157,505 cycles / 314,443 = 25.94x (raster)
    *
+   * #169 (docs/ROM_SPEED.md) re-measured both captures and found the two
+   * numbers above biased: the palette frame() is 281,382 cycles (2.36 video
+   * frames), so the no-raster factor should be 37.8 (this file
+   * underestimates by ~20 %); the parallax collection is 4,475,066 cycles and
+   * its raster call 19,782, so the raster factor should be 14.2 (this file
+   * overestimates by 1.8x, and by 3.5x on the held-out status-bar).  The
+   * constants are unchanged here on purpose: recalibrating them changes the
+   * studio's projection, which #169 does not do.
+   *
    * The factor is measured/estimate, not measured/measured, so applying it
    * to this model's collection for another toy projects the same way.  The
    * two shapes differ because a raster collection is 224 interpreter calls
    * (fixed call cost) rather than a long run of opcodes.  The status-bar
-   * capture (#115) is held out: 3,763,919 measured against a 275,268
-   * estimate projected at 25.94 would be 7,140,000, so the raster factor
-   * overestimates that toy by 1.9x — conservative for the 60 Hz question.
+   * capture (#115) is held out: STATUS_MEASURED is its pre-#169 figure,
+   * 3,763,919, against which the 275,268 estimate projected at 25.94
+   * (7,140,000) is 1.9x; #169's re-capture measured 1,994,069, so against
+   * the real number the same projection is 3.5x.  Directionally both say
+   * "not 60 Hz", and the overestimate is conservative for that question.
    * This is a static estimate, labelled as one wherever it is shown. */
   var ROUTE1 = {
     NO_RASTER: 32.10,

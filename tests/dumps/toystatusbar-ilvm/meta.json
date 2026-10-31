@@ -15,34 +15,38 @@
  },
  "capture": {
   "frames": 300,
-  "last_frame": "frame0305.png",
+  "last_frame": "frame0527.png",
   "measure": {
-   "collect_sum_ticks_7bit": 217945,
-   "collections": 110,
-   "count": 111,
-   "cycles_per_collection": 3780449.7454545456,
-   "cycles_per_frame": 30111.135135135137,
-   "cycles_per_raster_call": 16861.952477495743,
+   "collect_sum_ticks_7bit": 29210,
+   "collections": 15,
+   "count": 15,
+   "cycles_per_collection": 1994069.3333333333,
+   "cycles_per_frame": 36659.2,
+   "cycles_per_raster_call": 8702.171428571428,
    "flags": 0,
-   "max_ticks": 91,
-   "mean_ticks": 29.405405405405407,
+   "max_ticks": 154,
+   "mean_ticks": 35.8,
+   "mean_update_lines": 4444.0,
    "min_ticks": 26,
-   "raster_calls": 24662,
-   "raster_max_ticks": 237,
-   "raster_sum_ticks": 406103,
-   "sum_ticks": 3264
+   "overruns": 15,
+   "raster_calls": 3360,
+   "raster_max_ticks": 12,
+   "raster_sum_ticks": 28554,
+   "sum_ticks": 537,
+   "updates": 15,
+   "worst_update_lines": 4446
   },
   "slend": 234,
   "slstart": 3
  },
  "ilvm": {
   "bytes": 16384,
-  "sha256": "723a65e2b945957d7fce0f111391e62a6e3f481cc5b73d18c8704ed56bd570e9"
+  "sha256": "635f0e726f90a91704f1fcc0c8f0cf449ecef6f576f47829ce0099c2d1e4d330"
  },
  "name": "toystatusbar-ilvm",
  "rom": "tools/gen/toystatusbar-ilvm.pce",
  "rom_bytes": 24576,
- "rom_sha256": "0916530d5a2f8df7c90c4b1ece4f4fc64517a3e30ea79d3d4e67d2a554f3b8c1",
+ "rom_sha256": "e9fe7fad6773ce7d32226b15a330b6523d71318a914297ecdd265b43413585f3",
  "source": "toys/status-bar.lua",
- "source_sha256": "86f94c70c7ff0b408a50c74cd948ab6de417cc3f4be26d496a85e6dac54435cf"
+ "source_sha256": "0d52e4536692190ac82169fb636620fb5e38cce0379630876822011a2a25de33"
 }

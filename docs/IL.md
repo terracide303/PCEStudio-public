@@ -1197,7 +1197,7 @@ Measured sizes: the image is 16,384 B (the linker fills the fixed region),
 ### 14.3 The console frame flow
 
 A compiled `frame()` is 7,417 cycles and lands in the VBlank. An interpreted
-one is **238,988 cycles** (measured, below): it runs for two video frames. The
+one is **281,382 cycles** (measured, below; #169) — 2.36 video frames. The
 runtime therefore defers a no-raster toy's writes exactly as part B's HuC
 runtime does for the palette toy (§11.2): `frame(f)` runs in `MODE_BASE`
 during the display, and its palette/VRAM/register writes are applied in the
@@ -1261,17 +1261,26 @@ line, crop and timer read.
 | ROM | 24,576 B (3 physical banks) | 24,576 B | 24,576 B |
 | bytecode | 578 B | 1,100 B | 1,369 B |
 | code bytes in the container | 405 | 850 | 1,029 |
-| `frame()` | **238,988 cycles** (2.0 video frames) | **5,657 cycles** (0.05 frames) | **30,111 cycles** (0.25 frames) |
-| one `raster()` call | — | **36,072 cycles** | **16,862 cycles** |
-| one 224-call collection | — | **8,157,505 cycles** (68.4 frames) | **3,780,450 cycles** (31.7 frames) |
-| toy frame rate | one per ~3 video frames (~20 Hz) | one per ~69 video frames (~0.87 Hz) | one per ~32 video frames (~1.9 Hz) |
+| `frame()` | **281,382 cycles** (2.36 video frames) | **5,632 cycles** (0.05 frames) | **36,659 cycles** (0.31 frames) |
+| one `raster()` call | — | **19,778 cycles** | **8,702 cycles** |
+| one 224-call collection | — | **4,475,066 cycles** (37.5 frames) | **1,994,069 cycles** (16.7 frames) |
+| toy frame rate | one per ~3 video frames (~20 Hz) | one per ~38 video frames (~1.6 Hz) | one per ~17 video frames (~3.5 Hz) |
 | picture vs browser | diff 0 | diff 0 | bar rows 0-23 diff 0; playfield four lines out of phase |
 
-Set beside §12's compiled numbers, the interpreter costs **32x** the compiled
-palette `frame()` (238,988 vs 7,417 cycles), **4.7x** the compiled parallax
-`frame()` (5,657 vs 1,204), **24x** a compiled `raster()` call (36,072 vs
-1,510) and **24x** the collection (8,157,505 vs 338,757), which puts the
-raster toy at 0.87 Hz against the compiled route's ~12 Hz.  The bytecode is
+**#169 corrected this table.** The figures above are the re-captures of
+2026-10-31 with the timer measurement repaired: the IRQ had read the timer at
+`$1C00` (which is `$FF` on Mednafen), so the phase term was noise, and
+`tools/capture-ilvm.sh` divided the per-call sum for `cycles_per_collection`.
+The old row values were 238,988 / 5,657 / 30,111 cycles, 36,072 / 16,862 per
+call, and 8,157,505 / 3,780,450 per collection. The new ROM also counts
+overruns and the longest update in scanlines; the estimate-vs-measured table
+and the full explanation are in [`ROM_SPEED.md`](ROM_SPEED.md).
+
+Set beside §12's compiled numbers, the interpreter costs **38x** the compiled
+palette `frame()` (281,382 vs 7,417 cycles), **4.7x** the compiled parallax
+`frame()` (5,632 vs 1,204), **13x** a compiled `raster()` call (19,778 vs
+1,510) and **13x** the collection (4,475,066 vs 338,757), which puts the
+raster toy at ~1.6 Hz against the compiled route's ~12 Hz.  The bytecode is
 578 B (palette) and 1,100 B (parallax) against 1,784 B and 4,541 B of
 compiled IL functions.  Route 1 trades that speed for a ROM the browser can
 build with no compiler; route 2 (#101) is the direct generator that keeps
@@ -1281,10 +1290,11 @@ the speed.
 lines 0 and 24 — the handler's two-register case. Its capture
 (`tests/dumps/toystatusbar-ilvm`) shows the fixed bar is **diff 0** against
 the browser (rows 0-23 of a display frame are byte-equal), and the whole
-interpreter path works: 24,662 raster calls measured, the container carries
-the callback at slot 2, and the save's VRAM is the browser's and its CRAM a
-browser blink state. The scrolled playfield is the one place it does not
-match: the closest browser frame with the same bar is **793 bytes** off —
+interpreter path works: 3,396 raster calls measured (the #169 re-capture),
+the container carries the callback at slot 2, and the save's VRAM is the
+browser's and its CRAM a browser blink state. The scrolled playfield is the
+one place it does not match: the closest browser frame with the same bar is
+**285 bytes** off —
 the same four-line phase §10.4 records for the compiled route, because both
 routes share `toy_runtime.c`'s RCR replay. The cause is the VDC's background
 fetch pipeline taking the new BYR a few lines after the handler's write; the
@@ -1294,15 +1304,20 @@ half records the limitation rather than hiding it.
 
 The timer measurement is VBlank-aware. The TMA counter is seven bits, so a
 delta past 128 ticks (131,072 CPU clocks) wraps: the first run read the real
-~240,000-cycle frame as 30 ticks. The VBlank IRQ now records the timer value
-at each VBlank, so the measurement knows the phase within the 116.5-tick
-(119,318 CPU clock) frame: elapsed = frames x 116.5 + (phase at end - phase
-at start). A bracket that spans no VBlank is exact as measured, and that
-covers every `raster()` call. The figure includes the VBlank IRQ's few cycles
-per frame and is quantised to one tick. The per-frame maximum is clamped at
-255 ticks in the byte-wide save-state cell; the mean is not clamped.
+~240,000-cycle frame as 30 ticks. #169 measured the counter on Mednafen (it
+counts down at one count per 1024 CPU clocks) and replaced the old
+VBlank-timestamp phase with the unique-candidate window: a frame() or
+collection bracket starts just after a VBlank, so elapsed = frames x 116.52
++ phase with phase in [0, 116.52); the raw delta + 128k candidates are 128
+ticks apart and exactly one fits that window. A bracket that spans no VBlank
+is exact as measured, and that covers every `raster()` call (a call is
+8.5–19.3 ticks). The old "phase at the VBlank" term read `$1C00`, which is
+`$FF` on Mednafen, so it was noise; that is why the pre-#169 figures above
+were biased. The figure includes the VBlank IRQ's few cycles per frame and
+is quantised to one tick. The per-frame maximum is clamped at 255 ticks in
+the byte-wide save-state cell; the mean is not clamped.
 
-`node tests/check-ilvm.js` exits 0 with **65 checks**: the encoder is
+`node tests/check-ilvm.js` exits 0 with **61 checks**: the encoder is
 deterministic and refuses by code (table, fixed constant, five parameters,
 `clamp`); Node and a browser context build the same 24,576 B ROM; the
 committed `renderer/ilvm.bin` rebuilds byte-identically when llvm-mos is
@@ -1310,7 +1325,7 @@ present (SKIP otherwise); the three dumps' ROM shas match a fresh
 `tools/ilvm/emit.js` build; the palette capture's frames are diff 0 against
 the browser's run with eight consecutive browser frames present in order,
 its mean frame cost is above the seven-bit timer's 127-tick ceiling, and the
-save's VRAM/CRAM are the browser's; the parallax capture holds 30 exact
+save's VRAM/CRAM are the browser's; the parallax capture holds exact
 display frames (a run of eight in order) among the static compute frames,
 and its save is the browser's; the status-bar capture's bar is diff 0
 against a browser frame, its container carries the raster hook, its save's

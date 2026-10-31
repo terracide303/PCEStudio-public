@@ -455,3 +455,51 @@ the sprite patterns that push it over.
   bytes in a ROM it did not build.
 - Copy regions must not overlap each other or the BAT or the SAT in VRAM;
   the viewer copies them in order without checking.
+
+## The interpreter ROM's speed counters (card #169)
+
+The toy ROM built by `renderer/pce-rom.js` is not the viewer: its first
+16 KiB are `renderer/ilvm.bin`, the IL interpreter (`tools/ilvm/`). The
+interpreter keeps its measurement cells in the console's **BaseRAM**, at
+fixed addresses, so a host can read them out of a Mednafen save state
+without knowing anything else about the image. `tools/mcs-extract.py --ram`
+writes BaseRAM as `ram.bin` (8,192 bytes, logical `$2000`–`$3FFF`), so the
+offset in that file is the address minus `$2000`.
+
+The block from `$2100` predates #169 (it is the per-call timer measurement
+of #31/#100); #169 adds the update counters at `$2120`:
+
+| address | size | cell |
+|---------|------|------|
+| `$2100` | 4 | sum of per-frame `frame()` tick deltas (u32) |
+| `$2104` | 2 | `frame()` brackets measured (u16) |
+| `$2106` | 1 | largest `frame()` delta, clamped at 255 ticks (u8) |
+| `$2107` | 1 | smallest `frame()` delta (u8) |
+| `$2108` | 4 | sum of per-raster-call tick deltas (u32) |
+| `$210C` | 2 | raster calls measured (u16) |
+| `$210E` | 1 | largest per-call delta (u8) |
+| `$210F` | 1 | overflow flags (bit 0/1 base lists, bit 2 colour writes) |
+| `$2110` | 4 | sum of collection tick deltas (u32) |
+| `$2114` | 2 | collections measured (u16) |
+| **`$2120`** | 2 | **updates measured (u16)** |
+| **`$2122`** | 2 | **overruns: updates that crossed a VBlank (u16)** |
+| **`$2124`** | 2 | **longest update in scanlines (u16)** |
+| **`$2126`** | 4 | **sum of update lengths in scanlines (u32)** |
+
+One **update** is `frame()`, or `frame()` plus the 224-call raster collection
+for a toy with a `raster()` callback. An **overrun** is a nonzero VBlank
+delta across the update: the VBlank after it started arrived before it
+finished. A scanline is 455.4 CPU clocks (119,318 per 262-line frame), so
+the length is `ticks * 9 / 4`, saturated at 65,535 lines. The reading and
+the verdict live in `tools/measure-rom.js` and are explained in
+[`ROM_SPEED.md`](ROM_SPEED.md).
+
+**Why the addresses are safe.** The llvm-mos linker's RAM starts at `$2200`
+(`__ram_bank_size` 8 KiB, stack base `$4000`), so `$2100`–`$21FF` is not
+allocated to C objects; the soft stack grows down from `$4000` and the
+deepest call tree in the four measured toys does not reach this page. A
+canary written at `$2116`–`$211F` survived palette, parallax, status-bar and
+sky-gradient runs (one each), which proves the stack never descended as far
+as `$2120`; the canary check is recorded in `docs/ROM_SPEED.md`. The cells
+are little-endian and are not cleared by the ROM; Mednafen powers up with
+zeroed RAM, which is why `updates` starts from 0.
