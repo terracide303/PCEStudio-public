@@ -59,6 +59,48 @@
     }
   },
   {
+    "name": "project_save",
+    "description": "Save the session as a whole PCEStudio project (#163), the file a later session resumes from: the studio's .pcestudio (#162) — project.json, main.lua, the asset files, sources.json and NOTES.md — as ONE .pcestudio file, or as the same layout UNPACKED into a folder when the path is a folder (a trailing / on the name, or an existing folder), so git can hold the history. Pass the updated NOTES.md text as notes (what you did, what works, what is next); with no notes and none in the toy, the project gets the studio's NOTES.md template. The person opens the file in the studio with Project… → Open (or drops it on the page); a folder opens in a fresh session with project_open. The path is relative to the folder the server was started in; a path outside it is refused (save-path).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "the project to write, inside the working folder: a .pcestudio file name (the extension is added when it has none) or a folder, written unpacked"
+        },
+        "title": {
+          "type": "string",
+          "description": "the project's title (default: the project opened before, else the file or folder's own name)"
+        },
+        "notes": {
+          "type": "string",
+          "description": "the whole updated NOTES.md — the resume note: goal, what works, what does not, decisions, next steps"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "project_open",
+    "description": "Resume a project saved by project_save or the studio (#163): load its .pcestudio file, or its UNPACKED folder, into the session — main.lua, every asset file, sources.json, the songs and NOTES.md — and answer with NOTES.md's text FIRST, before anything else, so the session starts from what the last one learned. Then toy_run/frame_png play the resumed toy; toy_write edits it; project_save writes it back. A path outside the folder the server was started in is refused (open-path), and a file that is not a project is refused with the project format's own code.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "the .pcestudio file or the project folder, inside the working folder"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "toy_run",
     "description": "Run the loaded toy's main.lua for `frames` video frames (0..frames-1) through the IL runtime, with an optional pad script, and return the final state: registers, raster table shape, VRAM/CRAM/SAT digests, log lines, PSG write count and per-channel sound activity (notes started and the instrument each sounds with), so music() can be seen without hearing it. The toy's asset files are imported into VRAM/CRAM/SAT before init() (#117) and the song files are its music(index) slots (#161). A run is fresh and deterministic; t is f/60, not the clock.",
     "inputSchema": {
