@@ -4,9 +4,10 @@
  * the console.
  *
  *   1. The encoder (renderer/pce-ilbc.js) is deterministic, produces the
- *      documented container, and refuses by code: a table is ilbc-op, a
- *      fixed constant ilbc-fixed, five arguments ilbc-arity, a builtin other
- *      than rgb ilbc-builtin.
+ *      documented container, and refuses by code: a fixed constant
+ *      ilbc-fixed, five arguments ilbc-arity, a builtin other than rgb
+ *      ilbc-builtin.  #172: a table instruction makes container version 2
+ *      with a table section; a table-free toy stays version 1 byte for byte.
  *   2. buildToyRom() glues renderer/ilvm.bin and the bytecode into a
  *      24,576-byte image; Node and a browser context (self, no module)
  *      produce the same bytes; the refusals fire.
@@ -188,9 +189,15 @@ function checkEncoder() {
       ilbc.encode(il.compile(source, { chunkName: "refusal.lua" }));
     });
   }
-  eq("a table is ilbc-op", codeFor(
-    "function frame(t, f)\n  local a = {1, 2}\n  a[1] = f\nend\n"),
-    "ilbc-op");
+  /* #172: a table is carried now, so the old `ilbc-op` case is the smallest
+   * table toy and it must encode as version 2. */
+  const tableToy = ilbc.encode(il.compile(
+    "function frame(t, f)\n  local a = {1, 2}\n  a[1] = f\nend\n",
+    { chunkName: "table.lua" }));
+  eq("a table is no longer ilbc-op: it encodes version 2",
+     tableToy.version, 2);
+  eq("the table toy has one slot and two cells",
+     tableToy.tables, { nslots: 1, cells: 2 });
   eq("a fixed constant is ilbc-fixed", codeFor(
     "function frame(t, f)\n  local x = 1.5\n  pal(1, floor(x))\nend\n"),
     "ilbc-fixed");
@@ -346,6 +353,162 @@ function checkTableLayout() {
   eq("tableLayout refuses a non-pce-il program",
      refuseCode(function () { ilbc.tableLayout({ lang: "x" }); }),
      "ilbc-program");
+}
+
+/* ---- #172: the version 2 container and the four table ops -------------- *
+ * A toy with a table instruction gets version 2: a 28-byte header with
+ * tabTabOff, a table section (u8 nslots, then per slot u16 base, u8 cap,
+ * u8 nfields), and the four opcodes 0x18..0x1B.  A string key is a field id
+ * (kind 1), never a value constant.  The exact bytes are pinned; STARFALL's
+ * section is checked against tableLayout; the refusals have their own toys;
+ * and the three committed ILVM dumps stay version 1 and byte-identical. */
+function encodeSource(source) {
+  return ilbc.encode(il.compile(source, { chunkName: "toy.lua" }));
+}
+
+function u16At(bytes, off) { return bytes[off] | (bytes[off + 1] << 8); }
+
+function checkTableEncoding() {
+  /* The small four-op toy and its exact container bytes.  The four ops in
+   * the code section:
+   *   18 02 00          table   dst r2, slot 0
+   *   19 02 01 02 03 04 setlist base r2, first 1, n 2, values k3 k4
+   *   1b 02 01 00 82    tset    base r2, key r1 (kind 0), value k2
+   *   1a 05 02 01 00    tget    dst r5, base r2, key r1 (kind 0) */
+  const toy = encodeSource([
+    "function frame(t, f)",
+    "  local a = {7, 8}",
+    "  a[f] = 9",
+    "  pal(1, a[f])",
+    "end",
+    ""
+  ].join("\n"));
+  eq("the four-op toy is container version 2", toy.version, 2);
+  eq("its version 2 header is 28 bytes", u16At(toy.bytes, 12), 28);
+  eq("the table section is nslots + 4 B",
+     Array.from(toy.bytes.slice(u16At(toy.bytes, 20), u16At(toy.bytes, 22))),
+     [1, 0, 0, 2, 0]);   /* 1 slot: base 0, cap 2, nfields 0 */
+  eq("the four-op toy's exact container bytes",
+     Buffer.from(toy.bytes).toString("hex"),
+     "494c42430200ff00ff0202041c00300034004800520057008000000057005f" +
+     "003000020001005f0080003200060201000200020000070000000008000000" +
+     "00090000000001000000056672616d650370616c0100000200070001040000" +
+     "09ff1802000103000104011902010203041b020100820104031a0502010014" +
+     "040509ff");
+  const code = Buffer.from(toy.bytes).slice(u16At(toy.bytes, 22),
+                                          u16At(toy.bytes, 24));
+  function at(op) { return code.indexOf(op); }
+  eq("table opcode and operands", Array.from(code.slice(at(0x18), at(0x18) + 3)),
+     [0x18, 0x02, 0x00]);
+  eq("setlist opcode and operands",
+     Array.from(code.slice(at(0x19), at(0x19) + 6)),
+     [0x19, 0x02, 0x01, 0x02, 0x03, 0x04]);
+  eq("tset opcode and operands",
+     Array.from(code.slice(at(0x1B), at(0x1B) + 5)),
+     [0x1B, 0x02, 0x01, 0x00, 0x82]);
+  eq("tget opcode and operands",
+     Array.from(code.slice(at(0x1A), at(0x1A) + 5)),
+     [0x1A, 0x05, 0x02, 0x01, 0x00]);
+
+  /* A string key is a field id (kind 1) and never a value constant. */
+  const fieldToy = encodeSource([
+    "function frame(t, f)",
+    "  local s = {x = f}",
+    "  pal(1, s.x)",
+    "end",
+    ""
+  ].join("\n"));
+  const fcode = Buffer.from(fieldToy.bytes).slice(u16At(fieldToy.bytes, 22),
+                                                 u16At(fieldToy.bytes, 24));
+  const ti = fcode.indexOf(0x1B);
+  eq("a string key encodes kind 1 and its field id",
+     Array.from(fcode.slice(ti, ti + 5)), [0x1B, 0x02, 0x00, 0x01, 0x01]);
+  const gi = fcode.indexOf(0x1A);
+  eq("a string read encodes kind 1 too",
+     Array.from(fcode.slice(gi, gi + 5)), [0x1A, 0x05, 0x02, 0x00, 0x01]);
+  check(Buffer.from(fieldToy.bytes).toString("latin1").indexOf("x") < 0,
+        "the string key `x` is not in the value constant pool");
+  eq("the field toy's table section has one field cell",
+     Array.from(fieldToy.bytes.slice(u16At(fieldToy.bytes, 20),
+                                     u16At(fieldToy.bytes, 22))),
+     [1, 0, 0, 0, 1]);
+
+  /* STARFALL's table section against tableLayout(): 44 slots, 172 cells, in
+   * site order.  STARFALL still cannot encode (sprite/pad/sfx are not
+   * carried), so the section is built directly by the encoder's own
+   * builder — the bytes encode() writes. */
+  const starProg = il.compile(
+    fs.readFileSync(path.join(ROOT, "toys/demo-game/main.lua"), "utf8"),
+    { chunkName: "main.lua" });
+  const starLayout = ilbc.tableLayout(starProg);
+  const starSection = ilbc.buildTableSection(starProg, starLayout);
+  eq("STARFALL's section declares 44 slots", starSection.bytes[0], 44);
+  eq("STARFALL's section is 1 + 4 x 44 bytes",
+     starSection.bytes.length, 1 + 4 * 44);
+  let packed = true, cells = 0;
+  for (let i = 0; i < starLayout.sites.length; i++) {
+    const s = starLayout.sites[i], at = 1 + 4 * i;
+    packed = packed &&
+      u16At(starSection.bytes, at) === s.base &&
+      starSection.bytes[at + 2] === s.cap &&
+      starSection.bytes[at + 3] === s.nfields &&
+      s.base === cells;
+    cells += s.nfields + s.cap;
+  }
+  check(packed, "STARFALL's slots carry tableLayout's base/cap/nfields in " +
+        "site order");
+  eq("STARFALL's section covers its 172 cells", cells, 172);
+  eq("the builder agrees with the layout", starSection.cells,
+     starLayout.cells);
+
+  /* Refusals on their own toys. */
+  eq("a constant key past the array is ilbc-table-ram", refuseCode(
+    function () {
+      ilbc.encode(il.compile(
+        "function frame(t, f)\n  local a = {1, 2}\n  a[9] = 1\nend\n",
+        { chunkName: "ram.lua" }));
+    }), "ilbc-table-ram");
+  eq("an escaping re-executing table is ilbc-table-escape", refuseCode(
+    function () {
+      ilbc.encode(il.compile([
+        "held = nil",
+        "function frame(t, f)",
+        "  local s = {x = f}",
+        "  held = s",
+        "end",
+        ""
+      ].join("\n"), { chunkName: "escape.lua" }));
+    }), "ilbc-table-escape");
+  eq("a table key that is not a string or int operand is ilbc-table-key",
+     refuseCode(function () {
+       const p = il.compile(
+         "function frame(t, f)\n  local a = {1, 2}\n  a[1] = 1\nend\n",
+         { chunkName: "key.lua" });
+       const fn = p.functions.filter(function (x) {
+         return x.code.some(function (i) { return i.t === "tset"; });
+       })[0];
+       fn.code.filter(function (i) { return i.t === "tset"; })[0].key =
+         { k: { t: "bool", v: true } };
+       ilbc.encode(p);
+     }), "ilbc-table-key");
+  const big = new Array(300).fill("0").join(", ");
+  eq("a table past 255 array cells is ilbc-range", refuseCode(function () {
+    ilbc.encode(il.compile(
+      "function frame(t, f)\n  local a = {" + big + "}\n  pal(1, a[1])\n" +
+      "end\n", { chunkName: "big.lua" }));
+  }), "ilbc-range");
+
+  /* The three committed ILVM dumps stay version 1 and byte-identical. */
+  for (const spec of [PALETTE, PARALLAX, STATUS]) {
+    const enc = encodeToy(spec.toy);
+    eq(spec.name + " stays container version 1", enc.version, 1);
+    const meta = JSON.parse(fs.readFileSync(
+      path.join(ROOT, "tests", "dumps", spec.name, "meta.json"), "utf8"));
+    const rom = romLib.buildToyRom({
+      bank0: fs.readFileSync(ILVM), bytecode: enc.bytes });
+    eq(spec.name + "'s ROM is still the committed one",
+       sha256(Buffer.from(rom)), meta.rom_sha256);
+  }
 }
 
 /* ---- 2. the browser glue ---------------------------------------------- */
@@ -686,6 +849,7 @@ console.log("check-ilvm: #100 the IL as bytecode, interpreted");
 checkEncoder();
 checkArityRefusal();
 checkTableLayout();
+checkTableEncoding();
 checkRom();
 checkRebuild();
 
