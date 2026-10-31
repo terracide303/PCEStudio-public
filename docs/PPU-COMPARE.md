@@ -162,8 +162,8 @@ than duplicated. Sizes follow the board's ~S/~M/~L.
 
 ### 3. A home page that shows the thing — new, ~M
 - **Why:** `https://pcestudio.terracides.com` is a meta-refresh redirect to Browse (`tools/deploy.sh`).
-  A first-time tester never sees a hero or a running example; the gallery is the front door, with the
-  beta banner as its first row.
+  A first-time tester never sees a hero or a purpose-built first-run page; the gallery is the front
+  door, with the beta banner as its first row.
 - **How:** a static `renderer/home.html` (generated into the deploy root) with a short hero, one toy
   running at frame 60 as the card art, Open the Studio, Browse, Read the testers' guide, and the three
   things that are finished/not finished. No backend.
