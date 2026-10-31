@@ -69,6 +69,7 @@
     <li><a href="#keys">2. Keys</a></li>
     <li><a href="#ai">3. Make a game with an AI</a></li>
     <li><a href="#studio">4. A tour of the studio</a></li>
+    <li><a href="#project">Project files — save the whole game</a></li>
     <li><a href="#test">5. What we'd love you to test</a></li>
     <li><a href="#not-yet">6. What does not work yet</a></li>
     <li><a href="#report">7. How to report a bug</a></li>
@@ -146,6 +147,8 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
       (see section 6).</td></tr>
     <tr><td><b>Save file</b> / <b>Open…</b></td><td>Saves the whole toy (code and assets) as one
       <code>.pce.json</code> file, and opens one again. Use this to send us a toy that shows a bug.</td></tr>
+    <tr><td><b>Project…</b></td><td>Save or open a whole project as one <code>.pcestudio</code>: the game,
+      <code>NOTES.md</code>, the original art you imported, and named versions. See the next section.</td></tr>
     <tr><td><b>CODE</b> · <b>ASSETS</b></td><td>The toy's Lua files, and its art, palettes, waves, songs and
       the 15 built-in instruments.</td></tr>
     <tr><td>Panels: SCREEN, VRAM, PALETTES, SPRITES, AUDIO, SEQUENCER, LAYERS, SCANLINES, REGISTERS,
@@ -154,12 +157,58 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
     <tr><td><b>Docs</b></td><td>The full toy API, generated from the code.</td></tr>
   </table>
 
+  <h2 id="project">Project files — save the whole game, and resume it later</h2>
+  <p>A <b>.pcestudio</b> is one file that holds a whole project: the game's code, its asset files, a
+  <code>NOTES.md</code> written for whoever continues it, the <b>original</b> PNG/WAV/MID files you added, and any
+  named versions you made. It is a ZIP underneath, so you can also rename it to <code>.zip</code> and open it in
+  Finder/Explorer to see the files — the layout is in <code>docs/PROJECT-FORMAT.md</code> in the repository.</p>
+  <h3>Saving</h3>
+  <ol>
+    <li>Press <b>Project…</b> in the top bar, then <b>SAVE</b>.</li>
+    <li>Type a name. The checklist shows what goes in and how big it is: code, assets/sources, songs,
+      <code>NOTES.md</code>, original art, versions. All are ticked; untick anything you do not want to carry.</li>
+    <li>Pick the format: <b>project .pcestudio</b> (default), <b>plain toy .pce.json</b> (what <b>Save file</b>
+      writes — no notes, art originals or versions), or <b>ROM .pce</b> (opens Export…).</li>
+    <li>Press <b>Save project</b>. The browser downloads the file.</li>
+  </ol>
+  <h3>Opening</h3>
+  <ol>
+    <li>Press <b>Project…</b> → <b>OPEN</b>, or drag a <code>.pcestudio</code> onto the page.</li>
+    <li>Pick or drop a <code>.pcestudio</code>, an old <code>.pce.json</code>, a <code>.lua</code>, or an original
+      PNG/WAV/MID. The window lists what is inside — files, the notes' first lines, versions, original art — before
+      anything is loaded.</li>
+    <li>Tick the groups to load. Choose <b>replace the current toy</b>, or <b>add to it</b> (for example take only
+      the songs, or only the art, from another project). If the studio has unsaved work, replace warns you first and
+      the toy it replaces stays in <b>Open… → Recover</b>.</li>
+  </ol>
+  <p>The <b>recent projects</b> list under OPEN is kept in your browser only; a project too large for browser
+  storage is listed as <i>not kept</i> — open it from its file instead.</p>
+  <h3>NOTES.md</h3>
+  <p>A project gets a <code>NOTES.md</code> template; it opens as a tab beside <code>main.lua</code> and you can edit
+  it like any file. It asks for <b>Goal</b>, <b>What works</b>, <b>What does not work</b>, <b>Decisions</b> (who and
+  why) and <b>Next steps</b>. This is what lets a new session — a person or Claude — pick the game up without
+  guessing.</p>
+  <h3>Originals and versions</h3>
+  <p><b>Add Source</b> now keeps the file you dropped in the project's <code>art/</code>, and
+  <code>sources.json</code> records which original each source came from, so an image can be re-imported with other
+  settings without finding the file again. <b>Snapshot…</b> names the current code and asset files as a version
+  (never the originals); the list in the SAVE pane restores one into the current project, asking first if that
+  would replace unsaved edits. Versions are capped at a handful; delete one to make room. The oldest is never
+  dropped automatically.</p>
+  <div class="box">
+    <b>Reporting a bug with a project.</b> Save a <code>.pcestudio</code> and attach it to the report. It contains
+    your notes and your original art, so check you are happy to share them (or untick those two groups).
+  </div>
+
   <h2 id="test">5. What we'd love you to test</h2>
   <ul>
     <li><b>Play every game in Browse</b> for a minute or two. Look for anything that freezes, flickers,
     sounds wrong, or ignores a key.</li>
     <li><b>Make one toy with an AI</b> using the guide. Did the AI's first try run? What error did you get?
     Where did you get stuck? This is the most useful report of all.</li>
+    <li><b>Save a project and reopen it</b> (section “Project files”): does <code>Project… → SAVE</code> give you a
+    <code>.pcestudio</code> that <code>Project… → OPEN</code> (or a drag onto the page) brings back with its notes,
+    original art and versions? Try unticking art, and try adding only a song from one project to another.</li>
     <li><b>Connect Claude Code to the studio</b> (section 3): did Connect, the command and the feed work? Did the
     toy appear in the editor while Claude worked? Did pressing Disconnect really stop it?</li>
     <li><b>Change something</b> in a game's code and press Run. Does the studio tell you clearly what's wrong

@@ -571,6 +571,11 @@
         return readFile(file).then(function (got) {
           var state = add.state;
           state.fileName = got.name;
+          /* #162: the ORIGINAL bytes, kept for the project's art/.  The
+           * import's preview is derived from them; re-importing with other
+           * settings (another dither, another sample rate) must not need the
+           * person to find the file again. */
+          state.fileBytes = got.bytes;
           state.error = "";
           if (!state.name || state.name === "source")
             state.name = got.name.replace(/\.[^.]+$/, "");
@@ -977,11 +982,21 @@
         if (!result) throw new Error("nothing to add");
         var files = filesFor(result);
         var names = Object.keys(files);
-        for (var i = 0; i < names.length; i++) putFile(names[i], files[i]);
+        for (var i = 0; i < names.length; i++) putFile(names[i], files[names[i]]);
         var entry = sourceEntryOf(result);
-        if (entry)
+        /* #162: the original goes into the project's art/ and the entry says
+         * which one it was, so sources.json can name it on re-import.  A
+         * sample or a song has no source entry but still keeps its original. */
+        var kept = null;
+        if (state.fileBytes && state.kind !== "studio" &&
+            studio.project && studio.project.keepOriginal)
+          kept = studio.project.keepOriginal(state.fileName || state.name || "original",
+                                              state.fileBytes, state.name);
+        if (entry) {
+          if (kept) entry.original = kept.path;
           putFile("sources.json",
                   A.mergeSource(A.fileText(files(), "sources.json"), entry).text);
+        }
         var what = result.kind === "sample"
           ? result.samples.length + " samples at " + result.rate + " Hz in samples.json"
           : result.kind === "song"
