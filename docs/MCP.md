@@ -801,7 +801,7 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
 ## Evidence
 
 `node tests/check-mcp.js` starts `tools/mcp/server.js`, speaks MCP over
-stdio, and asserts 313 checks:
+stdio, and asserts 315 checks:
 
 - `initialize`, `ping`, and `tools/list` with all fourteen tools and their
   schemas;
