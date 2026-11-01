@@ -23,6 +23,6 @@ with no difference.
 
 It plays in the studio (the Lua runtime) and passes the validator, but the
 console **Export** path refuses it: `renderer/pce-ilbc.js` has no bytecode
-form for `padref` (the `pad[1]` read), so Export lists that as a refusal
-instead of building a ROM.  That is an encoder gap, not a fault in the toy;
-the test prints it as a NOTE.
+form for `sat` (the sprite table writes; #185 carried the pad reads), so
+Export lists that as a refusal instead of building a ROM.  That is an
+encoder gap, not a fault in the toy; the test prints it as a NOTE.

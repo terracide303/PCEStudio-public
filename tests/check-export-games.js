@@ -19,7 +19,8 @@
  *      PLATFORMER) each reach the outcome the table records: either a
  *      refusal with that code and message, or a built 24,576-byte ROM.  The
  *      source line the table names is checked against the IL (a function's
- *      definition line, the 128th constant, or the first padref), so the
+ *      definition line, the 128th constant, or the refused instruction's own
+ *      line), so the
  *      table's "line" column is reproducible and not a comment.  A blocker
  *      that lands moves the refusal: this pin goes red and asks for the
  *      table and the pin to be updated — a tripwire, not a broken test.
@@ -112,10 +113,13 @@ const GAMES = [
     where: "main.lua:325"
   },
   {
+    /* #185: padref/padget are carried, so the refusal moved to the toy's
+     * first sat (the same gap that stops the other four games — card #186
+     * takes it).  The five pad reads at main.lua:110-118 now encode. */
     name: "PLATFORMER", toy: "toys/platformer/main.lua",
     expect: { code: "ilbc-op",
-              message: "instruction padref (function 10, pc 2) has no bytecode form" },
-    where: "main.lua:110"
+              message: "instruction sat (function 10, pc 109) has no bytecode form" },
+    where: "main.lua:142"
   }
 ];
 
@@ -128,7 +132,7 @@ const GAME_PINS = {};
  * toy builds to one ROM and its picture repeats every eight frames. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "eee9c6ba257bd74aa98e1feb3fe6b29cfe5e8d02047ef1a4b36840028ef6b351",
+  rom: "b47cb2386784a21955ab62ecace677d323ba351a3cc3fedf12b68d0a79916a22",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -141,7 +145,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "c1e36d019505dfe64c7a006fb1d760725bdc3742ec7ef39b7f66c7ea3292fc8a",
+  rom: "323682f4a288bea0f90c3b1624cffb8d41cec42bd31d7b657a1602a2c9836665",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -238,8 +242,7 @@ function constantCeiling(program) {
 
 /* The source line the table names, re-derived from the IL:
  *   - STARFALL's 128th constant (the encoder names no line),
- *   - an ilbc-op refusal's "(function N, pc P)" instruction,
- *   - PLATFORMER's first padref, which the refusal names as fn 10 / pc 2. */
+ *   - an ilbc-op refusal's "(function N, pc P)" instruction. */
 function checkedWhere(game, program) {
   if (game.name === "STARFALL") {
     const hit = constantCeiling(program);

@@ -49,6 +49,7 @@ void toy_reg(int32_t which, int32_t value);
 void toy_vram_set(int32_t addr, int32_t word);
 void toy_display_on(void);
 int32_t toy_rgb(int32_t r, int32_t g, int32_t b);
+int32_t toy_pad(int32_t n, int32_t field);
 #else
 #include <pce.h>
 #include "toy_runtime.h"
@@ -384,6 +385,20 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       av = operand(r, rb(pc++));
       bv = operand(r, rb(pc++));
       toy_vram_set(av, bv);
+      break;
+    case 0x1C:                     /* padref: pad[n]'s n, held for the padget
+                                    * that indexes it (pce-cgen.js's lowering
+                                    * does the same) */
+      d = rb(pc++);
+      r[d] = operand(r, rb(pc++));
+      break;
+    case 0x1D:                     /* padget: one bit of the scanned pad word
+                                    * (toy_pad(n, field), tools/toyc/
+                                    * toy_runtime.h's TOY_PAD_* bits) */
+      d = rb(pc++);
+      av = operand(r, rb(pc++));
+      k = rb(pc++);
+      r[d] = toy_pad(av, k);
       break;
     case 0x18: {                   /* table: zero the slot, hold its id */
       d = rb(pc++);

@@ -150,6 +150,13 @@ async function measure(rom, frames) {
   });
 
   const args = ["-force_module", "pce", "-sound", "0", "-autosave", "1", rom];
+  /* mednafen's OpenGL driver can stall at video init when the Mac's display
+   * is asleep or locked; the frames come from the emulated surface either
+   * way, so VIDEO_DRIVER=sdl gives the same measurement.  Default: no flag
+   * (the build's driver). */
+  if (process.env.VIDEO_DRIVER) {
+    args.push("-video.driver", process.env.VIDEO_DRIVER);
+  }
   let log = "";
   let child;
   try {

@@ -2,7 +2,7 @@
  * ilvm_runtime.c — the console side of the IL bytecode interpreter (#100).
  *
  * This is tools/toyc/toy_runtime.c (the IL → C backend's proven runtime,
- * #31 parts A/C) with three changes, each marked "ilvm:" in place:
+ * #31 parts A/C) with four changes, each marked "ilvm:" in place:
  *
  *   1. the raster machinery is always compiled in, because the image must
  *      run any toy (the runtime decides from ilvm_has_raster() at boot);
@@ -11,6 +11,9 @@
  *      is slower than a compiled one and would otherwise paint a split;
  *   3. toy_boot/toy_frame/toy_raster come from ilvm.c, the interpreter,
  *      instead of generated C.
+ *   4. the pads (#185): joy_scan()/toy_pad() are compiled in and the scan
+ *      runs once per toy frame, because the one fixed image must read pads
+ *      whenever the toy's bytecode does.
  *
  * Everything else — the VDC/VCE setup, the zeroed VRAM/CRAM/SAT, the RCR
  * table replay, the TMA timer sums — is the file the #31 captures already
@@ -146,6 +149,50 @@ volatile uint8_t toy_pend_vram_a_hi[BASE_VRAM];
 volatile uint8_t toy_pend_vram_w_lo[BASE_VRAM];
 volatile uint8_t toy_pend_vram_w_hi[BASE_VRAM];
 #endif /* TOY_RASTER_BUILD */
+
+/* ilvm: the pads, once per toy frame (#185).  The sequence, the delay and
+ * the bit layout are tools/toyc/toy_runtime.c's (#45, proven by
+ * tools/capture-pads.sh and docs/PADS.md): reset the Turbo Tap to controller
+ * 1, then read each pad's D-pad (SEL high) and buttons (SEL low); inverted,
+ * so 1 means held.  The scan always runs — the fixed image serves every toy
+ * — and its ~1,000 cycles sit outside the measurement brackets, so the
+ * captured TMA figures of the committed dumps are unchanged by it. */
+static uint8_t joy_pads[5];
+static volatile uint8_t joy_ready;
+
+static void joy_delay(void) {
+  /* HuDK's joypad_delay, include/joypad.inc, is PHA/PLA/NOP/NOP (~11 cycles;
+   * pcetech §4: "a common sequence is PHA PLA NOP NOP").  2 cycles measured
+   * as a stale read on every other frame; five NOPs give the same ~10. */
+  __asm__ volatile("nop\n\tnop\n\tnop\n\tnop\n\tnop" ::: "memory");
+}
+
+static void joy_scan(void) {
+  uint8_t i, dirs, btns;
+  *IO_JOYPAD = 0x01;
+  joy_delay();
+  *IO_JOYPAD = 0x03;
+  joy_delay();
+  for (i = 0; i < 5; i++) {
+    *IO_JOYPAD = 0x01;              /* SEL=1: the D-pad on D3..D0 */
+    joy_delay();
+    dirs = *IO_JOYPAD;
+    *IO_JOYPAD = 0x00;              /* SEL=0: the four buttons */
+    joy_delay();
+    btns = *IO_JOYPAD;
+    /* D-pad to bits 4..7 (Up, Right, Down, Left), buttons to 0..3
+     * (II, I, Select, Run); inverted, so 1 means held. */
+    joy_pads[i] = (uint8_t)(~(((uint8_t)(dirs << 4) & 0xF0) |
+                              (uint8_t)(btns & 0x0F)));
+  }
+  joy_ready = 1;
+}
+
+int32_t toy_pad(int32_t n, int32_t field) {
+  if (!joy_ready || n < 1 || n > 5) return 0;
+  if (field < 0 || field > 7) return 0;
+  return (joy_pads[n - 1] >> field) & 1;
+}
 
 static void vdc_write(uint8_t reg, uint16_t value) {
   *IO_VDC_INDEX = reg;
@@ -766,6 +813,7 @@ int main(void) {
       }
       apply_base();
       toy_host_mode = MODE_BASE;
+      joy_scan();
       toy_update_begin();
       toy_measure_begin();
       toy_frame(f);
@@ -803,6 +851,7 @@ int main(void) {
       toy_pend_npal = 0;
       toy_pend_nvram = 0;
       toy_host_mode = MODE_BASE;
+      joy_scan();
       toy_update_begin();
       toy_measure_begin();
       toy_frame(f);

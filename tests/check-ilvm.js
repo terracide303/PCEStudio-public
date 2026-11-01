@@ -47,6 +47,16 @@
  *      bound keeps TABLE_ARRAY_CAP.  NOVA's 21 empty-then-loop arrays get
  *      8/10/8/6 instead of 16 each: 183 cells, which fits the pool (349 at
  *      the cap rule did not).
+ *   9. #185: the pads.  padref/padget encode (opcodes 0x1C/0x1D: three and
+ *      four bytes, the field byte in tools/toyc/toy_runtime.h's TOY_PAD_*
+ *      bit order) and a pad toy that reads all eight buttons of a register-
+ *      indexed and a constant-indexed pad compiles instead of refusing
+ *      ilbc-op.  On the host, the same toy runs under a scripted pad —
+ *      hostvm's PADFILE on one side, rt.setPad on the other — and its
+ *      vram/cram/sat diffs 0 against the browser IL run; the empty-pad run
+ *      matches the browser's empty-pad run AND differs from the scripted
+ *      one (a toy_pad that always read 0 could not pass both), and a
+ *      scratch mutation of toy_pad must break the artefacts.
  *
  * Written by @design because the card names this evidence.  Per workshop
  * rule 2 a cold break by another seat and model is owed: the operand
@@ -61,7 +71,9 @@
  * the closure, an inner loop's control).  #173's own target is the harness:
  * its artefacts, its frame count and its control mutation.  #174's targets:
  * the four ops' 1-based indexing and field ids, the pool bounds, the fault
- * rule and what a fault stops.
+ * rule and what a fault stops.  #185's own targets: the field-byte order,
+ * padref's held operand across the padget, the pad-number bounds, and the
+ * pad scan's place in the console loop (outside the measurement brackets).
  */
 "use strict";
 
@@ -249,7 +261,7 @@ var INSN_LEN = {
   0x01: 3, 0x02: 3, 0x03: 3, 0x04: 3, 0x05: 3, 0x06: 3, 0x07: 3,
   0x09: 2, 0x0A: 3, 0x0B: 5, 0x0C: 2, 0x0D: 4, 0x0E: 5, 0x0F: 3,
   0x10: 3, 0x12: 5, 0x14: 3, 0x15: 3, 0x16: 3, 0x17: 3,
-  0x18: 3, 0x1A: 5, 0x1B: 5
+  0x18: 3, 0x1A: 5, 0x1B: 5, 0x1C: 3, 0x1D: 4
 };
 
 /* Walk every function's code and return each instruction with its byte
@@ -1093,6 +1105,257 @@ function checkWideHostParity() {
   }
 }
 
+/* ---- #185: the pads, as bytecode and on the host ------------------------ *
+ * The toy reads all eight buttons through a register-indexed pad (bits(n):
+ * the padref must hold n across its padget) and a constant-indexed one
+ * (pad[1] in frame).  The encoding pin walks the container and checks the
+ * field bytes against tools/toyc/toy_runtime.h's TOY_PAD_* bit order,
+ * field by field, from the IL's names — a swapped pair in the encoder's
+ * PAD_FIELD map would go red without an emulator.
+ *
+ * The host parity runs the same toy under a scripted pad — hostvm's PADFILE
+ * on one side, rt.setPad on the other — and diffs all four artefacts.  Two
+ * controls make the diff mean something: the empty-pad run matches the
+ * browser's empty-pad run AND differs from the scripted one (a toy_pad that
+ * always read 0, or a scan that never ran, could not pass both), and a
+ * scratch mutation of the interpreter's padget (r[d] = 0) must break it. */
+const PAD_TOY = [
+  "x = 0",
+  "local function bits(n)",
+  "  local w = 0",
+  "  if pad[n].up then w = w + 1 end",
+  "  if pad[n].right then w = w + 2 end",
+  "  if pad[n].down then w = w + 4 end",
+  "  if pad[n].left then w = w + 8 end",
+  "  if pad[n].i then w = w + 16 end",
+  "  if pad[n].ii then w = w + 32 end",
+  "  if pad[n].select then w = w + 64 end",
+  "  if pad[n].run then w = w + 128 end",
+  "  return w",
+  "end",
+  "function frame(t, f)",
+  "  local w = bits(f % 2 + 1)",
+  "  if pad[1].right then x = x + 1 end",
+  "  if pad[1].left then x = x - 1 end",
+  "  pal(0, rgb(0, x % 8, 0))",
+  "  reg(\"BXR\", x)",
+  "  vram[0x7F01] = w",
+  "  vram[0x7F03] = x",
+  "  vram[0x7F05] = 0x100 << 1",
+  "  vram[0x7F07] = 0x80",
+  "end",
+  ""
+].join("\n");
+
+/* the encoder's PAD_FIELD map, pinned by name: a field byte must be the bit
+ * the runtime's toy_pad() shifts (tools/toyc/toy_runtime.h's TOY_PAD_*). */
+const PAD_FIELD_BITS = { ii: 0, i: 1, select: 2, run: 3,
+                         up: 4, right: 5, down: 6, left: 7 };
+
+/* One scripted pad per frame 1..8; frame 0 and the odd frames of bits()
+ * (pad 2) read an empty pad.  The same script feeds rt.setPad and, as
+ * PADFILE text, hostvm. */
+const PAD_SCRIPT = [
+  { frame: 1, buttons: { right: true } },
+  { frame: 2, buttons: { right: true, up: true } },
+  { frame: 3, buttons: { left: true, i: true } },
+  { frame: 4, buttons: { run: true, select: true } },
+  { frame: 5, buttons: { ii: true, down: true } },
+  { frame: 6, buttons: { left: true, right: true, up: true, down: true,
+                         i: true, ii: true, select: true, run: true } },
+  { frame: 7, buttons: {} },
+  { frame: 8, buttons: { up: true } }
+];
+const PAD_FRAMES = 9;
+
+function padfileText() {
+  const names = ["ii", "i", "select", "run", "up", "right", "down", "left"];
+  return PAD_SCRIPT.map(function (s) {
+    const held = names.filter(function (n) { return s.buttons[n]; });
+    return s.frame + " 1" + (held.length ? " " + held.join(" ") : "");
+  }).join("\n") + "\n";
+}
+
+function padToyState(rt) {
+  return { vram: rt.state.vram.slice(), cram: rt.state.cram.slice(),
+           sat: rt.state.sat.slice(),
+           regs: { BXR: rt.state.regs.BXR, BYR: rt.state.regs.BYR,
+                   CR: rt.state.regs.CR } };
+}
+
+function browserPadRun(withPads) {
+  const rt = il.create(PAD_TOY);
+  rt.load();
+  let want = null;
+  for (let f = 0; f < PAD_FRAMES; f++) {
+    if (withPads) {
+      const s = PAD_SCRIPT.find(function (e) { return e.frame === f; });
+      rt.setPad(1, s ? s.buttons : {});
+    }
+    rt.frame(f);
+    want = padToyState(rt);
+  }
+  return want;
+}
+
+function checkPadEncoding() {
+  const program = il.compile(PAD_TOY, { chunkName: "pad.lua" });
+  const encoded = ilbc.encode(program);
+  eq("pad encoding: the pad toy is a version 1 container", encoded.bytes[4], 1);
+
+  const ins = walkContainer(encoded.bytes);
+  const padrefs = ins.filter(function (i) { return i.op === 0x1C; });
+  const padgets = ins.filter(function (i) { return i.op === 0x1D; });
+  check(padrefs.length >= 10 && padgets.length >= 10,
+        "pad encoding: the toy encodes at least 10 padref and 10 padget " +
+        "instructions (" + padrefs.length + " / " + padgets.length + ")");
+  check(padrefs.every(function (i) { return i.len === 3; }),
+        "pad encoding: every padref is three bytes (dst, one operand)");
+  check(padgets.every(function (i) { return i.len === 4; }),
+        "pad encoding: every padget is four bytes (dst, operand, field)");
+
+  /* Field byte by field byte, name to bit: container instructions pair
+   * one-to-one, in order, with the IL function's code array (the encoder
+   * emits exactly one instruction per IL instruction), so a padget at
+   * position k of function fid is program.functions[fid].code[k].  The
+   * encoded byte must be the TOY_PAD_* bit for the IL padget's field name
+   * — a swapped pair in the encoder's PAD_FIELD map goes red here. */
+  const byFid = {};
+  ins.forEach(function (i) { (byFid[i.fid] = byFid[i.fid] || []).push(i); });
+  const fieldBits = [];
+  let named = 0;
+  padgets.forEach(function (i) {
+    const ilins = program.functions[i.fid].code[byFid[i.fid].indexOf(i)];
+    const fieldByte = encoded.bytes[i.at + 3];
+    fieldBits.push(fieldByte);
+    if (ilins && ilins.t === "padget" && ilins.field) {
+      named++;
+      eq("pad encoding: " + ilins.field + "'s field byte is its TOY_PAD bit",
+         fieldByte, PAD_FIELD_BITS[ilins.field]);
+    }
+  });
+  check(named === padgets.length,
+        "pad encoding: every padget resolves to an IL padget with a field " +
+        "name (" + named + " of " + padgets.length + ")");
+  /* bits(n) reads all eight fields in order (up..run) and frame reads
+   * right and left again on pad[1]: every bit is exercised. */
+  eq("pad encoding: all eight field bits are exercised",
+     fieldBits.slice().sort(), [0, 1, 2, 3, 4, 5, 5, 6, 7, 7]);
+}
+
+const PADGET_BODY = "      r[d] = toy_pad(av, k);";
+
+function checkPadHostParity() {
+  const probe = spawnSync("cc", ["--version"], { encoding: "utf8" });
+  if (probe.error) {
+    skipped.push("pad parity (no system cc)");
+    console.log("SKIP  pad parity: no system cc");
+    return;
+  }
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ilvm-pad-"));
+  const program = il.compile(PAD_TOY, { chunkName: "pad.lua" });
+  const encoded = ilbc.encode(program);
+  eq("pad parity: the pad toy encodes (version " + encoded.bytes[4] + ")",
+     encoded.bytes[4], 1);
+  const container = path.join(tmp, "pad.ilbc");
+  fs.writeFileSync(container, Buffer.from(encoded.bytes));
+  const padfile = path.join(tmp, "pad.txt");
+  fs.writeFileSync(padfile, padfileText());
+
+  /* the browser's scripted and empty runs */
+  const wantScripted = browserPadRun(true);
+  const wantEmpty = browserPadRun(false);
+  check(bytesDiff(wantScripted.vram, wantEmpty.vram) > 0 &&
+        bytesDiff(wantScripted.cram, wantEmpty.cram) > 0,
+        "pad parity: the scripted and empty browser runs differ (vram " +
+        bytesDiff(wantScripted.vram, wantEmpty.vram) + ", cram " +
+        bytesDiff(wantScripted.cram, wantEmpty.cram) +
+        ") — the toy responds to the pads");
+  const wantRegs = "BXR " + wantScripted.regs.BXR + "\nBYR " +
+                   wantScripted.regs.BYR + "\nCR " + wantScripted.regs.CR;
+
+  const hostvm = path.join(tmp, "hostvm");
+  check(buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c")),
+        "pad parity: the system cc builds ilvm.c with hostvm.c");
+  if (!fs.existsSync(hostvm)) return;
+
+  function hostRun(dir, args, label) {
+    const r = spawnSync(hostvm, args, { encoding: "utf8" });
+    check(r.status === 0, "pad parity: hostvm exits 0 for the " + label +
+          " run (" + ((r.stderr || "").trim().split("\n").slice(-1)[0] ||
+          "ok") + ")");
+    if (r.status !== 0) return null;
+    return { vram: fs.readFileSync(path.join(dir, "vram.bin")),
+             cram: fs.readFileSync(path.join(dir, "cram.bin")),
+             sat: fs.readFileSync(path.join(dir, "sat.bin")),
+             regs: fs.readFileSync(path.join(dir, "regs.txt"),
+                                   "utf8").trim() };
+  }
+
+  const scriptedDir = path.join(tmp, "scripted");
+  fs.mkdirSync(scriptedDir);
+  const gotScripted = hostRun(scriptedDir,
+    [container, scriptedDir, String(PAD_FRAMES), padfile], "scripted");
+  if (!gotScripted) return;
+  eq("pad parity: the scripted run's vram.bin is the browser IL run's",
+     bytesDiff(wantScripted.vram, gotScripted.vram), 0);
+  eq("pad parity: the scripted run's cram.bin is the browser IL run's",
+     bytesDiff(wantScripted.cram, gotScripted.cram), 0);
+  eq("pad parity: the scripted run's sat.bin is the browser IL run's",
+     bytesDiff(wantScripted.sat, gotScripted.sat), 0);
+  eq("pad parity: the scripted run's regs.txt is the browser IL run's",
+     gotScripted.regs, wantRegs);
+
+  /* control 1: no padfile at all — the run is the empty-pad browser run's,
+   * and different from the scripted run's (a scan that never ran, or a
+   * toy_pad that always read 0, fails one side or the other) */
+  const emptyDir = path.join(tmp, "empty");
+  fs.mkdirSync(emptyDir);
+  const gotEmpty = hostRun(emptyDir,
+    [container, emptyDir, String(PAD_FRAMES)], "empty");
+  if (!gotEmpty) return;
+  eq("pad parity: the empty run's vram.bin is the empty browser run's",
+     bytesDiff(wantEmpty.vram, gotEmpty.vram), 0);
+  eq("pad parity: the empty run's cram.bin is the empty browser run's",
+     bytesDiff(wantEmpty.cram, gotEmpty.cram), 0);
+  check(bytesDiff(gotEmpty.vram, gotScripted.vram) > 0,
+        "pad parity: the empty and scripted runs differ (vram " +
+        bytesDiff(gotEmpty.vram, gotScripted.vram) + " bytes)");
+
+  /* control 2: padget always answers 0, in a scratch copy of ilvm.c.  The
+   * scripted run must break — otherwise the diff-0 above proves nothing. */
+  const ilvmSource = fs.readFileSync(path.join(ROOT, "tools", "ilvm",
+                                               "ilvm.c"), "utf8");
+  check(ilvmSource.indexOf(PADGET_BODY) >= 0,
+        "pad parity: the control mutation's padget is still where the " +
+        "check expects it");
+  if (ilvmSource.indexOf(PADGET_BODY) < 0) return;
+  const mutantSource = path.join(tmp, "ilvm_mutant.c");
+  fs.writeFileSync(mutantSource,
+    ilvmSource.replace(PADGET_BODY, "      r[d] = 0;"));
+  const mutant = path.join(tmp, "hostvm-pad-mutant");
+  check(buildHostvm(mutant, mutantSource),
+        "pad parity: the system cc builds the padget mutation");
+  if (!fs.existsSync(mutant)) return;
+  const mutantDir = path.join(tmp, "mutant");
+  fs.mkdirSync(mutantDir);
+  const mrun = spawnSync(mutant,
+    [container, mutantDir, String(PAD_FRAMES), padfile],
+    { encoding: "utf8" });
+  check(mrun.status === 0, "pad parity: the padget mutation exits 0");
+  if (mrun.status !== 0) return;
+  const broken = bytesDiff(wantScripted.vram,
+    fs.readFileSync(path.join(mutantDir, "vram.bin"))) +
+    bytesDiff(wantScripted.cram,
+      fs.readFileSync(path.join(mutantDir, "cram.bin"))) +
+    bytesDiff(wantScripted.sat,
+      fs.readFileSync(path.join(mutantDir, "sat.bin")));
+  check(broken > 0, "pad parity: the control mutation (padget always 0) " +
+        "breaks the artefacts (" + broken + " bytes differ from the " +
+        "scripted browser run)");
+}
+
 /* ---- #174: the table ops on the host ----------------------------------- *
  * The same compile/run as checkHostParity for a version 2 table toy.  Eight
  * frames must match the browser host's artefacts exactly — every value they
@@ -1526,6 +1789,8 @@ checkRom();
 checkRebuild();
 checkHostParity();
 checkWideHostParity();
+checkPadEncoding();
+checkPadHostParity();
 checkTablesRun();
 
 const paletteMax = 300;

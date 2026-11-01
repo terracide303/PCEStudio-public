@@ -4,7 +4,7 @@
  *
  *   cc -DILVM_HOST -O2 -I tools/toyc tools/ilvm/ilvm.c tools/ilvm/hostvm.c \
  *      -o hostvm
- *   hostvm palette.ilbc OUTDIR 16
+ *   hostvm palette.ilbc OUTDIR 16 [PADFILE]
  *
  * Loads one bytecode container, runs toy_boot(), then `frames` frames the
  * way the console's main loop does (frame, then raster(0..223) when the toy
@@ -13,6 +13,16 @@
  * pool, one int32 per cell, #174's fault evidence).  Those are the same
  * layouts the Mednafen dump uses, so a host run can be compared with the
  * browser before an emulator is involved.
+ *
+ * The optional PADFILE scripts the pads (#185), one change per line:
+ *
+ *   <frame> <pad> <button> <button> ...
+ *
+ * with the button names tools/toyc/toy_runtime.h's TOY_PAD_* bits use:
+ * ii i select run up right down left.  A line replaces the pad's state (the
+ * browser's rt.setPad does the same, renderer/pce-il.js), so it holds until
+ * the next line; pads start empty, as the browser's do.  Unknown names or
+ * pads are errors, not typos to shrug off.
  *
  * The host is not the console: it does not model the VDC's timing, the RCR
  * chain or the base deferral.  It answers "does the interpreter compute the
@@ -66,6 +76,70 @@ int32_t toy_rgb(int32_t r, int32_t g, int32_t b) {
                    (uint32_t)(b & 7));
 }
 
+/* ---- the pads (#185): TOY_PAD_* bits, tools/toyc/toy_runtime.h ---- */
+
+/* One byte per pad, 1 meaning held: II 0, I 1, Select 2, Run 3, Up 4,
+ * Right 5, Down 6, Left 7 — the layout toy_pad() reads on the console
+ * (tools/ilvm/ilvm_runtime.c's joy_scan) and the host model's. */
+static uint8_t pads[5];
+
+int32_t toy_pad(int32_t n, int32_t field) {
+  if (n < 1 || n > 5) return 0;
+  if (field < 0 || field > 7) return 0;
+  return (pads[n - 1] >> field) & 1;
+}
+
+static const char *pad_names[8] = {
+  "ii", "i", "select", "run", "up", "right", "down", "left"
+};
+
+#define PAD_LINES 256
+static int npad_lines;
+static struct { int frame, pad; uint8_t bits; } pad_lines[PAD_LINES];
+
+/* Load the PADFILE: each line is "<frame> <pad> <button> ..." and replaces
+ * that pad's state when its frame comes up.  Unknown names or pads are hard
+ * errors — a scripted-pad typo silently reading as "no pad" would make a
+ * passing check meaningless. */
+static int load_pads(const char *path) {
+  FILE *pf = fopen(path, "r");
+  char line[128];
+  if (!pf) { perror(path); return 1; }
+  while (fgets(line, sizeof line, pf)) {
+    int fr, pn, k;
+    char tok[16];
+    char *p = line;
+    uint8_t bits = 0;
+    if (sscanf(p, "%d %d %n", &fr, &pn, &k) < 2) continue;
+    p += k;
+    while (sscanf(p, "%15s %n", tok, &k) == 1) {
+      int b;
+      p += k;
+      for (b = 0; b < 8 && strcmp(tok, pad_names[b]) != 0; b++) {
+      }
+      if (b == 8) {
+        fprintf(stderr, "padfile %s: unknown button '%s'\n", path, tok);
+        return 1;
+      }
+      bits |= (uint8_t)(1 << b);
+    }
+    if (pn < 1 || pn > 5) {
+      fprintf(stderr, "padfile %s: pad %d out of range\n", path, pn);
+      return 1;
+    }
+    if (npad_lines == PAD_LINES) {
+      fprintf(stderr, "padfile %s: more than %d lines\n", path, PAD_LINES);
+      return 1;
+    }
+    pad_lines[npad_lines].frame = fr;
+    pad_lines[npad_lines].pad = pn;
+    pad_lines[npad_lines].bits = bits;
+    npad_lines++;
+  }
+  fclose(pf);
+  return 0;
+}
+
 static void put_u16(FILE *f, const uint16_t *w, int n) {
   int i;
   for (i = 0; i < n; i++) {
@@ -93,7 +167,7 @@ int main(int argc, char **argv) {
   char path[4096];
 
   if (argc < 4) {
-    fprintf(stderr, "usage: hostvm PROGRAM.ilbc OUTDIR FRAMES\n");
+    fprintf(stderr, "usage: hostvm PROGRAM.ilbc OUTDIR FRAMES [PADFILE]\n");
     return 2;
   }
   frames = atoi(argv[3]);
@@ -111,8 +185,18 @@ int main(int argc, char **argv) {
   fclose(f);
   ilvm_program = buf;
 
+  if (argc >= 5 && load_pads(argv[4]) != 0) {
+    return 1;
+  }
+
   toy_boot();
   for (i = 0; i < frames; i++) {
+    int pl;
+    for (pl = 0; pl < npad_lines; pl++) {
+      if (pad_lines[pl].frame == i) {
+        pads[pad_lines[pl].pad - 1] = pad_lines[pl].bits;
+      }
+    }
     toy_frame(i);
     if (ilvm_has_raster()) {
       for (l = 0; l < 224; l++) toy_raster(l);

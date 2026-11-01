@@ -14,39 +14,39 @@
   "sha256": "7ab5404025a7cf796b97e9c215becb4359e0872d371d32c0f3a3129c18466efb"
  },
  "capture": {
-  "frames": 631,
-  "last_frame": "frame0630.png",
+  "frames": 1720,
+  "last_frame": "frame1719.png",
   "measure": {
-   "collect_sum_ticks_7bit": 39568,
-   "collections": 9,
-   "count": 10,
-   "cycles_per_collection": 4501959.111111111,
-   "cycles_per_frame": 5529.6,
-   "cycles_per_raster_call": 19840.812330009066,
+   "collect_sum_ticks_7bit": 214128,
+   "collections": 49,
+   "count": 50,
+   "cycles_per_collection": 4474838.204081632,
+   "cycles_per_frame": 5550.08,
+   "cycles_per_raster_call": 19775.47846332945,
    "flags": 0,
    "max_ticks": 6,
-   "mean_ticks": 5.4,
-   "mean_update_lines": 9904.666666666666,
+   "mean_ticks": 5.42,
+   "mean_update_lines": 9845.408163265307,
    "min_ticks": 5,
-   "overruns": 9,
-   "raster_calls": 2206,
-   "raster_max_ticks": 25,
-   "raster_sum_ticks": 42743,
-   "sum_ticks": 54,
-   "updates": 9,
-   "worst_update_lines": 10154
+   "overruns": 49,
+   "raster_calls": 11167,
+   "raster_max_ticks": 26,
+   "raster_sum_ticks": 215657,
+   "sum_ticks": 271,
+   "updates": 49,
+   "worst_update_lines": 9848
   },
   "slend": 234,
   "slstart": 3
  },
  "ilvm": {
   "bytes": 16384,
-  "sha256": "b575b1f1444c3528f4ed4cf3c0ba450d2e6db9e92818a8de1216f0ff2f186a54"
+  "sha256": "fbf932b1c31ccc287a95ba26494ae76e3430c9b53b3ec0b5198a89732e7e37e5"
  },
  "name": "toyparallax-ilvm",
  "rom": "tools/gen/toyparallax-ilvm.pce",
  "rom_bytes": 24576,
- "rom_sha256": "40d99d94b213091f6e6d7b4860e18416e997a5a953245831447c7a0415ed8673",
+ "rom_sha256": "1b302b884c07e751f8ee2eed9542bbecfd1e6427d72c4418b867a5ebc00c70b6",
  "source": "toys/parallax.lua",
  "source_sha256": "b22ff94879c3ca94c74fe7838b5023633a6802fc1cd97342314b174dbb213a80"
 }
