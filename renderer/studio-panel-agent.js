@@ -877,11 +877,26 @@
         host.appendChild(body);
       }
 
+      /* The top bar's Connect Claude button shows the link's state, so it is clear without opening the drawer. */
+      function syncTopButton() {
+        try {
+          var b = studio.$("btn-connect-claude");
+          if (!b) return;
+          var live = state.status === "live", busy = state.status === "connecting";
+          b.textContent = live ? "Claude connected" : busy ? "Connecting…" : "Connect Claude";
+          if (b.classList) {
+            b.classList.toggle("is-live", live);
+            b.classList.toggle("btn-accent", !live);
+          }
+        } catch (e) { /* a button label is not worth a broken panel */ }
+      }
+
       function render() {
         var host = studio.$("bottom-agent");
         if (!host) return;
         if (!relayUrl() && state.status !== "off") state.status = "off";
         if (relayUrl() && state.status === "off") state.status = "ready";
+        syncTopButton();
         clear(host);
         drawHead(host, relayUrl());
         drawBody(host, relayUrl());

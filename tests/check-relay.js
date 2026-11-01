@@ -548,6 +548,19 @@ async function run() {
         typeof worker.Room.prototype.webSocketMessage === "function" &&
         typeof worker.Room.prototype.webSocketClose === "function",
         "worker.js exports a Room with the hibernation-API shape");
+  /* a call that wakes a sleeping Room finds the tab's still-open socket (the 2026-11-01 "no tab" bug) */
+  {
+    const sent = [];
+    const ws = { send: (t) => sent.push(t), close: () => {},
+                 deserializeAttachment: () => ({ id: "tab-1", token: "0123456789abcdef0123456789abcdef" }) };
+    const room = new worker.Room({ getWebSockets: () => [ws] }, {});
+    check(room.tabWsId === null, "a freshly woken Room holds no tab");
+    room.reattachAfterSleep("0123456789abcdef0123456789abcdef");
+    check(room.tabWsId === "tab-1", "a call re-attaches the open tab socket after a sleep");
+    const room2 = new worker.Room({ getWebSockets: () => [ws] }, {});
+    room2.reattachAfterSleep("fedcba9876543210fedcba9876543210");
+    check(room2.tabWsId === null, "a socket of another token is not attached");
+  }
   check(worker.routePath && worker.originAllowed,
         "worker.js exports routePath and originAllowed for the tests");
 

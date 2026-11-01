@@ -149,6 +149,7 @@ class Room {
                  DEFAULT_LIMITS.messageLimitBytes + " bytes"
       });
     }
+    this.reattachAfterSleep(route.token);
     const body = await request.text();
     const out = await this.relay().handleMcp(route.token, body);
     const headers = {};
@@ -158,6 +159,22 @@ class Room {
       return new Response(null, { status: out.status, headers: headers });
     }
     return jsonResponse(out.status, out.json, headers);
+  }
+
+  /* A call can wake a sleeping Room before the tab's next ping does.  The tab's socket is still open
+   * (acceptWebSocket keeps it across the sleep), so look for it and attach it now instead of answering
+   * "no tab" for up to 25 s. */
+  reattachAfterSleep(token) {
+    if (this.tabWsId !== null || !this.state.getWebSockets) return;
+    const sockets = this.state.getWebSockets();
+    for (let i = sockets.length - 1; i >= 0; i--) {
+      const ws = sockets[i];
+      const attachment = (ws.deserializeAttachment && ws.deserializeAttachment()) || {};
+      if (attachment.token !== token || !attachment.id) continue;
+      this.tabWsId = attachment.id;
+      this.relay().attachTab(token, tabSocket(ws));
+      return;
+    }
   }
 
   upgrade(request, token) {
