@@ -23,5 +23,5 @@
   "use strict";
   root.PCEStudio = root.PCEStudio || {};
 
-  root.PCEStudio.RELAY_URL = "";
+  root.PCEStudio.RELAY_URL = "https://pcestudio-relay.pcestudio.workers.dev";
 })(typeof self !== "undefined" ? self : this);
