@@ -1167,6 +1167,7 @@ container offsets, patched after the layout is known.
 | 0E | `arith` | `op:u8 dst:r a:op b:op` |
 | 0F | `unm` | `dst:r a:op` |
 | 10 | `bnot` | `dst:r a:op` |
+| 11 | `not` | `dst:r a:op` — logical not (#187): the operand is a bool (`false` 0 / `true` 1, or a nil constant's 0), the interpreter stores 0/1; its own opcode, never an alias of `bnot` |
 | 12 | `cmp` | `op:u8 dst:r a:op b:op` |
 | 13 | `builtin` | `id:u8 dst:r n:u8 args[n]:op` |
 | 14 | `pal` | `addr:op word:op` |
@@ -1223,6 +1224,15 @@ functions take four or fewer parameters encodes byte for byte as it did before
 #183, and so does the C backend's `il_xargs`-free output.  `ilbc-arity` now
 refuses only a ninth parameter or argument.
 
+A **`not`** instruction is the logical not (#187), carried as its own opcode
+`11` (three bytes, like `unm`/`bnot`: `dst`, then the operand).  The IL's
+typing makes the operand a bool — `false` is 0 and `true` is 1 on the console,
+and a nil constant is also 0 — so the interpreter's `(a == 0) ? 1 : 0` is the
+host's `!truthy(a)` in 0/1.  It is deliberately **not** an alias of `bnot`
+(`~`): bitwise-notting `false` would give 0xFFFFFFFF, a truthy branch where
+Lua's `not false` is `true`.  A `not` result is a bool register, the same value
+a `cmp` or `br` condition already carries, so nothing downstream changes.
+
 `arith` ops are 0 add, 1 sub, 2 mul, 3 mod, 4 idiv, 5 band, 6 bor, 7 bxor,
 8 shl, 9 shr; `cmp` ops are 0 eq, 1 lt, 2 le; `reg` ids are 0 BXR, 1 BYR,
 2 CR; builtin 0 is `rgb` (the only one the interpreter implements).
@@ -1232,7 +1242,8 @@ in `init`, `frame` or `raster`, and the runtime calls whatever is there —
 exactly what the C backend's `toy_boot`/`toy_frame` do (§9.1).
 
 The encoder **refuses by code rather than guessing**, with the same spirit as
-`pce-cgen.js`: `ilbc-op` (sprites, pads, `print`, `music`, `vget`, `not`, …),
+`pce-cgen.js`: `ilbc-op` (sprites, `print`, `music`, `sfx`, `vget`, raster
+tables, …),
 `ilbc-fixed` (fixed-point arithmetic or constants),
 `ilbc-builtin` (a builtin other than `rgb`), `ilbc-arity` (more than eight
 parameters or arguments), `ilbc-range` (more than 127 constants, 128
@@ -1484,8 +1495,8 @@ This seat is deepseek-flash, the card's own model tag. Rule 2 asks for another
 
 The interpreter implements the instruction set above and nothing else; the
 encoder refuses the rest, so no ROM silently runs a different toy. In
-particular vget, `not`, tables, sprites, pads, `print`, music/SFX, fixed point
-and the other builtins are not in route 1 yet.
+particular vget, sprites, `print`, music/SFX, raster tables, fixed point and
+the other builtins are not in route 1 yet (tables, pads, `sat` and `not` are).
 
 Not proven:
 

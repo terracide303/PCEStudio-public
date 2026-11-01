@@ -21,8 +21,8 @@ Starting Mednafen 1.32.1
     Failed: Error opening file "/Volumes/External/agent-tmp/mdfn-home-toyparallax-ilvm/pgconfig/toyparallax-ilvm.pce.cfg" for reading: No such file or directory
 
    ROM:       24KiB
-   ROM CRC32: 0xca3e4046
-   ROM MD5:   0x6d3c2ad049f0383117b9ccf1142a5310
+   ROM CRC32: 0x27242cab
+   ROM MD5:   0x2347f8d752d27a3d2f23348f7cd0ebd3
    PSG Revision: HuC6280
 
   Loading custom palette from "/Volumes/External/agent-tmp/mdfn-home-toyparallax-ilvm/palettes/pce.pal"...

@@ -345,6 +345,14 @@ static int32_t exec(uint8_t fid, uint8_t clh,
     case 0x10:                     /* bnot */
       d = rb(pc++); r[d] = ~operand(r, rb(pc++));
       break;
+    case 0x11:                     /* not (logical, #187) */
+      /* The IL's typing makes the operand a bool (false 0, true 1; a nil
+       * constant is also 0), so this is the host's !truthy(a) in 0/1: 0 ->
+       * 1, everything else -> 0.  Its own opcode, never bnot's ~ (which
+       * would turn false into 0xFFFFFFFF, a truthy branch). */
+      d = rb(pc++);
+      r[d] = (operand(r, rb(pc++)) == 0) ? 1 : 0;
+      break;
     case 0x12:                     /* cmp */
       aa = rb(pc++);               /* op */
       d = rb(pc++);

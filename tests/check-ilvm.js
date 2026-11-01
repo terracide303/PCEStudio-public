@@ -70,6 +70,21 @@
  *      case must break the sat artefact.  Both host models write the SATB
  *      image the browser's host.sat writes; the console's
  *      VRAM-write-plus-DSR-mirror is what the ROM-side suites exercise.
+ *  11. #187: not.  The logical not (opcode 0x11: three bytes, dst and one
+ *      operand — its own opcode, never an alias of bnot's 0x10) encodes in
+ *      a not toy, one container byte per IL not at the IL's position; the
+ *      browser's not stores !truthy(a) and the IL's typing makes the
+ *      operand a bool (false 0, true 1, or a nil constant's 0), so the
+ *      interpreter's (a == 0) ? 1 : 0 is the host's answer in 0/1.  The
+ *      parity run diffs the toy's eight-frame vram/cram/sat/regs against
+ *      the browser IL run — the nots feed branches, palettes, a VRAM word
+ *      and BXR, so a bnot-aliased ~ would take the wrong branch and show
+ *      in the diff — and a scratch mutation of the interpreter's not case
+ *      must break it.  A bnot toy's container sha is pinned equal to
+ *      HEAD's (pre-#187) encoder, so carrying not moved nothing else.
+ *      tools/toys/not.lua is the same evidence on the ROM route
+ *      (tests/check-export-games.js: the Mednafen capture is diff 0
+ *      against the browser).
  *
  * Written by @design because the card names this evidence.  Per workshop
  * rule 2 a cold break by another seat and model is owed: the operand
@@ -89,7 +104,10 @@
  * pad scan's place in the console loop (outside the measurement brackets).
  * #186's own targets: the sat operand order (i/k/v), the constant-pool
  * operands, the SATB-image host model against the console's VRAM write, and
- * the bounds (i 0..63, k 0..3, v masked to 16 bits).
+ * the bounds (i 0..63, k 0..3, v masked to 16 bits).  #187's own targets:
+ * the not operand/dst order, the 0/1 result (an aliased ~, a dropped
+ * operand, an inverted test), the bnot pin, and the console loop's use of
+ * the result (a bool is a br condition as-is, not a conversion).
  */
 "use strict";
 
@@ -276,7 +294,7 @@ function checkEncoder() {
 var INSN_LEN = {
   0x01: 3, 0x02: 3, 0x03: 3, 0x04: 3, 0x05: 3, 0x06: 3, 0x07: 3,
   0x09: 2, 0x0A: 3, 0x0B: 5, 0x0C: 2, 0x0D: 4, 0x0E: 5, 0x0F: 3,
-  0x10: 3, 0x12: 5, 0x14: 3, 0x15: 3, 0x16: 3, 0x17: 3,
+  0x10: 3, 0x11: 3, 0x12: 5, 0x14: 3, 0x15: 3, 0x16: 3, 0x17: 3,
   0x18: 3, 0x1A: 5, 0x1B: 5, 0x1C: 3, 0x1D: 4, 0x1E: 4
 };
 
@@ -1549,6 +1567,209 @@ function checkSatHostParity() {
         " bytes differ from the browser run)");
 }
 
+/* ---- #187: not --------------------------------------------------------- *
+ * The same compile/run as checkSatHostParity for a not toy: two logical
+ * nots a frame (opcode 0x11, three bytes: dst, one operand), each feeding a
+ * branch, a palette, a VRAM word and the BXR register, so the eight-frame
+ * vram/cram/sat/regs diff against the browser IL run pins the semantics,
+ * not just the bytes.  The browser's `not` stores !truthy(a)
+ * (renderer/pce-il.js); the IL's typing makes the operand a bool (0 false /
+ * 1 true, or a nil constant's 0), so the interpreter's (a == 0) ? 1 : 0 is
+ * the host's answer in 0/1 — and NOT bnot's ~, which would turn false into
+ * 0xFFFFFFFF and take the wrong branch (the toy's `odd` and `notthird` make
+ * both branches paint different cram/vram/regs).  A bnot control's
+ * container sha is pinned: its bytes must not move now that the opcode
+ * exists (measured equal to HEAD's pre-#187 encoder byte for byte). */
+const NOT_TOY = [
+  "function frame(t, f)",
+  "  local even = (f % 2 == 0)",
+  "  local odd = not even",
+  "  local third = (f % 3 == 0)",
+  "  local notthird = not third",
+  "  if odd then",
+  "    pal(1, 300)",
+  "  else",
+  "    pal(1, 100)",
+  "  end",
+  "  pal(2, odd and 400 or 200)",
+  "  pal(3, notthird and 450 or 150)",
+  "  vram[0x7E00 + f % 6] = odd and 0x222 or 0x111",
+  "  reg(\"BXR\", odd and 8 or 4)",
+  "end",
+  ""
+].join("\n");
+
+const NOT_FRAMES = 8;
+
+const BNOT_TOY = [
+  "local function bandit(x) return ~x & 0x1FF end",
+  "function frame(t, f)",
+  "  pal(1, bandit(f % 2))",
+  "  pal(2, ~(f * 3) & 0x1FF)",
+  "  pal(3, ~f & 0x1FF)",
+  "end",
+  ""
+].join("\n");
+
+/* Measured 2026-11-01: equal to HEAD's (pre-#187) encoder byte for byte. */
+const BNOT_SHA =
+  "68bf734c38f09ffa94c7b58d96343dad785e69bbd28c790510ac2564afc96b8e";
+
+function checkNotEncoding() {
+  const program = il.compile(NOT_TOY, { chunkName: "not.lua" });
+  const encoded = ilbc.encode(program);
+  eq("not encoding: the not toy is a version 1 container", encoded.bytes[4], 1);
+
+  const ins = walkContainer(encoded.bytes);
+  const nots = ins.filter(function (i) { return i.op === 0x11; });
+  check(nots.length >= 2,
+        "not encoding: the toy encodes at least 2 not instructions (" +
+        nots.length + ")");
+  check(nots.every(function (i) { return i.len === 3; }),
+        "not encoding: every not is three bytes (dst, one operand)");
+  check(nots.every(function (i) {
+          return encoded.bytes[i.at + 1] < 0x80 &&
+                 encoded.bytes[i.at + 2] < 0x80;
+        }),
+        "not encoding: the dst and operand bytes are registers (the toy's " +
+        "two nots take a bool register each)");
+
+  /* One container not per IL not, at the IL's own position (the encoder
+   * emits exactly one instruction per IL instruction). */
+  const byFid = {};
+  ins.forEach(function (i) { (byFid[i.fid] = byFid[i.fid] || []).push(i); });
+  const ilNots = [];
+  for (let f = 0; f < program.functions.length; f++) {
+    (program.functions[f].code || []).forEach(function (x, pc) {
+      if (x.t === "not") ilNots.push({ fid: f, pc: pc });
+    });
+  }
+  eq("not encoding: the container holds one not per IL not",
+     nots.length, ilNots.length);
+  check(ilNots.every(function (s) {
+          const c = byFid[s.fid][s.pc];
+          return c && c.op === 0x11;
+        }),
+        "not encoding: each container not sits where its IL not does");
+
+  /* bnot stays its own opcode 0x10, and a bnot toy's container is the one
+   * HEAD's (pre-#187) encoder produced: carrying not moved nothing. */
+  const bnotEnc = ilbc.encode(il.compile(BNOT_TOY, { chunkName: "bnot.lua" }));
+  const bnots = walkContainer(bnotEnc.bytes).filter(function (i) {
+    return i.op === 0x10;
+  });
+  check(bnots.length >= 3,
+        "not encoding: the bnot control encodes at least 3 bnots as " +
+        "opcode 0x10, its own (" + bnots.length + ")");
+  check(bnots.every(function (i) { return i.len === 3; }),
+        "not encoding: every bnot is three bytes");
+  eq("not encoding: the bnot control's container sha is the pinned one",
+     sha256(Buffer.from(bnotEnc.bytes)), BNOT_SHA);
+}
+
+/* The interpreter's not case, as a literal so the scratch mutation below
+ * fails loudly if the case moves (like SAT_BODY). */
+const NOT_BODY = "      r[d] = (operand(r, rb(pc++)) == 0) ? 1 : 0;";
+const NOT_MUTANT = "      r[d] = 0; (void)rb(pc++);";
+
+function checkNotHostParity() {
+  const probe = spawnSync("cc", ["--version"], { encoding: "utf8" });
+  if (probe.error) {
+    skipped.push("not parity (no system cc)");
+    console.log("SKIP  not parity: no system cc");
+    return;
+  }
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ilvm-not-"));
+  const program = il.compile(NOT_TOY, { chunkName: "not.lua" });
+  const encoded = ilbc.encode(program);
+  eq("not parity: the not toy encodes (version " + encoded.bytes[4] + ")",
+     encoded.bytes[4], 1);
+  const container = path.join(tmp, "not.ilbc");
+  fs.writeFileSync(container, Buffer.from(encoded.bytes));
+
+  /* the browser's eight-frame run */
+  const rt = il.create(NOT_TOY);
+  rt.load();
+  let want = null;
+  for (let f = 0; f < NOT_FRAMES; f++) {
+    rt.frame(f);
+    want = padToyState(rt);
+  }
+  check(bytesDiff(want.cram, Buffer.alloc(1024)) >= 6,
+        "not parity: the browser run wrote CRAM words (" +
+        bytesDiff(want.cram, Buffer.alloc(1024)) + " nonzero bytes) — a toy " +
+        "that never branched on not would make the diff-0 trivial");
+  eq("not parity: the browser run's BXR is the odd frame's answer (f=7: " +
+     "odd is true, 8)", want.regs.BXR, 8);
+  /* The nots answer differently per frame: frame 0 (odd false, notthird
+   * false) must not paint what frame 1 (odd true, notthird true) paints —
+   * a not that ignored its operand would make these equal. */
+  const rt2 = il.create(NOT_TOY);
+  rt2.load();
+  rt2.frame(0);
+  const want0 = padToyState(rt2);
+  check(bytesDiff(want0.cram, want.cram) > 0 &&
+        want0.regs.BXR !== want.regs.BXR,
+        "not parity: the browser run answers the nots per frame (cram " +
+        bytesDiff(want0.cram, want.cram) + " bytes, BXR " + want0.regs.BXR +
+        " vs " + want.regs.BXR + " between frames 0 and 7)");
+  const wantRegs = "BXR " + want.regs.BXR + "\nBYR " +
+                   want.regs.BYR + "\nCR " + want.regs.CR;
+
+  const hostvm = path.join(tmp, "hostvm");
+  check(buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c")),
+        "not parity: the system cc builds ilvm.c with hostvm.c");
+  if (!fs.existsSync(hostvm)) return;
+
+  const hostDir = path.join(tmp, "host");
+  fs.mkdirSync(hostDir);
+  const r = spawnSync(hostvm, [container, hostDir, String(NOT_FRAMES)],
+                      { encoding: "utf8" });
+  check(r.status === 0, "not parity: hostvm exits 0 (" +
+        ((r.stderr || "").trim().split("\n").slice(-1)[0] || "ok") + ")");
+  if (r.status !== 0) return;
+  eq("not parity: the host run's vram.bin is the browser IL run's",
+     bytesDiff(want.vram, fs.readFileSync(path.join(hostDir, "vram.bin"))), 0);
+  eq("not parity: the host run's cram.bin is the browser IL run's",
+     bytesDiff(want.cram, fs.readFileSync(path.join(hostDir, "cram.bin"))), 0);
+  eq("not parity: the host run's sat.bin is the browser IL run's",
+     bytesDiff(want.sat, fs.readFileSync(path.join(hostDir, "sat.bin"))), 0);
+  eq("not parity: the host run's regs.txt is the browser IL run's",
+     fs.readFileSync(path.join(hostDir, "regs.txt"), "utf8").trim(), wantRegs);
+
+  /* control: the interpreter's not case returns 0 for every operand.  The
+   * nots' answers all become false: the odd frames' palettes, VRAM words
+   * and BXR must break — otherwise the diff-0 above proves only that two
+   * things fail alike. */
+  const ilvmSource = fs.readFileSync(path.join(ROOT, "tools", "ilvm",
+                                               "ilvm.c"), "utf8");
+  check(ilvmSource.indexOf(NOT_BODY) >= 0,
+        "not parity: the control mutation's not case is still where the " +
+        "check expects it");
+  if (ilvmSource.indexOf(NOT_BODY) < 0) return;
+  const mutantSource = path.join(tmp, "ilvm_mutant.c");
+  fs.writeFileSync(mutantSource, ilvmSource.replace(NOT_BODY, NOT_MUTANT));
+  const mutant = path.join(tmp, "hostvm-not-mutant");
+  check(buildHostvm(mutant, mutantSource),
+        "not parity: the system cc builds the not mutation");
+  if (!fs.existsSync(mutant)) return;
+  const mutantDir = path.join(tmp, "mutant");
+  fs.mkdirSync(mutantDir);
+  const mrun = spawnSync(mutant, [container, mutantDir, String(NOT_FRAMES)],
+                         { encoding: "utf8" });
+  check(mrun.status === 0, "not parity: the not mutation exits 0");
+  if (mrun.status !== 0) return;
+  const brokenCram = bytesDiff(want.cram,
+    fs.readFileSync(path.join(mutantDir, "cram.bin")));
+  const mutantRegs = fs.readFileSync(path.join(mutantDir, "regs.txt"), "utf8")
+    .trim();
+  check(brokenCram > 0 && mutantRegs !== wantRegs,
+        "not parity: the control mutation (not always false) breaks the " +
+        "artefacts (cram " + brokenCram + " bytes, regs " +
+        (mutantRegs === wantRegs ? "equal" : "differ") + ")");
+}
+
 /* ---- #174: the table ops on the host ----------------------------------- *
  * The same compile/run as checkHostParity for a version 2 table toy.  Eight
  * frames must match the browser host's artefacts exactly — every value they
@@ -1986,6 +2207,8 @@ checkPadEncoding();
 checkPadHostParity();
 checkSatEncoding();
 checkSatHostParity();
+checkNotEncoding();
+checkNotHostParity();
 checkTablesRun();
 
 const paletteMax = 300;

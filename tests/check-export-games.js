@@ -36,7 +36,9 @@
  *      eight-frame picture cycle are pinned) and, for #183,
  *      tools/toys/arity.lua, whose five- to eight-parameter functions reach
  *      the screen through the interpreter's extra-argument block (its ROM
- *      sha and sixteen-frame picture cycle are pinned).
+ *      sha and sixteen-frame picture cycle are pinned); #187 adds
+ *      tools/toys/not.lua, whose picture is painted by the logical not
+ *      (its ROM sha and four-picture cycle are pinned).
  *   3. The control's ROM bytes are the browser route's: emitted a second
  *      time from the same modules, byte-identical.
  *
@@ -86,7 +88,9 @@ const GAMES = [
   {
     /* #186 carried sat, so the refusal moved to the toy's first sfx (the
      * sfx instruction has no bytecode form).  The pin moved; the toy was
-     * not rewritten. */
+     * not rewritten.  #187 carried `not` too, but TOWER's sfx sits in
+     * function 36 and its one `not` in function 37 (main.lua:329), so the
+     * sfx still scans first and this pin survives. */
     name: "TOWER", toy: "toys/tower/main.lua",
     expect: { code: "ilbc-op",
               message: "instruction sfx (function 36, pc 9) has no bytecode form" },
@@ -112,11 +116,12 @@ const GAMES = [
      * the number toys/dusk-run/README.md and tests/check-dusk-run.js already
      * record at 600 frames — so the validator now extends a refused probe to
      * the performance before refusing.  #186 carried the encoder's sat
-     * refusal; the toy's next blocker is `not` (card #187). */
+     * refusal; #187 carried `not`, so the refusal moved to the toy's first
+     * sfx (the sfx instruction has no bytecode form). */
     name: "DUSK RUN", toy: "toys/dusk-run/main.lua",
     expect: { code: "ilbc-op",
-              message: "instruction not (function 39, pc 16) has no bytecode form" },
-    where: "main.lua:401"
+              message: "instruction sfx (function 39, pc 50) has no bytecode form" },
+    where: "main.lua:416"
   }
 ];
 
@@ -133,9 +138,11 @@ const GAME_PINS = {
    * overrunning, worst 311 lines — "30 Hz") and a 12 s capture.  The
    * picture is the game's static no-input scene (the hero stands on the
    * grass), so the pin holds that one hash. */
+  /* Every ROM embeds the committed renderer/ilvm.bin, so these shas move
+   * with any interpreter change (#187's opcode moved all three). */
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
-    rom: "ab59d6d38056fab244c5d435ced012645f2bc60142c4012bd6e558a682bd83f9",
+    rom: "5438f1790fee5769441889dc362e18ce2439e16ff40ea8820b72eb2079e3a815",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
@@ -146,7 +153,7 @@ const GAME_PINS = {
  * toy builds to one ROM and its picture repeats every eight frames. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "bbcedd18f5a858bbd701a6f30ae8126663b29d188b2a77feeb32f3d104b4e8ad",
+  rom: "14f078f56a6c8d8cb9f0c9b51da8a5acc04a3f929562616fef024be6f57ae365",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -159,11 +166,25 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "98fb4991ca7703c6836387adc63b96a686913ef341b93b8b2fbec3cece62c3f2",
+  rom: "a820a7b970afc739df9fe3ffcd24cc9b13fcb3eeaa0523061f648e7475f721b7",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
            3998485784]
+};
+
+/* #187's control: a toy whose picture is painted by the logical not
+ * (tools/toys/not.lua: pal 0-3 and the BXR scroll are each the answer of a
+ * `not`, so an interpreter that aliased `not` to bnot's ~ would paint the
+ * wrong branches and no capture could match — the host parity in
+ * tests/check-ilvm.js pins the same semantics value for value).  It
+ * exports, runs in Mednafen, and its picture is diff 0 against the
+ * browser's.  Its picture repeats every 6 frames, so the four pinned
+ * hashes are the whole cycle. */
+const NOT = {
+  toy: "tools/toys/not.lua",
+  rom: "6e5901293072cb79d0c2a8d6042c12b280d3ca08cfe3b1cf1544b0c059bceabb",
+  frames: [2266090996, 2632876444, 887268600, 1464026320]
 };
 
 let checks = 0;
@@ -576,6 +597,16 @@ async function main() {
     eq("wide: the ROM is the pinned one", sha256(wide.rom), WIDE.rom);
   }
 
+  /* #187: the not toy builds through the same route and is what proves the
+   * logical not on the console, not just on the host. */
+  const nott = exportToy(NOT.toy);
+  check(!!nott.rom, "not: " + NOT.toy + " exports (branches on not)");
+  if (nott.rom) {
+    eq("not: builds a " + ROM_BYTES + "-byte ROM", nott.rom.length,
+       ROM_BYTES);
+    eq("not: the ROM is the pinned one", sha256(nott.rom), NOT.rom);
+  }
+
   if (!fs.existsSync(MEDNAFEN)) {
     console.log("SKIP  mednafen not found at " + MEDNAFEN +
                 " (set MEDNAFEN to its path); the counters and the picture " +
@@ -599,6 +630,9 @@ async function main() {
     if (wide.rom) {
       work.push({ name: "wide-arity", key: "wide", toy: WIDE.toy,
                   out: wide });
+    }
+    if (nott.rom) {
+      work.push({ name: "not", key: "not", toy: NOT.toy, out: nott });
     }
     for (const b of builtGames) {
       work.push({ name: b.game.name, key: b.game.name, toy: b.game.toy,
@@ -658,6 +692,13 @@ async function main() {
           check(WIDE.frames.indexOf(want[cmp.match].hash) >= 0,
                 "wide-arity: the emulator matches one of the pinned sixteen " +
                 "pictures (browser frame " + cmp.match + ", " +
+                "hash " + want[cmp.match].hash + ")");
+        }
+      } else if (w.key === "not") {
+        if (cmp.match >= 0) {
+          check(NOT.frames.indexOf(want[cmp.match].hash) >= 0,
+                "not: the emulator matches one of the pinned four pictures " +
+                "(browser frame " + cmp.match + ", " +
                 "hash " + want[cmp.match].hash + ")");
         }
       } else if (pin.rom) {
