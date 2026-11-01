@@ -1727,6 +1727,125 @@ function checkSatHostParity() {
         " bytes differ from the browser run)");
 }
 
+/* ---- #189: sprite parity on the host ---------------------------------- *
+ * The same compile/run as checkSatHostParity for the sprite toy
+ * (tools/toys/sprite.lua): frame()'s three sprite() calls — the full spec,
+ * a partial spec with the host's defaults and one with the attribute bits
+ * packed — so the eight-frame vram/cram/sat/regs diff against the browser
+ * IL run pins the interpreter's 0x1F case to the browser's host.sprite,
+ * word for word.  The SATB words the toy writes are non-zero, so a diff of
+ * zero is not a diff against a silent toy.  The control mutation swaps x
+ * and y in the interpreter's toy_sprite call: word0 and word1 of every
+ * entry must swap in sat.bin, or the diff-0 above proves only that two
+ * things fail alike. */
+const SPRITE_FRAMES = 8;
+const SPRITE_TOY = "tools/toys/sprite.lua";
+
+/* The interpreter's sprite case, as a literal so the scratch mutation below
+ * fails loudly if the case moves (like SAT_BODY). */
+const SPRITE_BODY =
+  "      slot = operand(r, rb(pc++));\n" +
+  "      x = operand(r, rb(pc++));\n" +
+  "      y = operand(r, rb(pc++));\n" +
+  "      pat = operand(r, rb(pc++));\n" +
+  "      pal = operand(r, rb(pc++));\n" +
+  "      attr = operand(r, rb(pc++));\n" +
+  "      toy_sprite(slot, x, y, pat, pal, attr);";
+const SPRITE_MUTANT =
+  "      slot = operand(r, rb(pc++));\n" +
+  "      x = operand(r, rb(pc++));\n" +
+  "      y = operand(r, rb(pc++));\n" +
+  "      pat = operand(r, rb(pc++));\n" +
+  "      pal = operand(r, rb(pc++));\n" +
+  "      attr = operand(r, rb(pc++));\n" +
+  "      toy_sprite(slot, y, x, pat, pal, attr);";
+
+function checkSpriteHostParity() {
+  const probe = spawnSync("cc", ["--version"], { encoding: "utf8" });
+  if (probe.error) {
+    skipped.push("sprite parity (no system cc)");
+    console.log("SKIP  sprite parity: no system cc");
+    return;
+  }
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ilvm-sprite-"));
+  const toySource = fs.readFileSync(path.join(ROOT, SPRITE_TOY), "utf8");
+  const encoded = ilbc.encode(il.compile(toySource,
+    { chunkName: path.basename(SPRITE_TOY) }));
+  eq("sprite parity: the sprite toy encodes (version " + encoded.bytes[4] +
+     ")", encoded.bytes[4], 2);
+  const container = path.join(tmp, "sprite.ilbc");
+  fs.writeFileSync(container, Buffer.from(encoded.bytes));
+
+  /* the browser's eight-frame run */
+  const rt = il.create(toySource);
+  rt.load();
+  let want = null;
+  for (let f = 0; f < SPRITE_FRAMES; f++) {
+    rt.frame(f);
+    want = { vram: rt.state.vram.slice(), cram: rt.state.cram.slice(),
+             sat: rt.state.sat.slice(),
+             regs: { BXR: rt.state.regs.BXR, BYR: rt.state.regs.BYR,
+                     CR: rt.state.regs.CR } };
+  }
+  check(bytesDiff(want.sat, Buffer.alloc(512)) >= 8,
+        "sprite parity: the browser run wrote SATB words (" +
+        bytesDiff(want.sat, Buffer.alloc(512)) + " nonzero bytes) — a toy " +
+        "that never sprite'd would make the diff-0 trivial");
+  const wantRegs = "BXR " + want.regs.BXR + "\nBYR " + want.regs.BYR +
+                   "\nCR " + want.regs.CR;
+
+  const hostvm = path.join(tmp, "hostvm");
+  check(buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c")),
+        "sprite parity: the system cc builds ilvm.c with hostvm.c");
+  if (!fs.existsSync(hostvm)) return;
+
+  const hostDir = path.join(tmp, "host");
+  fs.mkdirSync(hostDir);
+  const r = spawnSync(hostvm, [container, hostDir, String(SPRITE_FRAMES)],
+                      { encoding: "utf8" });
+  check(r.status === 0, "sprite parity: hostvm exits 0 (" +
+        ((r.stderr || "").trim().split("\n").slice(-1)[0] || "ok") + ")");
+  if (r.status !== 0) return;
+  eq("sprite parity: the host run's vram.bin is the browser IL run's",
+     bytesDiff(want.vram, fs.readFileSync(path.join(hostDir, "vram.bin"))), 0);
+  eq("sprite parity: the host run's cram.bin is the browser IL run's",
+     bytesDiff(want.cram, fs.readFileSync(path.join(hostDir, "cram.bin"))), 0);
+  eq("sprite parity: the host run's sat.bin is the browser IL run's",
+     bytesDiff(want.sat, fs.readFileSync(path.join(hostDir, "sat.bin"))), 0);
+  eq("sprite parity: the host run's regs.txt is the browser IL run's",
+     fs.readFileSync(path.join(hostDir, "regs.txt"), "utf8").trim(), wantRegs);
+
+  /* control: the interpreter's sprite case swaps x and y.  The SAT
+   * artefact must break — otherwise the diff-0 above proves only that two
+   * things fail alike. */
+  const ilvmSource = fs.readFileSync(path.join(ROOT, "tools", "ilvm",
+                                               "ilvm.c"), "utf8");
+  check(ilvmSource.indexOf(SPRITE_BODY) >= 0,
+        "sprite parity: the control mutation's sprite case is still where " +
+        "the check expects it");
+  if (ilvmSource.indexOf(SPRITE_BODY) < 0) return;
+  const mutantSource = path.join(tmp, "ilvm_mutant.c");
+  fs.writeFileSync(mutantSource, ilvmSource.replace(SPRITE_BODY,
+                                                    SPRITE_MUTANT));
+  const mutant = path.join(tmp, "hostvm-sprite-mutant");
+  check(buildHostvm(mutant, mutantSource),
+        "sprite parity: the system cc builds the sprite mutation");
+  if (!fs.existsSync(mutant)) return;
+  const mutantDir = path.join(tmp, "mutant");
+  fs.mkdirSync(mutantDir);
+  const mrun = spawnSync(mutant, [container, mutantDir,
+                                  String(SPRITE_FRAMES)],
+                         { encoding: "utf8" });
+  check(mrun.status === 0, "sprite parity: the sprite mutation exits 0");
+  if (mrun.status !== 0) return;
+  const brokenSat = bytesDiff(want.sat,
+    fs.readFileSync(path.join(mutantDir, "sat.bin")));
+  check(brokenSat > 0, "sprite parity: the control mutation (x and y " +
+        "swapped) breaks sat.bin (" + brokenSat +
+        " bytes differ from the browser run)");
+}
+
 /* ---- #187: not --------------------------------------------------------- *
  * The same compile/run as checkSatHostParity for a not toy: two logical
  * nots a frame (opcode 0x11, three bytes: dst, one operand), each feeding a
@@ -2368,6 +2487,7 @@ checkPadHostParity();
 checkSatEncoding();
 checkSatHostParity();
 checkSpriteEncoding();
+checkSpriteHostParity();
 checkNotEncoding();
 checkNotHostParity();
 checkTablesRun();

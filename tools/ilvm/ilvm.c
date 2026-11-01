@@ -37,6 +37,12 @@
  */
 #include <stdint.h>
 
+/* The toy writers (pal, reg, vset, sat, and since #189 the shared
+ * toy_sprite) live in tools/toyc/toy_runtime.h so the host build and the
+ * console build interpret the same names; each side provides the toy_*
+ * definitions (hostvm.c on the host, the runtime below on the console). */
+#include "toy_runtime.h"
+
 #ifdef ILVM_HOST
 /* The host build runs the same interpreter over the same bytecode without a
  * console, so a bytecode or VM bug is found before Mednafen.  tools/ilvm/
@@ -44,16 +50,8 @@
  * path below is what the committed ilvm.bin is built from. */
 extern const uint8_t *ilvm_program;
 #define PROG (ilvm_program)
-void toy_pal(int32_t addr, int32_t word);
-void toy_reg(int32_t which, int32_t value);
-void toy_vram_set(int32_t addr, int32_t word);
-void toy_display_on(void);
-int32_t toy_rgb(int32_t r, int32_t g, int32_t b);
-int32_t toy_pad(int32_t n, int32_t field);
-void toy_sat(int32_t i, int32_t k, int32_t v);
 #else
 #include <pce.h>
-#include "toy_runtime.h"
 /* The MPR2 window: HuC6280 TAM mask $04 selects MPR2 ($4000-$5FFF).  The
  * crt0 leaves MPR2=$00 (ROM bank 0); the data bank is physical bank 2 (the
  * 16 KiB interpreter image occupies banks 0-1). */
@@ -421,6 +419,23 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       v = operand(r, rb(pc++));
       toy_sat(av, bv, v);
       break;
+    case 0x1F: {                   /* sprite: one SAT entry from the six
+                                    * constant operands (toy_sprite, #189).
+                                    * The encoder (#133) carried slot, x, y,
+                                    * pattern, palette and attr — the
+                                    * browser's host.sprite layout — so the
+                                    * interpreter writes the same four SAT
+                                    * words the browser writes. */
+      int32_t slot, x, y, pat, pal, attr;
+      slot = operand(r, rb(pc++));
+      x = operand(r, rb(pc++));
+      y = operand(r, rb(pc++));
+      pat = operand(r, rb(pc++));
+      pal = operand(r, rb(pc++));
+      attr = operand(r, rb(pc++));
+      toy_sprite(slot, x, y, pat, pal, attr);
+      break;
+    }
     case 0x18: {                   /* table: zero the slot, hold its id */
       d = rb(pc++);
       s = rb(pc++);

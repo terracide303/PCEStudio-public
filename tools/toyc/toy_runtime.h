@@ -72,6 +72,29 @@ int32_t toy_pad(int32_t n, int32_t field);
 /* The IL's sat(i, k, v): SAT entry i's word k, written through VRAM $7F00. */
 void toy_sat(int32_t i, int32_t k, int32_t v);
 
+/* The IL's sprite(i, spec): one SAT entry composed exactly as the browser's
+ * host.sprite composes it (renderer/pce-toyhost.js): word0 = y, word1 = x,
+ * word2 = pattern << 1, word3 = palette | SPBG<<7 | CGX<<8 | HFLIP<<11 |
+ * CGY<<12 | VFLIP<<15.  The encoder (#133) resolved the spec to six
+ * constants and packed the attribute bits into `attr`: spbg bit 0, cgx
+ * bit 1, hflip bit 2, vflip bit 3, cgy bits 4-5.  ONE function shared by
+ * the interpreter's runtime (tools/ilvm/ilvm_runtime.c), the host harness
+ * (tools/ilvm/hostvm.c) and the compiled route (toy_runtime.c), so all
+ * three write the same four SAT words through their own toy_sat (#189). */
+static inline void toy_sprite(int32_t slot, int32_t x, int32_t y,
+                              int32_t pattern, int32_t palette,
+                              int32_t attr) {
+  toy_sat(slot, 0, y);
+  toy_sat(slot, 1, x);
+  toy_sat(slot, 2, (pattern << 1) & 0xFFFF);
+  toy_sat(slot, 3, (palette | ((attr & 1) << 7) |        /* spbg  */
+                    (((attr >> 1) & 1) << 8) |           /* cgx   */
+                    (((attr >> 2) & 1) << 11) |          /* hflip */
+                    (((attr >> 4) & 3) << 12) |          /* cgy   */
+                    (((attr >> 3) & 1) << 15))           /* vflip */
+                    & 0xFFFF);
+}
+
 /* The IL's timer(period, fn): write the reload register and start the timer
  * (7-bit period; the interrupt is raised every period+1 ticks of 6,991.3 Hz,
  * H8-20..H8-22).  toy_timer_pending() returns and clears the interrupts that
