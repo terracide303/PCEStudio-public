@@ -60,8 +60,8 @@ window patch. The vendored tree itself is never edited.
 
 | piece | measured | where |
 |---|---|---|
-| engine lib + parser | **7,651 B** | `MusicCodeStart` `$C000` → `MusicCodeEnd` `$DDE3` |
-| engine front (`EngineCall`, `FadeTick`, `EndSong`, `Process.envelopes`, the 7 kHz IRQ) | **238 B** | `HuTrackEngine.7khz.IRQ` `$E086` → `MusicInit` `$E174` |
+| engine lib + parser (vendored macros) | **7,651 B** | `MusicCodeStart` `$C000` → `MusicCodeEnd` `$DDE3` |
+| engine front (`EngineCall` and the 7 kHz DDA IRQ; `FadeTick`, `EndSong` and `Process.envelopes` are already in the lib+parser bank above) | **238 B** | `HuTrackEngine.7khz.IRQ` `$E086` → `MusicInit` `$E174` |
 | integration tick wrapper (`HuTrackTick`) | **14 B** | measured in the same assembly |
 | **code, combined, vendored macros** | **7,903 B** | `$A000-$BEDF` at page 5 |
 | **code, combined, with the three-site window patch (§3)** | **7,876 B** | `$A000-$BEC4`; 316 B free in the bank |
@@ -82,11 +82,12 @@ HuTrackTick:
     rts
 ```
 
-The tables are 2,868 B because the four 256-entry tables (square positive
-and negative, volume, base) start at `$8000`, `$8200`, `$8400` and `$8800`,
-and the rest (scale, sine, tremolo, semitone, octave) follow. They must sit
-in a bank whose number the pitch code can map to MPR4; the code cannot live
-there.
+The 2,868 B are: `SquarePos` 512 B and `SquareNeg` 512 B at `$8000` and
+`$8200`, `Volume` 1,024 B at `$8400`, the 12-byte `BaseLo`/`BaseHi`/`Step`
+at `$8800`, the 64-byte sine tables, 16-byte scale, 128-byte tremolo, and
+the 256-byte `Semitone` and `Octave` at `$8934` and `$8A34` (the include's
+own `…Length` constants). They must sit in a bank whose number the pitch
+code can map to MPR4; the code cannot live there.
 
 **Added size, arithmetic from the two measurements:** 7,876 B of code and
 2,868 B of tables still need two 8 KiB physical banks (16,384 B), because
