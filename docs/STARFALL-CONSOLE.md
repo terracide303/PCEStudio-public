@@ -175,7 +175,7 @@ Two notes that matter for whoever closes these:
 
 - **`raster` is only refused in the table form.** `raster(line, spec)` is an
   IL instruction (`pce-il.js:1619`) with no ILBC opcode. The **callback** form,
-  `function raster(line)`, is carried (`pce-ilbc.js:355` records the hook
+  `function raster(line)`, is carried (`pce-ilbc.js:364` records the hook
   slot) — that is how `toys/parallax.lua` exports and runs. STARFALL chose the
   table form, and the table form is the *cheaper* one on the console: two RCR
   entries a frame (the validator prices them at 100 cycles against part C's
@@ -258,7 +258,7 @@ busiest line (no overflow), 2,010 VRAM words, 100 blank cycles against a
 layout — header 24 B (28 B once a table instruction makes it version 2),
 function entry 10 B, upvalue 2 B, the constant and global name tables, the
 table section (1 B + 4 B per slot: `u16` base, `u8` cap, `u8` nfields), and
-the per-op sizes at `pce-ilbc.js:248` — reproduces the two committed
+the per-op sizes at `pce-ilbc.js:255` — reproduces the two committed
 containers to **within 4 bytes** (palette 1 B short, parallax 4 B short).
 Applied to STARFALL:
 
