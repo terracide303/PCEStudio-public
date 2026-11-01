@@ -57,6 +57,19 @@
  *      matches the browser's empty-pad run AND differs from the scripted
  *      one (a toy_pad that always read 0 could not pass both), and a
  *      scratch mutation of toy_pad must break the artefacts.
+ *  10. #186: sat.  The sat instruction (opcode 0x1E: four bytes, the i/k/v
+ *      operands in that order, no dst) encodes in a sat toy — the container
+ *      shape is pinned here (opcode, length, register operand bytes, one
+ *      byte per IL sat at the IL's position) and the semantic i/k/v order
+ *      is pinned by the parity run below, where the browser's host.sat
+ *      reads the IL's fields directly and a shared-but-wrong order would
+ *      put a SATB word in the wrong cell.  On the host, the toy's
+ *      eight-frame vram/cram/sat/regs diff 0 against the browser IL run,
+ *      with real SATB words written (a toy that never sat would make the
+ *      diff-0 trivial), and a scratch mutation of the interpreter's sat
+ *      case must break the sat artefact.  Both host models write the SATB
+ *      image the browser's host.sat writes; the console's
+ *      VRAM-write-plus-DSR-mirror is what the ROM-side suites exercise.
  *
  * Written by @design because the card names this evidence.  Per workshop
  * rule 2 a cold break by another seat and model is owed: the operand
@@ -74,6 +87,9 @@
  * rule and what a fault stops.  #185's own targets: the field-byte order,
  * padref's held operand across the padget, the pad-number bounds, and the
  * pad scan's place in the console loop (outside the measurement brackets).
+ * #186's own targets: the sat operand order (i/k/v), the constant-pool
+ * operands, the SATB-image host model against the console's VRAM write, and
+ * the bounds (i 0..63, k 0..3, v masked to 16 bits).
  */
 "use strict";
 
@@ -261,7 +277,7 @@ var INSN_LEN = {
   0x01: 3, 0x02: 3, 0x03: 3, 0x04: 3, 0x05: 3, 0x06: 3, 0x07: 3,
   0x09: 2, 0x0A: 3, 0x0B: 5, 0x0C: 2, 0x0D: 4, 0x0E: 5, 0x0F: 3,
   0x10: 3, 0x12: 5, 0x14: 3, 0x15: 3, 0x16: 3, 0x17: 3,
-  0x18: 3, 0x1A: 5, 0x1B: 5, 0x1C: 3, 0x1D: 4
+  0x18: 3, 0x1A: 5, 0x1B: 5, 0x1C: 3, 0x1D: 4, 0x1E: 4
 };
 
 /* Walk every function's code and return each instruction with its byte
@@ -1356,6 +1372,183 @@ function checkPadHostParity() {
         "scripted browser run)");
 }
 
+/* ---- #186: sat --------------------------------------------------------- *
+ * The same compile/run as checkHostParity for a sat toy: six sat calls a
+ * frame — register and constant operands, two calls whose i/k/v values are
+ * pairwise distinct so an operand order the encoder and interpreter shared
+ * would put the SATB word in the wrong cell (the browser's host.sat reads
+ * the IL's i/k/v fields directly, so checkSatHostParity's diff pins the
+ * semantic order — see checkSatEncoding's last comment) — plus a pal, a
+ * vram write below the SATB window ($7E00, so neither host model's SATB
+ * image sees it) and a reg write, so the vram/cram/regs diffs are real
+ * comparisons too.  Eight frames must match the browser IL run's artefacts
+ * exactly: a wrong operand order, a SATB word placed at i*4+k the other way,
+ * or a bounds check the browser does not have would all show here.  The
+ * browser's host.sat writes its SATB image and so does hostvm's toy_sat —
+ * the two models the card's evidence compares (the console's VRAM write and
+ * DSR mirror is the ROM-side suites' business). */
+const SAT_TOY = [
+  "function frame(t, f)",
+  "  local i = f % 5          -- 0..4",
+  "  local k = (f * 3) % 4    -- 0..3",
+  "  local v = (f * 7) % 4    -- 0..3",
+  "  sat(i, k, v)",
+  "  sat(k, v, i)",
+  "  sat(10, 2, 0x123)",
+  "  sat(10, 3, 0x123)",
+  "  sat(i, 3, 0x456)",
+  "  sat(63, 3, v)",
+  "  pal(0, rgb(0, f % 8, 0))",
+  "  vram[0x7E00 + f] = v",
+  "  reg(\"BXR\", f * 3)",
+  "end",
+  ""
+].join("\n");
+
+const SAT_FRAMES = 8;
+
+function checkSatEncoding() {
+  const program = il.compile(SAT_TOY, { chunkName: "sat.lua" });
+  const encoded = ilbc.encode(program);
+  eq("sat encoding: the sat toy is a version 1 container", encoded.bytes[4], 1);
+
+  const ins = walkContainer(encoded.bytes);
+  const sats = ins.filter(function (i) { return i.op === 0x1E; });
+  check(sats.length >= 5,
+        "sat encoding: the toy encodes at least 5 sat instructions (" +
+        sats.length + ")");
+  check(sats.every(function (i) { return i.len === 4; }),
+        "sat encoding: every sat is four bytes (i, k, v operands, no dst)");
+  check(sats.every(function (i) {
+          return encoded.bytes[i.at + 1] < 0x80 &&
+                 encoded.bytes[i.at + 2] < 0x80 &&
+                 encoded.bytes[i.at + 3] < 0x80;
+        }),
+        "sat encoding: the three operand bytes are registers (the compiler " +
+        "materialises every sat argument into a scratch register first)");
+
+  /* One container sat per IL sat, at the IL's own position (the encoder
+   * emits exactly one instruction per IL instruction): the toy's six calls
+   * sit at pcs 8, 12, 16, 20, 24 and 28 of frame().  A sat that encoded as
+   * anything else — a call, a builtin, a dropped instruction — shows as a
+   * missing or misplaced byte. */
+  const byFid = {};
+  ins.forEach(function (i) { (byFid[i.fid] = byFid[i.fid] || []).push(i); });
+  const ilSats = [];
+  for (let f = 0; f < program.functions.length; f++) {
+    (program.functions[f].code || []).forEach(function (x, pc) {
+      if (x.t === "sat") ilSats.push({ fid: f, pc: pc });
+    });
+  }
+  eq("sat encoding: the container holds one sat per IL sat",
+     sats.length, ilSats.length);
+  check(ilSats.every(function (s) {
+          const c = byFid[s.fid][s.pc];
+          return c && c.op === 0x1E;
+        }),
+        "sat encoding: each container sat sits where its IL sat does");
+
+  /* The semantic i/k/v order is pinned by checkSatHostParity, not here:
+   * the browser's host.sat reads the IL's i/k/v fields directly, so an
+   * operand order the encoder and interpreter shared but the IL did not
+   * would put the SATB word in the wrong cell and break the diff — for
+   * sat(10, 2, 0x123) a wrong order writes a different cell, not the same
+   * one.  This check pins the container's shape; the parity run pins its
+   * meaning. */
+}
+
+/* The interpreter's sat case, as a literal so the scratch mutation below
+ * fails loudly if the case moves (like PADGET_BODY). */
+const SAT_BODY =
+  "      av = operand(r, rb(pc++));\n" +
+  "      bv = operand(r, rb(pc++));\n" +
+  "      v = operand(r, rb(pc++));\n" +
+  "      toy_sat(av, bv, v);";
+const SAT_MUTANT =
+  "      (void)rb(pc++);\n" +
+  "      (void)rb(pc++);\n" +
+  "      (void)rb(pc++);";
+
+function checkSatHostParity() {
+  const probe = spawnSync("cc", ["--version"], { encoding: "utf8" });
+  if (probe.error) {
+    skipped.push("sat parity (no system cc)");
+    console.log("SKIP  sat parity: no system cc");
+    return;
+  }
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ilvm-sat-"));
+  const program = il.compile(SAT_TOY, { chunkName: "sat.lua" });
+  const encoded = ilbc.encode(program);
+  eq("sat parity: the sat toy encodes (version " + encoded.bytes[4] + ")",
+     encoded.bytes[4], 1);
+  const container = path.join(tmp, "sat.ilbc");
+  fs.writeFileSync(container, Buffer.from(encoded.bytes));
+
+  /* the browser's eight-frame run */
+  const rt = il.create(SAT_TOY);
+  rt.load();
+  let want = null;
+  for (let f = 0; f < SAT_FRAMES; f++) {
+    rt.frame(f);
+    want = padToyState(rt);
+  }
+  check(bytesDiff(want.sat, Buffer.alloc(512)) >= 8,
+        "sat parity: the browser run wrote SATB words (" +
+        bytesDiff(want.sat, Buffer.alloc(512)) + " nonzero bytes) — a toy " +
+        "that never sat would make the diff-0 trivial");
+  const wantRegs = "BXR " + want.regs.BXR + "\nBYR " +
+                   want.regs.BYR + "\nCR " + want.regs.CR;
+
+  const hostvm = path.join(tmp, "hostvm");
+  check(buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c")),
+        "sat parity: the system cc builds ilvm.c with hostvm.c");
+  if (!fs.existsSync(hostvm)) return;
+
+  const hostDir = path.join(tmp, "host");
+  fs.mkdirSync(hostDir);
+  const r = spawnSync(hostvm, [container, hostDir, String(SAT_FRAMES)],
+                      { encoding: "utf8" });
+  check(r.status === 0, "sat parity: hostvm exits 0 (" +
+        ((r.stderr || "").trim().split("\n").slice(-1)[0] || "ok") + ")");
+  if (r.status !== 0) return;
+  eq("sat parity: the host run's vram.bin is the browser IL run's",
+     bytesDiff(want.vram, fs.readFileSync(path.join(hostDir, "vram.bin"))), 0);
+  eq("sat parity: the host run's cram.bin is the browser IL run's",
+     bytesDiff(want.cram, fs.readFileSync(path.join(hostDir, "cram.bin"))), 0);
+  eq("sat parity: the host run's sat.bin is the browser IL run's",
+     bytesDiff(want.sat, fs.readFileSync(path.join(hostDir, "sat.bin"))), 0);
+  eq("sat parity: the host run's regs.txt is the browser IL run's",
+     fs.readFileSync(path.join(hostDir, "regs.txt"), "utf8").trim(), wantRegs);
+
+  /* control: the interpreter's sat case reads its operands and drops them.
+   * The sat artefact must break — otherwise the diff-0 above proves only
+   * that two things fail alike. */
+  const ilvmSource = fs.readFileSync(path.join(ROOT, "tools", "ilvm",
+                                               "ilvm.c"), "utf8");
+  check(ilvmSource.indexOf(SAT_BODY) >= 0,
+        "sat parity: the control mutation's sat case is still where the " +
+        "check expects it");
+  if (ilvmSource.indexOf(SAT_BODY) < 0) return;
+  const mutantSource = path.join(tmp, "ilvm_mutant.c");
+  fs.writeFileSync(mutantSource, ilvmSource.replace(SAT_BODY, SAT_MUTANT));
+  const mutant = path.join(tmp, "hostvm-sat-mutant");
+  check(buildHostvm(mutant, mutantSource),
+        "sat parity: the system cc builds the sat mutation");
+  if (!fs.existsSync(mutant)) return;
+  const mutantDir = path.join(tmp, "mutant");
+  fs.mkdirSync(mutantDir);
+  const mrun = spawnSync(mutant, [container, mutantDir, String(SAT_FRAMES)],
+                         { encoding: "utf8" });
+  check(mrun.status === 0, "sat parity: the sat mutation exits 0");
+  if (mrun.status !== 0) return;
+  const brokenSat = bytesDiff(want.sat,
+    fs.readFileSync(path.join(mutantDir, "sat.bin")));
+  check(brokenSat > 0, "sat parity: the control mutation (sat operands " +
+        "dropped) breaks sat.bin (" + brokenSat +
+        " bytes differ from the browser run)");
+}
+
 /* ---- #174: the table ops on the host ----------------------------------- *
  * The same compile/run as checkHostParity for a version 2 table toy.  Eight
  * frames must match the browser host's artefacts exactly — every value they
@@ -1791,6 +1984,8 @@ checkHostParity();
 checkWideHostParity();
 checkPadEncoding();
 checkPadHostParity();
+checkSatEncoding();
+checkSatHostParity();
 checkTablesRun();
 
 const paletteMax = 300;

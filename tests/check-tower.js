@@ -33,8 +33,9 @@
  *
  * WHAT IT DOES NOT PROVE, and says so in a NOTE when it runs: the console
  * Export path refuses the toy — renderer/pce-ilbc.js has no bytecode form
- * for `table`, which is how TOWER keeps its boulders, hearts and state — so
- * the toy is browser-only for now, as toys/tower/README.md says.  Also per
+ * for `sfx` (its first, at main.lua:324), and `table`, which is how TOWER
+ * keeps its boulders, hearts and state, is missing too — so the toy is
+ * browser-only for now, as toys/tower/README.md says.  Also per
  * workshop rule 2 a cold break by another seat is owed before this closes
  * the card.
  */
@@ -343,11 +344,11 @@ function checkBudgets() {
               " words, " + b.sprites.requested + " strips on the busiest line");
 
   /* the browser-only finding, recorded rather than failed: the console
-   * encoder cannot carry a table yet. */
+   * encoder cannot carry `sfx` or a Lua table yet. */
   try {
     ilbc.encode(il.compile(source));
     note("the console export carries this toy now — toys/tower/README.md " +
-         "says it is browser-only for tables; update it");
+         "says it is browser-only for sfx and tables; update it");
   } catch (e) {
     note("browser-only for now: the console export refuses the toy (" +
          e.code + ": " + e.message + ") — toys/tower/README.md says so");

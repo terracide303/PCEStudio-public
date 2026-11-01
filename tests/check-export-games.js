@@ -19,8 +19,8 @@
  *      PLATFORMER) each reach the outcome the table records: either a
  *      refusal with that code and message, or a built 24,576-byte ROM.  The
  *      source line the table names is checked against the IL (a function's
- *      definition line, the 128th constant, or the refused instruction's own
- *      line), so the
+ *      definition line, the 128th constant, the refused instruction's own
+ *      line, or the first refused builtin's line), so the
  *      table's "line" column is reproducible and not a comment.  A blocker
  *      that lands moves the refusal: this pin goes red and asks for the
  *      table and the pin to be updated — a tripwire, not a broken test.
@@ -28,9 +28,12 @@
  *      (Mednafen, headless) and its picture is compared with the browser's
  *      frames of the same toy: the tail of a `-qtrecord` capture must be
  *      diff 0 against one of the browser's first BROWSER_FRAMES frames.
- *      With no game exporting today, two controls prove the capture-and-
- *      compare instrument works: tools/toys/palette.lua (its ROM sha and
- *      its eight-frame picture cycle are pinned) and, for #183,
+ *      A game whose one-time build outlasts the default 300-frame measure
+ *      or 5.5 s capture tail is pinned with its own measure frame count and
+ *      capture length (GAME_PINS) — PLATFORMER is that game since #186.
+ *      Two controls prove the capture-and-compare instrument works on a
+ *      toy that exports: tools/toys/palette.lua (its ROM sha and its
+ *      eight-frame picture cycle are pinned) and, for #183,
  *      tools/toys/arity.lua, whose five- to eight-parameter functions reach
  *      the screen through the interpreter's extra-argument block (its ROM
  *      sha and sixteen-frame picture cycle are pinned).
@@ -68,11 +71,12 @@ const CAPTURE_TAIL = 12;            /* the movie's last frames, like check-ilvm 
 const ROM_BYTES = 24576;            /* 16 KiB interpreter + one data bank */
 
 /* The card's five games and the outcome docs/ROM_SPEED.md records (2026-10-31;
- * DUSK RUN moved to the encoder's refusal by #184, 2026-11-01).  `where` is
- * the source line the table names; null is what the validator's own finding
- * can say (it names no line for a frame-wide budget).  `message` is a substring
- * of the refusal the suite insists on, so a message that loses its detail
- * fails too. */
+ * DUSK RUN moved to the encoder's refusal by #184, and the three games'
+ * sat refusals moved on by #186, 2026-11-01 — PLATFORMER now builds and
+ * moved to GAME_PINS below).  `where` is the source line the table names;
+ * null is what the validator's own finding can say (it names no line for a
+ * frame-wide budget).  `message` is a substring of the refusal the suite
+ * insists on, so a message that loses its detail fails too. */
 const GAMES = [
   {
     name: "STARFALL", toy: "toys/demo-game/main.lua",
@@ -80,19 +84,21 @@ const GAMES = [
     where: "main.lua:168"
   },
   {
-    /* #183 lifted the 4-parameter ceiling, so the arity refusal is gone and
-     * the next uncarried instruction is sat (#133).  The pin moved; the toy
-     * was not rewritten. */
+    /* #186 carried sat, so the refusal moved to the toy's first sfx (the
+     * sfx instruction has no bytecode form).  The pin moved; the toy was
+     * not rewritten. */
     name: "TOWER", toy: "toys/tower/main.lua",
     expect: { code: "ilbc-op",
-              message: "instruction sat (function 29, pc 8) has no bytecode form" },
-    where: "main.lua:261"
+              message: "instruction sfx (function 36, pc 9) has no bytecode form" },
+    where: "main.lua:324"
   },
   {
+    /* #186 carried sat; NOVA TIDE's next blocker is the note builtin (only
+     * rgb has a bytecode form). */
     name: "NOVA TIDE", toy: "toys/nova-tide/main.lua",
-    expect: { code: "ilbc-op",
-              message: "instruction sat (function 14, pc 11) has no bytecode form" },
-    where: "main.lua:124"
+    expect: { code: "ilbc-builtin",
+              message: "builtin `note` has no bytecode form" },
+    where: "main.lua:137"
   },
   {
     /* #184's decision: the 8-display-frame ceiling keeps its number, the
@@ -105,34 +111,42 @@ const GAMES = [
      * the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz) —
      * the number toys/dusk-run/README.md and tests/check-dusk-run.js already
      * record at 600 frames — so the validator now extends a refused probe to
-     * the performance before refusing.  The encoder behind it refuses sat
-     * (function 33, pc 3, main.lua:325), which is the toy's real blocker. */
+     * the performance before refusing.  #186 carried the encoder's sat
+     * refusal; the toy's next blocker is `not` (card #187). */
     name: "DUSK RUN", toy: "toys/dusk-run/main.lua",
     expect: { code: "ilbc-op",
-              message: "instruction sat (function 33, pc 3) has no bytecode form" },
-    where: "main.lua:325"
-  },
-  {
-    /* #185: padref/padget are carried, so the refusal moved to the toy's
-     * first sat (the same gap that stops the other four games — card #186
-     * takes it).  The five pad reads at main.lua:110-118 now encode. */
-    name: "PLATFORMER", toy: "toys/platformer/main.lua",
-    expect: { code: "ilbc-op",
-              message: "instruction sat (function 10, pc 109) has no bytecode form" },
-    where: "main.lua:142"
+              message: "instruction not (function 39, pc 16) has no bytecode form" },
+    where: "main.lua:401"
   }
 ];
 
-/* A game that starts exporting gets {rom, frames} here (its ROM sha and its
- * picture-cycle hashes), added with its row in docs/ROM_SPEED.md.  Empty
- * today: nothing exports. */
-const GAME_PINS = {};
+/* A game that starts exporting gets {rom, frames} here (its ROM sha, its
+ * picture-cycle hashes, and the measure/capture wall time its boot needs —
+ * see PLATFORMER's comment), added with its row in docs/ROM_SPEED.md. */
+const GAME_PINS = {
+  /* #186: sat carried, so PLATFORMER builds.  Its one-time build (init()
+   * draws the whole map and the sprite patterns through the interpreter)
+   * takes ~7 s of wall on the dummy SDL driver: the default 300-frame
+   * measure (≈7 s) lands inside the boot and reads 0 updates, and the
+   * default 5.5 s capture tail is still pre-scene.  The pin records the
+   * wall time that clears the boot: 900 measured frames (312 updates, all
+   * overrunning, worst 311 lines — "30 Hz") and a 12 s capture.  The
+   * picture is the game's static no-input scene (the hero stands on the
+   * grass), so the pin holds that one hash. */
+  "PLATFORMER": {
+    toy: "toys/platformer/main.lua",
+    rom: "ab59d6d38056fab244c5d435ced012645f2bc60142c4012bd6e558a682bd83f9",
+    frames: [1261564552],
+    measureFrames: 900,
+    captureMs: 12000
+  }
+};
 
 /* The control, pinned now so the pinning path is itself covered: the palette
  * toy builds to one ROM and its picture repeats every eight frames. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "b47cb2386784a21955ab62ecace677d323ba351a3cc3fedf12b68d0a79916a22",
+  rom: "bbcedd18f5a858bbd701a6f30ae8126663b29d188b2a77feeb32f3d104b4e8ad",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -145,7 +159,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "323682f4a288bea0f90c3b1624cffb8d41cec42bd31d7b657a1602a2c9836665",
+  rom: "98fb4991ca7703c6836387adc63b96a686913ef341b93b8b2fbec3cece62c3f2",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -242,7 +256,9 @@ function constantCeiling(program) {
 
 /* The source line the table names, re-derived from the IL:
  *   - STARFALL's 128th constant (the encoder names no line),
- *   - an ilbc-op refusal's "(function N, pc P)" instruction. */
+ *   - an ilbc-op refusal's "(function N, pc P)" instruction,
+ *   - an ilbc-builtin refusal's first uncarried builtin (only rgb has a
+ *     bytecode form; the message names no function or pc). */
 function checkedWhere(game, program) {
   if (game.name === "STARFALL") {
     const hit = constantCeiling(program);
@@ -257,6 +273,23 @@ function checkedWhere(game, program) {
     check(!!ins, game.name + ": fn " + fid + " pc " + pc + " is an instruction");
     return ins ? "main.lua:" + ins.line : null;
   }
+  if (game.expect.code === "ilbc-builtin") {
+    const m = /builtin `(\w+)`/.exec(game.expect.message);
+    for (let f = 0; f < program.functions.length; f++) {
+      const code = program.functions[f].code || [];
+      for (let pc = 0; pc < code.length; pc++) {
+        const ins = code[pc];
+        if (ins.t === "builtin" && ins.name !== "rgb") {
+          check(!!m && ins.name === m[1],
+                game.name + ": the first uncarried builtin is the one the " +
+                "message names (got " + ins.name + ")");
+          return "main.lua:" + ins.line;
+        }
+      }
+    }
+    check(false, game.name + ": a builtin other than rgb exists to refuse");
+    return null;
+  }
   return null;
 }
 
@@ -266,9 +299,12 @@ function sleep(ms) {
   return new Promise(function (resolve) { setTimeout(resolve, ms); });
 }
 
-/* tools/measure-rom.js, the card's instrument.  Its JSON is the contract. */
-function measure(romPath) {
-  const m = spawnSync(process.execPath, [MEASURE, romPath, "--frames", "300"],
+/* tools/measure-rom.js, the card's instrument.  Its JSON is the contract.
+ * A toy whose one-time build outlasts the default 300 frames is measured at
+ * its pin's frame count instead (GAME_PINS). */
+function measure(romPath, frames) {
+  const m = spawnSync(process.execPath,
+                      [MEASURE, romPath, "--frames", String(frames || 300)],
                       { cwd: ROOT, encoding: "utf8", timeout: 120000 });
   if (m.status !== 0) {
     return { error: "measure-rom exited " + m.status + ": " +
@@ -285,7 +321,7 @@ function measure(romPath) {
 /* A `-qtrecord` run: the route tools/capture-ilvm.sh proves.  The movie's
  * frames are the emulated picture, so the dummy SDL video driver is enough
  * and no key or mouse event is sent.  Returns the frame directory. */
-async function captureFrames(romPath, outDir) {
+async function captureFrames(romPath, outDir, sleepMs) {
   const movie = path.join(outDir, "capture.mov");
   const home = path.join(outDir, "home");
   fs.mkdirSync(path.join(home, "mcs"), { recursive: true });
@@ -307,7 +343,9 @@ async function captureFrames(romPath, outDir) {
                                         stdio: ["ignore", "ignore", "pipe"] });
   let log = "";
   child.stderr.on("data", function (d) { log += d; });
-  await sleep(5500);                 /* boot, OSD fade, a run of frames */
+  /* boot, OSD fade, a run of frames; a toy whose one-time build outlasts
+   * the default is captured at its pin's length instead (GAME_PINS). */
+  await sleep(sleepMs || 5500);
   if (child.exitCode === null && child.signalCode === null) {
     try { child.kill("SIGINT"); } catch (e) { /* already gone */ }
   }
@@ -457,16 +495,21 @@ async function main() {
   console.log("check-export-games: #180 the five games through export_pce's " +
               "route, and Mednafen on what builds");
 
+  /* The five card games: four are refused in GAMES, and each that starts
+   * exporting moves to GAME_PINS — the card's games are still all five. */
+  const cardGames = GAMES.concat(Object.keys(GAME_PINS).map(function (n) {
+    return { name: n, toy: GAME_PINS[n].toy, expect: null };
+  }));
   eq("the card's five games are the ones measured",
-     GAMES.map(function (g) { return g.name; }).join(", "),
-     "STARFALL, TOWER, NOVA TIDE, DUSK RUN, PLATFORMER");
-  for (const game of GAMES) {
+     cardGames.map(function (g) { return g.name; }).sort().join(", "),
+     "DUSK RUN, NOVA TIDE, PLATFORMER, STARFALL, TOWER");
+  for (const game of cardGames) {
     check(fs.existsSync(path.join(ROOT, game.toy)),
           game.name + ": " + game.toy + " exists");
   }
 
   const builtGames = [];
-  for (const game of GAMES) {
+  for (const game of cardGames) {
     const out = exportToy(game.toy);
     if (out.rom) {
       builtGames.push({ game: game, out: out });
@@ -475,6 +518,11 @@ async function main() {
       check(!!GAME_PINS[game.name],
             game.name + " exports now: add its ROM sha and picture hashes " +
             "to GAME_PINS and its row to docs/ROM_SPEED.md");
+      continue;
+    }
+    if (!game.expect) {
+      check(false, game.name + ": a pinned game refused — " + out.code +
+            " — " + out.message);
       continue;
     }
     eq(game.name + ": refusal code", out.code, game.expect.code);
@@ -562,9 +610,10 @@ async function main() {
       fs.mkdirSync(dir, { recursive: true });
       const romPath = path.join(dir, "toy.pce");
       fs.writeFileSync(romPath, w.out.rom);
+      const pin = GAME_PINS[w.key] || {};
 
       /* 1. the speed counters, through the card's own instrument */
-      const m = measure(romPath);
+      const m = measure(romPath, pin.measureFrames);
       check(!!m.json, w.name + ": tools/measure-rom.js reads the counters" +
             (m.error ? " — " + m.error : ""));
       if (m.json) {
@@ -579,7 +628,7 @@ async function main() {
       }
 
       /* 2. the picture, against the browser's frames */
-      const cap = await captureFrames(romPath, dir);
+      const cap = await captureFrames(romPath, dir, pin.captureMs);
       if (cap.error) {
         check(false, w.name + ": the picture captured — " + cap.error);
         continue;
@@ -611,14 +660,11 @@ async function main() {
                 "pictures (browser frame " + cmp.match + ", " +
                 "hash " + want[cmp.match].hash + ")");
         }
-      } else {
-        const pin = GAME_PINS[w.key];
-        if (pin) {
-          eq(w.name + ": the ROM is the pinned one", sha256(w.out.rom),
-             pin.rom);
-          check(cmp.match >= 0 && pin.frames.indexOf(want[cmp.match].hash) >= 0,
-                w.name + ": the emulator matches one of the pinned pictures");
-        }
+      } else if (pin.rom) {
+        eq(w.name + ": the ROM is the pinned one", sha256(w.out.rom),
+           pin.rom);
+        check(cmp.match >= 0 && pin.frames.indexOf(want[cmp.match].hash) >= 0,
+              w.name + ": the emulator matches one of the pinned pictures");
       }
     }
   } finally {

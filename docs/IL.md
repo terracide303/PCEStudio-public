@@ -1179,6 +1179,7 @@ container offsets, patched after the layout is known.
 | 1B | `tset` | `base:op key:u8 kind:u8 value:op` |
 | 1C | `padref` | `dst:r n:op` — `pad[n]`'s n, held for the padget that indexes it (#185) |
 | 1D | `padget` | `dst:r pad:op field:u8` — one bit of the scanned pad word |
+| 1E | `sat` | `i:op k:op v:op` — one SAT word, entry `i` word `k` (#186) |
 
 For `tget`/`tset`, `kind` 0 means the key byte is an **operand** (a register,
 or a constant int index encoded `0x80|k`); `kind` 1 means the key byte is a
@@ -1197,6 +1198,19 @@ sequence #45's HuC runtime proved) and the host harness scripts
 (`tools/ilvm/hostvm.c`'s optional PADFILE argument); the scan sits
 outside the TMA measurement brackets, so the measured figures are the
 pre-#185 ones.
+
+A **`sat`** instruction writes one SATB word (entry `i` 0..63, word `k`
+0..3): on the console the runtime's `toy_sat` writes VRAM `$7F00 + i*4 + k`
+(the compiled runtime's body, #45) and the startup's DSR auto-repeat DMA
+mirrors it into SATB every VBlank, while the host harness writes its SATB
+image directly (`tools/ilvm/hostvm.c`'s `sat` array) — the same 256 words
+the browser host's `sat()` writes (renderer/pce-toyhost.js), so sat.bin is
+comparable across all three.  Out of range is ignored, as the compiled
+runtime ignores it.  A sat toy usually turns sprites on (`CR` bit 6, SB),
+and the interpreter's display-on writes keep the toy's CR: `toy_display_on`
+and the main loops write `0x88 | toy_cr` (or `0x8C | toy_cr` on the raster
+flow), the compiled runtime's `toy_cr` shadow, so the sprites a toy turned
+on in `init()` are not dropped at display time.
 
 A **`call` carries up to eight arguments** (#183). The first four ride in the
 interpreter's C parameters (`exec(fid, clh, a0..a3)`, the same signature every

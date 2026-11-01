@@ -65,8 +65,8 @@ then sky, hills, city and sea each move faster than the one above.
 
 NOVA TIDE keeps its bolts, enemies, explosions and state in Lua tables.
 The console **Export** path cannot carry this toy yet: `renderer/pce-ilbc.js`
-refuses both the `table` instruction and calls with more than four
-parameters (the interpreter's limit — the toy's `hit()` takes eight), so
-Export lists those as findings instead of building a ROM.  The toy runs
-fine in the browser studio (and in the IL runtime the validator uses).
+has no bytecode form for the `note` builtin (its first is at
+`main.lua:137` — only `rgb` has one), and the `table` instruction is
+missing too, so Export lists a finding instead of building a ROM.  The toy
+runs fine in the browser studio (and in the IL runtime the validator uses).
 See `docs/IL.md`.

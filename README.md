@@ -94,11 +94,12 @@ Each toy's own `README.md` says how it was made and which keys it uses. A toy's 
 
 The studio compiles a toy to a small bytecode and glues it to a fixed interpreter ROM, all in the browser
 ([`docs/EXPORT.md`](docs/EXPORT.md), [`docs/IL.md`](docs/IL.md)). The simple example toys in `toys/*.lua`
-(parallax, status bar, sky gradient, palette cycle) export today. **None of the five games** — STARFALL, TOWER,
-NOVA TIDE, DUSK RUN and PLATFORMER — does yet: each is stopped by a named finding, and
+(parallax, status bar, sky gradient, palette cycle) export today, and so does **PLATFORMER** (#186 carried
+the `sat` instruction — its ROM runs in Mednafen at 30 Hz). The other four games — STARFALL, TOWER,
+NOVA TIDE and DUSK RUN — do not yet: each is stopped by a named finding, and
 [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five (STARFALL's 127-constant
-pool, the missing `sat` instruction for TOWER, NOVA TIDE and DUSK RUN, PLATFORMER's pad read), with the
-`sprite()`/`sat`/`sfx()`/`raster` instructions and the 8 KiB data bank behind those. Carrying them
+pool, the missing `sfx` instruction for TOWER, NOVA TIDE's `note` builtin, DUSK RUN's `not`), with the
+`sprite()`/`sfx()`/`raster` instructions and the 8 KiB data bank behind those. Carrying them
 is the next big piece of work. The ROMs are checked in Mednafen; nothing has run on a real console yet.
 
 ## Project files

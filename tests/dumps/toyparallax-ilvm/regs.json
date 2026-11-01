@@ -1,8 +1,8 @@
 {
- "BG_XOffset": 135,
+ "BG_XOffset": 71,
  "BG_YMoo": 236,
  "BG_YOffset": 236,
- "BXR": 96,
+ "BXR": 32,
  "BYR": 0,
  "CR": 140,
  "DCR": 16,
@@ -39,7 +39,7 @@
  "color_table": 1,
  "color_table_bytes": 1024,
  "ctaddress": 52,
- "pixel_offset": 2016,
+ "pixel_offset": 2020,
  "scanline": 254,
  "status": 0
 }

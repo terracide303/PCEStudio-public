@@ -369,6 +369,43 @@ This is not a recalibration: the finding was on the model's own cycles, so
 runs fast on the export route — its steady-state **route-1** projection is
 10,135,899 cycles = 84.95 display frames (0.71 Hz), and the export builds the
 interpreter. What the change fixes is which blocker the user is told about: the
-validator no longer masks the encoder's first refusal, `sat` (function 33,
-pc 3, `main.lua:325`; card #186). `tests/check-export-games.js` pins DUSK RUN
-there.
+validator no longer masks the encoder's first refusal — `sat` by #184's close
+(function 33, pc 3, `main.lua:325`; card #186), `not` after it
+(function 39, pc 16, `main.lua:401`; card #187). `tests/check-export-games.js`
+pins DUSK RUN there.
+
+## 2026-11-01 — sat writes the compiled runtime's SATB word (card #186)
+
+Route 1 had no `sat()` op, so PLATFORMER — the last of the five games with no
+other refusal — could not export. The op is carried the way every other
+surface op is: **one IL instruction `sat(i, k, v)` (opcode `1E`, three operand
+bytes, no dst), and the runtime writes exactly what a compiled toy's
+`toy_sat` writes — VRAM `$7F00 + i*4 + k`** (`tools/ilvm/ilvm_runtime.c`),
+which the startup's DSR auto-repeat DMA mirrors into SATB every VBlank, the
+same words the browser host's `sat()` holds and the host harness keeps in its
+SATB image (`tools/ilvm/hostvm.c`).  Out of range is ignored, as the compiled
+runtime ignores it.
+
+Two interpreter details the card surfaced, each fixed by copying the compiled
+runtime (`tools/toyc/toy_runtime.c`):
+- **`toy_display_on` clobbered the toy's CR.** The interpreter's display-on
+  wrote `CR = $88` after `toy_boot()`, dropping bit 6 (SB, sprites on) that
+  PLATFORMER's `init()` set — its first interpreted `sat` could never show.
+  The runtime now shadows the toy's CR (the compiled runtime's `toy_cr`) and
+  writes `$88 | toy_cr` (`$8C | toy_cr` on the raster flow), so sprites the
+  toy turned on survive display-on.
+- **The encoder's pass-1 scan read `ins.k` on every instruction**, written
+  for `const`'s k; `sat`'s own `k` field (its word index operand) collided
+  with it and refused `ilbc-key: a `undefined` constant`.  The scan now reads
+  `k` only for `const` and treats `sat`'s three fields as operands.
+
+Evidence on the card's named route: `tests/check-ilvm.js` encodes a sat toy
+(`SAT_TOY`, six sats a frame, the IL's i/k/v order checked by the browser
+parity — every argument is materialised into scratch registers, so the byte
+triple alone cannot pin the order), runs it on the host harness for 8 frames
+and diffs vram/cram/sat/regs against the browser IL run; the mutation control
+(three `rb(pc++)` reads) must break sat.bin.  `tests/check-export-games.js`'s
+PLATFORMER pin moved from a refusal to a build: its ROM, its static-scene
+picture and its 30 Hz measure are pinned, with the ~7 s interpreter boot
+covered by the pin's own measure/capture lengths.  A cold break by another
+seat is owed (workshop rule 2).
