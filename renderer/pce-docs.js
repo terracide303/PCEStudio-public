@@ -36,7 +36,8 @@
                              require("./pce-il.js"),
                              require("./pce-psg.js"),
                              require("./pce-validate.js"),
-                             require("./pce-cgen.js"));
+                             require("./pce-cgen.js"),
+                             require("./pce-ilbc.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.docs = factory(root.PCEStudio.toyhost,
@@ -45,10 +46,11 @@
                                   root.PCEStudio.il,
                                   root.PCEStudio.psg,
                                   root.PCEStudio.validate,
-                                  root.PCEStudio.cgen);
+                                  root.PCEStudio.cgen,
+                                  root.PCEStudio.ilbc);
   }
 })(typeof self !== "undefined" ? self : this,
-   function (host, editor, toys, il, psg, validate, cgen) {
+   function (host, editor, toys, il, psg, validate, cgen, ilbc) {
   "use strict";
 
   function range(lo, hi) { return lo + ".." + hi; }
@@ -87,6 +89,69 @@
       }
     }
     return out;
+  }
+
+  /* ---- writing for the ROM (card #193) -------------------------------- *
+   *
+   * One section, generated from the two compilers' own FEATURES/REFUSALS
+   * tables: the Studio's ROM CHECK drawer, the MCP rom_check tool, this
+   * page and the chat-AI guide all print the same lists, so a feature a
+   * compiler gains or refuses appears everywhere with no second edit.
+   * tools/docs.js also writes this section's HTML into the Claude Code
+   * manual (renderer/claude-code.html). */
+  function romSection() {
+    var carriedRows = [];
+    var groups = [
+      { key: "cgen", name: "C compiler (Export…)", feat: cgen.FEATURES },
+      { key: "ilbc", name: "bytecode (every .pce)", feat: ilbc.FEATURES }
+    ];
+    var i, j;
+    for (i = 0; i < groups.length; i++) {
+      var list = groups[i].feat.carried || [];
+      for (j = 0; j < list.length; j++) {
+        carriedRows.push([groups[i].name, list[j].label,
+                          list[j].detail || ""]);
+      }
+    }
+    var refusedRows = [];
+    for (i = 0; i < groups.length; i++) {
+      var map = groups[i].feat.refused || {};
+      var codes = Object.keys(map).sort();
+      for (j = 0; j < codes.length; j++) {
+        refusedRows.push([groups[i].name, codes[j], map[codes[j]]]);
+      }
+    }
+    return {
+      id: "writing-for-the-rom",
+      title: "Writing for the ROM",
+      blocks: [
+        { type: "p", text: "Two routes build a .pce, and this page lists " +
+            "what each carries today. The C route is " + cgen.FEATURES.route +
+            ". The interpreter route is " + ilbc.FEATURES.route + ". A toy " +
+            "the Studio exports must pass both; a toy exported over MCP " +
+            "needs the interpreter route. The lists below are the compilers' " +
+            "own tables (renderer/pce-cgen.js and renderer/pce-ilbc.js), not " +
+            "a summary: a feature added to either compiler appears here " +
+            "without a second edit." },
+        { type: "p", text: "The Studio's ROM CHECK drawer checks both routes " +
+            "as you type, marks the lines in the gutter, and shows 'ROM: ok' " +
+            "or 'ROM: N problems' beside Export. The same check is the MCP " +
+            "tool rom_check, which returns every finding at once as " +
+            "{code, line, message}." },
+        { type: "h3", text: "Carried today", source: "renderer/pce-cgen.js, " +
+            "renderer/pce-ilbc.js (FEATURES)" },
+        { type: "table", headers: ["route", "feature", "notes"],
+          rows: carriedRows },
+        { type: "h3", text: "Refused today", source: "renderer/pce-cgen.js, " +
+            "renderer/pce-ilbc.js (REFUSALS)" },
+        { type: "table", headers: ["route", "code", "meaning"],
+          rows: refusedRows },
+        { type: "p", text: "A refusal is not a crash: the exported ROM " +
+            "cannot carry the construct, so the finding names it and the " +
+            "line. The browser may still run the toy — the CONSOLE tab " +
+            "answers that question (renderer/pce-validate.js)." }
+      ]
+    };
   }
 
   /* ---- the reference --------------------------------------------------- */
@@ -566,7 +631,10 @@
       ]
     });
 
-    /* 10. refusals -------------------------------------------------------- */
+    /* 10. writing for the ROM --------------------------------------------- */
+    sections.push(romSection());
+
+    /* 11. refusals -------------------------------------------------------- */
     var refusalBlocks = [
       { type: "p", text: "A refusal is a named failure, not a silent drop: the " +
           "call throws (or the page shows) an error whose code is one of these, " +
@@ -597,7 +665,7 @@
         "renderer/pce-toyhost.js", "renderer/pce-editor.js",
         "renderer/pce-toys.js", "renderer/pce-il.js", "renderer/pce-psg.js",
         "renderer/pce-validate.js", "renderer/pce-cgen.js",
-        "renderer/pce-song.js"
+        "renderer/pce-ilbc.js", "renderer/pce-song.js"
       ],
       footer: "Generated by node tools/docs.js from the modules listed above. " +
               "Do not edit renderer/docs.html by hand: tests/check-docs.js " +
@@ -659,6 +727,28 @@
     return h + "</tbody></table>";
   }
 
+  /* One section as HTML, the same markup html() puts in the page.  Exported
+   * because tools/docs.js writes the ROM chapter into the Claude Code manual
+   * (renderer/claude-code.html) from it: one renderer, no second copy. */
+  function htmlSection(sec) {
+    var body = '<section id="' + sec.id + '">\n<h2>' + esc(sec.title) +
+               "</h2>\n";
+    for (var b = 0; b < sec.blocks.length; b++) {
+      var blk = sec.blocks[b];
+      if (blk.type === "p") body += "<p>" + esc(blk.text) + "</p>\n";
+      else if (blk.type === "h3")
+        body += "<h3>" + esc(blk.text) +
+                (blk.source ? ' <span class="src">' + esc(blk.source) +
+                              "</span>" : "") + "</h3>\n";
+      else if (blk.type === "table")
+        body += htmlTable(blk.headers, blk.rows, blk.tight) + "\n";
+      else if (blk.type === "code")
+        body += '<pre><code class="' + esc(blk.lang) + '">' +
+                esc(blk.text) + "</code></pre>\n";
+    }
+    return body + "</section>\n";
+  }
+
   /* The page: ppu.toys' docs layout, our dark studio skin.  A sticky
    * chapter list on the left, the chapters on the right, tables and code in
    * the same card style as renderer/toys.html and renderer/editor.html. */
@@ -669,22 +759,7 @@
 
     var body = "";
     for (var s = 0; s < ref.sections.length; s++) {
-      var sec = ref.sections[s];
-      body += '<section id="' + sec.id + '">\n<h2>' + esc(sec.title) + "</h2>\n";
-      for (var b = 0; b < sec.blocks.length; b++) {
-        var blk = sec.blocks[b];
-        if (blk.type === "p") body += "<p>" + esc(blk.text) + "</p>\n";
-        else if (blk.type === "h3")
-          body += "<h3>" + esc(blk.text) +
-                  (blk.source ? ' <span class="src">' + esc(blk.source) +
-                                "</span>" : "") + "</h3>\n";
-        else if (blk.type === "table")
-          body += htmlTable(blk.headers, blk.rows, blk.tight) + "\n";
-        else if (blk.type === "code")
-          body += '<pre><code class="' + esc(blk.lang) + '">' +
-                  esc(blk.text) + "</code></pre>\n";
-      }
-      body += "</section>\n";
+      body += htmlSection(ref.sections[s]);
     }
 
     return '<!doctype html>\n' +
@@ -747,6 +822,8 @@ body +
     reference: reference,
     markdown: markdown,
     html: html,
+    htmlSection: htmlSection,
+    romSection: romSection,
     refusalIndex: refusalIndex,
     REFUSAL_GROUPS: REFUSAL_GROUPS
   };

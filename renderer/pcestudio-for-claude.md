@@ -1,6 +1,6 @@
 # PCEStudio for Claude
 
-A guide a chat AI reads before it helps someone make a PC Engine toy for PCEStudio (https://pcestudio.terracides.com). Paste the whole file into the chat. Sections 1-9 are hand-written; section 10 is generated from the runtime's own tables, and the examples are the toys/ files themselves.
+A guide a chat AI reads before it helps someone make a PC Engine toy for PCEStudio (https://pcestudio.terracides.com). Paste the whole file into the chat. Sections 1-7 and 9-11 are hand-written; section 8's carried and refused lists and section 10's API chapters are generated from the code's own tables, and the examples are the toys/ files themselves.
 
 ## If you are Claude Code: drive PCEStudio yourself
 
@@ -34,6 +34,7 @@ The server needs Node and nothing else: no npm install, no compiler. The link is
 | song_write | compose the toy's song.json from a step list with the SEQUENCER's built-in instruments; music(0) plays it |
 | frame_png | the picture at a frame, as a PNG you can look at |
 | validate | check it against the hardware's limits, with file:line findings |
+| rom_check | what the exported ROM can and cannot run: both cartridge front ends over main.lua, every finding at once with its line, plus the carried/refused lists |
 | toy_save | save the whole toy — code, art, songs — as one .pce.json the person opens in the studio |
 | project_open | resume a project: a .pcestudio file or an unpacked project folder, with NOTES.md's text returned first |
 | project_save | save the session as a project — one .pcestudio, or the same layout unpacked into a folder so git holds the history; pass the updated NOTES.md as notes |
@@ -42,7 +43,7 @@ The server needs Node and nothing else: no npm install, no compiler. The link is
 | registers_get | read a VDC, VCE or PSG register with its range |
 | register_set | set a view override frame_png applies (and clears) |
 
-Work the loop the skill teaches: docs(topic) for the API (do not guess names), toy_write, toy_run, frame_png to look, validate, export_pce. Add art with source_add before toy_run: a base64 PNG or a pixel grid with its palette becomes the toy's tiles, sprites, a tilesheet or a palette, merged into its asset files, and the reply is the VRAM/CRAM budget — toy_run imports those files into VRAM, CRAM and the SAT before init(), exactly as the studio does. Add music with song_write (or source_add kind song for a .mid): it writes song.json and music(0) plays it, while toy_run's sound report says what started on each channel. A toy that runs without errors does not mean it looks right: look at the frame.
+Work the loop the skill teaches: docs(topic) for the API (do not guess names), toy_write, toy_run, frame_png to look, validate, rom_check before you promise a ROM, export_pce. Add art with source_add before toy_run: a base64 PNG or a pixel grid with its palette becomes the toy's tiles, sprites, a tilesheet or a palette, merged into its asset files, and the reply is the VRAM/CRAM budget — toy_run imports those files into VRAM, CRAM and the SAT before init(), exactly as the studio does. Add music with song_write (or source_add kind song for a .mid): it writes song.json and music(0) plays it, while toy_run's sound report says what started on each channel. A toy that runs without errors does not mean it looks right: look at the frame.
 
 **Finish with toy_save.** It writes one .pce.json holding every file — main.lua, the art source_add made, the named sources and the songs — in the studio's own Save format, inside the folder the server runs in (a path outside it is refused). Then tell the person: open PCEStudio, press Open… → From file…, pick that file — or drop it on the page — and the game plays with its art. Without this step you can only hand over the code, and everything source_add imported stays behind.
 
@@ -829,23 +830,74 @@ The cartridge subset has no string values (il-string). A table the toy builds ca
 
 print(...) adds a line to the studio's log, not to devtools. It is useful, but a print in frame() runs 60 times a second and fills the log; print once, or when something changes.
 
-## 8. Keep it cartridge-ready
+## 8. Writing for the ROM
 
-The studio's Check compiles the file through PCEStudio's IL, the same intermediate language that becomes a .pce cartridge. A toy written inside it runs identically in the browser and on the console; a toy outside it still runs in the browser but cannot be exported. Keep to these rules from the first version:
+The studio's Check answers whether the toy runs in the page. A cartridge has a second question: can the export build this toy, and what will the console do with it? The ROM CHECK drawer answers that as the file is typed — it marks the lines in the gutter and shows 'ROM: ok' or 'ROM: N problems' beside Export — and the same check is the MCP tool rom_check. Fix every finding before promising a ROM.
 
-- Integers only. No 1.5, no x / y (use x // y). sin/cos/sqrt exist for the browser but return fractions; the console uses fixed point. The safest toys use f and integer arithmetic.
+Keep to the carried lists below from the first version. They are generated from the two compilers' own tables, so they are what the code does, not a summary of it.
 
-- Numbers stay inside 32 bits (about -2,000,000,000..2,000,000,000).
+Two routes build a .pce, and this page lists what each carries today. The C route is C compiler — the Studio's Export (pce-cgen -> llvm-mos). The interpreter route is bytecode interpreter — MCP export_pce and the page's Export. A toy the Studio exports must pass both; a toy exported over MCP needs the interpreter route. The lists below are the compilers' own tables (renderer/pce-cgen.js and renderer/pce-ilbc.js), not a summary: a feature added to either compiler appears here without a second edit.
 
-- No string used as a value. A string is allowed as reg's name and in print, not in a variable.
+The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in the gutter, and shows 'ROM: ok' or 'ROM: N problems' beside Export. The same check is the MCP tool rom_check, which returns every finding at once as {code, line, message}.
 
-- Tables: the IL reads them back (t[i], t.x), but pce-cgen, the console back end, does not lower tables at all (cgen-op), so a toy with a table read runs in the browser and will not export. sprite(i, spec) is a table too: place sprites with sat() words (section 5) when the toy must export. The worked examples fill a table with constants and do not read it back; keep to that if the person wants a cartridge.
+### Carried today
 
-- No method calls (:), no varargs (...), no pairs/ipairs, and no multiple return values. Use for i = a, b, step do and plain functions.
+| route | feature | notes |
+| --- | --- | --- |
+| C compiler (Export…) | the file's top-level statements | run once by toy_boot |
+| C compiler (Export…) | init(), frame(t, f) and raster(line) | the three hooks the runtime calls; the console passes t = 0 |
+| C compiler (Export…) | 32-bit integer arithmetic + - * % // & \| ^ << >> | Lua's % and // keep the divisor's sign |
+| C compiler (Export…) | booleans, comparisons, and/or | a branch condition the IL did not type as bool is cgen-cond |
+| C compiler (Export…) | if, while, numeric for, break | jumps must land on an instruction (cgen-target) |
+| C compiler (Export…) | function calls with up to 8 arguments | a ninth parameter or argument is cgen-arity |
+| C compiler (Export…) | closures and upvalues | one static slot per site; a closure created in a loop is refused when a function value can be stored |
+| C compiler (Export…) | int, bool, function and table globals | the IL must declare the global's type (cgen-global) |
+| C compiler (Export…) | tables: int array keys, string fields | a static pool of 256 cells, one slot per table site; an escaping site that runs more than once is cgen-table-escape |
+| C compiler (Export…) | vram[...] writes | vset; a vram read (vget) is cgen-op |
+| C compiler (Export…) | pal(addr, word) and rgb(r, g, b) | rgb is the one value-returning builtin lowered |
+| C compiler (Export…) | reg("BXR", v), reg("BYR", v), reg("CR", v) | the three registers a toy may write |
+| C compiler (Export…) | sat(i, k, v) | one raw SAT word |
+| C compiler (Export…) | sprite(i, spec) | one SAT entry from a spec table whose slot and fields are constants; a spec the encoder's walker cannot pin is cgen-op |
+| C compiler (Export…) | pad[n].field | the five controllers |
+| C compiler (Export…) | timer(period, fn) | the HuC6280 TMA timer and its callback |
+| bytecode (every .pce) | init(), frame(t, f) and raster(line) | the hooks are global slots the runtime calls |
+| bytecode (every .pce) | values, globals, closures and control flow | int/bool/nil and function values; upvalues; jumps, branches, numeric for and returns |
+| bytecode (every .pce) | 32-bit integer arithmetic and comparisons | add sub mul mod idiv band bor bxor shl shr; eq lt le; unm, bnot and logical not |
+| bytecode (every .pce) | rgb(r, g, b) | the one builtin with a bytecode form; note(), min/max/floor/abs/clamp/sr and the fixed helpers do not encode here |
+| bytecode (every .pce) | pal(), reg(BXR/BYR/CR), vram[...] writes | vram reads (vget) have no bytecode form |
+| bytecode (every .pce) | tables: int array keys and string fields | the interpreter's fixed pool of 256 cells |
+| bytecode (every .pce) | pad[n].field |  |
+| bytecode (every .pce) | sat(i, k, v) and sprite(i, spec) |  |
 
-- A named function must be defined before it is called, in the same file.
+### Refused today
 
-The refused constructs come back by code (il-syntax, il-op, il-string, il-mixed, il-method, il-for-in, il-undefined, il-arity); a browser-only toy fails Check with one of those.
+| route | code | meaning |
+| --- | --- | --- |
+| C compiler (Export…) | cgen-arity | more than 8 parameters or arguments |
+| C compiler (Export…) | cgen-closure-loop | a closure created inside a loop |
+| C compiler (Export…) | cgen-cond | a branch whose condition the IL did not type as bool |
+| C compiler (Export…) | cgen-fixed | fixed-point arithmetic or a fixed-point constant |
+| C compiler (Export…) | cgen-global | a global whose type this backend cannot put in C |
+| C compiler (Export…) | cgen-hook | no frame() hook, no top-level chunk, or a raster() hook that is not one int parameter |
+| C compiler (Export…) | cgen-key | a constant operand that is neither int nor bool |
+| C compiler (Export…) | cgen-op | an IL instruction this backend has no C lowering for (fixed point, some builtins, print/music/sfx, or a sprite whose spec it cannot pin to constants) |
+| C compiler (Export…) | cgen-table-escape | a table site that can run more than once and escapes; one static slot would alias two tables |
+| C compiler (Export…) | cgen-table-ram | a table access or slot shape the fixed cell pool cannot serve |
+| C compiler (Export…) | cgen-target | a jump target that is not an instruction |
+| C compiler (Export…) | cgen-width | a constant that does not fit the C dialect's width |
+| bytecode (every .pce) | ilbc-arity | more than 8 parameters or arguments |
+| bytecode (every .pce) | ilbc-builtin | a builtin other than rgb |
+| bytecode (every .pce) | ilbc-fixed | fixed-point arithmetic, comparison or constant |
+| bytecode (every .pce) | ilbc-jump | a jump target that is not an instruction boundary |
+| bytecode (every .pce) | ilbc-key | a constant or operand with no bytecode form |
+| bytecode (every .pce) | ilbc-op | an instruction the bytecode has no form for (music, sfx, release, print, raster(table), vget) or a sprite whose spec the walker cannot resolve |
+| bytecode (every .pce) | ilbc-program | not a pce-il version 1 program, no functions, or a hook with no global slot |
+| bytecode (every .pce) | ilbc-range | a value past one byte: more than 127 constants, 128 registers, 255 functions or globals, or a setlist index/count |
+| bytecode (every .pce) | ilbc-table-escape | a table site that can run more than once and escapes; one static slot would alias two tables |
+| bytecode (every .pce) | ilbc-table-key | a table base that is not a register, or a key that is neither a string field nor an int operand |
+| bytecode (every .pce) | ilbc-table-ram | the table slots need more than the interpreter's 256 cells, or a key/field is past its slot's shape |
+
+A refusal is not a crash: the exported ROM cannot carry the construct, so the finding names it and the line. The browser may still run the toy — the CONSOLE tab answers that question (renderer/pce-validate.js).
 
 ## 9. When it goes wrong
 
@@ -1157,6 +1209,6 @@ Ask what they see. You are done when the picture on their screen is the one they
 
 ---
 
-Generated by node tools/docs.js --claude: the API chapters from renderer/pce-docs.js, which reads every range and refusal out of the module that enforces it; the examples from toys/. Do not edit this file by hand — tests/check-guide.js regenerates it and fails on a hand-written number.
+Generated by node tools/docs.js --claude: the API chapters from renderer/pce-docs.js, the ROM carried/refused lists from renderer/pce-cgen.js and renderer/pce-ilbc.js, and the examples from toys/. Do not edit this file by hand — tests/check-guide.js regenerates it and fails on a hand-written number.
 
-Sources: renderer/pce-toyhost.js, renderer/pce-editor.js, renderer/pce-toys.js, renderer/pce-il.js, renderer/pce-psg.js, renderer/pce-validate.js, renderer/pce-cgen.js, renderer/pce-song.js, renderer/pce-guide.js, toys/*.lua, tools/mcp/server.js (the tool names).
+Sources: renderer/pce-toyhost.js, renderer/pce-editor.js, renderer/pce-toys.js, renderer/pce-il.js, renderer/pce-psg.js, renderer/pce-validate.js, renderer/pce-cgen.js, renderer/pce-ilbc.js, renderer/pce-song.js, renderer/pce-guide.js, toys/*.lua, renderer/pce-cgen.js, renderer/pce-ilbc.js, tools/mcp/server.js (the tool names).

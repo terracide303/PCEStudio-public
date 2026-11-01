@@ -88,15 +88,20 @@
    * second copy of the pool rule (docs/TABLES-PLAN.md §5). */
   var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
 
-  function CGenError(code, message) {
+  function CGenError(code, message, line) {
     this.name = "CGenError";
     this.code = code;
     this.message = message;
+    /* The Lua source line the finding points at, when the emitter knows it.
+     * check() (below) sets it from the IL instruction for every instruction
+     * refusal, so the ROM CHECK drawer and the MCP tool can put the line in
+     * the editor gutter.  null means "the program as a whole". */
+    this.line = line == null ? null : line;
   }
   CGenError.prototype = Object.create(Error.prototype);
   CGenError.prototype.constructor = CGenError;
 
-  function refuse(code, message) { throw new CGenError(code, message); }
+  function refuse(code, message, line) { throw new CGenError(code, message, line); }
 
   /* ---- operands -------------------------------------------------------- */
 
@@ -146,16 +151,33 @@
 
   /* ---- the program as the emitter needs it ----------------------------- */
 
-  function analyse(program) {
+  function analyse(program, issues) {
+    /* `issues` is check()'s collector: when it is given, a refusal is
+     * recorded and analysis goes on instead of throwing on the first one.
+     * emitC() passes nothing, so its behaviour is unchanged. */
+    function fail(code, message, line) {
+      if (issues) {
+        issues.push(new CGenError(code, message, line));
+        return;
+      }
+      refuse(code, message, line);
+    }
+    function firstLine(fn) {
+      return fn && fn.code && fn.code.length ? fn.code[0].line : null;
+    }
+
     if (!program || program.lang !== "pce-il" || program.version !== 1) {
-      refuse("cgen-op", "not a pce-il version 1 program");
+      fail("cgen-op", "not a pce-il version 1 program", null);
+      return null;
     }
     var functions = program.functions || [];
     if (!functions.length || functions[0].name !== "main") {
-      refuse("cgen-hook", "the IL has no top-level chunk (function 0 `main`)");
+      fail("cgen-hook", "the IL has no top-level chunk (function 0 `main`)",
+           null);
+      return null;
     }
     if (program.hooks.frame == null) {
-      refuse("cgen-hook", "the toy defines no frame() hook");
+      fail("cgen-hook", "the toy defines no frame() hook", null);
     }
 
     var maxUps = 0;
@@ -164,8 +186,9 @@
     for (f = 0; f < functions.length; f++) {
       var fn = functions[f];
       if (fn.params.length > ilbc.MAX_ARGS) {
-        refuse("cgen-arity", fn.name + " takes " + fn.params.length +
-               " parameters; this backend supports at most " + ilbc.MAX_ARGS);
+        fail("cgen-arity", fn.name + " takes " + fn.params.length +
+             " parameters; this backend supports at most " + ilbc.MAX_ARGS,
+             firstLine(fn));
       }
       maxUps = Math.max(maxUps, fn.upvalues.length);
       maxParams = Math.max(maxParams, fn.params.length);
@@ -177,7 +200,8 @@
     if (hookRaster != null) {
       var rfn = functions[hookRaster];
       if (!rfn || rfn.params.length !== 1 || rfn.params[0] !== "int") {
-        refuse("cgen-hook", "raster() must be a function of one int parameter");
+        fail("cgen-hook", "raster() must be a function of one int parameter",
+             firstLine(rfn));
       }
     }
 
@@ -227,11 +251,11 @@
         if (code[pc].t !== "closure") continue;
         for (var b = 0; b < backEdges.length; b++) {
           if (pc >= backEdges[b][0] && pc <= backEdges[b][1] && closureEscapes) {
-            refuse("cgen-closure-loop",
-                   "function " + functions[f].name + ": a closure is created " +
-                   "inside a loop (IL line " + code[pc].line + ") and a " +
-                   "function value can be stored in this program; one static " +
-                   "slot per site is not enough");
+            fail("cgen-closure-loop",
+                 "function " + functions[f].name + ": a closure is created " +
+                 "inside a loop (IL line " + code[pc].line + ") and a " +
+                 "function value can be stored in this program; one static " +
+                 "slot per site is not enough", code[pc].line);
           }
         }
         closureAt[f + ":" + pc] = closureSites.length;
@@ -270,26 +294,27 @@
         /* A slot's cap/fields are emitted as uint8_t arrays, so a shape
          * that does not fit one byte would silently truncate in the C. */
         if (site.cap > 255 || site.nfields > 255) {
-          refuse("cgen-table-ram", "the table at function " + site.fid +
-                 " pc " + site.pc + " (line " + site.line + ") needs " +
-                 site.cap + " array cells and " + site.nfields +
-                 " field cells; the pool's cap/fields are one byte");
+          fail("cgen-table-ram", "the table at function " + site.fid +
+               " pc " + site.pc + " (line " + site.line + ") needs " +
+               site.cap + " array cells and " + site.nfields +
+               " field cells; the pool's cap/fields are one byte", site.line);
         }
         if (site.escapes && site.repeats) {
-          refuse("cgen-table-escape", "the table at function " + site.fid +
-                 " pc " + site.pc + " (line " + site.line + ") can run more " +
-                 "than once and escapes; one static slot would alias two " +
-                 "tables");
+          fail("cgen-table-escape", "the table at function " + site.fid +
+               " pc " + site.pc + " (line " + site.line + ") can run more " +
+               "than once and escapes; one static slot would alias two " +
+               "tables", site.line);
         }
         if (site.maxKey != null && (site.maxKey > site.cap || site.maxKey < 1)) {
-          refuse("cgen-table-ram", "a constant key " + site.maxKey + " at " +
-                 "function " + site.fid + " pc " + site.pc + " is outside " +
-                 "its slot's array part (cap " + site.cap + ")");
+          fail("cgen-table-ram", "a constant key " + site.maxKey + " at " +
+               "function " + site.fid + " pc " + site.pc + " is outside " +
+               "its slot's array part (cap " + site.cap + ")", site.line);
         }
         if (site.readMaxField != null && site.readMaxField >= site.nfields) {
-          refuse("cgen-table-ram", "a field id " + site.readMaxField +
-                 " read at function " + site.fid + " pc " + site.pc +
-                 " is past the slot's " + site.nfields + " field cells");
+          fail("cgen-table-ram", "a field id " + site.readMaxField +
+               " read at function " + site.fid + " pc " + site.pc +
+               " is past the slot's " + site.nfields + " field cells",
+               site.line);
         }
         if (tableSiteAt[site.fid] == null) {
           tableSiteAt[site.fid] = new Array(functions[site.fid].code.length);
@@ -300,8 +325,8 @@
         tableFieldIds[table.fieldIds[fi]] = fi;
       }
       if (table.cells > ilbc.TABLE_POOL_CELLS) {
-        refuse("cgen-table-ram", "the table slots need " + table.cells +
-               " cells; the fixed pool is " + ilbc.TABLE_POOL_CELLS);
+        fail("cgen-table-ram", "the table slots need " + table.cells +
+             " cells; the fixed pool is " + ilbc.TABLE_POOL_CELLS, null);
       }
     }
 
@@ -445,19 +470,29 @@
 
   /* ---- validation: refuse outside part A, naming the construct --------- */
 
-  function validate(program, a, huc) {
+  function validate(program, a, huc, issues) {
     var uses = { mod: false, idiv: false, shl: false, shr: false };
     var i, j;
     for (i = 0; i < a.functions.length; i++) {
       var fn = a.functions[i];
       if (fixedIsUsed(fn)) {
-        refuse("cgen-fixed", "function " + fn.name +
-               " reads a fixed-point parameter; part A passes t = 0");
+        var fmsg = "function " + fn.name +
+                   " reads a fixed-point parameter; part A passes t = 0";
+        if (issues) {
+          issues.push(new CGenError("cgen-fixed", fmsg,
+            fn.code && fn.code.length ? fn.code[0].line : null));
+        } else {
+          refuse("cgen-fixed", fmsg);
+        }
       }
       for (j = 0; j < fn.code.length; j++) {
         var ins = fn.code[j];
         var where = "function " + fn.name + ", IL line " + ins.line +
                     ", instruction `" + ins.t + "`";
+        /* check() runs every instruction and keeps going, so one toy can
+         * report all its refusals at once; emitC() has no collector and the
+         * first refusal throws exactly as before. */
+        try {
         switch (ins.t) {
         case "const":
           if (ins.k && ins.k.t === "fixed") {
@@ -628,7 +663,7 @@
           break;
         default:
           refuse("cgen-op", where + ": not lowered by this backend (" +
-                 "init/frame/raster and the reg/pal/vset/vget/sat/sprite/" +
+                 "init/frame/raster and the reg/pal/vset/sat/sprite/" +
                  "pad/table instructions and the timer only; no fixed " +
                  "point, print, music or sfx)");
         }
@@ -636,6 +671,11 @@
                 ? ins.target : null;
         if (t != null && (typeof t !== "number" || t < 0 || t >= fn.code.length)) {
           refuse("cgen-target", where + ": target " + t + " is not an instruction");
+        }
+        } catch (e) {
+          if (!issues || !(e instanceof CGenError)) throw e;
+          if (e.line == null && ins.line != null) e.line = ins.line;
+          issues.push(e);
         }
       }
     }
@@ -1220,35 +1260,168 @@
     return out.join("\n") + "\n";
   }
 
+  /* ---- the front end on its own (#193) --------------------------------- *
+   *
+   * check(program) runs analyse() + validate() and returns every refusal,
+   * in source order, without emitting a line of C.  renderer/pce-romcheck.js
+   * is the one caller: the Studio's ROM CHECK drawer, the MCP rom_check tool
+   * and the generated docs all report what this returns, so the list the
+   * author sees is the compiler's own, not a second description of it.
+   *
+   * emitC() is unchanged: it calls analyse(program) and validate(program, a,
+   * huc) with no collector and still throws the first CGenError. */
+  function check(program, options) {
+    var issues = [];
+    var a = analyse(program, issues);
+    if (a) validate(program, a, !!(options && options.target === "huc"), issues);
+    /* The HuC dialect's width rule lives in the constant lowering, which
+     * emitC() runs; check() never emits, so apply the same rule to every
+     * constant operand here.  The llvm route has no width refusal. */
+    if (a && options && options.target === "huc") {
+      var scan = function (ins) {
+        var ops = [ins.a, ins.b, ins.cond, ins.callee, ins.value, ins.addr,
+                   ins.word, ins.lineArg, ins.spec, ins.i, ins.k, ins.key,
+                   ins.n, ins.pad];
+        if (ins.t === "move" || ins.t === "ret") ops.push(ins.src);
+        if (ins.args) ops = ops.concat(ins.args);
+        if (ins.values) ops = ops.concat(ins.values);
+        for (var q = 0; q < ops.length; q++) {
+          var op = ops[q];
+          if (!op || !op.k) continue;
+          try {
+            constLitImpl(op.k, true);
+          } catch (e) {
+            if (!(e instanceof CGenError)) throw e;
+            if (e.line == null) e.line = ins.line == null ? null : ins.line;
+            issues.push(e);
+          }
+        }
+      };
+      for (var hf = 0; hf < a.functions.length; hf++) {
+        for (var hp = 0; hp < a.functions[hf].code.length; hp++) {
+          scan(a.functions[hf].code[hp]);
+        }
+      }
+    }
+    /* A feature can be refused twice for the same line (a global lookup in
+     * analyse and again in validate); keep one of each code+line+message. */
+    var seen = {}, out = [];
+    for (var i = 0; i < issues.length; i++) {
+      var e = issues[i];
+      var key = e.code + "\u0000" + (e.line == null ? "" : e.line) +
+                "\u0000" + e.message;
+      if (seen[key]) continue;
+      seen[key] = true;
+      out.push({ code: e.code, line: e.line == null ? null : e.line,
+                 message: e.message });
+    }
+    out.sort(function (x, y) {
+      var lx = x.line == null ? Infinity : x.line;
+      var ly = y.line == null ? Infinity : y.line;
+      return lx - ly || (x.code < y.code ? -1 : x.code > y.code ? 1 : 0);
+    });
+    return out;
+  }
+
+  /* What this backend carries today, and what it refuses, as ONE table.
+   * renderer/pce-romcheck.js re-exports it, tools/docs.js prints it and the
+   * Studio's ROM CHECK drawer shows it: there is no hand-written copy of
+   * these lists anywhere, so a feature added to (or refused by) this file
+   * cannot go stale in the docs.  `refused` is REFUSALS itself. */
+  var FEATURES = {
+    route: "C compiler — the Studio's Export (pce-cgen -> llvm-mos)",
+    carried: [
+      { id: "chunk", label: "the file's top-level statements",
+        detail: "run once by toy_boot",
+        ops: ["const", "move", "ret"] },
+      { id: "hooks", label: "init(), frame(t, f) and raster(line)",
+        detail: "the three hooks the runtime calls; the console passes t = 0",
+        ops: [] },
+      { id: "int", label: "32-bit integer arithmetic + - * % // & | ^ << >>",
+        detail: "Lua's % and // keep the divisor's sign",
+        ops: ["arith"] },
+      { id: "bool", label: "booleans, comparisons, and/or",
+        detail: "a branch condition the IL did not type as bool is cgen-cond",
+        ops: ["cmp", "br"] },
+      { id: "flow", label: "if, while, numeric for, break",
+        detail: "jumps must land on an instruction (cgen-target)",
+        ops: ["br", "jmp", "forprep", "fornext"] },
+      { id: "calls", label: "function calls with up to " + ilbc.MAX_ARGS +
+        " arguments", detail: "a ninth parameter or argument is cgen-arity",
+        ops: ["call"] },
+      { id: "closures", label: "closures and upvalues",
+        detail: "one static slot per site; a closure created in a loop is " +
+                "refused when a function value can be stored",
+        ops: ["closure", "getupval"] },
+      { id: "globals", label: "int, bool, function and table globals",
+        detail: "the IL must declare the global's type (cgen-global)",
+        ops: ["getglobal", "setglobal"] },
+      { id: "tables", label: "tables: int array keys, string fields",
+        detail: "a static pool of " + ilbc.TABLE_POOL_CELLS + " cells, one " +
+                "slot per table site; an escaping site that runs more than " +
+                "once is cgen-table-escape",
+        ops: ["table", "setlist", "tget", "tset"] },
+      { id: "vram", label: "vram[...] writes", detail: "vset; a vram read " +
+        "(vget) is cgen-op", ops: ["vset"] },
+      { id: "pal", label: "pal(addr, word) and rgb(r, g, b)",
+        detail: "rgb is the one value-returning builtin lowered",
+        ops: ["pal", "builtin"] },
+      { id: "reg", label: "reg(\"BXR\", v), reg(\"BYR\", v), reg(\"CR\", v)",
+        detail: "the three registers a toy may write",
+        ops: ["reg"] },
+      { id: "sat", label: "sat(i, k, v)", detail: "one raw SAT word",
+        ops: ["sat"] },
+      { id: "sprites", label: "sprite(i, spec)", detail: "one SAT entry " +
+        "from a spec table whose slot and fields are constants; a spec the " +
+        "encoder's walker cannot pin is cgen-op",
+        ops: ["sprite"] },
+      { id: "pads", label: "pad[n].field", detail: "the five controllers",
+        ops: ["padref", "padget"] },
+      { id: "timer", label: "timer(period, fn)",
+        detail: "the HuC6280 TMA timer and its callback",
+        ops: ["timer"] }
+    ],
+    /* Everything else the bytecode route carries and this backend does not is
+     * named by the cgen-op details in REFUSALS (the music/sfx/print surface
+     * and a sprite spec no walker can pin). */
+    refused: null
+  };
+
+  /* The codes and their meanings, for the toy author's reference (#61), the
+   * chat-AI guide's error table and the ROM CHECK drawer: one table, so a
+   * code added above is described here or the reference test notices. */
+  var REFUSALS = {
+    "cgen-op": "an IL instruction this backend has no C lowering for " +
+               "(fixed point, some builtins, print/music/sfx, or a sprite " +
+               "whose spec it cannot pin to constants)",
+    "cgen-fixed": "fixed-point arithmetic or a fixed-point constant",
+    "cgen-cond": "a branch whose condition the IL did not type as bool",
+    "cgen-global": "a global whose type this backend cannot put in C",
+    "cgen-arity": "more than " + ilbc.MAX_ARGS +
+                  " parameters or arguments",
+    "cgen-hook": "no frame() hook, no top-level chunk, or a raster() hook " +
+                 "that is not one int parameter",
+    "cgen-closure-loop": "a closure created inside a loop",
+    "cgen-key": "a constant operand that is neither int nor bool",
+    "cgen-target": "a jump target that is not an instruction",
+    "cgen-width": "a constant that does not fit the C dialect's width",
+    "cgen-table-ram": "a table access or slot shape the fixed cell pool " +
+                      "cannot serve",
+    "cgen-table-escape": "a table site that can run more than once and " +
+                         "escapes; one static slot would alias two tables"
+  };
+  FEATURES.refused = REFUSALS;
+
   return {
     VERSION: VERSION,
     CGenError: CGenError,
     emitC: emitC,
+    check: check,
+    FEATURES: FEATURES,
     /* exported for the test: the refusal codes part A can raise */
     CODES: ["cgen-op", "cgen-fixed", "cgen-cond", "cgen-global",
             "cgen-arity", "cgen-hook", "cgen-closure-loop", "cgen-key",
             "cgen-target", "cgen-width", "cgen-table-ram", "cgen-table-escape"],
-    /* The same twelve codes with their meanings, for the toy author's
-     * reference (#61) and the chat-AI guide's error table: one table, so a
-     * code added above is described here or the reference test notices. */
-    REFUSALS: {
-      "cgen-op": "an IL instruction this backend has no C lowering for " +
-                 "(fixed point, some builtins, print/music/sfx, or a " +
-                 "sprite whose spec it cannot pin to constants)",
-      "cgen-fixed": "fixed-point arithmetic or a fixed-point constant",
-      "cgen-cond": "a branch whose condition the IL did not type as bool",
-      "cgen-global": "a global whose type this backend cannot put in C",
-      "cgen-arity": "more than eight parameters or arguments",
-      "cgen-hook": "no frame() hook, no top-level chunk, or a raster() hook " +
-                   "that is not one int parameter",
-      "cgen-closure-loop": "a closure created inside a loop",
-      "cgen-key": "a constant operand that is neither int nor bool",
-      "cgen-target": "a jump target that is not an instruction",
-      "cgen-width": "a constant that does not fit the C dialect's width",
-      "cgen-table-ram": "a table access or slot shape the fixed cell pool " +
-                        "cannot serve",
-      "cgen-table-escape": "a table site that can run more than once and " +
-                           "escapes; one static slot would alias two tables"
-    }
+    REFUSALS: REFUSALS
   };
 });

@@ -158,7 +158,8 @@ function buildSandbox() {
     sat: require(path.join(ROOT, "renderer", "pce-sat.js")),
     editor: require(path.join(ROOT, "renderer", "pce-editor.js")),
     seq: require(path.join(ROOT, "renderer", "pce-seq.js")),
-    project: require(path.join(ROOT, "renderer", "pce-project.js"))
+    project: require(path.join(ROOT, "renderer", "pce-project.js")),
+    romcheck: require(path.join(ROOT, "renderer", "pce-romcheck.js"))
   };
   ctx.PCEStudio = PCEStudio;
   vm.runInContext(core, ctx, { filename: "pce-agent-tools.js" });

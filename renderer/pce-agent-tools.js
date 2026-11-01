@@ -75,18 +75,20 @@
                              require("./pce-toyhost.js"), require("./pce-panels.js"),
                              require("./pce-psg.js"), require("./pce-source.js"),
                              require("./pce-sat.js"), require("./pce-editor.js"),
-                             require("./pce-seq.js"), require("./pce-project.js"));
+                             require("./pce-seq.js"), require("./pce-project.js"),
+                             require("./pce-romcheck.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.agentTools = factory(root.PCEStudio.il, root.PCEStudio.ilbc,
       root.PCEStudio.rom, root.PCEStudio.docs, root.PCEStudio.validate,
       root.PCEStudio.sprites, root.PCEStudio.toyhost, root.PCEStudio.panels,
       root.PCEStudio.psg, root.PCEStudio.source, root.PCEStudio.sat,
-      root.PCEStudio.editor, root.PCEStudio.seq, root.PCEStudio.project);
+      root.PCEStudio.editor, root.PCEStudio.seq, root.PCEStudio.project,
+      root.PCEStudio.romcheck);
   }
 })(typeof self !== "undefined" ? self : this, function (il, ilbc, romLib, docs,
   validateLib, sprites, toyhost, panels, psg, sourceLib, satLib, editorLib,
-  seqLib, projectLib) {
+  seqLib, projectLib, romcheck) {
   "use strict";
 
   const MAIN = "main.lua";
@@ -1100,6 +1102,21 @@
           frames: { type: "integer", minimum: 1, maximum: 60, default: 8,
                     description: "frames the validator runs the toy for" }
         },
+        additionalProperties: false
+      }
+    },
+    {
+      name: "rom_check",
+      description: "What the exported ROM can and cannot run (#193): run BOTH " +
+        "cartridge front ends over the loaded main.lua — the C route " +
+        "(renderer/pce-cgen.js, the page's Export) and the bytecode route " +
+        "(renderer/pce-ilbc.js, the interpreter image every .pce carries) — " +
+        "without building anything. Returns every finding at once as " +
+        "{code, line, message}, plus the compilers' own carried and refused " +
+        "feature lists.",
+      inputSchema: {
+        type: "object",
+        properties: {},
         additionalProperties: false
       }
     },
@@ -2126,6 +2143,26 @@
       };
     }
 
+    function toolRomCheck(args) {
+      requireToy();
+      try {
+        const report = romcheck.check(session.source, { chunkName: MAIN });
+        return {
+          ok: report.ok,
+          findings: report.findings,
+          carried: report.carried,
+          refused: report.refused,
+          routes: report.routes,
+          note: "renderer/pce-romcheck.js (#193): the C route and the " +
+                "bytecode route, every refusal at once; line is the Lua " +
+                "line in main.lua, null when the finding is about the file " +
+                "as a whole"
+        };
+      } catch (e) {
+        refuse(errorCode(e), errorMessage(e));
+      }
+    }
+
     async function toolExportPce(args) {
       requireToy();
       const report = validateLib.validate(session.source,
@@ -2234,6 +2271,7 @@
       registers_get: toolRegistersGet,
       register_set: toolRegisterSet,
       validate: toolValidate,
+      rom_check: toolRomCheck,
       export_pce: toolExportPce,
       docs: toolDocs
     };
