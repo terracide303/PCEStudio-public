@@ -1,6 +1,6 @@
 # The console's real speed, measured (card #169)
 
-> Dennis, 2026-10-31: "we can use an emulator as well to do the same" (as
+> Asked on 2026-10-31: "we can use an emulator as well to do the same" (as
 > ppu.toys, whose cost number comes from its compiled code, not from the Lua
 > running in the page).
 

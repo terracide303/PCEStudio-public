@@ -586,7 +586,7 @@ async function run() {
         /name\s*=\s*"ROOM"/.test(toml),
         "wrangler.toml binds ROOM to the Room class");
   check(/\[\[migrations\]\]/.test(toml) &&
-        /new_classes\s*=\s*\["Room"\]/.test(toml),
+        /new_sqlite_classes\s*=\s*\["Room"\]/.test(toml),
         "wrangler.toml migrates the Room class");
 
   /* 8. tools.json equals the one tool core's list */

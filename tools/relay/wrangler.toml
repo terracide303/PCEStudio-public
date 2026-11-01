@@ -16,10 +16,10 @@ compatibility_date = "2025-03-15"
 
 # One Durable Object per token: env.ROOM.idFromName(token).  The Room
 # uses the WebSocket Hibernation API and writes NOTHING to storage, so
-# the key-value storage backend (new_classes) is the lightest choice.
+# the key-value storage backend (new_sqlite_classes, which the free plan requires) is the lightest choice.
 [durable_objects]
 bindings = [{ name = "ROOM", class_name = "Room" }]
 
 [[migrations]]
 tag = "v1"
-new_classes = ["Room"]
+new_sqlite_classes = ["Room"]

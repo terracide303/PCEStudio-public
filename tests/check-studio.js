@@ -7168,6 +7168,7 @@ async function checkAgentPanel() {
         "#167: the AGENT panel exposes the drawer's own functions");
 
   /* 1. nothing switched on: the sentence, and nothing to press */
+  S.RELAY_URL = "";   /* the deployed constant is set now; this step checks the unset case */
   api.render();
   eq("#167: with RELAY_URL empty the panel is not switched on",
      api.status(), "off");
