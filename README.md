@@ -140,8 +140,12 @@ and the mutation suites break the engine on purpose to show the tests notice.
 
 ## What does not work yet
 
-- **Export of the five games**: STARFALL, TOWER, NOVA TIDE, DUSK RUN and PLATFORMER are all refused today. The
-  exact code and line for each is in [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md); the simple `toys/*.lua` examples do export.
+- **Export of four of the five games**: PLATFORMER exports and runs in Mednafen at 30 Hz (re-measured
+  2026-11-01); the sprite toy runs at 60 Hz. STARFALL, TOWER, NOVA TIDE and DUSK RUN stop on named findings —
+  STARFALL on the 127-constant pool and ten sprite specs it cannot pin, TOWER and DUSK RUN on the version 3
+  sound container (they encode, but the interpreter's HuTrack engine link is not built yet), NOVA TIDE on the
+  `raster` table — and [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code, Lua line and
+  refusing file:line for each. All five run in the browser.
 - **Real hardware**: nothing has been tried on a console or a flash cart.
 - **Phones and tablets**, **CD-ROM, Arcade Card and SuperGrafx** are not designed for.
 - The MCP server and the studio have been tested on **macOS** only. Linux and Windows should work (plain Node.js and

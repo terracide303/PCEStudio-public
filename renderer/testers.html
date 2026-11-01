@@ -234,27 +234,34 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
   <table>
     <tr><th>Area</th><th>What happens</th><th>Status</th></tr>
     <tr><td>Export to <code>.pce</code></td><td>Only the simple example toys export, plus PLATFORMER (#186
-      carried the <code>sat</code> instruction; it runs at 30 Hz) and the sprite toy (#190 carried
-      <code>sprite()</code> for a spec whose slot and fields are constants; it runs at 60 Hz). The other
-      four games — STARFALL, TOWER, NOVA TIDE and DUSK RUN — stop on named findings (STARFALL's constant
-      pool and ten sprite specs it cannot pin to constants; TOWER's and DUSK RUN's sound, which encodes
-      but waits on the interpreter's engine link; NOVA TIDE's <code>raster</code> table), and
-      <code>docs/ROM_SPEED.md</code> records the exact code and line for all five. They all run in the
-      browser.</td>
+      carried the <code>sat</code> instruction; re-measured 2026-11-01, it runs at 30 Hz) and the sprite toy
+      (#190 carried <code>sprite()</code> for a spec whose slot and fields are constants; it runs at 60 Hz).
+      The other four games — STARFALL, TOWER, NOVA TIDE and DUSK RUN — stop on named findings, and the page's
+      Export and the MCP's <code>export_pce</code> stop at different ones: the page first runs the C route
+      (STARFALL's <code>abs</code> at <code>main.lua:466</code>, TOWER's <code>not</code> at
+      <code>:329</code>, NOVA TIDE's and DUSK RUN's <code>unm</code> at <code>:29</code> and
+      <code>:62</code>); the MCP reaches the bytecode route (STARFALL's 127-constant pool at
+      <code>:168</code>, TOWER's and DUSK RUN's version 3 sound container, NOVA TIDE's <code>raster</code>
+      at <code>:530</code>). <code>docs/ROM_SPEED.md</code> records every code, Lua line and refusing
+      <code>file:line</code>. All five run in the browser.</td>
       <td class="status soon">next big job</td></tr>
     <tr><td>Real hardware</td><td>Exports are checked in an emulator only.</td><td class="status no">untested</td></tr>
     <tr><td>Dropping a <code>.lua</code> file</td><td>The studio keeps the previous toy's art, so the SCREEN
       panel can show old pictures. Reload the page before dropping a new file.</td><td class="status soon">being fixed</td></tr>
     <tr><td>Game art in ASSETS</td><td>Art that a game draws in code shows only in VRAM, not as named assets with
       a preview.</td><td class="status soon">being built</td></tr>
-    <tr><td>Sound in an exported ROM</td><td>The ROM has no sound code yet, so games that call
-      <code>sfx()</code> or <code>note()</code> run in the browser but stop at Export. The plan is to build it on
-      the HuTrack sound engine.</td><td class="status soon">next</td></tr>
-    <tr><td>What the ROM can run, while you write</td><td>You learn the limits (for example, at most four
-      parameters per function) only when you press Export. A live ROM check is being built.</td>
+    <tr><td>Sound in an exported ROM</td><td>The ROM has no sound code yet. A toy that calls
+      <code>sfx()</code>, <code>note()</code> or <code>music()</code> encodes, but the build refuses the
+      version 3 (sound) container until the HuTrack engine is linked into the interpreter, so it stops at
+      Export. The plan is to build it on the HuTrack sound engine.</td><td class="status soon">next</td></tr>
+    <tr><td>What the ROM can run, while you write</td><td>ROM CHECK (and the MCP's <code>rom_check</code>)
+      now reports the exact findings for both routes while you write. It is a front-end check: it does not
+      build the ROM or run it, so the frame rate still needs Export and an emulator.</td>
+      <td class="status ok">built; front end only</td></tr>
+    <tr><td>Claude Code: songs</td><td>Through the MCP server a toy's <code>music(0)</code> now encodes
+      (it is no longer refused), but the ROM build still stops at the version 3 sound container until the
+      HuTrack engine is linked in. <code>sfx()</code> and <code>note()</code> reach the same gate.</td>
       <td class="status soon">being built</td></tr>
-    <tr><td>Claude Code: songs</td><td>Through the MCP server a game can't carry a song yet
-      (<code>music(0)</code> is refused; <code>sfx()</code> notes work).</td><td class="status soon">being built</td></tr>
     <tr><td>Connect Claude (live link)</td><td>New and lightly tested: if Connect does not give you a working
       command, or Claude says no studio tab is connected, please report it.</td><td class="status soon">please test</td></tr>
     <tr><td>Export error reports</td><td>When an export is refused, the studio sends the error message (code, line
