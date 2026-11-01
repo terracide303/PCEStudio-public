@@ -95,12 +95,15 @@ Each toy's own `README.md` says how it was made and which keys it uses. A toy's 
 The studio compiles a toy to a small bytecode and glues it to a fixed interpreter ROM, all in the browser
 ([`docs/EXPORT.md`](docs/EXPORT.md), [`docs/IL.md`](docs/IL.md)). The simple example toys in `toys/*.lua`
 (parallax, status bar, sky gradient, palette cycle) export today, and so does **PLATFORMER** (#186 carried
-the `sat` instruction — its ROM runs in Mednafen at 30 Hz). The other four games — STARFALL, TOWER,
-NOVA TIDE and DUSK RUN — do not yet: each is stopped by a named finding, and
-[`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five (STARFALL's 127-constant
-pool, the missing `sfx` instruction for TOWER, NOVA TIDE's `note` builtin, DUSK RUN's `not`), with the
-`sprite()`/`sfx()`/`raster` instructions and the 8 KiB data bank behind those. Carrying them
-is the next big piece of work. The ROMs are checked in Mednafen; nothing has run on a real console yet.
+the `sat` instruction — its ROM runs in Mednafen at 30 Hz). `sprite()` is carried too, for a spec whose
+slot and fields are constants (#188–#190; its ROM runs at 60 Hz). The other four games — STARFALL,
+TOWER, NOVA TIDE and DUSK RUN — do not yet: each is stopped by a named finding, and
+[`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five (STARFALL's
+127-constant pool and the ten sprite specs it cannot pin to constants; TOWER's and DUSK RUN's sound,
+which now encodes but waits on the interpreter's engine link; NOVA TIDE's `raster` table), with the
+`raster` table form, the sound engine and the 8 KiB data bank behind those. Carrying them is the next
+big piece of work. The ROMs are checked in
+Mednafen; nothing has run on a real console yet.
 
 ## Project files
 

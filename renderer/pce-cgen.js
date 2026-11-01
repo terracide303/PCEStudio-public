@@ -1432,7 +1432,7 @@
       { id: "sound", label: "music(song), sfx(ch, freq, volume, frames), " +
         "release(ch) and note(midi)",
         detail: "lowered to the engine's runtime calls toy_music/toy_sfx/" +
-                "toy_release/toy_note — the engine-link card declares them, " +
+                "toy_release/toy_note — a later engine link declares them, " +
                 "so a sound toy's C does not build until then (the browser " +
                 "host runs the same ops today)",
         ops: ["music", "sfx", "release"] }

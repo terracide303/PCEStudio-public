@@ -860,7 +860,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | C compiler (Export…) | sprite(i, spec) | one SAT entry from a spec table whose slot and fields are constants; a spec the encoder's walker cannot pin is cgen-op |
 | C compiler (Export…) | pad[n].field | the five controllers |
 | C compiler (Export…) | timer(period, fn) | the HuC6280 TMA timer and its callback |
-| C compiler (Export…) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | lowered to the engine's runtime calls toy_music/toy_sfx/toy_release/toy_note — the engine-link card declares them, so a sound toy's C does not build until then (the browser host runs the same ops today) |
+| C compiler (Export…) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | lowered to the engine's runtime calls toy_music/toy_sfx/toy_release/toy_note — a later engine link declares them, so a sound toy's C does not build until then (the browser host runs the same ops today) |
 | bytecode (every .pce) | init(), frame(t, f) and raster(line) | the hooks are global slots the runtime calls |
 | bytecode (every .pce) | values, globals, closures and control flow | int/bool/nil and function values; upvalues; jumps, branches, numeric for and returns |
 | bytecode (every .pce) | 32-bit integer arithmetic and comparisons | add sub mul mod idiv band bor bxor shl shr; eq lt le; unm, bnot and logical not |
@@ -869,7 +869,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | bytecode (every .pce) | tables: int array keys and string fields | the interpreter's fixed pool of 256 cells |
 | bytecode (every .pce) | pad[n].field |  |
 | bytecode (every .pce) | sat(i, k, v) and sprite(i, spec) |  |
-| bytecode (every .pce) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | a sound toy's container is version 3, which the committed interpreter does not read — export refuses the ROM until the engine-link card lands (the sound umbrella).  The host harness runs the same ops today. |
+| bytecode (every .pce) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | a sound toy's container is version 3, which the committed interpreter does not read — export refuses the ROM until the engine link lands.  The host harness runs the same ops today. |
 
 ### Refused today
 
