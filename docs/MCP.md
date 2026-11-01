@@ -488,8 +488,8 @@ The built-in instruments are `lead`, `bass`, `bell`, `strings` (wave voices)
 and `kick`, `snare` (noise drums; the toy runtime's player has no effect
 columns, so through `music()` they sound their envelope on a wave channel —
 use `sfx()` for a percussion hit in a toy; the ROM song conversion encodes
-their on/off as HuTrack's noise effect `11`). `step` counts columns from 0 across patterns
-of `steps` columns, so step 32 is pattern 2 column 0.
+their on/off as HuTrack's noise effect `11`). `step` counts columns from 0
+across patterns of `steps` columns, so step 32 is pattern 2 column 0.
 
 ```json
 {"name":"song_write","arguments":{"name":"game tune","tempo":140,"steps":16,
