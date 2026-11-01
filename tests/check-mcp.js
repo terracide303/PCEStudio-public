@@ -1393,7 +1393,7 @@ function usedChannels(song) {
       check(!defaultSave.isError && defaultSave.body.ok,
             "the default folder is the server's own and saves there");
       eq("the file lands in the folder the server was started in",
-         defaultSave.body.path, path.join(work2, "here.pce.json"));
+         defaultSave.body.path, path.join(fs.realpathSync(work2), "here.pce.json"));
       check(fs.existsSync(path.join(work2, "here.pce.json")),
             "the file is in that folder");
       const defaultOut = await client2.call("toy_save", {
