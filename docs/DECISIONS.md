@@ -409,3 +409,38 @@ PLATFORMER pin moved from a refusal to a build: its ROM, its static-scene
 picture and its 30 Hz measure are pinned, with the ~7 s interpreter boot
 covered by the pin's own measure/capture lengths.  A cold break by another
 seat is owed (workshop rule 2).
+
+## 2026-11-01 — logical not is its own opcode, never an alias of bnot (card #187)
+
+Route 1 had no logical `not`, so TOWER (`main.lua:329`) and DUSK RUN
+(`main.lua:401`) — each with exactly one, as a *stored* value
+(`local jump = pad[1].i and not was_i`) — were refused by the encoder
+(`ilbc-op: instruction not ... has no bytecode form`). The card said
+pce-cgen.js lowers it; it does not: a `not` that survives in the final IL is
+refused by the compiled route too (`cgen-op ... not lowered by this
+backend`). It is carried as **its own opcode `0x11`** — the free slot
+between bnot `0x10` and cmp `0x12` — with the same 3-byte shape as every
+unary op (dst:reg, a:op).
+
+The semantics are the IL host's `!truthy(a)` in 0/1, not bnot's `~`: the IL
+unifies `not`'s operand to BOOL (an int operand is an `il-type` error), so on
+route 1 the operand byte is already 0/1 — a nil constant loads as 0. The
+interpreter's single line is `r[d] = (operand(r, rb(pc++)) == 0) ? 1 : 0`.
+An alias of bnot would turn false into `0xFFFFFFFF`, a *truthy* branch: the
+wrong `if` paints, and a picture comparison could only catch it by luck.
+The two IL instructions stay separate, and so do the opcodes.
+
+Evidence on the card's named route: `tools/toys/not.lua` (new) runs two
+`not`s a frame — `not even` and `not third` — feeding pal 0–3, one VRAM word
+and the BXR scroll, a 6-frame picture cycle. `tests/check-ilvm.js` pins the
+encoding (fn 1, op `0x11`, len 3), runs the toy on the host harness for
+8 frames and diffs vram/cram/sat/regs against the browser IL run, with a
+mutation control (`r[d] = 0` + a dead `rb(pc++)`) that must break it; the
+existing bnot toy stays byte-identical to the pre-#187 encoder, so toys
+without `not` keep their containers. `tests/check-export-games.js` pins
+not.lua's ROM sha and 4 captured frames (diff 0 vs the browser's first
+frames), and DUSK RUN's pin moves from `not` (fn 39 pc 16) to the *next*
+refusal, `sfx` (fn 39, pc 50, `main.lua:416`). **TOWER's pin did not move**:
+its `sfx` (fn 36, pc 9) is scanned before the `not` in fn 37, so the card's
+"TOWER pin moves" half is wrong on the ground — the pin's comment records
+that. A cold break by another seat is owed (workshop rule 2).

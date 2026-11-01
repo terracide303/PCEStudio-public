@@ -79,6 +79,10 @@
  *   0E arith  op:u8 dst:reg a:op b:op
  *   0F unm    dst:reg a:op
  *   10 bnot   dst:reg a:op
+ *   11 not    dst:reg a:op            (logical not, #187: the operand is a
+ *              bool — 0 false / 1 true, or a nil constant's 0 — and the
+ *              interpreter stores 0/1, the IL host's !truthy(a), not bnot's
+ *              bitwise ~; its own opcode, never an alias of bnot)
  *   12 cmp    op:u8 dst:reg a:op b:op
  *   13 builtin id:u8 dst:reg n:u8 args:n*op
  *   14 pal    addr:op word:op
@@ -111,7 +115,8 @@
  *   ilbc-program  not a pce-il version 1 program
  *   ilbc-op       an IL instruction the interpreter does not have
  *                 (sprites, print, music, raster tables, ...; tables are
- *                 carried since #172, pads since #185, sat since #186)
+ *                 carried since #172, pads since #185, sat since #186,
+ *                 logical not since #187)
  *   ilbc-fixed    fixed-point arithmetic or a fixed constant
  *   ilbc-key      a constant that is not int/bool/nil
  *   ilbc-arity    more than eight parameters or arguments
@@ -165,7 +170,7 @@
     const: 0x01, move: 0x02, getglobal: 0x03, setglobal: 0x04,
     getupval: 0x05, setupval: 0x06, closure: 0x07, call: 0x08,
     ret: 0x09, jmp: 0x0A, br: 0x0B, forprep: 0x0C, fornext: 0x0D,
-    arith: 0x0E, unm: 0x0F, bnot: 0x10, cmp: 0x12, builtin: 0x13,
+    arith: 0x0E, unm: 0x0F, bnot: 0x10, not: 0x11, cmp: 0x12, builtin: 0x13,
     pal: 0x14, reg: 0x15, vset: 0x16, vget: 0x17,
     table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B,
     padref: 0x1C, padget: 0x1D, sat: 0x1E
@@ -252,7 +257,8 @@
     var t = ins.t;
     if (t === "const" || t === "move" || t === "getglobal" ||
         t === "setglobal" || t === "getupval" || t === "setupval" ||
-        t === "closure" || t === "unm" || t === "bnot" || t === "pal" ||
+        t === "closure" || t === "unm" || t === "bnot" || t === "not" ||
+        t === "pal" ||
         t === "reg" || t === "vset" || t === "vget" || t === "padref") return 3;
     if (t === "ret") return 2;
     if (t === "jmp") return 3;
@@ -689,6 +695,7 @@
         break;
       case "unm":
       case "bnot":
+      case "not":
         buf.u8(reg(ins.dst)); buf.u8(op(ins.a));
         break;
       case "cmp":

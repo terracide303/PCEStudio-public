@@ -205,12 +205,13 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 | toy | exports? | picture matches? | overruns | worst update | verdict | validator's static estimate |
 |-----|----------|------------------|----------|--------------|---------|-----------------------------|
 | **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants`; the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
-| **TOWER** `toys/tower` | **no** — `ilbc-op: instruction sfx (function 36, pc 9) has no bytecode form` (`main.lua:324`). #186 carried `sat`, its old refusal; `sfx` is the next uncarried kind (#135). | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
+| **TOWER** `toys/tower` | **no** — `ilbc-op: instruction sfx (function 36, pc 9) has no bytecode form` (`main.lua:324`). #186 carried `sat`, its old refusal; #187 carried `not` but the toy's one `not` sits in function 37 (`main.lua:329`), after this sfx, so the pin survives; `sfx` is the next uncarried kind (#135). | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
 | **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-builtin: builtin \`note\` has no bytecode form` (`main.lua:137`). #186 carried `sat`, its old refusal; only `rgb` has a bytecode form, so `note` is the next gap (#137). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
-| **DUSK RUN** `toys/dusk-run` | **no** — `ilbc-op: instruction not (function 39, pc 16) has no bytecode form` (`main.lua:401`; card **#187**). #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
+| **DUSK RUN** `toys/dusk-run` | **no** — `ilbc-op: instruction sfx (function 39, pc 50) has no bytecode form` (`main.lua:416`). #187 carried `not`, its old refusal (`function 39, pc 16`, `main.lua:401`), so the refusal moved to the toy's first sfx (#135). #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
 | **PLATFORMER** `toys/platformer` | **yes** — 24,576 B, sha256 `ab59d6d38056fab2…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 312 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
 | *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `bbcedd18f5a858bb…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 112 | **623** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
 | *control #183* `tools/toys/arity.lua` | **yes** — 24,576 B, sha256 `98fb4991ca7703c6…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 112 | **783** lines | **too slow** | — |
+| *control #187* `tools/toys/not.lua` | **yes** — 24,576 B, sha256 `6e5901293072cb79…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **106** lines | **60 Hz** | — |
 
 ### What this says, plainly
 
@@ -227,10 +228,11 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   measure reads 0 updates mid-boot; and the interpreter's display-on keeps
   the toy's CR, so the sprites' SB bit survives `toy_display_on` (`docs/IL.md`
   §14, the compiled runtime's `toy_cr` shadow).
-- **The other four stop on four different kinds.** The 127-constant pool
-  (STARFALL), `sfx` (TOWER), the `note` builtin (NOVA TIDE) and logical
-  `not` (DUSK RUN) — #186 moved TOWER, NOVA TIDE and DUSK RUN past `sat`,
-  so the table's refusals are each the toy's next gap, not one shared one.
+- **The other four stop on three different kinds.** The 127-constant pool
+  (STARFALL), `sfx` (TOWER and DUSK RUN), and the `note` builtin (NOVA
+  TIDE) — #186 moved TOWER, NOVA TIDE and DUSK RUN past `sat`, and #187
+  moved DUSK RUN past logical `not` to its first `sfx`, so the table's
+  refusals are each the toy's next gap, not one shared one.
 - **DUSK RUN's validator refusal was the probe, not the toy (#184).** The
   export validates with an 8-frame run and judges its last frame; DUSK RUN
   builds its landscape over 137 frames, so frame 7 is build step 7 and costs
@@ -240,8 +242,9 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   18.3 Hz `tests/check-dusk-run.js` already recorded at 600 frames.  The
   validator now runs a refused probe on to 300 frames before refusing; the
   8-frame ceiling still refuses a toy that is over it in its steady state
-  (`tests/check-validate.js` V07).  DUSK RUN now reaches the encoder and
-  stops on `not` (**#187**).  Its **route-1** projection is still 0.71 Hz
+  (`tests/check-validate.js` V07).  DUSK RUN now reaches the encoder and,
+  with #187 carrying logical `not`, stops on its first `sfx`
+  (`main.lua:416`; #135).  Its **route-1** projection is still 0.71 Hz
   steady-state (84.95 frames per update) — the compiled-route estimate is
   what the validator prices; the export builds the interpreter.
 - **The static estimate is still an estimate.** It is the same
@@ -262,7 +265,7 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   projections put STARFALL at 8,969 B, TOWER at 8,379 B and NOVA TIDE at
   9,287 B — all over the interpreter's 8,192-byte data bank (#138), before
   the still-uncarried kinds (`sprite` #133, `sfx` #135, `raster`
-  table #136, builtins #137, `not` #187) are counted. DUSK RUN (7,385 B)
+  table #136, builtins #137) are counted. DUSK RUN (7,385 B)
   fits, PLATFORMER (2,351 B) fits and now builds.
 
 ### The cards this measurement added
@@ -273,10 +276,11 @@ are on the board: **#148** (the 127-constant pool, already open),
 now stop on `sat`), **#184** (closed 2026-11-01: DUSK RUN's refusal was the
 8-frame probe sampling its build; the probe extends to the 300-frame
 performance, so the toy reaches the encoder), **#185**
-(closed 2026-11-01: padref/padget carried) and **#186** (closed 2026-11-01:
+(closed 2026-11-01: padref/padget carried), **#186** (closed 2026-11-01:
 `sat` carried, PLATFORMER builds and measures 30 Hz — the first game
-export). The uncarried kind the inventory behind them names next is
-**#187** (logical `not`); the rest are the existing #133–#138 umbrellas.
+export) and **#187** (closed 2026-11-01: logical `not` carried; DUSK RUN
+moves to its first `sfx`, TOWER's pin survives — its sfx is scanned first).
+The rest are the existing #133–#138 umbrellas.
 
 ## What is not proven
 
