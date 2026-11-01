@@ -854,20 +854,22 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | C compiler (Export…) | int, bool, function and table globals | the IL must declare the global's type (cgen-global) |
 | C compiler (Export…) | tables: int array keys, string fields | a static pool of 256 cells, one slot per table site; an escaping site that runs more than once is cgen-table-escape |
 | C compiler (Export…) | vram[...] writes | vset; a vram read (vget) is cgen-op |
-| C compiler (Export…) | pal(addr, word) and rgb(r, g, b) | rgb is the one value-returning builtin lowered |
+| C compiler (Export…) | pal(addr, word) and rgb(r, g, b) | rgb and note are the value-returning builtins lowered |
 | C compiler (Export…) | reg("BXR", v), reg("BYR", v), reg("CR", v) | the three registers a toy may write |
 | C compiler (Export…) | sat(i, k, v) | one raw SAT word |
 | C compiler (Export…) | sprite(i, spec) | one SAT entry from a spec table whose slot and fields are constants; a spec the encoder's walker cannot pin is cgen-op |
 | C compiler (Export…) | pad[n].field | the five controllers |
 | C compiler (Export…) | timer(period, fn) | the HuC6280 TMA timer and its callback |
+| C compiler (Export…) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | lowered to the engine's runtime calls toy_music/toy_sfx/toy_release/toy_note — a later engine link declares them, so a sound toy's C does not build until then (the browser host runs the same ops today) |
 | bytecode (every .pce) | init(), frame(t, f) and raster(line) | the hooks are global slots the runtime calls |
 | bytecode (every .pce) | values, globals, closures and control flow | int/bool/nil and function values; upvalues; jumps, branches, numeric for and returns |
 | bytecode (every .pce) | 32-bit integer arithmetic and comparisons | add sub mul mod idiv band bor bxor shl shr; eq lt le; unm, bnot and logical not |
-| bytecode (every .pce) | rgb(r, g, b) | the one builtin with a bytecode form; note(), min/max/floor/abs/clamp/sr and the fixed helpers do not encode here |
+| bytecode (every .pce) | rgb(r, g, b) and note(midi) | the two builtins with a bytecode form (note is a MIDI number to the PSG's 12-bit F); min/max/floor/abs/clamp/sr and the fixed helpers do not encode here |
 | bytecode (every .pce) | pal(), reg(BXR/BYR/CR), vram[...] writes | vram reads (vget) have no bytecode form |
 | bytecode (every .pce) | tables: int array keys and string fields | the interpreter's fixed pool of 256 cells |
 | bytecode (every .pce) | pad[n].field |  |
 | bytecode (every .pce) | sat(i, k, v) and sprite(i, spec) |  |
+| bytecode (every .pce) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | a sound toy's container is version 3, which the committed interpreter does not read — export refuses the ROM until the engine link lands.  The host harness runs the same ops today. |
 
 ### Refused today
 
@@ -880,17 +882,17 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | C compiler (Export…) | cgen-global | a global whose type this backend cannot put in C |
 | C compiler (Export…) | cgen-hook | no frame() hook, no top-level chunk, or a raster() hook that is not one int parameter |
 | C compiler (Export…) | cgen-key | a constant operand that is neither int nor bool |
-| C compiler (Export…) | cgen-op | an IL instruction this backend has no C lowering for (fixed point, some builtins, print/music/sfx, or a sprite whose spec it cannot pin to constants) |
+| C compiler (Export…) | cgen-op | an IL instruction this backend has no C lowering for (fixed point, some builtins, print, or a sprite whose spec it cannot pin to constants) |
 | C compiler (Export…) | cgen-table-escape | a table site that can run more than once and escapes; one static slot would alias two tables |
 | C compiler (Export…) | cgen-table-ram | a table access or slot shape the fixed cell pool cannot serve |
 | C compiler (Export…) | cgen-target | a jump target that is not an instruction |
 | C compiler (Export…) | cgen-width | a constant that does not fit the C dialect's width |
 | bytecode (every .pce) | ilbc-arity | more than 8 parameters or arguments |
-| bytecode (every .pce) | ilbc-builtin | a builtin other than rgb |
+| bytecode (every .pce) | ilbc-builtin | a builtin other than rgb and note |
 | bytecode (every .pce) | ilbc-fixed | fixed-point arithmetic, comparison or constant |
 | bytecode (every .pce) | ilbc-jump | a jump target that is not an instruction boundary |
 | bytecode (every .pce) | ilbc-key | a constant or operand with no bytecode form |
-| bytecode (every .pce) | ilbc-op | an instruction the bytecode has no form for (music, sfx, release, print, raster(table), vget) or a sprite whose spec the walker cannot resolve |
+| bytecode (every .pce) | ilbc-op | an instruction the bytecode has no form for (print, raster(table), vget) or a sprite whose spec the walker cannot resolve |
 | bytecode (every .pce) | ilbc-program | not a pce-il version 1 program, no functions, or a hook with no global slot |
 | bytecode (every .pce) | ilbc-range | a value past one byte: more than 127 constants, 128 registers, 255 functions or globals, or a setlist index/count |
 | bytecode (every .pce) | ilbc-table-escape | a table site that can run more than once and escapes; one static slot would alias two tables |
@@ -922,7 +924,7 @@ Every refusal is a named failure, not a silent drop: the studio shows `code: fil
 | password-code | a password that is not one |
 | tile-space | no room for another tile: the ROM layout gives 1536, or the patterns would reach the SAT |
 | validate-rom | an estimated ROM past the HuCard's 1 MB |
-| cgen-op | an IL instruction this backend has no C lowering for (fixed point, some builtins, print/music/sfx, or a sprite whose spec it cannot pin to constants) |
+| cgen-op | an IL instruction this backend has no C lowering for (fixed point, some builtins, print, or a sprite whose spec it cannot pin to constants) |
 | toy-timeout | a toy hook past the frame's Lua budget |
 | toy-error | a Lua error inside the toy, naming file:line |
 | il-syntax | Lua's own compile error, with file:line |

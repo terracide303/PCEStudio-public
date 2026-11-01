@@ -85,7 +85,20 @@
  *      tools/toys/not.lua is the same evidence on the ROM route
  *      (tests/check-export-games.js: the Mednafen capture is diff 0
  *      against the browser).
- *  12. #191: tests/dumps/toysprite-ilvm.  tools/toys/sprite.lua emitted
+ *  12. #197: the sound ops.  music/sfx/release encode as opcodes 0x20/0x21/
+ *      0x22 (two, five and two bytes) and note as builtin id 1, and a toy
+ *      with any of the four is container version 3 — the version 2 layout
+ *      with an empty one-byte table section when it has no tables.  The
+ *      committed interpreter reads versions 1 and 2, so buildToyRom refuses
+ *      a version 3 container until #198 links the engine (this card changes
+ *      no interpreter byte, the #172/#175 pair's own pattern).  The encode
+ *      half pins version 3, the header, one container op per IL op at the
+ *      IL's position, the operand byte order (song; ch, freq, volume,
+ *      frames; ch; the builtin's id/dst/n/arg) and the pool's constants;
+ *      the host half pins the browser host's PSG writes for the same toy —
+ *      the sfx's wave upload, note(60)'s F to R2/R3 and release(2)'s
+ *      channel select.
+ *  13. #191: tests/dumps/toysprite-ilvm.  tools/toys/sprite.lua emitted
  *      through the browser path, run on the console in Mednafen
  *      (tools/capture-ilvm.sh), and pinned end to end: the fresh build is
  *      the dumped ROM; all 160 captured tail frames are diff 0 against
@@ -125,6 +138,11 @@
  * that is not shifted left, the attribute bits packed differently), the
  * DSR mirror window's address ($7F00) and length (256 words), and the
  * export-game pin — the sprite ROM's sha and its static picture hash.
+ * #197's own targets: the three op lengths and their operand byte order
+ * (song; ch/freq/volume/frames; ch), the version-3 header and the empty
+ * one-byte table section, the pool constants the note builtin pulls in,
+ * and the host parity pins — note's rounded-and-clamped F, the sfx wave
+ * upload, and release's three-word tail on the owned channel.
  */
 "use strict";
 
@@ -302,7 +320,7 @@ function checkEncoder() {
   eq("a fixed constant is ilbc-fixed", codeFor(
     "function frame(t, f)\n  local x = 1.5\n  pal(1, floor(x))\nend\n"),
     "ilbc-fixed");
-  eq("a builtin other than rgb is ilbc-builtin", codeFor(
+  eq("a builtin other than rgb and note is ilbc-builtin", codeFor(
     "function frame(t, f)\n  pal(1, clamp(f, 0, 8))\nend\n"),
     "ilbc-builtin");
 }
@@ -322,7 +340,8 @@ var INSN_LEN = {
   0x01: 3, 0x02: 3, 0x03: 3, 0x04: 3, 0x05: 3, 0x06: 3, 0x07: 3,
   0x09: 2, 0x0A: 3, 0x0B: 5, 0x0C: 2, 0x0D: 4, 0x0E: 5, 0x0F: 3,
   0x10: 3, 0x11: 3, 0x12: 5, 0x14: 3, 0x15: 3, 0x16: 3, 0x17: 3,
-  0x18: 3, 0x1A: 5, 0x1B: 5, 0x1C: 3, 0x1D: 4, 0x1E: 4, 0x1F: 7
+  0x18: 3, 0x1A: 5, 0x1B: 5, 0x1C: 3, 0x1D: 4, 0x1E: 4, 0x1F: 7,
+  0x20: 2, 0x21: 5, 0x22: 2
 };
 
 /* Walk every function's code and return each instruction with its byte
@@ -749,10 +768,9 @@ function checkTableEncoding() {
      [1, 0, 0, 0, 1]);
 
   /* STARFALL's table section against tableLayout(): 44 slots, 172 cells, in
-   * site order.  STARFALL still cannot encode (sfx is not carried and its
-   * sprite specs and constant pool overflow the limits), so the section is
-   * built directly by the encoder's own builder — the bytes encode()
-   * writes. */
+   * site order.  STARFALL still cannot encode (its sprite specs and its
+   * constant pool overflow the limits), so the section is built directly by
+   * the encoder's own builder — the bytes encode() writes. */
   const starProg = il.compile(
     fs.readFileSync(path.join(ROOT, "toys/demo-game/main.lua"), "utf8"),
     { chunkName: "main.lua" });
@@ -2078,6 +2096,180 @@ function checkNotHostParity() {
         (mutantRegs === wantRegs ? "equal" : "differ") + ")");
 }
 
+/* ---- #197: the sound ops (0x20 music, 0x21 sfx, 0x22 release, and the
+ * note builtin, id 1) ----------------------------------------------------- *
+ * The front ends carry the four sound constructs (docs/ROM-SOUND.md §7): the
+ * encoder gains the three opcodes and the note builtin, and a sound toy's
+ * container is version 3 — the version 2 layout with an empty one-byte table
+ * section when the toy has no tables.  The committed interpreter reads
+ * versions 1 and 2, so buildToyRom refuses a version 3 container until #198
+ * links the engine (this card changes no interpreter byte: no re-capture, no
+ * committed-rom sha churn — the #172/#175 pair's own pattern).  The host
+ * harness below is the BROWSER host (renderer/pce-toyhost through il.create),
+ * the host the five games already run their sfx()/note()/release() on; the
+ * bytecode's console half is #198's evidence.
+ *
+ * The encode half pins: version 3, the 28-byte header with the empty
+ * section, one container op per IL op at the IL's own position, the operand
+ * bytes in the IL's field order (song; ch, freq, volume, frames; ch; and the
+ * builtin's id, dst, n, argument), and the toy's constants in the pool.  The
+ * compiler materialises every operand into a scratch register (like sat), so
+ * the operand bytes are registers and the pool carries the values through
+ * the const instructions.  The host half pins the same toy's PSG writes:
+ * the sfx's wave upload, note(60)'s F to R2/R3, and release(2)'s channel
+ * select. */
+const SOUND_TOY = [
+  "function frame(t, f)",
+  "  music(0)",
+  "  sfx(0, note(60), 9, 6)",
+  "  sfx(f % 4, note(f % 12 + 60), 9, 6)",
+  "  release(2)",
+  "end",
+  ""
+].join("\n");
+
+const SOUND_FRAMES = 3;
+
+function checkSoundEncoding() {
+  const program = il.compile(SOUND_TOY, { chunkName: "sound.lua" });
+  const encoded = ilbc.encode(program);
+  eq("sound encoding: a toy with the four sound constructs is container " +
+     "version 3", encoded.bytes[4], 3);
+  eq("sound encoding: the version 3 header is 28 bytes",
+     u16At(encoded.bytes, 12), 28);
+  eq("sound encoding: the empty table section is one nslots byte",
+     [u16At(encoded.bytes, 22) - u16At(encoded.bytes, 20),
+      encoded.bytes[u16At(encoded.bytes, 20)]], [1, 0]);
+
+  const ins = walkContainer(encoded.bytes);
+  const musics = ins.filter(function (i) { return i.op === 0x20; });
+  const sfxs = ins.filter(function (i) { return i.op === 0x21; });
+  const releases = ins.filter(function (i) { return i.op === 0x22; });
+  const notes = ins.filter(function (i) {
+    return i.op === 0x13 && encoded.bytes[i.at + 1] === 1;
+  });
+  check(musics.length >= 1 && sfxs.length >= 1 &&
+        releases.length >= 1 && notes.length >= 1,
+        "sound encoding: the toy encodes at least one music, sfx, release " +
+        "and note (" + musics.length + "/" + sfxs.length + "/" +
+        releases.length + "/" + notes.length + ")");
+  check(musics.every(function (i) { return i.len === 2; }) &&
+        sfxs.every(function (i) { return i.len === 5; }) &&
+        releases.every(function (i) { return i.len === 2; }) &&
+        notes.every(function (i) { return i.len === 5; }),
+        "sound encoding: music is two bytes, sfx five, release two, and a " +
+        "builtin note five (op, id, dst, n, one operand)");
+
+  /* One container op per IL op, at the IL's own position (the encoder emits
+   * exactly one instruction per IL instruction), with the operand bytes in
+   * the IL's field order.  A dropped, reordered or misplaced op shows as a
+   * missing or mismatched byte. */
+  const byFid = {};
+  ins.forEach(function (i) { (byFid[i.fid] = byFid[i.fid] || []).push(i); });
+  let ops = 0, orderOk = true;
+  for (let f = 0; f < program.functions.length; f++) {
+    (program.functions[f].code || []).forEach(function (x, pc) {
+      const isSound = x.t === "music" || x.t === "sfx" || x.t === "release" ||
+        (x.t === "builtin" && x.name === "note");
+      if (!isSound) return;
+      ops++;
+      const c = byFid[f][pc];
+      const b = encoded.bytes;
+      if (!c || c.op !== (x.t === "builtin" ? 0x13
+                          : x.t === "music" ? 0x20
+                          : x.t === "sfx" ? 0x21 : 0x22)) {
+        orderOk = false; return;
+      }
+      if (x.t === "music") orderOk = orderOk && b[c.at + 1] === x.song.r;
+      if (x.t === "sfx") orderOk = orderOk &&
+        b[c.at + 1] === x.ch.r && b[c.at + 2] === x.freq.r &&
+        b[c.at + 3] === x.volume.r && b[c.at + 4] === x.frames.r;
+      if (x.t === "release") orderOk = orderOk && b[c.at + 1] === x.ch.r;
+      if (x.t === "builtin") orderOk = orderOk &&
+        b[c.at + 1] === 1 && b[c.at + 2] === x.dst &&
+        b[c.at + 3] === x.args.length && b[c.at + 4] === x.args[0].r;
+    });
+  }
+  eq("sound encoding: the container holds one op per IL sound construct",
+     ops, musics.length + sfxs.length + releases.length + notes.length);
+  check(orderOk, "sound encoding: each container op sits where its IL op " +
+        "does, with the operand bytes in the IL's field order");
+
+  /* The toy's constants (0, 60, 9, 6, 4, 12, 2, in first-use order) are in
+   * the pool — the ints the sound operands need, carried by the const
+   * instructions that feed the scratch registers. */
+  const constOff = u16At(encoded.bytes, 16);
+  const pool = [];
+  let p = constOff;
+  for (let c = 0; c < encoded.bytes[11]; c++) {
+    const t = encoded.bytes[p++];
+    if (t === 0) {
+      let v = encoded.bytes[p] | encoded.bytes[p + 1] << 8 |
+              encoded.bytes[p + 2] << 16 | encoded.bytes[p + 3] << 24;
+      if (v > 0x7fffffff) v -= 0x100000000;
+      pool.push(v); p += 4;
+    } else if (t === 1) { pool.push(encoded.bytes[p] ? true : false); p++; }
+    else if (t === 2) {
+      const l = encoded.bytes[p]; pool.push("<str>"); p += 1 + l;
+    } else pool.push(null);
+  }
+  eq("sound encoding: the pool carries the toy's sound constants",
+     pool, [0, 60, 9, 6, 4, 12, 2]);
+
+  /* The controls: a toy with no sound construct keeps the bytes the old
+   * encoder produced (version 1), and a sound toy is the one thing that
+   * moves to version 3 — carrying the ops moved nothing else. */
+  const plain = ilbc.encode(il.compile(
+    "function frame(t, f)\n  pal(1, f)\nend\n", { chunkName: "plain.lua" }));
+  eq("sound encoding: a sound-free toy stays container version 1",
+     plain.bytes[4], 1);
+}
+
+function checkSoundHostParity() {
+  /* The browser host's run of the same toy: the IL host (pce-toyhost
+   * through il.create) executes the sfx/release/note the bytecode carries.
+   * The console's half of these ops is #198's evidence; this pins the
+   * host's answers the interpreter must reproduce there. */
+  const rt = il.create([
+    "function frame(t, f)",
+    "  sfx(2, note(60), 9, 6)",
+    "  release(2)",
+    "end",
+    ""
+  ].join("\n"), { chunkName: "sound.lua" });
+  rt.load();
+  for (let f = 0; f < SOUND_FRAMES; f++) rt.frame(f);
+  const events = rt.sound.events;
+  check(events.length > 40,
+        "sound host: the run recorded PSG writes (" + events.length +
+        ") — a toy whose sfx never fired would record none");
+  const f0 = events.filter(function (e) { return e.f === 0; });
+  check(f0.some(function (e) { return e.reg === 4 && e.value === 0x40; }) &&
+        f0.some(function (e) { return e.reg === 6; }),
+        "sound host: frame 0 uploads the sfx wave (the 0x40 select and the " +
+        "32 R6 steps)");
+  /* note(60)'s F: the same formula both halves share — 7,159,090 / (64 *
+   * 440 * 2^((midi-69)/12)), rounded to the nearest and clamped to 0..4095
+   * (the IL's own callBuiltin).  The encoded container carries the midi 60;
+   * the host turns it into this F, which the sfx writes to R2/R3. */
+  const F = Math.max(0, Math.min(4095, Math.floor(
+    7159090 / (64 * 440 * Math.pow(2, (60 - 69) / 12)) + 0.5)));
+  const lo = f0.filter(function (e) { return e.reg === 2; }).map(
+    function (e) { return e.value; });
+  const hi = f0.filter(function (e) { return e.reg === 3; }).map(
+    function (e) { return e.value; });
+  check(lo.length >= 1 && hi.length >= 1 &&
+        lo[0] === (F & 0xff) && hi[0] === ((F >> 8) & 0x0f),
+        "sound host: the sfx writes note(60)'s F (" + F + ") to R2/R3 (got " +
+        lo[0] + "/" + hi[0] + ")");
+  /* release(2) gives the owned channel back: releaseWrites' three words
+   * (0, ch), (4, 0), (7, 0) close frame 0 after the sfx's last AL write —
+   * a release that fired before or not at all leaves another tail. */
+  eq("sound host: release(2) gives the owned channel back (reg 0)",
+     f0.slice(-3).map(function (e) { return [e.reg, e.value]; }),
+     [[0, 2], [4, 0], [7, 0]]);
+}
+
 /* ---- #174: the table ops on the host ----------------------------------- *
  * The same compile/run as checkHostParity for a version 2 table toy.  Eight
  * frames must match the browser host's artefacts exactly — every value they
@@ -2596,6 +2788,8 @@ checkSpriteEncoding();
 checkSpriteHostParity();
 checkNotEncoding();
 checkNotHostParity();
+checkSoundEncoding();
+checkSoundHostParity();
 checkTablesRun();
 
 const paletteMax = 300;
