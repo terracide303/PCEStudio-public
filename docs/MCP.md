@@ -485,9 +485,10 @@ SEQUENCER edits. Two forms, exactly one of them:
 | `tempo`, `steps`, `swing`, `key` | integer | the notes form's grid settings; pce-seq.js's own ranges |
 
 The built-in instruments are `lead`, `bass`, `bell`, `strings` (wave voices)
-and `kick`, `snare` (noise drums; `pce-song.js` does not play effect 0F yet,
-so through `music()` they sound their envelope on a wave channel — use `sfx()`
-for a percussion hit in a toy). `step` counts columns from 0 across patterns
+and `kick`, `snare` (noise drums; the toy runtime's player has no effect
+columns, so through `music()` they sound their envelope on a wave channel —
+use `sfx()` for a percussion hit in a toy; the ROM song conversion encodes
+their on/off as HuTrack's noise effect `11`). `step` counts columns from 0 across patterns
 of `steps` columns, so step 32 is pattern 2 column 0.
 
 ```json

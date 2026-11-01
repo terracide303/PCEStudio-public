@@ -24,8 +24,22 @@
  * mask asks whether a slot is present) and `legacyArpSpeed` (written into the
  * attributes).
  *
+ * `fromSequencer(module)` is the adapter from the studio's own song model:
+ * renderer/pce-seq.js's compile() returns a module of the same DMF shape but
+ * with `effects` on every row (never `fxSlots`) and no `legacyArpSpeed`, so
+ * convert() would throw before writing a byte.  The adapter fills those and
+ * turns a noise drum into the engine's noise effect (0x11) on channels 5-6.
+ * A drum's timbre in the studio is the instrument's NF; in the engine it is
+ * NoiseTable[the row's semitone] (HuTrack_parser.asm, "Legacy noise pitch by
+ * semitone"), twelve fixed values, so the adapter retimes the drum row to the
+ * nearest one and the check compares the two numerically.
+ *
  * Refusals carry a machine-readable `code` (the convention pce-wave.js and
  * pce-rom.js use):
+ *   song-shape     not a module compile()'s shape (six channel lists)
+ *   song-noise-channel a noise drum outside channels 5-6 (the engine's
+ *                  .platFX.Noise ignores 0..3, so the write would go missing)
+ *   song-noise     a noise instrument with no NF to convert
  *   song-pcm       PCM samples present; their conversion needs a resampler
  *                  (numpy/resampy) and is not ported
  *   song-volume    a volume outside 0..31 (the PSG's AL field is 5 bits)
@@ -61,10 +75,182 @@
   var SONG_ORG = 0x4000;     /* and .org $4000 */
   var BANK = 8 * 1024;
 
+  var FX_NONE = 0xffff;      /* an absent effect code or argument */
+  var NOISE_FX = 0x11;       /* HuTrack_parser.asm's .platFX.Noise */
+  var NOISE_CHANNELS = [4, 5];   /* 0-based: the PSG's two noise voices */
+  /* HuTrack_parser.asm "NoiseTable: Legacy noise pitch by semitone" — the
+   * 5-bit NF the engine writes for each semitone (R7 = $80 | this). */
+  var NOISE_TABLE = [4, 13, 15, 18, 21, 23, 25, 27, 29, 31, 0, 2];
+
   function refuse(code, message) {
     var e = new Error("pce-hutrack: " + code + ": " + message);
     e.code = code;
     throw e;
+  }
+
+  /* ---- 0. the studio's song model (pce-seq.compile) ---------------------
+
+     pce-seq.compile() hands the browser player a DMF-shaped module, but the
+     two fields HuTrack's converter reads are not DMF reader fields: its rows
+     carry `effects` (always empty — the SEQUENCER has no effect columns) and
+     its header has no `legacyArpSpeed`.  This adapter adds what the console
+     format needs, on a copy, so the module the player uses is untouched:
+
+       - every row gets `fxSlots`, one per column (the compression mask asks
+         whether a slot is present, so the empty ones are written 0xffff);
+       - the header gets `legacyArpSpeed: 1` (dmfReader's default — the
+         "initial arp ticks" attribute);
+       - a noise drum is the engine's effect 0x11 on channels 5-6: arg 1
+         where the drum's note starts, arg 0 where it ends (a note cut, a
+         wave note, or a note with no instrument), tracked across the order
+         exactly as pce-seq.js's noiseWrites() does for the browser.  The
+         drum's row is retimed to the nearest of the engine's twelve legacy
+         noise pitches, because .platFX.Noise reads its NF from
+         NoiseTable[note's semitone] and not from the effect's argument.
+  */
+
+  /* The nearest legacy noise semitone for an NF, and the R7 value the
+   * engine will write for it.  Ties go to the first table entry; the check
+   * pins the mapping. */
+  function noisePitch(nf) {
+    var semitone = 0, best = Infinity;
+    for (var s = 0; s < NOISE_TABLE.length; s++) {
+      var delta = Math.abs(NOISE_TABLE[s] - nf);
+      if (delta < best) { best = delta; semitone = s; }
+    }
+    return { semitone: semitone, value: 0x80 | NOISE_TABLE[semitone],
+             delta: best };
+  }
+
+  function isNoiseChannel(ch) {
+    return NOISE_CHANNELS.indexOf(ch) >= 0;
+  }
+
+  function fromSequencer(mod, options) {
+    var opts = options || {};
+    if (!mod || typeof mod !== "object" ||
+        !Array.isArray(mod.patterns) || mod.patterns.length !== CHANNELS)
+      refuse("song-shape",
+             "the sequencer adapter needs a module with " + CHANNELS +
+             " channel pattern lists");
+    if (!Array.isArray(mod.instruments) || !mod.instruments.length)
+      refuse("song-shape", "the module has no instruments");
+    var orderCount = mod.orderCount;
+    if (!Array.isArray(mod.patterns[0]) || !mod.patterns[0].length)
+      refuse("song-shape", "the module has no order slots");
+    if (orderCount !== mod.patterns[0].length)
+      refuse("song-shape",
+             "orderCount " + orderCount + " but " + mod.patterns[0].length +
+             " order slots");
+
+    /* A copy: convert() rewrites fxSlots' arguments in place. */
+    var out = JSON.parse(JSON.stringify(mod));
+    if (out.legacyArpSpeed === undefined || out.legacyArpSpeed === null)
+      out.legacyArpSpeed = opts.legacyArpSpeed === undefined
+        ? 1 : opts.legacyArpSpeed;
+    if (!Array.isArray(out.samples)) out.samples = [];
+
+    /* The instruments the converter reads, plus the drum retiming. */
+    var noise = [];
+    for (var n = 0; n < out.instruments.length; n++) {
+      var ins = out.instruments[n];
+      if (!ins || typeof ins !== "object")
+        refuse("song-instrument", "instrument " + n + " is not an object");
+      if (!ins.volumeEnv) ins.volumeEnv = { size: 0, data: [], loop: 0xff };
+      if (!ins.arpeggioEnv)
+        ins.arpeggioEnv = { size: 0, data: [], loop: 0xff, mode: 0 };
+      if (!ins.wavetableEnv)
+        ins.wavetableEnv = { size: 0, data: [], loop: 0xff };
+      if (ins.kind === "noise") {
+        if (ins.nf === null || ins.nf === undefined ||
+            typeof ins.nf !== "number" || ins.nf < 0 || ins.nf > 31)
+          refuse("song-noise",
+                 "instrument " + n + " is a noise drum without an NF 0..31");
+        noise[n] = noisePitch(ins.nf);
+      }
+    }
+
+    /* The effect columns: the source rows' own effects (none from the
+     * SEQUENCER), and one slot for noise mode when a drum is played.  Every
+     * row in every channel carries the same count, which convert() checks. */
+    var baseFX = 0, usesNoise = false;
+    for (var bch = 0; bch < CHANNELS; bch++)
+      for (var bo = 0; bo < orderCount; bo++)
+        for (var br = 0; br < out.patterns[bch][bo].length; br++) {
+          var brow = out.patterns[bch][bo][br];
+          if (Array.isArray(brow.fxSlots))
+            refuse("song-shape",
+                   "channel " + bch + " order " + bo + " row " + br +
+                   " already carries fxSlots (a DMF module or an adapted " +
+                   "one); call convert() directly");
+          if (Array.isArray(brow.effects) && brow.effects.length > baseFX)
+            baseFX = brow.effects.length;
+          if (brow.note && !brow.note.cut &&
+              brow.instrument !== null && brow.instrument !== undefined) {
+            var bins = out.instruments[brow.instrument];
+            if (bins && bins.kind === "noise") usesNoise = true;
+          }
+        }
+    var numFX = Math.max(1, baseFX + (usesNoise ? 1 : 0));
+
+    function slots(row) {
+      var list = [];
+      var eff = Array.isArray(row.effects) ? row.effects : [];
+      for (var e = 0; e < baseFX; e++)
+        list.push(e < eff.length && eff[e]
+          ? { code: eff[e].code, arg: eff[e].arg }
+          : { code: FX_NONE, arg: FX_NONE });
+      if (numFX > baseFX) list.push({ code: FX_NONE, arg: FX_NONE });
+      return list;
+    }
+
+    for (var ch = 0; ch < CHANNELS; ch++) {
+      var noiseOn = false;
+      for (var o = 0; o < orderCount; o++) {
+        var rows = out.patterns[ch][o];
+        if (!Array.isArray(rows))
+          refuse("song-shape", "channel " + ch + " order " + o +
+                               " is not a row list");
+        for (var r = 0; r < rows.length; r++) {
+          var row = rows[r];
+          var want = noiseOn;
+          if (row.note) {
+            if (row.note.cut) {
+              want = false;
+            } else if (row.instrument !== null &&
+                       row.instrument !== undefined) {
+              var used = out.instruments[row.instrument];
+              if (!used)
+                refuse("song-instrument",
+                       "channel " + ch + " order " + o + " row " + r +
+                       " names instrument " + row.instrument);
+              if (used.kind === "noise") {
+                if (!isNoiseChannel(ch))
+                  refuse("song-noise-channel",
+                         "channel " + (ch + 1) + " order " + o + " row " + r +
+                         ": a noise drum needs channel 5 or 6 (the engine's " +
+                         "noise effect is ignored on 1-4)");
+                want = true;
+                row.note.semitone = noise[row.instrument].semitone;
+              } else {
+                want = false;
+              }
+            } else {
+              want = false;
+            }
+          }
+          var list = slots(row);
+          if (want !== noiseOn) {
+            list[baseFX] = { code: NOISE_FX, arg: want ? 1 : 0 };
+            noiseOn = want;
+          }
+          row.fxSlots = list;
+          delete row.effects;
+        }
+      }
+    }
+
+    return out;
   }
 
   /* ---- 1. the compression (dmfReader.getPatternData) ---------------------
@@ -789,6 +975,11 @@
   return {
     convert: convert,
     assemble: assemble,
+    fromSequencer: fromSequencer,
+    noisePitch: noisePitch,
+    NOISE_FX: NOISE_FX,
+    NOISE_CHANNELS: NOISE_CHANNELS,
+    NOISE_TABLE: NOISE_TABLE,
     SONG_BANK: SONG_BANK,
     SONG_ORG: SONG_ORG,
     BANK: BANK

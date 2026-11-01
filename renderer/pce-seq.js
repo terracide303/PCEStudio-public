@@ -192,6 +192,41 @@
     return { name: PATTERN_NAMES[index || 0], channels: channels };
   }
 
+  /* A built-in instrument from renderer/pce-assets.js's palette (#99/#140)
+   * in this model's shape: the asset model keeps a wave and an `envelope`
+   * whose loop may be the envelope's size ("hold the last value"); a song
+   * instrument keeps `env` and spells holding as loop 0xff, which is what
+   * pce-song.js and HuTrack's converter both read.  The SEQUENCER panel and
+   * the ROM song conversion read the palette through this one function, so
+   * the two cannot drift. */
+  function instrumentFromAsset(inst) {
+    if (!inst || (inst.kind !== "wave" && inst.kind !== "noise"))
+      refuse("seq-instrument", "a built-in instrument is a wave or a noise drum");
+    var env = inst.envelope || {};
+    var data = Array.isArray(env.data) && env.data.length
+      ? env.data.slice(0, ENV_MAX) : [31];
+    var size = data.length;
+    var loop = env.loop;
+    if (loop === undefined || loop === null || loop >= size) loop = 0xff;
+    var out = { name: String(inst.name || ""), kind: inst.kind,
+                env: { size: size, loop: loop, data: data } };
+    if (inst.kind === "wave") {
+      if (!Array.isArray(inst.wave) || inst.wave.length !== WAVE_STEPS)
+        refuse("seq-wave", (inst.name || "an instrument") + " needs a wave " +
+               "of " + WAVE_STEPS + " steps");
+      for (var s = 0; s < WAVE_STEPS; s++)
+        checkInt(inst.wave[s], 0, WAVE_MAX, "seq-wave",
+                 (inst.name || "an instrument") + " wave step " + s);
+      out.wave = inst.wave.slice();
+    } else {
+      checkInt(inst.nf, 0, NF_MAX, "seq-noise",
+               (inst.name || "an instrument") + " noise frequency");
+      out.nf = inst.nf;
+    }
+    checkEnv(out.env, out.name || "an instrument");
+    return out;
+  }
+
   function newSong(steps) {
     var song = {
       version: VERSION,
@@ -860,6 +895,7 @@
     newSong: newSong,
     demoSong: demoSong,
     defaultInstruments: defaultInstruments,
+    instrumentFromAsset: instrumentFromAsset,
     check: check,
     setTempo: setTempo,
     setSwing: setSwing,

@@ -304,24 +304,44 @@ module `renderer/pce-dmf.js` returns, and `renderer/pce-hutrack.js`'s
   which has no effect columns);
 - its header has no `legacyArpSpeed`, so the header assembles
   `.db 0,undefined,0` — the adapter supplies it (the DMF reader's field);
-- **noise drums**: `compile()` writes no effect `0F`; HuTrack's noise is
-  effect `0F` on channels 5–6. Without it a drum plays only its volume
-  envelope on a silent wave channel. `docs/SEQ.md`'s part 3 (#96) names the
-  same missing state change; #199 adds it or the converter refuses a noise
-  instrument by code.
+- **noise drums**: `compile()` writes no effect at all; HuTrack's noise is
+  **effect `11`** on channels 5–6 (`.platFX.Noise`,
+  `vendor/hutrack/docs/compatibility.md`: "`10`, `11` | Wave selection and
+  noise mode"). Without it a drum plays only its volume envelope on a silent
+  wave channel. The effect's **argument is the on/off flag**: the engine's
+  NF is `NoiseTable[the row's semitone]` — twelve legacy values, not the
+  studio's 0..31 NF — so the adapter retimes the drum row to the nearest
+  legacy pitch. #199 added both halves; the earlier plan's "effect `0F`"
+  was wrong (`0F` is `SetSpeed2` in the engine's own FX table).
 
-**Measured song sizes.** With those two adapter fields in place, the JS
-assembler produced:
+**The gap is closed (#199).** `renderer/pce-hutrack.js`'s
+`fromSequencer(module)` fills `fxSlots` on every row, writes
+`legacyArpSpeed: 1`, and adds the noise effect (arg 1 at a drum's note,
+arg 0 at its cut, a wave note, or a note with no instrument, tracked across
+the order as `pce-seq.js`'s `noiseWrites()` does). `pce-seq.js`'s
+`instrumentFromAsset()` is one conversion of `pce-assets.js`'s palette for
+both the SEQUENCER panel and this path.
+`tests/check-hutrack-seq.js` decodes the assembled bank back with the
+engine's rules and compares it with the studio's writes: each of the 15
+built-ins' envelope and 32-step wave is byte-identical and every PSG write
+of its `pce-assets.traceFor` stream matches except a drum's R7 NF, which
+lands on the nearest of the twelve legacy values (deltas 0–2); a
+two-pattern song's rows, drum on/off rows and frame-by-frame register
+stream match the studio's, with only the retimed drums' R2/R3 and the
+quantised R7 differing.
+
+**Measured song sizes.** With the adapter in place, the JS assembler
+produces:
 
 | data | includes | assembled bank |
 |---|---|---|
-| `pce-seq.demoSong()` (6 instruments, 4 waveforms, one 16×16 pattern) | 13,449 B of text | **491 B** |
+| `pce-seq.demoSong()` (6 instruments, 4 waveforms, one 16×16 pattern) | 13,449 B of text | **521 B** (491 B before the drums' `11` effects) |
 | the 15 built-ins (`pce-assets.js`: 8 wave + 7 noise) + 8 waveforms + one empty 16-row pattern | 23,416 B of text | **935 B** |
 
 Both fit the 8 KiB data bank beside a typical bytecode (PLATFORMER's is
 2,410 B). The 15 built-ins are the studio's palette (#99/#140), not a
 second instrument set: each is a 32-step wave plus a driver volume envelope
-(the drums also carry `nf` for the `0F` effect).
+(the drums' NF becomes the nearest `NoiseTable` pitch, as above).
 
 **The comparison.** The vendored Python converter needs numpy/resampy and a
 DMF, so the numeric comparison for #199 is against the studio's own model:
@@ -417,9 +437,10 @@ LLVM_MOS=/Volumes/External/pce-tools/llvm-mos tools/ilvm/build.sh
 PCE_INCLUDE=<staged lib> pceas4 -raw -o engine.bin engine.asm
 
 # song sizes: pce-seq.demoSong() and the 15 pce-assets instruments through
-# pce-hutrack.convert() (adding fxSlots to every row and legacyArpSpeed:1 to
-# the header — the adapter #199 lands), then pce-hutrack.assemble():
-#   491 B for the demo song, 935 B for the 15 built-ins + 8 waves.
+# pce-hutrack.fromSequencer() (fxSlots on every row, legacyArpSpeed: 1 and
+# the drums' effect 11 — the adapter #199 landed), convert() and assemble():
+#   521 B for the demo song, 935 B for the 15 built-ins + 8 waves.
+# tests/check-hutrack-seq.js pins both numbers and re-runs the comparison.
 ```
 
 The exact numbers in this page are from those commands on 2026-11-01; a
@@ -445,8 +466,10 @@ toolchain change that moves them is a change to this page.
 - **The engine's per-frame cost is unmeasured.** It runs outside #169's
   bracket by design; the frame-rate effect on a 30 Hz toy (TOWER, DUSK RUN)
   is measured in #198/#200.
-- **The SEQUENCER adapter and noise `0F`** are #199; this page measured the
-  two shape gaps and the sizes, not a playing drum.
+- **The SEQUENCER adapter and the noise effect are landed (#199)** and their
+  data half is measured by `tests/check-hutrack-seq.js`; what is not yet
+  witnessed is the console playing it — a toy's `music(index)` needs #198's
+  image, so #199's Mednafen half is open.
 - **Rule 2 is owed** for any check #198–#200 write: the author is not the
   seat that can prove it.
 
@@ -457,7 +480,7 @@ toolchain change that moves them is a change to this page.
 | **#196** (this page) | done | the measured link design and budgets | the numbers reproduce; no suite red |
 | **#197** | done | the encoder and the C emitter carry `note`, `sfx`, `release`, `music`; the version 3 container and its gate | `check-ilvm`, `check-romcheck`, `check-agent-core` green; a note/sfx toy encodes and the host harness runs it |
 | **#198** | open | the engine linked: two banks, 32 KiB image, data bank 4, wrappers, tick, zp/RAM partition and assertions | a note toy and an sfx toy play in Mednafen; `check-ilvm`, `check-export-games` green |
-| **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise `0F` | a numeric comparison with the studio's writes; a song plays in Mednafen |
+| **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (needs #198) |
 | **#200** | open | `tests/check-rom-sound.js`, the trace build, the docs | the Mednafen trace equals the studio's for note and sfx; the suites green; a cold break by another seat |
 
 The umbrella (#194) closes when #196–#200 are done. TOWER, DUSK RUN and
