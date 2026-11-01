@@ -98,6 +98,19 @@
  *      the host half pins the browser host's PSG writes for the same toy —
  *      the sfx's wave upload, note(60)'s F to R2/R3 and release(2)'s
  *      channel select.
+ *  13. #191: tests/dumps/toysprite-ilvm.  tools/toys/sprite.lua emitted
+ *      through the browser path, run on the console in Mednafen
+ *      (tools/capture-ilvm.sh), and pinned end to end: the fresh build is
+ *      the dumped ROM; all 160 captured tail frames are diff 0 against
+ *      browser frame 0 (the toy's three specs are constants, so its
+ *      picture does not animate — the toy reads no pad, so both routes run
+ *      the same empty pad script); the save's SATB is the browser's SAT
+ *      word for word; and the save's VRAM $7F00 window carries the same
+ *      words, because the console's toy_sat writes them there and the DSR
+ *      auto-repeat mirrors them into SATB.  That is the SAT-word
+ *      comparison #133 asks for, on the console rather than the host model
+ *      checkSpriteHostParity uses.  tools/toys/sprite.lua is also the
+ *      sprite row in tests/check-export-games.js's GAME_PINS.
  *
  * Written by @design because the card names this evidence.  Per workshop
  * rule 2 a cold break by another seat and model is owed: the operand
@@ -120,7 +133,16 @@
  * the bounds (i 0..63, k 0..3, v masked to 16 bits).  #187's own targets:
  * the not operand/dst order, the 0/1 result (an aliased ~, a dropped
  * operand, an inverted test), the bnot pin, and the console loop's use of
- * the result (a bool is a br condition as-is, not a conversion).
+ * the result (a bool is a br condition as-is, not a conversion).  #191's
+ * own targets: the console SAT words themselves (a swapped x/y, a pattern
+ * that is not shifted left, the attribute bits packed differently), the
+ * DSR mirror window's address ($7F00) and length (256 words), and the
+ * export-game pin — the sprite ROM's sha and its static picture hash.
+ * #197's own targets: the three op lengths and their operand byte order
+ * (song; ch/freq/volume/frames; ch), the version-3 header and the empty
+ * one-byte table section, the pool constants the note builtin pulls in,
+ * and the host parity pins — note's rounded-and-clamped F, the sfx wave
+ * upload, and release's three-word tail on the owned channel.
  */
 "use strict";
 
@@ -149,6 +171,16 @@ const PARALLAX = { name: "toyparallax-ilvm", toy: "toys/parallax.lua",
  * (two register writes at line 24).  Its fixed bar is asserted; the
  * playfield's known four-line phase is recorded, not hidden. */
 const STATUS = { name: "toystatusbar-ilvm", toy: "toys/status-bar.lua" };
+/* #191: the sprite toy on the console.  tools/toys/sprite.lua writes the
+ * same three sprites every frame (its specs must be constants for the
+ * encoder, #188), so its picture is static: every captured frame must be
+ * diff 0 against browser frame 0, not just one of them.  It reads no pad,
+ * so both routes run the same empty pad script.  Its SAT words are the
+ * point: the console's toy_sat writes VRAM $7F00 + i*4 + k and the DSR
+ * auto-repeat mirrors it into SATB, so the save's sat.bin must be the
+ * browser's SAT word for word and the same words must sit at VRAM $7F00. */
+const SPRITE = { name: "toysprite-ilvm", toy: "tools/toys/sprite.lua",
+                 period: 0, phase: 1, static: true, sat: true };
 
 let checks = 0;
 let failures = [];
@@ -2445,7 +2477,8 @@ function checkDump(spec, maxF, tail) {
     const g = browser.frame(f);
     wantPixels.push(g.pixels);
     wantHashes.push(sampleHash(g.pixels));
-    wantState.push({ vram: g.state.vram, cram: g.state.cram });
+    wantState.push({ vram: g.state.vram, cram: g.state.cram,
+                     sat: g.state.sat });
   }
   browser.dispose();
 
@@ -2499,21 +2532,97 @@ function checkDump(spec, maxF, tail) {
         " consecutive browser frames are present in order (need " +
         spec.phase + ")");
 
+  /* A static toy (the sprite toy's specs are constants, so every frame is
+   * the same picture): every captured tail frame must be diff 0 against
+   * browser frame 0, not merely one of them.  This is the card's "frames
+   * diff 0" pin at its strongest for a picture that does not animate. */
+  if (spec.static) {
+    check(matched.length === use.length && matched.every(function (k) {
+            return k === 0;
+          }),
+          spec.name + ": all " + use.length + " captured tail frames are " +
+          "diff 0 against browser frame 0");
+  }
+
   /* The save's VRAM and CRAM are the browser's at the matched frame.  The
    * save follows the display, so a frame or two on is allowed. */
   const vram = fs.readFileSync(path.join(dir, "vram.bin"));
   const cram = fs.readFileSync(path.join(dir, "cram.bin"));
+
+  /* #191: the SAT-word comparison.  The console writes each SAT word to
+   * VRAM $7F00 + i*4 + k and the DSR auto-repeat mirrors that window into
+   * SATB every VBlank; the browser's host.sprite writes the SAT model and
+   * leaves VRAM there untouched.  So for a sprite toy the two artefacts
+   * must agree word for word: the save's SATB (sat.bin) with the browser's
+   * SAT, and the console's VRAM $7F00 window with the same words, with
+   * every byte of VRAM outside that window equal to the browser's.  A
+   * sprite whose x and y were swapped, whose pattern was not shifted left,
+   * or whose attribute bits were packed in another order would put
+   * different words in SATB, and a console that stopped mirroring them
+   * would leave the window zero or stale. */
+  const SAT_VRAM_BYTE = 0x7F00 * 2;      /* word $7F00 in the vram.bin bytes */
+  const SAT_BYTES = 512;                 /* 256 words: 64 entries x 4 */
+  function vramOutsideSat(a, b) {
+    const n = Math.min(a.length, b.length), end = SAT_VRAM_BYTE + SAT_BYTES;
+    let count = 0;
+    for (let i = 0; i < n; i++) {
+      if (i >= SAT_VRAM_BYTE && i < end) continue;
+      if (a[i] !== b[i]) count++;
+    }
+    return count;
+  }
+  function vramSatWindow(a) {
+    const out = Buffer.alloc(SAT_BYTES);
+    for (let i = 0; i < SAT_BYTES; i++) {
+      out[i] = a[SAT_VRAM_BYTE + i] || 0;
+    }
+    return out;
+  }
+
   let stateOk = false;
   for (let k = 0; k < maxF; k++) {
-    if (diff(vram, wantState[k].vram) === 0 &&
+    if (!spec.sat) {
+      if (diff(vram, wantState[k].vram) === 0 &&
+          diff(cram, wantState[k].cram) === 0) {
+        stateOk = true;
+        notes.push(spec.name + ": the save's vram/cram are browser frame " +
+                   k + "'s");
+        break;
+      }
+      continue;
+    }
+    if (vramOutsideSat(vram, wantState[k].vram) === 0 &&
         diff(cram, wantState[k].cram) === 0) {
       stateOk = true;
       notes.push(spec.name + ": the save's vram/cram are browser frame " +
-                 k + "'s");
+                 k + "'s (the VRAM SAT window excluded)");
       break;
     }
   }
   check(stateOk, spec.name + ": the saved VRAM and CRAM are the browser's");
+
+  if (spec.sat) {
+    const sat = fs.readFileSync(path.join(dir, "sat.bin"));
+    let satOk = false, satFrame = -1;
+    for (let k = 0; k < maxF; k++) {
+      if (diff(sat, wantState[k].sat) === 0) { satOk = true; satFrame = k;
+                                               break; }
+    }
+    check(satOk, spec.name + ": the save's SATB is the browser's SAT " +
+          "words" + (satOk ? " (frame " + satFrame + ")" : " (no browser " +
+          "frame matches; the console's four SAT words per sprite must " +
+          "equal host.sprite's)"));
+    check(satFrame >= 0 && diff(vramSatWindow(vram), wantState[satFrame].sat)
+          === 0,
+          spec.name + ": the save's VRAM $7F00 window is the same SAT " +
+          "words (the console's VRAM write, not just the DSR mirror)");
+    /* Non-zero words make both comparisons above non-trivial: a toy that
+     * never wrote SATB would compare equal to an all-zero browser SAT. */
+    check(sat.filter(function (b) { return b !== 0; }).length >= 8,
+          spec.name + ": the saved SATB carries the toy's words (" +
+          sat.filter(function (b) { return b !== 0; }).length +
+          " non-zero bytes)");
+  }
 }
 
 function checkMeasure(spec) {
@@ -2692,6 +2801,12 @@ checkMeasure(PALETTE);
 const parallaxMax = 400;
 checkDump(PARALLAX, parallaxMax, 500);
 checkMeasure(PARALLAX);
+
+/* #191: the sprite toy's picture is static, so eight browser frames are the
+ * whole run and all 160 captured tail frames must match frame 0. */
+const spriteMax = 8;
+checkDump(SPRITE, spriteMax, 160);
+checkMeasure(SPRITE);
 
 /* #115: the RCR-split toy on the same interpreter */
 checkStatusBarDump();

@@ -1,0 +1,52 @@
+{
+ "bytecode": {
+  "bytes": 430,
+  "code_bytes": 241,
+  "constants": 16,
+  "data_bank": 2,
+  "functions": 3,
+  "globals": 7,
+  "hooks": {
+   "frame": 1,
+   "init": 0,
+   "raster": 255
+  },
+  "sha256": "bf52541242428cdc195d1a1d8f4e86a83509b1417b8df9e66c14ad3c965a6ad9"
+ },
+ "capture": {
+  "frames": 160,
+  "last_frame": "frame0292.png",
+  "measure": {
+   "collect_sum_ticks_7bit": 0,
+   "collections": 0,
+   "count": 280,
+   "cycles_per_collection": null,
+   "cycles_per_frame": 45520.45714285714,
+   "cycles_per_raster_call": null,
+   "flags": 0,
+   "max_ticks": 45,
+   "mean_ticks": 44.45357142857143,
+   "mean_update_lines": 100.52857142857142,
+   "min_ticks": 44,
+   "overruns": 0,
+   "raster_calls": 0,
+   "raster_max_ticks": 0,
+   "raster_sum_ticks": 0,
+   "sum_ticks": 12447,
+   "updates": 280,
+   "worst_update_lines": 101
+  },
+  "slend": 234,
+  "slstart": 3
+ },
+ "ilvm": {
+  "bytes": 16384,
+  "sha256": "ea84ace37155e1bb904885fa22d651fb2b5c89ba324235fd3449a5f2e5b1a039"
+ },
+ "name": "toysprite-ilvm",
+ "rom": "tools/gen/toysprite-ilvm.pce",
+ "rom_bytes": 24576,
+ "rom_sha256": "7f8ce59af4846f5067e77e1a742ca3335644de3cfdb65e1c3da0656de165a121",
+ "source": "tools/toys/sprite.lua",
+ "source_sha256": "dab969868d3d11f4e60602ea51bd0a66b8d3883581db53a0036ae265f90efc2a"
+}

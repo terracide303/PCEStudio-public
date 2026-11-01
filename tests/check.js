@@ -41,7 +41,7 @@
  * frames against the browser run.  The skip list is explicit below and a
  * dump with the background off that is not on it is rendered like any
  * other, so a bad capture cannot hide behind a blanket "not a picture" rule.
- * The four toy dumps are skipped rather than given the crop they record in
+ * The five toy dumps are skipped rather than given the crop they record in
  * meta.json: a still capture records its crop in regs.json (capture.sh), the
  * toy route does not, and teaching this check to prefer meta.json's crop
  * would make the unlisted-dump guard's toy copy render clean — the guard
@@ -312,6 +312,18 @@ const NOT_PICTURES = {
        "against the browser and the playfield carries the #31C handler's " +
        "known four-line phase, so this check's whole-save comparison is not " +
        "its judge",
+  /* #191: the sprite toy on the bytecode route.  capture-ilvm.sh records
+   * its crop slstart 3 in meta.json and nothing in regs.json, so this
+   * check's default crop 4 renders the saved state one line off (measured
+   * 144 differing bytes of 178,176; diff 0 at slstart 3).  The picture
+   * itself is judged against the browser by tests/check-ilvm.js, which also
+   * compares the console's SAT words with the browser's. */
+  "toysprite-ilvm": "a toy capture through the bytecode route (#191), " +
+       "judged frame by frame against the browser run by " +
+       "tests/check-ilvm.js: the route records its crop slstart 3 in " +
+       "meta.json, not regs.json, so the saved state renders diff 0 only at " +
+       "that crop (144 differing bytes of 178,176 at this check's default " +
+       "4) — a capture crop, not a renderer difference",
 };
 
 /* ---- the #15 raster-table checks -------------------------------------- */
