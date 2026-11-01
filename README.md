@@ -41,7 +41,7 @@ palettes, sprite table, registers, scanlines, sound.
 
 ## Make a game with an AI
 
-**With a chat assistant** (claude.ai, ChatGPT, …): in the studio press **Download for Claude** (or take
+**With a chat assistant** (claude.ai, ChatGPT, …): open the studio's AGENT panel and use its **download the guide** link (or take
 [`renderer/pcestudio-for-claude.md`](renderer/pcestudio-for-claude.md)), attach it to a new chat and say what you want.
 Copy the Lua it writes into the studio with **Paste & Run** and tell it what you see. The guide teaches the assistant the
 console's rules, the toy API and how to fix its own mistakes.
