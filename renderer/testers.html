@@ -234,11 +234,12 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
   <table>
     <tr><th>Area</th><th>What happens</th><th>Status</th></tr>
     <tr><td>Export to <code>.pce</code></td><td>Only the simple example toys export, plus PLATFORMER (#186
-      carried the <code>sat</code> instruction; it runs at 30 Hz). The other four games — STARFALL, TOWER,
-      NOVA TIDE and DUSK RUN — stop on named findings (STARFALL's constant pool, TOWER's <code>sfx</code>,
-      NOVA TIDE's <code>note</code> builtin, DUSK RUN's <code>not</code>), and
-      <code>docs/ROM_SPEED.md</code> records the exact code and line for all five.
-      They all run in the browser.</td>
+      carried the <code>sat</code> instruction; it runs at 30 Hz) and the sprite toy (#190 carried
+      <code>sprite()</code> for a spec whose slot and fields are constants; it runs at 60 Hz). The other
+      four games — STARFALL, TOWER, NOVA TIDE and DUSK RUN — stop on named findings (STARFALL's constant
+      pool and ten sprite specs it cannot pin to constants, TOWER's <code>sfx</code>, NOVA TIDE's
+      <code>note</code> builtin, DUSK RUN's unary minus), and <code>docs/ROM_SPEED.md</code> records the
+      exact code and line for all five. They all run in the browser.</td>
       <td class="status soon">next big job</td></tr>
     <tr><td>Real hardware</td><td>Exports are checked in an emulator only.</td><td class="status no">untested</td></tr>
     <tr><td>Dropping a <code>.lua</code> file</td><td>The studio keeps the previous toy's art, so the SCREEN

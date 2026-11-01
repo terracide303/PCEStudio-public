@@ -23,6 +23,17 @@ global type in the C emitter, closing #132's cgen half and #143; the page's
 finding is now the `sprite` at `main.lua:406` — §3.  The route-1 half of
 #132 closed with #174.)*
 
+*(2026-11-01: #188–#190 carried `sprite` on both routes — 21 of STARFALL's
+31 specs resolve; the other 10 are the score's `digit_pattern` calls, one
+runtime `x` and three loop-window specs, and both backends refuse those by
+design. The page's first finding is now the `builtin abs` at
+`main.lua:466`, and the toy's sprite-only `art_sat()` block (17 specs)
+lowers whole: 0 refusals, a 940 B container and 17 `toy_sprite` calls
+(measured 2026-11-01). `sprite` is no longer on the blocker list; the
+remaining refusal inventory is in §4, and the sprite toy is the end-to-end
+capture `tests/dumps/toysprite-ilvm` (#191, frames diff 0, SAT words
+compared).)*
+
 ---
 
 ## 1. How this was measured
@@ -116,8 +127,10 @@ Two first-hit aborts sit between the page and the truth:
 1. `pce-cgen.js:665` refuses the **first** IL instruction it cannot lower and
    throws. STARFALL's first was the `table` for the `DIGIT` digit-code array at
    `main.lua:47`; #176 (2026-10-31) carried the four table kinds and the
-   table-typed globals, so the first is now the `sprite` at `main.lua:406`.
-2. That error sets `errors > 0`, and `renderer/studio.html:4336` returns
+   table-typed globals, so the first was then the `sprite` at `main.lua:406`
+   (since #188–#190 carried sprite, it is now the `builtin abs` at
+   `main.lua:466`).
+2. That error sets `errors > 0`, and `renderer/studio.html:4335` returns
    before the encoder is ever called — so the page never reports what
    `pce-ilbc.js` (route 1, the backend the Export actually uses) would say.
    Asked directly, `pce-ilbc.js` refuses with `ilbc-op: instruction table
@@ -130,7 +143,8 @@ kinds in the C emitter, the very next thing it lowers is
 `renderer/pce-cgen.js:530` refuses a global typed `table`. That gate is
 [#143](#143); the ordered list in `tools/starfall-console.js` prints it.
 (#176 closed both: the allow-list is now `fn|vram|int|bool|padset|table`, so
-the ordered list's next refusal is the `sprite` at `main.lua:406`.)
+the ordered list's next refusal was then the `sprite` at `main.lua:406`;
+#188–#190 carried sprite, so it is now the `builtin abs` at `main.lua:466`.)
 
 ---
 
@@ -159,7 +173,11 @@ Nine of the eleven kinds are refused by both; pad reads are a
 **route-1-only** gap (the C backend lowers `padref`/`padget` —
 `pce-cgen.js:601 and 610` — so the two backends disagree about what a toy can
 do). (#174 and #176 carried the four table kinds on both backends, so as of
-2026-10-31 the count is **49 of 1,919 (2.6%)** over seven kinds.)
+2026-10-31 the count is **49 of 1,919 (2.6%)** over seven kinds. #185–#190
+then carried pads, `sat`, `not` and `sprite`; what is left of the rows above
+is 18 of 1,919 (0.94%) over five kinds — `sprite` 10, `sfx` 3, `raster` 2,
+`builtin abs` 2, `builtin sr` 1, the sprite row being the specs no walker can
+pin to constants.)
 
 **A twelfth gate is not an instruction kind** and the table cannot hold it.
 `renderer/pce-cgen.js:530` refuses `getglobal`/`setglobal` unless the global's
@@ -190,7 +208,8 @@ The cards filed, one per kind — and one for the operand gate:
   `tget`, `tset`), 197 instructions. #118's int arrays.
 - <a id="133"></a>**#133** — `sprite()`, 31 instructions. Without it STARFALL
   draws nothing at all: the ship, six drones, four bullets and the HUD are
-  all sprites.
+  all sprites. (Carried 2026-11-01 by #188–#190 on both routes, 21 of 31;
+  the other ten are the specs the walker cannot pin, and they stay refused.)
 - <a id="134"></a>**#134** — `pad[n]`, `padref`/`padget`, 5 each. Route 1 only.
 - <a id="135"></a>**#135** — `sfx()`, 3 instructions. This is about the
   **export carrying the call**, not about #71/#113's audible sound.
@@ -320,9 +339,10 @@ then `toy-data-bank-full` on route 1 — instead of `ilbc-op`.
   may widen the global-type allow-list as part of that; if so #143 closes with
   #132. Until then the page stays blocked, which is the fact recorded here.
   (#176 did exactly that on 2026-10-31: the four table kinds and the
-  `table` global type are carried, #143 is closed, and the page now stops at
-  the `sprite` at `main.lua:406` instead.  The finding the panel showed on
-  2026-10-29 stays as recorded in §2.)
+  `table` global type are carried, #143 is closed, and the page then stopped
+  at the `sprite` at `main.lua:406` — until #190 carried the sprites cgen can
+  resolve, leaving the `builtin abs` at `main.lua:466` as the page's finding.
+  The finding the panel showed on 2026-10-29 stays as recorded in §2.)
 - **Not the model's sound.** `sfx()` writes PSG events that render silent with
   no `music()` (#113); `tests/check-demo-game.js` prints that NOTE itself.
 - **Not the page's download wiring.** The export was blocked before the
