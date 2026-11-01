@@ -161,6 +161,15 @@ function analyse(rel, opts) {
       bytecode: enc.value.bytes }));
   }
 
+  /* tableLayout() is the encoder's own reading of each site (shape, cells,
+   * escape, repeat) and, since #133, of each sprite's resolved spec; it
+   * changes no bytes.  The inventory below consults its sprite records, so
+   * the route-1 sprite row counts what the encoder will actually refuse,
+   * not just the kind's presence in OPS. */
+  let layout = null, layoutError = null;
+  try { layout = ilbc.tableLayout(program); }
+  catch (e) { layoutError = { code: e.code || e.name, message: e.message }; }
+
   /* ---- the complete inventory, by KIND -------------------------------- */
   const kinds = new Map();
   function note(kind, line, backend) {
@@ -198,6 +207,13 @@ function analyse(rel, opts) {
       }
       if (ins.t === "builtin" && !ILBC_BUILTIN.has(ins.name)) {
         note("builtin " + ins.name, ins.line, "route 1 (ilbc)");
+      }
+      /* #133: a sprite whose spec the encoder cannot pin refuses ilbc-op
+       * deeper than the kind table — the walker's own records decide. */
+      if (ins.t === "sprite" && layout &&
+          layout.sprites && layout.sprites[fn.id]) {
+        const spr = layout.sprites[fn.id][pc];
+        if (!spr || !spr.ok) note("sprite", ins.line, "route 1 (ilbc)");
       }
       for (const f of ["k", "src", "a", "b", "cond", "value"]) {
         const v = ins[f];
@@ -291,10 +307,6 @@ function analyse(rel, opts) {
    * frame the console pays every time).  Both are staged: a toy this tool
    * cannot run still prints its inventory and says why the frame did not
    * run, rather than taking the whole report down. */
-  let layout = null, layoutError = null;
-  try { layout = ilbc.tableLayout(program); }
-  catch (e) { layoutError = { code: e.code || e.name, message: e.message }; }
-
   const exec = {
     ok: false, code: null, message: null, il: 0,
     table: 0, setlist: 0, tget: 0, tset: 0, total: 0
@@ -371,7 +383,7 @@ function analyse(rel, opts) {
     const: 3, move: 3, getglobal: 3, setglobal: 3, getupval: 3, setupval: 3,
     closure: 3, ret: 2, jmp: 3, br: 5, forprep: 2, fornext: 4, arith: 5,
     unm: 3, bnot: 3, cmp: 5, pal: 3, reg: 3, vset: 3, vget: 3,
-    table: 3, tget: 5, tset: 5
+    table: 3, tget: 5, tset: 5, sprite: 7
   };
   function opSize(ins) {
     if (ins.t === "call") return 4 + ins.args.length;
