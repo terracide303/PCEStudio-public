@@ -202,19 +202,32 @@ function checkSourceRefusals() {
     ""
   ].join("\n")), "cgen-table-ram", 1);
 
-  refusal("ilbc-op sfx", findingsOf([
+  /* #197: sfx/note are CARRIED, so the old refusal toys now report ok and
+   * the still-refused surfaces keep their codes: print is the ilbc-op case,
+   * abs the ilbc-builtin case (the two builtins with a bytecode form are
+   * rgb and note). */
+  refusal("ilbc-op print", findingsOf([
     "function frame(t, f)",
-    "  sfx(0, 100, 8, 4)",
+    "  print(1)",
     "end",
     ""
   ].join("\n")), "ilbc-op", 2);
 
-  refusal("ilbc-builtin note", findingsOf([
+  refusal("ilbc-builtin abs", findingsOf([
     "function frame(t, f)",
-    "  pal(1, note(60))",
+    "  pal(1, abs(f))",
     "end",
     ""
   ].join("\n")), "ilbc-builtin", 2);
+
+  eq("a sound toy reports ok on both routes", romcheck.checkProgram(compile([
+    "function frame(t, f)",
+    "  music(0)",
+    "  sfx(0, note(60), 9, 6)",
+    "  release(0)",
+    "end",
+    ""
+  ].join("\n"))).ok, true);
 
   refusal("ilbc-fixed", findingsOf([
     "function frame(t, f)",

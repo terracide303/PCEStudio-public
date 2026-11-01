@@ -99,9 +99,10 @@ the `sat` instruction — its ROM runs in Mednafen at 30 Hz). `sprite()` is carr
 slot and fields are constants (#188–#190; its ROM runs at 60 Hz). The other four games — STARFALL,
 TOWER, NOVA TIDE and DUSK RUN — do not yet: each is stopped by a named finding, and
 [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five (STARFALL's
-127-constant pool and the ten sprite specs it cannot pin to constants, the missing `sfx` instruction for
-TOWER, NOVA TIDE's `note` builtin, DUSK RUN's unary minus), with the `sfx()`/`raster` instructions and
-the 8 KiB data bank behind those. Carrying them is the next big piece of work. The ROMs are checked in
+127-constant pool and the ten sprite specs it cannot pin to constants; TOWER's and DUSK RUN's sound,
+which now encodes but waits on the interpreter's engine link; NOVA TIDE's `raster` table), with the
+`raster` table form, the sound engine and the 8 KiB data bank behind those. Carrying them is the next
+big piece of work. The ROMs are checked in
 Mednafen; nothing has run on a real console yet.
 
 ## Project files

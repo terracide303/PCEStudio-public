@@ -3,10 +3,13 @@
 The exported toy ROM is the IL interpreter image
 [`renderer/ilvm.bin`](../renderer/ilvm.bin) (16,384 B, built once by
 [`tools/ilvm/build.sh`](../tools/ilvm/build.sh) with llvm-mos) plus the toy's
-bytecode in the next physical bank. Sound in a toy is refused today: the
-encoder has no `music`/`sfx`/`release` op and no `note` builtin
-(`renderer/pce-ilbc.js`), and TOWER, DUSK RUN and NOVA TIDE are stopped on
-exactly those instructions ([`ROM_SPEED.md`](ROM_SPEED.md) §#193).
+bytecode in the next physical bank. Since #197 the two cartridge front ends
+carry the whole sound surface — the encoder has `music`/`sfx`/`release` ops
+and the `note` builtin (`renderer/pce-ilbc.js`, container version 3), and the
+C emitter lowers them — but the committed interpreter reads only container
+versions 1 and 2, so `buildToyRom` refuses a sound toy's version 3 container
+until #198 links the engine in. That is where TOWER and DUSK RUN stop today;
+NOVA TIDE stops on its first `raster` ([`ROM_SPEED.md`](ROM_SPEED.md) §#193).
 
 This page is the design half: **how the vendored HuTrack engine
 ([`vendor/hutrack/`](../vendor/hutrack/VENDORED.md), MIT) links beside the C
@@ -349,10 +352,22 @@ run (`HUTRACK_PYTHON`), its includes are the second opinion, exactly as
   `frames` toy frames — a C counter in the update path, so the count is in
   toy frames on both sides.
 - **`music(index)`** queues the song pointer and calls `playSong` with the
-  slot; `music` again restarts. **Stop has no IL form today** (the IL's
-  three sound instructions are `music`, `sfx`, `release`); #197 decides
-  between a sentinel index and a new instruction, with the engine's
-  `HuTrackEngine.stop` as the console action.
+  slot; `music` again restarts. **Stop has no IL form** — #197's decision:
+  the browser host's toy surface has no music-stop either, and a stop form
+  would be a new toy-surface feature, not a bytecode carry of what exists.
+  A card that adds `musicStop()` (or similar) to the host surface adds the
+  IL form and the engine's `HuTrackEngine.stop` with it.
+- **The version 3 container (#197).** Any container with a sound op or a
+  `note` builtin is version 3 — the version 2 header layout (28 bytes, an
+  empty one-byte table section when there are no tables), since the #194
+  engine shares the v2 shape. `buildToyRom` refuses version 3 until #198
+  links the engine into the committed interpreter — the same gate that
+  refused version 2 containers before #175's interpreter learned to read
+  them. The gate fires before the bank-size check, so a sound toy that
+  would exceed the 8,192-byte data bank (TOWER's 8,524 B) refuses for the
+  same version reason a fitting one (DUSK RUN's 7,470 B) does: uniformly,
+  and never as a ROM that would fault on ops `20`–`22`. `release(ch)` on a
+  channel no sfx owns is a no-op, exactly as on the host.
 
 The engine's code is called by fixed address, never through a C prototype:
 the pceas `.sym` file gives `HuTrackTick`, `HuTrackEngine.Init`,
@@ -437,13 +452,13 @@ toolchain change that moves them is a change to this page.
 
 ## The slices
 
-| card | what | closes on |
-|---|---|---|
-| **#196** (this page) | the measured link design and budgets | the numbers reproduce; no suite red |
-| **#197** | the encoder and the C emitter carry `note`, `sfx`, `release`, `music` | `check-ilvm`, `check-romcheck`, `check-agent-core` green; a note/sfx toy encodes and the host harness runs it |
-| **#198** | the engine linked: two banks, 32 KiB image, data bank 4, wrappers, tick, zp/RAM partition and assertions | a note toy and an sfx toy play in Mednafen; `check-ilvm`, `check-export-games` green |
-| **#199** | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise `0F` | a numeric comparison with the studio's writes; a song plays in Mednafen |
-| **#200** | `tests/check-rom-sound.js`, the trace build, the docs | the Mednafen trace equals the studio's for note and sfx; the suites green; a cold break by another seat |
+| card | state | what | closes on |
+|---|---|---|---|
+| **#196** (this page) | done | the measured link design and budgets | the numbers reproduce; no suite red |
+| **#197** | done | the encoder and the C emitter carry `note`, `sfx`, `release`, `music`; the version 3 container and its gate | `check-ilvm`, `check-romcheck`, `check-agent-core` green; a note/sfx toy encodes and the host harness runs it |
+| **#198** | open | the engine linked: two banks, 32 KiB image, data bank 4, wrappers, tick, zp/RAM partition and assertions | a note toy and an sfx toy play in Mednafen; `check-ilvm`, `check-export-games` green |
+| **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise `0F` | a numeric comparison with the studio's writes; a song plays in Mednafen |
+| **#200** | open | `tests/check-rom-sound.js`, the trace build, the docs | the Mednafen trace equals the studio's for note and sfx; the suites green; a cold break by another seat |
 
 The umbrella (#194) closes when #196–#200 are done. TOWER, DUSK RUN and
 NOVA TIDE stay blocked until #198–#200: `docs/ROM_SPEED.md` has their
