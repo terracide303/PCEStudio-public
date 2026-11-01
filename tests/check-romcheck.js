@@ -128,7 +128,7 @@ function checkTables() {
     return !carriedOps[op];
   }).sort();
   eq("the C route's carried ops leave exactly the refused opcodes", cgenMissing,
-     ["bnot", "not", "setupval", "sprite", "unm", "vget"]);
+     ["bnot", "not", "setupval", "unm", "vget"]);
 
   const byteOps = {};
   for (const f of ilbc.FEATURES.carried) for (const op of f.ops || []) byteOps[op] = true;
@@ -141,11 +141,12 @@ function checkTables() {
 /* ---- 2. source-reachable refusals, with their lines -------------------- */
 
 function checkSourceRefusals() {
-  refusal("cgen-op sprite", findingsOf([
-    "function init()",
-    "  sprite(0, { x = 1, y = 2 })",
+  /* #190: a constant spec is CARRIED, so the refusal case is a spec the
+   * walker cannot pin (its x is the frame number). */
+  refusal("cgen-op sprite (spec not constant)", findingsOf([
+    "function frame(t, f)",
+    "  sprite(0, { x = f, y = 2 })",
     "end",
-    "function frame(t, f) end",
     ""
   ].join("\n")), "cgen-op", 2);
 
