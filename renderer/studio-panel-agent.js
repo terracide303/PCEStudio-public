@@ -831,6 +831,7 @@
             "Let Claude drive this tab. Press Connect, then run the one " +
             "command it shows in your terminal — nothing to install."));
           if (state.note) body.appendChild(el("p", "agent-note", state.note));
+          body.appendChild(guideLink());
           host.appendChild(body);
           return;
         }
@@ -849,6 +850,7 @@
         var edits = el("p", "agent-edits", EDITS);
         edits.id = "agent-edits";
         body.appendChild(edits);
+        body.appendChild(guideLink());
 
         if (state.status === "taken") {
           body.appendChild(el("p", "agent-note",
@@ -889,6 +891,17 @@
             b.classList.toggle("btn-accent", !live);
           }
         } catch (e) { /* a button label is not worth a broken panel */ }
+      }
+
+      /* The chat-assistant route, for people without Claude Code or with trouble connecting. */
+      function guideLink() {
+        var p = el("p", "agent-guide", "No Claude Code, or trouble connecting? Use a chat assistant instead: ");
+        var a = el("a", "agent-guide-link", "download the guide for Claude, ChatGPT and others");
+        a.id = "agent-guide-link";
+        a.href = "pcestudio-for-claude.md";
+        a.setAttribute("download", "pcestudio-for-claude.md");
+        p.appendChild(a);
+        return p;
       }
 
       function render() {
