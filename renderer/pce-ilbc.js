@@ -11,9 +11,13 @@
  *
  * The format is defined in docs/IL.md §14.  A short version:
  *
- *   header 24 bytes (version 1) or 28 bytes (version 2):
+ *   header 24 bytes (version 1) or 28 bytes (versions 2 and 3):
  *     0  "ILBC"               magic
- *     4  u8 version (1, or 2 when the program has a table instruction)
+ *     4  u8 version (1; 2 when the program has a table instruction; 3 when
+ *             it has a sound op — music/sfx/release or the note builtin —
+ *             and then the version 2 layout below.  The committed
+ *             interpreter reads 1 and 2 and refuses a version 3 container
+ *             at boot until the #194 engine link lands in #198.)
  *     5  u8 flags             bit 0: the toy has a raster() callback
  *     6  u8 initSlot          0xFF when the toy has no init()
  *     7  u8 frameSlot         0xFF when the toy has no frame()
@@ -28,14 +32,15 @@
  *    20  u16 codeOff         first instruction   (v1)
  *    22  u16 codeEnd         one past the last instruction (v1)
  *
- *   A version 2 header is 28 bytes: bytes 0..19 mean the same, then
+ *   A version 2 or 3 header is 28 bytes: bytes 0..19 mean the same, then
  *    20  u16 tabTabOff       table section (u8 nslots, then per slot
  *                            u16 base, u8 cap, u8 nfields)
  *    22  u16 codeOff
  *    24  u16 codeEnd
  *    26  u16 reserved (0)
  *   The table section sits between the global names and the code.  A toy
- *   with no table instruction stays version 1, byte for byte.
+ *   with no table instruction stays version 1, byte for byte; a version 3
+ *   sound toy with no tables carries an empty one-byte section.
  *
  *   function entry (10 bytes), one per function id in order:
  *     u16 codeOff, u16 codeEnd, u16 upOff, u8 nregs, u8 nparams,
@@ -116,6 +121,12 @@
  *              take the host's defaults, and a non-constant attribute
  *              field or a spec that is not a site built at the point of use
  *              refuses ilbc-op — the op can only carry the six operands.
+ *   20 music  song:op               (#197: song 0 is the one song a ROM toy
+ *              can have; the interpreter links the engine in #198)
+ *   21 sfx    ch:op freq:op volume:op frames:op  (#197: one play effect on
+ *              one channel, the browser host's own sfx)
+ *   22 release ch:op               (#197: stop the channel; the interpreter
+ *              links the engine's chanReleaseSFX in #198)
  *
  * A table operand is a slot id from the table section.  `kind` is 0 for an
  * array key (the key byte is an operand: a register or an int constant) and
@@ -125,21 +136,25 @@
  *                7 bxor, 8 shl, 9 shr
  * cmp opcodes:   0 eq, 1 lt, 2 le
  * reg ids:       0 BXR, 1 BYR, 2 CR
- * builtin ids:   0 rgb
+ * builtin ids:   0 rgb, 1 note (a MIDI number to the PSG's 12-bit F, the
+ *                 same 7,159,090 / (64 * 440 * 2^((midi-69)/12)) the host
+ *                 uses, rounded to the nearest and clamped to 0..4095 —
+ *                 #197; the interpreter links the engine in #198)
  *
  * What this half refuses, by code rather than guessing:
  *   ilbc-program  not a pce-il version 1 program
  *   ilbc-op       an IL instruction the interpreter does not have
- *                 (print, music, raster tables, ...; tables are carried
- *                 since #172, pads since #185, sat since #186, logical not
- *                 since #187, sprites since #133 — but a sprite whose spec
- *                 table the encoder cannot resolve still refuses here)
+ *                 (print, vget, raster tables, ...; tables are carried since
+ *                 #172, pads since #185, sat since #186, logical not since
+ *                 #187, sprites since #133, the sound ops since #197 — but
+ *                 a sprite whose spec table the encoder cannot resolve
+ *                 still refuses here)
  *   ilbc-fixed    fixed-point arithmetic or a fixed constant
  *   ilbc-key      a constant that is not int/bool/nil
  *   ilbc-arity    more than eight parameters or arguments
  *   ilbc-range    more registers/constants/functions than a byte can index
  *   ilbc-jump     a branch target that is not an instruction
- *   ilbc-builtin  a builtin other than rgb
+ *   ilbc-builtin  a builtin other than rgb and note
  *   ilbc-table-ram    the slots need more than TABLE_POOL_CELLS cells, or a
  *                     constant array key / field id is past its slot's shape
  *   ilbc-table-escape an escaping table site that can run more than once
@@ -166,6 +181,9 @@
 
   var VERSION = 1;
   var VERSION_TABLES = 2;
+  var VERSION_SOUND = 3;      /* a version 2 layout that may carry the sound
+                               * ops; the committed interpreter reads 1 and 2
+                               * and refuses the container until #198 (#194) */
   var MAGIC = "ILBC";
   var HEADER = 24;
   var HEADER_TABLES = 28;
@@ -190,14 +208,16 @@
     arith: 0x0E, unm: 0x0F, bnot: 0x10, not: 0x11, cmp: 0x12, builtin: 0x13,
     pal: 0x14, reg: 0x15, vset: 0x16, vget: 0x17,
     table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B,
-    padref: 0x1C, padget: 0x1D, sat: 0x1E, sprite: 0x1F
+    padref: 0x1C, padget: 0x1D, sat: 0x1E, sprite: 0x1F,
+    music: 0x20, sfx: 0x21, release: 0x22
   };
   var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
+  var SOUND_OPS = { music: 1, sfx: 1, release: 1 };
   var ARITH = { add: 0, sub: 1, mul: 2, mod: 3, idiv: 4, band: 5,
                 bor: 6, bxor: 7, shl: 8, shr: 9 };
   var CMP = { eq: 0, lt: 1, le: 2 };
   var REG = { BXR: 0, BYR: 1, CR: 2 };
-  var BUILTIN = { rgb: 0 };    /* only the one the interpreter implements */
+  var BUILTIN = { rgb: 0, note: 1 };  /* only what the interpreter implements */
   /* padget's field byte: the runtime's TOY_PAD_* bit (tools/toyc/toy_runtime.h,
    * pcetech §4's order I, II, Select, Run, Up, Right, Down, Left).  The IL
    * guarantees the name is one of these (pce-il.js's il-key refusal), so the
@@ -270,6 +290,11 @@
     if (ins.addr) fn(ins.addr, ins.line);
     if (ins.word) fn(ins.word, ins.line);
     if (ins.value) fn(ins.value, ins.line);
+    if (ins.song) fn(ins.song, ins.line);
+    if (ins.ch) fn(ins.ch, ins.line);
+    if (ins.freq) fn(ins.freq, ins.line);
+    if (ins.volume) fn(ins.volume, ins.line);
+    if (ins.frames) fn(ins.frames, ins.line);
     if (ins.args) for (var i = 0; i < ins.args.length; i++) fn(ins.args[i], ins.line);
   }
 
@@ -289,6 +314,8 @@
     if (t === "fornext") return 4;
     if (t === "padget" || t === "sat") return 4;
     if (t === "sprite") return 7;
+    if (t === "music" || t === "release") return 2;
+    if (t === "sfx") return 5;
     if (t === "arith" || t === "cmp") return 5;
     if (t === "table") return 3;
     if (t === "setlist") return 4 + (ins.values || []).length;
@@ -386,17 +413,29 @@
     var frameSlot = hookSlot("frame", program.hooks && program.hooks.frame);
     var rasterSlot = hookSlot("raster", program.hooks && program.hooks.raster);
 
-    /* A program with a table instruction gets version 2 and a table section.
-     * Everything else keeps version 1, byte for byte. */
-    var usesTables = false;
-    for (f = 0; f < functions.length && !usesTables; f++) {
+    /* A program with a table instruction gets version 2 and a table section;
+     * everything else keeps version 1, byte for byte.  A program with a
+     * sound op (music/sfx/release or the note builtin) gets version 3 — the
+     * version 2 layout, with an empty table section when it has no tables —
+     * so the committed interpreter, which reads 1 and 2, refuses the whole
+     * container cleanly at boot instead of faulting mid-frame on an opcode
+     * it does not have (#194's interpreter link lands in #198). */
+    var usesTables = false, usesSound = false;
+    for (f = 0; f < functions.length && !(usesTables && usesSound); f++) {
       var scanCode = functions[f].code || [];
       for (pc = 0; pc < scanCode.length; pc++) {
-        if (TABLE_OPS[scanCode[pc].t]) { usesTables = true; break; }
+        if (TABLE_OPS[scanCode[pc].t]) usesTables = true;
+        if (SOUND_OPS[scanCode[pc].t] ||
+            (scanCode[pc].t === "builtin" && scanCode[pc].name === "note")) {
+          usesSound = true;
+        }
+        if (usesTables && usesSound) break;
       }
     }
+    var wide = usesTables || usesSound;
     var layout = usesTables ? tableLayout(program) : null;
-    var section = usesTables ? buildTableSection(program, layout) : null;
+    var section = usesTables ? buildTableSection(program, layout)
+                             : (usesSound ? { bytes: [0] } : null);
     var siteIdOf = [], fieldIds = {};
     if (usesTables) {
       for (f = 0; f < functions.length; f++) {
@@ -499,7 +538,7 @@
       globalTableSize += 1 + globals[g].name.length;
     }
 
-    var funcTabOff = usesTables ? HEADER_TABLES : HEADER;
+    var funcTabOff = wide ? HEADER_TABLES : HEADER;
     var upTabOff = funcTabOff + functions.length * FUNC_ENTRY;
     var constTabOff = upTabOff + upCount * 2;
     var globalTabOff = constTabOff + constTableSize;
@@ -518,13 +557,13 @@
     var buf = new Buf();
     buf.bytes([MAGIC.charCodeAt(0), MAGIC.charCodeAt(1),
                MAGIC.charCodeAt(2), MAGIC.charCodeAt(3)]);
-    buf.u8(usesTables ? VERSION_TABLES : VERSION);
+    buf.u8(usesSound ? VERSION_SOUND : (usesTables ? VERSION_TABLES : VERSION));
     buf.u8(program.hooks && program.hooks.raster != null ? 1 : 0);
     buf.u8(initSlot); buf.u8(frameSlot); buf.u8(rasterSlot);
     buf.u8(functions.length); buf.u8(globals.length); buf.u8(constKeys.length);
     buf.u16(funcTabOff); buf.u16(upTabOff); buf.u16(constTabOff);
     buf.u16(globalTabOff);
-    if (usesTables) {
+    if (wide) {
       buf.u16(tabTabOff); buf.u16(codeOff); buf.u16(codeEnd); buf.u16(0);
     } else {
       buf.u16(codeOff); buf.u16(codeEnd);
@@ -580,7 +619,8 @@
       for (var nc = 0; nc < name.length; nc++) buf.u8(name.charCodeAt(nc) & 0xFF);
     }
 
-    /* Table section (version 2 only). */
+    /* Table section (versions 2 and 3; a sound toy with no tables carries
+     * the empty one byte section). */
     if (section) {
       if (buf.a.length !== tabTabOff) {
         refuse("ilbc-program", "internal: tabTabOff " + tabTabOff + " but " +
@@ -607,7 +647,7 @@
     return {
       bytes: Uint8Array.from(buf.a),
       magic: MAGIC,
-      version: usesTables ? VERSION_TABLES : VERSION,
+      version: usesSound ? VERSION_SOUND : (usesTables ? VERSION_TABLES : VERSION),
       functions: functions.length,
       globals: globals.length,
       constants: constKeys.length,
@@ -815,6 +855,16 @@
         buf.u8(op(ins.value));
         break;
       }
+      case "music":
+        buf.u8(op(ins.song));
+        break;
+      case "sfx":
+        buf.u8(op(ins.ch)); buf.u8(op(ins.freq));
+        buf.u8(op(ins.volume)); buf.u8(op(ins.frames));
+        break;
+      case "release":
+        buf.u8(op(ins.ch));
+        break;
       default:
         refuse("ilbc-op", "instruction " + ins.t);
       }
@@ -1605,9 +1655,9 @@
   var REFUSALS = {
     "ilbc-program": "not a pce-il version 1 program, no functions, or a hook " +
                     "with no global slot",
-    "ilbc-op": "an instruction the bytecode has no form for (music, sfx, " +
-               "release, print, raster(table), vget) or a sprite whose spec " +
-               "the walker cannot resolve",
+    "ilbc-op": "an instruction the bytecode has no form for (print, " +
+               "raster(table), vget) or a sprite whose spec the walker " +
+               "cannot resolve",
     "ilbc-fixed": "fixed-point arithmetic, comparison or constant",
     "ilbc-key": "a constant or operand with no bytecode form",
     "ilbc-arity": "more than " + MAX_ARGS + " parameters or arguments",
@@ -1615,7 +1665,7 @@
                   " constants, " + MAX_REGS + " registers, 255 functions or " +
                   "globals, or a setlist index/count",
     "ilbc-jump": "a jump target that is not an instruction boundary",
-    "ilbc-builtin": "a builtin other than rgb",
+    "ilbc-builtin": "a builtin other than rgb and note",
     "ilbc-table-ram": "the table slots need more than the interpreter's " +
                       TABLE_POOL_CELLS + " cells, or a key/field is past " +
                       "its slot's shape",
@@ -1645,9 +1695,10 @@
         detail: "add sub mul mod idiv band bor bxor shl shr; eq lt le; " +
                 "unm, bnot and logical not",
         ops: ["arith", "unm", "bnot", "not", "cmp"] },
-      { id: "builtins", label: "rgb(r, g, b)",
-        detail: "the one builtin with a bytecode form; note(), min/max/" +
-                "floor/abs/clamp/sr and the fixed helpers do not encode here",
+      { id: "builtins", label: "rgb(r, g, b) and note(midi)",
+        detail: "the two builtins with a bytecode form (note is a MIDI " +
+                "number to the PSG's 12-bit F); min/max/floor/abs/clamp/sr " +
+                "and the fixed helpers do not encode here",
         ops: ["builtin"] },
       { id: "display", label: "pal(), reg(BXR/BYR/CR), vram[...] writes",
         detail: "vram reads (vget) have no bytecode form",
@@ -1658,7 +1709,14 @@
       { id: "pads", label: "pad[n].field", detail: "",
         ops: ["padref", "padget"] },
       { id: "sprites", label: "sat(i, k, v) and sprite(i, spec)",
-        detail: "", ops: ["sat", "sprite"] }
+        detail: "", ops: ["sat", "sprite"] },
+      { id: "sound", label: "music(song), sfx(ch, freq, volume, frames), " +
+        "release(ch) and note(midi)",
+        detail: "a sound toy's container is version 3, which the committed " +
+                "interpreter does not read — export refuses the ROM until " +
+                "#198 links the engine (#194).  The host harness runs the " +
+                "same ops today.",
+        ops: ["music", "sfx", "release"] }
     ],
     refused: REFUSALS
   };
@@ -1666,6 +1724,7 @@
   return {
     VERSION: VERSION,
     VERSION_TABLES: VERSION_TABLES,
+    VERSION_SOUND: VERSION_SOUND,
     MAGIC: MAGIC,
     HEADER: HEADER,
     HEADER_TABLES: HEADER_TABLES,

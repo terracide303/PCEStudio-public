@@ -20,12 +20,13 @@
  *      problems, 8 frames of 9,530–9,637 cycles, 6 sprites / 6 strips with 4
  *      on the busiest line, 2,010 VRAM words, 100 blank cycles, a ~30,480 B
  *      ROM.  A green check-demo-game says nothing about the console.
- *   3. THE FULL REFUSAL INVENTORY, by kind, for both backends: 18 of 1,919
- *      instructions (0.94%) over the kinds the write-up names, with the
+ *   3. THE FULL REFUSAL INVENTORY, by kind, for both backends: 15 of 1,919
+ *      instructions (0.78%) over the kinds the write-up names, with the
  *      first main.lua line of each and the two route-1-only pad kinds.
  *      (#174 carried the four table kinds on route 1; #176 carried them in
  *      cgen; #190 carried 21 of sprite's 31 in cgen, so sprite's row is now
- *      10 instructions on each backend rather than a whole kind.)
+ *      10 instructions on each backend rather than a whole kind; #197
+ *      carried sfx and the note builtin, so its row is gone.)
  *   4. THE NEXT BLOCKER AFTER #190.  #176 widened cgen's global-type
  *      allow-list to fn/vram/int/bool/padset/table (pce-cgen.js validate()),
  *      so the #143 gate is closed: STARFALL has 0 getglobal/setglobal outside
@@ -49,8 +50,8 @@
  *
  *   - No .pce was built for STARFALL and no emulator ran, because the export
  *     refuses.  There is no 20-frame browser/Mednafen diff and no TMA-timer
- *     cycle count; those stay conditional on the sprite/sfx kinds, the route
- *     1 pad kinds and the 8 KiB bank.
+ *     cycle count; those stay conditional on the sprite specs, the remaining
+ *     kinds and the 8 KiB bank.
  *   - The page's `exportAnalysis()` was not executed here: this machine has
  *     no chrome-headless-shell (#114), so the real-page run in the write-up
  *     is not re-verified.  The panel function it reads was executed, and the
@@ -167,8 +168,8 @@ function checkPanel() {
   eq("the one finding's line", f.line, 466);
   ok("the finding names the `builtin` instruction",
      /instruction `builtin`/.test(String(f.message)), String(f.message));
-  ok("the finding says rgb is the only builtin it lowers",
-     /part A lowers rgb only/.test(String(f.message)));
+  ok("the finding says rgb and note are the only builtins it lowers",
+     /part A lowers rgb and note only/.test(String(f.message)));
 
   eq("panel stats.frameCycles", S.stats.frameCycles, 9530);
   eq("panel stats.route1.collectionCycles", S.stats.route1.collectionCycles,
@@ -227,9 +228,10 @@ const INVENTORY = [
    * the 10 sprites whose spec the walker cannot resolve (the score's
    * digit_pattern calls, one runtime x, and three loop re-running spec
    * windows — both backends consume tableLayout's own sprite records), and
-   * 21 sprites now lower in cgen as they already did on route 1. */
+   * 21 sprites now lower in cgen as they already did on route 1.  #197
+   * carried sfx (and the note builtin) on both backends, so its row is
+   * gone too. */
   ["sprite", 31, 10, 10, 590],
-  ["sfx", 3, 3, 3, 475],
   ["raster", 2, 2, 2, 498],
   ["builtin abs", 2, 2, 2, 466],
   ["builtin sr", 1, 1, 1, 570]
@@ -241,8 +243,8 @@ function checkInventory() {
   const inv = r.inventory;
   eq("IL functions", inv.functions, 18);
   eq("IL instructions", inv.total, 1919);
-  eq("refused instructions", inv.refusedCount, 18);
-  near("refused percentage", 100 * inv.refusedCount / inv.total, 0.94, 0.05);
+  eq("refused instructions", inv.refusedCount, 15);
+  near("refused percentage", 100 * inv.refusedCount / inv.total, 0.78, 0.05);
 
   for (const [kind, n, ilbcN, cgenN, first] of INVENTORY) {
     const rows = inv.rows.filter(function (x) { return x.kind === kind; });
@@ -286,8 +288,8 @@ function checkInventory() {
   const partlyRefused = INVENTORY.filter(function (x) {
     return x[2] < x[1] || x[3] < x[1];
   }).map(function (x) { return x[0]; });
-  eq("kinds in the table", kinds, 5);
-  eq("kinds refused by both backends", both, 4);
+  eq("kinds in the table", kinds, 4);
+  eq("kinds refused by both backends", both, 3);
   eq("kinds one backend still refuses in part", partlyRefused, ["sprite"]);
   eq("route-1-only kinds", route1Only, []);
 }
@@ -381,17 +383,17 @@ const CITATIONS = [
   ["renderer/studio.html", 4336, "if (errors) return"],
   ["renderer/studio-panel-console.js", 145, "emitC"],
   ["renderer/studio-panel-console.js", 148, "severity: \"error\""],
-  ["renderer/pce-cgen.js", 530, "fn|vram|int|bool|padset|table"],
-  ["renderer/pce-cgen.js", 601, "case \"padget\""],
-  ["renderer/pce-cgen.js", 610, "case \"padref\""],
-  ["renderer/pce-cgen.js", 628, "builtin `"],
-  ["renderer/pce-cgen.js", 665, "refuse(\"cgen-op\""],
-  ["renderer/pce-ilbc.js", 186, "var OPS = {"],
-  ["renderer/pce-ilbc.js", 200, "var BUILTIN = {"],
-  ["renderer/pce-ilbc.js", 310, "refuse(\"ilbc-op\""],
-  ["renderer/pce-ilbc.js", 335, "refuse(\"ilbc-builtin\""],
-  ["renderer/pce-ilbc.js", 387, "hookSlot(\"raster\""],
-  ["renderer/pce-rom.js", 622, "if (dataLen > BANK)"],
+  ["renderer/pce-cgen.js", 536, "fn|vram|int|bool|padset|table"],
+  ["renderer/pce-cgen.js", 607, "case \"padget\""],
+  ["renderer/pce-cgen.js", 616, "case \"padref\""],
+  ["renderer/pce-cgen.js", 636, "builtin `"],
+  ["renderer/pce-cgen.js", 697, "refuse(\"cgen-op\""],
+  ["renderer/pce-ilbc.js", 204, "var OPS = {"],
+  ["renderer/pce-ilbc.js", 220, "var BUILTIN = {"],
+  ["renderer/pce-ilbc.js", 337, "refuse(\"ilbc-op\""],
+  ["renderer/pce-ilbc.js", 362, "refuse(\"ilbc-builtin\""],
+  ["renderer/pce-ilbc.js", 414, "hookSlot(\"raster\""],
+  ["renderer/pce-rom.js", 627, "if (dataLen > BANK)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];
 

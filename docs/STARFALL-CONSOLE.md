@@ -113,7 +113,7 @@ as the gate:
 
 Two first-hit aborts sit between the page and the truth:
 
-1. `pce-cgen.js:665` refuses the **first** IL instruction it cannot lower and
+1. `pce-cgen.js:697` refuses the **first** IL instruction it cannot lower and
    throws. STARFALL's first was the `table` for the `DIGIT` digit-code array at
    `main.lua:47`; #176 (2026-10-31) carried the four table kinds and the
    table-typed globals, so the first is now the `sprite` at `main.lua:406`.
@@ -127,7 +127,7 @@ So the page's single line is the first of many. The rest are below — and one
 of them is not an instruction kind at all: if #132 carried the four table
 kinds in the C emitter, the very next thing it lowers is
 `setglobal DIGIT` at function 0 **pc 14** (`main.lua:47`), and
-`renderer/pce-cgen.js:530` refuses a global typed `table`. That gate is
+`renderer/pce-cgen.js:536` refuses a global typed `table`. That gate is
 [#143](#143); the ordered list in `tools/starfall-console.js` prints it.
 (#176 closed both: the allow-list is now `fn|vram|int|bool|padset|table`, so
 the ordered list's next refusal is the `sprite` at `main.lua:406`.)
@@ -149,7 +149,6 @@ than stopping at the first hit. "Route 1" is `pce-ilbc.js` + `renderer/ilvm.bin`
 | `sprite` | 31 | 406 | `ilbc-op`, `cgen-op` | #133 |
 | `padref` | 5 | 649 | `ilbc-op` only | #134 |
 | `padget` | 5 | 649 | `ilbc-op` only | #134 |
-| `sfx` | 3 | 475 | `ilbc-op`, `cgen-op` | #135 |
 | `raster` (table form) | 2 | 498 | `ilbc-op`, `cgen-op` | #136 |
 | `builtin abs` | 2 | 466 | `ilbc-builtin`, `cgen-op` | #137 |
 | `builtin sr` | 1 | 570 | `ilbc-builtin`, `cgen-op` | #137 |
@@ -157,12 +156,14 @@ than stopping at the first hit. "Route 1" is `pce-ilbc.js` + `renderer/ilvm.bin`
 **246 of 1,919 instructions (12.8%)** are refused by at least one backend.
 Nine of the eleven kinds are refused by both; pad reads are a
 **route-1-only** gap (the C backend lowers `padref`/`padget` —
-`pce-cgen.js:601 and 610` — so the two backends disagree about what a toy can
+`pce-cgen.js:607 and 616` — so the two backends disagree about what a toy can
 do). (#174 and #176 carried the four table kinds on both backends, so as of
-2026-10-31 the count is **49 of 1,919 (2.6%)** over seven kinds.)
+2026-10-31 the count is **49 of 1,919 (2.6%)** over seven kinds; #197
+carried `sfx` on both backends, 2026-11-01, so the count is **46 of 1,919
+(2.4%)** over six kinds.)
 
 **A twelfth gate is not an instruction kind** and the table cannot hold it.
-`renderer/pce-cgen.js:530` refuses `getglobal`/`setglobal` unless the global's
+`renderer/pce-cgen.js:536` refuses `getglobal`/`setglobal` unless the global's
 declared type is `fn|vram|int|bool|padset`; STARFALL's drawings live in seven
 `table`-typed globals (`DIGIT`, `bl`, `bx`, `by`, `ex`, `ey`, `es`), read or
 written by **36 instructions** — 29 `getglobal`, 7 `setglobal`. Both kinds
@@ -181,7 +182,7 @@ Two notes that matter for whoever closes these:
   entries a frame (the validator prices them at 100 cycles against part C's
   123-cycle blank budget) instead of 224 callback calls.
 - **`sr()` is `pce-cgen.js`'s "part A lowers rgb only"** and `pce-ilbc.js`'s
-  `BUILTIN = { rgb: 0 }`. #119 put `sr()` in the IL; no console backend carries
+  `BUILTIN = { rgb: 0, note: 1 }` (#197 added `note`). #119 put `sr()` in the IL; no console backend carries
   it yet.
 
 The cards filed, one per kind — and one for the operand gate:
@@ -194,6 +195,10 @@ The cards filed, one per kind — and one for the operand gate:
 - <a id="134"></a>**#134** — `pad[n]`, `padref`/`padget`, 5 each. Route 1 only.
 - <a id="135"></a>**#135** — `sfx()`, 3 instructions. This is about the
   **export carrying the call**, not about #71/#113's audible sound.
+  (Closed by #197, 2026-11-01: the encoder has `music`/`sfx`/`release` ops
+  and the C emitter lowers them; the ROM's interpreter reads them once the
+  #198 engine link lands, so the sound container is version 3 and
+  `buildToyRom` refuses it until then.)
 - <a id="136"></a>**#136** — the `raster(line, spec)` table form, 2
   instructions.
 - <a id="137"></a>**#137** — builtins beyond `rgb`: `abs()` and `sr()`.
@@ -252,13 +257,15 @@ busiest line (no overflow), 2,010 VRAM words, 100 blank cycles against a
 
 ## 6. The capacity limit behind the instruction gaps (#138)
 
-`renderer/pce-rom.js:622` refuses a bytecode (plus asset tail) larger than
+`renderer/pce-rom.js:627` refuses a bytecode (plus asset tail) larger than
 `BANK` = **8,192 B** with code `toy-data-bank-full`: *"the interpreter reads one
 8 KiB data bank"*. A size model built from `pce-ilbc.js`'s own container
 layout — header 24 B (28 B once a table instruction makes it version 2),
 function entry 10 B, upvalue 2 B, the constant and global name tables, the
-table section (1 B + 4 B per slot: `u16` base, `u8` cap, `u8` nfields), and
-the per-op sizes at `pce-ilbc.js:255` — reproduces the two committed
+table section (1 B + 4 B per slot: `u16` base, `u8` cap, `u8` nfields; the
+header is 28 B for a version 2 container, or for a version 3 one when a
+sound instruction makes it, with a 1-byte empty section when no tables), and
+the per-op sizes at `pce-ilbc.js:303` — reproduces the two committed
 containers to **within 4 bytes** (palette 1 B short, parallax 4 B short).
 Applied to STARFALL:
 

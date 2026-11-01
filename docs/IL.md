@@ -1098,11 +1098,19 @@ that fits in a single 8 KiB data bank. All offsets are byte offsets from the
 start of the container. Little-endian. The container is **version 1** unless
 the program has a table instruction; then it is **version 2**, with a 28-byte
 header and a table section (#172). A table-free toy's bytes are unchanged.
+Since #197 the container is **version 3** when the program has a sound
+instruction (`music`, `sfx`, `release`) or the `note` builtin: the version 2
+header layout (28 bytes, with an empty one-byte table section when there are
+no tables), because the sound engine the #194 cards add to the interpreter
+shares the v2 shape. The committed `renderer/ilvm.bin` reads versions 1 and 2
+only until #198 links that engine in, and `buildToyRom` refuses a version 3
+container the same way it refused a version 2 one before #175's interpreter
+read it — so a sound toy encodes fully but does not export a faulting ROM.
 
 | offset | size | field |
 |---|---|---|
 | 0 | 4 | `"ILBC"` |
-| 4 | 1 | version (1, or 2 when the program has a table instruction) |
+| 4 | 1 | version (1; 2 when the program has a table instruction; 3 when it has a sound instruction or `note` — #197) |
 | 5 | 1 | flags — bit 0: the toy has a `raster()` callback |
 | 6 | 1 | `init` slot (0xFF = none) |
 | 7 | 1 | `frame` slot |
@@ -1181,6 +1189,9 @@ container offsets, patched after the layout is known.
 | 1C | `padref` | `dst:r n:op` — `pad[n]`'s n, held for the padget that indexes it (#185) |
 | 1D | `padget` | `dst:r pad:op field:u8` — one bit of the scanned pad word |
 | 1E | `sat` | `i:op k:op v:op` — one SAT word, entry `i` word `k` (#186) |
+| 20 | `music` | `song:op` — a song id (#197, carried for the #194 engine) |
+| 21 | `sfx` | `ch:op freq:op volume:op frames:op` — a PSG channel 0..5, the 12-bit F, the AL volume 0..31, and how many frames before the engine gives the channel back (#197) |
+| 22 | `release` | `ch:op` — give the channel back early; a no-op on a channel no sfx owns, as on the host (#197) |
 
 For `tget`/`tset`, `kind` 0 means the key byte is an **operand** (a register,
 or a constant int index encoded `0x80|k`); `kind` 1 means the key byte is a
@@ -1233,19 +1244,38 @@ host's `!truthy(a)` in 0/1.  It is deliberately **not** an alias of `bnot`
 Lua's `not false` is `true`.  A `not` result is a bool register, the same value
 a `cmp` or `br` condition already carries, so nothing downstream changes.
 
+A **`music`/`sfx`/`release`** instruction carries one call into the PSG sound
+engine the #194 cards vend into the interpreter (#197 encodes them; #198 links
+the engine, which is when the interpreter learns ops `20`–`22` and `buildToyRom`
+admits version 3).  `music` is two bytes (`song`), `release` two (`ch`), `sfx`
+five (`ch`, `freq`, `volume`, `frames`); the operand semantics are the host
+toy surface's — `ch` is a PSG channel 0..5, `freq` the 12-bit F the `note`
+builtin's MIDI number rounds to, `volume` the AL word 0..31, `frames` how many
+frames the channel is owned for.  `release(ch)` on a channel no sfx owns is a
+no-op (the host's release: nothing to give back), and there is no music-stop
+form — the browser host's toy surface has none, so the bytecode carries what
+the surface has (docs/ROM-SOUND.md §7).  Every container carrying one of
+these ops is version 3, even with no tables: the gate that stops TOWER and
+DUSK RUN today.
+
 `arith` ops are 0 add, 1 sub, 2 mul, 3 mod, 4 idiv, 5 band, 6 bor, 7 bxor,
 8 shl, 9 shr; `cmp` ops are 0 eq, 1 lt, 2 le; `reg` ids are 0 BXR, 1 BYR,
-2 CR; builtin 0 is `rgb` (the only one the interpreter implements).
+2 CR; builtin 0 is `rgb`, builtin 1 is `note` — a MIDI number to the PSG's
+12-bit F, the same 7,159,090 / (64 × 440 × 2^((midi-69)/12)) the host uses,
+rounded to the nearest and clamped to 0..4095 (the interpreter implements
+them once the #198 engine link lands; the committed image implements only
+`rgb`).
 
 The hooks are **global slots**, not function ids: the chunk stores a closure
 in `init`, `frame` or `raster`, and the runtime calls whatever is there —
 exactly what the C backend's `toy_boot`/`toy_frame` do (§9.1).
 
 The encoder **refuses by code rather than guessing**, with the same spirit as
-`pce-cgen.js`: `ilbc-op` (sprites, `print`, `music`, `sfx`, `vget`, raster
+`pce-cgen.js`: `ilbc-op` (sprites, `print`, `vget`, raster
 tables, …),
 `ilbc-fixed` (fixed-point arithmetic or constants),
-`ilbc-builtin` (a builtin other than `rgb`), `ilbc-arity` (more than eight
+`ilbc-builtin` (a builtin other than `rgb` and `note`), `ilbc-arity` (more
+than eight
 parameters or arguments), `ilbc-range` (more than 127 constants, 128
 registers, 32 globals, a setlist `first` past 255, more than 255 slots or
 field names), `ilbc-jump`, `ilbc-key`, `ilbc-program`. The table work adds
