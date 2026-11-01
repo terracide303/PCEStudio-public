@@ -581,18 +581,21 @@ function usedChannels(song) {
     check(!list.error, "tools/list answers without a JSON-RPC error");
     const tools = list.result.tools || [];
     const names = tools.map((t) => t.name).sort();
-    eq("tools/list lists exactly the server's thirteen tools", names, [
+    eq("tools/list lists exactly the server's fourteen tools", names, [
       "docs", "export_pce", "frame_png", "project_open", "project_save",
-      "register_set", "registers_get", "song_write", "source_add", "toy_run",
-      "toy_save", "toy_write", "validate"
+      "register_set", "registers_get", "rom_check", "song_write",
+      "source_add", "toy_run", "toy_save", "toy_write", "validate"
     ]);
     for (const t of tools) {
       const schema = t.inputSchema;
       check(!!t.description && t.description.length > 40,
             t.name + " has a description that says what it does");
       check(schema && schema.type === "object" && schema.properties &&
-            Object.keys(schema.properties).length > 0,
-            t.name + " publishes an object inputSchema with properties");
+            (Object.keys(schema.properties).length > 0 ||
+             t.name === "rom_check"),
+            t.name + " publishes an object inputSchema" +
+            (t.name === "rom_check" ? " (rom_check takes no arguments)"
+                                    : " with properties"));
     }
     eq("toy_write requires files",
        list.result.tools.filter((t) => t.name === "toy_write")[0]

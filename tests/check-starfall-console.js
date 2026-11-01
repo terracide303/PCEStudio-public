@@ -378,19 +378,19 @@ function checkCapacity() {
 
 /* ---- 6. the write-up's citations --------------------------------------- */
 const CITATIONS = [
-  ["renderer/studio.html", 4198, "if (errors) return"],
+  ["renderer/studio.html", 4336, "if (errors) return"],
   ["renderer/studio-panel-console.js", 145, "emitC"],
   ["renderer/studio-panel-console.js", 148, "severity: \"error\""],
-  ["renderer/pce-cgen.js", 495, "fn|vram|int|bool|padset|table"],
-  ["renderer/pce-cgen.js", 566, "case \"padget\""],
-  ["renderer/pce-cgen.js", 575, "case \"padref\""],
-  ["renderer/pce-cgen.js", 593, "builtin `"],
-  ["renderer/pce-cgen.js", 630, "refuse(\"cgen-op\""],
+  ["renderer/pce-cgen.js", 530, "fn|vram|int|bool|padset|table"],
+  ["renderer/pce-cgen.js", 601, "case \"padget\""],
+  ["renderer/pce-cgen.js", 610, "case \"padref\""],
+  ["renderer/pce-cgen.js", 628, "builtin `"],
+  ["renderer/pce-cgen.js", 665, "refuse(\"cgen-op\""],
   ["renderer/pce-ilbc.js", 186, "var OPS = {"],
   ["renderer/pce-ilbc.js", 200, "var BUILTIN = {"],
-  ["renderer/pce-ilbc.js", 305, "refuse(\"ilbc-op\""],
-  ["renderer/pce-ilbc.js", 330, "refuse(\"ilbc-builtin\""],
-  ["renderer/pce-ilbc.js", 382, "hookSlot(\"raster\""],
+  ["renderer/pce-ilbc.js", 310, "refuse(\"ilbc-op\""],
+  ["renderer/pce-ilbc.js", 335, "refuse(\"ilbc-builtin\""],
+  ["renderer/pce-ilbc.js", 387, "hookSlot(\"raster\""],
   ["renderer/pce-rom.js", 622, "if (dataLen > BANK)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];

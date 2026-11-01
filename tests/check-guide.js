@@ -32,8 +32,11 @@
  *   6. The cold seat's transcript (docs/GUIDE-TRANSCRIPT.md) carries its
  *      main.lua; that file is run the same way, and must be visible,
  *      validator-clean, and move with the pad.
- *   7. The guide fits a chat: under 12,000 words, and it ends every code
- *      answer with the exact Paste & Run line.
+ *   7. The guide fits a chat: under 14,000 words, and it ends every code
+ *      answer with the exact Paste & Run line.  (The limit was 12,000 until
+ *      card #193 added the generated "Writing for the ROM" chapter, which is
+ *      a required part of the guide; the generated carried/refused tables are
+ *      what took it past the old bound.)
  *   8. The cold review's seven findings stay fixed (#141): every BXR that
  *      grows with the frame is wrapped (and parallax runs past frame 2048),
  *      the starter is table-free and pce-cgen lowers it, the pattern range is
@@ -76,7 +79,7 @@ const GUIDE_PATH = path.join(ROOT, "renderer", "pcestudio-for-claude.md");
 const TRANSCRIPT_PATH = path.join(ROOT, "docs", "GUIDE-TRANSCRIPT.md");
 const WIDTH = host.WIDTH;
 const HEIGHT = host.HEIGHT;
-const WORD_LIMIT = 12000;
+const WORD_LIMIT = 14000;
 
 let checks = 0;
 const failures = [];

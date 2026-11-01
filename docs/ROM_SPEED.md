@@ -282,6 +282,66 @@ export) and **#187** (closed 2026-11-01: logical `not` carried; DUSK RUN
 moves to its first `sfx`, TOWER's pin survives — its sfx is scanned first).
 The rest are the existing #133–#138 umbrellas.
 
+## ROM CHECK: the five games' exact blockers (card #193)
+
+`renderer/pce-romcheck.js` runs the two cartridge front ends over a toy's
+`main.lua` without building anything: the C backend's check
+(`renderer/pce-cgen.js`, what the studio's Export adds on top of the bytecode)
+and the bytecode encoder's check (`renderer/pce-ilbc.js`, the interpreter
+image every exported `.pce` carries). It returns every refusal at once, with
+its Lua line. The same code is the studio's ROM CHECK drawer and the MCP tool
+`rom_check`; the tables below are that tool's output on the five games at
+this commit. `line` is the Lua line in `main.lua`; a repeated construct lists
+every line it occurs on.
+
+| toy | route | code | lines | blocker |
+|-----|-------|------|-------|---------|
+| **STARFALL** | C compiler | `cgen-op` | 406–422, 590, 591, 592, 594, 596, 599, 601, 604, 606, 617, 619, 626, 628, 635 | `sprite(i, spec)` — no C lowering |
+| | C compiler | `cgen-op` | 475, 554, 663 | `sfx(channel, freq, volume, frames)` |
+| | C compiler | `cgen-op` | 498, 646 | `raster(line, spec)` (the table form, not the hook) |
+| | C compiler | `cgen-op` | 466, 467, 570 | builtins `abs` and `sr` (only `rgb` lowers) |
+| | bytecode | `ilbc-range` | 168 | more than 127 constants (the 128th is first seen here) |
+| | bytecode | `ilbc-builtin` | 466, 570 | builtins `abs`, `sr` |
+| | bytecode | `ilbc-op` | 475, 554, 663 | `sfx` |
+| | bytecode | `ilbc-op` | 498, 646 | `raster(line, spec)` |
+| **TOWER** | C compiler | `cgen-op` | 324, 371, 442, 452, 458, 463 | `sfx` |
+| | C compiler | `cgen-op` | 329 | logical `not` |
+| | bytecode | `ilbc-op` | 324, 371, 442, 452, 458, 463 | `sfx` |
+| **NOVA TIDE** | C compiler | `cgen-op` | 29 | unary minus (`unm`) |
+| | C compiler | `cgen-op` | 137, 138, 139, 381, 526 | `sfx` (and `note()` on the same lines) |
+| | C compiler | `cgen-op` | 530, 531, 532, 533, 534 | `raster(line, spec)` |
+| | bytecode | `ilbc-builtin` | 137 | builtin `note` |
+| | bytecode | `ilbc-op` | 137, 138, 139, 381, 526 | `sfx` |
+| | bytecode | `ilbc-op` | 530, 531, 532, 533, 534 | `raster(line, spec)` |
+| **DUSK RUN** | C compiler | `cgen-op` | 62 | unary minus (`unm`) |
+| | C compiler | `cgen-op` | 401 | logical `not` |
+| | C compiler | `cgen-op` | 416, 445, 449 | `sfx` |
+| | bytecode | `ilbc-op` | 416, 445, 449 | `sfx` |
+| **PLATFORMER** | — | — | — | **none: `rom_check` answers `ok:true`** |
+
+### What the table says, plainly
+
+- **PLATFORMER is the only one of the five both routes carry.** That agrees
+  with #180's measurement: its export builds and runs at 30 Hz. The other
+  four stop on constructs no route carries yet: `sfx` and the `raster(line,
+  spec)` table form (bytecode), and `sprite`, `unm`, `not` and the non-`rgb`
+  builtins (the C route). STARFALL additionally exhausts the 127-constant
+  pool.
+- **The two routes differ, and that is the point of checking both.** TOWER's
+  `not`, NOVA TIDE's `unm` and the `raster(line, spec)` calls are refused by
+  the C route, while the bytecode opcode table carries `not` and `unm` (not
+  `raster`, not `sfx`). NOVA TIDE's MCP `export_pce` is therefore stopped by
+  `note` and `sfx`, not by its `unm`. A toy is exportable by the studio only
+  when both lists are empty, and by MCP `export_pce` when the bytecode list
+  is.
+- **These are front-end findings, not a verdict on speed.** The ROM's frame
+  rate is the #169/#180 measurement (`tools/measure-rom.js`); this table says
+  only whether the ROM can be built, and the exact constructs that stop it.
+- The carried and refused feature lists the check reports come from the
+  compilers' own `FEATURES`/`REFUSALS` tables, so a card that carries one of
+  these constructs moves it from refused to carried in the check, the drawer,
+  the MCP tool and the generated docs together.
+
 ## What is not proven
 
 - **Mednafen only.** No real hardware (Tang Nano / flash cart: a later card),

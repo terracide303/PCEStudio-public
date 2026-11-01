@@ -442,6 +442,15 @@
     }
   },
   {
+    "name": "rom_check",
+    "description": "What the exported ROM can and cannot run (#193): run BOTH cartridge front ends over the loaded main.lua — the C route (renderer/pce-cgen.js, the page's Export) and the bytecode route (renderer/pce-ilbc.js, the interpreter image every .pce carries) — without building anything. Returns every finding at once as {code, line, message}, plus the compilers' own carried and refused feature lists.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "export_pce",
     "description": "Export the loaded toy to a .pce through #100's browser route (no compiler): IL -> pce-ilbc bytecode -> pce-rom.buildToyRom over the committed renderer/ilvm.bin. The validator runs first and a toy it fails is refused by code. Default output is $TMPDIR/pce-mcp/<name>.pce; pass out for another path. The llvm-mos route (tools/toyc) exists where llvm-mos is installed but is not called here.",
     "inputSchema": {
