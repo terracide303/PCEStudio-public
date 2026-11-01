@@ -64,8 +64,9 @@ uploads no wave for it.
 
 ## 4. Noise drums: which half is whose
 
-`pce-song.js` deliberately has no effect columns, and HuTrack's noise is effect `0F` on channels 5-6
-(`vendor/hutrack`, `HuTrack_parser.asm .platFX.Noise`). Part 1 therefore splits the drum:
+`pce-song.js` deliberately has no effect columns, and HuTrack's noise is effect `11` on channels 5-6
+(`vendor/hutrack`, `HuTrack_parser.asm .platFX.Noise`; `vendor/hutrack/docs/compatibility.md`: "`10`, `11` |
+Wave selection and noise mode"). Part 1 therefore splits the drum:
 
 * **volume** is `pce-song.js`'s: the drum instrument carries its envelope and the engine writes
   `R4 = $80 | level` every VBlank exactly as for a wave note. `tests/check-sequencer.js` reads that R4
@@ -76,8 +77,13 @@ uploads no wave for it.
   same frame as the player's writes, after them. `R7 = 0` is also written when a **wave** note follows a
   drum on that channel, so the state never leaks.
 
-#96 owes the other half: a DMF export must encode the same state change as effect `0F`, or a DMF of a
-drum song opens in Furnace without its drums.
+The ROM conversion (`renderer/pce-hutrack.js`'s `fromSequencer()`, #199) encodes the same state change
+as effect `11` with argument 1 (on) / 0 (off). The engine takes the **NF from the note's semitone**
+(`NoiseTable`'s twelve legacy values), not from the effect's argument, so the converter retimes a drum
+row to the legacy pitch nearest the instrument's NF; `tests/check-hutrack-seq.js` measures that mapping
+(deltas 0-2) and compares the rest of the register stream with the studio's. #96 owes the DMF side: a
+DMF export must encode the same state change as effect `11`, or a DMF of a drum song opens in Furnace
+without its drums.
 
 ## 5. What plays
 
@@ -134,6 +140,11 @@ watchers on both paths).
   of cells and the voices bar, a pattern written through its API compiles to the expected rows, the
   rendered stream is the model's, six voices is the maximum and a noise drum on channel 1 is refused, and
   an edit saves `song.json` without touching the toy's other files.
+* `tests/check-hutrack-seq.js` (#199) — the ROM conversion: `pce-hutrack.fromSequencer()` and
+  `pce-seq.instrumentFromAsset()`; each of the 15 built-ins' wave and envelope decoded out of the
+  assembled song bank and compared with `pce-assets.traceFor`'s writes (the drums' R7 NF within 2 of the
+  studio's); a two-pattern song's rows, noise `11` on/off rows and frame-by-frame register stream
+  against `pce-seq.events()`.
 
 Six source substitutions of the model were run by hand in a `$TMPDIR` copy on 2026-10-29 and each made
 `check-sequencer.js` fail: swing inverted (tick1/tick2 swapped), no note-cut rows, the octave one too high,

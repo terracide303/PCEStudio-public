@@ -122,22 +122,11 @@
       }
 
       function seqInstrument(t) {
-        if (t.kind !== "wave" && t.kind !== "noise") return null;
-        var env = t.envelope || {};
-        var data = Array.isArray(env.data) && env.data.length
-          ? env.data.slice(0, 32) : [31];
-        var size = data.length;
-        var loop = env.loop;
-        if (loop === undefined || loop === null || loop >= size) loop = 0xff;
-        var out = { name: t.name, kind: t.kind,
-                    env: { size: size, loop: loop, data: data } };
-        if (t.kind === "wave") {
-          if (!Array.isArray(t.wave) || t.wave.length < 32) return null;
-          out.wave = t.wave.slice(0, 32);
-        } else {
-          out.nf = t.nf;
-        }
-        return out;
+        /* One conversion for the palette: pce-seq.js's shape, which the ROM
+         * song conversion reads too.  A malformed asset is skipped here (it
+         * is another source's problem, not this panel's). */
+        try { return sq.instrumentFromAsset(t); }
+        catch (e) { return null; }
       }
 
       function mergeToyInstruments(s) {
