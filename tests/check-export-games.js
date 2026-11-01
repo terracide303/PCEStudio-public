@@ -38,7 +38,11 @@
  *      the screen through the interpreter's extra-argument block (its ROM
  *      sha and sixteen-frame picture cycle are pinned); #187 adds
  *      tools/toys/not.lua, whose picture is painted by the logical not
- *      (its ROM sha and four-picture cycle are pinned).
+ *      (its ROM sha and four-picture cycle are pinned); #191 adds
+ *      tools/toys/sprite.lua to GAME_PINS — its three constant sprite
+ *      specs export and draw on both routes, and its ROM sha and static
+ *      picture are pinned (the same toy is the console dump
+ *      tests/check-ilvm.js registers, where the SAT words are compared).
  *   3. The control's ROM bytes are the browser route's: emitted a second
  *      time from the same modules, byte-identical.
  *
@@ -146,6 +150,20 @@ const GAME_PINS = {
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
+  },
+  /* #191: tools/toys/sprite.lua, the sprite op on the exported route.  It
+   * is not one of the card's five games, so `kind: "toy"` keeps it out of
+   * the five-game tripwire below; it rides GAME_PINS so it is measured,
+   * captured and pinned by the same instrument as a game that exports.
+   * Its three sprite specs are constants (#188), so the picture is the
+   * same every frame: one pinned hash is the whole cycle.  The console's
+   * SAT words for this toy are compared in tests/check-ilvm.js's
+   * tests/dumps/toysprite-ilvm dump. */
+  "SPRITE": {
+    kind: "toy",
+    toy: "tools/toys/sprite.lua",
+    rom: "7f8ce59af4846f5067e77e1a742ca3335644de3cfdb65e1c3da0656de165a121",
+    frames: [1994475180]
   }
 };
 
@@ -517,8 +535,17 @@ async function main() {
               "route, and Mednafen on what builds");
 
   /* The five card games: four are refused in GAMES, and each that starts
-   * exporting moves to GAME_PINS — the card's games are still all five. */
-  const cardGames = GAMES.concat(Object.keys(GAME_PINS).map(function (n) {
+   * exporting moves to GAME_PINS — the card's games are still all five.
+   * GAME_PINS also holds toys that are not card games (#191's SPRITE,
+   * marked kind: "toy"), so the five-game tripwire counts only the game
+   * pins. */
+  const gamePins = Object.keys(GAME_PINS).filter(function (n) {
+    return GAME_PINS[n].kind !== "toy";
+  });
+  const toyPins = Object.keys(GAME_PINS).filter(function (n) {
+    return GAME_PINS[n].kind === "toy";
+  });
+  const cardGames = GAMES.concat(gamePins.map(function (n) {
     return { name: n, toy: GAME_PINS[n].toy, expect: null };
   }));
   eq("the card's five games are the ones measured",
@@ -569,7 +596,7 @@ async function main() {
     }
   }
   eq("the number of exporting games matches the pins", builtGames.length,
-     Object.keys(GAME_PINS).length);
+     gamePins.length);
   if (!builtGames.length) {
     console.log("      no game exports today — docs/ROM_SPEED.md's table " +
                 "records the five refusals");
@@ -607,6 +634,23 @@ async function main() {
     eq("not: the ROM is the pinned one", sha256(nott.rom), NOT.rom);
   }
 
+  /* #191: the sprite toy rides GAME_PINS as a kind: "toy" pin, not one of
+   * the five games.  It builds through the same route and the loop below
+   * measures it, captures it and checks its ROM sha and picture against
+   * the pin. */
+  const toyOut = {};
+  for (const n of toyPins) {
+    const out = exportToy(GAME_PINS[n].toy);
+    toyOut[n] = out;
+    check(!!out.rom, n + ": " + GAME_PINS[n].toy + " exports (sprite op)");
+    if (out.rom) {
+      eq(n + ": builds a " + ROM_BYTES + "-byte ROM", out.rom.length,
+         ROM_BYTES);
+      eq(n + ": the ROM is the pinned one", sha256(out.rom),
+         GAME_PINS[n].rom);
+    }
+  }
+
   if (!fs.existsSync(MEDNAFEN)) {
     console.log("SKIP  mednafen not found at " + MEDNAFEN +
                 " (set MEDNAFEN to its path); the counters and the picture " +
@@ -633,6 +677,11 @@ async function main() {
     }
     if (nott.rom) {
       work.push({ name: "not", key: "not", toy: NOT.toy, out: nott });
+    }
+    for (const n of toyPins) {
+      if (toyOut[n] && toyOut[n].rom) {
+        work.push({ name: n, key: n, toy: GAME_PINS[n].toy, out: toyOut[n] });
+      }
     }
     for (const b of builtGames) {
       work.push({ name: b.game.name, key: b.game.name, toy: b.game.toy,
