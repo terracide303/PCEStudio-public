@@ -1177,12 +1177,26 @@ container offsets, patched after the layout is known.
 | 19 | `setlist` | `base:r first:u8 n:u8 values[n]:op` — `first` is 1-based |
 | 1A | `tget` | `dst:r base:op key:u8 kind:u8` |
 | 1B | `tset` | `base:op key:u8 kind:u8 value:op` |
+| 1C | `padref` | `dst:r n:op` — `pad[n]`'s n, held for the padget that indexes it (#185) |
+| 1D | `padget` | `dst:r pad:op field:u8` — one bit of the scanned pad word |
 
 For `tget`/`tset`, `kind` 0 means the key byte is an **operand** (a register,
 or a constant int index encoded `0x80|k`); `kind` 1 means the key byte is a
 **field id**. A string key becomes a field id and never enters the value
 constant pool, so `MAX_CONST = 127` is unaffected. A `table` value in a
 register is its slot id. `table` is 3 bytes, `setlist` 4+n, `tget`/`tset` 5.
+
+A **`padget`'s field byte** is the runtime's `TOY_PAD_*` bit
+(`tools/toyc/toy_runtime.h`, pcetech §4's order): ii 0, i 1, select 2,
+run 3, up 4, right 5, down 6, left 7 — 1 means held.  The IL guarantees the
+field name is one of those eight (pce-il.js refuses anything else at compile
+time), so the bytecode and both backends agree on the bit by construction.
+The interpreter reads the pads through `toy_pad(n, field)`, which the runtime
+scans once per toy frame (`tools/ilvm/ilvm_runtime.c`'s `joy_scan`, the
+sequence #45's HuC runtime proved) and the host harness scripts
+(`tools/ilvm/hostvm.c`'s optional PADFILE argument); the scan sits
+outside the TMA measurement brackets, so the measured figures are the
+pre-#185 ones.
 
 A **`call` carries up to eight arguments** (#183). The first four ride in the
 interpreter's C parameters (`exec(fid, clh, a0..a3)`, the same signature every

@@ -29,8 +29,9 @@
  *     overflows.
  *
  * WHAT IT DOES NOT PROVE, and says so in a NOTE when it runs: the console
- * Export path currently refuses the toy — renderer/pce-ilbc.js has no
- * bytecode form for `padref` (the pad[1] read) — so the toy is browser-only
+ * Export path currently refuses the toy — #185 carried the pad reads, so
+ * renderer/pce-ilbc.js now stops on `sat` (the sprite table write), the
+ * four other games' blocker — so the toy is browser-only
  * for now, as toys/platformer/README.md says.  Also per workshop rule 2 a
  * cold break by another seat is owed before this closes the card.
  */
@@ -312,11 +313,11 @@ function checkBudgets() {
               " words, " + b.sprites.requested + " strips on the busiest line");
 
   /* the browser-only finding, recorded rather than failed: the console
-   * encoder cannot carry a pad[1] read yet. */
+   * encoder cannot carry a `sat` sprite table write yet. */
   try {
     ilbc.encode(il.compile(source));
     note("the console export carries this toy now — toys/platformer/README.md " +
-         "says it is browser-only for padref; update it");
+         "says it is browser-only for sat; update it");
   } catch (e) {
     note("browser-only for now: the console export refuses the toy (" +
          e.code + ": " + e.message + ") — toys/platformer/README.md says so");

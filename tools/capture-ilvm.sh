@@ -22,6 +22,11 @@ NAME="${1:-toypalette-ilvm}"
 TOY="${2:-tools/toys/palette.lua}"
 DUMPDIR="tests/dumps/$NAME"
 SCRATCH="${TMPDIR:-/tmp}"
+# mednafen's video driver.  The default (OpenGL) can stall at video init
+# when the Mac's display is asleep or locked — the frames come from the
+# emulated surface either way, so a capture under `sdl` is the same
+# evidence.  Override with VIDEO_DRIVER=sdl when the OpenGL path hangs.
+VIDEO_DRIVER="${VIDEO_DRIVER:-opengl}"
 # Seats share this account: keep this run's save states and config out of
 # ~/.mednafen/mcs, which another seat may clear (and whose Mednafen this
 # script must never signal — it signals only the process it starts).
@@ -42,7 +47,8 @@ rm -rf "$DUMPDIR/frames"
 rm -f "$MOV"
 START=$(date +%s)
 echo "== launch mednafen ($NAME)"
-mednafen -force_module pce -pce.slstart "$SLSTART" -pce.slend "$SLEND" \
+mednafen -force_module pce -video.driver "$VIDEO_DRIVER" \
+  -pce.slstart "$SLSTART" -pce.slend "$SLEND" \
   -pce.xscale 1 -pce.yscale 1 \
   -qtrecord "$MOV" -qtrecord.vcodec png \
   -qtrecord.w_double_threshold 0 -qtrecord.h_double_threshold 0 \

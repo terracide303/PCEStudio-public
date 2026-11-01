@@ -89,6 +89,10 @@
  *   19 setlist base:reg first:u8 n:u8 values:n*op
  *   1A tget   dst:reg base:op key:u8 kind:u8
  *   1B tset   base:op key:u8 kind:u8 value:op
+ *   1C padref dst:reg n:op            (pad[n]'s n; #185)
+ *   1D padget dst:reg pad:op field:u8 (one bit of the scanned pad word;
+ *              field is the runtime's TOY_PAD_* bit, tools/toyc/
+ *              toy_runtime.h — the same meaning pce-cgen.js lowers)
  *
  * A table operand is a slot id from the table section.  `kind` is 0 for an
  * array key (the key byte is an operand: a register or an int constant) and
@@ -103,8 +107,8 @@
  * What this half refuses, by code rather than guessing:
  *   ilbc-program  not a pce-il version 1 program
  *   ilbc-op       an IL instruction the interpreter does not have
- *                 (tables, sprites, pads, print, music, raster tables,
- *                 setupval is encoded but the toys do not use it, ...)
+ *                 (sprites, print, music, raster tables, ...; tables are
+ *                 carried since #172, pads since #185)
  *   ilbc-fixed    fixed-point arithmetic or a fixed constant
  *   ilbc-key      a constant that is not int/bool/nil
  *   ilbc-arity    more than eight parameters or arguments
@@ -160,7 +164,8 @@
     ret: 0x09, jmp: 0x0A, br: 0x0B, forprep: 0x0C, fornext: 0x0D,
     arith: 0x0E, unm: 0x0F, bnot: 0x10, cmp: 0x12, builtin: 0x13,
     pal: 0x14, reg: 0x15, vset: 0x16, vget: 0x17,
-    table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B
+    table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B,
+    padref: 0x1C, padget: 0x1D
   };
   var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
   var ARITH = { add: 0, sub: 1, mul: 2, mod: 3, idiv: 4, band: 5,
@@ -168,6 +173,12 @@
   var CMP = { eq: 0, lt: 1, le: 2 };
   var REG = { BXR: 0, BYR: 1, CR: 2 };
   var BUILTIN = { rgb: 0 };    /* only the one the interpreter implements */
+  /* padget's field byte: the runtime's TOY_PAD_* bit (tools/toyc/toy_runtime.h,
+   * pcetech §4's order I, II, Select, Run, Up, Right, Down, Left).  The IL
+   * guarantees the name is one of these (pce-il.js's il-key refusal), so the
+   * bytecode and both backends agree on the bit by construction. */
+  var PAD_FIELD = { ii: 0, i: 1, select: 2, run: 3,
+                    up: 4, right: 5, down: 6, left: 7 };
 
   function ILBCError(code, message) {
     this.name = "ILBCError";
@@ -239,12 +250,13 @@
     if (t === "const" || t === "move" || t === "getglobal" ||
         t === "setglobal" || t === "getupval" || t === "setupval" ||
         t === "closure" || t === "unm" || t === "bnot" || t === "pal" ||
-        t === "reg" || t === "vset" || t === "vget") return 3;
+        t === "reg" || t === "vset" || t === "vget" || t === "padref") return 3;
     if (t === "ret") return 2;
     if (t === "jmp") return 3;
     if (t === "br") return 5;
     if (t === "forprep") return 2;
     if (t === "fornext") return 4;
+    if (t === "padget") return 4;
     if (t === "arith" || t === "cmp") return 5;
     if (t === "table") return 3;
     if (t === "setlist") return 4 + (ins.values || []).length;
@@ -691,6 +703,13 @@
         break;
       case "vget":
         buf.u8(reg(ins.dst)); buf.u8(op(ins.addr));
+        break;
+      case "padref":
+        buf.u8(reg(ins.dst)); buf.u8(op(ins.n));
+        break;
+      case "padget":
+        buf.u8(reg(ins.dst)); buf.u8(op(ins.pad));
+        buf.u8(PAD_FIELD[ins.field]);
         break;
       case "table": {
         var slot = siteIds == null ? null : siteIds[pc];

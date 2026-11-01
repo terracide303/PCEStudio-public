@@ -218,10 +218,10 @@ function checkBudgets() {
 const INVENTORY = [
   /* kind, count, route-1 count, cgen count, first main.lua line.
    * #174 carried the four table kinds on route 1 and #176 carried them in
-   * cgen, so their rows are gone from both backends. */
+   * cgen, so their rows are gone from both backends.  #185 carried
+   * padref/padget on route 1 (cgen already lowered them), so their rows
+   * are gone too. */
   ["sprite", 31, 31, 31, 406],
-  ["padref", 5, 5, 0, 649],
-  ["padget", 5, 5, 0, 649],
   ["sfx", 3, 3, 3, 475],
   ["raster", 2, 2, 2, 498],
   ["builtin abs", 2, 2, 2, 466],
@@ -234,8 +234,8 @@ function checkInventory() {
   const inv = r.inventory;
   eq("IL functions", inv.functions, 18);
   eq("IL instructions", inv.total, 1919);
-  eq("refused instructions", inv.refusedCount, 49);
-  near("refused percentage", 100 * inv.refusedCount / inv.total, 2.6, 0.05);
+  eq("refused instructions", inv.refusedCount, 39);
+  near("refused percentage", 100 * inv.refusedCount / inv.total, 2.03, 0.05);
 
   for (const [kind, n, ilbcN, cgenN, first] of INVENTORY) {
     const rows = inv.rows.filter(function (x) { return x.kind === kind; });
@@ -261,9 +261,9 @@ function checkInventory() {
   const route1Only = INVENTORY.filter(function (x) {
     return x[2] && !x[3];
   }).map(function (x) { return x[0]; });
-  eq("kinds in the table", kinds, 7);
+  eq("kinds in the table", kinds, 5);
   eq("kinds refused by both backends", both, 5);
-  eq("route-1-only kinds", route1Only, ["padref", "padget"]);
+  eq("route-1-only kinds", route1Only, []);
 }
 
 /* ---- 4. the next blocker after #176 ------------------------------------ */
@@ -360,11 +360,11 @@ const CITATIONS = [
   ["renderer/pce-cgen.js", 545, "case \"padref\""],
   ["renderer/pce-cgen.js", 563, "builtin `"],
   ["renderer/pce-cgen.js", 600, "refuse(\"cgen-op\""],
-  ["renderer/pce-ilbc.js", 157, "var OPS = {"],
-  ["renderer/pce-ilbc.js", 170, "var BUILTIN = {"],
-  ["renderer/pce-ilbc.js", 266, "refuse(\"ilbc-op\""],
-  ["renderer/pce-ilbc.js", 291, "refuse(\"ilbc-builtin\""],
-  ["renderer/pce-ilbc.js", 343, "hookSlot(\"raster\""],
+  ["renderer/pce-ilbc.js", 161, "var OPS = {"],
+  ["renderer/pce-ilbc.js", 175, "var BUILTIN = {"],
+  ["renderer/pce-ilbc.js", 278, "refuse(\"ilbc-op\""],
+  ["renderer/pce-ilbc.js", 303, "refuse(\"ilbc-builtin\""],
+  ["renderer/pce-ilbc.js", 355, "hookSlot(\"raster\""],
   ["renderer/pce-rom.js", 622, "if (dataLen > BANK)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];

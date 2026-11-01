@@ -207,15 +207,16 @@ under the dummy SDL driver, cropped to 256x224 and compared with
 | **TOWER** `toys/tower` | **no** — `ilbc-op: instruction sat (function 29, pc 8) has no bytecode form` (`main.lua:261`). #183 lifted the old 4-parameter refusal (`spr` takes 7); `sat` is the next uncarried kind (#133). | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
 | **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction sat (function 14, pc 11) has no bytecode form` (`main.lua:124`). #183 lifted the old 4-parameter refusal (`hit` takes 8); `sat` is next (#133). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
 | **DUSK RUN** `toys/dusk-run` | **no** — `ilbc-op: instruction sat (function 33, pc 3) has no bytecode form` (`main.lua:325`; card **#186**). #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
-| **PLATFORMER** `toys/platformer` | **no** — `ilbc-op: instruction padref (function 10, pc 2) has no bytecode form`; the first padref is `main.lua:110`, padget follows. Card **#185** (the queue slice of #134). | — | — | — | — | 88,115 cycles · 0.74 frames · **81.2 Hz** |
-| *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `eee9c6ba257bd74a…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 112 | **628** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
-| *control #183* `tools/toys/arity.lua` | **yes** — 24,576 B, sha256 `c1e36d019505dfe6…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 112 | **785** lines | **too slow** | — |
+| **PLATFORMER** `toys/platformer` | **no** — `ilbc-op: instruction sat (function 10, pc 109) has no bytecode form` (`main.lua:142`). #185 carried padref/padget, its old refusal; the five pad reads at `main.lua:110-118` now encode. `sat` is next (**#186**). | — | — | — | — | 88,115 cycles · 0.74 frames · **81.2 Hz** |
+| *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `b47cb2386784a2…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 112 | **628** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
+| *control #183* `tools/toys/arity.lua` | **yes** — 24,576 B, sha256 `323682f4a288bea…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 112 | **785** lines | **too slow** | — |
 
 ### What this says, plainly
 
-- **No game exports today.** The five games stop on three kinds of refusal
-  (the 127-constant pool; `sat`, first for TOWER, NOVA TIDE and DUSK RUN;
-  `padref`, first for PLATFORMER), which is why the table has no speed number
+- **No game exports today.** The five games stop on two kinds of refusal
+  (the 127-constant pool; `sat`, first for TOWER, NOVA TIDE and DUSK RUN and
+  now PLATFORMER too, which #185 moved past padref/padget), which is why the
+  table has no speed number
   for any of them: the counters and the picture comparison have nothing to
   run. The control row proves both instruments work on a ROM the route does
   build, so "nothing built" is a measurement, not a blind spot.  The #183
@@ -237,7 +238,9 @@ under the dummy SDL driver, cropped to 256x224 and compared with
   validator prices; the export builds the interpreter.
 - **PLATFORMER is the closest.** The validator accepts it, the C emitter
   lowers it completely, and it is the one game the static model puts over
-  60 Hz (81.2 Hz). Its remaining route-1 gaps are padref/padget and `sat`
+  60 Hz (81.2 Hz). #185 carried its padref/padget reads (the pads now scan
+  on the console once per toy frame, `tools/ilvm/ilvm_runtime.c`'s
+  `joy_scan`, the #45 sequence); its remaining route-1 gap is `sat`
   (4 at `main.lua:142`) — and its projected container is 2,351 B, inside
   the 8 KiB data bank.
 - **The static estimate is still an estimate.** It is the same
@@ -268,7 +271,8 @@ are on the board: **#148** (the 127-constant pool, already open),
 now stop on `sat`), **#184** (closed 2026-11-01: DUSK RUN's refusal was the
 8-frame probe sampling its build; the probe extends to the 300-frame
 performance, so the toy reaches the encoder and stops on `sat`) and **#185**
-(padref/padget, PLATFORMER's first). The
+(closed 2026-11-01: padref/padget carried; PLATFORMER stops on `sat` like
+the other four). The
 uncarried kinds the
 inventory behind them names — with no card before this measurement — are
 **#186** (`sat`) and **#187** (logical `not`); the rest are the existing
