@@ -175,7 +175,7 @@ Two notes that matter for whoever closes these:
 
 - **`raster` is only refused in the table form.** `raster(line, spec)` is an
   IL instruction (`pce-il.js:1619`) with no ILBC opcode. The **callback** form,
-  `function raster(line)`, is carried (`pce-ilbc.js:364` records the hook
+  `function raster(line)`, is carried (`pce-ilbc.js:382` records the hook
   slot) — that is how `toys/parallax.lua` exports and runs. STARFALL chose the
   table form, and the table form is the *cheaper* one on the console: two RCR
   entries a frame (the validator prices them at 100 cycles against part C's
