@@ -36,10 +36,12 @@
  *      proves that refusal is live code, not a source reading.
  *   5. THE 8 KiB DATA BANK (#138).  The size model reproduces the two
  *      committed containers to ≤3 B (the table section is counted since
- *      route 1 carries it); STARFALL projects 9,107/9,153/9,245 B at 3/4/6 B
- *      per uncarried instruction, all over 8,192, and 8,969 B with the four
- *      table ops at their real sizes and the rest at 0 B (#178 corrected the
- *      model's v2 header and table-section sizing).  The limit itself is
+ *      route 1 carries it); STARFALL projects 9,231/9,246/9,276 B at 3/4/6 B
+ *      per still-refused instruction, all over 8,192, and 9,186 B with the
+ *      carried ops (the four table ops and #188's sprite, 31 × 7 B) at their
+ *      real sizes and the rest at 0 B (#178 corrected the model's v2 header
+ *      and table-section sizing; #188 gave sprite its opcode size).  The
+ *      limit itself is
  *      exercised behaviourally: a valid container of exactly 8,192 B builds,
  *      8,193 B is refused with toy-data-bank-full.
  *   6. THE WRITE-UP'S CITATIONS.  Every file:line the report names still
@@ -380,7 +382,7 @@ function checkCapacity() {
 
 /* ---- 6. the write-up's citations --------------------------------------- */
 const CITATIONS = [
-  ["renderer/studio.html", 4336, "if (errors) return"],
+  ["renderer/studio.html", 4335, "if (errors) return"],
   ["renderer/studio-panel-console.js", 145, "emitC"],
   ["renderer/studio-panel-console.js", 148, "severity: \"error\""],
   ["renderer/pce-cgen.js", 536, "fn|vram|int|bool|padset|table"],

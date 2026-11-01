@@ -602,13 +602,20 @@ per site), `cgen-key`, and `cgen-target`.  (#176 carried the four table ops —
 §2.5, with their own two codes: `cgen-table-ram` for a slot the pool cannot
 hold, `cgen-table-escape` for an escaping re-running site.)
 
+*Dated note (2026-11-01): this paragraph records part A's scope when it was
+measured. The emitter has since carried `table` (#176), `padref`/`padget`
+(#185), `sat` (#186), `not` (#187) and `sprite` with a constant spec
+(#188–#190);
+`print`, `vget`, `music`/`sfx`, the `raster` table form and fixed point are
+still refused. §14.6 is the current list.*
+
 Not proven, written down:
 
 - **Part A is one toy.** Nothing in §9 says the IL → C route handles the
   other #30 toys, the five example toys, or any toy beyond the palette one.
-  Part C (§10) adds `raster()` through parallax.lua, but not sprites or
-  pads; parts B (HuC) and D (the measured comparison sent to ppu.toys'
-  author) remain.
+  Part C (§10) adds `raster()` through parallax.lua; parts B (HuC) and D
+  (the measured comparison sent to ppu.toys' author) remain. Sprites and
+  pads were carried after part A (see the dated note above and §14.6).
 - **No comparison of routes yet.** llvm-mos is the first route, not the
   chosen one; the note in `docs/PLAN.md` still requires measuring it against
   the HuC route and a direct generator on the same toy.
@@ -746,9 +753,10 @@ that does not fit; parallax uses one register and no colour in the chain.
   caught the compute);
 - the emitter lowers `reg` to `toy_reg()` with a register id, an int global
   to a C slot the frame and the callback share, and the raster hook to
-  `toy_raster(line)`; the refusals still come back by code (`cgen-op` for
-  sprites/pads, `cgen-arity` at nine parameters, `cgen-closure-loop` when a
-  function value can escape, `cgen-global` for a pad global);
+  `toy_raster(line)`; the refusals still come back by code (at this
+  milestone `cgen-op` for sprites/pads — both carried later, §14.6 — plus
+  `cgen-arity` at nine parameters, `cgen-closure-loop` when a function value
+  can escape, `cgen-global` for a pad global);
 - the measurements are read from the save's RAM and reported: frame()
   **1,204 cycles**, one raster call **1,510 cycles**, one collection
   **338,757 cycles**, and the flags byte is 0 (no list overflow, no `vset`
@@ -757,7 +765,8 @@ that does not fit; parallax uses one register and no colour in the chain.
 ### 10.4 What part C refuses, and what it does not prove
 
 Refused by code rather than guessed: `reg` names outside BXR/BYR/CR
-(`cgen-op`); sprite/print/vget still (`cgen-op`/`cgen-global`); the four
+(`cgen-op`); `print`/`vget` still (`cgen-op`/`cgen-global`; `sprite` was
+also here at this milestone and is carried since #190, §14.6); the four
 table ops lower into the fixed pool (#176), refused with `cgen-table-ram`/
 `cgen-table-escape` when a slot does not fit or aliases; more than eight
 parameters (`cgen-arity`, #183: five to eight now travel through
@@ -1013,6 +1022,10 @@ Every number below is from the committed captures (`tests/dumps/toypalette`,
 | what it cannot compile | fixed point, sprites, pads, tables, strings, >8 parameters, a closure that escapes; 32-bit ints are exact | all of the above, **and any value wider than 16 bits**; the same refusal codes |
 | picture vs browser | diff 0, 8 (palette) and 40 (raster) frames | diff 0, 8 and 20 frames |
 
+*The refusal row is the measurement's date (2026-10-29). Since then #176
+carried tables, #185 pads, #186 `sat`, #187 `not` and #188–#190 `sprite` on
+both routes; §14.6 has the current list.*
+
 **What the table says.** llvm-mos is a modern optimising compiler and HuC is
 Small-C: the IL functions are 1.6–2.1× larger under HuC, `frame()` is 2.4×
 slower on the raster toy and **13.8×** slower on the palette loop (whose
@@ -1052,9 +1065,12 @@ pictures — and as the measured answer to "what would HuC cost?".
   toy runs through IL → C → llvm-mos (§9) and through the same IL → C → HuC
   (§11), and `toys/parallax.lua`'s `raster()` runs on both routes through
   the table and RCR chain (§10, §11.2); §12 measures them side by side.
-  Sprites and pads are still refused, `status-bar.lua` and #30's
-  `TOY_RASTER` do not match (§10.4), and a direct HuC6280 generator was not
-  built — the card's part D asked for llvm-mos vs HuC, which is what §12
+  At the time part D was measured, sprites and pads were still refused; both
+  were carried afterwards (#185–#190 — the pad ops and `sat` in §14.1, and
+  `sprite` with its constant-spec walker), so the paragraph above describes
+  the comparison, not today's refusal list (§14.6). `status-bar.lua` and
+  #30's `TOY_RASTER` do not match (§10.4), and a direct HuC6280 generator was
+  not built — the card's part D asked for llvm-mos vs HuC, which is what §12
   has. No backend choice is baked into the IL: the types, the explicit
   surface instructions and the line info are the parts every backend reads.
 - **No browser page for the IL yet.** The interpreter runs in Node and in a
@@ -1189,6 +1205,7 @@ container offsets, patched after the layout is known.
 | 1C | `padref` | `dst:r n:op` — `pad[n]`'s n, held for the padget that indexes it (#185) |
 | 1D | `padget` | `dst:r pad:op field:u8` — one bit of the scanned pad word |
 | 1E | `sat` | `i:op k:op v:op` — one SAT word, entry `i` word `k` (#186) |
+| 1F | `sprite` | `i:op x:op y:op pattern:op palette:op attr:op` — one SAT entry from a spec table (#188): the encoder resolves the slot and the five fields through `tableLayout()`'s sprite records at tset time, so all six bytes are operands; the interpreter writes the same four SAT words the browser's `host.sprite` writes (#189) |
 | 20 | `music` | `song:op` — a song id (#197, carried for the #194 engine) |
 | 21 | `sfx` | `ch:op freq:op volume:op frames:op` — a PSG channel 0..5, the 12-bit F, the AL volume 0..31, and how many frames before the engine gives the channel back (#197) |
 | 22 | `release` | `ch:op` — give the channel back early; a no-op on a channel no sfx owns, as on the host (#197) |
@@ -1223,6 +1240,22 @@ and the interpreter's display-on writes keep the toy's CR: `toy_display_on`
 and the main loops write `0x88 | toy_cr` (or `0x8C | toy_cr` on the raster
 flow), the compiled runtime's `toy_cr` shadow, so the sprites a toy turned
 on in `init()` are not dropped at display time.
+
+A **`sprite`** instruction writes one SAT entry from a spec table (#188/#189).
+The slot and the five fields (`x`, `y`, `pattern`, `palette`, plus `attr`'s
+`spbg`/`cgx`/`hflip`/`vflip`/`cgy` bits) are resolved when the encoder walks
+the site: the spec's build window must be straight-line (no control flow
+between the table and the sprite, no branch landing in it, no loop enclosing
+it), every field must be a constant in that window, and the spec must not
+escape before the sprite (a call could have changed it unseen). A table
+passed to a `sprite` instruction is consumed, not escaped, so a spec built and
+used in the same straight-line stretch resolves even when its function runs
+every frame. The six operands are
+therefore register-or-constant bytes, and the interpreter calls the same
+`toy_sprite(slot, x, y, pattern, palette, attr)` the compiled route does; it
+writes SAT words 0..3 (`y`, `x`, `pattern << 1`, `palette`/`attr`) the way
+`renderer/pce-toyhost.js`'s `host.sprite` does. A spec the walker cannot pin
+is refused (`ilbc-op`/`cgen-op`) at its source line, not guessed.
 
 A **`call` carries up to eight arguments** (#183). The first four ride in the
 interpreter's C parameters (`exec(fid, clh, a0..a3)`, the same signature every
@@ -1271,8 +1304,8 @@ in `init`, `frame` or `raster`, and the runtime calls whatever is there —
 exactly what the C backend's `toy_boot`/`toy_frame` do (§9.1).
 
 The encoder **refuses by code rather than guessing**, with the same spirit as
-`pce-cgen.js`: `ilbc-op` (sprites, `print`, `vget`, raster
-tables, …),
+`pce-cgen.js`: `ilbc-op` (`print`, `vget`, raster tables, a `sprite` whose
+spec the walker cannot pin to constants, …),
 `ilbc-fixed` (fixed-point arithmetic or constants),
 `ilbc-builtin` (a builtin other than `rgb` and `note`), `ilbc-arity` (more
 than eight
@@ -1523,10 +1556,14 @@ This seat is deepseek-flash, the card's own model tag. Rule 2 asks for another
 
 ### 14.6 What this half refuses, and what it does not prove
 
-The interpreter implements the instruction set above and nothing else; the
-encoder refuses the rest, so no ROM silently runs a different toy. In
-particular vget, sprites, `print`, music/SFX, raster tables, fixed point and
-the other builtins are not in route 1 yet (tables, pads, `sat` and `not` are).
+The interpreter implements the instruction set above and nothing else, so no
+ROM silently runs a different toy. `music`/`sfx`/`release` have bytecode
+forms since #197, but the committed image implements only `rgb` until #198
+links the engine; `vget`, `print`, raster tables, fixed point and the other
+builtins still have no bytecode form. Tables, pads, `sat`, `sprite` (#188) and
+`not` (#187) are carried. A `sprite` whose spec the walker cannot pin to
+constants is refused by both backends (10 of STARFALL's 31), and a table toy
+that runs out of the 256-cell pool is refused rather than truncated.
 
 Not proven:
 

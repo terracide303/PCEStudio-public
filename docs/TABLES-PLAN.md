@@ -194,9 +194,10 @@ cell layout of one slot:
   through it + 1, so a slot that only writes `cram` reserves six field cells
   and leaves the first five zero. Program-wide ids are what makes `t.x` mean
   the same thing at a constructor and at a read site that receives the table
-  from a global or a helper. They are also what lets a future `sprite`/`raster`
-  op (#133/#136) name its spec fields *by id in its own operand bytes* rather
-  than at run time — the interpreter never compares a string.
+  from a global or a helper. They are also what let the `sprite` op (#133,
+  landed as opcode `0x1F` in #188) and a future `raster` op (#136) name their
+  spec fields *by id in their own operand bytes* rather than at run time — the
+  interpreter never compares a string.
 - **Capacity rule.** `cap` = the end index of the site's `setlist` if it has
   one; else the largest constant int key written through it; else, for a
   register key, the largest index the enclosing numeric `for` can reach when
@@ -339,20 +340,27 @@ lets STARFALL's per-frame nested list and pair through.
 
 ## 3. What this does and does not unblock (measured projections)
 
-Projected container size (the four table ops at their real sizes, table section
-added; the column headers say how the still-uncarried kinds are counted):
+Projected container size (the carried ops at their real sizes — the four table
+ops and, since #188, `sprite`'s 31 instructions at 7 B each — with the
+still-uncarried kinds at 0 B; the at-3/4/6-B columns add them at those sizes):
 
-| toy | floor: everything uncarried at 0 B | four table ops exact | + remaining kinds at 3 B | vs 8,192 B bank |
-|---|---|---|---|---|
-| STARFALL | 7,856 | **8,969** | 9,107 | over by 777–915 |
-| TOWER | 8,075 | **8,379** | 8,475 | over by 187–283 |
-| NOVA TIDE | 8,301 | **9,287** | 9,377 | over by 1,095–1,185 |
+| toy | carried ops exact | + still-refused kinds at 3 B | at 4 B | at 6 B | vs 8,192 B bank |
+|---|---|---|---|---|---|
+| STARFALL | **9,186** | 9,231 | 9,246 | 9,276 | over by 994–1,084 |
+| TOWER | **8,379** | 8,475 | 8,507 | 8,571 | over by 187–379 |
+| NOVA TIDE | **9,287** | 9,377 | 9,407 | 9,467 | over by 1,095–1,275 |
+
+The STARFALL row moved from #178's 8,969/9,107 when #188 gave `sprite` a real
+opcode size: the model now prices all 31 sprite instructions at 7 B (31 × 7 =
+217 B), whether or not the walker can pin their specs. That is the honest
+count for the instruction; the 10 specs it cannot pin are a separate refusal,
+and the row does not pretend they encode.
 
 **No game exports on tables alone.** All three exceed the one 8 KiB data bank,
 so #138 is on the critical path for every one of them (TOWER is the closest,
-187 B over with the four ops carried and the other kinds at 0). The rest of
-each toy's refusal inventory, measured on this tree after the four table kinds
-would be carried:
+187 B over with the carried ops priced and the still-refused kinds at 0). The
+rest of each toy's refusal inventory, measured on this tree with the four
+table kinds and `sprite` carried:
 
 Reproduce these rows on the current tree: `node tools/starfall-console.js
 <toys/demo-game/main.lua|toys/tower/main.lua|toys/nova-tide/main.lua>` prints
@@ -361,9 +369,9 @@ three rows above (#178).
 
 | toy | route 1 still refuses | cgen still refuses |
 |---|---|---|
-| STARFALL | `sprite` 31 (#133), `padref`/`padget` 5+5 (#134), `sfx` 3 (#135), `raster` table form 2 (#136), `abs` 2 + `sr` 1 (#137) | the same, once #143's typing change lands |
-| TOWER | `padref`/`padget` 10+10 (#134), `sfx` 6 (#135), `sat` 5, `not` 1 | `sat` 5, `not` 1, `sfx` |
-| NOVA TIDE | `sat` 6, `padref`/`padget` 7+7 (#134), `sfx` 5 (#135), `raster` 5 (#136), `note` 5 (#137) | `sat`, `note`, `unm` |
+| STARFALL | the 10 `sprite` specs the walker cannot pin (#133), `sfx` 3 (#135), `raster` table form 2 (#136), `abs` 2 + `sr` 1 (#137), and the 127-constant pool (#148) | the same 10 sprite specs, `sfx`, the raster table, `abs`/`sr`; the other 21 sprites, pads, tables and `sat` are carried |
+| TOWER | `sfx` 6 (#135) | `sfx` 6, `not` 1 (the bytecode carries `not` since #187) |
+| NOVA TIDE | `note` 5 (#137), `sfx` 5 (#135), `raster` 5 (#136) | `unm` 1, `note` 5, `sfx` 5, `raster` 5 |
 
 The arity refusals this table used to carry are gone (#183, 2026-10-31): a
 call now carries up to eight arguments, four in the interpreter's C
@@ -373,8 +381,12 @@ byte-identical to before.
 
 So #132's children make the table work true and measurable — the
 `tools/starfall-console.js` inventory drops by 197 / 52 / 184 instructions —
-but the games also need #133–#138, `sat`/`not`/`unm` (small op cards) and the
-arity question. This plan does not pretend otherwise.
+but the games also needed the op cards that followed: `sprite` (#133, #188–#190;
+carried except 10 unpinnable specs), pads (#134, #185), `sat` (#186) and `not`
+(#187). What still refuses is `sfx`, the `raster` table form, the builtins
+other than `rgb` (`abs`, `sr`, `note`) and `unm` on the C route; #138 (the
+8 KiB bank) and the arity question (#183) are on every game's path. This plan
+does not pretend otherwise.
 
 ---
 
@@ -437,6 +449,12 @@ did not break the neighbours):
 - **Two implementations of one layout** (encoder and cgen). They can drift;
   #176's evidence asserts they agree on the same IL, and the rule is written
   once here.
+- **The projection prices the sprite op, not its resolver.** Since #188 the
+  model charges all 31 of STARFALL's `sprite` instructions at their real 7 B
+  (31 × 7 = 217 B), which moved §3's row from 8,969 to 9,186 B. The 21 that
+  resolve do encode at that size; the 10 the walker cannot pin are still
+  refusals, so the number is neither a guarantee they encode nor a reason to
+  discount the ones that do.
 - **The frame-rate answer will disappoint.** These games are 5–16 frames per
   update on route 1 (reasoning from the measured per-instruction cost); the
   export's value is that their speed can now be *measured*, and that data is
