@@ -19,10 +19,12 @@ byte.  **No changes were made**: it loads and runs in the studio unchanged,
 `tests/check-platformer.js` plays 600 frames of it through both runtimes
 with no difference.
 
-## Browser only, for now
+## Browser and console
 
-It plays in the studio (the Lua runtime) and passes the validator, but the
-console **Export** path refuses it: `renderer/pce-ilbc.js` has no bytecode
-form for `sat` (the sprite table writes; #185 carried the pad reads), so
-Export lists that as a refusal instead of building a ROM.  That is an
-encoder gap, not a fault in the toy; the test prints it as a NOTE.
+It plays in the studio (the Lua runtime), passes the validator, and the
+console **Export** path builds it (#186 carried the `sat` instruction —
+the sprite table writes; #185 carried the pad reads): the ROM runs in
+Mednafen at 30 Hz, and its picture is the browser's.  A note on the
+console boot: `init()` draws the whole map and the sprite patterns through
+the interpreter, so the first update lands after ~7 s of emulated time —
+`docs/ROM_SPEED.md` measures it with a 900-frame run.

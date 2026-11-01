@@ -53,11 +53,11 @@ runtime runs the toy at the page's frame rate.
 
 DUSK RUN keeps its rocks, birds, hearts and game state in Lua tables.  The
 console **Export** path cannot carry it yet: `renderer/pce-ilbc.js` refuses
-the `sat` instruction first (function 33, pc 3, `main.lua:325`), and
-`padref`/`padget` (the `pad[1]` reads), `sfx()` and the `table` instruction
-have no bytecode form either.  The toy runs fine in the browser studio (and
-in the IL runtime the validator uses); it is the bytecode encoder that is
-missing the ops.  See `docs/IL.md`.
+the `not` instruction first (function 39, pc 16, `main.lua:401`, card
+#187), and `padref`/`padget` (the `pad[1]` reads), `sfx()` and the `table`
+instruction have no bytecode form either.  The toy runs fine in the browser
+studio (and in the IL runtime the validator uses); it is the bytecode
+encoder that is missing the ops.  See `docs/IL.md`.
 
 The export validates an 8-frame run; card #184 makes the validator run a
 refused probe on to the studio's default 300-frame performance, so it

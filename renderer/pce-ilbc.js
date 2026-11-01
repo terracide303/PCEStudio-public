@@ -93,6 +93,9 @@
  *   1D padget dst:reg pad:op field:u8 (one bit of the scanned pad word;
  *              field is the runtime's TOY_PAD_* bit, tools/toyc/
  *              toy_runtime.h — the same meaning pce-cgen.js lowers)
+ *   1E sat    i:op k:op v:op           (one SAT word, entry i word k; the
+ *              runtime's toy_sat writes VRAM $7F00 + i*4 + k and the VDC's
+ *              auto-repeat DSR mirrors it into SATB every VBlank — #186)
  *
  * A table operand is a slot id from the table section.  `kind` is 0 for an
  * array key (the key byte is an operand: a register or an int constant) and
@@ -108,7 +111,7 @@
  *   ilbc-program  not a pce-il version 1 program
  *   ilbc-op       an IL instruction the interpreter does not have
  *                 (sprites, print, music, raster tables, ...; tables are
- *                 carried since #172, pads since #185)
+ *                 carried since #172, pads since #185, sat since #186)
  *   ilbc-fixed    fixed-point arithmetic or a fixed constant
  *   ilbc-key      a constant that is not int/bool/nil
  *   ilbc-arity    more than eight parameters or arguments
@@ -165,7 +168,7 @@
     arith: 0x0E, unm: 0x0F, bnot: 0x10, cmp: 0x12, builtin: 0x13,
     pal: 0x14, reg: 0x15, vset: 0x16, vget: 0x17,
     table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B,
-    padref: 0x1C, padget: 0x1D
+    padref: 0x1C, padget: 0x1D, sat: 0x1E
   };
   var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
   var ARITH = { add: 0, sub: 1, mul: 2, mod: 3, idiv: 4, band: 5,
@@ -256,7 +259,7 @@
     if (t === "br") return 5;
     if (t === "forprep") return 2;
     if (t === "fornext") return 4;
-    if (t === "padget") return 4;
+    if (t === "padget" || t === "sat") return 4;
     if (t === "arith" || t === "cmp") return 5;
     if (t === "table") return 3;
     if (t === "setlist") return 4 + (ins.values || []).length;
@@ -415,8 +418,13 @@
         if (size < 0) refuse("ilbc-op", "instruction " + ins.t);
         offsets[pc] = at;
         at += size;
-        if (ins.k) seeOperand({ k: ins.k });
+        /* `const` is the one instruction whose k IS its constant; sat's k is
+         * an operand (the word index) and enters the pool below with i/v. */
+        if (ins.t === "const" && ins.k) seeOperand({ k: ins.k });
         eachOperand(ins, seeOperand);
+        if (ins.t === "sat") {
+          seeOperand(ins.i); seeOperand(ins.k); seeOperand(ins.v);
+        }
         /* An int table key is an operand byte; a string key is a field id
          * and must never enter the value constant pool. */
         if ((ins.t === "tget" || ins.t === "tset") &&
@@ -710,6 +718,9 @@
       case "padget":
         buf.u8(reg(ins.dst)); buf.u8(op(ins.pad));
         buf.u8(PAD_FIELD[ins.field]);
+        break;
+      case "sat":
+        buf.u8(op(ins.i)); buf.u8(op(ins.k)); buf.u8(op(ins.v));
         break;
       case "table": {
         var slot = siteIds == null ? null : siteIds[pc];

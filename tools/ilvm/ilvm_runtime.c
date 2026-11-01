@@ -106,6 +106,8 @@ extern int ilvm_has_raster(void);
 
 #ifdef TOY_RASTER_BUILD
 volatile uint8_t toy_host_mode;
+static uint8_t toy_cr;  /* the CR the toy last asked for (#186: the display-on
+                         * writes must not drop the toy's SB bit) */
 
 /* The line table: 14 page-aligned arrays indexed by VDW line, so the IRQ
  * handler's `lda array,x` never crosses a page (viewer.asm's reason). */
@@ -299,6 +301,10 @@ void toy_reg(int32_t which, int32_t value) {
      * (bit 2) for the RCR line interrupt the raster chain runs on.  Neither
      * changes the picture; the state comparison masks them (§10). */
     vdc_write(0x05, (uint16_t)(((v & 0xFF) | 0x0C)));
+    /* Remember the toy's CR so the display-on writes keep its bits (#186:
+     * a sat toy sets $C0 for sprites; the compiled runtime's toy_display_on
+     * does the same, tools/toyc/toy_runtime.c). */
+    toy_cr = (uint8_t)v;
   }
 }
 
@@ -340,6 +346,16 @@ void toy_vram_set(int32_t addr, int32_t word) {
 #endif
 }
 
+/* ilvm: the compiled runtime's toy_sat (tools/toyc/toy_runtime.c, #45) —
+ * one SAT word as a VRAM write at $7F00 + i*4 + k, which the startup's DSR
+ * auto-repeat DMA (DVSSR $7F00, above) mirrors into SATB every VBlank.  The
+ * bytecode's sat instruction (#186) calls this, so an interpreted sat lands
+ * in SATB exactly where the compiled route's does. */
+void toy_sat(int32_t i, int32_t k, int32_t v) {
+  if (i < 0 || i > 63 || k < 0 || k > 3) return;
+  toy_vram_set(0x7F00 + i * 4 + k, v);
+}
+
 void toy_wait_vblank(void) {
   /* Reading the status register acknowledges the flags.  The VDC only sets
    * the VBlank status bit when CR bit 3 (the VBlank IRQ enable) is set —
@@ -350,8 +366,9 @@ void toy_wait_vblank(void) {
 }
 
 void toy_display_on(void) {
-  /* CR = BB (background on) + the VBlank status bit. */
-  vdc_write(0x05, 0x0088);
+  /* CR = BB (background on) + the VBlank status bit, plus the toy's own CR
+   * (a sat toy's $C0 keeps SB, sprites, on — #186). */
+  vdc_write(0x05, (uint16_t)(0x0088 | toy_cr));
 }
 
 /* ilvm: an interpreted frame() can take several video frames, and the TMA
@@ -800,7 +817,8 @@ int main(void) {
     {
     int32_t f;
     uint8_t v;
-    vdc_write(0x05, 0x0088);          /* BB + VC (toy_display_on) */
+    vdc_write(0x05, (uint16_t)(0x0088 | toy_cr));  /* BB + VC + the toy's CR
+                                                     * (toy_display_on) */
     pce_irq_enable(IRQ_VDC);
     pce_cpu_irq_enable();
     for (f = 0;; f++) {
@@ -835,7 +853,8 @@ int main(void) {
     int32_t f;
     uint8_t v;
     toy_host_mode = MODE_DIRECT;
-    vdc_write(0x05, 0x008C);          /* BB + VC + RC */
+    vdc_write(0x05, (uint16_t)(0x008C | toy_cr));  /* BB + VC + RC + the
+                                                    * toy's CR */
     pce_irq_enable(IRQ_VDC);
     pce_cpu_irq_enable();
     v = toy_vblank_count;

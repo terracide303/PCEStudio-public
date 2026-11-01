@@ -14,39 +14,39 @@
   "sha256": "3eca0d1d4fe0b1b79aae57d82bc784e608f2b9165c6291a5322230336f5efa93"
  },
  "capture": {
-  "frames": 471,
-  "last_frame": "frame0470.png",
+  "frames": 467,
+  "last_frame": "frame0466.png",
   "measure": {
    "collect_sum_ticks_7bit": 0,
    "collections": 0,
-   "count": 132,
+   "count": 130,
    "cycles_per_collection": null,
-   "cycles_per_frame": 275262.0606060606,
+   "cycles_per_frame": 274542.27692307695,
    "cycles_per_raster_call": null,
    "flags": 0,
    "max_ticks": 255,
-   "mean_ticks": 268.81060606060606,
-   "mean_update_lines": 607.030303030303,
-   "min_ticks": 245,
-   "overruns": 132,
+   "mean_ticks": 268.10769230769233,
+   "mean_update_lines": 605.4692307692308,
+   "min_ticks": 244,
+   "overruns": 130,
    "raster_calls": 0,
    "raster_max_ticks": 0,
    "raster_sum_ticks": 0,
-   "sum_ticks": 35483,
-   "updates": 132,
-   "worst_update_lines": 635
+   "sum_ticks": 34854,
+   "updates": 130,
+   "worst_update_lines": 632
   },
   "slend": 234,
   "slstart": 3
  },
  "ilvm": {
   "bytes": 16384,
-  "sha256": "fbf932b1c31ccc287a95ba26494ae76e3430c9b53b3ec0b5198a89732e7e37e5"
+  "sha256": "3a593db12e452212633a32d3b47377fb5c306d9683a649e541ba8a72f41aa3cf"
  },
  "name": "toypalette-ilvm",
  "rom": "tools/gen/toypalette-ilvm.pce",
  "rom_bytes": 24576,
- "rom_sha256": "b47cb2386784a21955ab62ecace677d323ba351a3cc3fedf12b68d0a79916a22",
+ "rom_sha256": "bbcedd18f5a858bbd701a6f30ae8126663b29d188b2a77feeb32f3d104b4e8ad",
  "source": "tools/toys/palette.lua",
  "source_sha256": "458df4060eb9111db60241a0e1fac6a8f193c21a1543fa3d69899d4e7d8c7204"
 }

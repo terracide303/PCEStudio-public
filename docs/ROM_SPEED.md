@@ -196,33 +196,41 @@ renderer/pce-validate.js (8 frames)
 over the committed `renderer/ilvm.bin`; no compiler is called. The static
 estimate is `renderer/pce-validate.js`'s `budgets.route1` for the same source.
 "overruns", "worst update" and the verdict are `tools/measure-rom.js
---frames 300` (the #169 instrument) and the picture is a `-qtrecord` capture
-under the dummy SDL driver, cropped to 256x224 and compared with
-`renderer/pce-toys.js`'s frame of the same toy — the
+--frames 300` (the #169 instrument; a game whose one-time build outlasts
+300 frames is measured at the frame count its row records) and the picture
+is a `-qtrecord` capture under the dummy SDL driver, cropped to 256x224 and
+compared with `renderer/pce-toys.js`'s frame of the same toy — the
 `tools/capture-ilvm.sh`/`tests/check-ilvm.js` route, no input sent.
 
 | toy | exports? | picture matches? | overruns | worst update | verdict | validator's static estimate |
 |-----|----------|------------------|----------|--------------|---------|-----------------------------|
 | **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants`; the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
-| **TOWER** `toys/tower` | **no** — `ilbc-op: instruction sat (function 29, pc 8) has no bytecode form` (`main.lua:261`). #183 lifted the old 4-parameter refusal (`spr` takes 7); `sat` is the next uncarried kind (#133). | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
-| **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction sat (function 14, pc 11) has no bytecode form` (`main.lua:124`). #183 lifted the old 4-parameter refusal (`hit` takes 8); `sat` is next (#133). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
-| **DUSK RUN** `toys/dusk-run` | **no** — `ilbc-op: instruction sat (function 33, pc 3) has no bytecode form` (`main.lua:325`; card **#186**). #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
-| **PLATFORMER** `toys/platformer` | **no** — `ilbc-op: instruction sat (function 10, pc 109) has no bytecode form` (`main.lua:142`). #185 carried padref/padget, its old refusal; the five pad reads at `main.lua:110-118` now encode. `sat` is next (**#186**). | — | — | — | — | 88,115 cycles · 0.74 frames · **81.2 Hz** |
-| *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `b47cb2386784a2…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 112 | **628** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
-| *control #183* `tools/toys/arity.lua` | **yes** — 24,576 B, sha256 `323682f4a288bea…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 112 | **785** lines | **too slow** | — |
+| **TOWER** `toys/tower` | **no** — `ilbc-op: instruction sfx (function 36, pc 9) has no bytecode form` (`main.lua:324`). #186 carried `sat`, its old refusal; `sfx` is the next uncarried kind (#135). | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
+| **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-builtin: builtin \`note\` has no bytecode form` (`main.lua:137`). #186 carried `sat`, its old refusal; only `rgb` has a bytecode form, so `note` is the next gap (#137). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
+| **DUSK RUN** `toys/dusk-run` | **no** — `ilbc-op: instruction not (function 39, pc 16) has no bytecode form` (`main.lua:401`; card **#187**). #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
+| **PLATFORMER** `toys/platformer` | **yes** — 24,576 B, sha256 `ab59d6d38056fab2…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 312 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
+| *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `bbcedd18f5a858bb…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 112 | **623** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
+| *control #183* `tools/toys/arity.lua` | **yes** — 24,576 B, sha256 `98fb4991ca7703c6…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 112 | **783** lines | **too slow** | — |
 
 ### What this says, plainly
 
-- **No game exports today.** The five games stop on two kinds of refusal
-  (the 127-constant pool; `sat`, first for TOWER, NOVA TIDE and DUSK RUN and
-  now PLATFORMER too, which #185 moved past padref/padget), which is why the
-  table has no speed number
-  for any of them: the counters and the picture comparison have nothing to
-  run. The control row proves both instruments work on a ROM the route does
-  build, so "nothing built" is a measurement, not a blind spot.  The #183
-  control (`tools/toys/arity.lua`, five- to eight-parameter functions) is the
-  second: it exports and its Mednafen picture is diff 0 against the
-  browser's, which is the evidence that a wide call runs on the console.
+- **PLATFORMER exports — the first game that does (#186).** Carrying `sat`
+  was its last route-1 gap: the interpreter writes the SATB words a compiled
+  toy writes, the ROM builds, and Mednafen's picture is the browser's (the
+  static no-input scene — the hero standing on the grass — is pinned).  Its
+  measured verdict is **30 Hz**: 312 updates in 900 frames, all overrunning,
+  worst 311 lines, which is the interpreter's ~4.6× the static model's
+  0.74 frames an update.  Two of #186's console details are in the row's
+  fine print: the one-time build (`init()` draws the whole map and the
+  sprite patterns through the interpreter) takes ~7 s, so the measure needs
+  900 frames and the capture 12 s to clear the boot — the default 300-frame
+  measure reads 0 updates mid-boot; and the interpreter's display-on keeps
+  the toy's CR, so the sprites' SB bit survives `toy_display_on` (`docs/IL.md`
+  §14, the compiled runtime's `toy_cr` shadow).
+- **The other four stop on four different kinds.** The 127-constant pool
+  (STARFALL), `sfx` (TOWER), the `note` builtin (NOVA TIDE) and logical
+  `not` (DUSK RUN) — #186 moved TOWER, NOVA TIDE and DUSK RUN past `sat`,
+  so the table's refusals are each the toy's next gap, not one shared one.
 - **DUSK RUN's validator refusal was the probe, not the toy (#184).** The
   export validates with an 8-frame run and judges its last frame; DUSK RUN
   builds its landscape over 137 frames, so frame 7 is build step 7 and costs
@@ -233,35 +241,29 @@ under the dummy SDL driver, cropped to 256x224 and compared with
   validator now runs a refused probe on to 300 frames before refusing; the
   8-frame ceiling still refuses a toy that is over it in its steady state
   (`tests/check-validate.js` V07).  DUSK RUN now reaches the encoder and
-  stops on `sat`.  Its **route-1** projection is still 0.71 Hz steady-state
-  (84.95 frames per update) — the compiled-route estimate is what the
-  validator prices; the export builds the interpreter.
-- **PLATFORMER is the closest.** The validator accepts it, the C emitter
-  lowers it completely, and it is the one game the static model puts over
-  60 Hz (81.2 Hz). #185 carried its padref/padget reads (the pads now scan
-  on the console once per toy frame, `tools/ilvm/ilvm_runtime.c`'s
-  `joy_scan`, the #45 sequence); its remaining route-1 gap is `sat`
-  (4 at `main.lua:142`) — and its projected container is 2,351 B, inside
-  the 8 KiB data bank.
+  stops on `not` (**#187**).  Its **route-1** projection is still 0.71 Hz
+  steady-state (84.95 frames per update) — the compiled-route estimate is
+  what the validator prices; the export builds the interpreter.
 - **The static estimate is still an estimate.** It is the same
   `pce-validate.js` factor pair #169 measured to be 20 % low (no raster) and
-  1.3–3.5× high (raster). It orders the games but cannot give a verdict; only
-  a built ROM can, and none exists.
+  1.3–3.5× high (raster). It orders the games but cannot give a verdict;
+  only a built ROM can, and PLATFORMER's is the first: 30 Hz where the
+  model's route-1 pricing said 81.2 Hz, the interpreter's per-operation
+  cost the model does not price.
 - **The studio page refuses earlier than the MCP for four of the five.**
   Its Export runs `renderer/pce-cgen.js` first: STARFALL stops on
   `cgen-op` `sprite` (`main.lua:406`), TOWER on `cgen-op` `sfx`
   (`main.lua:324`), NOVA TIDE and DUSK RUN on `cgen-op` `unm`
-  (`main.lua:29` and `:62`), and only PLATFORMER reaches the encoder.  #183
-  lifted the page's old `cgen-arity` refusal (the same 4-parameter ceiling),
-  so the finding for TOWER, NOVA and DUSK is now a different, later gap.
+  (`main.lua:29` and `:62`), and only PLATFORMER reaches the encoder — it
+  is the one game the page's Export and the MCP's `export_pce` agree on.
   So the page's one-line finding for those four is a C-emitter or validator
   finding, not the bytecode refusal in the table.
 - **Carrying the first refusals would not finish the job.** #178's
   projections put STARFALL at 8,969 B, TOWER at 8,379 B and NOVA TIDE at
   9,287 B — all over the interpreter's 8,192-byte data bank (#138), before
-  the still-uncarried kinds (`sprite` #133, `sat`, `sfx` #135, `raster`
-  table #136, builtins #137, `not`) are counted. DUSK RUN (7,385 B) and
-  PLATFORMER (2,351 B) do fit.
+  the still-uncarried kinds (`sprite` #133, `sfx` #135, `raster`
+  table #136, builtins #137, `not` #187) are counted. DUSK RUN (7,385 B)
+  fits, PLATFORMER (2,351 B) fits and now builds.
 
 ### The cards this measurement added
 
@@ -270,13 +272,11 @@ are on the board: **#148** (the 127-constant pool, already open),
 **#183** (closed 2026-10-31: the 4-parameter ceiling is gone; TOWER and NOVA
 now stop on `sat`), **#184** (closed 2026-11-01: DUSK RUN's refusal was the
 8-frame probe sampling its build; the probe extends to the 300-frame
-performance, so the toy reaches the encoder and stops on `sat`) and **#185**
-(closed 2026-11-01: padref/padget carried; PLATFORMER stops on `sat` like
-the other four). The
-uncarried kinds the
-inventory behind them names — with no card before this measurement — are
-**#186** (`sat`) and **#187** (logical `not`); the rest are the existing
-#133–#138 umbrellas.
+performance, so the toy reaches the encoder), **#185**
+(closed 2026-11-01: padref/padget carried) and **#186** (closed 2026-11-01:
+`sat` carried, PLATFORMER builds and measures 30 Hz — the first game
+export). The uncarried kind the inventory behind them names next is
+**#187** (logical `not`); the rest are the existing #133–#138 umbrellas.
 
 ## What is not proven
 
@@ -284,7 +284,9 @@ inventory behind them names — with no card before this measurement — are
   no ares run of a bytecode ROM.
 - **One save state per run.** The counters accumulate from boot to the
   SIGINT; `--frames` controls how long that is, and boot time (about a
-  second) is included in nothing but the run's length. The worst update is
+  second, or the ~7 s a game that draws its whole map through the
+  interpreter needs — PLATFORMER's measure and capture lengths clear it)
+  is included in nothing but the run's length. The worst update is
   the max over the run, so a very rare slow update needs a long run to show
   up.
 - **The VBlank counter is eight bits.** An update longer than 255 video

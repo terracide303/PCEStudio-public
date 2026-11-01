@@ -223,10 +223,11 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
   <p>Known and on the board. No need to report these, but tell us if one of them stops you completely.</p>
   <table>
     <tr><th>Area</th><th>What happens</th><th>Status</th></tr>
-    <tr><td>Export to <code>.pce</code></td><td>Only the simple example toys export. None of the five games —
-      STARFALL, TOWER, NOVA TIDE, DUSK RUN and PLATFORMER — does yet: each stops on a named finding (STARFALL's
-      constant pool, the missing <code>sat</code> instruction for TOWER, NOVA TIDE and DUSK RUN, PLATFORMER's pad
-      read), and <code>docs/ROM_SPEED.md</code> records the exact code and line for all five.
+    <tr><td>Export to <code>.pce</code></td><td>Only the simple example toys export, plus PLATFORMER (#186
+      carried the <code>sat</code> instruction; it runs at 30 Hz). The other four games — STARFALL, TOWER,
+      NOVA TIDE and DUSK RUN — stop on named findings (STARFALL's constant pool, TOWER's <code>sfx</code>,
+      NOVA TIDE's <code>note</code> builtin, DUSK RUN's <code>not</code>), and
+      <code>docs/ROM_SPEED.md</code> records the exact code and line for all five.
       They all run in the browser.</td>
       <td class="status soon">next big job</td></tr>
     <tr><td>Real hardware</td><td>Exports are checked in an emulator only.</td><td class="status no">untested</td></tr>

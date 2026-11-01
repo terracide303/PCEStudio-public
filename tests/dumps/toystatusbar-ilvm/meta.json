@@ -17,36 +17,36 @@
   "frames": 470,
   "last_frame": "frame0469.png",
   "measure": {
-   "collect_sum_ticks_7bit": 21314,
+   "collect_sum_ticks_7bit": 21435,
    "collections": 11,
    "count": 12,
-   "cycles_per_collection": 1984139.6363636365,
-   "cycles_per_frame": 27477.333333333332,
-   "cycles_per_raster_call": 8658.463378176382,
+   "cycles_per_collection": 1995403.6363636365,
+   "cycles_per_frame": 27392.0,
+   "cycles_per_raster_call": 8654.203529853548,
    "flags": 0,
    "max_ticks": 28,
-   "mean_ticks": 26.833333333333332,
-   "mean_update_lines": 4420.272727272727,
+   "mean_ticks": 26.75,
+   "mean_update_lines": 4445.363636363636,
    "min_ticks": 26,
    "overruns": 11,
-   "raster_calls": 2676,
+   "raster_calls": 2663,
    "raster_max_ticks": 12,
-   "raster_sum_ticks": 22627,
-   "sum_ticks": 322,
+   "raster_sum_ticks": 22506,
+   "sum_ticks": 321,
    "updates": 11,
-   "worst_update_lines": 4421
+   "worst_update_lines": 4703
   },
   "slend": 234,
   "slstart": 3
  },
  "ilvm": {
   "bytes": 16384,
-  "sha256": "fbf932b1c31ccc287a95ba26494ae76e3430c9b53b3ec0b5198a89732e7e37e5"
+  "sha256": "3a593db12e452212633a32d3b47377fb5c306d9683a649e541ba8a72f41aa3cf"
  },
  "name": "toystatusbar-ilvm",
  "rom": "tools/gen/toystatusbar-ilvm.pce",
  "rom_bytes": 24576,
- "rom_sha256": "dbbe9638203fdaccaea7ede995582fc2728fbedc497e3511d7a0bbe530c7e37a",
+ "rom_sha256": "488c5b65c26d1d847f0608ce3ac9794a6f62d23dbcfb431e4e0577fe0c798eee",
  "source": "toys/status-bar.lua",
  "source_sha256": "0d52e4536692190ac82169fb636620fb5e38cce0379630876822011a2a25de33"
 }

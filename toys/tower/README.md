@@ -23,9 +23,9 @@ first ladder.
 
 ## Browser only
 
-TOWER keeps its boulders, hearts and game state in Lua tables, and the
-console **Export** path cannot carry a table yet: `renderer/pce-ilbc.js`
-refuses the `table` instruction, so Export lists that as a finding instead of
-building a ROM.  The toy runs fine in the browser studio (and in the IL
-runtime the validator uses); it is the bytecode encoder that is missing the
-op.  See `docs/IL.md`.
+The console **Export** path cannot carry TOWER yet: `renderer/pce-ilbc.js`
+refuses the `sfx` instruction first (function 36, pc 9, `main.lua:324`), and
+the `table` instruction its boulders, hearts and game state need is missing
+too, so Export lists a finding instead of building a ROM.  The toy runs
+fine in the browser studio (and in the IL runtime the validator uses); it
+is the bytecode encoder that is missing the ops.  See `docs/IL.md`.

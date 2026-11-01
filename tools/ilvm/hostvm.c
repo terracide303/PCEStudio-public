@@ -76,6 +76,18 @@ int32_t toy_rgb(int32_t r, int32_t g, int32_t b) {
                    (uint32_t)(b & 7));
 }
 
+/* ---- the SAT (#186) ---- */
+
+/* The host models SATB the way the browser host does (renderer/
+ * pce-toyhost.js's host.sat): the word goes into the SATB image, not into
+ * VRAM.  The console's toy_sat writes VRAM $7F00 + i*4 + k and its DSR DMA
+ * mirrors it into SATB, so both sides end with the same 256 words — which
+ * is what sat.bin dumps.  Out of range is ignored, like the console's. */
+void toy_sat(int32_t i, int32_t k, int32_t v) {
+  if (i < 0 || i > 63 || k < 0 || k > 3) return;
+  sat[i * 4 + k] = (uint16_t)v;
+}
+
 /* ---- the pads (#185): TOY_PAD_* bits, tools/toyc/toy_runtime.h ---- */
 
 /* One byte per pad, 1 meaning held: II 0, I 1, Select 2, Run 3, Up 4,

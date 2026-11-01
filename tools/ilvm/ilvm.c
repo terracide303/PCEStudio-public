@@ -50,6 +50,7 @@ void toy_vram_set(int32_t addr, int32_t word);
 void toy_display_on(void);
 int32_t toy_rgb(int32_t r, int32_t g, int32_t b);
 int32_t toy_pad(int32_t n, int32_t field);
+void toy_sat(int32_t i, int32_t k, int32_t v);
 #else
 #include <pce.h>
 #include "toy_runtime.h"
@@ -399,6 +400,18 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       av = operand(r, rb(pc++));
       k = rb(pc++);
       r[d] = toy_pad(av, k);
+      break;
+    case 0x1E:                     /* sat: one SAT word (toy_sat, #186).  On
+                                    * the console the runtime writes VRAM
+                                    * $7F00 + i*4 + k and the startup's DSR
+                                    * auto-repeat mirrors it into SATB; the
+                                    * host harness writes its SATB image —
+                                    * both sides end with the SATB words the
+                                    * browser's host.sat writes. */
+      av = operand(r, rb(pc++));
+      bv = operand(r, rb(pc++));
+      v = operand(r, rb(pc++));
+      toy_sat(av, bv, v);
       break;
     case 0x18: {                   /* table: zero the slot, hold its id */
       d = rb(pc++);
