@@ -76,7 +76,8 @@
                              require("./pce-psg.js"), require("./pce-source.js"),
                              require("./pce-sat.js"), require("./pce-editor.js"),
                              require("./pce-seq.js"), require("./pce-project.js"),
-                             require("./pce-romcheck.js"));
+                             require("./pce-romcheck.js"),
+                             require("./pce-assets.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.agentTools = factory(root.PCEStudio.il, root.PCEStudio.ilbc,
@@ -84,11 +85,11 @@
       root.PCEStudio.sprites, root.PCEStudio.toyhost, root.PCEStudio.panels,
       root.PCEStudio.psg, root.PCEStudio.source, root.PCEStudio.sat,
       root.PCEStudio.editor, root.PCEStudio.seq, root.PCEStudio.project,
-      root.PCEStudio.romcheck);
+      root.PCEStudio.romcheck, root.PCEStudio.assets);
   }
 })(typeof self !== "undefined" ? self : this, function (il, ilbc, romLib, docs,
   validateLib, sprites, toyhost, panels, psg, sourceLib, satLib, editorLib,
-  seqLib, projectLib, romcheck) {
+  seqLib, projectLib, romcheck, assets) {
   "use strict";
 
   const MAIN = "main.lua";
@@ -670,6 +671,96 @@
               total: toyhost.VRAM_WORDS },
       regs: data.regs
     };
+  }
+
+  /* ---- sources.json (#181): the picture the import wrote ------------------ *
+   * The studio's Add Source records a named source (#156) beside the art it
+   * wrote (studio-panel-assets.js sourceEntryOf), and the AGENT panel did the
+   * same when it mirrored an agent's source_add (studio-panel-agent.js
+   * addNamedSource).  A Claude Code session has no panel, so the tool core had
+   * nothing to put in sources.json and the ASSETS pane could not name the art
+   * (#160's 2026-10-31 note; #181).  The core records it here, through
+   * renderer/pce-assets.js mergeSource — the merge the ASSETS pane reads — so
+   * there is no second sources.json format.
+   *
+   * The ranges are the ones the CORE's merge really made.  bg, tilesheet and
+   * palette replace their files wholesale, so they start at 0 — but a sprite
+   * import APPENDS its patterns and SAT slots past the toy's own and lands its
+   * palette rows on the first free sprite rows (mergeFiles above), so those
+   * firsts are the counts the toy held BEFORE the add. */
+
+  function fileDoc(list, name) {
+    for (const f of list) {
+      if (f.name !== name) continue;
+      try { return JSON.parse(f.source); } catch (e) { return null; }
+    }
+    return null;
+  }
+
+  function sourceEntryOf(result, before) {
+    if (!result || !result.stats) return null;
+    const name = result.name;
+    /* a source's name is the file format's (pce-assets.js): a picture whose
+     * name breaks it still imports and draws; it just is not listed */
+    if (typeof name !== "string" || !/^[A-Za-z0-9 _.-]+$/.test(name)) return null;
+    const stats = result.stats;
+    if (result.kind === "bg" || result.kind === "tilesheet") {
+      return { name: name, kind: result.kind,
+               tiles: { first: 0, count: stats.tiles },
+               map: result.kind === "bg" ? true : undefined,
+               palettes: { side: "bg", first: 0, count: stats.palettes } };
+    }
+    if (result.kind === "palette") {
+      return { name: name, kind: "palette",
+               palettes: { side: "bg", first: 0, count: stats.palettes } };
+    }
+    if (result.kind === "sprites") {
+      const oldSprites = fileDoc(before, "sprites.json") || {};
+      const oldPalettes = fileDoc(before, "palettes.json") || {};
+      const newPalettes = JSON.parse(result.files["palettes.json"]);
+      const oldPatterns = Array.isArray(oldSprites.patterns)
+        ? oldSprites.patterns.length : 0;
+      const oldSat = Array.isArray(oldSprites.sprites)
+        ? oldSprites.sprites.length : 0;
+      let firstRow = 0;
+      while (firstRow < 16 &&
+             rowUsed((oldPalettes.sprites || [])[firstRow])) firstRow++;
+      let rows = 0;
+      for (let i = 0; i < 16; i++)
+        if (rowUsed((newPalettes.sprites || [])[i])) rows++;
+      return { name: name, kind: "sprites",
+               patterns: { first: oldPatterns, count: result.patterns.length },
+               sprites: { first: oldSat, count: result.sprites.length },
+               palettes: { side: "spr", first: firstRow, count: rows } };
+    }
+    return null;
+  }
+
+  /* The merged file set with the source's entry in sources.json.  A
+   * sources.json the merge refuses (bad JSON, a name the format does not
+   * allow) must not fail the import: the art is already merged and accepted,
+   * and the entry is bookkeeping (#156's own rule — a dropped range is a
+   * note, not a refusal). */
+  function withNamedSource(files, before, result) {
+    const entry = sourceEntryOf(result, before);
+    if (!entry) return files;
+    let held = "";
+    for (const f of files) if (f.name === "sources.json") held = f.source;
+    let text;
+    try { text = assets.mergeSource(held, entry).text; }
+    catch (e) { return files; }
+    const out = [];
+    let put = false;
+    for (const f of files) {
+      if (f.name === "sources.json") {
+        out.push({ name: f.name, source: text });
+        put = true;
+      } else {
+        out.push({ name: f.name, source: f.source });
+      }
+    }
+    if (!put) out.push({ name: "sources.json", source: text });
+    return out;
   }
 
   /* ---- song_write (#161): compose the toy's song ------------------------- */
@@ -1937,7 +2028,9 @@
         });
         const merged = mergeFiles(result, session.files);
         const budget = pictureBudget(merged);
-        session.files = merged;
+        /* #181: the import's name in sources.json, so the studio's ASSETS
+         * pane lists the art a Claude Code session added */
+        session.files = withNamedSource(merged, session.files, result);
         resetRun();                /* the files changed: the frames are stale */
         const warnings = result.warnings.slice();
         if (budget.sprites >= toyhost.SAT_ENTRIES)

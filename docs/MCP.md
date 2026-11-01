@@ -111,8 +111,10 @@ One toy at a time, in one process:
 - `source_add` turns a picture into those asset files (#153): a base64 PNG or
   a pixel grid with a palette becomes tiles, sprites, a tilesheet or a
   palette, merged into the toy's files, and the reply is the VRAM/CRAM
-  budget (tiles, palettes, words used, warnings). Kind `song` takes a base64
-  `.mid` and writes `song.json` (#161).
+  budget (tiles, palettes, words used, warnings). The picture is recorded by
+  name in `sources.json` (#156, #181), so the studio's ASSETS pane lists the
+  art the session added. Kind `song` takes a base64 `.mid` and writes
+  `song.json` (#161).
 - `toy_save` (#160) hands the whole session to the person as one
   `pce.studio/1` envelope in the studio's own Save format, so the game opens
   in the studio with the art the imports made — the studio's `Open… → From
@@ -397,7 +399,10 @@ runtime refusal (for example `toy-timeout`, `reg-range`) keeps its code.
 Imports a picture into the toy's asset files (#153), with the studio's own
 importer (`renderer/pce-source.js`, the Add Source dialog's) — so what the
 server accepts is what the studio accepts. The new art is **merged** into
-the current files and the reply is the budget. Call it before `toy_run`;
+the current files and the reply is the budget. The picture is also named in
+`sources.json` (#156, #181) with the ranges the merged files give it, the
+same entry the studio's Add Source writes — so a toy saved from Claude Code
+opens with its art listed in the ASSETS pane. Call it before `toy_run`;
 `toy_run` imports the merged files into VRAM, CRAM and the SAT before
 `init()`.
 
@@ -427,7 +432,7 @@ Example reply (abridged):
 {"ok":true,"kind":"sprites","name":"red-square","size":{"width":16,"height":16},
  "stats":{"tiles":1,"max_tiles":1536,"palettes":1,"max_palettes":16,
   "colours":2,"max_tile_colours":16,"dither":"none"},
- "files":["main.lua","palettes.json","sprites.json"],
+ "files":["main.lua","palettes.json","sprites.json","sources.json"],
  "budget":{"tiles":1,"patterns":1,"sprites":1,"vram_words":1360,
   "vram_total":32768,"vram":{"bat":1024,"tiles":16,"patterns":64,
   "sat":256,"used":1360,"total":32768},"cram_entries":512,"sat_entries":64},
@@ -442,6 +447,10 @@ Merge rules, so a second add never silently destroys the first:
   reindexed past the old ones, SAT entries are appended after the old
   sprites, and their palette rows land on free rows; `palette` merges row by
   row, incoming non-zero entries winning.
+- The picture's `sources.json` entry (#156) replaces one of the same name or
+  joins the list; its ranges are the merged files' — `bg`/`tilesheet`/
+  `palette` start at 0, a sprite add starts at the pattern, SAT and free
+  palette-row counts the toy held before it.
 - A refused import changes nothing: the merge is validated against the
   hardware (`toPicture`) on a copy and committed only if it fits.
 
