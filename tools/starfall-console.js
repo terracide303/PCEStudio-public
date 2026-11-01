@@ -164,8 +164,8 @@ function analyse(rel, opts) {
   /* tableLayout() is the encoder's own reading of each site (shape, cells,
    * escape, repeat) and, since #133, of each sprite's resolved spec; it
    * changes no bytes.  The inventory below consults its sprite records, so
-   * the route-1 sprite row counts what the encoder will actually refuse,
-   * not just the kind's presence in OPS. */
+   * the sprite rows count what each backend will actually refuse (#190:
+   * both consume the same records), not just the kind's presence in OPS. */
   let layout = null, layoutError = null;
   try { layout = ilbc.tableLayout(program); }
   catch (e) { layoutError = { code: e.code || e.name, message: e.message }; }
@@ -208,12 +208,20 @@ function analyse(rel, opts) {
       if (ins.t === "builtin" && !ILBC_BUILTIN.has(ins.name)) {
         note("builtin " + ins.name, ins.line, "route 1 (ilbc)");
       }
-      /* #133: a sprite whose spec the encoder cannot pin refuses ilbc-op
-       * deeper than the kind table — the walker's own records decide. */
+      /* #133/#190: a sprite whose spec the walker cannot pin refuses
+       * deeper than the kind table — both backends consume the SAME
+       * records (pce-ilbc.js's sprite resolution), so one note per backend
+       * marks exactly the sites that backend's encode/emit refuses. */
       if (ins.t === "sprite" && layout &&
           layout.sprites && layout.sprites[fn.id]) {
         const spr = layout.sprites[fn.id][pc];
-        if (!spr || !spr.ok) note("sprite", ins.line, "route 1 (ilbc)");
+        if (!spr || !spr.ok) {
+          note("sprite", ins.line, "route 1 (ilbc)");
+          note("sprite", ins.line, "C backend (cgen)");
+          /* Both backends refuse this instruction, so it belongs in the
+           * union even though neither kind table rejects `sprite`. */
+          refused.add(fn.id + ":" + pc);
+        }
       }
       for (const f of ["k", "src", "a", "b", "cond", "value"]) {
         const v = ins[f];

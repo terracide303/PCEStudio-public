@@ -296,7 +296,7 @@ every line it occurs on.
 
 | toy | route | code | lines | blocker |
 |-----|-------|------|-------|---------|
-| **STARFALL** | C compiler | `cgen-op` | 406–422, 590, 591, 592, 594, 596, 599, 601, 604, 606, 617, 619, 626, 628, 635 | `sprite(i, spec)` — no C lowering |
+| **STARFALL** | C compiler | `cgen-op` | 590, 591, 592, 594, 599, 604, 619, 626, 628, 635 | `sprite(i, spec)` whose spec the encoder's walker cannot pin (a field that is not a constant, or a loop re-running the spec) |
 | | C compiler | `cgen-op` | 475, 554, 663 | `sfx(channel, freq, volume, frames)` |
 | | C compiler | `cgen-op` | 498, 646 | `raster(line, spec)` (the table form, not the hook) |
 | | C compiler | `cgen-op` | 466, 467, 570 | builtins `abs` and `sr` (only `rgb` lowers) |
@@ -324,9 +324,10 @@ every line it occurs on.
 - **PLATFORMER is the only one of the five both routes carry.** That agrees
   with #180's measurement: its export builds and runs at 30 Hz. The other
   four stop on constructs no route carries yet: `sfx` and the `raster(line,
-  spec)` table form (bytecode), and `sprite`, `unm`, `not` and the non-`rgb`
-  builtins (the C route). STARFALL additionally exhausts the 127-constant
-  pool.
+  spec)` table form (both routes), and `unm`, `not` and the non-`rgb` builtins
+  (the C route). The C route carries `sprite(i, spec)` since #190; STARFALL's
+  ten refused sprites are the specs its walker cannot pin to constants, not
+  the instruction. STARFALL additionally exhausts the 127-constant pool.
 - **The two routes differ, and that is the point of checking both.** TOWER's
   `not`, NOVA TIDE's `unm` and the `raster(line, spec)` calls are refused by
   the C route, while the bytecode opcode table carries `not` and `unm` (not
