@@ -857,6 +857,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | C compiler (Export…) | pal(addr, word) and rgb(r, g, b) | rgb is the one value-returning builtin lowered |
 | C compiler (Export…) | reg("BXR", v), reg("BYR", v), reg("CR", v) | the three registers a toy may write |
 | C compiler (Export…) | sat(i, k, v) | one raw SAT word |
+| C compiler (Export…) | sprite(i, spec) | one SAT entry from a spec table whose slot and fields are constants; a spec the encoder's walker cannot pin is cgen-op |
 | C compiler (Export…) | pad[n].field | the five controllers |
 | C compiler (Export…) | timer(period, fn) | the HuC6280 TMA timer and its callback |
 | bytecode (every .pce) | init(), frame(t, f) and raster(line) | the hooks are global slots the runtime calls |
@@ -879,7 +880,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | C compiler (Export…) | cgen-global | a global whose type this backend cannot put in C |
 | C compiler (Export…) | cgen-hook | no frame() hook, no top-level chunk, or a raster() hook that is not one int parameter |
 | C compiler (Export…) | cgen-key | a constant operand that is neither int nor bool |
-| C compiler (Export…) | cgen-op | an IL instruction this backend has no C lowering for (sprite(), fixed point, some builtins) |
+| C compiler (Export…) | cgen-op | an IL instruction this backend has no C lowering for (fixed point, some builtins, print/music/sfx, or a sprite whose spec it cannot pin to constants) |
 | C compiler (Export…) | cgen-table-escape | a table site that can run more than once and escapes; one static slot would alias two tables |
 | C compiler (Export…) | cgen-table-ram | a table access or slot shape the fixed cell pool cannot serve |
 | C compiler (Export…) | cgen-target | a jump target that is not an instruction |
@@ -921,7 +922,7 @@ Every refusal is a named failure, not a silent drop: the studio shows `code: fil
 | password-code | a password that is not one |
 | tile-space | no room for another tile: the ROM layout gives 1536, or the patterns would reach the SAT |
 | validate-rom | an estimated ROM past the HuCard's 1 MB |
-| cgen-op | an IL instruction this backend has no C lowering for (sprite(), fixed point, some builtins) |
+| cgen-op | an IL instruction this backend has no C lowering for (fixed point, some builtins, print/music/sfx, or a sprite whose spec it cannot pin to constants) |
 | toy-timeout | a toy hook past the frame's Lua budget |
 | toy-error | a Lua error inside the toy, naming file:line |
 | il-syntax | Lua's own compile error, with file:line |
