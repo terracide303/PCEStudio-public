@@ -650,6 +650,43 @@ A refusal sets `isError:true` and names the code: `validate-frame-budget`,
 the validator reports without a source line carry `line:null` and
 `location:null` rather than an invented one.
 
+### `rom_check()`
+
+Answers what the exported ROM can and cannot run (#193), without building
+anything: `renderer/pce-romcheck.js` compiles `main.lua` to the IL, then runs
+BOTH cartridge front ends over it — the C backend's check
+(`renderer/pce-cgen.js`, the route the studio's Export uses on top of the
+bytecode) and the bytecode encoder's check (`renderer/pce-ilbc.js`, the
+interpreter image every `.pce` carries). Every refusal comes back at once,
+with the Lua line it starts on.
+
+Takes no arguments:
+
+```json
+{"name":"rom_check","arguments":{}}
+```
+
+Example reply (abridged — one toy, both routes):
+
+```json
+{"ok":false,
+ "findings":[
+  {"code":"cgen-op","line":324,
+   "message":"function fn@320, IL line 324, instruction `sfx`: not lowered by this backend (...)"},
+  {"code":"ilbc-op","line":324,
+   "message":"instruction sfx (function 36, pc 9) has no bytecode form"}],
+ "carried":{"cgen":[{"id":"chunk","label":"...","detail":"..."}],
+           "ilbc":[{"id":"hooks","label":"...","detail":"...","ops":[]}]},
+ "refused":{"cgen":{"cgen-op":"..."},"ilbc":{"ilbc-op":"..."}},
+ "routes":{"cgen":"C compiler — ...","ilbc":"bytecode interpreter — ..."}}
+```
+
+`carried` and `refused` are copied from the compilers' own `FEATURES` and
+`REFUSALS` tables, so the lists cannot describe a feature the compiler does
+not carry. `ok:true` and an empty `findings` array is the answer PLATFORMER
+gets; a toy refused by the IL front end (`il-syntax`, `il-op`, …) has that
+one finding and the compiler checks are skipped.
+
 ### `export_pce(name, out)`
 
 Exports the loaded toy to a `.pce` through **#100's browser route** — no
@@ -766,7 +803,7 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
 `node tests/check-mcp.js` starts `tools/mcp/server.js`, speaks MCP over
 stdio, and asserts 313 checks:
 
-- `initialize`, `ping`, and `tools/list` with all thirteen tools and their
+- `initialize`, `ping`, and `tools/list` with all fourteen tools and their
   schemas;
 - #29's parallax toy written, 60 frames run, and the PNG at frame 60 equal
   to `tests/dumps/examples/parallax.png` (check-examples' frame 60) pixel

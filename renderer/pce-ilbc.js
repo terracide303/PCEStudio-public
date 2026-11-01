@@ -205,15 +205,18 @@
   var PAD_FIELD = { ii: 0, i: 1, select: 2, run: 3,
                     up: 4, right: 5, down: 6, left: 7 };
 
-  function ILBCError(code, message) {
+  function ILBCError(code, message, line) {
     this.name = "ILBCError";
     this.code = code;
     this.message = message;
+    /* The Lua source line, when the encoder knows it (the constant pool and
+     * the per-instruction rules do; the container as a whole does not). */
+    this.line = line == null ? null : line;
   }
   ILBCError.prototype = Object.create(Error.prototype);
   ILBCError.prototype.constructor = ILBCError;
 
-  function refuse(code, message) { throw new ILBCError(code, message); }
+  function refuse(code, message, line) { throw new ILBCError(code, message, line); }
 
   /* ---- a byte buffer -------------------------------------------------- */
 
@@ -256,16 +259,18 @@
     return null;
   }
 
-  /* Walk every operand of an IL instruction (the ones the encoding uses). */
+  /* Walk every operand of an IL instruction (the ones the encoding uses).
+   * `fn(operand, line)` so a refusal that trips on an operand can name the
+   * Lua source line the IL instruction carries. */
   function eachOperand(ins, fn) {
-    if (ins.a) fn(ins.a);
-    if (ins.b) fn(ins.b);
-    if (ins.cond) fn(ins.cond);
-    if (ins.src) fn(ins.src);
-    if (ins.addr) fn(ins.addr);
-    if (ins.word) fn(ins.word);
-    if (ins.value) fn(ins.value);
-    if (ins.args) for (var i = 0; i < ins.args.length; i++) fn(ins.args[i]);
+    if (ins.a) fn(ins.a, ins.line);
+    if (ins.b) fn(ins.b, ins.line);
+    if (ins.cond) fn(ins.cond, ins.line);
+    if (ins.src) fn(ins.src, ins.line);
+    if (ins.addr) fn(ins.addr, ins.line);
+    if (ins.word) fn(ins.word, ins.line);
+    if (ins.value) fn(ins.value, ins.line);
+    if (ins.args) for (var i = 0; i < ins.args.length; i++) fn(ins.args[i], ins.line);
   }
 
   /* ---- instruction sizes and validation ------------------------------- */
@@ -409,12 +414,12 @@
     /* Pass 1: constants and per-function instruction offsets. */
     var constKeys = [];
     var constIndex = {};
-    function seeOperand(op) {
+    function seeOperand(op, line) {
       var key = operandKey(op);
       if (key == null) return;
       if (constIndex[key] == null) {
         if (constKeys.length >= MAX_CONST) {
-          refuse("ilbc-range", "more than " + MAX_CONST + " constants");
+          refuse("ilbc-range", "more than " + MAX_CONST + " constants", line);
         }
         constIndex[key] = constKeys.length;
         constKeys.push(op.k);
@@ -444,10 +449,11 @@
         at += size;
         /* `const` is the one instruction whose k IS its constant; sat's k is
          * an operand (the word index) and enters the pool below with i/v. */
-        if (ins.t === "const" && ins.k) seeOperand({ k: ins.k });
+        if (ins.t === "const" && ins.k) seeOperand({ k: ins.k }, ins.line);
         eachOperand(ins, seeOperand);
         if (ins.t === "sat") {
-          seeOperand(ins.i); seeOperand(ins.k); seeOperand(ins.v);
+          seeOperand(ins.i, ins.line); seeOperand(ins.k, ins.line);
+          seeOperand(ins.v, ins.line);
         }
         /* A sprite's six operand bytes are the resolved constants (#133);
          * the walker already refused anything it could not prove. */
@@ -455,20 +461,21 @@
           var spr = layout && layout.sprites ? layout.sprites[f][pc] : null;
           if (!spr || !spr.ok) {
             refuse("ilbc-op", "line " + ins.line + ": " +
-                   (spr ? spr.why : "the sprite has no resolved spec"));
+                   (spr ? spr.why : "the sprite has no resolved spec"),
+                   ins.line);
           }
-          seeOperand({ k: { t: "int", v: spr.slot } });
-          seeOperand({ k: { t: "int", v: spr.x } });
-          seeOperand({ k: { t: "int", v: spr.y } });
-          seeOperand({ k: { t: "int", v: spr.pattern } });
-          seeOperand({ k: { t: "int", v: spr.palette } });
-          seeOperand({ k: { t: "int", v: spr.attr } });
+          seeOperand({ k: { t: "int", v: spr.slot } }, ins.line);
+          seeOperand({ k: { t: "int", v: spr.x } }, ins.line);
+          seeOperand({ k: { t: "int", v: spr.y } }, ins.line);
+          seeOperand({ k: { t: "int", v: spr.pattern } }, ins.line);
+          seeOperand({ k: { t: "int", v: spr.palette } }, ins.line);
+          seeOperand({ k: { t: "int", v: spr.attr } }, ins.line);
         }
         /* An int table key is an operand byte; a string key is a field id
          * and must never enter the value constant pool. */
         if ((ins.t === "tget" || ins.t === "tset") &&
             ins.key && ins.key.k && ins.key.k.t === "int") {
-          seeOperand({ k: ins.key.k });
+          seeOperand({ k: ins.key.k }, ins.line);
         }
       }
       fnOffsets.push(offsets);
@@ -627,27 +634,27 @@
       var key = operandKey(opnd);
       return OP_CONST | constIndex[key];
     }
-    function target(pc) {
+    function target(pc, line) {
       if (pc == null || pc < 0 || pc >= offsets.length) {
         refuse("ilbc-jump", "function " + fid + " jumps to pc " + pc +
-               " (only " + offsets.length + " instructions)");
+               " (only " + offsets.length + " instructions)", line);
       }
       return codeOff + offsets[pc];
     }
     /* A table value is a register; a key is either an operand byte (array
      * part, kind 0) or a field id (kind 1).  A string key never becomes a
      * value constant. */
-    function tableBase(opnd) {
+    function tableBase(opnd, line) {
       if (!opnd || opnd.r == null) {
         refuse("ilbc-table-key", "a table base must be a register in " +
-               "function " + fid);
+               "function " + fid, line);
       }
       return reg(opnd.r);
     }
-    function tableKey(opnd) {
+    function tableKey(opnd, line) {
       if (!opnd) {
         refuse("ilbc-table-key", "a table access with no key in function " +
-               fid);
+               fid, line);
       }
       if (opnd.r != null) return { kind: 0, byte: reg(opnd.r) };
       if (opnd.k && opnd.k.t === "str") {
@@ -665,7 +672,7 @@
         return { kind: 0, byte: OP_CONST | constIndex[kKey(opnd.k)] };
       }
       refuse("ilbc-table-key", "a table key must be a string field or an " +
-             "int operand in function " + fid);
+             "int operand in function " + fid, line);
       return null;
     }
 
@@ -711,17 +718,17 @@
         buf.u8(op(ins.src));
         break;
       case "jmp":
-        buf.u16(target(ins.target));
+        buf.u16(target(ins.target, ins.line));
         break;
       case "br":
         buf.u8(op(ins.cond)); buf.u8(ins.when ? 1 : 0);
-        buf.u16(target(ins.target));
+        buf.u16(target(ins.target, ins.line));
         break;
       case "forprep":
         buf.u8(ins.base & 0xFF);
         break;
       case "fornext":
-        buf.u8(ins.base & 0xFF); buf.u16(target(ins.target));
+        buf.u8(ins.base & 0xFF); buf.u16(target(ins.target, ins.line));
         break;
       case "arith":
         buf.u8(ARITH[ins.op]); buf.u8(reg(ins.dst));
@@ -788,22 +795,22 @@
       }
       case "setlist": {
         var values = ins.values || [];
-        buf.u8(tableBase(ins.base));
+        buf.u8(tableBase(ins.base, ins.line));
         buf.u8(ins.index);
         buf.u8(values.length);
         for (var vi = 0; vi < values.length; vi++) buf.u8(op(values[vi]));
         break;
       }
       case "tget": {
-        var gk = tableKey(ins.key);
+        var gk = tableKey(ins.key, ins.line);
         buf.u8(reg(ins.dst));
-        buf.u8(tableBase(ins.base));
+        buf.u8(tableBase(ins.base, ins.line));
         buf.u8(gk.byte); buf.u8(gk.kind);
         break;
       }
       case "tset": {
-        var sk = tableKey(ins.key);
-        buf.u8(tableBase(ins.base));
+        var sk = tableKey(ins.key, ins.line);
+        buf.u8(tableBase(ins.base, ins.line));
         buf.u8(sk.byte); buf.u8(sk.kind);
         buf.u8(op(ins.value));
         break;
@@ -1465,6 +1472,197 @@
     };
   }
 
+  /* ---- the encoder's rules on their own (#193) ------------------------ *
+   *
+   * check(program) answers "does the exported ROM carry this toy?" without
+   * writing a ROM: it runs the encoder's own validateInstruction(), sizeOf()
+   * and tableLayout()/buildTableSection() over every instruction, keeps
+   * going after a refusal, then runs encode() itself for the container-wide
+   * rules (the constant pool, jump targets, table-key bytes).  No byte is
+   * kept and nothing here is a second copy of a rule: every refusal is the
+   * encoder's own error, caught.
+   *
+   * renderer/pce-romcheck.js is the caller; the Studio's ROM CHECK drawer
+   * and the MCP rom_check tool show these findings. */
+  function check(program) {
+    var issues = [];
+    function remember(e, line) {
+      if (!e || typeof e.code !== "string") throw e;
+      var at = e.line != null ? e.line : (line == null ? null : line);
+      if (at == null) {
+        var m = /\bline (\d+)\b/.exec(String(e.message || ""));
+        if (m) at = Number(m[1]);
+      }
+      issues.push({ code: e.code, line: at, message: e.message });
+    }
+    function attempt(fn, line) {
+      try { return fn(); } catch (e) { remember(e, line); return null; }
+    }
+
+    if (!program || program.lang !== "pce-il" || program.version !== 1) {
+      remember(new ILBCError("ilbc-program",
+        "not a pce-il version 1 program"), null);
+      return issues;
+    }
+    var functions = program.functions || [];
+    if (!functions.length) {
+      remember(new ILBCError("ilbc-program", "the IL has no functions"), null);
+      return issues;
+    }
+    if (functions.length > 255) {
+      remember(new ILBCError("ilbc-range", functions.length + " functions; " +
+        "a function id is one byte"), null);
+    }
+    var globals = program.globals || [];
+    if (globals.length > 255) {
+      remember(new ILBCError("ilbc-range", globals.length + " globals; " +
+        "a global slot is one byte"), null);
+    }
+    var globalIds = {};
+    for (var g = 0; g < globals.length; g++) globalIds[globals[g].name] = g;
+    var hooks = program.hooks || {};
+    ["init", "frame", "raster"].forEach(function (name) {
+      if (hooks[name] != null && globalIds[name] == null) {
+        remember(new ILBCError("ilbc-program",
+          "the `" + name + "` hook has no global slot"), null);
+      }
+    });
+
+    /* Tables: the encoder's own layout and section rules. */
+    var usesTables = false;
+    for (var tf = 0; tf < functions.length && !usesTables; tf++) {
+      var tcode = functions[tf].code || [];
+      for (var tp = 0; tp < tcode.length; tp++) {
+        if (TABLE_OPS[tcode[tp].t]) { usesTables = true; break; }
+      }
+    }
+    if (usesTables) {
+      var layout = attempt(function () { return tableLayout(program); });
+      if (layout) attempt(function () { return buildTableSection(program, layout); });
+    }
+
+    /* Per instruction: the encoder's validateInstruction + sizeOf. */
+    for (var f = 0; f < functions.length; f++) {
+      var fn = functions[f];
+      var code = fn.code || [];
+      var first = code.length ? code[0].line : null;
+      if (fn.params.length > MAX_ARGS) {
+        remember(new ILBCError("ilbc-arity", fn.name + " takes " +
+          fn.params.length + " parameters; the interpreter takes at most " +
+          MAX_ARGS), first);
+      }
+      if (fn.registers > MAX_REGS) {
+        remember(new ILBCError("ilbc-range", fn.name + " has " +
+          fn.registers + " registers; an operand is one byte"), first);
+      }
+      for (var pc = 0; pc < code.length; pc++) {
+        (function (ins, fid, at) {
+          attempt(function () {
+            validateInstruction(ins, fid, at);
+            /* The encoder's operand rule too, so a fixed or impossible
+             * constant is reported with this instruction's line instead of
+             * waiting for the container-wide encode() pass. */
+            if (ins.t === "const") operandKey(ins);
+            eachOperand(ins, function (op) { operandKey(op); });
+            var size = sizeOf(ins);
+            if (size < 0) {
+              throw new ILBCError("ilbc-op", "instruction " + ins.t);
+            }
+            return size;
+          }, ins.line);
+        })(code[pc], f, pc);
+      }
+    }
+
+    /* The container-wide rules, from the encoder itself (constant pool size,
+     * jump targets, the table-key bytes).  A refusal already reported by the
+     * per-instruction pass is not repeated. */
+    attempt(function () { return encode(program); });
+    var indexOfIssue = {}, out = [];
+    for (var i = 0; i < issues.length; i++) {
+      var e = issues[i];
+      /* The same rule can fire twice (the per-instruction pass names the Lua
+       * line, the encoder's own pass may not): keep one finding per code and
+       * message, preferring the copy that carries a line. */
+      var key = e.code + "\u0000" + e.message;
+      if (indexOfIssue[key] == null) {
+        indexOfIssue[key] = out.length;
+        out.push(e);
+      } else if (out[indexOfIssue[key]].line == null && e.line != null) {
+        out[indexOfIssue[key]] = e;
+      }
+    }
+    out.sort(function (x, y) {
+      var lx = x.line == null ? Infinity : x.line;
+      var ly = y.line == null ? Infinity : y.line;
+      return lx - ly || (x.code < y.code ? -1 : x.code > y.code ? 1 : 0);
+    });
+    return out;
+  }
+
+  /* The codes and their meanings: the one table the docs, the ROM CHECK
+   * drawer and the tests read. */
+  var REFUSALS = {
+    "ilbc-program": "not a pce-il version 1 program, no functions, or a hook " +
+                    "with no global slot",
+    "ilbc-op": "an instruction the bytecode has no form for (music, sfx, " +
+               "release, print, raster(table), vget) or a sprite whose spec " +
+               "the walker cannot resolve",
+    "ilbc-fixed": "fixed-point arithmetic, comparison or constant",
+    "ilbc-key": "a constant or operand with no bytecode form",
+    "ilbc-arity": "more than " + MAX_ARGS + " parameters or arguments",
+    "ilbc-range": "a value past one byte: more than " + MAX_CONST +
+                  " constants, " + MAX_REGS + " registers, 255 functions or " +
+                  "globals, or a setlist index/count",
+    "ilbc-jump": "a jump target that is not an instruction boundary",
+    "ilbc-builtin": "a builtin other than rgb",
+    "ilbc-table-ram": "the table slots need more than the interpreter's " +
+                      TABLE_POOL_CELLS + " cells, or a key/field is past " +
+                      "its slot's shape",
+    "ilbc-table-escape": "a table site that can run more than once and " +
+                         "escapes; one static slot would alias two tables",
+    "ilbc-table-key": "a table base that is not a register, or a key that is " +
+                      "neither a string field nor an int operand"
+  };
+
+  /* What the bytecode route carries today, and what it refuses, as ONE
+   * table: `ops` names the IL instruction types of the bytecode's own OPS
+   * table, so a test can prove the list covers every opcode.  `refused` is
+   * REFUSALS itself. */
+  var FEATURES = {
+    route: "bytecode interpreter — MCP export_pce and the page's Export",
+    carried: [
+      { id: "hooks", label: "init(), frame(t, f) and raster(line)",
+        detail: "the hooks are global slots the runtime calls",
+        ops: [] },
+      { id: "values", label: "values, globals, closures and control flow",
+        detail: "int/bool/nil and function values; upvalues; jumps, branches, " +
+                "numeric for and returns",
+        ops: ["const", "move", "getglobal", "setglobal", "getupval",
+              "setupval", "closure", "call", "ret", "jmp", "br", "forprep",
+              "fornext"] },
+      { id: "arith", label: "32-bit integer arithmetic and comparisons",
+        detail: "add sub mul mod idiv band bor bxor shl shr; eq lt le; " +
+                "unm, bnot and logical not",
+        ops: ["arith", "unm", "bnot", "not", "cmp"] },
+      { id: "builtins", label: "rgb(r, g, b)",
+        detail: "the one builtin with a bytecode form; note(), min/max/" +
+                "floor/abs/clamp/sr and the fixed helpers do not encode here",
+        ops: ["builtin"] },
+      { id: "display", label: "pal(), reg(BXR/BYR/CR), vram[...] writes",
+        detail: "vram reads (vget) have no bytecode form",
+        ops: ["pal", "reg", "vset"] },
+      { id: "tables", label: "tables: int array keys and string fields",
+        detail: "the interpreter's fixed pool of " + TABLE_POOL_CELLS +
+                " cells", ops: ["table", "setlist", "tget", "tset"] },
+      { id: "pads", label: "pad[n].field", detail: "",
+        ops: ["padref", "padget"] },
+      { id: "sprites", label: "sat(i, k, v) and sprite(i, spec)",
+        detail: "", ops: ["sat", "sprite"] }
+    ],
+    refused: REFUSALS
+  };
+
   return {
     VERSION: VERSION,
     VERSION_TABLES: VERSION_TABLES,
@@ -1479,11 +1677,12 @@
     TABLE_POOL_CELLS: TABLE_POOL_CELLS,
     ILBCError: ILBCError,
     encode: encode,
+    check: check,
+    FEATURES: FEATURES,
     tableLayout: tableLayout,
     buildTableSection: buildTableSection,
     /* exported for tests: the refusal codes the encoder can raise */
-    CODES: ["ilbc-program", "ilbc-op", "ilbc-fixed", "ilbc-key",
-            "ilbc-arity", "ilbc-range", "ilbc-jump", "ilbc-builtin",
-            "ilbc-table-ram", "ilbc-table-escape", "ilbc-table-key"]
+    REFUSALS: REFUSALS,
+    CODES: Object.keys(REFUSALS)
   };
 });

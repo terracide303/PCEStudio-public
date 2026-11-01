@@ -333,6 +333,9 @@ function guide() {
         ["frame_png", "the picture at a frame, as a PNG you can look at"],
         ["validate", "check it against the hardware's limits, with file:line " +
                      "findings"],
+        ["rom_check", "what the exported ROM can and cannot run: both " +
+                      "cartridge front ends over main.lua, every finding at " +
+                      "once with its line, plus the carried/refused lists"],
         ["toy_save", "save the whole toy — code, art, songs — as one " +
                      ".pce.json the person opens in the studio"],
         ["project_open", "resume a project: a .pcestudio file or an unpacked " +
@@ -347,7 +350,8 @@ function guide() {
       ]),
       p("Work the loop the skill teaches: docs(topic) for the API (do not " +
         "guess names), toy_write, toy_run, frame_png to look, validate, " +
-        "export_pce. Add art with source_add before toy_run: a base64 PNG or " +
+        "rom_check before you promise a ROM, export_pce. Add art with " +
+        "source_add before toy_run: a base64 PNG or " +
         "a pixel grid with its palette becomes the toy's tiles, sprites, a " +
         "tilesheet or a palette, merged into its asset files, and the reply " +
         "is the VRAM/CRAM budget — toy_run imports those files into VRAM, " +
@@ -609,37 +613,20 @@ function guide() {
     ]
   });
 
-  /* 8. the subset -------------------------------------------------------- */
+  /* 8. the subset: generated from both compilers' own tables (#193) ------- */
   sections.push({
-    id: "cartridge", title: "8. Keep it cartridge-ready",
+    id: "rom", title: "8. Writing for the ROM",
     blocks: [
-      p("The studio's Check compiles the file through PCEStudio's IL, the " +
-        "same intermediate language that becomes a .pce cartridge. A toy " +
-        "written inside it runs identically in the browser and on the " +
-        "console; a toy outside it still runs in the browser but cannot be " +
-        "exported. Keep to these rules from the first version:"),
-      p("- Integers only. No 1.5, no x / y (use x // y). sin/cos/sqrt exist " +
-        "for the browser but return fractions; the console uses fixed point. " +
-        "The safest toys use f and integer arithmetic."),
-      p("- Numbers stay inside 32 bits (about -2,000,000,000..2,000,000,000)."),
-      p("- No string used as a value. A string is allowed as reg's name and " +
-        "in print, not in a variable."),
-      p("- Tables: the IL reads them back (t[i], t.x), but pce-cgen, the " +
-        "console back end, does not lower tables at all (cgen-op), so a toy " +
-        "with a table read runs in the browser and will not export. sprite(i, " +
-        "spec) is a table too: place sprites with sat() words (section 5) when " +
-        "the toy must export. The worked examples fill a table with constants " +
-        "and do not read it back; keep to that if the person wants a " +
-        "cartridge."),
-      p("- No method calls (:), no varargs (...), no pairs/ipairs, and no " +
-        "multiple return values. Use for i = a, b, step do and plain " +
-        "functions."),
-      p("- A named function must be defined before it is called, in the " +
-        "same file."),
-      p("The refused constructs come back by code (il-syntax, il-op, " +
-        "il-string, il-mixed, il-method, il-for-in, il-undefined, il-arity); " +
-        "a browser-only toy fails Check with one of those.")
-    ]
+      p("The studio's Check answers whether the toy runs in the page. A " +
+        "cartridge has a second question: can the export build this toy, and " +
+        "what will the console do with it? The ROM CHECK drawer answers that " +
+        "as the file is typed — it marks the lines in the gutter and shows " +
+        "'ROM: ok' or 'ROM: N problems' beside Export — and the same check " +
+        "is the MCP tool rom_check. Fix every finding before promising a ROM."),
+      p("Keep to the carried lists below from the first version. They are " +
+        "generated from the two compilers' own tables, so they are what the " +
+        "code does, not a summary of it.")
+    ].concat(docs.romSection().blocks)
   });
 
   /* 9. errors ------------------------------------------------------------ */
@@ -711,15 +698,17 @@ function guide() {
     title: "PCEStudio for Claude",
     intro: "A guide a chat AI reads before it helps someone make a PC Engine " +
            "toy for PCEStudio (" + STUDIO_URL + "). Paste the whole file " +
-           "into the chat. Sections 1-9 are hand-written; section 10 is " +
-           "generated from the runtime's own tables, and the examples are " +
-           "the toys/ files themselves.",
+           "into the chat. Sections 1-7 and 9-11 are hand-written; section 8's " +
+           "carried and refused lists and section 10's API chapters are " +
+           "generated from the code's own tables, and the examples are the " +
+           "toys/ files themselves.",
     footer: "Generated by node tools/docs.js --claude: the API chapters from " +
-            "renderer/pce-docs.js, which reads every range and refusal " +
-            "out of the module that enforces it; the examples from toys/. " +
-            "Do not edit this file by hand — tests/check-guide.js regenerates " +
-            "it and fails on a hand-written number.",
+            "renderer/pce-docs.js, the ROM carried/refused lists from " +
+            "renderer/pce-cgen.js and renderer/pce-ilbc.js, and the examples " +
+            "from toys/. Do not edit this file by hand — tests/check-guide.js " +
+            "regenerates it and fails on a hand-written number.",
     sources: ref.sources.concat(["renderer/pce-guide.js", "toys/*.lua",
+                                 "renderer/pce-cgen.js", "renderer/pce-ilbc.js",
                                  "tools/mcp/server.js (the tool names)"]),
     sections: sections
   };
