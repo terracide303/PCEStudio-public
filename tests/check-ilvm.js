@@ -1531,7 +1531,9 @@ function checkSpriteEncoding() {
   /* The resolved operand values (slot, x, y, pattern, palette, attr) for
    * frame()'s three sprites, read back through the constant pool.  Sprite
    * 1's spec omits y — the byte is the host's default 0.  Sprite 2's attr
-   * packs spbg (bit 0), vflip (bit 3) and cgy 3 (bits 4-5): 1 | 8 | 48. */
+   * packs spbg (bit 0), vflip (bit 3) and cgy 3 (bits 4-5): 1 | 8 | 48.
+   * The pattern is 0x100 — the cell the toy fills, VRAM word 0x4000 — so
+   * the toy's picture is visible on both routes (#190). */
   const consts = [];
   const constTabOff = u16At(encoded.bytes, 16);
   for (let c = 0, at = constTabOff; c < encoded.bytes[11]; c++) {
@@ -1555,9 +1557,9 @@ function checkSpriteEncoding() {
          return consts[encoded.bytes[c.at + k] & 0x7F];
        });
      }),
-     [[0, 32, 64, 0, 1, 0],
-      [1, 64, 0, 0, 1, 6],
-      [2, 96, 96, 0, 1, 57]]);
+     [[0, 32, 64, 256, 1, 0],
+      [1, 64, 0, 256, 1, 6],
+      [2, 96, 96, 256, 1, 57]]);
 
   /* Refusals: a spec the encoder cannot pin to constants refuses ilbc-op
    * rather than guessing.  Each reason has its own toy. */

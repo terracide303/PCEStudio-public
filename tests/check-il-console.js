@@ -107,6 +107,7 @@ const ROOT = path.join(__dirname, "..");
 const DUMP = path.join(ROOT, "tests/dumps/toypalette");
 const TOY_FILE = path.join(ROOT, "tools/toys/palette.lua");
 const TABLEPOOL_FILE = path.join(ROOT, "tools/toys/tablepool.lua");
+const SPRITE_FILE = path.join(ROOT, "tools/toys/sprite.lua");
 const RASTER_DUMP = path.join(ROOT, "tests/dumps/toyparallax");
 const RASTER_FILE = path.join(ROOT, "toys/parallax.lua");
 
@@ -341,12 +342,35 @@ function refusal(name, source, code, mutate, opts) {
 }
 
 function checkRefusals() {
-  /* Part C added reg() and int globals; what is still refused moves up:
-   * a sprite instruction, nine parameters (#183 moved the ceiling from four
-   * to eight), a table global. */
-  refusal("a sprite instruction (no SAT writes on the console yet)", `
-function init() sprite(0, {x = 1, y = 2}) end
-function frame(t, f) end`, "cgen-op");
+  /* Part C added reg() and int globals; #176 added tables and #190 the
+   * sprites pce-ilbc.js's spec resolution can pin; what is still refused
+   * moves up: nine parameters (#183 moved the ceiling from four to eight),
+   * a table global. */
+  /* #190: a resolved spec lowers to the runtime's shared toy_sprite with
+   * the six values the encoder's own walker resolved (slot, x, y, pattern,
+   * palette, attr).  The attr byte packs hflip as bit 2. */
+  {
+    const SPRITE = [
+      "function frame(t, f)",
+      "  sprite(2, {x = 32, y = 64, pattern = 3, palette = 1, hflip = true})",
+      "end",
+      ""
+    ].join("\n");
+    const c = cgen.emitC(il.compile(SPRITE, { chunkName: "sprite.lua" }));
+    check(/toy_sprite\(\(int32_t\)0x2u, \(int32_t\)0x20u, \(int32_t\)0x40u, \(int32_t\)0x3u, \(int32_t\)0x1u, \(int32_t\)0x4u\);/
+          .test(c),
+          "cgen lowers a resolved sprite to toy_sprite(slot, x, y, pat, pal, flag)");
+  }
+  /* …and a spec the SAME resolution cannot prove refuses cgen-op, at the
+   * sites the encoder refuses ilbc-op (a runtime field, a runtime slot). */
+  refusal("a sprite whose spec field is not constant", `
+function frame(t, f)
+  sprite(0, {x = f, y = 2})
+end`, "cgen-op");
+  refusal("a sprite whose slot is not constant", `
+function frame(t, f)
+  sprite(f % 4, {x = 1})
+end`, "cgen-op");
   refusal("a fixed-point constant", `
 function init() local x = 1.5 print(x) end
 function frame(t, f) end`, "cgen-fixed");
@@ -541,6 +565,20 @@ function frame(t, f) pal(1, g[1]) end`, "cgen-op", null, { target: "huc" });
                       { cwd: ROOT, encoding: "utf8", env: process.env });
   check(r.status === 0, "tools/build-toyc.sh builds the table toy (" +
         (r.stderr || "").trim().split("\n").slice(-1)[0] + ")");
+
+  /* #190: the sprite toy's C calls the runtime's toy_sprite, so the ROM is
+   * the build that proves the lowering compiles and links. */
+  const sr = spawnSync(path.join(ROOT, "tools/build-toyc.sh"),
+                       [SPRITE_FILE, "toysprite"],
+                       { cwd: ROOT, encoding: "utf8", env: process.env });
+  check(sr.status === 0, "tools/build-toyc.sh builds the sprite toy (" +
+        (sr.stderr || "").trim().split("\n").slice(-1)[0] + ")");
+  if (sr.status === 0) {
+    const csrc = fs.readFileSync(path.join(ROOT, "tools/gen/toysprite.c"),
+                                 "utf8");
+    check(/toy_sprite\(/.test(csrc),
+          "the sprite ROM's C calls toy_sprite");
+  }
 }
 
 /* ---- 3. the ROM is reproducible --------------------------------------- */
