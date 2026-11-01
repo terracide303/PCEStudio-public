@@ -38,6 +38,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The shared toy surface (tools/toyc/toy_runtime.h): toy_rgb and the one
+ * toy_sprite (#189) come from the header so the host harness and the
+ * console runtimes agree on the sprite's four SAT words.  toy_sat below
+ * writes this harness's SATB image, so the header's toy_sprite lands in
+ * the same 256 words the console's VRAM/DSR path ends with. */
+#include "toy_runtime.h"
+
 const uint8_t *ilvm_program;
 int ilvm_has_raster(void);
 
@@ -70,11 +77,8 @@ void toy_reg(int32_t which, int32_t value) {
 
 void toy_display_on(void) {}
 
-int32_t toy_rgb(int32_t r, int32_t g, int32_t b) {
-  return (int32_t)(((uint32_t)(g & 7) * 64u) +
-                   ((uint32_t)(r & 7) * 8u) +
-                   (uint32_t)(b & 7));
-}
+/* toy_rgb is the shared header's (tools/toyc/toy_runtime.h), the same
+ * 9-bit formula the console runs. */
 
 /* ---- the SAT (#186) ---- */
 
