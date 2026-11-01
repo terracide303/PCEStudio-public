@@ -220,8 +220,13 @@ const INVENTORY = [
    * #174 carried the four table kinds on route 1 and #176 carried them in
    * cgen, so their rows are gone from both backends.  #185 carried
    * padref/padget on route 1 (cgen already lowered them), so their rows
-   * are gone too. */
-  ["sprite", 31, 31, 31, 406],
+   * are gone too.  #133 carried sprite on route 1, but only where the
+   * encoder can pin the spec to constants: the row's route-1 count is the
+   * 10 sprites whose spec the walker cannot resolve (the score's
+   * digit_pattern calls, one runtime x, and three loop re-running spec
+   * windows — the analyse() model counts them through tableLayout's own
+   * sprite records), cgen still refuses the kind outright. */
+  ["sprite", 31, 10, 31, 406],
   ["sfx", 3, 3, 3, 475],
   ["raster", 2, 2, 2, 498],
   ["builtin abs", 2, 2, 2, 466],
@@ -322,7 +327,7 @@ function checkCapacity() {
      cap.controls[1].modelled], [1115, 1112]);
   eq("projection at 3/4/6 B per uncarried instruction",
      cap.projections.map(function (p) { return [p.assumed, p.bytes, p.over]; }),
-     [[3, 9107, true], [4, 9153, true], [6, 9245, true]]);
+     [[3, 9231, true], [4, 9246, true], [6, 9276, true]]);
 
   /* the limit itself, behaviourally: 8 KiB exactly builds, 8 KiB + 1 refuses */
   const bank0 = fs.readFileSync(path.join(ROOT, "renderer/ilvm.bin"));
@@ -360,11 +365,11 @@ const CITATIONS = [
   ["renderer/pce-cgen.js", 545, "case \"padref\""],
   ["renderer/pce-cgen.js", 563, "builtin `"],
   ["renderer/pce-cgen.js", 600, "refuse(\"cgen-op\""],
-  ["renderer/pce-ilbc.js", 164, "var OPS = {"],
-  ["renderer/pce-ilbc.js", 178, "var BUILTIN = {"],
-  ["renderer/pce-ilbc.js", 281, "refuse(\"ilbc-op\""],
-  ["renderer/pce-ilbc.js", 306, "refuse(\"ilbc-builtin\""],
-  ["renderer/pce-ilbc.js", 358, "hookSlot(\"raster\""],
+  ["renderer/pce-ilbc.js", 186, "var OPS = {"],
+  ["renderer/pce-ilbc.js", 200, "var BUILTIN = {"],
+  ["renderer/pce-ilbc.js", 305, "refuse(\"ilbc-op\""],
+  ["renderer/pce-ilbc.js", 330, "refuse(\"ilbc-builtin\""],
+  ["renderer/pce-ilbc.js", 382, "hookSlot(\"raster\""],
   ["renderer/pce-rom.js", 622, "if (dataLen > BANK)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];

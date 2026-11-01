@@ -295,7 +295,7 @@ var INSN_LEN = {
   0x01: 3, 0x02: 3, 0x03: 3, 0x04: 3, 0x05: 3, 0x06: 3, 0x07: 3,
   0x09: 2, 0x0A: 3, 0x0B: 5, 0x0C: 2, 0x0D: 4, 0x0E: 5, 0x0F: 3,
   0x10: 3, 0x11: 3, 0x12: 5, 0x14: 3, 0x15: 3, 0x16: 3, 0x17: 3,
-  0x18: 3, 0x1A: 5, 0x1B: 5, 0x1C: 3, 0x1D: 4, 0x1E: 4
+  0x18: 3, 0x1A: 5, 0x1B: 5, 0x1C: 3, 0x1D: 4, 0x1E: 4, 0x1F: 7
 };
 
 /* Walk every function's code and return each instruction with its byte
@@ -722,9 +722,10 @@ function checkTableEncoding() {
      [1, 0, 0, 0, 1]);
 
   /* STARFALL's table section against tableLayout(): 44 slots, 172 cells, in
-   * site order.  STARFALL still cannot encode (sprite/pad/sfx are not
-   * carried), so the section is built directly by the encoder's own
-   * builder — the bytes encode() writes. */
+   * site order.  STARFALL still cannot encode (sfx is not carried and its
+   * sprite specs and constant pool overflow the limits), so the section is
+   * built directly by the encoder's own builder — the bytes encode()
+   * writes. */
   const starProg = il.compile(
     fs.readFileSync(path.join(ROOT, "toys/demo-game/main.lua"), "utf8"),
     { chunkName: "main.lua" });
@@ -1475,6 +1476,165 @@ function checkSatEncoding() {
    * meaning. */
 }
 
+/* ---- #133: the sprite op (0x1F) ---------------------------------------- *
+ * The opcode carries slot, x, y, pattern, palette and attr as its six
+ * operand bytes — constants the encoder resolves from the spec's table
+ * site (the last tset per field in the site's build window, tableLayout's
+ * own sprite records), with absent fields at the host's defaults and the
+ * spbg/cgx/hflip/vflip/cgy attributes packed into attr.  This pins the
+ * container's shape; the host-parity run over the same toy (the later
+ * #133 evidence) pins the SAT words against the browser's host.sprite. */
+function checkSpriteEncoding() {
+  const program = il.compile(
+    fs.readFileSync(path.join(ROOT, "tools/toys/sprite.lua"), "utf8"),
+    { chunkName: "sprite.lua" });
+  const encoded = ilbc.encode(program);
+  eq("sprite encoding: the sprite toy is a version 2 container",
+     encoded.bytes[4], 2);
+
+  const ins = walkContainer(encoded.bytes);
+  const sprites = ins.filter(function (i) { return i.op === 0x1F; });
+  check(sprites.length >= 3,
+        "sprite encoding: the toy encodes at least 3 sprite instructions (" +
+        sprites.length + ")");
+  check(sprites.every(function (i) { return i.len === 7; }),
+        "sprite encoding: every sprite is seven bytes (opcode + six " +
+        "operands)");
+  check(sprites.every(function (i) {
+          for (let k = 1; k <= 6; k++) {
+            if (encoded.bytes[i.at + k] < 0x80) return false;
+          }
+          return true;
+        }),
+        "sprite encoding: the six operand bytes are constants, not " +
+        "registers");
+
+  /* One container sprite per IL sprite, at the IL's own position (the
+   * encoder emits exactly one instruction per IL instruction). */
+  const byFid = {};
+  ins.forEach(function (i) { (byFid[i.fid] = byFid[i.fid] || []).push(i); });
+  const ilSprites = [];
+  for (let f = 0; f < program.functions.length; f++) {
+    (program.functions[f].code || []).forEach(function (x, pc) {
+      if (x.t === "sprite") ilSprites.push({ fid: f, pc: pc });
+    });
+  }
+  eq("sprite encoding: the container holds one sprite per IL sprite",
+     sprites.length, ilSprites.length);
+  check(ilSprites.every(function (s) {
+          const c = byFid[s.fid][s.pc];
+          return c && c.op === 0x1F;
+        }),
+        "sprite encoding: each container sprite sits where its IL sprite " +
+        "does");
+
+  /* The resolved operand values (slot, x, y, pattern, palette, attr) for
+   * frame()'s three sprites, read back through the constant pool.  Sprite
+   * 1's spec omits y — the byte is the host's default 0.  Sprite 2's attr
+   * packs spbg (bit 0), vflip (bit 3) and cgy 3 (bits 4-5): 1 | 8 | 48. */
+  const consts = [];
+  const constTabOff = u16At(encoded.bytes, 16);
+  for (let c = 0, at = constTabOff; c < encoded.bytes[11]; c++) {
+    const t = encoded.bytes[at++];
+    if (t === 0) {
+      consts.push(encoded.bytes[at] | (encoded.bytes[at + 1] << 8) |
+                  (encoded.bytes[at + 2] << 16) | (encoded.bytes[at + 3] << 24));
+      at += 4;
+    } else if (t === 1) {
+      consts.push(encoded.bytes[at] ? 1 : 0); at += 1;
+    } else if (t === 2) {
+      at += 1 + encoded.bytes[at];
+    } else {
+      at += 0;   /* nil: one byte, already consumed */
+    }
+  }
+  eq("sprite encoding: the six operands per sprite",
+     ilSprites.map(function (s) {
+       const c = byFid[s.fid][s.pc];
+       return [1, 2, 3, 4, 5, 6].map(function (k) {
+         return consts[encoded.bytes[c.at + k] & 0x7F];
+       });
+     }),
+     [[0, 32, 64, 0, 1, 0],
+      [1, 64, 0, 0, 1, 6],
+      [2, 96, 96, 0, 1, 57]]);
+
+  /* Refusals: a spec the encoder cannot pin to constants refuses ilbc-op
+   * rather than guessing.  Each reason has its own toy. */
+  function codeFor(source) {
+    return refuseCode(function () {
+      ilbc.encode(il.compile(source, { chunkName: "sprite-refusal.lua" }));
+    });
+  }
+  /* These three sit in the chunk, not frame(): a spec table that escapes
+   * AND re-executes is refused ilbc-table-escape by #171's machinery
+   * before the sprite resolution runs, so the sprite refusals themselves
+   * need non-repeating sites. */
+  eq("a spec from a global is ilbc-op", codeFor(
+    "SPEC = {x = 1}\nsprite(0, SPEC)\ninit = function () end\n" +
+    "frame = function (t, f) end\n"), "ilbc-op");
+  eq("a spec from a call is ilbc-op", codeFor(
+    "SPEC2 = {x = 1}\nfunction make()\n  return SPEC2\nend\n" +
+    "sprite(0, make())\ninit = function () end\n" +
+    "frame = function (t, f) end\n"), "ilbc-op");
+  eq("a runtime field is ilbc-op", codeFor(
+    "function frame(t, f)\n  sprite(0, {x = f, y = 2})\nend\n"), "ilbc-op");
+  eq("a runtime attribute is ilbc-op", codeFor(
+    "function frame(t, f)\n  sprite(0, {x = 1, hflip = f % 2})\nend\n"),
+    "ilbc-op");
+  eq("a runtime slot is ilbc-op", codeFor(
+    "function frame(t, f)\n  sprite(f % 4, {x = 1})\nend\n"), "ilbc-op");
+  eq("a register-keyed spec write is ilbc-op", codeFor(
+    "function frame(t, f)\n  local s = {x = 1}\n  local k = \"x\"\n" +
+    "  s[k] = 2\n  sprite(0, s)\nend\n"), "ilbc-op");
+  eq("control flow inside the build window is ilbc-op", codeFor(
+    "function frame(t, f)\n  local s = {x = 1}\n  if f > 3 then\n" +
+    "    pal(0, rgb(1, 1, 1))\n  end\n  sprite(0, s)\nend\n"), "ilbc-op");
+  eq("a loop re-running the build window is ilbc-op", codeFor(
+    "function frame(t, f)\n  local v = 5\n  for i = 1, 2 do\n" +
+    "    local s = {x = v}\n    sprite(0, s)\n    v = 9\n  end\nend\n"),
+    "ilbc-op");
+  eq("an escaping spec table is ilbc-op", codeFor(
+    "local s = {x = 1}\nSPEC = s\nsprite(0, s)\n" +
+    "init = function () end\nframe = function (t, f) end\n"), "ilbc-op");
+  let named = null;
+  try {
+    ilbc.encode(il.compile(
+      "function frame(t, f)\n  sprite(0, {x = f, y = 2})\nend\n",
+      { chunkName: "named.lua" }));
+  } catch (e) { named = e; }
+  check(named && named.code === "ilbc-op" &&
+        /field `x` is not a constant/.test(String(named.message)),
+        "the runtime-field refusal names the field — " +
+        (named ? named.message : "accepted"));
+
+  /* The value a tset pins is the one at the tset, not at the sprite: a
+   * rewrite between them must not move the encoded byte. */
+  const pinned = ilbc.encode(il.compile(
+    "function frame(t, f)\n  local v = 5\n  local s = {x = v}\n  v = 9\n" +
+    "  sprite(0, s)\nend\n", { chunkName: "pinned.lua" }));
+  const pins = walkContainer(pinned.bytes).filter(function (i) {
+    return i.op === 0x1F;
+  });
+  eq("a rewrite after the tset does not move the sprite's field",
+     pins.length, 1);
+  const pconsts = [];
+  const pconstTabOff = u16At(pinned.bytes, 16);
+  for (let c = 0, at = pconstTabOff; c < pinned.bytes[11]; c++) {
+    const t = pinned.bytes[at++];
+    if (t === 0) {
+      pconsts.push(pinned.bytes[at] | (pinned.bytes[at + 1] << 8) |
+                   (pinned.bytes[at + 2] << 16) |
+                   (pinned.bytes[at + 3] << 24));
+      at += 4;
+    } else if (t === 1) { at += 1; }
+    else if (t === 2) { at += 1 + pinned.bytes[at]; }
+    else { at += 0; }
+  }
+  eq("the sprite's x byte is the tset-time value",
+     pconsts[pinned.bytes[pins[0].at + 2] & 0x7F], 5);
+}
+
 /* The interpreter's sat case, as a literal so the scratch mutation below
  * fails loudly if the case moves (like PADGET_BODY). */
 const SAT_BODY =
@@ -2207,6 +2367,7 @@ checkPadEncoding();
 checkPadHostParity();
 checkSatEncoding();
 checkSatHostParity();
+checkSpriteEncoding();
 checkNotEncoding();
 checkNotHostParity();
 checkTablesRun();

@@ -100,6 +100,22 @@
  *   1E sat    i:op k:op v:op           (one SAT word, entry i word k; the
  *              runtime's toy_sat writes VRAM $7F00 + i*4 + k and the VDC's
  *              auto-repeat DSR mirrors it into SATB every VBlank — #186)
+ *   1F sprite i:op x:op y:op pattern:op palette:op attr:op  (#133)
+ *              One SAT entry the way the browser's host.sprite composes it
+ *              (renderer/pce-toyhost.js): the runtime writes word 0 = y,
+ *              word 1 = x, word 2 = pattern << 1, word 3 = palette plus the
+ *              attribute bits.  attr packs spbg (bit 0), cgx (bit 1),
+ *              hflip (bit 2), vflip (bit 3) and cgy (bits 4-5) — the spec
+ *              fields the IL carries (#112) — so the runtime's word 3 is
+ *              palette | (attr&1)<<7 | (attr&2)<<7 | (attr&4)<<9 |
+ *              (attr&8)<<12 | ((attr>>4)&3)<<12, the host's
+ *              palette | spbg<<7 | cgx<<8 | hflip<<11 | cgy<<12 | vflip<<15.
+ *              The encoder resolves the spec register to its table site
+ *              (the site's build window, tableLayout's sprite records):
+ *              each field is its last tset's value operand, absent fields
+ *              take the host's defaults, and a non-constant attribute
+ *              field or a spec that is not a site built at the point of use
+ *              refuses ilbc-op — the op can only carry the six operands.
  *
  * A table operand is a slot id from the table section.  `kind` is 0 for an
  * array key (the key byte is an operand: a register or an int constant) and
@@ -114,9 +130,10 @@
  * What this half refuses, by code rather than guessing:
  *   ilbc-program  not a pce-il version 1 program
  *   ilbc-op       an IL instruction the interpreter does not have
- *                 (sprites, print, music, raster tables, ...; tables are
- *                 carried since #172, pads since #185, sat since #186,
- *                 logical not since #187)
+ *                 (print, music, raster tables, ...; tables are carried
+ *                 since #172, pads since #185, sat since #186, logical not
+ *                 since #187, sprites since #133 — but a sprite whose spec
+ *                 table the encoder cannot resolve still refuses here)
  *   ilbc-fixed    fixed-point arithmetic or a fixed constant
  *   ilbc-key      a constant that is not int/bool/nil
  *   ilbc-arity    more than eight parameters or arguments
@@ -173,7 +190,7 @@
     arith: 0x0E, unm: 0x0F, bnot: 0x10, not: 0x11, cmp: 0x12, builtin: 0x13,
     pal: 0x14, reg: 0x15, vset: 0x16, vget: 0x17,
     table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B,
-    padref: 0x1C, padget: 0x1D, sat: 0x1E
+    padref: 0x1C, padget: 0x1D, sat: 0x1E, sprite: 0x1F
   };
   var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
   var ARITH = { add: 0, sub: 1, mul: 2, mod: 3, idiv: 4, band: 5,
@@ -266,6 +283,7 @@
     if (t === "forprep") return 2;
     if (t === "fornext") return 4;
     if (t === "padget" || t === "sat") return 4;
+    if (t === "sprite") return 7;
     if (t === "arith" || t === "cmp") return 5;
     if (t === "table") return 3;
     if (t === "setlist") return 4 + (ins.values || []).length;
@@ -431,6 +449,21 @@
         if (ins.t === "sat") {
           seeOperand(ins.i); seeOperand(ins.k); seeOperand(ins.v);
         }
+        /* A sprite's six operand bytes are the resolved constants (#133);
+         * the walker already refused anything it could not prove. */
+        if (ins.t === "sprite") {
+          var spr = layout && layout.sprites ? layout.sprites[f][pc] : null;
+          if (!spr || !spr.ok) {
+            refuse("ilbc-op", "line " + ins.line + ": " +
+                   (spr ? spr.why : "the sprite has no resolved spec"));
+          }
+          seeOperand({ k: { t: "int", v: spr.slot } });
+          seeOperand({ k: { t: "int", v: spr.x } });
+          seeOperand({ k: { t: "int", v: spr.y } });
+          seeOperand({ k: { t: "int", v: spr.pattern } });
+          seeOperand({ k: { t: "int", v: spr.palette } });
+          seeOperand({ k: { t: "int", v: spr.attr } });
+        }
         /* An int table key is an operand byte; a string key is a field id
          * and must never enter the value constant pool. */
         if ((ins.t === "tget" || ins.t === "tset") &&
@@ -556,7 +589,8 @@
     }
     for (f = 0; f < functions.length; f++) {
       encodeFunction(buf, functions[f], f, fnOffsets[f], fnCodeOff[f],
-                     constIndex, globalIds, siteIdOf[f], fieldIds);
+                     constIndex, globalIds, siteIdOf[f], fieldIds,
+                     layout ? layout.sprites[f] : null);
     }
     if (buf.a.length !== codeEnd) {
       refuse("ilbc-program", "internal: codeEnd " + codeEnd + " but the " +
@@ -580,7 +614,7 @@
   }
 
   function encodeFunction(buf, fn, fid, offsets, codeOff, constIndex,
-                          globalIds, siteIds, fieldIds) {
+                          globalIds, siteIds, fieldIds, sprites) {
     function reg(r) {
       if (r == null || r < 0 || r >= MAX_REGS) {
         refuse("ilbc-range", "register " + r + " in function " + fid);
@@ -729,6 +763,20 @@
       case "sat":
         buf.u8(op(ins.i)); buf.u8(op(ins.k)); buf.u8(op(ins.v));
         break;
+      case "sprite": {
+        /* The six operand bytes are the resolved constants, in the order
+         * the header comment documents: slot, x, y, pattern, palette, attr. */
+        var spr = sprites ? sprites[pc] : null;
+        if (!spr || !spr.ok) {
+          refuse("ilbc-op", "line " + ins.line + ": the sprite has no " +
+                 "resolved spec");
+        }
+        var so = [spr.slot, spr.x, spr.y, spr.pattern, spr.palette, spr.attr];
+        for (var sxi = 0; sxi < so.length; sxi++) {
+          buf.u8(OP_CONST | constIndex[kKey({ t: "int", v: so[sxi] })]);
+        }
+        break;
+      }
       case "table": {
         var slot = siteIds == null ? null : siteIds[pc];
         if (slot == null) {
@@ -794,8 +842,10 @@
    * through a `move`, and through a table-typed global a site stores into
    * (every `getglobal` of that global is followed the same way).  A table
    * passed to a sprite()/raster() instruction does NOT escape: the runtime
-   * copies the fields it needs.  Reading only; the encoder's bytes and the
-   * encoder's refusals are unchanged.
+   * copies the fields it needs.  Since #133 the walker also RESOLVES each
+   * sprite's spec (sprites[f][pc]): a sprite it cannot pin to constants
+   * refuses ilbc-op, so a spec that cannot be resolved also cannot reach
+   * the bytes.  Raster tables are still reading only.
    */
   /* ---- the version 2 table section (#172) ------------------------------ *
    * u8 nslots, then per slot u16 base, u8 cap, u8 nfields — the shapes
@@ -900,10 +950,11 @@
     var initFid = program.hooks && program.hooks.init;
 
     /* One site per `table` instruction, in program order. */
-    var sites = [], siteAt = [];
+    var sites = [], siteAt = [], sprites = [];
     for (f = 0; f < functions.length; f++) {
       var code = functions[f].code || [];
       siteAt.push(new Array(code.length));
+      sprites.push(new Array(code.length));
       for (pc = 0; pc < code.length; pc++) {
         if (code[pc].t !== "table") continue;
         siteAt[f][pc] = sites.length;
@@ -913,6 +964,9 @@
           loopKeyMax: null, unboundedKey: false,
           readKeyMax: null, readFields: [],
           fields: [], globals: [], escapes: false, nested: false,
+          tsets: [],   /* every tset written through the site, in walk order:
+                        * { pc, key, value, const } — const is the value
+                        * operand's proven int at the tset's own pc (#133) */
           repeats: (f !== 0 && f !== initFid) || insideLoop(f, pc)
         });
       }
@@ -945,6 +999,22 @@
     function opReg(op) { return op != null && op.r != null; }
     function opStr(op) { return op != null && op.k != null && op.k.t === "str"; }
     function opInt(op) { return op != null && op.k != null && op.k.t === "int"; }
+    /* The constant an operand denotes, when the walker can prove one: a
+     * const k — an int as itself, a bool as 0/1 (a sprite flag is a bool in
+     * the IL) — or a register the walker holds as a proven int (#133's
+     * sprite resolution reads its operands through this). */
+    function opIntConst(regs, op) {
+      if (op == null) return null;
+      if (op.k != null) {
+        if (op.k.t === "int") return op.k.v | 0;
+        if (op.k.t === "bool") return op.k.v ? 1 : 0;
+        return null;
+      }
+      if (op.r != null && regs[op.r] && regs[op.r].int != null) {
+        return regs[op.r].int;
+      }
+      return null;
+    }
     function descOf(regs, op) {
       if (!opReg(op)) return null;
       return regs[op.r] || null;
@@ -1057,6 +1127,16 @@
       }
       var loopStack = [];  /* active constant-bounds numeric fors, innermost
                             * last; pushed at forprep, popped at its fornext */
+      var branchTargets = {};  /* pc -> true: a jmp/br/fornext lands here
+                                * (#133's sprite resolution refuses a spec
+                                * build window a branch can enter) */
+      for (pc = 0; pc < fcode.length; pc++) {
+        var bt = fcode[pc];
+        if ((bt.t === "jmp" || bt.t === "br" || bt.t === "fornext") &&
+            bt.target != null) {
+          branchTargets[bt.target] = true;
+        }
+      }
 
       for (pc = 0; pc < fcode.length; pc++) {
         var ins = fcode[pc];
@@ -1073,10 +1153,102 @@
             readTarget(regs, sd, null, ins.values[vi], loopStack);
           }
         } else if (ins.t === "tset") {
-          readTarget(regs, descOf(regs, ins.base), ins.key, ins.value,
-                     loopStack);
+          var tsd = descOf(regs, ins.base);
+          readTarget(regs, tsd, ins.key, ins.value, loopStack);
+          if (tsd && tsd.site != null) {
+            /* The value's proven int is captured here, at the tset's own
+             * pc, not at the sprite's: the table keeps the value the tset
+             * stored, whatever a later write does to the register. */
+            sites[tsd.site].tsets.push(
+              { pc: pc, key: ins.key, value: ins.value,
+                const: opIntConst(regs, ins.value) });
+          }
         } else if (ins.t === "tget") {
           readUse(regs, descOf(regs, ins.base), ins.key);
+        } else if (ins.t === "sprite") {
+          /* Resolve the spec register to its table site and every field the
+           * runtime's sprite reads to a constant (#133): the op carries six
+           * operand bytes, so what it cannot prove it refuses.  The spec
+           * must hold its site here, the site's build window — the table at
+           * site.pc through the tsets before this sprite — must be
+           * straight-line (no control flow inside it, no branch landing in
+           * it, no back edge re-running it with other register values), and
+           * the site must not escape before the sprite (a call could have
+           * changed it out of the walker's sight).  Each field is its last
+           * tset's captured constant in that window; absent fields take the
+           * host's defaults (x/y/pattern/palette/cgy 0, the flags false —
+           * renderer/pce-toyhost.js's sprite).  The attr byte packs spbg,
+           * cgx, hflip, vflip, cgy into bits 0..5, the packing the op's
+           * header comment documents. */
+          var spr = sprites[f][pc] = { ok: false, why: null, line: ins.line };
+          var spd = descOf(regs, ins.spec);
+          var site = spd && spd.site != null ? sites[spd.site] : null;
+          if (!site) {
+            spr.why = "the spec is not a table site at this point";
+          } else {
+            for (var wpc = site.pc + 1; wpc < pc && !spr.why; wpc++) {
+              var wt = fcode[wpc].t;
+              if (wt === "jmp" || wt === "br" || wt === "ret" ||
+                  wt === "forprep" || wt === "fornext") {
+                spr.why = "control flow sits between the spec table and " +
+                          "the sprite";
+              }
+            }
+            for (var bpc = site.pc + 1; bpc <= pc && !spr.why; bpc++) {
+              if (branchTargets[bpc]) {
+                spr.why = "a branch lands between the spec table and " +
+                          "the sprite";
+              }
+            }
+            for (var be = 0; be < loops[f].length && !spr.why; be++) {
+              if (loops[f][be][0] <= site.pc && loops[f][be][1] > pc) {
+                spr.why = "a loop re-runs the spec's build window";
+              }
+            }
+            if (!spr.why && site.escapes) {
+              spr.why = "the spec table escapes before the sprite";
+            }
+            if (!spr.why) {
+              var vals = {};   /* field name -> the last tset's constant */
+              for (var ti = 0; ti < site.tsets.length && !spr.why; ti++) {
+                var ts = site.tsets[ti];
+                if (ts.pc <= site.pc || ts.pc >= pc) continue;
+                if (ts.key.r != null || ts.key.k == null ||
+                    (ts.key.k.t !== "str" && ts.key.k.t !== "int")) {
+                  spr.why = "the spec is written through a key the " +
+                            "encoder cannot see";
+                } else if (ts.key.k.t === "int") {
+                  /* An array cell: the sprite never reads it. */
+                } else if (ts.const == null) {
+                  spr.why = "field `" + ts.key.k.v +
+                            "` is not a constant the encoder can carry";
+                } else {
+                  vals[ts.key.k.v] = ts.const;
+                }
+              }
+            }
+            if (!spr.why) {
+              spr.slot = opIntConst(regs, ins.i);
+              if (spr.slot == null) {
+                spr.why = "the slot is not a constant the encoder can carry";
+              } else {
+                function flag(name) {
+                  return vals[name] != null && vals[name] !== 0 ? 1 : 0;
+                }
+                spr.ok = true;
+                spr.x = vals.x != null ? vals.x : 0;
+                spr.y = vals.y != null ? vals.y : 0;
+                spr.pattern = vals.pattern != null ? vals.pattern : 0;
+                spr.palette = vals.palette != null ? vals.palette : 0;
+                spr.attr = flag("spbg") | (flag("cgx") << 1) |
+                           (flag("hflip") << 2) | (flag("vflip") << 3) |
+                           ((vals.cgy != null ? vals.cgy : 0) << 4);
+              }
+            }
+          }
+          /* A sprite the walker cannot pin refuses in encode(), not here:
+           * tableLayout stays a pure analysis for its layout-only readers
+           * (the studio's export flow, pce-cgen, the layout checks). */
         } else if (ins.t === "setglobal") {
           var gd = descOf(regs, ins.src);
           if (gd && gd.site != null) {
@@ -1285,7 +1457,11 @@
       cells: arrayCells + fieldCells,
       escaping: escaping,
       reexecuting: reexecuting,
-      nested: out.filter(function (s) { return s.nested; }).length
+      nested: out.filter(function (s) { return s.nested; }).length,
+      /* #133: per function, per sprite pc, the resolved operand bytes
+       * ({ ok, slot, x, y, pattern, palette, attr, line } — or { ok:false,
+       * why } for the ones that refused; the walker refuses those itself). */
+      sprites: sprites
     };
   }
 

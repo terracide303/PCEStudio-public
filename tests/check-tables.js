@@ -68,15 +68,16 @@ function eq(name, got, want) {
 
 /* The three games, in docs/TABLES-PLAN.md's order, with the numbers that
  * document measured before any of #171-#178 existed (reproduced here from
- * the tool's own analyse()). */
+ * the tool's own analyse()).  The capacity pins move when a kind gains a
+ * real opcode size in the model — #133's sprite did (31 x 7 B). */
 const TOYS = [
   { rel: "toys/demo-game/main.lua", name: "STARFALL",
     sites: 44, cells: 172, arrayCells: 46, fieldCells: 126,
     shapes: { array: 11, record: 33, mixed: 0, empty: 0, nested: 4 },
     escaping: 7, reexecuting: 34,
     ops: { table: 20, setlist: 2, tget: 45, tset: 61, total: 128, il: 450 },
-    exact: 8969, over: true, by: 777,
-    at3: 9107, at4: 9153, at6: 9245 },
+    exact: 9186, over: true, by: 994,
+    at3: 9231, at4: 9246, at6: 9276 },
   { rel: "toys/tower/main.lua", name: "TOWER",
     sites: 6, cells: 33, arrayCells: 33, fieldCells: 0,
     shapes: { array: 6, record: 0, mixed: 0, empty: 0, nested: 0 },
