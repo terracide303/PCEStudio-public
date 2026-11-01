@@ -56,6 +56,14 @@
  * (pce-ilbc.js), so the two backends cannot drift.  The HuC dialect refuses
  * tables: its int is 16 bits and the pool cells are the IL's 32-bit int32_t.
  *
+ * Sprites (#190): `sprite(i, spec)` lowers to the runtime's shared
+ * toy_sprite() (tools/toyc/toy_runtime.h), with the six values pce-ilbc.js's
+ * walker resolved from the spec's table site — the same records the encoder
+ * turns into op 0x1F (#133), not a second resolution.  So the build-window,
+ * escape, constant-field and constant-slot guards are the encoder's own, and
+ * a site they cannot pin refuses cgen-op here exactly where the encoder
+ * refuses ilbc-op.
+ *
  * The emitted program runs under tools/toyc/toy_runtime.c, which owns the
  * console: the VDC/VCE setup, the frame flow (wait for VBlank, run frame),
  * the VRAM/colour-table writes, and the HuC6280 TMA timer the capture reads
@@ -239,16 +247,23 @@
      * the same sites and cells for the same IL; the refusals mirror the
      * encoder's rule (pce-ilbc.js buildTableSection) with this backend's
      * codes. */
-    var usesTables = false;
-    for (f = 0; f < functions.length && !usesTables; f++) {
+    var usesTables = false, usesSprites = false;
+    for (f = 0; f < functions.length && !(usesTables && usesSprites); f++) {
       for (pc = 0; pc < functions[f].code.length; pc++) {
-        if (TABLE_OPS[functions[f].code[pc].t]) { usesTables = true; break; }
+        var okt = functions[f].code[pc].t;
+        if (TABLE_OPS[okt]) usesTables = true;
+        if (okt === "sprite") usesSprites = true;
       }
     }
     var table = null;
     var tableSiteAt = [];
     var tableFieldIds = {};
-    if (usesTables) {
+    /* #190: a sprite's spec is a table site, so a sprite toy needs the
+     * walker's layout even if it builds its spec some other way.  The
+     * sprite records (table.sprites) are the SAME resolution the encoder
+     * consumes (#133), so both backends resolve and refuse identical
+     * sites; this backend only maps a refusal to cgen-op. */
+    if (usesTables || usesSprites) {
       table = ilbc.tableLayout(program);
       for (var si = 0; si < table.sites.length; si++) {
         var site = table.sites[si];
@@ -350,7 +365,9 @@
       hookFrame: program.hooks.frame,
       hookRaster: hookRaster,
       usesTables: usesTables,
+      usesSprites: usesSprites,
       table: table,
+      sprites: table ? table.sprites : null,
       tableSiteAt: tableSiteAt,
       tableFieldIds: tableFieldIds
     };
@@ -533,6 +550,19 @@
             refuse("cgen-op", where + ": sat()'s arguments must be ints");
           }
           break;
+        case "sprite": {
+          /* #190: the six operands are pce-ilbc.js's resolved spec (#133),
+           * and every guard that produced them is the encoder's own, so
+           * this backend refuses exactly the sites the encoder refuses —
+           * with this backend's code.  Nothing here re-derives a field. */
+          var sprs = a.sprites && a.sprites[i];
+          var spr = sprs ? sprs[j] : null;
+          if (!spr || !spr.ok) {
+            refuse("cgen-op", where + ": " + (spr && spr.why
+                   ? spr.why : "the sprite has no resolved spec"));
+          }
+          break;
+        }
         case "padget":
           /* pad[n].field (#45): the console reads the port, the host the
            * scripted state; the C is toy_pad(n, field).  The base operand is
@@ -598,8 +628,9 @@
           break;
         default:
           refuse("cgen-op", where + ": not lowered by this backend (" +
-                 "init/frame/raster and reg/pal/vset/sat/pad and the timer " +
-                 "only; no sprites or fixed point)");
+                 "init/frame/raster and the reg/pal/vset/vget/sat/sprite/" +
+                 "pad/table instructions and the timer only; no fixed " +
+                 "point, print, music or sfx)");
         }
         var t = (ins.t === "jmp" || ins.t === "br" || ins.t === "fornext")
                 ? ins.target : null;
@@ -825,6 +856,20 @@
         line("  toy_sat(" + operand(ins.i) + ", " + operand(ins.k) + ", " +
              operand(ins.v) + ");");
         break;
+      case "sprite": {
+        /* #190: one SAT entry from the six values pce-ilbc.js resolved off
+         * the spec's table site, in the op's own order — slot, x, y,
+         * pattern, palette, attr.  validate() has refused any site the
+         * walker could not pin, so the records here are all resolved. */
+        var spr = a.sprites[fid][pc];
+        line("  toy_sprite(" + constLit({ t: "int", v: spr.slot }) + ", " +
+             constLit({ t: "int", v: spr.x }) + ", " +
+             constLit({ t: "int", v: spr.y }) + ", " +
+             constLit({ t: "int", v: spr.pattern }) + ", " +
+             constLit({ t: "int", v: spr.palette }) + ", " +
+             constLit({ t: "int", v: spr.attr }) + ");");
+        break;
+      }
       case "padref":
         line("  " + d + " = " + operand(ins.n) + ";");
         break;
@@ -1188,7 +1233,8 @@
      * code added above is described here or the reference test notices. */
     REFUSALS: {
       "cgen-op": "an IL instruction this backend has no C lowering for " +
-                 "(sprite(), fixed point, some builtins)",
+                 "(fixed point, some builtins, print/music/sfx, or a " +
+                 "sprite whose spec it cannot pin to constants)",
       "cgen-fixed": "fixed-point arithmetic or a fixed-point constant",
       "cgen-cond": "a branch whose condition the IL did not type as bool",
       "cgen-global": "a global whose type this backend cannot put in C",

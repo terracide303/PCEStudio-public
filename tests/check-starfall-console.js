@@ -11,25 +11,27 @@
  *      the Export button's `exportAnalysis()` read — is loaded in a vm with a
  *      fake studio whose toy source is toys/demo-game/main.lua.  It reports
  *      banner "bad", errors 1, warnings 0 and exactly one finding: cgen-op at
- *      line 406, the `sprite` the sfx() call at main.lua:405's spec argument
- *      lowered to (#176 carried the four table kinds and the table-typed
- *      globals, so the finding moved off the `table` at line 47).  The same
- *      panel on toys/parallax.lua reports 0 errors (the control), so
+ *      line 466, the `builtin abs` the score uses (#176 carried the four
+ *      table kinds and the table-typed globals, #190 carried the sprites
+ *      cgen can resolve, so the finding moved off the `sprite` at line 406).
+ *      The same panel on toys/parallax.lua reports 0 errors (the control), so
  *      "refused" is not a panel that cannot pass.
  *   2. THE VALIDATOR DOES NOT REFUSE IT.  pce-validate.js returns ok with 0
  *      problems, 8 frames of 9,530–9,637 cycles, 6 sprites / 6 strips with 4
  *      on the busiest line, 2,010 VRAM words, 100 blank cycles, a ~30,480 B
  *      ROM.  A green check-demo-game says nothing about the console.
- *   3. THE FULL REFUSAL INVENTORY, by kind, for both backends: 49 of 1,919
- *      instructions (2.6%) over the 7 kinds the write-up names, with the
+ *   3. THE FULL REFUSAL INVENTORY, by kind, for both backends: 18 of 1,919
+ *      instructions (0.94%) over the kinds the write-up names, with the
  *      first main.lua line of each and the two route-1-only pad kinds.
  *      (#174 carried the four table kinds on route 1; #176 carried them in
- *      cgen, so their four rows are gone from this table.)
- *   4. THE NEXT BLOCKER AFTER #176.  #176 widened cgen's global-type
+ *      cgen; #190 carried 21 of sprite's 31 in cgen, so sprite's row is now
+ *      10 instructions on each backend rather than a whole kind.)
+ *   4. THE NEXT BLOCKER AFTER #190.  #176 widened cgen's global-type
  *      allow-list to fn/vram/int/bool/padset/table (pce-cgen.js validate()),
  *      so the #143 gate is closed: STARFALL has 0 getglobal/setglobal outside
- *      the list, and the first cgen refusal left is the `sprite` at function
- *      2 pc 6, main.lua:406.  A mutation probe (parallax's g_f retyped str)
+ *      the list.  #190 carried the sprites cgen can resolve, so the first
+ *      cgen refusal left is the `builtin abs` at function 5 pc 1,
+ *      main.lua:466.  A mutation probe (parallax's g_f retyped str)
  *      proves that refusal is live code, not a source reading.
  *   5. THE 8 KiB DATA BANK (#138).  The size model reproduces the two
  *      committed containers to ≤3 B (the table section is counted since
@@ -162,11 +164,11 @@ function checkPanel() {
   const f = S.findings[0] || {};
   eq("the one finding's severity", f.severity, "error");
   eq("the one finding's code", f.code, "cgen-op");
-  eq("the one finding's line", f.line, 406);
-  ok("the finding names the `sprite` instruction",
-     /instruction `sprite`/.test(String(f.message)), String(f.message));
-  ok("the finding says it is not lowered", /not lowered by this backend/
-     .test(String(f.message)));
+  eq("the one finding's line", f.line, 466);
+  ok("the finding names the `builtin` instruction",
+     /instruction `builtin`/.test(String(f.message)), String(f.message));
+  ok("the finding says rgb is the only builtin it lowers",
+     /part A lowers rgb only/.test(String(f.message)));
 
   eq("panel stats.frameCycles", S.stats.frameCycles, 9530);
   eq("panel stats.route1.collectionCycles", S.stats.route1.collectionCycles,
@@ -220,13 +222,13 @@ const INVENTORY = [
    * #174 carried the four table kinds on route 1 and #176 carried them in
    * cgen, so their rows are gone from both backends.  #185 carried
    * padref/padget on route 1 (cgen already lowered them), so their rows
-   * are gone too.  #133 carried sprite on route 1, but only where the
-   * encoder can pin the spec to constants: the row's route-1 count is the
-   * 10 sprites whose spec the walker cannot resolve (the score's
+   * are gone too.  #133/#190 carried sprite on BOTH backends, but only
+   * where the walker can pin the spec to constants: the rows' counts are
+   * the 10 sprites whose spec the walker cannot resolve (the score's
    * digit_pattern calls, one runtime x, and three loop re-running spec
-   * windows — the analyse() model counts them through tableLayout's own
-   * sprite records), cgen still refuses the kind outright. */
-  ["sprite", 31, 10, 31, 406],
+   * windows — both backends consume tableLayout's own sprite records), and
+   * 21 sprites now lower in cgen as they already did on route 1. */
+  ["sprite", 31, 10, 10, 590],
   ["sfx", 3, 3, 3, 475],
   ["raster", 2, 2, 2, 498],
   ["builtin abs", 2, 2, 2, 466],
@@ -239,8 +241,8 @@ function checkInventory() {
   const inv = r.inventory;
   eq("IL functions", inv.functions, 18);
   eq("IL instructions", inv.total, 1919);
-  eq("refused instructions", inv.refusedCount, 39);
-  near("refused percentage", 100 * inv.refusedCount / inv.total, 2.03, 0.05);
+  eq("refused instructions", inv.refusedCount, 18);
+  near("refused percentage", 100 * inv.refusedCount / inv.total, 0.94, 0.05);
 
   for (const [kind, n, ilbcN, cgenN, first] of INVENTORY) {
     const rows = inv.rows.filter(function (x) { return x.kind === kind; });
@@ -250,24 +252,43 @@ function checkInventory() {
     const gotCgen = rows.filter(function (x) {
       return x.backend === "C backend (cgen)";
     }).reduce(function (a, x) { return a + x.n; }, 0);
-    const total = Math.max(gotIlbc, gotCgen);
+    /* The kind's instruction count comes from the IL, not from a backend's
+     * refusals: #190 means a carried kind can still refuse some sites. */
+    let inProgram = 0;
+    for (const fn of r.program.functions) {
+      for (const ins of fn.code) {
+        if (kind.indexOf("builtin ") === 0
+            ? (ins.t === "builtin" && kind.slice(8) === ins.name)
+            : ins.t === kind) inProgram++;
+      }
+    }
     const lines = rows.reduce(function (a, x) { return a.concat(x.lines); }, []);
     const firstLine = lines.length ? Math.min.apply(null, lines) : null;
     ok(kind + ": " + n + " instructions (ilbc " + ilbcN + ", cgen " + cgenN +
        ", first main.lua:" + first + ")",
-       total === n && gotIlbc === ilbcN && gotCgen === cgenN &&
+       inProgram === n && gotIlbc === ilbcN && gotCgen === cgenN &&
        firstLine === first,
-       "got " + total + " instructions, ilbc " + gotIlbc + ", cgen " +
+       "got " + inProgram + " instructions, ilbc " + gotIlbc + ", cgen " +
        gotCgen + ", first " + firstLine);
   }
 
   const kinds = INVENTORY.length;
-  const both = INVENTORY.filter(function (x) { return x[2] && x[3]; }).length;
+  /* "Refused by both backends" means every instruction of the kind:
+   * #190 put sprite in both kind tables (cgen lowers every spec the walker
+   * resolves), so the kind is no longer refused — only the 10 specs neither
+   * backend can pin still refuse, one per backend (the rows above). */
+  const both = INVENTORY.filter(function (x) {
+    return x[2] === x[1] && x[3] === x[1];
+  }).length;
   const route1Only = INVENTORY.filter(function (x) {
     return x[2] && !x[3];
   }).map(function (x) { return x[0]; });
+  const partlyRefused = INVENTORY.filter(function (x) {
+    return x[2] < x[1] || x[3] < x[1];
+  }).map(function (x) { return x[0]; });
   eq("kinds in the table", kinds, 5);
-  eq("kinds refused by both backends", both, 5);
+  eq("kinds refused by both backends", both, 4);
+  eq("kinds one backend still refuses in part", partlyRefused, ["sprite"]);
   eq("route-1-only kinds", route1Only, []);
 }
 
@@ -282,8 +303,8 @@ function checkGlobals() {
   eq("the typed globals they name", ex.names, {});
   eq("the first one", ex.first, null);
   eq("the next cgen refusal, in traversal order", ex.nextRefusal,
-     { code: "cgen-op", fn: 2, fnName: "fn@405", pc: 6, line: 406,
-       kind: "sprite", name: null, type: null });
+     { code: "cgen-op", fn: 5, fnName: "fn@465", pc: 1, line: 466,
+       kind: "builtin", name: "abs", type: "builtin" });
   eq("other operand checks that would fire", ex.otherChecks,
      { fixed: 0, cond: 0, arity: 0, closure: 0 });
 
@@ -357,14 +378,14 @@ function checkCapacity() {
 
 /* ---- 6. the write-up's citations --------------------------------------- */
 const CITATIONS = [
-  ["renderer/studio.html", 4196, "if (errors) return"],
+  ["renderer/studio.html", 4198, "if (errors) return"],
   ["renderer/studio-panel-console.js", 145, "emitC"],
   ["renderer/studio-panel-console.js", 148, "severity: \"error\""],
-  ["renderer/pce-cgen.js", 478, "fn|vram|int|bool|padset|table"],
-  ["renderer/pce-cgen.js", 536, "case \"padget\""],
-  ["renderer/pce-cgen.js", 545, "case \"padref\""],
-  ["renderer/pce-cgen.js", 563, "builtin `"],
-  ["renderer/pce-cgen.js", 600, "refuse(\"cgen-op\""],
+  ["renderer/pce-cgen.js", 495, "fn|vram|int|bool|padset|table"],
+  ["renderer/pce-cgen.js", 566, "case \"padget\""],
+  ["renderer/pce-cgen.js", 575, "case \"padref\""],
+  ["renderer/pce-cgen.js", 593, "builtin `"],
+  ["renderer/pce-cgen.js", 630, "refuse(\"cgen-op\""],
   ["renderer/pce-ilbc.js", 186, "var OPS = {"],
   ["renderer/pce-ilbc.js", 200, "var BUILTIN = {"],
   ["renderer/pce-ilbc.js", 305, "refuse(\"ilbc-op\""],
@@ -405,8 +426,8 @@ function main() {
   console.log("\nNOTE  nothing was built for STARFALL and no emulator ran: the " +
               "export refuses, so there is no Mednafen run, no 20-frame " +
               "browser diff and no TMA-timer cycles. Those stay conditional " +
-              "on the sprite/sfx kinds, the route-1 pad kinds and the 8 KiB " +
-              "bank.");
+              "on the sfx/raster/builtin kinds, the 10 unresolvable sprite " +
+              "specs and the 8 KiB bank.");
   console.log("NOTE  the page's exportAnalysis() was not executed here (no " +
               "chrome-headless-shell on this machine, #114). The CONSOLE " +
               "panel's own analyse() was, over the same three modules; the " +
