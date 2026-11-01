@@ -11,12 +11,14 @@
 --              carry the attribute bits
 --   sprite 2  spbg, cgy and vflip pack the rest of the attr byte
 --
--- The three sprites are visible, so a captured frame is evidence and not a
--- black screen (#190/#191): CR turns the sprite layer on (SB, bit 6), and
--- the pattern code 0x100 names the cell the tile is written to — pattern p
--- is the 64-word VRAM cell at word p*64 (renderer/pce-sprites.js), so
--- 0x100 is word 0x4000.  The filled cell is all colour 15, which sprite
--- palette 1 reads from CRAM $11F ($100 + palette 1 * 16 + colour 15).
+-- The sprites are visible, so a captured frame is evidence and not a black
+-- screen (#190/#191): CR turns the sprite layer on (SB, bit 6), and the
+-- pattern code 0x100 names the cell the tile is written to — pattern p is
+-- the 64-word VRAM cell at word p*64 (renderer/pce-sprites.js), so 0x100 is
+-- word 0x4000.  The filled cell is all colour 15, which sprite palette 1
+-- reads from CRAM $11F ($100 + palette 1 * 16 + colour 15).  Sprite 1's y
+-- is the host's default 0, which is above the display, so two of the three
+-- show.
 
 init = function ()
   pal(0, rgb(0, 0, 0))
