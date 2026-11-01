@@ -10,9 +10,20 @@
  *                                       renderer/docs.html)
  *   node tools/docs.js --claude [path]  write the chat-AI guide (default
  *                                       renderer/pcestudio-for-claude.md)
+ *   node tools/docs.js --manual [path]  write the generated "Writing for the
+ *                                       ROM" section into the Claude Code
+ *                                       manual (default renderer/claude-code.html)
  *   node tools/docs.js --check          exit 1 if either generated file
  *                                       (docs.html, the guide) is not
- *                                       exactly what the generator writes
+ *                                       exactly what the generator writes,
+ *                                       or the manual's ROM block is stale
+ *
+ * The "Writing for the ROM" section is generated from the two compilers'
+ * own tables (renderer/pce-cgen.js and renderer/pce-ilbc.js FEATURES /
+ * REFUSALS) and appears in all three places: the reference (docs.html), the
+ * chat-AI guide, and between the markers in the Claude Code manual.  One
+ * generator, so a feature the compiler carries or refuses cannot go stale
+ * in any of them.
  *
  * tests/check-docs.js uses --check and, beyond it, mutates the code's tables
  * in a scratch copy to show the output follows them.  tests/check-guide.js
@@ -28,6 +39,31 @@ const guide = require("../renderer/pce-guide.js");
 const ROOT = path.resolve(__dirname, "..");
 const HTML_PATH = path.join(ROOT, "renderer", "docs.html");
 const CLAUDE_PATH = path.join(ROOT, "renderer", "pcestudio-for-claude.md");
+const MANUAL_PATH = path.join(ROOT, "renderer", "claude-code.html");
+const MANUAL_BEGIN = "<!-- writing-for-the-rom:begin";
+const MANUAL_END = "<!-- writing-for-the-rom:end -->";
+
+/* The manual is hand-written except for one generated section between the
+ * two markers.  Replace only those lines; leave every hand-written byte
+ * alone. */
+function manualWithRom(file) {
+  const target = file || MANUAL_PATH;
+  const src = fs.readFileSync(target, "utf8");
+  const beginAt = src.indexOf(MANUAL_BEGIN);
+  if (beginAt < 0) {
+    throw new Error(MANUAL_BEGIN + " marker missing from " + target);
+  }
+  const beginLineEnd = src.indexOf("\n", beginAt);
+  if (beginLineEnd < 0) throw new Error("the ROM marker has no line end");
+  const endAt = src.indexOf(MANUAL_END, beginLineEnd + 1);
+  if (endAt < 0) {
+    throw new Error(MANUAL_END + " marker missing from " + target);
+  }
+  const section = docs.htmlSection(docs.romSection())
+    .split("\n").map((line) => line ? "  " + line : line).join("\n");
+  return src.slice(0, beginLineEnd + 1) + section + "\n" +
+         src.slice(endAt);
+}
 
 function main(argv) {
   const args = argv.slice(2);
@@ -44,10 +80,15 @@ function main(argv) {
       mode = "claude";
       target = CLAUDE_PATH;
       if (args[i + 1] && !args[i + 1].startsWith("--")) target = args[++i];
+    } else if (a === "--manual") {
+      mode = "manual";
+      target = MANUAL_PATH;
+      if (args[i + 1] && !args[i + 1].startsWith("--")) target = args[++i];
     } else if (a === "--markdown") mode = "markdown";
     else if (a === "--help" || a === "-h") {
       process.stdout.write("usage: node tools/docs.js [--markdown | " +
-                           "--html [path] | --claude [path] | --check]\n");
+                           "--html [path] | --claude [path] | " +
+                           "--manual [path] | --check]\n");
       return 0;
     } else {
       process.stderr.write("unknown argument: " + a + "\n");
@@ -80,11 +121,40 @@ function main(argv) {
                      wantGuide.length + " generated)\n"
                    : "(the file is missing)\n"));
     }
+    let wantManual = null;
+    try {
+      wantManual = manualWithRom();
+    } catch (e) {
+      failed = true;
+      process.stderr.write("check-manual: " + e.message + "\n");
+    }
+    const haveManual = fs.existsSync(MANUAL_PATH)
+      ? fs.readFileSync(MANUAL_PATH, "utf8") : "";
+    if (wantManual != null && haveManual !== wantManual) {
+      failed = true;
+      process.stderr.write(
+        "check-manual: renderer/claude-code.html's Writing-for-the-ROM " +
+        "section is not the generator's output.\nRegenerate it with: node " +
+        "tools/docs.js --manual\n" +
+        "(" + haveManual.length + " bytes on disk, " + wantManual.length +
+        " generated)\n");
+    }
     if (failed) return 1;
     process.stdout.write("renderer/docs.html matches the generator: " +
                          want.length + " bytes; " +
                          "renderer/pcestudio-for-claude.md matches: " +
-                         wantGuide.length + " bytes\n");
+                         wantGuide.length + " bytes; " +
+                         "renderer/claude-code.html's ROM section matches: " +
+                         (wantManual ? wantManual.length : 0) + " bytes\n");
+    return 0;
+  }
+
+  if (mode === "manual") {
+    const page = manualWithRom(target);
+    fs.writeFileSync(target, page);
+    process.stdout.write("wrote the Writing-for-the-ROM section into " +
+                         path.relative(ROOT, target) + " (" +
+                         docs.romSection().blocks.length + " blocks)\n");
     return 0;
   }
 

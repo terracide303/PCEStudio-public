@@ -790,6 +790,40 @@
   .btab:hover { color: var(--text2); }
   .btab.is-on { color: var(--text); border-bottom-color: var(--accent); }
   .bottom-body { overflow: auto; padding: 8px 10px 16px; min-height: 0; }
+  /* #193 — the ROM CHECK drawer: the findings both cartridge routes share,
+   * each with the Lua line it starts on, and the compiler's own carried/
+   * refused lists. */
+  .rom-status {
+    align-self: center; color: var(--dim); font: 10px var(--mono);
+    letter-spacing: 0.06em; padding: 0 2px; white-space: nowrap;
+  }
+  .rom-status.is-ok { color: var(--green); }
+  .rom-status.is-bad { color: var(--bad); }
+  .rom-head {
+    display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px;
+    color: var(--muted); font: 10px var(--mono); letter-spacing: 0.08em;
+  }
+  .rom-summary { margin: 0 0 7px; font: 11px var(--mono); color: var(--text2); }
+  .rom-summary.is-ok { color: var(--green); }
+  .rom-summary.is-bad { color: var(--bad); }
+  .rom-list { list-style: none; margin: 0; padding: 0;
+              display: flex; flex-direction: column; gap: 4px; }
+  .rom-item {
+    display: flex; gap: 8px; align-items: baseline;
+    font: 11px var(--mono); min-width: 0;
+  }
+  .rom-line-btn {
+    flex: none; background: transparent; border: 0; padding: 0;
+    color: #9fd2ff; font: 11px var(--mono);
+  }
+  .rom-line-btn:hover { color: #d5ecff; text-decoration: underline; }
+  .rom-code { flex: none; color: var(--bad); }
+  .rom-msg { color: var(--text2); min-width: 0; }
+  .rom-carried { margin-top: 9px; color: var(--muted); font: 11px var(--mono); }
+  .rom-carried summary { cursor: pointer; color: var(--text2); }
+  .rom-carried p { margin: 6px 0 0; }
+  .rom-carried b { color: var(--muted); font-weight: 600; }
+  .rom-line { color: var(--bad); font-weight: 700; }
   .marker-list { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
   .marker {
     background: transparent; border: 0; color: #9fd2ff; text-align: left;
@@ -1086,6 +1120,8 @@
       <button type="button" class="btn" id="btn-paste-run"
               title="Read the clipboard (or drop a .lua / .pce.json file on the page), put it in main.lua and run it">Paste &amp; Run</button>
       <button type="button" class="btn" id="btn-check">Check</button>
+      <span class="rom-status" id="rom-status"
+            title="The ROM CHECK drawer: what both cartridge routes carry, as you type">ROM: —</span>
       <button type="button" class="btn btn-accent" id="btn-export"
               title="Export to ROM — build this toy's .pce in this page (IL bytecode on the interpreter, no compiler)">Export…</button>
       <button type="button" class="btn" id="btn-panels" aria-haspopup="true"
@@ -1777,12 +1813,15 @@
       <div class="bottom-tabs">
         <button type="button" class="btab is-on" id="tab-markers">MARKERS</button>
         <button type="button" class="btab" id="tab-agent">AGENT</button>
+        <button type="button" class="btab" id="tab-rom"
+                title="What the exported ROM can and cannot run (#193)">ROM CHECK</button>
       </div>
       <div class="bottom-body" id="bottom-body">
         <div class="panel" id="bottom-markers">
           <button type="button" class="btn" id="btn-addmarker">Add marker at frame 0</button>
           <div class="marker-list" id="marker-list"></div>
         </div>
+        <div class="panel" id="bottom-rom" hidden></div>
         <!-- #167: the AGENT drawer is studio-panel-agent.js's.  It draws the
              Connect state, the one command to run and the FEED of Claude's
              calls here; while RELAY_URL (renderer/relay-config.js) is empty
@@ -2035,6 +2074,7 @@
      stops a toy reaching a real console.  pce-cgen.js depends on
      pce-ilbc.js for the tables' shared pool layout (#176), loaded above. -->
 <script src="pce-cgen.js"></script>
+<script src="pce-romcheck.js"></script>
 <script src="pce-assets.js"></script>
 <!-- #97: the AUDIO panel's mixer — the mix document over pce-wave.js's PSG
      shape, its register writes, its meter and waves.json.  pce-song.js is
@@ -2093,6 +2133,7 @@
 <script src="studio-panel-scanlines.js"></script>
 <script src="studio-panel-registers.js"></script>
 <script src="studio-panel-console.js"></script>
+<script src="studio-panel-romcheck.js"></script>
 <script src="studio-panel-markers.js"></script>
 <script src="studio-panel-agent.js"></script>
 <script src="studio-panel-assets.js"></script>
@@ -3243,11 +3284,18 @@ function selectCodeTab(which) {
 }
 
 function selectBottomTab(which) {
-  const markersOn = which === "markers";
-  $("tab-markers").classList.toggle("is-on", markersOn);
-  $("tab-agent").classList.toggle("is-on", !markersOn);
-  $("bottom-markers").hidden = !markersOn;
-  $("bottom-agent").hidden = markersOn;
+  const ids = ["markers", "agent", "rom"];
+  for (const id of ids) {
+    const tab = $("tab-" + id), panel = $("bottom-" + id);
+    if (tab) {
+      tab.classList.toggle("is-on", which === id);
+      tab.setAttribute("aria-selected", String(which === id));
+    }
+    if (panel) panel.hidden = which !== id;
+  }
+  /* Opening the drawer checks the current text at once rather than waiting
+   * for the next debounce. */
+  if (which === "rom") runRomCheck();
 }
 
 /* ---- the draggable dividers (#139) -------------------------------------
@@ -3612,13 +3660,26 @@ function setEditorText(text) {
   if (editor) editor.setValue(String(text == null ? "" : text));
   else $("source").value = String(text == null ? "" : text);
   if (!editor) drawGutter();
+  /* A new file (an example, a paste, an opened project) is a new ROM input. */
+  if (!showingGlobals && findFile("main.lua")) scheduleRomCheck();
 }
+
+/* #193 — ROM CHECK.  The compiler's two front ends run as typing pauses, so
+ * the gutter marks and the one-line status are about the current file, not
+ * the last Run.  The report is kept here; the drawer renders it and the
+ * MCP tool (pce-agent-tools.js) returns the same object. */
+let romTimer = null;
+let romReport = null;
+let romProblemLines = [];
+let romCodeMarks = [];
 
 function drawGutter() {
   if (editor) return;
   const lines = $("source").value.split("\n").length;
+  const bad = {};
+  for (const n of romProblemLines) bad[n] = true;
   let out = "";
-  for (let i = 1; i <= lines; i++) out += i + "\n";
+  for (let i = 1; i <= lines; i++) out += i + (bad[i] ? " ✗" : "") + "\n";
   $("gutter").textContent = out;
 }
 
@@ -3662,6 +3723,82 @@ function scheduleConsoleRefresh() {
   }, 180);
 }
 
+/* #193: the ROM CHECK drawer answers as the Lua changes, debounced a little
+ * longer than CONSOLE because it runs BOTH back ends' front ends.  It runs
+ * even while the drawer is closed so the status and the gutter stay honest. */
+function scheduleRomCheck() {
+  if (typeof setTimeout !== "function") { runRomCheck(); return; }
+  if (romTimer) clearTimeout(romTimer);
+  romTimer = setTimeout(() => {
+    romTimer = null;
+    runRomCheck();
+  }, 350);
+}
+
+/* CodeMirror's line-number gutter is the one it always has; a marked line
+ * replaces its number with a red span through CodeMirror's marker API. */
+function markRomGutter(lines) {
+  if (editor) {
+    for (const n of romCodeMarks)
+      editor.setGutterMarker(n - 1, "CodeMirror-linenumbers", null);
+    romCodeMarks = [];
+    for (const n of lines) {
+      const el = document.createElement("span");
+      el.className = "rom-line";
+      el.textContent = String(n);
+      editor.setGutterMarker(n - 1, "CodeMirror-linenumbers", el);
+      romCodeMarks.push(n);
+    }
+  }
+  romProblemLines = lines;
+  drawGutter();
+}
+
+function setRomStatus(report) {
+  const el = $("rom-status");
+  if (!el) return;
+  const panel = romcheckPanel();
+  const text = panel ? panel.statusText(report) : "ROM: —";
+  el.textContent = text;
+  const n = report ? report.findings.length : 0;
+  el.className = "rom-status" + (report ? (n ? " is-bad" : " is-ok") : "");
+  el.title = !report
+    ? "The ROM CHECK drawer could not run (renderer/pce-romcheck.js)"
+    : n
+      ? "ROM CHECK: " + report.findings[0].code + " at main.lua:" +
+        (report.findings[0].line == null ? "?" : report.findings[0].line) +
+        " — open the ROM CHECK drawer for every finding"
+      : "ROM CHECK: both cartridge routes carry this toy";
+}
+
+function romcheckPanel() {
+  return typeof window !== "undefined" && window.PCEStudio
+    ? window.PCEStudio.romcheckPanel || null : null;
+}
+
+function renderRomDrawer(report) {
+  const panel = romcheckPanel();
+  const host = $("bottom-rom");
+  if (!panel || !host) return;
+  panel.render(host.ownerDocument || document, host, report, editorLine);
+}
+
+function runRomCheck() {
+  const panel = romcheckPanel();
+  if (!panel) {
+    romReport = null;
+    setRomStatus(null);
+    renderRomDrawer(null);
+    markRomGutter([]);
+    return;
+  }
+  const report = panel.run(mainSource(), { chunkName: "@main.lua" });
+  romReport = report;
+  setRomStatus(report);
+  markRomGutter(panel.lines(report));
+  renderRomDrawer(report);
+}
+
 /* Every edit lands in the active file and, when that file is main.lua, in the
  * Lua the Run button compiles. Autosave on every edit is the ppu.toys
  * contract (`saved in this browser`); a failed write is a convenience lost,
@@ -3681,6 +3818,7 @@ function onEditorChange() {
   if (f && f.name === "main.lua") {
     panelDirty = true;
     scheduleConsoleRefresh();
+    scheduleRomCheck();
   }
   /* An asset file edited by hand is a new input for the panels that draw
    * the assets (SCREEN): each one decides whether it cares. */
@@ -6151,6 +6289,7 @@ function bind() {
   /* markers / agent drawers; the MARKERS module binds its own Add button */
   $("tab-markers").addEventListener("click", () => selectBottomTab("markers"));
   $("tab-agent").addEventListener("click", () => selectBottomTab("agent"));
+  $("tab-rom").addEventListener("click", () => selectBottomTab("rom"));
 
   /* the canvas: follow a pixel, and the controller while it has focus */
   canvas.addEventListener("click", (e) => {
@@ -6348,6 +6487,8 @@ function init() {
   selectPanel("screen");
   selectCodeTab("code");
   selectBottomTab("markers");
+  /* #193: the status line and the gutter are right from the first paint. */
+  scheduleRomCheck();
   updateLayerUI();
 
   const qs = (typeof URLSearchParams === "function")
@@ -6364,7 +6505,8 @@ function init() {
   /* ?bottom=agent|markers opens a drawer without synthetic input, the way
    * ?tab=assets opens the ASSETS list (#84's screenshots). */
   const bottomParam = qs.get("bottom");
-  if (bottomParam === "agent" || bottomParam === "markers")
+  if (bottomParam === "agent" || bottomParam === "markers" ||
+      bottomParam === "rom")
     selectBottomTab(bottomParam);
 
   const startExample = EXAMPLES[0];
@@ -6720,6 +6862,9 @@ const studio = {
   hex: hex,
   layout: {
     drawer: (which) => selectBottomTab(which),
+    /* #193: the drawer's own report, for tests and the agent panel. */
+    romCheck: () => romReport,
+    runRomCheck: runRomCheck,
     codeTab: (which) => selectCodeTab(which),
     panel: (id) => selectPanel(id),
     /* #139: the three dividers.  split() is the saved px (null = the
