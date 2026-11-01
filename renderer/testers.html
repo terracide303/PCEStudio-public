@@ -103,6 +103,16 @@
   When you report a bug, please write the keyboard key you pressed.</p>
 
   <h2 id="ai">3. Make a game with an AI</h2>
+  <h3>With Claude Code, live in the studio tab</h3>
+  <ol>
+    <li>Open the studio and press <b>Connect Claude</b> in the top bar. The AGENT panel opens.</li>
+    <li>Press <b>Connect</b>. The panel shows one command; copy it and run it once in a terminal. It looks like
+    <code>claude mcp add --transport http pcestudio https://pcestudio-relay.pcestudio.workers.dev/mcp/&lt;your-secret&gt;</code>.</li>
+    <li>Start Claude Code and ask for a game. It writes into this tab; you watch the code, art and screen change.
+    Keep the tab open: it does the work, the relay only passes messages and stores nothing.</li>
+  </ol>
+  <p>The secret in that command is yours alone; anyone who has it can drive your tab, so do not share it. Press
+  <b>New link</b> to get a fresh one.</p>
   <h3>With a chat AI (Claude, ChatGPT, …)</h3>
   <ol>
     <li>In the studio, press <b>Download for Claude</b>, or get the guide here:
@@ -235,11 +245,19 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
       panel can show old pictures. Reload the page before dropping a new file.</td><td class="status soon">being fixed</td></tr>
     <tr><td>Game art in ASSETS</td><td>Art that a game draws in code shows only in VRAM, not as named assets with
       a preview.</td><td class="status soon">being built</td></tr>
-    <tr><td>Claude Code: songs and saving</td><td>Through the MCP server a game can't carry a song yet
-      (<code>music(0)</code> is refused; <code>sfx()</code> notes work), and there is no one-click save of a whole toy
-      with its art for the studio yet.</td><td class="status soon">being built</td></tr>
-    <tr><td>Demos with bought art</td><td>CITY and OAK WOODS use art packs and come online once they look
-      right.</td><td class="status soon">soon</td></tr>
+    <tr><td>Sound in an exported ROM</td><td>The ROM has no sound code yet, so games that call
+      <code>sfx()</code> or <code>note()</code> run in the browser but stop at Export. The plan is to build it on
+      the HuTrack sound engine.</td><td class="status soon">next</td></tr>
+    <tr><td>What the ROM can run, while you write</td><td>You learn the limits (for example, at most four
+      parameters per function) only when you press Export. A live ROM check is being built.</td>
+      <td class="status soon">being built</td></tr>
+    <tr><td>Claude Code: songs</td><td>Through the MCP server a game can't carry a song yet
+      (<code>music(0)</code> is refused; <code>sfx()</code> notes work).</td><td class="status soon">being built</td></tr>
+    <tr><td>Connect Claude (live link)</td><td>New and lightly tested: if Connect does not give you a working
+      command, or Claude says no studio tab is connected, please report it.</td><td class="status soon">please test</td></tr>
+    <tr><td>Export error reports</td><td>When an export is refused, the studio sends the error message (code, line
+      and finding text, never your code or art) so that we can fix the commonest gaps first. This is not optional.</td>
+      <td class="status soon">coming</td></tr>
     <tr><td>Old files after an update</td><td>Your browser may keep old copies. Reload with
       <kbd>Shift</kbd> (see section 1).</td><td class="status soon">being fixed</td></tr>
     <tr><td>Phones and tablets</td><td>Not designed for them yet.</td><td class="status no">not planned for beta</td></tr>
