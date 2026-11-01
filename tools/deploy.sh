@@ -98,6 +98,16 @@ cat > "$web_stage/.htaccess" <<'HTACCESS'
     Header set Cache-Control "no-cache"
   </FilesMatch>
 </IfModule>
+
+# The site has a valid certificate (Let's Encrypt, *.terracides.com); plain http:// links only get
+# the browser's "Not secure" label.  Send them to https.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTP:X-Forwarded-Proto} =http [OR]
+  RewriteCond %{HTTPS} =off
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^(.*)$ https://%{HTTP_HOST}/$1 [R=301,L]
+</IfModule>
 HTACCESS
 
 # Only the HTML is staged (it is the only thing the ?v= rewrite touches); the

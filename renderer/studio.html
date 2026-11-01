@@ -1128,6 +1128,8 @@
               aria-expanded="false">Panels ▾</button>
       <button type="button" class="btn btn-icon" id="btn-settings"
               aria-label="Settings">⚙</button>
+      <button type="button" class="btn btn-accent" id="btn-connect-claude"
+              title="Let Claude Code work in this studio tab: opens the AGENT panel, where Connect gives you the one command to run">Connect Claude</button>
       <a class="btn" id="btn-claude" href="pcestudio-for-claude.md"
          download="pcestudio-for-claude.md"
          title="Download the guide to paste into Claude or another chat AI, which then walks you to a running toy (#105)">Download for Claude</a>
@@ -6290,6 +6292,7 @@ function bind() {
   $("tab-markers").addEventListener("click", () => selectBottomTab("markers"));
   $("tab-agent").addEventListener("click", () => selectBottomTab("agent"));
   $("tab-rom").addEventListener("click", () => selectBottomTab("rom"));
+  $("btn-connect-claude").addEventListener("click", () => selectBottomTab("agent"));
 
   /* the canvas: follow a pixel, and the controller while it has focus */
   canvas.addEventListener("click", (e) => {
