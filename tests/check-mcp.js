@@ -47,7 +47,12 @@
  *      tiles.json/palettes.json name a checkerboard renders through MCP
  *      exactly the frame an independent il.create(source, {files}) +
  *      pce-sprites run renders (diff 0), and toy_run reports the #117
- *      import summary.
+ *      import summary.  #181: source_add also records the picture in
+ *      sources.json — toy_write + source_add a 16x16 PNG + toy_save gives
+ *      an envelope carrying sources.json, the studio's own open path plus
+ *      renderer/pce-assets.js sources() lists it by name, kind and ranges,
+ *      and the saved frame is the run's frame (diff 0); the control saved
+ *      without source_add has no sources.json.
  *  11. Songs (#161): toys/oak-woods/song.json in toy_write's files is the
  *      runtime's options.songs, so music(0) plays it — PSG writes are
  *      recorded, every channel the compiled song uses starts notes (with its
@@ -111,6 +116,7 @@ const sprites = require("../renderer/pce-sprites.js");
 const seqLib = require("../renderer/pce-seq.js");
 const sourceLib = require("../renderer/pce-source.js");
 const projectLib = require("../renderer/pce-project.js");
+const assetsLib = require("../renderer/pce-assets.js");
 
 const ROOT = path.join(__dirname, "..");
 const SERVER = path.join(ROOT, "tools", "mcp", "server.js");
@@ -888,9 +894,9 @@ function usedChannels(song) {
     eq("the importer's stats: one 16x16 pattern", added.body.stats.tiles, 1);
     eq("one sprite palette row", added.body.stats.palettes, 1);
     eq("two colours (entry 0 is the transparent zero)", added.body.stats.colours, 2);
-    eq("the toy's files now carry the sprite",
+    eq("the toy's files now carry the sprite, named in sources.json",
        added.body.files.slice().sort(),
-       ["main.lua", "palettes.json", "sprites.json"]);
+       ["main.lua", "palettes.json", "sources.json", "sprites.json"]);
     eq("the budget counts the placed sprite", added.body.budget.sprites, 1);
     eq("one pattern packed after the blank tile", added.body.budget.patterns, 1);
     eq("VRAM words: BAT + blank tile + pattern cell + SAT",
@@ -928,9 +934,9 @@ function usedChannels(song) {
     check(!second.isError && second.body.ok, "the second sprite appends");
     eq("two sprites are placed now", second.body.budget.sprites, 2);
     eq("two patterns are packed now", second.body.budget.patterns, 2);
-    eq("the file set still has one of each",
+    eq("the file set still has one of each, both named in sources.json",
        second.body.files.slice().sort(),
-       ["main.lua", "palettes.json", "sprites.json"]);
+       ["main.lua", "palettes.json", "sources.json", "sprites.json"]);
     const bothRun = await client.call("toy_run", { frames: 1 });
     check(!bothRun.isError && bothRun.body.ok, "the two-sprite toy runs");
     const bothPng = await client.call("frame_png", { frame: 0 });
@@ -1022,6 +1028,88 @@ function usedChannels(song) {
        pixelOf(checkerImg, 4, 4), checkerColour(4, 4));
     eq("the next cell draws the other tile",
        pixelOf(checkerImg, 12, 4), checkerColour(12, 4));
+
+    /* 9b — #181: source_add names the picture in sources.json ---------------
+     * A Claude Code session has no Add Source dialog, so the tool core has to
+     * record the source itself: sources.json is the list the studio's ASSETS
+     * pane reads (#156).  The card's flow is one toy — toy_write + source_add
+     * a 16x16 PNG + toy_save — and the studio's own open path plus
+     * pce-assets.js sources() must list the picture by name, kind and ranges
+     * while the saved frame stays the run's frame.  The control saves the
+     * same toy without source_add and carries no sources.json. */
+    const namedToy = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: movedSpriteToy() }]
+    });
+    check(!namedToy.isError && namedToy.body.ok,
+          "#181: the named-source toy writes");
+    const namedAdd = await client.call("source_add", {
+      kind: "sprites", name: "square", png: redPng
+    });
+    check(!namedAdd.isError && namedAdd.body.ok, "#181: its PNG is added");
+    check(namedAdd.body.files.indexOf("sources.json") >= 0,
+          "#181: source_add records the source in sources.json (" +
+          JSON.stringify(namedAdd.body.files) + ")");
+    const namedRun = await client.call("toy_run", { frames: 1 });
+    check(!namedRun.isError && namedRun.body.ok, "#181: the toy runs");
+    const namedPng = imageOf(await client.call("frame_png", { frame: 0 }));
+    eq("#181: the run draws the PNG's square",
+       pixelOf(namedPng, 68, 36), [252, 0, 0]);
+
+    const namedSave = await client.call("toy_save",
+                                        { path: "named-source.pce.json" });
+    check(!namedSave.isError && namedSave.body.ok,
+          "#181: toy_save writes the toy");
+    const namedText = fs.readFileSync(
+      path.join(WORK, "named-source.pce.json"), "utf8");
+    const namedEnv = JSON.parse(namedText);
+    const namedFile = namedEnv.files.filter((f) => f.name === "sources.json")[0];
+    check(!!namedFile, "#181: the envelope carries sources.json");
+    let namedDoc = null;
+    try {
+      namedDoc = namedFile ? JSON.parse(namedFile.source) : null;
+    } catch (e) { namedDoc = null; }
+    const namedEntry = namedDoc && Array.isArray(namedDoc.sources)
+      ? namedDoc.sources[0] : null;
+    eq("#181: it names the picture", namedEntry && namedEntry.name, "square");
+    eq("#181: ... by kind", namedEntry && namedEntry.kind, "sprites");
+    eq("#181: ... and the ranges the merge made",
+       namedEntry && { patterns: namedEntry.patterns,
+                       sprites: namedEntry.sprites,
+                       palettes: namedEntry.palettes },
+       { patterns: { first: 0, count: 1 },
+         sprites: { first: 0, count: 1 },
+         palettes: { side: "spr", first: 0, count: 1 } });
+
+    /* the studio's own open path, then the ASSETS pane's own model */
+    const namedOpen = sourceLib.importStudio(namedText);
+    const listed = assetsLib.sources(namedOpen.files);
+    eq("#181: the ASSETS list names the picture",
+       listed.sources.map((s) => s.name), ["square"]);
+    eq("#181: ... with its kind", listed.sources[0] && listed.sources[0].kind,
+       "sprites");
+    check(!!listed.sources[0] && /VRAM/.test(listed.sources[0].placement) &&
+          /CRAM/.test(listed.sources[0].placement),
+          "#181: ... and its VRAM/CRAM ranges (" +
+          (listed.sources[0] || {}).placement + ")");
+    eq("#181: no range is dropped", listed.notes, []);
+    const namedStudioFrame = independentArtFrames(namedOpen.files, 1, {});
+    sameImage("#181: the saved frame is the run's frame (diff 0)",
+              namedStudioFrame, namedPng);
+
+    /* the control: the same toy saved WITHOUT source_add has no sources.json */
+    const noSourceToy = await client.call("toy_write", {
+      files: [{ name: "main.lua", source: movedSpriteToy() }]
+    });
+    check(!noSourceToy.isError && noSourceToy.body.ok,
+          "#181: control — the toy writes");
+    const noSourceSave = await client.call("toy_save",
+                                           { path: "no-source.pce.json" });
+    check(!noSourceSave.isError && noSourceSave.body.ok,
+          "#181: control — it saves");
+    const noSourceOpen = sourceLib.importStudio(
+      fs.readFileSync(path.join(WORK, "no-source.pce.json"), "utf8"));
+    eq("#181: control — no source_add, no sources.json",
+       noSourceOpen.files.map((f) => f.name), ["main.lua"]);
 
     /* 10 — songs (#161): a toy's song.json is its music(0) */
 

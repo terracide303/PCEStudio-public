@@ -583,11 +583,30 @@
         return null;
       }
 
+      /* Is the source already named in the file set's sources.json?  #181
+       * moved the entry into the tool core (pce-agent-tools.js
+       * sourceEntryOf), so the envelope this mirror opens already carries it
+       * with the ranges the core's merge made; the panel must not replace
+       * that with its own first-0 guess. */
+      function hasNamedSource(files, name) {
+        if (!name) return false;
+        var doc = jsonOf(files, "sources.json");
+        var list = doc && Array.isArray(doc.sources) ? doc.sources : [];
+        for (var i = 0; i < list.length; i++)
+          if (list[i] && list[i].name === name) return true;
+        return false;
+      }
+
       /* sources.json is the ASSETS panel's named-source list (#156); the
        * merge is pce-assets.js's own (#123's Add Source), not a second one. */
       function addNamedSource(info, before, after) {
         var A = P.assets;
         if (!A || typeof A.mergeSource !== "function") return false;
+        if (hasNamedSource(after, info && info.name)) {
+          var named = studio.panels.get("assets");
+          if (named && named.api && named.api.refresh) named.api.refresh();
+          return true;
+        }
         var entry = sourceEntry(info, before, after);
         if (!entry) return false;
         var f = studio.toy.file("sources.json");
