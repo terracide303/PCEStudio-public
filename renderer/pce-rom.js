@@ -615,9 +615,14 @@
          "bytecode must start with the ILBC magic (renderer/pce-ilbc.js)");
     /* #172's container version 2 carries the table section; the committed
      * interpreter image reads it since #175.  Version 1 stays byte-identical
-     * (a table-free toy is unaffected). */
+     * (a table-free toy is unaffected).  #197's version 3 carries the sound
+     * ops; the committed interpreter does not read it, so the container is
+     * refused here rather than faulting on the console — the #198 interpreter
+     * accepts it, the way #175 accepted version 2. */
     need(bytecode[4] === 1 || bytecode[4] === 2,
-         "bytecode version must be 1 or 2");
+         "bytecode version must be 1 or 2 (a version 3 container carries " +
+         "the sound ops, which the committed interpreter runs once the #194 " +
+         "engine link lands in #198)");
     var dataLen = bytecode.length + (assets ? assets.length : 0);
     if (dataLen > BANK) {
       refuse("toy-data-bank-full", "the bytecode (" + bytecode.length +

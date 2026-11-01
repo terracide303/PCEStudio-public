@@ -205,9 +205,9 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 | toy | exports? | picture matches? | overruns | worst update | verdict | validator's static estimate |
 |-----|----------|------------------|----------|--------------|---------|-----------------------------|
 | **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants`; the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
-| **TOWER** `toys/tower` | **no** — `ilbc-op: instruction sfx (function 36, pc 9) has no bytecode form` (`main.lua:324`). #186 carried `sat`, its old refusal; #187 carried `not` but the toy's one `not` sits in function 37 (`main.lua:329`), after this sfx, so the pin survives; `sfx` is the next uncarried kind (#135). | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
-| **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-builtin: builtin \`note\` has no bytecode form` (`main.lua:137`). #186 carried `sat`, its old refusal; only `rgb` has a bytecode form, so `note` is the next gap (#137). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
-| **DUSK RUN** `toys/dusk-run` | **no** — `ilbc-op: instruction sfx (function 39, pc 50) has no bytecode form` (`main.lua:416`). #187 carried `not`, its old refusal (`function 39, pc 16`, `main.lua:401`), so the refusal moved to the toy's first sfx (#135). #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
+| **TOWER** `toys/tower` | **no** — `error: pce-rom: bytecode version must be 1 or 2` (a version 3 container carries the sound ops). #186 carried `sat`, #187 `not` and #197 `sfx`; TOWER's bytecode route is otherwise clean, so it now encodes as a version 3 sound container and buildToyRom refuses it — the gate the committed interpreter needs until #198 links the engine in. The gate's Error names no line. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
+| **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`). #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind (#136). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
+| **DUSK RUN** `toys/dusk-run` | **no** — `error: pce-rom: bytecode version must be 1 or 2` (a version 3 container carries the sound ops). #187 carried `not` and #197 `sfx`, its old refusals; DUSK RUN's bytecode route is otherwise clean, so it now encodes as a version 3 sound container and buildToyRom refuses it until #198 links the engine in. The gate's Error names no line. #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
 | **PLATFORMER** `toys/platformer` | **yes** — 24,576 B, sha256 `ab59d6d38056fab2…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 312 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
 | *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `bbcedd18f5a858bb…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 112 | **623** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
 | *control #183* `tools/toys/arity.lua` | **yes** — 24,576 B, sha256 `98fb4991ca7703c6…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 112 | **783** lines | **too slow** | — |
@@ -229,10 +229,13 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   the toy's CR, so the sprites' SB bit survives `toy_display_on` (`docs/IL.md`
   §14, the compiled runtime's `toy_cr` shadow).
 - **The other four stop on three different kinds.** The 127-constant pool
-  (STARFALL), `sfx` (TOWER and DUSK RUN), and the `note` builtin (NOVA
-  TIDE) — #186 moved TOWER, NOVA TIDE and DUSK RUN past `sat`, and #187
-  moved DUSK RUN past logical `not` to its first `sfx`, so the table's
-  refusals are each the toy's next gap, not one shared one.
+  (STARFALL), the version 3 sound container (TOWER and DUSK RUN — their
+  bytecode routes are otherwise clean now that `sfx` carries, and the
+  committed interpreter refuses version 3 until #198 links the engine in),
+  and `raster(line, spec)` (NOVA TIDE) — #186 moved TOWER, NOVA TIDE and
+  DUSK RUN past `sat`, #187 moved DUSK RUN past logical `not`, and #197
+  moved TOWER and DUSK RUN past `sfx` and NOVA TIDE past `note` and `sfx`,
+  so the table's refusals are each the toy's next gap, not one shared one.
 - **DUSK RUN's validator refusal was the probe, not the toy (#184).** The
   export validates with an 8-frame run and judges its last frame; DUSK RUN
   builds its landscape over 137 frames, so frame 7 is build step 7 and costs
@@ -243,10 +246,11 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   validator now runs a refused probe on to 300 frames before refusing; the
   8-frame ceiling still refuses a toy that is over it in its steady state
   (`tests/check-validate.js` V07).  DUSK RUN now reaches the encoder and,
-  with #187 carrying logical `not`, stops on its first `sfx`
-  (`main.lua:416`; #135).  Its **route-1** projection is still 0.71 Hz
-  steady-state (84.95 frames per update) — the compiled-route estimate is
-  what the validator prices; the export builds the interpreter.
+  with #187 carrying logical `not` and #197 `sfx`, encodes fully — then
+  stops at buildToyRom's version-3 gate, which #198 lifts.  Its **route-1**
+  projection is still 0.71 Hz steady-state (84.95 frames per update) — the
+  compiled-route estimate is what the validator prices; the export builds
+  the interpreter.
 - **The static estimate is still an estimate.** It is the same
   `pce-validate.js` factor pair #169 measured to be 20 % low (no raster) and
   1.3–3.5× high (raster). It orders the games but cannot give a verdict;
@@ -255,8 +259,8 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   cost the model does not price.
 - **The studio page refuses earlier than the MCP for four of the five.**
   Its Export runs `renderer/pce-cgen.js` first: STARFALL stops on
-  `cgen-op` `sprite` (`main.lua:406`), TOWER on `cgen-op` `sfx`
-  (`main.lua:324`), NOVA TIDE and DUSK RUN on `cgen-op` `unm`
+  `cgen-op` `sprite` (`main.lua:406`), TOWER on `cgen-op` `not`
+  (`main.lua:329`), NOVA TIDE and DUSK RUN on `cgen-op` `unm`
   (`main.lua:29` and `:62`), and only PLATFORMER reaches the encoder — it
   is the one game the page's Export and the MCP's `export_pce` agree on.
   So the page's one-line finding for those four is a C-emitter or validator
@@ -278,8 +282,11 @@ now stop on `sat`), **#184** (closed 2026-11-01: DUSK RUN's refusal was the
 performance, so the toy reaches the encoder), **#185**
 (closed 2026-11-01: padref/padget carried), **#186** (closed 2026-11-01:
 `sat` carried, PLATFORMER builds and measures 30 Hz — the first game
-export) and **#187** (closed 2026-11-01: logical `not` carried; DUSK RUN
-moves to its first `sfx`, TOWER's pin survives — its sfx is scanned first).
+export), **#187** (closed 2026-11-01: logical `not` carried; DUSK RUN
+moves to its first `sfx`, TOWER's pin survives — its sfx is scanned first)
+and **#197** (closed 2026-11-01: `note` and the `sfx` instruction carried;
+TOWER and DUSK RUN's bytecode routes encode fully and stop at the version 3
+sound-container gate, NOVA TIDE moves to its first `raster`).
 The rest are the existing #133–#138 umbrellas.
 
 ## ROM CHECK: the five games' exact blockers (card #193)
@@ -297,44 +304,39 @@ every line it occurs on.
 | toy | route | code | lines | blocker |
 |-----|-------|------|-------|---------|
 | **STARFALL** | C compiler | `cgen-op` | 590, 591, 592, 594, 599, 604, 619, 626, 628, 635 | `sprite(i, spec)` whose spec the encoder's walker cannot pin (a field that is not a constant, or a loop re-running the spec) |
-| | C compiler | `cgen-op` | 475, 554, 663 | `sfx(channel, freq, volume, frames)` |
 | | C compiler | `cgen-op` | 498, 646 | `raster(line, spec)` (the table form, not the hook) |
-| | C compiler | `cgen-op` | 466, 467, 570 | builtins `abs` and `sr` (only `rgb` lowers) |
+| | C compiler | `cgen-op` | 466, 467, 570 | builtins `abs` and `sr` (only `rgb` and `note` lower) |
 | | bytecode | `ilbc-range` | 168 | more than 127 constants (the 128th is first seen here) |
 | | bytecode | `ilbc-builtin` | 466, 570 | builtins `abs`, `sr` |
-| | bytecode | `ilbc-op` | 475, 554, 663 | `sfx` |
 | | bytecode | `ilbc-op` | 498, 646 | `raster(line, spec)` |
-| **TOWER** | C compiler | `cgen-op` | 324, 371, 442, 452, 458, 463 | `sfx` |
-| | C compiler | `cgen-op` | 329 | logical `not` |
-| | bytecode | `ilbc-op` | 324, 371, 442, 452, 458, 463 | `sfx` |
+| **TOWER** | C compiler | `cgen-op` | 329 | logical `not` |
 | **NOVA TIDE** | C compiler | `cgen-op` | 29 | unary minus (`unm`) |
-| | C compiler | `cgen-op` | 137, 138, 139, 381, 526 | `sfx` (and `note()` on the same lines) |
 | | C compiler | `cgen-op` | 530, 531, 532, 533, 534 | `raster(line, spec)` |
-| | bytecode | `ilbc-builtin` | 137 | builtin `note` |
-| | bytecode | `ilbc-op` | 137, 138, 139, 381, 526 | `sfx` |
 | | bytecode | `ilbc-op` | 530, 531, 532, 533, 534 | `raster(line, spec)` |
 | **DUSK RUN** | C compiler | `cgen-op` | 62 | unary minus (`unm`) |
 | | C compiler | `cgen-op` | 401 | logical `not` |
-| | C compiler | `cgen-op` | 416, 445, 449 | `sfx` |
-| | bytecode | `ilbc-op` | 416, 445, 449 | `sfx` |
 | **PLATFORMER** | — | — | — | **none: `rom_check` answers `ok:true`** |
 
 ### What the table says, plainly
 
 - **PLATFORMER is the only one of the five both routes carry.** That agrees
   with #180's measurement: its export builds and runs at 30 Hz. The other
-  four stop on constructs no route carries yet: `sfx` and the `raster(line,
-  spec)` table form (both routes), and `unm`, `not` and the non-`rgb` builtins
-  (the C route). The C route carries `sprite(i, spec)` since #190; STARFALL's
-  ten refused sprites are the specs its walker cannot pin to constants, not
-  the instruction. STARFALL additionally exhausts the 127-constant pool.
+  four stop on constructs no route carries yet: `raster(line, spec)` (both
+  routes), and `unm`, `not` and the non-`rgb`/`note` builtins (the C route).
+  The C route carries `sprite(i, spec)` since #190; STARFALL's ten refused
+  sprites are the specs its walker cannot pin to constants, not the
+  instruction. STARFALL additionally exhausts the 127-constant pool.
 - **The two routes differ, and that is the point of checking both.** TOWER's
   `not`, NOVA TIDE's `unm` and the `raster(line, spec)` calls are refused by
-  the C route, while the bytecode opcode table carries `not` and `unm` (not
-  `raster`, not `sfx`). NOVA TIDE's MCP `export_pce` is therefore stopped by
-  `note` and `sfx`, not by its `unm`. A toy is exportable by the studio only
-  when both lists are empty, and by MCP `export_pce` when the bytecode list
-  is.
+  the C route, while the bytecode opcode table carries `not`, `unm`, `sfx`,
+  `music` and `release` (not `raster`). NOVA TIDE's MCP `export_pce` is
+  therefore stopped by its `raster`, not by its `unm`; TOWER and DUSK RUN's
+  bytecode lists are empty now that `sfx` carries (#197), so their MCP
+  export passes the encoder and stops one step later at buildToyRom's
+  version-3 gate (the committed interpreter reads versions 1 and 2 only,
+  until #198 links the sound engine in). A toy is exportable by the studio
+  only when both lists are empty, and by MCP `export_pce` when the bytecode
+  list is and the built container is one the committed interpreter runs.
 - **These are front-end findings, not a verdict on speed.** The ROM's frame
   rate is the #169/#180 measurement (`tools/measure-rom.js`); this table says
   only whether the ROM can be built, and the exact constructs that stop it.

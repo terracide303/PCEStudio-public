@@ -64,6 +64,12 @@
  * a site they cannot pin refuses cgen-op here exactly where the encoder
  * refuses ilbc-op.
  *
+ * Sound (#197): music/sfx/release and the note builtin lower to the
+ * runtime's toy_music()/toy_sfx()/toy_release()/toy_note() — the calls
+ * #198's engine link implements (docs/ROM-SOUND.md), not declared in
+ * tools/toyc/toy_runtime.h yet, so a sound toy's C does not build until
+ * then.  The browser host runs the same four ops today.
+ *
  * The emitted program runs under tools/toyc/toy_runtime.c, which owns the
  * console: the VDC/VCE setup, the frame flow (wait for VBlank, run frame),
  * the VRAM/colour-table writes, and the HuC6280 TMA timer the capture reads
@@ -624,9 +630,35 @@
           }
           break;
         case "builtin":
-          if (ins.name !== "rgb") {
+          /* rgb and note are the value-returning builtins lowered (toy_rgb,
+           * toy_note). */
+          if (ins.name !== "rgb" && ins.name !== "note") {
             refuse("cgen-op", where + ": builtin `" + ins.name + "` (part A " +
-                   "lowers rgb only)");
+                   "lowers rgb and note only)");
+          }
+          break;
+        case "music":
+          /* #197: the sound surface lowers to the runtime's toy_music /
+           * toy_sfx / toy_release — the engine's calls, declared by #198's
+           * link (tools/toyc/toy_runtime.h does not carry them yet, so a
+           * sound toy's C does not build until then).  The operands are ints
+           * by the IL's arity checks; these are the same belt-and-braces
+           * guards sat() has. */
+          if (staticType(ins.song) !== "int") {
+            refuse("cgen-op", where + ": music()'s song must be an int");
+          }
+          break;
+        case "sfx":
+          if (staticType(ins.ch) !== "int" || staticType(ins.freq) !== "int" ||
+              staticType(ins.volume) !== "int" ||
+              staticType(ins.frames) !== "int") {
+            refuse("cgen-op", where + ": sfx()'s channel, freq, volume and " +
+                   "frames must be ints");
+          }
+          break;
+        case "release":
+          if (staticType(ins.ch) !== "int") {
+            refuse("cgen-op", where + ": release()'s channel must be an int");
           }
           break;
         case "table":
@@ -664,8 +696,8 @@
         default:
           refuse("cgen-op", where + ": not lowered by this backend (" +
                  "init/frame/raster and the reg/pal/vset/sat/sprite/" +
-                 "pad/table instructions and the timer only; no fixed " +
-                 "point, print, music or sfx)");
+                 "pad/table instructions, the timer and the sound surface " +
+                 "only; no fixed point or print)");
         }
         var t = (ins.t === "jmp" || ins.t === "br" || ins.t === "fornext")
                 ? ins.target : null;
@@ -971,9 +1003,26 @@
         line("  toy_vram_set(" + operand(ins.addr) + ", " + operand(ins.word) + ");");
         break;
       case "builtin":
-        /* validate() admits only rgb */
-        line("  " + d + " = toy_rgb(" + operand(ins.args[0]) + ", " +
-             operand(ins.args[1]) + ", " + operand(ins.args[2]) + ");");
+        /* validate() admits only rgb and note */
+        if (ins.name === "rgb") {
+          line("  " + d + " = toy_rgb(" + operand(ins.args[0]) + ", " +
+               operand(ins.args[1]) + ", " + operand(ins.args[2]) + ");");
+        } else {
+          line("  " + d + " = toy_note(" + operand(ins.args[0]) + ");");
+        }
+        break;
+      case "music":
+        /* #197: the engine's runtime calls (toy_music/toy_sfx/toy_release
+         * and toy_note above) are the ones #198's engine link declares in
+         * tools/toyc/toy_runtime.h — a sound toy's C builds from then on. */
+        line("  toy_music(" + operand(ins.song) + ");");
+        break;
+      case "sfx":
+        line("  toy_sfx(" + operand(ins.ch) + ", " + operand(ins.freq) + ", " +
+             operand(ins.volume) + ", " + operand(ins.frames) + ");");
+        break;
+      case "release":
+        line("  toy_release(" + operand(ins.ch) + ");");
         break;
       case "table":
         /* #176: one static slot per `table` site (docs/TABLES-PLAN.md §2.1),
@@ -1364,7 +1413,7 @@
       { id: "vram", label: "vram[...] writes", detail: "vset; a vram read " +
         "(vget) is cgen-op", ops: ["vset"] },
       { id: "pal", label: "pal(addr, word) and rgb(r, g, b)",
-        detail: "rgb is the one value-returning builtin lowered",
+        detail: "rgb and note are the value-returning builtins lowered",
         ops: ["pal", "builtin"] },
       { id: "reg", label: "reg(\"BXR\", v), reg(\"BYR\", v), reg(\"CR\", v)",
         detail: "the three registers a toy may write",
@@ -1379,11 +1428,18 @@
         ops: ["padref", "padget"] },
       { id: "timer", label: "timer(period, fn)",
         detail: "the HuC6280 TMA timer and its callback",
-        ops: ["timer"] }
+        ops: ["timer"] },
+      { id: "sound", label: "music(song), sfx(ch, freq, volume, frames), " +
+        "release(ch) and note(midi)",
+        detail: "lowered to the engine's runtime calls toy_music/toy_sfx/" +
+                "toy_release/toy_note — the #198 engine link declares them, " +
+                "so a sound toy's C does not build until then (the browser " +
+                "host runs the same ops today)",
+        ops: ["music", "sfx", "release"] }
     ],
     /* Everything else the bytecode route carries and this backend does not is
-     * named by the cgen-op details in REFUSALS (the music/sfx/print surface
-     * and a sprite spec no walker can pin). */
+     * named by the cgen-op details in REFUSALS (the print surface and a
+     * sprite spec no walker can pin). */
     refused: null
   };
 
@@ -1392,7 +1448,7 @@
    * code added above is described here or the reference test notices. */
   var REFUSALS = {
     "cgen-op": "an IL instruction this backend has no C lowering for " +
-               "(fixed point, some builtins, print/music/sfx, or a sprite " +
+               "(fixed point, some builtins, print, or a sprite " +
                "whose spec it cannot pin to constants)",
     "cgen-fixed": "fixed-point arithmetic or a fixed-point constant",
     "cgen-cond": "a branch whose condition the IL did not type as bool",

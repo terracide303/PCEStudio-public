@@ -20,7 +20,8 @@
  *      refusal with that code and message, or a built 24,576-byte ROM.  The
  *      source line the table names is checked against the IL (a function's
  *      definition line, the 128th constant, the refused instruction's own
- *      line, or the first refused builtin's line), so the
+ *      line, or the first refused builtin's line — or null, when the
+ *      refusal names none: the version gate's plain Error), so the
  *      table's "line" column is reproducible and not a comment.  A blocker
  *      that lands moves the refusal: this pin goes red and asks for the
  *      table and the pin to be updated — a tripwire, not a broken test.
@@ -73,12 +74,15 @@ const CAPTURE_TAIL = 12;            /* the movie's last frames, like check-ilvm 
 const ROM_BYTES = 24576;            /* 16 KiB interpreter + one data bank */
 
 /* The card's five games and the outcome docs/ROM_SPEED.md records (2026-10-31;
- * DUSK RUN moved to the encoder's refusal by #184, and the three games'
- * sat refusals moved on by #186, 2026-11-01 — PLATFORMER now builds and
- * moved to GAME_PINS below).  `where` is the source line the table names;
- * null is what the validator's own finding can say (it names no line for a
- * frame-wide budget).  `message` is a substring of the refusal the suite
- * insists on, so a message that loses its detail fails too. */
+ * DUSK RUN moved to the encoder's refusal by #184, the three games' sat
+ * refusals moved on by #186, PLATFORMER now builds and moved to GAME_PINS
+ * below, and #197 carried note and the sfx instruction: TOWER and DUSK RUN
+ * moved to the version gate and NOVA TIDE to its first raster, 2026-11-01).
+ * `where` is the source line the table names; null is what the validator's
+ * own finding can say (it names no line for a frame-wide budget) or what a
+ * plain Error without function or pc says (the version gate).  `message` is
+ * a substring of the refusal the suite insists on, so a message that loses
+ * its detail fails too. */
 const GAMES = [
   {
     name: "STARFALL", toy: "toys/demo-game/main.lua",
@@ -86,23 +90,25 @@ const GAMES = [
     where: "main.lua:168"
   },
   {
-    /* #186 carried sat, so the refusal moved to the toy's first sfx (the
-     * sfx instruction has no bytecode form).  The pin moved; the toy was
-     * not rewritten.  #187 carried `not` too, but TOWER's sfx sits in
-     * function 36 and its one `not` in function 37 (main.lua:329), so the
-     * sfx still scans first and this pin survives. */
+    /* #186 carried sat, #187 `not`, and #197 carried the sfx instruction —
+     * so TOWER's bytecode route now encodes fully and buildToyRom refuses
+     * the version-3 container instead (the committed interpreter only
+     * reads versions 1 and 2; the #198 engine link admits version 3).  The
+     * gate throws a plain Error with no code and no function or pc, so the
+     * table's `where` is null and exportToy records code "error". */
     name: "TOWER", toy: "toys/tower/main.lua",
-    expect: { code: "ilbc-op",
-              message: "instruction sfx (function 36, pc 9) has no bytecode form" },
-    where: "main.lua:324"
+    expect: { code: "error",
+              message: "pce-rom: bytecode version must be 1 or 2" },
+    where: null
   },
   {
-    /* #186 carried sat; NOVA TIDE's next blocker is the note builtin (only
-     * rgb has a bytecode form). */
+    /* #186 carried sat and #197 carried note and sfx; NOVA TIDE's next
+     * blocker is its first raster (the raster instruction has no bytecode
+     * form). */
     name: "NOVA TIDE", toy: "toys/nova-tide/main.lua",
-    expect: { code: "ilbc-builtin",
-              message: "builtin `note` has no bytecode form" },
-    where: "main.lua:137"
+    expect: { code: "ilbc-op",
+              message: "instruction raster (function 34, pc 53) has no bytecode form" },
+    where: "main.lua:530"
   },
   {
     /* #184's decision: the 8-display-frame ceiling keeps its number, the
@@ -116,12 +122,17 @@ const GAMES = [
      * the number toys/dusk-run/README.md and tests/check-dusk-run.js already
      * record at 600 frames — so the validator now extends a refused probe to
      * the performance before refusing.  #186 carried the encoder's sat
-     * refusal; #187 carried `not`, so the refusal moved to the toy's first
-     * sfx (the sfx instruction has no bytecode form). */
+     * refusal, #187 carried `not`, and #197 carried the sfx instruction —
+     * so DUSK RUN's bytecode route now encodes fully and buildToyRom
+     * refuses the version-3 container instead (the #198 engine link admits
+     * it; until then the committed interpreter reads only versions 1 and
+     * 2).  The gate throws a plain Error with no code and no function or
+     * pc, so the table's `where` is null and exportToy records code
+     * "error". */
     name: "DUSK RUN", toy: "toys/dusk-run/main.lua",
-    expect: { code: "ilbc-op",
-              message: "instruction sfx (function 39, pc 50) has no bytecode form" },
-    where: "main.lua:416"
+    expect: { code: "error",
+              message: "pce-rom: bytecode version must be 1 or 2" },
+    where: null
   }
 ];
 
@@ -278,8 +289,10 @@ function constantCeiling(program) {
 /* The source line the table names, re-derived from the IL:
  *   - STARFALL's 128th constant (the encoder names no line),
  *   - an ilbc-op refusal's "(function N, pc P)" instruction,
- *   - an ilbc-builtin refusal's first uncarried builtin (only rgb has a
- *     bytecode form; the message names no function or pc). */
+ *   - an ilbc-builtin refusal's first uncarried builtin (only rgb and note
+ *     have a bytecode form; the message names no function or pc).
+ * A game whose `where` is null (TOWER and DUSK RUN: the version gate's
+ * plain Error names no line) skips this entirely. */
 function checkedWhere(game, program) {
   if (game.name === "STARFALL") {
     const hit = constantCeiling(program);

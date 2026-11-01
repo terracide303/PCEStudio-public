@@ -657,8 +657,8 @@ function report(r) {
   const last = cap.projections[cap.projections.length - 1];
   console.log("   " + (last
     ? (last.over
-       ? "renderer/pce-rom.js:622 refuses such a build with toy-data-bank-full"
-       : "renderer/pce-rom.js:622 would accept this one")
+       ? "renderer/pce-rom.js:627 refuses such a build with toy-data-bank-full"
+       : "renderer/pce-rom.js:627 would accept this one")
     : "the size model could not be projected (tableLayout() refused)"));
 }
 
