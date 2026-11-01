@@ -1714,8 +1714,8 @@
         "release(ch) and note(midi)",
         detail: "a sound toy's container is version 3, which the committed " +
                 "interpreter does not read — export refuses the ROM until " +
-                "#198 links the engine (#194).  The host harness runs the " +
-                "same ops today.",
+                "the engine-link card lands (the sound umbrella).  The host " +
+                "harness runs the same ops today.",
         ops: ["music", "sfx", "release"] }
     ],
     refused: REFUSALS
