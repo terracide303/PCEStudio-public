@@ -14,39 +14,39 @@
   "sha256": "da128302c6233e0cdc23087036df829a86c157b42750288318bd092b9454134c"
  },
  "capture": {
-  "frames": 463,
-  "last_frame": "frame0462.png",
+  "frames": 469,
+  "last_frame": "frame0468.png",
   "measure": {
-   "collect_sum_ticks_7bit": 21340,
+   "collect_sum_ticks_7bit": 21217,
    "collections": 11,
    "count": 12,
-   "cycles_per_collection": 1986560.0,
+   "cycles_per_collection": 1975109.8181818181,
    "cycles_per_frame": 27392.0,
-   "cycles_per_raster_call": 8617.542989930287,
+   "cycles_per_raster_call": 8617.129129129129,
    "flags": 0,
    "max_ticks": 27,
    "mean_ticks": 26.75,
-   "mean_update_lines": 4425.636363636364,
+   "mean_update_lines": 4400.636363636364,
    "min_ticks": 26,
    "overruns": 11,
-   "raster_calls": 2582,
+   "raster_calls": 2664,
    "raster_max_ticks": 12,
-   "raster_sum_ticks": 21729,
+   "raster_sum_ticks": 22418,
    "sum_ticks": 321,
    "updates": 11,
-   "worst_update_lines": 4682
+   "worst_update_lines": 4403
   },
   "slend": 234,
   "slstart": 3
  },
  "ilvm": {
   "bytes": 16384,
-  "sha256": "fcef1103d345312e4a4c61d21ce80630bb13788cb6cc4a22aabd76976176f2d9"
+  "sha256": "ea84ace37155e1bb904885fa22d651fb2b5c89ba324235fd3449a5f2e5b1a039"
  },
  "name": "toystatusbar-ilvm",
  "rom": "tools/gen/toystatusbar-ilvm.pce",
  "rom_bytes": 24576,
- "rom_sha256": "48cbabb672a77b62c9bcf8fc2da216e8e0f75bc35ff3e85aebbe411c723b54d8",
+ "rom_sha256": "79f872e786343c9e00a094dc96b55e3ccb4ef90dce4a7e75f9f01308109981ba",
  "source": "toys/status-bar.lua",
  "source_sha256": "0d52e4536692190ac82169fb636620fb5e38cce0379630876822011a2a25de33"
 }
