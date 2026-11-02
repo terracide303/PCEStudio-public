@@ -33,7 +33,7 @@
  *      or 5.5 s capture tail is pinned with its own measure frame count and
  *      capture length (GAME_PINS) — PLATFORMER is that game since #186.
  *      A game that exports and runs but whose displayed frame is not the
- *      browser's yet (DUSK RUN, #222/#223) is pinned as its ROM sha plus
+ *      browser's yet (DUSK RUN, #222/#227) is pinned as its ROM sha plus
  *      `unmatched`: the capture must be not black AND not a browser frame,
  *      so either half going stale fails and asks for a re-pin.
  *      Two controls prove the capture-and-compare instrument works on a
@@ -88,7 +88,7 @@ const ROM_BYTES = 40960;            /* 32 KiB image + one data bank */
  * reads the version-3 container: TOWER now stops at the data bank and NOVA
  * TIDE at its first raster, 2026-11-02.  DUSK RUN builds, loads, runs and
  * draws since #222, and moved to GAME_PINS below; its displayed frame is
- * not the browser's yet (#223) — see its pin).
+ * not the browser's yet (#227) — see its pin).
  * `where` is the source line the table names; null is what the validator's
  * own finding can say (it names no line for a frame-wide budget) or what a
  * refusal without function or pc says (the data bank).  `message` is
@@ -159,14 +159,14 @@ const GAME_PINS = {
    * differs by 16 bytes on one scanline (row 16, the raster write's line
    * latency).  Until that is pinned, the pin records the ROM sha and asserts
    * the game is NOT black and NOT yet a browser frame; a capture that does
-   * match fails here and asks for its hash.  Card #223 carries the raster
+   * match fails here and asks for its hash.  Card #227 carries the raster
    * picture.  It also needs its own capture window: the boot that draws the
    * base takes ~7 s on the dummy SDL driver. */
   "DUSK RUN": {
     toy: "toys/dusk-run/main.lua",
     rom: "5c01dc368ccb390eaa312a5961910ba17c9b05f09460d46db89f727a12f8de94",
     frames: [],
-    unmatched: "the container runs and draws; no captured frame is the browser's picture yet (raster scanline latency, #223)",
+    unmatched: "the container runs and draws; no captured frame is the browser's picture yet (raster scanline latency, #227)",
     measureFrames: 600,
     captureMs: 12000
   },

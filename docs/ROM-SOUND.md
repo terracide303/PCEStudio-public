@@ -656,7 +656,7 @@ The best replay frame in a 20 s movie is **16 bytes off** — row 16,
 columns 0–15, one colour channel — the raster write's scanline latency
 (`apply_entry0`/RCR ordering). `tests/check-export-games.js` pins DUSK's
 ROM sha and asserts the screen is **not black and not yet a browser frame**;
-card **#223** carries the raster picture. TOWER is different: it stops
+card **#227** carries the raster picture. TOWER is different: it stops
 earlier, at `toy-data-bank-full` (8,524 B of bytecode against the 8 KiB
 bank), which is a refusal with a message and no ROM.
 
@@ -951,8 +951,8 @@ entry, not gated on a new ownership (the #239 defense):
 | **#215** | done | the interpreter ops for note/sfx/release/music call the engine; the per-toy-frame tick; version 3 accepted | `tests/check-rom-sound.js` PASS; version 1 and 2 containers still run; `check-ilvm` green |
 | **#220** | done | the sound ops fit the 32 KiB image (the note table and the cold glue moved to the engine's tables bank) | `build.sh` exits 0, `ilvm.bin` stays 32 KiB, `check-hutrack-image` green |
 | **#221** | done | land #220's image and re-pin what it changed | every re-pinned ROM sha has an old/new Mednafen diff (§10); `check-ilvm` and `check-export-games` green; DUSK RUN's black verdict and TOWER's refusal documented |
-| **#222** | open (umbrella) | the interpreter's capacities: DUSK RUN's container needs 41 registers, 41 functions and 19 upvalues (MAX_REGS 32, MAX_FUNCS 32, MAX_UPS 6) | **done**: MAX_REGS 41 / MAX_FUNCS 41 / MAX_UPS 20 with the pool; the container loads, runs and its state is diff 0 against browser frame 3; build.sh asserts (headroom 1,131 B) and the canary measures 1,083 B. **Left**: the displayed picture (16 bytes on row 16) is #223 |
-| **#223** | open | the raster backend shows one replay frame per toy frame and one scanline's first 16 pixels lag the write | DUSK RUN's Mednafen picture diff 0 against a browser frame, pinned in check-export-games |
+| **#222** | open (umbrella) | the interpreter's capacities: DUSK RUN's container needs 41 registers, 41 functions and 19 upvalues (MAX_REGS 32, MAX_FUNCS 32, MAX_UPS 6) | **done**: MAX_REGS 41 / MAX_FUNCS 41 / MAX_UPS 20 with the pool; the container loads, runs and its state is diff 0 against browser frame 3; build.sh asserts (headroom 1,131 B) and the canary measures 1,083 B. **Left**: the displayed picture (16 bytes on row 16) is #227 |
+| **#227** | open | the raster backend shows one replay frame per toy frame and one scanline's first 16 pixels lag the write | DUSK RUN's Mednafen picture diff 0 against a browser frame, pinned in check-export-games |
 | **#216** | done (§11) | a note toy and an sfx toy run in Mednafen, recorded and measured | both ROMs run; the register/audio differences were listed: F masked (#238), R1 missing (#113), dirty glue `.bss` (#239); #113 and #238's F are now in the image and the WAVs are audible (§11); the command is §11 |
 | **#198** | done | the umbrella: everything #212–#216 links | a note toy and an sfx toy run and play in Mednafen since #113; `check-ilvm`, `check-export-games` green |
 | **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (#216) |
