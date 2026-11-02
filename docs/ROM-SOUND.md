@@ -682,8 +682,8 @@ exit between frames. Two toys, both exported with
 | [`tools/toys/note.lua`](../tools/toys/note.lua) | C4/E4/G4/C5 (`note(60/64/67/72)`), 12 toy frames each (200.6 ms), repeating every 48 frames. F 428/339/285/214 = **261.4/329.7/392.1/523.0 Hz** |
 | [`tools/toys/sfx.lua`](../tools/toys/sfx.lua) | every 60 frames: channel 1 a raw **F 200 (559.3 Hz)** for 10 frames; channel 2 `note(48)` (**F 855, 130.8 Hz**) for a 600-frame budget, cut by `release(2)` at frame 50 |
 
-**On the committed image (`renderer/ilvm.bin`, sha256 `90d4a655…`) both
-toys are silent.** ROMs: note 40,960 B `7a8f2896…`, sfx 40,960 B
+**On the image committed before #200 (sha256 `90d4a655…`) both toys are
+silent.** ROMs: note 40,960 B `7a8f2896…`, sfx 40,960 B
 `d727e2a0…`. Both WAVs have peak 0. A Mednafen save state (the
 `tools/mcs-extract.py` route) shows the glue **did** run — channel 0
 selected, R5 = `$FF`, R4 = `$8F`, the 32-step square uploaded — and gives
@@ -699,9 +699,9 @@ the difference to the studio in one line each:
   ([`tools/ilvm/hutrack_engine.asm:233`](../tools/ilvm/hutrack_engine.asm))
   does `lda <_hk.EAX0.m / and #$0F / sta <_hk.EAX0.m` — the low byte — where
   the 12-bit clamp belongs on the high byte (`_hk.EAX0.h`). The value is
-  `F' = (F & $0F) | (F & $0F00)`: note(60)'s **428 became 268** (417 Hz, the
-  save state's `CH0.frequency`), note(48)'s 855 became 775 (144 Hz), and
-  the sfx toy's raw 200 became 8 (13,982 Hz).
+  `F' = (F & $0F) | (F & $0F00)`: on `90d4a655…` note(60)'s **428 became
+  268** (417 Hz, the save state's `CH0.frequency`), note(48)'s 855 became
+  775 (144 Hz), and the sfx toy's raw 200 became 8 (13,982 Hz).
 
 **With those two writes changed in a scratch image** (`renderer/ilvm.bin`
 `92d6dc42…`, built by `tools/ilvm/build.sh`; not committed — it moves every
@@ -711,7 +711,7 @@ studio column needed the same R1 write for the same reason: on this tree
 `rt.renderSound()` is silent too (measured, peak 0 — #113), so it is the
 studio with `soundWrite(1, 0xff)` added at the reserve:
 
-| toy | studio `rt.renderSound()` for the same frames | Mednafen, committed image | Mednafen, scratch image `92d6dc42…` |
+| toy | studio `rt.renderSound()` for the same frames | Mednafen, `90d4a655…` | Mednafen, scratch image `92d6dc42…` |
 |---|---|---|---|
 | note | 261 / 330 / 392 / 523 Hz, RMS 369–370 | silent (peak 0); PSG state F 268 for note 60, R1 0 | 330 / 392 / 523 / 261 Hz (the capture began on the second note and repeats through C4/E4/G4/C5), RMS 368–370 |
 | sfx | 559 Hz for 167 ms, then 131 Hz for 334 ms; RMS 367 / 371 | silent (peak 0) | 559 Hz for 170 ms (RMS 360), 131 Hz for 341 ms (RMS 367), repeating every 1,003 ms |
@@ -743,9 +743,48 @@ the stale flags of a `sta`, so the `n = 0` trailer no longer writes song
 pointers over `snd_owned`. §8's trace is the proof of effect: the
 console's PSG writes equal the studio's for both toys, frame for frame. The
 audio table above is **not** re-recorded because #113 (R1) is still open:
-the chip stays master-muted, so a new WAV would only repeat peak 0. #238
-and #239 remain open on the board for the audio/save-state evidence their
-own cards name; their code half is in this image.
+the chip stays master-muted, so a new WAV would only repeat peak 0. #239
+remains open on the board for the audio/save-state evidence its card names;
+its code half is in this image.
+
+**#238's F on the committed image (2026-11-02).** `tools/ilvm/build.sh`
+run from this tree (to a scratch `BIN`) reproduces the committed
+`dad10ffd05661956…` byte for byte (32,768 B), so the image carries the
+`_hk.EAX0.h` clamp. The card's own instrument, a Mednafen save state
+(pce_fast, `-autosave 1`, SDL video, one emulator at a time), now reads the
+corrected 12-bit F out of the PSG's `SCHn.frequency` records:
+
+| toy (frame 0…) | F written | state's channel frequency | pre-fix value (`90d4a655…`) |
+|---|---|---|---|
+| `tools/toys/sfx-once.lua`, `sfx(0, note(60), 15, 600)` | 428 | CH0 `$1AC` = 428 → **261.4 Hz** | 268 → 417 Hz |
+| `tools/toys/note.lua`, `note(64)` | 339 | CH0 `$153` = 339 → **330.0 Hz** | 259 → 431.9 Hz |
+| `tools/toys/sfx.lua`, raw `sfx(1, 200, …)` | 200 | CH1 `$0C8` = 200 → **559.3 Hz** | 8 → 13,982 Hz |
+| `tools/toys/sfx.lua`, `note(48)` | 855 | CH2 `$357` = 855 → **130.8 Hz** | 775 → 144 Hz |
+
+The state shows one note of `note.lua`'s cycle. The table quotes the run
+made with no other emulator on the machine; an earlier run of the same toy,
+taken while another seat's Mednafen was running, caught `note(67)` at
+`$11D` = 285 (392.5 Hz) with the same R1 (the toy's writes do not depend on
+wall time; only which note the save lands in does). The pre-fix column
+is the documented mask `(F & $0F) | (F & $0F00)`; note(60)'s, note(48)'s
+and raw 200's values are the ones §11 measured on `90d4a655…`, and
+note(64)'s 259 is that mask applied to 339.
+
+`PSG.globalbalance` (R1) reads `$00` in all three runs, so the chip is
+still master-muted by #113 and a WAV cannot yet measure these pitches. The
+state's `SCH0`–`SCH5` sections are the six PSG channels (their `frequency`
+record is the 12-bit divider) and `PSG.globalbalance` is R1;
+`tools/mcs-extract.py` walks the same gzip container but keeps only the
+VDC/VCE records, so these were read with a scratch parser over its
+sections. The audible table above (scratch image `92d6dc42…`, which carried
+both the F and the R1 writes) remains the sound evidence. The register content is
+what this card is about, and it now equals the F the studio writes, which
+§8's trace confirms write for write (note 92 writes, sfx 48, over 24
+frames; `tests/check-rom-sound.js` PASS). With the image unchanged,
+`check-ilvm` (348 checks) and `check-export-games` (67 checks, and every
+captured frame still diff 0 against the browser) are green. #238 is
+closed on this evidence; the F half of #216's finding is done, and the R1
+half is #113.
 
 **Reproducing all of it** (nothing is written to the repository):
 
