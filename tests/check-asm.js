@@ -69,7 +69,16 @@
  * NOT PROVEN: the native binary is the only reference, so a shared PCEAS bug
  * (or a wrong native build) would cancel; the wasm is not run in a browser
  * page (Node only); and the 4.x interpreter build path is out of reach of
- * this 3.23 artefact.
+ * this 3.23 artefact.  Of the #251 additions: the exitCode capture assumes
+ * the wasm's quit hook sets process.exitCode rather than hard-exiting the
+ * process (a hard exit would still fail the suite, just without a named
+ * line); the .list leak assertion can only fire if the returned listing
+ * contains .list text, and PCEAS 3.23 never emits the directive — the
+ * renumbering checks (count, first '    1', last '  134') carry the
+ * observable half of that property, and the leak break here was proven
+ * with a mutant that emits the injected line itself; and the breaks were
+ * chosen by this seat — rule 2: a different seat must re-break in its own
+ * ways before #251 closes.
  */
 
 const fs = require("fs");
