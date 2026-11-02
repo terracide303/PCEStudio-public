@@ -274,7 +274,7 @@ busiest line (no overflow), 2,010 VRAM words, 100 blank cycles against a
 
 ## 6. The capacity limit behind the instruction gaps (#138)
 
-`renderer/pce-rom.js:627` refuses a bytecode (plus asset tail) larger than
+`renderer/pce-rom.js:630` refuses a bytecode (plus asset tail) larger than
 `BANK` = **8,192 B** with code `toy-data-bank-full`: *"the interpreter reads one
 8 KiB data bank"*. A size model built from `pce-ilbc.js`'s own container
 layout — header 24 B (28 B once a table instruction makes it version 2),

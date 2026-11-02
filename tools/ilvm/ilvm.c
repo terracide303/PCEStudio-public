@@ -3,16 +3,17 @@
  *
  * This is the console half of route 1: the toy's IL is encoded by
  * renderer/pce-ilbc.js into a compact bytecode container, the browser glues
- * that container to this interpreter's fixed 8 KiB bank (renderer/ilvm.bin,
+ * that container to this interpreter's fixed banks (renderer/ilvm.bin,
  * built once by tools/ilvm/build.sh and committed), and the console runs the
  * toy by interpreting it.  No compiler is needed to export a ROM.
  *
- * The interpreter reads its program from ROM bank 1, mapped into the CPU's
+ * The interpreter reads its program from ROM bank 4, mapped into the CPU's
  * MPR2 window at $4000-$5FFF (HuC6280 manual H8-7/H8-10; the viewer uses
- * the same window, docs/ROM_LAYOUT.md).  Bank 0 is this code; the data bank
- * is bytes 8192..16383 of the .pce.  ilvm_runtime.c owns the VDC/VCE, the
- * frame flow and the RCR table replay; this file owns only the toy's
- * meaning: the bytecode loop.
+ * the same window, docs/ROM_LAYOUT.md).  Banks 0-1 are this code; #213
+ * appended the HuTrack engine as banks 2-3, so the data bank is bytes
+ * 32768..40959 of the .pce (renderer/pce-rom.js's TOY_DATA_BANK).
+ * ilvm_runtime.c owns the VDC/VCE, the frame flow and the RCR table replay;
+ * this file owns only the toy's meaning: the bytecode loop.
  *
  * The encoding is docs/IL.md §14.  The opcodes and their exact Lua
  * semantics mirror renderer/pce-cgen.js's C lowering (32-bit wrapping,
@@ -43,6 +44,13 @@
  * definitions (hostvm.c on the host, the runtime below on the console). */
 #include "toy_runtime.h"
 
+/* The MPR2 window: HuC6280 TAM mask $04 selects MPR2 ($4000-$5FFF).  The
+ * crt0 leaves MPR2=$00 (ROM bank 0); the data bank is physical bank 4 (the
+ * 16 KiB interpreter image occupies banks 0-1 and the HuTrack engine banks
+ * 2-3, #213).  Must equal renderer/pce-rom.js's TOY_DATA_BANK.  The host
+ * build maps nothing but boots the same container, so it shares the value. */
+#define DATA_BANK 4
+
 #ifdef ILVM_HOST
 /* The host build runs the same interpreter over the same bytecode without a
  * console, so a bytecode or VM bug is found before Mednafen.  tools/ilvm/
@@ -52,9 +60,6 @@ extern const uint8_t *ilvm_program;
 #define PROG (ilvm_program)
 #else
 #include <pce.h>
-/* The MPR2 window: HuC6280 TAM mask $04 selects MPR2 ($4000-$5FFF).  The
- * crt0 leaves MPR2=$00 (ROM bank 0); the data bank is physical bank 2 (the
- * 16 KiB interpreter image occupies banks 0-1). */
 #define PROG ((const uint8_t *)0x4000)
 #endif
 
@@ -125,14 +130,14 @@ static uint8_t clos_next;
 static uint8_t fault;
 
 #ifdef ILVM_HOST
-static void map_bank2(uint8_t bank) { (void)bank; }
+static void map_data_bank(uint8_t bank) { (void)bank; }
 #else
-static void map_bank2(uint8_t bank) {
+static void map_data_bank(uint8_t bank) {
   __asm__ volatile ("tam #$04" : : "a" (bank));
 }
 #endif
 
-/* ---- byte readers (ROM bank 1) ---------------------------------------- */
+/* ---- byte readers (data bank 4) --------------------------------------- */
 
 __attribute__((noinline)) static uint8_t rb(uint16_t off) {
   return PROG[off];
@@ -518,7 +523,7 @@ void toy_boot(void) {
   nfunc = 0; nglobal = 0; nconst = 0; nslots = 0;
   init_slot = 0xFF; frame_slot = 0xFF; raster_slot = 0xFF;
 
-  map_bank2(2);
+  map_data_bank(DATA_BANK);
   if (rb(0) != 'I' || rb(1) != 'L' || rb(2) != 'B' || rb(3) != 'C') {
     fault = 1;
     toy_display_on();

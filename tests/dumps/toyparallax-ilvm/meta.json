@@ -3,7 +3,7 @@
   "bytes": 1115,
   "code_bytes": 865,
   "constants": 17,
-  "data_bank": 2,
+  "data_bank": 4,
   "functions": 8,
   "globals": 8,
   "hooks": {
@@ -40,13 +40,13 @@
   "slstart": 3
  },
  "ilvm": {
-  "bytes": 16384,
-  "sha256": "ea84ace37155e1bb904885fa22d651fb2b5c89ba324235fd3449a5f2e5b1a039"
+  "bytes": 32768,
+  "sha256": "d4ad2bae75f371b110ea4c6cb5e274e007bf79542c5f865d51d9b9c91b4270dc"
  },
  "name": "toyparallax-ilvm",
  "rom": "tools/gen/toyparallax-ilvm.pce",
- "rom_bytes": 24576,
- "rom_sha256": "63342cec7dda2646fe0fb80034b318ec2d3cc8587f20b1f8b1be84a879405154",
+ "rom_bytes": 40960,
+ "rom_sha256": "b114a287a95c0acabc3df5f228cc2a2ab4b46148f294c200c933a5ddb61edfc2",
  "source": "toys/parallax.lua",
  "source_sha256": "b22ff94879c3ca94c74fe7838b5023633a6802fc1cd97342314b174dbb213a80"
 }

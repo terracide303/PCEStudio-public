@@ -3,7 +3,7 @@
   "bytes": 578,
   "code_bytes": 405,
   "constants": 13,
-  "data_bank": 2,
+  "data_bank": 4,
   "functions": 5,
   "globals": 5,
   "hooks": {
@@ -40,13 +40,13 @@
   "slstart": 3
  },
  "ilvm": {
-  "bytes": 16384,
-  "sha256": "ea84ace37155e1bb904885fa22d651fb2b5c89ba324235fd3449a5f2e5b1a039"
+  "bytes": 32768,
+  "sha256": "d4ad2bae75f371b110ea4c6cb5e274e007bf79542c5f865d51d9b9c91b4270dc"
  },
  "name": "toypalette-ilvm",
  "rom": "tools/gen/toypalette-ilvm.pce",
- "rom_bytes": 24576,
- "rom_sha256": "fa2a3bf584caa3bc9ee619cbf984d1029928588472852c1f21889e16cdf583f7",
+ "rom_bytes": 40960,
+ "rom_sha256": "1af88081cb9f2d40f6d67a171ea556082f06498728f50d6203934a93bc7e4a7a",
  "source": "tools/toys/palette.lua",
  "source_sha256": "458df4060eb9111db60241a0e1fac6a8f193c21a1543fa3d69899d4e7d8c7204"
 }

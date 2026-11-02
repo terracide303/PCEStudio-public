@@ -3,18 +3,24 @@
 #
 #   tools/ilvm/build.sh
 #
-# Produces renderer/ilvm.bin: the fixed 16 KiB HuCard image that every toy
-# ROM's bank 0-1 is made of.  The browser glues it to a toy's bytecode with
+# Produces renderer/ilvm.bin: the fixed 32 KiB HuCard image that every toy
+# ROM's banks 0-3 are made of.  The browser glues it to a toy's bytecode with
 # renderer/pce-rom.js's buildToyRom() and never runs a compiler, so this
 # image is a committed artefact exactly like renderer/viewer-bank0.bin.
 #
-# Why 16 KiB and not one 8 KiB bank: the interpreter plus the proven #31
-# runtime is ~6 KB of code, and llvm-mos's PCE platform places a fixed ROM
-# of up to 48 KiB contiguous at $C000-$FFFF (MPR6 = 1 at reset for a 16 KiB
-# fixed image; crt0's __start_bank_6 is 1, see link.ld).  Physical bank 0
-# ($E000-$FFFF) holds the vectors and startup; physical bank 1 ($C000-$DFFF)
-# holds the interpreter.  The toy's bytecode is appended as physical bank 2,
-# which ilvm.c maps into MPR2 ($4000-$5FFF) with TAM #$04.
+# Why the first 16 KiB: the interpreter plus the proven #31 runtime is ~6 KB
+# of code, and llvm-mos's PCE platform places a fixed ROM of up to 48 KiB
+# contiguous at $C000-$FFFF (MPR6 = 1 at reset for a 16 KiB fixed image;
+# crt0's __start_bank_6 is 1, see link.ld).  Physical bank 0 ($E000-$FFFF)
+# holds the vectors and startup; physical bank 1 ($C000-$DFFF) holds the
+# interpreter.
+#
+# #213 appends the HuTrack engine built by build-engine.sh: physical bank 2
+# (page 5, $A000-$BFFF) is the engine code and physical bank 3 (page 4,
+# $8000-$9FFF) its pitch tables.  Two whole banks because the pitch code
+# maps the tables to page 4 while executing from page 5 (docs/ROM-SOUND.md
+# §1-2).  The toy's bytecode moves to physical bank 4, which ilvm.c maps
+# into MPR2 ($4000-$5FFF) with TAM #$04.
 #
 # Needs the prebuilt llvm-mos SDK (external, never vendored — the PCEAS rule
 # in docs/DECISIONS.md): /Volumes/External II/pce-tools/llvm-mos/llvm-mos,
@@ -22,8 +28,8 @@
 #
 # Writes renderer/ilvm.bin and tools/gen/ilvm.json (sha, size, section and
 # symbol bytes).  tests/check-ilvm.js rebuilds it and compares the SHA when
-# llvm-mos is present; without the toolchain it prints SKIP, the same rule
-# as the other PCEAS/llvm rebuild checks.
+# the toolchains are present; without llvm-mos or PCEAS 4.x it prints SKIP,
+# the same rule as the other PCEAS/llvm rebuild checks.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -35,6 +41,11 @@ BIN=renderer/ilvm.bin
 
 if [ ! -x "$CC" ]; then
   echo "llvm-mos not found at $LLVM_MOS (set LLVM_MOS to the SDK root)" >&2
+  exit 2
+fi
+if ! command -v "${PCEAS4:-pceas4}" >/dev/null 2>&1 && \
+   [ ! -x "${PCEAS4:-pceas4}" ]; then
+  echo "PCEAS 4.x not found: set PCEAS4 or install pceas4 (docs/BUILD.md)" >&2
   exit 2
 fi
 
@@ -50,7 +61,28 @@ if [ "$BYTES" != "16384" ]; then
   exit 1
 fi
 
-cp "$OUT" "$BIN"
+# #213: assemble the engine into its own two banks (vendor/hutrack is staged
+# into tools/gen/hutrack-stage; the build verifies the patch sites itself).
+tools/ilvm/build-engine.sh
+
+ENGINE_CODE=tools/gen/hutrack-code.bin
+ENGINE_TABLES=tools/gen/hutrack-tables.bin
+for bank in "$ENGINE_CODE" "$ENGINE_TABLES"; do
+  BANK_BYTES=$(wc -c < "$bank" | tr -d ' ')
+  if [ "$BANK_BYTES" != "8192" ]; then
+    echo "$bank is $BANK_BYTES bytes; expected 8192 (one physical bank)" >&2
+    exit 1
+  fi
+done
+
+# The image is a byte concatenation only: llvm-mos owns banks 0-1, PCEAS owns
+# banks 2-3, and neither toolchain links the other (docs/ROM-SOUND.md §1).
+cat "$OUT" "$ENGINE_CODE" "$ENGINE_TABLES" > "$BIN"
+BYTES=$(wc -c < "$BIN" | tr -d ' ')
+if [ "$BYTES" != "32768" ]; then
+  echo "ilvm image is $BYTES bytes; expected 32768 (4 physical banks)" >&2
+  exit 1
+fi
 
 python3 -I - "$LLVM_MOS" "$OUT" tools/gen/ilvm.pce.elf "$BIN" <<'PY'
 import hashlib
@@ -124,18 +156,23 @@ if "cells" in symbols:
 out = {
     "image": binpath,
     "rom": rom,
-    "bytes": len(open(rom, "rb").read()),
-    "sha256": sha(rom),
+    "bytes": len(open(binpath, "rb").read()),
+    "sha256": sha(binpath),
+    "llvm_bytes": len(open(rom, "rb").read()),
+    "llvm_sha256": sha(rom),
     "bank0": "physical 0 ($E000-$FFFF: vectors, startup, runtime)",
     "bank1": "physical 1 ($C000-$DFFF: the interpreter)",
-    "data_bank": "physical 2, appended per toy by renderer/pce-rom.js",
+    "bank2": "physical 2 ($A000-$BFFF: HuTrack engine code, #213)",
+    "bank3": "physical 3 ($8000-$9FFF: HuTrack pitch tables, #213)",
+    "data_bank": "physical 4, appended per toy by renderer/pce-rom.js",
     "sizes": sizes,
     "section_sizes": section_sizes,
     "table_pool": table_pool,
     "functions": functions,
     "cc": run([llvm + "/bin/mos-pce-clang", "--version"]).splitlines()[0],
     "flags": "-Os -Wl,--defsym,__rom_bank0=0xc000 "
-             "-Wl,--defsym,__rom_bank0_size=0x4000",
+             "-Wl,--defsym,__rom_bank0_size=0x4000 "
+             "+ HuTrack banks from tools/ilvm/build-engine.sh",
 }
 with open("tools/gen/ilvm.json", "w") as fh:
     json.dump(out, fh, indent=1, sort_keys=True)

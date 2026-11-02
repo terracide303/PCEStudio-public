@@ -3,7 +3,7 @@
   "bytes": 594,
   "code_bytes": 407,
   "constants": 16,
-  "data_bank": 2,
+  "data_bank": 4,
   "functions": 2,
   "globals": 7,
   "hooks": {
@@ -40,13 +40,13 @@
   "slstart": 3
  },
  "ilvm": {
-  "bytes": 16384,
-  "sha256": "a152a83f41621415c03974b58adfeba82a4ba939a8031adda8017c217f377c10"
+  "bytes": 32768,
+  "sha256": "d4ad2bae75f371b110ea4c6cb5e274e007bf79542c5f865d51d9b9c91b4270dc"
  },
  "name": "tableops-ilvm",
  "rom": "tools/gen/tableops-ilvm.pce",
- "rom_bytes": 24576,
- "rom_sha256": "4ba681d07fb4731db8ab8f14d17f6eefa6dc636df8470cf97a0ef50bca440864",
+ "rom_bytes": 40960,
+ "rom_sha256": "2b658b2f550070ca7814b68e14b61227dbc0603578997197710b1d3135209642",
  "source": "tools/toys/tables.lua",
  "source_sha256": "746bfbeece78ec9c5e98b83bc5b882efdc688a2aad594b3b109f41a601c432ad"
 }

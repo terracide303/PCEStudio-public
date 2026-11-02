@@ -4400,7 +4400,7 @@ function exportLoadBank0() {
     return res.arrayBuffer();
   }).then((buf) => {
     const bytes = new Uint8Array(buf);
-    const want = (PCEStudio.rom && PCEStudio.rom.ILVM_BYTES) || 16384;
+    const want = (PCEStudio.rom && PCEStudio.rom.ILVM_BYTES) || 32768;
     if (bytes.length !== want) {
       throw toyRefuse("export-image", ILVM_URL + " is " + bytes.length +
         " B, expected " + want);

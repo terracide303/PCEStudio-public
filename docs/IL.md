@@ -1332,14 +1332,18 @@ mos-pce-clang -Os -Wl,--defsym,__rom_bank0=0xc000 \
 
 llvm-mos's PCE platform places a fixed ROM of up to 48 KiB at `$C000-$FFFF`
 (MPR2–MPR7; `__start_bank_6` is 1 for a 16 KiB fixed image, so crt0 sets
-MPR6). The image is **two physical banks**:
+MPR6). The committed image is **four physical banks** (32 KiB): llvm-mos
+builds the first two, and #213 appended the two HuTrack engine banks
+([`ROM-SOUND.md`](ROM-SOUND.md) §1–2):
 
 - bank 0 (`$E000-$FFFF`): vectors, crt0, the runtime;
 - bank 1 (`$C000-$DFFF`): the interpreter (`exec` 6,010 B of the 16 KiB).
+- bank 2 (`$A000-$BFFF`): HuTrack engine code (page 5);
+- bank 3 (`$8000-$9FFF`): HuTrack pitch tables (page 4).
 
-The toy's container is **physical bank 2**, and `ilvm.c` maps it into the
+The toy's container is **physical bank 4**, and `ilvm.c` maps it into the
 MPR2 window (`$4000-$5FFF`) with `TAM #$04` at boot. The image is committed
-as `renderer/ilvm.bin` (16,384 B, sha256 in `tools/gen/ilvm.json`), like
+as `renderer/ilvm.bin` (32,768 B, sha256 in `tools/gen/ilvm.json`), like
 `renderer/viewer-bank0.bin`; the browser never invokes a compiler.
 
 Register-file semantics mirror `pce-cgen.js`: 32-bit wrapping `add/sub/mul`,
@@ -1350,8 +1354,9 @@ are shallow); closures are 32 slots of `{fid, up[6]}`, allocated round-robin,
 with upvalues copied at creation (the toys have no `setupval`, as part A
 assumed).
 
-Measured sizes: the image is 16,384 B (the linker fills the fixed region),
-`.bss` 5,607 B; `exec` 6,012 B, `main` 2,321 B, `toy_frame` 198 B.
+Measured sizes (the #213 build): the llvm-mos part is 16,384 B and the
+committed image 32,768 B (banks 2-3 are the engine and tables banks);
+`.bss` 6,781 B; `exec` 9,724 B, `main` 2,410 B, `toy_frame` 198 B.
 
 ### 14.3 The console frame flow
 
@@ -1379,8 +1384,8 @@ browser's.
 ### 14.4 The browser glue
 
 `renderer/pce-rom.js`'s new `buildToyRom({bank0, bytecode, assets})` is a pure
-function: it validates the 16 KiB image, the `ILBC` magic and the data-bank
-size, and returns `bank0 + one 8 KiB bank` (bytecode at offset 16,384,
+function: it validates the 32 KiB image, the `ILBC` magic and the data-bank
+size, and returns `bank0 + one 8 KiB bank` (bytecode at offset 32,768,
 optional assets after it, `0xFF` padding). The page loads `ilvm.bin` the way
 it loads `viewer-bank0.bin`. Node and a browser context (`self`, no `module`)
 build the same bytes — tested byte for byte.

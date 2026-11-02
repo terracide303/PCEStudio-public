@@ -42,7 +42,11 @@ The two facts that decide the design:
 
 The browser appends the toy's ILBC container as physical bank 2
 (`renderer/pce-rom.js` `buildToyRom`), and `tools/ilvm/ilvm.c` maps it at
-MPR2 (`$4000-$5FFF`, `TAM #$04`) at boot.
+MPR2 (`$4000-$5FFF`, `TAM #$04`) at boot. **Since #213** the committed image
+is 32 KiB: banks 2 and 3 hold the engine code and pitch tables (built by
+`tools/ilvm/build-engine.sh` and concatenated by `build.sh`), and the toy's
+container is physical bank 4 — `buildToyRom` follows, and `ilvm.c`'s
+`DATA_BANK` is 4.
 
 HuTrack is pceas code. In its own music ROM
 ([`tools/hutrack.asm`](../tools/hutrack.asm)) the engine is one bank of code
@@ -98,10 +102,12 @@ the tables must be reachable at page 4 while the code executes from page 5.
 They would fit one bank only if 2,552 B of the two disappeared, and neither
 is a layout change — they are the engine. So:
 
-- `renderer/ilvm.bin`: **16,384 B → 32,768 B**.
+- `renderer/ilvm.bin`: **16,384 B → 32,768 B** (landed by #213: the image
+  is now llvm-mos banks 0-1, engine code bank 2, pitch tables bank 3).
 - A toy ROM: **24,576 B → 40,960 B** (five 8 KiB banks, a legal HuCard
   size). The toy's data bank moves from physical bank 2 to **physical bank
-  4**; `renderer/pce-rom.js`'s `ILVM_BYTES`/`TOY_DATA_BANK` follow in #198.
+  4**; `renderer/pce-rom.js`'s `ILVM_BYTES`/`TOY_DATA_BANK` and `ilvm.c`'s
+  `DATA_BANK` follow (#213).
 
 The spike that proved the layout: a minimal `.asm` with no base_func
 framework, `.bank $02 / .org $A000` for the code (the front and the wrapper
@@ -157,6 +163,9 @@ they do today.
 | 2 | `$4000-$5FFF` | 4 | the toy's ILBC container (moved from 2) |
 | 4 | `$8000-$9FFF` | 3 | HuTrack pitch tables (the pitch code remaps/restores it) |
 | 5 | `$A000-$BFFF` | 2 | HuTrack code, `EngineCall`, `HuTrackTick` |
+
+#213 maps only row 2 (the data bank moved 2 → 4); rows 4-5 are mapped by the
+first sound call in #215, because no existing toy reaches the engine.
 
 **The tick's caller is the interpreter's per-toy-frame path, not the VBlank
 IRQ.** The browser's toy host is the model that must be matched: `music()`
@@ -448,10 +457,13 @@ toolchain change that moves them is a change to this page.
 
 ## What is not proven
 
-- **No llvm-mos + pceas image has been built or run yet.** The 32 KiB
-  layout, the narrowed window, the boot mappings and the tick are a
-  measured *plan* (#198 builds them). The spike proved only that pceas
-  assembles the engine at pages 5/4 and in physical banks 2/3.
+- **The 32 KiB image is built and committed (#213); nothing calls the engine
+  yet.** The two banks are concatenated after the unchanged llvm-mos image
+  and every existing toy ROM still runs and captures identically (the five
+  example ROMs: palette, parallax, status-bar, sprite, tables). The
+  narrowed window, the RAM partition and the tick are not exercised until
+  #215's interpreter ops call in, and the llvm-mos + pceas image has not
+  played a sound on a console yet.
 - **The zero-page/RAM partition is arithmetic.** The 96/93-byte split and
   the 787-byte stack headroom (1,019 with the optional engine-vars trim) are
   projections from measured sizes; #198 builds them with assertions, and the

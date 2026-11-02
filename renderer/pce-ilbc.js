@@ -5,7 +5,8 @@
  *                                                       --(ilvm.bin)--> .pce
  *
  * The console's interpreter (tools/ilvm/, built once by us and committed as
- * renderer/ilvm.bin) reads exactly this encoding out of ROM bank 1.  The
+ * renderer/ilvm.bin) reads exactly this encoding out of ROM bank 4 (the
+ * interpreter and the HuTrack engine occupy banks 0-3 since #213).  The
  * browser encodes a toy and glues it to ilvm.bin with renderer/pce-rom.js's
  * buildToyRom(); no compiler is involved at that point.
  *

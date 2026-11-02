@@ -188,7 +188,7 @@ outcomes are unchanged (PLATFORMER is still the only one of the five that
 exports), and the ROM shas moved with the rebuilt `renderer/ilvm.bin`. What
 #207 skipped, because it is not done: **#148** (the 127-constant pool) is
 open; **#198** (the HuTrack engine linked into the interpreter image) is
-parked, so `renderer/pce-rom.js:623` still refuses a version 3 container and
+parked, so `renderer/pce-rom.js:626` still refuses a version 3 container and
 TOWER and DUSK RUN cannot build; **#199** landed its data half but its second
 close needs #198; **#200** (the trace test and the docs) has no
 `tests/check-rom-sound.js` in this tree. Nothing that was measured here can
@@ -216,10 +216,10 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 
 | toy | exports? | picture matches? | overruns | worst update | verdict | validator's static estimate |
 |-----|----------|------------------|----------|--------------|---------|-----------------------------|
-| **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants` (`renderer/pce-ilbc.js:461`, `MAX_CONST = 127`); the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. `sprite()` is carried for 21 of its 31 specs since #188–#190; the other ten are **#211**, and the pool refuses first. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
-| **TOWER** `toys/tower` | **no** — `error: pce-rom: bytecode version must be 1 or 2` (`renderer/pce-rom.js:623`; a version 3 container carries the sound ops). #186 carried `sat`, #187 `not` and #197 `sfx`; TOWER's bytecode route is otherwise clean, so it now encodes as a version 3 sound container and buildToyRom refuses it — the gate the committed interpreter needs until #198 links the engine in. The gate's Error names no line. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
+| **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants` (`renderer/pce-ilbc.js:462`, `MAX_CONST = 127`); the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. `sprite()` is carried for 21 of its 31 specs since #188–#190; the other ten are **#211**, and the pool refuses first. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
+| **TOWER** `toys/tower` | **no** — `error: pce-rom: bytecode version must be 1 or 2` (`renderer/pce-rom.js:626`; a version 3 container carries the sound ops). #186 carried `sat`, #187 `not` and #197 `sfx`; TOWER's bytecode route is otherwise clean, so it now encodes as a version 3 sound container and buildToyRom refuses it — the gate the committed interpreter needs until #198 links the engine in. The gate's Error names no line. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
 | **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`; refused by `renderer/pce-ilbc.js:335` because `raster` has no entry in its OPS table). #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind (#136). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
-| **DUSK RUN** `toys/dusk-run` | **no** — `error: pce-rom: bytecode version must be 1 or 2` (`renderer/pce-rom.js:623`; a version 3 container carries the sound ops). #187 carried `not` and #197 `sfx`, its old refusals; DUSK RUN's bytecode route is otherwise clean, so it now encodes as a version 3 sound container and buildToyRom refuses it until #198 links the engine in. The gate's Error names no line. #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
+| **DUSK RUN** `toys/dusk-run` | **no** — `error: pce-rom: bytecode version must be 1 or 2` (`renderer/pce-rom.js:626`; a version 3 container carries the sound ops). #187 carried `not` and #197 `sfx`, its old refusals; DUSK RUN's bytecode route is otherwise clean, so it now encodes as a version 3 sound container and buildToyRom refuses it until #198 links the engine in. The gate's Error names no line. #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
 | **PLATFORMER** `toys/platformer` | **yes** — 24,576 B, sha256 `7bff6fc79ea199cf…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 308 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
 | *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `fa2a3bf584caa3bc…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 111 | **626** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
 | *control #183* `tools/toys/arity.lua` | **yes** — 24,576 B, sha256 `fea4bc6bff47a016…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 111 | **783** lines | **too slow** | — |
@@ -324,10 +324,10 @@ their own, the rest already did:
   global, a runtime `x`, specs rebuilt in a loop). #188–#192 carried the
   instruction for constant specs only; this card asks the lowering question
   first, so it is backlog, not `QUEUE: auto`.
-- Already open: **#148** (the 127-constant pool, `renderer/pce-ilbc.js:461`),
+- Already open: **#148** (the 127-constant pool, `renderer/pce-ilbc.js:462`),
   **#136** (`raster(line, spec)`, `renderer/pce-ilbc.js:335`), **#137** (the
   builtins other than `rgb`/`note`, `main.lua:466` and `:570`),
-  **#198** (the version 3 gate, `renderer/pce-rom.js:623`, with #199 and
+  **#198** (the version 3 gate, `renderer/pce-rom.js:626`, with #199 and
   #200 behind it).
 
 ## ROM CHECK: the five games' exact blockers (card #193)

@@ -139,12 +139,15 @@
   var MAX_TILE_BANKS = MAX_ROM_BANKS - 4;
 
   /* #100: the IL bytecode interpreter image (renderer/ilvm.bin).  llvm-mos
-   * links it as a 16 KiB fixed ROM: physical bank 0 ($E000-$FFFF: vectors,
-   * startup, the #31 runtime) and physical bank 1 ($C000-$DFFF: the
-   * interpreter, docs/IL.md §14).  The toy's bytecode is physical bank 2,
-   * which ilvm.c maps into MPR2 ($4000-$5FFF) with TAM #$04. */
-  var ILVM_BYTES = 2 * BANK;     /* 16384 */
-  var TOY_DATA_BANK = 2;
+   * links banks 0-1 as a fixed 16 KiB ROM: physical bank 0 ($E000-$FFFF:
+   * vectors, startup, the #31 runtime) and physical bank 1 ($C000-$DFFF:
+   * the interpreter, docs/IL.md §14).  #213 appended the HuTrack engine as
+   * physical banks 2-3 (code at $A000, pitch tables at $8000; design
+   * docs/ROM-SOUND.md §1-2, §4), so the committed image is 32 KiB and the
+   * toy's bytecode is physical bank 4, which ilvm.c maps into MPR2
+   * ($4000-$5FFF) with TAM #$04. */
+  var ILVM_BYTES = 4 * BANK;     /* 32768 */
+  var TOY_DATA_BANK = 4;
 
   /* MWR bits 4-5: BAT width (0:32, 1:64, 2/3:128); bit 6: BAT height
    * (0:32, 1:64).  Same order as viewer.asm's bat_words table. */
@@ -591,12 +594,12 @@
   /* ---- #100: a toy as IL bytecode + the interpreter ---------------------
    *
    * The browser's export for route 1: no compiler, no PCEAS, no llvm-mos.
-   * `toy.bank0` is renderer/ilvm.bin (the committed 16 KiB image, loaded by
+   * `toy.bank0` is renderer/ilvm.bin (the committed 32 KiB image, loaded by
    * the page the same way viewer-bank0.bin is); `toy.bytecode` is the
    * container renderer/pce-ilbc.js encodes from the IL.  The result is the
-   * interpreter image followed by one data bank (physical bank 2) holding
-   * the bytecode and, after it, any assets the caller ships for a future
-   * loader.
+   * interpreter image, its two HuTrack engine banks, then one data bank
+   * (physical bank 4) holding the bytecode and, after it, any assets the
+   * caller ships for a future loader.
    *
    * The output is a pure function of its inputs, so the Node test and the
    * studio page produce the same bytes. */
@@ -606,7 +609,7 @@
     var assets = (toy && toy.assets) || null;
     need(bank0 && bank0.length === ILVM_BYTES,
          "bank0 must be renderer/ilvm.bin (" + ILVM_BYTES +
-         " bytes = two physical banks), got " +
+         " bytes = interpreter, engine and tables banks), got " +
          (bank0 ? bank0.length : "nothing"));
     need(bytecode && bytecode.length >= 24,
          "bytecode must be a pce-ilbc container");

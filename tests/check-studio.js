@@ -885,7 +885,7 @@ async function checkExport(page) {
     const source = studio.current().source;
     const got = pageBuild(id);
     if (!got.ok) continue;
-    eq("#115: " + id + " export is 24,576 B", got.bytes.length, 24576);
+    eq("#115: " + id + " export is 40,960 B", got.bytes.length, 40960);
     check(Buffer.from(got.bytes).equals(nodeBytes(source)),
           "#115: " + id + "'s page-built ROM is Node buildToyRom's bytes");
     eq("#115: " + id + "'s bytecode length is the encoder's",
@@ -930,9 +930,9 @@ async function checkExport(page) {
      * follows it. */
     const tail = Buffer.from(JSON.stringify({ version: 1, files: [
       { name: "tiles.json", source: tiles.source }] }), "utf8");
-    const at = 16384 + withTail.bytecodeBytes;
+    const at = romLib.ILVM_BYTES + withTail.bytecodeBytes;
     eq("#115: the asset tail starts after the bytecode", at,
-       16384 + plain.bytecodeBytes);
+       romLib.ILVM_BYTES + plain.bytecodeBytes);
     check(Buffer.from(withTail.bytes.slice(at, at + tail.length))
       .equals(tail), "#115: the tail is the asset files' JSON bytes");
     check(withTail.bytes[at + tail.length] === 0xFF,

@@ -17,7 +17,7 @@
  *
  *   1. The five games the card names (STARFALL, TOWER, NOVA TIDE, DUSK RUN,
  *      PLATFORMER) each reach the outcome the table records: either a
- *      refusal with that code and message, or a built 24,576-byte ROM.  The
+ *      refusal with that code and message, or a built 40,960-byte ROM.  The
  *      source line the table names is checked against the IL (a function's
  *      definition line, the 128th constant, the refused instruction's own
  *      line, or the first refused builtin's line — or null, when the
@@ -75,7 +75,7 @@ const BANK0 = path.join(ROOT, "renderer", "ilvm.bin");
 
 const BROWSER_FRAMES = 60;          /* the browser frames a capture may match */
 const CAPTURE_TAIL = 12;            /* the movie's last frames, like check-ilvm */
-const ROM_BYTES = 24576;            /* 16 KiB interpreter + one data bank */
+const ROM_BYTES = 40960;            /* 32 KiB image + one data bank */
 
 /* The card's five games and the outcome docs/ROM_SPEED.md records (2026-10-31;
  * DUSK RUN moved to the encoder's refusal by #184, the three games' sat
@@ -157,7 +157,7 @@ const GAME_PINS = {
    * with any interpreter change (#187's opcode moved all three). */
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
-    rom: "7bff6fc79ea199cf1d2c13ce9b3b560d6699906164ced514f233439040f90728",
+    rom: "6a30111599e134a2945225607b8878636a3eeb2aba1bc552c24a6f1aa1e68ad4",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
@@ -173,7 +173,7 @@ const GAME_PINS = {
   "SPRITE": {
     kind: "toy",
     toy: "tools/toys/sprite.lua",
-    rom: "7f8ce59af4846f5067e77e1a742ca3335644de3cfdb65e1c3da0656de165a121",
+    rom: "ba70d18473e6bbf60ad4dae4053ead9b5e385cb95c7b14d229c071a1087d2b3e",
     frames: [1994475180]
   }
 };
@@ -182,7 +182,7 @@ const GAME_PINS = {
  * toy builds to one ROM and its picture repeats every eight frames. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "fa2a3bf584caa3bc9ee619cbf984d1029928588472852c1f21889e16cdf583f7",
+  rom: "1af88081cb9f2d40f6d67a171ea556082f06498728f50d6203934a93bc7e4a7a",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -195,7 +195,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "fea4bc6bff47a0165ca1365ad401d597b3ee15eb4468125a3bfeaca2804b0d00",
+  rom: "fff2461f16cf07561aec0e083e91c981f96b315108cbd248a66df1f47e667e42",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -212,7 +212,7 @@ const WIDE = {
  * hashes are the whole cycle. */
 const NOT = {
   toy: "tools/toys/not.lua",
-  rom: "9cbcb2ce3c37824c016acbafef77e87b4f61d31dc46b56227f61e2df503f8a42",
+  rom: "907c7878363f77a0e78b7b8d361b75410a1c8267e0676c8e1b1824f077ffff52",
   frames: [2266090996, 2632876444, 887268600, 1464026320]
 };
 

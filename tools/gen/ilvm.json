@@ -1,10 +1,12 @@
 {
  "bank0": "physical 0 ($E000-$FFFF: vectors, startup, runtime)",
  "bank1": "physical 1 ($C000-$DFFF: the interpreter)",
- "bytes": 16384,
+ "bank2": "physical 2 ($A000-$BFFF: HuTrack engine code, #213)",
+ "bank3": "physical 3 ($8000-$9FFF: HuTrack pitch tables, #213)",
+ "bytes": 32768,
  "cc": "clang version 24.0.0git (https://github.com/llvm-mos/llvm-mos a40207a371b60ff787ece46817d9c0f62eada719)",
- "data_bank": "physical 2, appended per toy by renderer/pce-rom.js",
- "flags": "-Os -Wl,--defsym,__rom_bank0=0xc000 -Wl,--defsym,__rom_bank0_size=0x4000",
+ "data_bank": "physical 4, appended per toy by renderer/pce-rom.js",
+ "flags": "-Os -Wl,--defsym,__rom_bank0=0xc000 -Wl,--defsym,__rom_bank0_size=0x4000 + HuTrack banks from tools/ilvm/build-engine.sh",
  "functions": {
   "exec": 9724,
   "lua_idiv": 120,
@@ -14,6 +16,8 @@
   "toy_frame": 198
  },
  "image": "renderer/ilvm.bin",
+ "llvm_bytes": 16384,
+ "llvm_sha256": "43afcf8f51ae9f07a91eb3ef6ed421a6069f2c01c11bc70b869c4b3964cdc8bd",
  "rom": "tools/gen/ilvm.pce",
  "section_sizes": {
   ".bss": 6552,
@@ -32,7 +36,7 @@
   ".zp.bss": 216,
   ".zp.data": 0
  },
- "sha256": "ea84ace37155e1bb904885fa22d651fb2b5c89ba324235fd3449a5f2e5b1a039",
+ "sha256": "d4ad2bae75f371b110ea4c6cb5e274e007bf79542c5f865d51d9b9c91b4270dc",
  "sizes": {
   "bss": 6781,
   "data": 0,

@@ -13,7 +13,7 @@
  *      had; the interpreter passes arguments 5..8 through its extra-argument
  *      block (tools/ilvm/ilvm.c's `xargs`).
  *   2. buildToyRom() glues renderer/ilvm.bin and the bytecode into a
- *      24,576-byte image; Node and a browser context (self, no module)
+ *      40,960-byte image; Node and a browser context (self, no module)
  *      produce the same bytes; the refusals fire.
  *   3. tools/ilvm/build.sh rebuilds renderer/ilvm.bin byte-identically to
  *      the committed image when llvm-mos is present (SKIP otherwise, the
@@ -851,21 +851,29 @@ function checkTableEncoding() {
 
 function checkRom() {
   const bank0 = fs.readFileSync(ILVM);
-  eq("renderer/ilvm.bin is 16 KiB (two instructions banks plus data)",
-     bank0.length, 16384);
+  eq("renderer/ilvm.bin is 32 KiB (#213: interpreter, engine code, engine " +
+     "tables; the data bank follows)",
+     bank0.length, 32768);
   const enc = encodeToy(PALETTE.toy);
   const rom = romLib.buildToyRom({ bank0: bank0, bytecode: enc.bytes });
-  eq("buildToyRom is 24,576 B (16 KiB image + one data bank)",
-     rom.length, 24576);
-  check(Buffer.from(rom.slice(0, 16384)).equals(bank0),
-        "the image is the ROM's first 16 KiB");
-  eq("the data bank starts with ILBC", Array.from(rom.slice(16384, 16388)),
+  eq("buildToyRom is 40,960 B (32 KiB image + one data bank)",
+     rom.length, 40960);
+  check(Buffer.from(rom.slice(0, 32768)).equals(bank0),
+        "the image is the ROM's first 32 KiB");
+  eq("the data bank starts with ILBC", Array.from(rom.slice(32768, 32772)),
      [0x49, 0x4C, 0x42, 0x43]);
-  check(Buffer.from(rom.slice(16384, 16384 + enc.bytes.length))
+  check(Buffer.from(rom.slice(32768, 32768 + enc.bytes.length))
         .equals(Buffer.from(enc.bytes)),
-        "the bytecode is at physical bank 2, offset 0");
+        "the bytecode is at physical bank 4, offset 0");
   eq("the rest of the data bank is 0xFF padding",
-     rom[16384 + enc.bytes.length], 0xFF);
+     rom[32768 + enc.bytes.length], 0xFF);
+  eq("the toy data bank is physical bank 4", romLib.TOY_DATA_BANK, 4);
+  /* ilvm.c maps the data bank with TAM; it must be the bank buildToyRom
+   * appends (the #213 pair, docs/ROM-SOUND.md §4). */
+  const src = fs.readFileSync(path.join(ROOT, "tools", "ilvm", "ilvm.c"),
+                              "utf8");
+  const m = /#define DATA_BANK (\d+)/.exec(src);
+  eq("ilvm.c's DATA_BANK is TOY_DATA_BANK", m && Number(m[1]), 4);
 
   /* The browser path: the same files with `self`, no `module`, exactly the
    * branch a <script> in the studio page runs. */
@@ -904,11 +912,27 @@ function checkRebuild() {
     console.log("SKIP  ilvm.bin rebuild: llvm-mos not found at " + llvm);
     return;
   }
+  /* #213: the image is now llvm-mos PLUS the engine banks build-engine.sh
+   * assembles with PCEAS 4.x, so without that toolchain the rebuild cannot
+   * run — skip, the same rule as the llvm side. */
+  let pceas = process.env.PCEAS4 || "pceas4";
+  if (!(process.env.PCEAS4 && fs.existsSync(process.env.PCEAS4))) {
+    const which = spawnSync("sh", ["-c", "command -v pceas4"],
+                            { encoding: "utf8" });
+    if (which.status !== 0) {
+      skipped.push("ilvm.bin rebuild (PCEAS 4.x not found)");
+      console.log("SKIP  ilvm.bin rebuild: no PCEAS 4.x (set PCEAS4 or " +
+                  "put pceas4 on PATH)");
+      return;
+    }
+    pceas = which.stdout.trim();
+  }
   /* build.sh writes renderer/ilvm.bin; keep the committed file safe so a
    * differing toolchain reports FAIL without changing the tree. */
   const committed = fs.readFileSync(ILVM);
   const r = spawnSync(path.join(ROOT, "tools", "ilvm", "build.sh"), [],
-                      { cwd: ROOT, encoding: "utf8", env: process.env });
+                      { cwd: ROOT, encoding: "utf8",
+                        env: { ...process.env, PCEAS4: pceas } });
   const rebuilt = fs.existsSync(ILVM) ? fs.readFileSync(ILVM) : null;
   fs.writeFileSync(ILVM, committed);
   check(r.status === 0, "tools/ilvm/build.sh exits 0 (" +
@@ -916,11 +940,12 @@ function checkRebuild() {
   if (r.status !== 0 || !rebuilt) return;
   eq("the rebuilt image is the committed renderer/ilvm.bin",
      sha256(rebuilt), sha256(committed));
-  eq("the image is two physical banks", rebuilt.length, 16384);
+  eq("the image is four physical banks (32 KiB)", rebuilt.length, 32768);
   const report = JSON.parse(fs.readFileSync(
     path.join(ROOT, "tools", "gen", "ilvm.json"), "utf8"));
   eq("the build report's sha is the committed image", report.sha256,
      sha256(committed));
+  eq("the build report's size is the committed image", report.bytes, 32768);
 }
 
 /* ---- 4. the host harness: ilvm.c runs on this machine ----------------- */
@@ -2467,7 +2492,7 @@ function checkDump(spec, maxF, tail) {
   if (emitFresh(spec.toy, fresh)) {
     eq(spec.name + ": a fresh browser-path build is the dumped ROM",
        sha256(fs.readFileSync(fresh)), meta.rom_sha256);
-    eq(spec.name + ": the ROM is 24,576 B", fs.statSync(fresh).size, 24576);
+    eq(spec.name + ": the ROM is 40,960 B", fs.statSync(fresh).size, 40960);
   }
 
   const browser = toys.create(fs.readFileSync(toyPath, "utf8"),
@@ -2701,7 +2726,7 @@ function checkStatusBarDump() {
   if (emitFresh(STATUS.toy, fresh)) {
     eq("status-bar: a fresh browser-path build is the dumped ROM",
        sha256(fs.readFileSync(fresh)), meta.rom_sha256);
-    eq("status-bar: the ROM is 24,576 B", fs.statSync(fresh).size, 24576);
+    eq("status-bar: the ROM is 40,960 B", fs.statSync(fresh).size, 40960);
   }
 
   const browser = toys.create(fs.readFileSync(path.join(ROOT, STATUS.toy),

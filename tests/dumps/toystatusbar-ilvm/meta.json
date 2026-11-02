@@ -3,7 +3,7 @@
   "bytes": 1369,
   "code_bytes": 1029,
   "constants": 29,
-  "data_bank": 2,
+  "data_bank": 4,
   "functions": 11,
   "globals": 9,
   "hooks": {
@@ -40,13 +40,13 @@
   "slstart": 3
  },
  "ilvm": {
-  "bytes": 16384,
-  "sha256": "ea84ace37155e1bb904885fa22d651fb2b5c89ba324235fd3449a5f2e5b1a039"
+  "bytes": 32768,
+  "sha256": "d4ad2bae75f371b110ea4c6cb5e274e007bf79542c5f865d51d9b9c91b4270dc"
  },
  "name": "toystatusbar-ilvm",
  "rom": "tools/gen/toystatusbar-ilvm.pce",
- "rom_bytes": 24576,
- "rom_sha256": "79f872e786343c9e00a094dc96b55e3ccb4ef90dce4a7e75f9f01308109981ba",
+ "rom_bytes": 40960,
+ "rom_sha256": "06fc409fb9da4c9eb097ddf81887a6f89a343f8c4bddb5dae6c479f723892a45",
  "source": "toys/status-bar.lua",
  "source_sha256": "0d52e4536692190ac82169fb636620fb5e38cce0379630876822011a2a25de33"
 }
