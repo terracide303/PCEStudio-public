@@ -126,7 +126,7 @@ layout and the Save/Open window: [`docs/PROJECT-FORMAT.md`](docs/PROJECT-FORMAT.
 | [`plugin/`](plugin/) | The Claude Code skill that teaches the toy API, with worked recipes. |
 | [`tests/`](tests/) | The test suites, one `check-*.js` per area, run by `tests/all.sh`. |
 | [`docs/`](docs/) | The studio ([`STUDIO.md`](docs/STUDIO.md)), the toy API ([`TOYS.md`](docs/TOYS.md)), the compiler ([`IL.md`](docs/IL.md)), the sound chip ([`PSG.md`](docs/PSG.md)), the ROM layout ([`ROM_LAYOUT.md`](docs/ROM_LAYOUT.md)), hardware notes ([`MANUALS.md`](docs/MANUALS.md)), build notes ([`BUILD.md`](docs/BUILD.md)), the MCP server ([`MCP.md`](docs/MCP.md)). |
-| [`vendor/`](vendor/) | Third-party code that ships with the studio: Fengari (Lua in JavaScript), CodeMirror, HuTrack and parts of ppu.toys, each with its own licence. |
+| [`vendor/`](vendor/) | Third-party code that ships with the studio: Fengari (Lua in JavaScript), CodeMirror, HuTrack, parts of ppu.toys, and the WebAssembly PCEAS assembler, each with its own licence. |
 
 ## Tests
 
@@ -173,7 +173,11 @@ version** ([`LICENSE`](LICENSE)).
 - [`renderer/pce-psg.js`](renderer/pce-psg.js) is derived from the PSG core of **Mednafen** (GPL-2.0-or-later) and from
   **Blip_Buffer** 0.4.1 (LGPL-2.1-or-later, Shay Green), which is why the project is GPL.
 - Code under [`vendor/`](vendor/) keeps its own licence (see each folder's notice): Fengari, CodeMirror, HuTrack and the
-  parts taken from **ppu.toys** (Liora Labs) are MIT.
+  parts taken from **ppu.toys** (Liora Labs) are MIT.  `vendor/pceas/` is the MagicKit PC Engine assembler (PCEAS
+  3.23, `uli/huc@52a556a`) compiled to WebAssembly: its MagicKit part is freeware ("free to distribute, use and
+  modifiy it as you wish") and Ulrich Hecht's changes are Simplified BSD; the licence text is beside the files in
+  [`vendor/pceas/LICENSE`](vendor/pceas/LICENSE) and the record in
+  [`vendor/pceas/VENDORED.md`](vendor/pceas/VENDORED.md).
 - The idea, and the shape of the studio, come from **[ppu.toys](https://ppu.toys)**, a studio for the SNES, with its
   author's blessing.
 - The browser export's interpreter-in-the-ROM idea is turboxray's, who also wrote **HuTrack** (MIT), the sound engine in the exported ROMs, and a Mesen 2 sprite script we use, with permission, to test our sprites. Full credits: <https://pcestudio.terracides.com/renderer/credits.html>.

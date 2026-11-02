@@ -5,9 +5,14 @@ How to assemble a PC Engine ROM on this Mac, and how to check it in Mednafen.
 ## PCEAS
 
 PCEAS (the MagicKit/HuC PC Engine assembler) is the PCE-native assembler the
-working examples use. It is a **build tool, not part of PCEStudio**: per
-[`DECISIONS.md`](DECISIONS.md) its licence is freeware with unclear provenance,
-so its source and binary are not vendored in this repository.
+working examples use. It is a **build tool, not part of PCEStudio**: its
+licence is freeware with unclear provenance for much of the kit (the MagicKit
+part says "free to distribute, use and modifiy it as you wish"; Ulrich Hecht's
+changes are Simplified BSD).  Per [`DECISIONS.md`](DECISIONS.md) the source
+and the native binary stay outside the repository.  The one exception is the
+**WebAssembly build the studio runs** (#224, below): the maintainer approved
+bundling it with the licence text and credit, and it contains the assembler
+only, never the HuC C compiler.
 
 **Installed here:** `pceas` 3.23 (`52a556a`, 2018-05-28) at
 `/Volumes/External/pce-tools/bin/pceas`, linked from `~/.local/bin/pceas`
@@ -45,6 +50,49 @@ Verify:
 ```sh
 pceas            # prints: PC Engine Assembler (v 3.23-52a556a, 2018-05-28)
 ```
+
+### PCEAS in the browser (WebAssembly, #224)
+
+The studio ships its own build of the same assembler as WebAssembly:
+`vendor/pceas/pceas.wasm` plus Emscripten's module factory
+`vendor/pceas/pceas.js`.  It is compiled from the checkout above at the pinned
+commit `52a556a`; `vendor/pceas/VENDORED.md` records the source, the licence
+text and the exact build.  HuC's C compiler is not included — this is the
+assembler only.
+
+`renderer/pce-asm.js` runs it:
+
+```js
+const asm = require("./renderer/pce-asm.js");
+const { bytes, errors, listing } = asm.assemble(sourceText, {
+  includes: { "lib/foo.inc": "..." }   // paths exactly as .include names them
+});
+```
+
+`assemble()` is synchronous in Node.  In a browser, `await asm.ready()` first
+(it fetches the wasm), then call `assemble()`.  **The browser path is not yet
+exercised by a page** — nothing in the studio UI calls this module yet, and
+`tests/check-asm.js` runs in Node; the wasm does not need a server or a
+filesystem.  Each call gets a fresh module instance and a fresh in-memory
+filesystem; the source is assembled exactly as `pceas -raw <filename>` would
+assemble it.  `bytes` is the raw HuCard image
+(no PCEAS header), `errors` is `[{line, message, file}]` parsed from PCEAS's
+own diagnostics, and `listing` is the `.lst` text (PCEAS writes one when the
+source uses `.list`; the wrapper adds the directive and renumbers it back when
+the caller asks for a listing).  Nothing in the studio UI calls it yet.
+
+Rebuild after a toolchain change with:
+
+```sh
+tools/build-pceas-wasm.sh       # PCEAS_SRC=… EMCC=… to override the paths
+node tests/check-asm.js         # wasm ROMs == native pceas ROMs
+```
+
+`tests/check-asm.js` assembles six real sources with both the wasm and the
+native binary and requires byte-identical output, including the generated
+`tools/gen/scene1.asm` and `tools/gen/viewer1.asm` (`.include` + five binary
+`.incbin` files); it also holds a failing source to the same line and
+message.
 
 ### The browser's bank 0 asset (#9)
 

@@ -133,6 +133,15 @@ replaces the 2026-10-27 rule that PCEAS stays an external tool. PCEStudio is **p
 public the HuC copy needs a settled licence or must be removed with its history. #54 builds PCEAS from this copy;
 #31 weighs compiling toys through HuC's C compiler.
 
+## 2026-11-02 — the WebAssembly PCEAS build is bundled (the maintainer, card #224)
+
+the maintainer: "it's fine just use it, we are allowed to do so."  The MagicKit assembler (uli/huc@52a556a, PCEAS 3.23)
+is compiled to WebAssembly with Emscripten and committed as `vendor/pceas/pceas.wasm` + `pceas.js`, with the
+source tree's `LICENSE` copied beside it and `vendor/pceas/VENDORED.md` naming the commit and quoting the licence
+(MagicKit: "This program is freeware.  You are free to distribute, use and modifiy it as you wish."; Ulrich
+Hecht's changes: Simplified BSD).  This is the assembler only, never the HuC C compiler.  The native binary stays
+external; `tests/check-asm.js` holds the wasm's ROMs to it byte-for-byte.
+
 ## 2026-10-28 — the #16 viewer's raster chain: parallel arrays, not a record walker
 
 The #16 table (per-scanline VDC/VCE writes run from the viewer's RCR interrupt) is stored as **16 parallel
