@@ -807,11 +807,12 @@ is proven on this evidence and its audible clause is measurable since
 
 **#113 on the committed image (2026-11-02).** The committed image is
 `renderer/ilvm.bin` sha256 `46ccefb656d18ca9…`, 32,768 B;
-`tools/ilvm/build.sh` reproduces it byte for byte from this tree. Two
-changes from #200's image: `SndGlueSfx` writes `$801 = $FF` before its
-reserve (and `PSGT_A 1` logs it in the trace build), and
+`tools/ilvm/build.sh` reproduces it byte for byte from this tree. The
+change is the same R1 write in three places: `SndGlueSfx` writes
+`$801 = $FF` before its reserve (and `PSGT_A 1` logs it in the trace
+build), `ilvm_sound.c`'s host half writes the same byte, and
 `renderer/pce-toyhost.js`'s `sfx()` writes `soundWrite(1, 0xff)` first on
-the studio side (with `ilvm_sound.c`'s host half matching). The two toys
+the studio side. The two toys
 run exactly where they did: `tests/check-rom-sound.js` is green, its trace
 now equal to the studio for **94** (note) and **49** (sfx) writes, R1
 included. The recordings, made on this image with the §11 route:
