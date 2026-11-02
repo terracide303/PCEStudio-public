@@ -23,10 +23,11 @@
  *                 not just text accepted on stdin.
  *   listing       features.asm contains .list, exactly as PCEAS documents it;
  *                 the listing pce-asm.js returns must equal the native .lst
- *                 byte-for-byte.  For a source *without* .list the wrapper
- *                 prepends one, renumbers the listing back to the caller's
- *                 lines and returns it — hello.asm is checked for that
- *                 (non-empty, starts at line 1, no injected .list line).
+ *                 byte-for-byte, and its symbol table must equal the native
+ *                 .sym byte-for-byte.  For a source *without* .list the
+ *                 wrapper prepends one, renumbers the listing back to the
+ *                 caller's lines and returns it — hello.asm is checked for
+ *                 that (non-empty, starts at line 1, no injected .list line).
  *   error         tests/asm/error.asm has a deliberate `lda #$GG` on line 5.
  *                 assemble() must return status 1, no bytes, and exactly
  *                 [{line: 5, message: "Syntax error in expression!"}]; the
@@ -41,14 +42,16 @@
  * 4.x's `&`/`<` expressions and dotted labels.  `tools/ilvm/build-engine.sh`
  * builds it with `pceas4` (docs/BUILD.md), not with /Volumes/External/
  * pce-tools/bin/pceas.  This test requires the wasm to reproduce the native
- * 3.23 diagnostics exactly (same lines, same messages), which is all a 3.23
- * build can do with that file.  Assembling it would need a PCEAS 4.x wasm;
- * that is not what card #224 asked this directory to be built from.
+ * 3.23 output exactly — both as the parsed {line, message} diagnostics AND
+ * as the full raw stdout byte for byte (banner, file header, diagnostics,
+ * error summary), which is all a 3.23 build can do with that file.
+ * Assembling it would need a PCEAS 4.x wasm; that is not what card #224
+ * asked this directory to be built from.
  *
  * NOT PROVEN: the native binary is the only reference, so a shared PCEAS bug
  * (or a wrong native build) would cancel; the wasm is not run in a browser
- * page (Node only); the banner/version text is not compared; and the 4.x
- * interpreter build path is out of reach of this 3.23 artefact.
+ * page (Node only); and the 4.x interpreter build path is out of reach of
+ * this 3.23 artefact.
  */
 
 const fs = require("fs");
@@ -205,6 +208,10 @@ for (const sample of SAMPLES) {
     check(r.listing === nativeLst,
           "features: the listing differs from the native .lst");
     check(r.listing.length > 0, "features: the listing is empty");
+    const nativeSym = fs.readFileSync(
+      path.join(staged.dir, "features.sym"), "utf8");
+    check(r.sym === nativeSym,
+          "features: the symbol table differs from the native .sym");
   }
   if (sample.name === "hello") {
     check(r.listing.length > 0, "hello: no listing returned without .list");
@@ -289,15 +296,25 @@ for (const sample of SAMPLES) {
         "ilvm: wasm diagnostics differ from native PCEAS 3.23's: " +
         JSON.stringify(got.slice(0, 3)) + " vs " +
         JSON.stringify(nativeErrs.slice(0, 3)));
+  // Raw parity on the same refusal: with the wrapper's listing helper off
+  // (no prepended .list, no renumbering), the wasm's full stdout — banner,
+  // file header, diagnostics, error summary — must be the native binary's
+  // stdout byte for byte.
+  const raw = asm.assemble(text, {
+    filename: "hutrack_engine.asm", listing: false
+  });
+  check(raw.out === native.stdout + native.stderr,
+        "ilvm: the wasm's full stdout differs from native PCEAS 3.23's");
 }
 
 if (failures.length === 0) {
   console.log(`PASS: ${checks} checks — six sources assemble byte-identically ` +
               `to the native PCEAS 3.23 (hello, viewer, generated scene1 and ` +
               `viewer1 with .include/.incbin, features with macros, banks), ` +
-              `the listing matches the native .lst, error.asm reports line 5 ` +
-              `and its message, and the interpreter 4.x source is refused ` +
-              `identically by both 3.23 builds`);
+              `the listing and symbol table match the native .lst/.sym, ` +
+              `error.asm reports line 5 and its message, and the interpreter ` +
+              `4.x source is refused identically by both 3.23 builds (same ` +
+              `diagnostics, raw stdout byte for byte)`);
   process.exitCode = 0;
 } else {
   console.log(`FAIL: ${failures.length} of ${checks} checks failed`);

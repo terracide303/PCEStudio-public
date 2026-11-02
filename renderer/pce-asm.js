@@ -2,10 +2,11 @@
  * pce-asm.js — assemble PC Engine source in the browser (card #224).
  *
  *   const asm = require("../renderer/pce-asm.js");
- *   const { bytes, errors, listing } = asm.assemble(sourceText, {
- *     includes: { "lib/foo.inc": "..." },
- *     filename: "main.asm"          // optional; diagnostics name it
- *   });
+ *   const { bytes, errors, listing, sym, out, status } = asm.assemble(
+ *     sourceText, {
+ *       includes: { "lib/foo.inc": "..." },
+ *       filename: "main.asm"          // optional; diagnostics name it
+ *     });
  *
  * The work is done by vendor/pceas/: PCEAS 3.23 (the MagicKit assembler,
  * uli/huc@52a556a) compiled to WebAssembly with Emscripten.  See
@@ -17,7 +18,7 @@
  *   - the source and every include are written into the instance's in-memory
  *     filesystem, then main() runs exactly as `pceas -raw main.asm` would;
  *   - stdout is parsed back into {line, message} diagnostics, and the .pce /
- *     .lst files PCEAS wrote are read from the filesystem.
+ *     .lst / .sym files PCEAS wrote are read from the filesystem.
  *
  * assemble() is synchronous in Node.  In a browser, fetch the wasm first with
  * `await asm.ready()`, then call assemble() (also synchronous).  The browser
@@ -327,6 +328,12 @@
         listing = "";
       }
     }
+    var sym = "";
+    try {
+      sym = new TextDecoder().decode(mod.FS.readFile(base + ".sym"));
+    } catch (e) {
+      sym = "";
+    }
 
     var errors = parseDiagnostics(stdout + stderr);
     if (prepended) {
@@ -337,7 +344,14 @@
     if (status !== 0 && errors.length === 0) {
       errors = [fallbackError(stdout + stderr)];
     }
-    return { bytes: bytes, errors: errors, listing: listing, status: status };
+    return {
+      bytes: bytes,
+      errors: errors,
+      listing: listing,
+      sym: sym,
+      out: stdout + stderr,
+      status: status
+    };
   }
 
   var api = {
