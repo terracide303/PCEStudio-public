@@ -111,3 +111,53 @@ beside it (card #224).
 ppu.toys compiles a restricted subset of Lua to 65816 machine code for a SNES cartridge (no interpreter in the
 ROM) and shows the generated 65816 for the costliest lines. We did not see a way to write your own assembly there.
 That is the model for our compiler item (#101); the assembly chain (#224 to #237) goes beyond it.
+
+## 7. From the HuCC development chat (Discord doc thread, pasted by the maintainer 2026-11-02)
+
+Paraphrased, not quoted. Names are the chat's public handles.
+
+### Who made the HuCC documentation (this answers "author not stated")
+- **Elmer** maintains HuC and HuCC (his own fork is merged into `pce-devel/huc`) and merges documentation changes.
+  He says the project is in "desperate need" of more and more accurate documentation.
+- **Flame** (aeriform) wrote the gitbook <https://aeriform.gitbook.io/hucc>, including the getting-started chapters
+  (the "Working with Sprites" chapter is a moving-logo example). Its example was offered to the HuCC repo.
+- **MrJ** (pceDev16) rewrote the function reference to match what the repo supports (pull request
+  `pce-devel/huc#107`, Sept 2025); **Elmer** merged it into his own restructuring.
+- **Kaminari** (Ryusennin) corrected and reorganised it (removed duplicates, added the directives, put the
+  SuperGrafx functions next to their PC Engine counterparts; this is the `doc-changes` branch we link to) and
+  rewrote the `cross_fade_to()` text. Elmer merged this too.
+- **Newsdee** wrote <https://newsdee.com/hucc/> and the wiki <https://github.com/Newsdee/huc/wiki> from their own
+  notes after reading most files in the repo (May 2026), and is looking at a shared wiki (a GitHub organisation
+  with read-access collaborators). The wording about CD-ROM was corrected after review (see below).
+- **Licence of the documents is still not stated.** The way to be sure is to ask Elmer. Until then we link and
+  learn, and copy nothing.
+
+### Facts worth keeping
+- **HuC versions:** the old HuC v3.21 builds CD and Super CD games fine. Uli's HuC v4 added some limited SuperGrafx
+  and Arcade Card support. **HuCC** adds full SuperGrafx support and other modern improvements. So HuCC is not "the
+  CD version of HuC"; HuC stays in the kit for old projects. (Correction made to Newsdee's page by Kaminari and
+  Elmer, 2026-05-02.)
+- **Fades:** `fade_to_*` uses 7 steps. `cross_fade_to` can use 14 half-steps (slower, with odd colours on the way);
+  fades are usually quick on purpose because they stop gameplay, and crossfades are used for effects.
+- **Mixing C and assembly is normal in HuCC.** Embedded assembly exists (`#asm`, `#asmdef`) and is used to speed up
+  slow compiled code. Rules from Elmer: do not jump between asm chunks and do not leave the function from inside
+  one, or you break the compiler. If you are comfortable with assembly, write normal procedures and subroutines
+  and call them. "Most HuCC users aren't" comfortable with it. The runtime overhead is low; the biggest cost is the
+  C stack, which lives in **zero page** and can be tiny if you avoid recursion. Another developer uses embedded
+  assembly for things with no library function that must run uninterrupted (for example talking to a flash chip).
+  **For our design (#225):** call-by-name into assembly routines, no jumping out, and a stated zero-page budget match
+  what HuCC users already do.
+- **Shadow and highlight (turboxray):** the console's shadow and highlight only work on sprites (or on a whole 8x8
+  background tile block, and then only shadow, not highlight); they cannot be applied to other sprites. The
+  easiest general use is a boss made of a background layer plus shadow and highlight sprites: you give up a
+  background layer and gain an extended main palette. Toy Story uses it for extra colours in the intro stills; Ecco
+  may use it too. **Check whether our VDC and sprite model implements this** (card below).
+- **Skweek** (game): its level transitions are brute-force palette swapping and colour cycling, not a raster bar on
+  colour 0; turboxray's advice for studying any ROM: open it in Mesen to see tile and palette animation. This
+  supports the purpose of card #202 (open an existing ROM to learn from it).
+- The PC Engine's history interview (Japanese oral history, NEC's part) was mentioned but has little about the
+  console itself.
+
+### Open questions that this raises
+- Ask Elmer (or the doc authors) for the licence of the HuCC docs, and whether a link and a comparison table is welcome.
+- Does the studio model shadow and highlight? If not, it is a gap that real games use.
