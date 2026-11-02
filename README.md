@@ -100,7 +100,7 @@ builds the `.pce` in the browser from the bytecode and a fixed interpreter image
 ([`docs/EXPORT.md`](docs/EXPORT.md), [`docs/IL.md`](docs/IL.md)). Since the sound engine joined the image,
 that image is 32 KiB and every toy ROM is 40,960 bytes.
 
-The simple example toys in `toys/*.lua` (parallax, status bar, sky gradient, palette cycle) export today,
+The simple example toys in `toys/*.lua` (parallax, status bar, sky gradient, palette cycle, road) export today,
 and so does **PLATFORMER** (#186 carried the `sat` instruction — its ROM runs in Mednafen at 30 Hz).
 `sprite()` is carried too, for a spec whose slot and fields are constants (#188–#190; its ROM runs at
 60 Hz). **DUSK RUN** also builds a 40,960-byte ROM and loads, runs and draws: #222 raised the interpreter's
