@@ -161,3 +161,23 @@ Paraphrased, not quoted. Names are the chat's public handles.
 ### Open questions that this raises
 - Ask Elmer (or the doc authors) for the licence of the HuCC docs, and whether a link and a comparison table is welcome.
 - Does the studio model shadow and highlight? If not, it is a gap that real games use.
+
+## 8. Geargrafx and an outside opinion on where PCEStudio can be different (2026-11-02)
+
+- **Geargrafx** (<https://github.com/drhelius/Geargrafx>, GPL-3.0, last push 2026-11-01, 252 stars when checked; checked
+  against its README): an accurate PC Engine, TurboGrafx-16, SuperGrafx, CD-ROM2 and LaserActive emulator in C++.
+  It has a full debugger (just-in-time disassembler, CPU and memory-access breakpoints, debug symbols loaded
+  automatically from `.sym`, `.lbl` or `.noi` next to the ROM), save states with rewind, and an **MCP server**
+  (stdio or HTTP) so Claude Code and similar tools can drive debugging. From a community comment (unchecked
+  detail): it also has VDC, sprite and tile viewers, a PSG inspector, and loads PCEAS, wla-dx and vasm symbols.
+  It does not list trace logging, profiling or source-level debugging.
+- **The comment's advice, summarised** (a community member after seeing PCEStudio): "AI plus chip viewers" alone does
+  not set us apart; the opening is (1) HuCC projects built and debugged in the browser, (2) source-level debugging
+  and a profiler (per-scanline and per-frame CPU cost), (3) a live bank and ROM-space map, (4) a map editor in
+  HuCC's metatile format plus Tiled import, (5) a music pipeline into a real driver so the studio sounds like the
+  ROM, (6) compression tools showing the size and speed trade-off, (7) one-click build and copy to a Turbo
+  EverDrive or a programmable HuCard, with photos of games on real consoles, (8) write `.sym` files that Geargrafx
+  and Mednafen load, and an "open this build in Geargrafx" route; and (9) talk to the pce-devel people (Elmer,
+  pceDev16) and active homebrewers early, as a front end to HuCC and not a competitor.
+- **Our reading of it** is in the board cards filed on 2026-11-02 (search the board for "SYM", "bank map",
+  "profiler" and "HuCC project").
