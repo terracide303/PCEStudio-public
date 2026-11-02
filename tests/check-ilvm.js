@@ -161,7 +161,8 @@ const toys = require("../renderer/pce-toys.js");
 
 const ROOT = path.join(__dirname, "..");
 const ILVM = path.join(ROOT, "renderer", "ilvm.bin");
-const LLVM_DEFAULT = "/Volumes/External II/pce-tools/llvm-mos/llvm-mos";
+const LLVM_DEFAULT = ["/Volumes/External II/pce-tools/llvm-mos/llvm-mos", "/Volumes/External/pce-tools/llvm-mos"]
+  .find((p) => fs.existsSync(path.join(p, "bin", "mos-pce-clang"))) || "/Volumes/External II/pce-tools/llvm-mos/llvm-mos";
 
 const PALETTE = { name: "toypalette-ilvm", toy: "tools/toys/palette.lua",
                   period: 8, phase: 8, minMeanTicks: 127 };

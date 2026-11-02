@@ -28,6 +28,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 LLVM_MOS="${LLVM_MOS:-/Volumes/External II/pce-tools/llvm-mos/llvm-mos}"
+[ -x "$LLVM_MOS/bin/mos-pce-clang" ] || { [ -x /Volumes/External/pce-tools/llvm-mos/bin/mos-pce-clang ] && LLVM_MOS=/Volumes/External/pce-tools/llvm-mos; }
 CC="$LLVM_MOS/bin/mos-pce-clang"
 OUT=tools/gen/ilvm.pce
 BIN=renderer/ilvm.bin

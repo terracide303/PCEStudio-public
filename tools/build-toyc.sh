@@ -18,6 +18,7 @@ cd "$(dirname "$0")/.."
 SRC="${1:?usage: tools/build-toyc.sh TOY.lua [NAME]}"
 NAME="${2:-$(basename "$SRC" .lua)}"
 LLVM_MOS="${LLVM_MOS:-/Volumes/External II/pce-tools/llvm-mos/llvm-mos}"
+[ -x "$LLVM_MOS/bin/mos-pce-clang" ] || { [ -x /Volumes/External/pce-tools/llvm-mos/bin/mos-pce-clang ] && LLVM_MOS=/Volumes/External/pce-tools/llvm-mos; }
 CC="$LLVM_MOS/bin/mos-pce-clang"
 
 if [ ! -x "$CC" ]; then

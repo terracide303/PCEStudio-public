@@ -26,7 +26,8 @@ const path = require("path");
 
 const NAME = "chrome-headless-shell";
 const BASE = process.env.PCE_CHROME_BASE ||
-  path.join("/Volumes/External II", "pce-tools", "chrome");
+  ["/Volumes/External II", "/Volumes/External"].map((d) => path.join(d, "pce-tools", "chrome"))
+    .find((d) => fs.existsSync(d)) || path.join("/Volumes/External II", "pce-tools", "chrome");
 
 function installed() {
   const out = [];
