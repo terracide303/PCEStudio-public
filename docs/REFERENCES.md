@@ -151,7 +151,9 @@ Paraphrased, not quoted. Names are the chat's public handles.
   background tile block, and then only shadow, not highlight); they cannot be applied to other sprites. The
   easiest general use is a boss made of a background layer plus shadow and highlight sprites: you give up a
   background layer and gain an extended main palette. Toy Story uses it for extra colours in the intro stills; Ecco
-  may use it too. **Check whether our VDC and sprite model implements this** (card below).
+  may use it too. **#241: this is the Sega Mega Drive VDP's shadow/highlight (VDP register `$8Cxx` bit 3, colours
+  14/15), not a PC Engine feature — the HuC6270/HuC6260 have no such bit. See `docs/SHADOW-HIGHLIGHT.md`; the
+  Toy Story/Ecco usage stays reported, unchecked.**
 - **Skweek** (game): its level transitions are brute-force palette swapping and colour cycling, not a raster bar on
   colour 0; turboxray's advice for studying any ROM: open it in Mesen to see tile and palette animation. This
   supports the purpose of card #202 (open an existing ROM to learn from it).
@@ -160,7 +162,8 @@ Paraphrased, not quoted. Names are the chat's public handles.
 
 ### Open questions that this raises
 - Ask Elmer (or the doc authors) for the licence of the HuCC docs, and whether a link and a comparison table is welcome.
-- Does the studio model shadow and highlight? If not, it is a gap that real games use.
+- ~~Does the studio model shadow and highlight? If not, it is a gap that real games use.~~ Answered by #241
+  (`docs/SHADOW-HIGHLIGHT.md`): the PC Engine has no such mode, so there is no gap; #252 keeps the model that way.
 
 ## 8. Geargrafx and an outside opinion on where PCEStudio can be different (2026-11-02)
 
