@@ -45,7 +45,7 @@ Where its "not proven / what comes next" lists below are now out of date, this s
 ## 0. What is taken from ppu.toys, and under what licence
 
 ppu.toys is **MIT, Copyright (c) 2026 Liora Labs**. Its served files are not in the public repository, but
-The maintainer's 2026-10-28 update allows taking them with credit. The credit comment is at the top of
+the maintainer's 2026-10-28 update allows taking them with credit. The credit comment is at the top of
 [`renderer/studio.html`](../renderer/studio.html); this table is the full list.
 
 | ppu.toys source (URL) | what was adapted | where it lives |
