@@ -10,8 +10,8 @@ the C emitter lowers them. Since #215 the committed interpreter reads
 container version 3 and calls the engine, so a sound toy exports; **§11
 (2026-11-02) is the console check: both sound toys run in Mednafen, the
 engine and the glue execute, and three defects keep them silent or off
-pitch — #228 (F masked on the low byte), #113 (the main amplitude R1 is
-never written) and #229 (dirty glue `.bss`). With the first two fixed in a
+pitch — #238 (F masked on the low byte), #113 (the main amplitude R1 is
+never written) and #239 (dirty glue `.bss`). With the first two fixed in a
 scratch image the recordings match the studio's model.** TOWER
 still stops earlier, at the 8 KiB data bank (8,524 B of bytecode), and
 DUSK RUN exports but does not play on the committed image (its container
@@ -647,7 +647,7 @@ the difference to the studio in one line each:
 
 **With those two writes changed in a scratch image** (`renderer/ilvm.bin`
 `92d6dc42…`, built by `tools/ilvm/build.sh`; not committed — it moves every
-pinned ROM sha and is card #228 plus #113) the same two toys play, and the
+pinned ROM sha and is card #238 plus #113) the same two toys play, and the
 recording matches the studio's `pce-psg` render of the same frames. The
 studio column needed the same R1 write for the same reason: on this tree
 `rt.renderSound()` is silent too (measured, peak 0 — #113), so it is the
@@ -672,7 +672,7 @@ run the engine with uninitialised state, which mutes the chip. The note and
 sfx toys recover only because they reserve again every 12 / 60 frames.
 Moving the glue `.bss` 64 B higher did not stop it, so the write is not
 simply the soft stack reaching the partition. Root cause is open (card
-**#229**); until it is fixed, an R1 write must be unconditional at the start
+**#239**); until it is fixed, an R1 write must be unconditional at the start
 of `sfx()`, not gated on a channel being newly owned.
 
 **Reproducing all of it** (nothing is written to the repository):
@@ -792,8 +792,8 @@ a test. The exact fixes a later card must carry — the first diff is the form
 | **#221** | done | land #220's image and re-pin what it changed | every re-pinned ROM sha has an old/new Mednafen diff (§10); `check-ilvm` and `check-export-games` green; DUSK RUN's black verdict and TOWER's refusal documented |
 | **#222** | open (umbrella) | the interpreter's capacities: DUSK RUN's container needs 41 registers, 41 functions and 19 upvalues (MAX_REGS 32, MAX_FUNCS 32, MAX_UPS 6) | **done**: MAX_REGS 41 / MAX_FUNCS 41 / MAX_UPS 20 with the pool; the container loads, runs and its state is diff 0 against browser frame 3; build.sh asserts (headroom 1,131 B) and the canary measures 1,083 B. **Left**: the displayed picture (16 bytes on row 16) is #223 |
 | **#223** | open | the raster backend shows one replay frame per toy frame and one scanline's first 16 pixels lag the write | DUSK RUN's Mednafen picture diff 0 against a browser frame, pinned in check-export-games |
-| **#216** | done (§11) | a note toy and an sfx toy run in Mednafen, recorded and measured | both ROMs run; the register/audio difference is listed: F masked (#228), R1 missing (#113), dirty glue `.bss` (#229); the command is §11 |
-| **#198** | done | the umbrella: everything #212–#216 links | a note toy and an sfx toy run in Mednafen (they do not yet play: #113/#228/#229); `check-ilvm`, `check-export-games` green |
+| **#216** | done (§11) | a note toy and an sfx toy run in Mednafen, recorded and measured | both ROMs run; the register/audio difference is listed: F masked (#238), R1 missing (#113), dirty glue `.bss` (#239); the command is §11 |
+| **#198** | done | the umbrella: everything #212–#216 links | a note toy and an sfx toy run in Mednafen (they do not yet play: #113/#238/#239); `check-ilvm`, `check-export-games` green |
 | **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (#216) |
 | **#200** | open | `tests/check-rom-sound.js`, the trace build, the docs | the Mednafen trace equals the studio's for note and sfx; the suites green; a cold break by another seat |
 
