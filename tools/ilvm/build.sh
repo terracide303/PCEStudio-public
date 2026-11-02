@@ -32,6 +32,12 @@
 # non-zero if either budget is broken.  The stack high-water mark itself is
 # measured by tools/ilvm/stack-canary.sh, not here.
 #
+# #215 makes the C and the engine need each other's outputs: ilvm_sound.c
+# calls the engine's fixed addresses (the generated hutrack-symbols.h) and
+# the engine's .bss base is the C image's measured __heap_start.  The build
+# resolves the cycle in two passes (see the comment at compile time below)
+# and asserts the second compile lands on the same RAM partition.
+#
 # Needs the prebuilt llvm-mos SDK (external, never vendored — the PCEAS rule
 # in docs/DECISIONS.md): /Volumes/External II/pce-tools/llvm-mos/llvm-mos,
 # override with LLVM_MOS.
@@ -67,11 +73,37 @@ mkdir -p tools/gen
 # variables at $2020-$207F and the engine's 94 B take $2080-$20DD.  The
 # assertions below read the built ELF, so a toolchain that ignores the flag
 # fails the build instead of silently overlapping the engine.
-"$CC" -Os -mlto-zp=96 -Itools/toyc \
-  -Wl,--defsym,__rom_bank0=0xc000 \
-  -Wl,--defsym,__rom_bank0_size=0x4000 \
-  -o "$OUT" tools/ilvm/ilvm_runtime.c tools/ilvm/ilvm.c
+#
+# #215's chicken-and-egg, resolved in two passes: ilvm_sound.c calls the
+# engine's fixed addresses from tools/gen/hutrack-symbols.h, and the engine's
+# .bss base is the C image's __heap_start — which needs a built C image.
+# Only the RAM addresses in the header move with the base (HUTRACK_HK_EAX0
+# lives in the engine .bss); the code addresses are fixed, and a #define
+# cannot change the C image's .bss size.  So:
+#   1. build-engine.sh pass 1 against the placeholder base $2200 — the code
+#      addresses are already final, the RAM addresses are not;
+#   2. compile the interpreter against that header and measure zp_end and
+#      __heap_start from the built ELF;
+#   3. build-engine.sh pass 2 against the measured heap — the final header;
+#   4. compile again with the final header.  The .bss size (and therefore
+#      __heap_start) cannot have moved, and the build asserts it did not.
+ENGINE_ZP_BASE=0x2080      # docs/ROM-SOUND.md §5's engine zero-page base
+STACK_MARGIN=787           # docs/ROM-SOUND.md §5's stack headroom floor
 
+# Pass 1: the engine with a placeholder .bss base, just to get the header's
+# code addresses (build-engine.sh also verifies the note table and the
+# patch sites, so both passes prove them).
+ENGINE_ZP_BASE=$ENGINE_ZP_BASE ENGINE_BSS_BASE=0x2200 \
+  tools/ilvm/build-engine.sh >/dev/null
+
+compile_c() {   # $1 = output path
+  "$CC" -Os -mlto-zp=96 -Itools/toyc -Itools/gen \
+    -Wl,--defsym,__rom_bank0=0xc000 \
+    -Wl,--defsym,__rom_bank0_size=0x4000 \
+    -o "$1" tools/ilvm/ilvm_runtime.c tools/ilvm/ilvm.c tools/ilvm/ilvm_sound.c
+}
+
+compile_c "$OUT"
 BYTES=$(wc -c < "$OUT" | tr -d ' ')
 if [ "$BYTES" != "16384" ]; then
   echo "ilvm image is $BYTES bytes; expected 16384 (2 physical banks)" >&2
@@ -81,7 +113,8 @@ fi
 # #214: the two RAM facts the partition needs, read from the interpreter's
 # own ELF (not from a constant in this script): where its zero page ends, and
 # where its .bss/heap start.  build-engine.sh places the engine against them.
-BUDGET=$(python3 -I - "$LLVM_MOS" tools/gen/ilvm.pce.elf <<'PY'
+measure_budget() {   # $1 = the ELF; prints "ZP_END HEAP_START"
+python3 -I - "$LLVM_MOS" "$1" <<'PY'
 import subprocess
 import sys
 
@@ -113,21 +146,32 @@ if not zp_end or heap is None:
                      "from %s" % elf)
 print("0x%04X 0x%04X" % (zp_end, heap))
 PY
-)
+}
+BUDGET=$(measure_budget tools/gen/ilvm.pce.elf)
 ZP_END=${BUDGET%% *}
 HEAP_START=${BUDGET##* }
-ENGINE_ZP_BASE=0x2080      # docs/ROM-SOUND.md §5's engine zero-page base
-STACK_MARGIN=787           # docs/ROM-SOUND.md §5's stack headroom floor
 if [ $((ZP_END)) -gt $((ENGINE_ZP_BASE)) ]; then
   echo "interpreter zero page ends at $ZP_END, past the engine's $ENGINE_ZP_BASE" >&2
   exit 1
 fi
 
-# #213: assemble the engine into its own two banks (vendor/hutrack is staged
-# into tools/gen/hutrack-stage; the build verifies the patch sites itself).
-# #214: its RAM is placed against the interpreter's measured ELF.
+# Pass 2: the engine against the measured heap — the final header — then the
+# final C image against it.  The second compile must land on the same
+# zp_end/__heap_start the engine was placed from, or the chicken-egg broke.
 ENGINE_ZP_BASE=$ENGINE_ZP_BASE ENGINE_BSS_BASE=$HEAP_START \
   tools/ilvm/build-engine.sh
+
+cp "$OUT" "$OUT.pass1"
+compile_c "$OUT"
+BUDGET2=$(measure_budget tools/gen/ilvm.pce.elf)
+ZP_END2=${BUDGET2%% *}
+HEAP_START2=${BUDGET2##* }
+if [ "$ZP_END2" != "$ZP_END" ] || [ "$HEAP_START2" != "$HEAP_START" ]; then
+  echo "the final compile moved the RAM partition ($ZP_END/$HEAP_START ->" \
+       "$ZP_END2/$HEAP_START2); the two-pass build broke" >&2
+  exit 1
+fi
+rm -f "$OUT.pass1"
 
 ENGINE_CODE=tools/gen/hutrack-code.bin
 ENGINE_TABLES=tools/gen/hutrack-tables.bin
@@ -206,7 +250,8 @@ for line in run([llvm + "/bin/llvm-nm", "--print-size", "--size-sort",
 
 functions = {name: symbols[name]["size"] for name in symbols if name in (
     "exec", "toy_boot", "toy_frame", "toy_raster", "main",
-    "ilvm_has_raster", "operand", "lua_mod", "lua_idiv")}
+    "ilvm_has_raster", "operand", "lua_mod", "lua_idiv",
+    "ilvm_sound_tick", "ilvm_note", "ilvm_sfx", "ilvm_music")}
 
 # #175: the table pool is ilvm.c's static `cells` array, placed by the linker
 # in .bss.  Record it by name so the section sizes can be read as
@@ -290,7 +335,7 @@ out = {
     "bank0": "physical 0 ($E000-$FFFF: vectors, startup, runtime)",
     "bank1": "physical 1 ($C000-$DFFF: the interpreter)",
     "bank2": "physical 2 ($A000-$BFFF: HuTrack engine code, #213)",
-    "bank3": "physical 3 ($8000-$9FFF: HuTrack pitch tables, #213)",
+    "bank3": "physical 3 ($8000-$9FFF: HuTrack pitch + note tables, #213/#215)",
     "data_bank": "physical 4, appended per toy by renderer/pce-rom.js",
     "sizes": sizes,
     "section_sizes": section_sizes,
@@ -298,7 +343,8 @@ out = {
     "ram_budget": budget,
     "functions": functions,
     "cc": run([llvm + "/bin/mos-pce-clang", "--version"]).splitlines()[0],
-    "flags": "-Os -mlto-zp=96 -Wl,--defsym,__rom_bank0=0xc000 "
+    "flags": "-Os -mlto-zp=96 -Itools/toyc -Itools/gen "
+             "-Wl,--defsym,__rom_bank0=0xc000 "
              "-Wl,--defsym,__rom_bank0_size=0x4000 "
              "+ HuTrack banks from tools/ilvm/build-engine.sh",
 }

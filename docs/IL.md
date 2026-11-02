@@ -1118,10 +1118,9 @@ Since #197 the container is **version 3** when the program has a sound
 instruction (`music`, `sfx`, `release`) or the `note` builtin: the version 2
 header layout (28 bytes, with an empty one-byte table section when there are
 no tables), because the sound engine the #194 cards add to the interpreter
-shares the v2 shape. The committed `renderer/ilvm.bin` reads versions 1 and 2
-only until #198 links that engine in, and `buildToyRom` refuses a version 3
-container the same way it refused a version 2 one before #175's interpreter
-read it — so a sound toy encodes fully but does not export a faulting ROM.
+shares the v2 shape. The committed `renderer/ilvm.bin` reads versions 1, 2
+and 3 since #215: the sound ops call the HuTrack engine bank and
+`buildToyRom` builds the ROM the way it has for version 2 since #175.
 
 | offset | size | field |
 |---|---|---|
@@ -1279,9 +1278,9 @@ Lua's `not false` is `true`.  A `not` result is a bool register, the same value
 a `cmp` or `br` condition already carries, so nothing downstream changes.
 
 A **`music`/`sfx`/`release`** instruction carries one call into the PSG sound
-engine the #194 cards vend into the interpreter (#197 encodes them; #198 links
-the engine, which is when the interpreter learns ops `20`–`22` and `buildToyRom`
-admits version 3).  `music` is two bytes (`song`), `release` two (`ch`), `sfx`
+engine the #194 cards vend into the interpreter (#197 encodes them; #215 makes
+the interpreter run them: ops `20`–`22` call the HuTrack engine bank, and
+`buildToyRom` admits version 3).  `music` is two bytes (`song`), `release` two (`ch`), `sfx`
 five (`ch`, `freq`, `volume`, `frames`); the operand semantics are the host
 toy surface's — `ch` is a PSG channel 0..5, `freq` the 12-bit F the `note`
 builtin's MIDI number rounds to, `volume` the AL word 0..31, `frames` how many
@@ -1289,16 +1288,14 @@ frames the channel is owned for.  `release(ch)` on a channel no sfx owns is a
 no-op (the host's release: nothing to give back), and there is no music-stop
 form — the browser host's toy surface has none, so the bytecode carries what
 the surface has (docs/ROM-SOUND.md §7).  Every container carrying one of
-these ops is version 3, even with no tables: the gate that stops TOWER and
-DUSK RUN today.
+these ops is version 3, even with no tables.
 
 `arith` ops are 0 add, 1 sub, 2 mul, 3 mod, 4 idiv, 5 band, 6 bor, 7 bxor,
 8 shl, 9 shr; `cmp` ops are 0 eq, 1 lt, 2 le; `reg` ids are 0 BXR, 1 BYR,
-2 CR; builtin 0 is `rgb`, builtin 1 is `note` — a MIDI number to the PSG's
-12-bit F, the same 7,159,090 / (64 × 440 × 2^((midi-69)/12)) the host uses,
-rounded to the nearest and clamped to 0..4095 (the interpreter implements
-them once the #198 engine link lands; the committed image implements only
-`rgb`).
+2 CR; builtin 0 is `rgb`, builtin 1 is `note` — a MIDI number to the PSG's 12-bit F, the same 7,159,090 / (64 × 440 × 2^((midi-69)/12)) the host uses,
+rounded to the nearest and clamped to 0..4095 (the interpreter's ROM table
+since #215: 512 entries at $8C00, docs/ROM-SOUND.md §7; the committed image
+implements only `rgb` among the other builtins).
 
 The hooks are **global slots**, not function ids: the chunk stores a closure
 in `init`, `frame` or `raster`, and the runtime calls whatever is there —

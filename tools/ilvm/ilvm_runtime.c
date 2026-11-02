@@ -65,6 +65,7 @@
 #include <pce.h>
 
 #include "toy_runtime.h"
+#include "ilvm_sound.h"
 
 /* ilvm: the one interpreter image carries the raster chain for every toy;
  * whether a toy uses it is decided at boot from its bytecode header. */
@@ -836,6 +837,8 @@ int main(void) {
       apply_base();
       toy_host_mode = MODE_BASE;
       joy_scan();
+      ilvm_sound_tick();            /* before frame(): SFX timers, then the
+                                     * engine tick (docs/ROM-SOUND.md §4) */
       toy_update_begin();
       toy_measure_begin();
       toy_frame(f);
@@ -875,6 +878,7 @@ int main(void) {
       toy_pend_nvram = 0;
       toy_host_mode = MODE_BASE;
       joy_scan();
+      ilvm_sound_tick();            /* same place as the non-raster loop */
       toy_update_begin();
       toy_measure_begin();
       toy_frame(f);
