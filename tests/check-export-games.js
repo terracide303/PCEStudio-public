@@ -95,14 +95,16 @@ const GAMES = [
   },
   {
     /* #186 carried sat, #187 `not`, and #197 carried the sfx instruction —
-     * so TOWER's bytecode route now encodes fully and buildToyRom refuses
-     * the version-3 container instead (the committed interpreter only
-     * reads versions 1 and 2; the #198 engine link admits version 3).  The
-     * gate throws a plain Error with no code and no function or pc, so the
-     * table's `where` is null and exportToy records code "error". */
+     * so TOWER's bytecode route encodes fully and buildToyRom refused the
+     * version-3 container (the committed interpreter only read versions 1
+     * and 2).  #215's interpreter reads version 3, so TOWER's encoding now
+     * passes the version gate and stops at the data bank instead: its
+     * bytecode (8,524 B) is over the 8 KiB data bank the interpreter reads.
+     * The refusal names no function or pc, so the table's `where` is null
+     * and exportToy records the buildToyRom code. */
     name: "TOWER", toy: "toys/tower/main.lua",
-    expect: { code: "error",
-              message: "pce-rom: bytecode version must be 1 or 2" },
+    expect: { code: "toy-data-bank-full",
+              message: "the interpreter reads one 8 KiB data bank" },
     where: null
   },
   {

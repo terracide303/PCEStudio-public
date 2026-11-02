@@ -22,14 +22,18 @@
  *      MAP_BANK.4 -> MAP_BANK.  PUSHBANK.4/PULLBANK.4 are byte-identical.
  *   2. The image's shape.  engine.bin is 32,768 B (four physical banks); the
  *      extracted banks are 8,192 B each; code ends at $BEC4 (7,876 B used,
- *      316 free in bank 2) and the tables end at $8B34 (2,868 B used, 5,324
- *      free in bank 3) — the numbers docs/ROM-SOUND.md §2 measured.  Bytes
- *      after each extent are $FF, and the extracted banks equal the raw
- *      image's banks 2 and 3 byte for byte.
+ *      316 free in bank 2) and bank 3 holds three extents — the pitch tables
+ *      to $8B34 (2,868 B), note(midi)'s 512-word table at $8C00-$9000
+ *      (#215) and the sound-op glue at $9000-$91F4 (500 B, #220), 3,596 B
+ *      free — the numbers docs/ROM-SOUND.md §2 measured.  Bytes outside the
+ *      extents are $FF, and the extracted banks equal the raw image's banks
+ *      2 and 3 byte for byte.
  *   3. The symbol header.  Every entry point docs/ROM-SOUND.md §7 names has
- *      a fixed address in bank 2 (page 5), the RAM interface symbols sit at
- *      the §5 addresses ($2080, $2200), and tools/gen/hutrack-symbols.h
- *      carries the same numbers as hutrack-image.json.
+ *      a fixed address in bank 2 (page 5) or bank 3 (page 4), the RAM
+ *      interface symbols sit at the §5 addresses ($2080, $2200, and the
+ *      glue's snd_args_frames at the engine bss end), and
+ *      tools/gen/hutrack-symbols.h carries the same numbers as
+ *      hutrack-image.json.
  *
  * Honest limits: this is the engine image only.  It does not link either
  * bank into renderer/ilvm.bin or make a toy ROM (that is #213), and it does
@@ -58,6 +62,11 @@ const CODE_BYTES = 7876;
 const TABLES_START = 0x8000;
 const TABLES_END = 0x8b34;
 const TABLES_BYTES = 2868;
+const NOTE_TABLE_START = 0x8c00;       /* #215: note(midi)'s 512 words */
+const NOTE_TABLE_BYTES = 1024;
+const GLUE_START = 0x9000;             /* #220: the sound-op glue */
+const GLUE_END = 0x91f4;
+const GLUE_BYTES = 500;
 
 /* The three call sites the staged copy narrows, and the files they live in.
  * The line numbers are the vendored ones; the patch asserts the content. */
@@ -68,15 +77,24 @@ const PATCH_SITES = [
     owner: "Process.envelopes" },
 ];
 
-/* docs/ROM-SOUND.md §7: what ilvm.c calls by fixed address. */
+/* docs/ROM-SOUND.md §7: what ilvm.c calls by fixed address.  The code-bank
+ * engine entry points, the tables-bank sound-op glue (#220) and note table
+ * (#215), and the RAM cells the wrappers write. */
 const INTERFACE = [
   "HuTrackTick", "HuTrackEngine.EngineCall", "HuTrackEngine.Init",
   "HuTrackEngine.QueueSong", "HuTrackEngine.playSong", "HuTrackEngine.stop",
   "HuTrackEngine.setChanForSFX", "HuTrackEngine.chanReleaseSFX",
   "HuTrack.returnVec", "_hk.R1", "_hk.EAX0",
+  "SndGlueMap", "SndGlueReset", "SndGlueNote", "SndGlueSfx",
+  "SndGlueRelease", "SndGlueMusic", "SndGlueTick",
+  "HuTrack.NoteTable", "snd_args_frames",
 ];
 const RAM = { "HuTrack.returnVec": 0x2200, "_hk.R1": 0x2080,
-              "_hk.EAX0": 0x2086 };
+              "_hk.EAX0": 0x2086, "snd_args_frames": 0x2655 };
+const TABLES_IFACE = new Set([
+  "SndGlueMap", "SndGlueReset", "SndGlueNote", "SndGlueSfx",
+  "SndGlueRelease", "SndGlueMusic", "SndGlueTick", "HuTrack.NoteTable",
+]);
 
 let failures = 0;
 function fail(msg) {
@@ -253,14 +271,35 @@ function checkImage(out) {
       t.bytes !== TABLES_BYTES)
     fail(`tables bank is ${hex(t.start)}-${hex(t.end)} (${t.bytes} B); expected ` +
          `${hex(TABLES_START)}-${hex(TABLES_END)} (${TABLES_BYTES} B)`);
+  const nt = json.banks.note_table;
+  if (!nt || nt.bank !== TABLES_BANK || nt.start !== NOTE_TABLE_START ||
+      nt.end !== NOTE_TABLE_START + NOTE_TABLE_BYTES || nt.bytes !== NOTE_TABLE_BYTES)
+    fail("note_table bank is not $8C00-$9000 (1024 B) in bank 3");
+  const gl = json.banks.sound_glue;
+  if (!gl || gl.bank !== TABLES_BANK || gl.start !== GLUE_START ||
+      gl.end !== GLUE_END || gl.bytes !== GLUE_BYTES)
+    fail(`sound_glue bank is ${gl && hex(gl.start)}-${gl && hex(gl.end)} ` +
+         `(${gl && gl.bytes} B); expected ${hex(GLUE_START)}-${hex(GLUE_END)} ` +
+         `(${GLUE_BYTES} B) in bank 3`);
 
-  /* the used extent is not empty and the rest of each bank is erased ($FF) */
-  for (const [name, buf, used] of [["code", code, CODE_BYTES],
-                                   ["tables", tables, TABLES_BYTES]]) {
-    if (buf[used - 1] === 0xff) fail(`${name} bank's last used byte is $FF`);
-    for (let i = used; i < buf.length; i++)
-      if (buf[i] !== 0xff) { fail(`${name} bank has data at ${hex(i)} past its extent`); break; }
+  /* each used extent ends on a non-$FF byte and every byte outside the
+   * extents is erased ($FF): the code bank after $BEC4, the pitch-table
+   * gap $8B34-$8C00, and the tables bank after the glue's end. */
+  if (code[CODE_BYTES - 1] === 0xff) fail("code bank's last used byte is $FF");
+  for (let i = CODE_BYTES; i < code.length; i++)
+    if (code[i] !== 0xff) { fail(`code bank has data at ${hex(i)} past its extent`); break; }
+  const extents = [[TABLES_START, TABLES_END], [NOTE_TABLE_START,
+    NOTE_TABLE_START + NOTE_TABLE_BYTES], [GLUE_START, GLUE_END]];
+  for (const [start, end] of extents) {
+    if (tables[end - start - 1] === 0xff)
+      fail(`extent ${hex(start)}-${hex(end)}'s last used byte is $FF`);
   }
+  for (let i = TABLES_BYTES; i < NOTE_TABLE_START - TABLES_START; i++)
+    if (tables[i] !== 0xff) { fail(`tables bank has data at ${hex(i + TABLES_START)} ` +
+      `in the pitch-table gap`); break; }
+  for (let i = GLUE_END - TABLES_START; i < tables.length; i++)
+    if (tables[i] !== 0xff) { fail(`tables bank has data at ${hex(i + TABLES_START)} ` +
+      `past the glue`); break; }
 
   /* the banks are the raw image's physical banks 2 and 3, byte for byte */
   const rawPath = path.join(out, "hutrack-stage", "engine.bin");
@@ -278,7 +317,7 @@ function checkImage(out) {
     }
   }
 
-  /* every interface symbol is in the code bank (or RAM), in range */
+  /* every interface symbol is in its bank (or RAM), in range */
   for (const name of INTERFACE) {
     const s = json.symbols[name];
     if (!s) { fail(`symbol ${name} missing from the image manifest`); continue; }
@@ -286,6 +325,11 @@ function checkImage(out) {
       if (s.bank !== null) fail(`${name} has bank ${s.bank}; expected RAM`);
       if (s.addr !== RAM[name])
         fail(`${name} is at ${hex(s.addr)}; docs/ROM-SOUND.md §5 says ${hex(RAM[name])}`);
+    } else if (TABLES_IFACE.has(name)) {
+      if (s.bank !== TABLES_BANK)
+        fail(`${name} is in bank ${s.bank}; expected the tables bank ${TABLES_BANK}`);
+      if (s.addr < TABLES_START || s.addr >= GLUE_END)
+        fail(`${name} at ${hex(s.addr)} is outside page 4's used extent`);
     } else {
       if (s.bank !== CODE_BANK)
         fail(`${name} is in bank ${s.bank}; expected the code bank ${CODE_BANK}`);
@@ -326,6 +370,15 @@ function checkImage(out) {
       "HuTrack.returnVec": "HUTRACK_RETURN_VEC",
       "_hk.R1": "HUTRACK_HK_R1",
       "_hk.EAX0": "HUTRACK_HK_EAX0",
+      "HuTrack.NoteTable": "HUTRACK_NOTE_TABLE",
+      SndGlueReset: "HUTRACK_SND_RESET",
+      SndGlueMap: "HUTRACK_SND_MAP",
+      SndGlueNote: "HUTRACK_SND_NOTE",
+      SndGlueSfx: "HUTRACK_SND_SFX",
+      SndGlueRelease: "HUTRACK_SND_RELEASE",
+      SndGlueMusic: "HUTRACK_SND_MUSIC",
+      SndGlueTick: "HUTRACK_SND_TICK",
+      snd_args_frames: "HUTRACK_SND_FRAMES",
     }[name];
     const m = new RegExp(`^#define\\s+${define}\\s+(0x[0-9A-Fa-f]+)`, "m")
       .exec(header);
@@ -336,8 +389,9 @@ function checkImage(out) {
 
   if (failures === 0)
     console.log(`image: code $A000-$BEC4 (${CODE_BYTES} B, 316 free), ` +
-                `tables $8000-$8B34 (${TABLES_BYTES} B, 5324 free), ` +
-                `${INTERFACE.length} symbols`);
+                `pitch tables $8000-$8B34 (${TABLES_BYTES} B), ` +
+                `note table $8C00-$9000, glue $9000-$91F4 (${GLUE_BYTES} B), ` +
+                `3,596 free, ${INTERFACE.length} symbols`);
 }
 
 /* ---- run ---- */

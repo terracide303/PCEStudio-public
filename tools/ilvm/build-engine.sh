@@ -200,6 +200,10 @@ required = {
     "HuTrack.Tables.end": None,
     "HuTrack.NoteTable": None,
     "HuTrack.NoteTable.end": None,
+    "SndGlueStart": None,
+    "SndGlueEnd": None,
+    "SndGlueBss.start": None,
+    "SndGlueBss.end": None,
 }
 
 def need(name):
@@ -235,6 +239,14 @@ if tab_start != 0x8000 or not (0x8000 < tab_end <= 0xA000):
 if note_start != 0x8C00 or note_end != 0x9000:
     raise SystemExit("note table extent %04X-%04X is not $8C00-$9000" %
                      (note_start, note_end))
+glue_start = need("SndGlueStart")
+glue_end = need("SndGlueEnd")
+if symbols["SndGlueStart"]["bank"] != TABLES_BANK:
+    raise SystemExit("SndGlueStart is in bank %r, expected %d" %
+                     (symbols["SndGlueStart"]["bank"], TABLES_BANK))
+if glue_start != 0x9000 or not (0x9000 < glue_end <= 0xA000):
+    raise SystemExit("sound-op glue extent %04X-%04X is not inside "
+                     "$9000-$9FFF" % (glue_start, glue_end))
 
 code = raw[CODE_BANK * BANK_BYTES:(CODE_BANK + 1) * BANK_BYTES]
 tables = raw[TABLES_BANK * BANK_BYTES:(TABLES_BANK + 1) * BANK_BYTES]
@@ -244,15 +256,15 @@ note_bytes = note_end - note_start
 
 # The whole bank is written, but only the extents are real; padding is $FF so
 # a later reader can tell used bytes from unused ones.  The tables bank has
-# two extents (pitch tables at $8000, the note table at $8C00) with an $FF
-# gap and an $FF tail.
+# three extents (pitch tables at $8000, the note table at $8C00, the sound-op
+# glue at $9000) with $FF gaps and an $FF tail.
 if any(b != 0xFF for b in code[code_bytes:]):
     raise SystemExit("code bank has non-$FF bytes after HuTrackCode.end")
 if any(b != 0xFF for b in tables[tables_bytes:note_start - tab_start]):
     raise SystemExit("table bank has non-$FF bytes between the pitch tables "
                      "and the note table")
-if any(b != 0xFF for b in tables[note_end - tab_start:]):
-    raise SystemExit("table bank has non-$FF bytes after HuTrack.NoteTable.end")
+if any(b != 0xFF for b in tables[glue_end - tab_start:]):
+    raise SystemExit("table bank has non-$FF bytes after SndGlueEnd")
 
 # ---- the engine's RAM extents (#214) ---------------------------------------
 # The placement came from build.sh as ENGINE_ZP_BASE/ENGINE_BSS_BASE; the
@@ -281,6 +293,12 @@ if zp_end <= zp_start or zp_end > 0x2100:
 if bss_end <= bss_start or bss_end > 0x4000:
     raise SystemExit("engine .bss $%04X-$%04X is outside BaseRAM below the "
                      "stack" % (bss_start, bss_end))
+glue_bss_start = need("SndGlueBss.start")
+glue_bss_end = need("SndGlueBss.end")
+if not (bss_start < glue_bss_start < glue_bss_end <= bss_end):
+    raise SystemExit("glue .bss $%04X-$%04X is not inside the engine's "
+                     ".bss $%04X-$%04X" % (glue_bss_start, glue_bss_end,
+                                           bss_start, bss_end))
 zp_bytes = zp_end - zp_start
 bss_bytes = bss_end - bss_start
 
@@ -305,6 +323,14 @@ INTERFACE = [
     ("_hk.R1", "HUTRACK_HK_R1", "scratch register"),
     ("_hk.EAX0", "HUTRACK_HK_EAX0", "4-byte argument register"),
     ("HuTrack.NoteTable", "HUTRACK_NOTE_TABLE", "note(midi)'s 512-word table"),
+    ("SndGlueReset", "HUTRACK_SND_RESET", "the sound ops' per-boot reset"),
+    ("SndGlueMap", "HUTRACK_SND_MAP", "map engine banks, read song trailer"),
+    ("SndGlueNote", "HUTRACK_SND_NOTE", "note(midi): table read"),
+    ("SndGlueSfx", "HUTRACK_SND_SFX", "sfx(): reserve, upload, start"),
+    ("SndGlueRelease", "HUTRACK_SND_RELEASE", "release(): give the channel back"),
+    ("SndGlueMusic", "HUTRACK_SND_MUSIC", "music(): init, queue, play"),
+    ("SndGlueTick", "HUTRACK_SND_TICK", "per-toy-frame timers and engine tick"),
+    ("snd_args_frames", "HUTRACK_SND_FRAMES", "sfx()'s frames argument cell"),
 ]
 interface = []
 for symbol, define, what in INTERFACE:
@@ -378,11 +404,22 @@ manifest = {
                        "source": "tools/ilvm/note-table.inc",
                        "generator": "tools/ilvm/gen-note-table.js (verified "
                                     "against the committed tables at build)"},
+        "sound_glue": {"bank": TABLES_BANK, "page": 4, "start": glue_start,
+                       "end": glue_end, "bytes": glue_end - glue_start,
+                       "card": "#220",
+                       "what": "the interpreter's sound ops (note/sfx/"
+                               "release/music/tick), called by fixed address "
+                               "from tools/ilvm/ilvm_sound.c"},
     },
     # #214: the engine's own RAM extents, measured from the staging assembly.
     "ram": {
         "zero_page": {"start": zp_start, "end": zp_end, "bytes": zp_bytes},
         "bss": {"start": bss_start, "end": bss_end, "bytes": bss_bytes},
+        "sound_glue_bss": {"start": glue_bss_start, "end": glue_bss_end,
+                           "bytes": glue_bss_end - glue_bss_start,
+                           "card": "#220",
+                           "what": "the sound ops' state, inside the "
+                                   "engine's .bss"},
     },
     "symbols": {entry["symbol"]: {"addr": entry["addr"],
                                   "bank": entry["bank"]}
@@ -397,8 +434,12 @@ print("engine code    bank %d: $%04X-$%04X  %4d B of %d  (%d free)" %
       (CODE_BANK, code_start, code_end, code_bytes, BANK_BYTES,
        BANK_BYTES - code_bytes))
 print("engine tables  bank %d: $%04X-$%04X  %4d B of %d  (%d free)" %
-      (TABLES_BANK, tab_start, tab_end, tables_bytes, BANK_BYTES,
-       BANK_BYTES - tables_bytes))
+      (TABLES_BANK, tab_start, glue_end, glue_end - tab_start, BANK_BYTES,
+       BANK_BYTES - (glue_end - tab_start)))
+print("  pitch tables  $%04X-$%04X  %4d B" % (tab_start, tab_end, tables_bytes))
+print("  note table    $%04X-$%04X  %4d B" % (note_start, note_end, note_bytes))
+print("  sound-op glue $%04X-$%04X  %4d B" % (glue_start, glue_end,
+                                                glue_end - glue_start))
 print("note table     bank %d: $%04X-$%04X  %4d B" %
       (TABLES_BANK, note_start, note_end, note_bytes))
 print("engine RAM     zero page $%04X-$%04X  %3d B" %

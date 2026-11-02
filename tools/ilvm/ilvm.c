@@ -151,6 +151,21 @@ static void map_data_bank(uint8_t bank) {
 }
 #endif
 
+/* The engine banks (card #215): page 5 = physical bank 2 (engine code),
+ * page 4 = physical bank 3 (tables and the sound-op glue).  Mapped at boot
+ * so the glue's reset and the per-frame tick are reachable before any sound
+ * op has run — the glue's SndGlueMap re-maps them on its first op anyway
+ * (idempotent), and nothing else in the interpreter uses those pages
+ * (tools/ilvm/ilvm_sound.c's header). */
+#ifndef ILVM_HOST
+static void map_sound_banks(void) {
+  __asm__ volatile ("tam #$10" : : "a" ((uint8_t)3));   /* MPR4: tables + glue */
+  __asm__ volatile ("tam #$20" : : "a" ((uint8_t)2));   /* MPR5: engine code */
+}
+#else
+static void map_sound_banks(void) { }
+#endif
+
 /* ---- the stack canary (#214) ------------------------------------------ *
  * The shipped image has no probe.  tools/ilvm/stack-canary.sh rebuilds the
  * same sources with -DTOY_STACK_PROBE, so every exec() entry records the
@@ -191,11 +206,53 @@ __attribute__((noinline)) static int32_t ri32(uint16_t off) {
                    ((uint32_t)rb((uint16_t)(off + 3)) << 24));
 }
 
+/* ---- the / // % builtins, without the backend's 643-byte __divmodsi4 ----
+ * Any C division here makes llvm-mos materialize its generic 32-bit
+ * __divmodsi4 (plus __modsi3/__umodsi3 under it), which alone is a third of
+ * what the sound ops must save (#220).  The interpreter's only 32-bit
+ * divisions are these two builtins, so they divide by hand instead: one
+ * unsigned restoring division, one bit per iteration, then the signs —
+ * C's truncated semantics, which is what pce-cgen.js's il_lua_mod/
+ * il_lua_idiv use on the browser side.  The host build runs the same code,
+ * so the parity harness pins the algorithm to the browser's.
+ *
+ * The division operator's one undefined corner, INT_MIN / -1, is undefined
+ * in the browser's own generated C too; here it is merely well-defined
+ * (it yields q = 0, r = INT_MIN). */
+__attribute__((noinline))
+static uint32_t udiv32(uint32_t n, uint32_t d, uint32_t *rem) {
+  uint32_t q = 0, r = 0, bit = 0x80000000u;
+  int8_t i;
+#pragma clang loop unroll(disable)
+  for (i = 0; i < 32; i++) {
+    r = (r << 1) | (uint32_t)(n >= 0x80000000u);
+    n <<= 1;
+    if (r >= d) { r -= d; q |= bit; }
+    bit >>= 1;
+  }
+  *rem = r;
+  return q;
+}
+
+/* Truncated i32 division from the unsigned magnitudes: |q| = floor(|x|/|y|),
+ * |r| = |x| mod |y|; q takes the xor of the signs and r the dividend's.
+ * The unsigned negations keep INT_MIN's magnitude well-defined.  d != 0
+ * (both callers guard, as the old builtins did). */
+__attribute__((noinline))
+static void sdivmod(int32_t x, int32_t y, int32_t *q, int32_t *r) {
+  uint32_t ux = (x < 0) ? (0u - (uint32_t)x) : (uint32_t)x;
+  uint32_t uy = (y < 0) ? (0u - (uint32_t)y) : (uint32_t)y;
+  uint32_t ur;
+  uint32_t uq = udiv32(ux, uy, &ur);
+  *q = (int32_t)(((x < 0) != (y < 0)) ? (0u - uq) : uq);
+  *r = (int32_t)((x < 0) ? (0u - ur) : ur);
+}
+
 /* Lua's `%`: the result has the divisor's sign (pce-cgen.js's il_lua_mod). */
 __attribute__((noinline)) static int32_t lua_mod(int32_t x, int32_t y) {
-  int32_t m;
+  int32_t m, q;
   if (y == 0) return 0;          /* the reference interpreter raises */
-  m = x % y;
+  sdivmod(x, y, &q, &m);
   if (m != 0 && ((m < 0) != (y < 0))) m += y;
   return m;
 }
@@ -204,8 +261,7 @@ __attribute__((noinline)) static int32_t lua_mod(int32_t x, int32_t y) {
 __attribute__((noinline)) static int32_t lua_idiv(int32_t x, int32_t y) {
   int32_t q, r;
   if (y == 0) return 0;
-  q = x / y;
-  r = x % y;
+  sdivmod(x, y, &q, &r);
   if (r != 0 && ((r < 0) != (y < 0))) q--;
   return q;
 }
@@ -435,7 +491,11 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       for (i = 0; i < CALL_ARGS; i++) pargs[i] = 0;
       for (i = 0; i < n; i++) pargs[i] = operand(r, rb(pc++));
       if (aa == 0) v = toy_rgb(pargs[0], pargs[1], pargs[2]);
+#ifdef ILVM_HOST
       else if (aa == 1) v = ilvm_note(pargs[0]);
+#else
+      else if (aa == 1) v = ilvm_note(pargs);   /* console: pointer form */
+#endif
       else { fault = 1; return 0; }
       r[d] = v;
       break;
@@ -561,17 +621,29 @@ static int32_t exec(uint8_t fid, uint8_t clh,
     }
     case 0x20:                     /* music (#215, docs/ROM-SOUND.md) */
       av = operand(r, rb(pc++));   /* song index */
+#ifdef ILVM_HOST
       ilvm_music((uint8_t)av);
+#else
+      ilvm_music(&av);             /* console: pointer form */
+#endif
       break;
     case 0x21: {                   /* sfx */
       int32_t pargs[CALL_ARGS];
       for (i = 0; i < CALL_ARGS; i++) pargs[i] = operand(r, rb(pc++));
+#ifdef ILVM_HOST
       ilvm_sfx((uint8_t)pargs[0], pargs[1], pargs[2], pargs[3]);
+#else
+      ilvm_sfx(pargs);             /* console: pointer form */
+#endif
       break;
     }
     case 0x22:                     /* release */
       av = operand(r, rb(pc++));   /* channel */
+#ifdef ILVM_HOST
       ilvm_release((uint8_t)av);
+#else
+      ilvm_release(&av);           /* console: pointer form */
+#endif
       break;
     default:
       /* Every other opcode is refused by the encoder, so reaching one is
@@ -592,6 +664,7 @@ void toy_boot(void) {
   clos_next = 1;
   nfunc = 0; nglobal = 0; nconst = 0; nslots = 0;
   init_slot = 0xFF; frame_slot = 0xFF; raster_slot = 0xFF;
+  map_sound_banks();           /* the glue's reset/tick jsr page 4 */
   ilvm_sound_reset();
 
   map_data_bank(DATA_BANK);

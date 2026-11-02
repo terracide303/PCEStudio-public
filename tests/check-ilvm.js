@@ -968,9 +968,14 @@ function bytesDiff(a, b) {
 }
 
 function buildHostvm(bin, ilvmSource) {
+  /* ilvm_sound.c since #215: the sound ops' host half, recording through
+   * hostvm.c's ilvm_host_psg_write.  -I tools/ilvm so a mutant ilvm.c
+   * written into the scratch dir still finds ilvm_sound.h. */
   const r = spawnSync("cc", [
     "-DILVM_HOST", "-O2", "-I", path.join(ROOT, "tools", "toyc"),
-    ilvmSource, path.join(ROOT, "tools", "ilvm", "hostvm.c"), "-o", bin
+    "-I", path.join(ROOT, "tools", "ilvm"),
+    ilvmSource, path.join(ROOT, "tools", "ilvm", "ilvm_sound.c"),
+    path.join(ROOT, "tools", "ilvm", "hostvm.c"), "-o", bin
   ], { cwd: ROOT, encoding: "utf8" });
   if (r.status !== 0) {
     const out = ((r.stderr || "") + (r.stdout || "")).trim().split("\n");

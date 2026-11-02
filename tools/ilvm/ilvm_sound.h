@@ -1,9 +1,10 @@
-/* tools/ilvm/ilvm_sound.h — the interpreter's sound ops (card #215;
+/* tools/ilvm/ilvm_sound.h — the interpreter's sound ops (card #215, #220;
  * design: docs/ROM-SOUND.md §7).
  *
  * tools/ilvm/ilvm_sound.c implements these for both builds: the console
- * calls the HuTrack engine banks (tools/gen/hutrack-symbols.h) and writes
- * the PSG registers directly; the host build (ILVM_HOST) runs the same
+ * jsr's the sound-op glue in the engine's tables bank (assembled by
+ * tools/ilvm/build-engine.sh, called by fixed address from the generated
+ * tools/gen/hutrack-symbols.h); the host build (ILVM_HOST) runs the same
  * op-level logic and records the same PSG write streams through hostvm.c's
  * ilvm_host_psg_write so tests/check-rom-sound.js can compare them to the
  * browser's rt.sound.events without an emulator.
@@ -16,8 +17,9 @@
 /* Called by toy_boot for every boot: all sound state back to idle. */
 void ilvm_sound_reset(void);
 
-/* note(midi): the PSG's 12-bit F from the ROM table (console) or the
- * committed array (host); the table is the browser's own formula. */
+#ifdef ILVM_HOST
+/* note(midi): the PSG's 12-bit F from the committed array; the table is the
+ * browser's own formula. */
 int32_t ilvm_note(int32_t midi);
 
 /* music(index): queue and play a song from the data bank's trailer (the
@@ -35,6 +37,15 @@ void ilvm_sfx(uint8_t ch, int32_t freq, int32_t volume, int32_t frames);
  * (the browser returns too, and the engine's chanReleaseSFX would no-op
  * on its inProgress bit). */
 void ilvm_release(uint8_t ch);
+#else
+/* The console build takes the dispatch's pargs array directly: exec passes
+ * one zero-page pointer instead of materializing four 32-bit arguments
+ * across the ABI boundary (#220).  The glue owns the operand clamps. */
+int32_t ilvm_note(const int32_t *pargs);
+void ilvm_music(const int32_t *pargs);
+void ilvm_sfx(const int32_t *pargs);
+void ilvm_release(const int32_t *pargs);
+#endif
 
 /* Once per toy frame, before frame(): run down the SFX timers and, if a
  * song is playing, tick the engine (docs/ROM-SOUND.md §4). */
