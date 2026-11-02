@@ -17,8 +17,8 @@
  *     4  u8 version (1; 2 when the program has a table instruction; 3 when
  *             it has a sound op — music/sfx/release or the note builtin —
  *             and then the version 2 layout below.  The committed
- *             interpreter reads 1 and 2 and refuses a version 3 container
- *             at boot until the #194 engine link lands in #198.)
+ *             interpreter reads 1, 2 and 3 since #215: the sound ops call
+ *             the HuTrack engine bank.)
  *     5  u8 flags             bit 0: the toy has a raster() callback
  *     6  u8 initSlot          0xFF when the toy has no init()
  *     7  u8 frameSlot         0xFF when the toy has no frame()
@@ -183,8 +183,8 @@
   var VERSION = 1;
   var VERSION_TABLES = 2;
   var VERSION_SOUND = 3;      /* a version 2 layout that may carry the sound
-                               * ops; the committed interpreter reads 1 and 2
-                               * and refuses the container until #198 (#194) */
+                               * ops; the committed interpreter reads it
+                               * since #215 (docs/ROM-SOUND.md) */
   var MAGIC = "ILBC";
   var HEADER = 24;
   var HEADER_TABLES = 28;
@@ -1714,9 +1714,9 @@
       { id: "sound", label: "music(song), sfx(ch, freq, volume, frames), " +
         "release(ch) and note(midi)",
         detail: "a sound toy's container is version 3, which the committed " +
-                "interpreter does not read — export refuses the ROM until " +
-                "the engine link lands.  The host harness runs the same " +
-                "ops today.",
+                "interpreter reads since #215: note and sfx match the " +
+                "browser on the host harness, music runs on the engine " +
+                "with the ROM's song table (docs/ROM-SOUND.md).",
         ops: ["music", "sfx", "release"] }
     ],
     refused: REFUSALS

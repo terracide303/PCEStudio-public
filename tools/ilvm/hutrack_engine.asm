@@ -78,3 +78,17 @@ HuTrackCode.end:
     .bank $03, "Tables"
     .org $8000
     .include "HuTrack/engine/HuTrack_pitch_tables.inc"
+
+; note(midi) for the interpreter's builtin (card #215, docs/ROM-SOUND.md §7):
+; 512 words at $8C00, generated from renderer/pce-il.js's noteFrequency() by
+; tools/ilvm/gen-note-table.js — build-engine.sh stages the committed copy and
+; fails the build if regeneration drifts.  The pitch tables end well below
+; $8C00 and the bank is padded to 8 KiB anyway, so the table costs nothing.
+    .org $8C00
+HuTrack.NoteTable:
+    .include "note-table.inc"
+HuTrack.NoteTable.end:
+
+    .if (HuTrack.NoteTable.end > $9000)
+      .fail note table overflows $8C00-$8FFF (512 words).
+    .endif

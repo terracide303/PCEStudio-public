@@ -67,10 +67,21 @@ if pgrep -x mednafen >/dev/null 2>&1; then
 fi
 
 echo "== probe image ($SCRATCH)"
-"$CC" -Os -DTOY_STACK_PROBE -mlto-zp=96 -Itools/toyc \
+# #215: the probe compiles ilvm_sound.c too, so it needs the generated
+# engine header first — the same two passes as tools/ilvm/build.sh: build
+# the engine against the placeholder base, compile, measure, rebuild the
+# engine against the measured heap, and take the pass-1 compile's ELF (its
+# .bss cannot move with a #define change, which build.sh asserts; here the
+# probe only reads __heap_start back out of that ELF).
+OUT="$SCRATCH/engine" STAGE="$SCRATCH/engine/hutrack-stage" \
+  ENGINE_ZP_BASE=0x2080 ENGINE_BSS_BASE=0x2200 \
+  tools/ilvm/build-engine.sh > "$SCRATCH/build-engine-p1.log"
+
+"$CC" -Os -DTOY_STACK_PROBE -mlto-zp=96 -Itools/toyc -Itools/gen \
   -Wl,--defsym,__rom_bank0=0xc000 \
   -Wl,--defsym,__rom_bank0_size=0x4000 \
-  -o "$SCRATCH/probe.pce" tools/ilvm/ilvm_runtime.c tools/ilvm/ilvm.c
+  -o "$SCRATCH/probe.pce" tools/ilvm/ilvm_runtime.c tools/ilvm/ilvm.c \
+  tools/ilvm/ilvm_sound.c
 BYTES=$(wc -c < "$SCRATCH/probe.pce" | tr -d ' ')
 if [ "$BYTES" != "16384" ]; then
   echo "probe image is $BYTES bytes; expected 16384" >&2

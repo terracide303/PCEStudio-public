@@ -38,6 +38,10 @@
  */
 #include <stdint.h>
 
+/* The sound ops (card #215): tools/ilvm/ilvm_sound.c holds music/sfx/
+ * release/note's logic for both builds; this file only dispatches to it. */
+#include "ilvm_sound.h"
+
 /* The toy writers (pal, reg, vset, sat, and since #189 the shared
  * toy_sprite) live in tools/toyc/toy_runtime.h so the host build and the
  * console build interpret the same names; each side provides the toy_*
@@ -422,7 +426,7 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       break;
     case 0x13: {                   /* builtin */
       int32_t pargs[CALL_ARGS];
-      aa = rb(pc++);               /* builtin id (0 = rgb) */
+      aa = rb(pc++);               /* builtin id (0 = rgb, 1 = note) */
       d = rb(pc++);
       n = rb(pc++);
       /* Every builtin the interpreter has takes at most four arguments,
@@ -431,6 +435,7 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       for (i = 0; i < CALL_ARGS; i++) pargs[i] = 0;
       for (i = 0; i < n; i++) pargs[i] = operand(r, rb(pc++));
       if (aa == 0) v = toy_rgb(pargs[0], pargs[1], pargs[2]);
+      else if (aa == 1) v = ilvm_note(pargs[0]);
       else { fault = 1; return 0; }
       r[d] = v;
       break;
@@ -554,6 +559,20 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       } else { fault = 1; return 0; }
       break;
     }
+    case 0x20:                     /* music (#215, docs/ROM-SOUND.md) */
+      av = operand(r, rb(pc++));   /* song index */
+      ilvm_music((uint8_t)av);
+      break;
+    case 0x21: {                   /* sfx */
+      int32_t pargs[CALL_ARGS];
+      for (i = 0; i < CALL_ARGS; i++) pargs[i] = operand(r, rb(pc++));
+      ilvm_sfx((uint8_t)pargs[0], pargs[1], pargs[2], pargs[3]);
+      break;
+    }
+    case 0x22:                     /* release */
+      av = operand(r, rb(pc++));   /* channel */
+      ilvm_release((uint8_t)av);
+      break;
     default:
       /* Every other opcode is refused by the encoder, so reaching one is
        * a corrupt container: stop rather than run a wrong toy. */
@@ -573,6 +592,7 @@ void toy_boot(void) {
   clos_next = 1;
   nfunc = 0; nglobal = 0; nconst = 0; nslots = 0;
   init_slot = 0xFF; frame_slot = 0xFF; raster_slot = 0xFF;
+  ilvm_sound_reset();
 
   map_data_bank(DATA_BANK);
   if (rb(0) != 'I' || rb(1) != 'L' || rb(2) != 'B' || rb(3) != 'C') {
@@ -581,7 +601,7 @@ void toy_boot(void) {
     return;
   }
   ver = rb(4);
-  if (ver != 1 && ver != 2) {
+  if (ver != 1 && ver != 2 && ver != 3) {
     fault = 1;
     toy_display_on();
     return;
@@ -630,10 +650,11 @@ void toy_boot(void) {
     else { fault = 1; toy_display_on(); return; }
   }
 
-  /* The table section (version 2): every slot's place and shape in the fixed
-   * pool.  A slot whose cells end past the pool is a corrupt container, not
-   * a toy: stop before anything runs, the way an oversized function does. */
-  if (ver == 2) {
+  /* The table section (version 2 and 3): every slot's place and shape in
+   * the fixed pool.  A slot whose cells end past the pool is a corrupt
+   * container, not a toy: stop before anything runs, the way an oversized
+   * function does. */
+  if (ver >= 2) {
     tabOff = rw(20);
     nslots = rb(tabOff);
     if (nslots > MAX_SLOTS) { fault = 1; toy_display_on(); return; }
