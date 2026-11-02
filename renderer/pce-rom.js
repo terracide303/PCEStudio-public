@@ -149,6 +149,10 @@
   var ILVM_BYTES = 4 * BANK;     /* 32768 */
   var TOY_DATA_BANK = 4;
 
+  /* The song trailer's offset in the data bank (card #215; the console
+   * reads it at DATA_BANK's last 32 bytes, tools/ilvm/ilvm_sound.c). */
+  var SONG_TABLE_OFF = 0x1FE0;
+
   /* MWR bits 4-5: BAT width (0:32, 1:64, 2/3:128); bit 6: BAT height
    * (0:32, 1:64).  Same order as viewer.asm's bat_words table. */
   function batWords(mwr) {
@@ -619,13 +623,10 @@
     /* #172's container version 2 carries the table section; the committed
      * interpreter image reads it since #175.  Version 1 stays byte-identical
      * (a table-free toy is unaffected).  #197's version 3 carries the sound
-     * ops; the committed interpreter does not read it, so the container is
-     * refused here rather than faulting on the console — the #198 interpreter
-     * accepts it, the way #175 accepted version 2. */
-    need(bytecode[4] === 1 || bytecode[4] === 2,
-         "bytecode version must be 1 or 2 (a version 3 container carries " +
-         "the sound ops, which the committed interpreter runs once the #194 " +
-         "engine link lands in #198)");
+     * ops; the #215 interpreter reads it (tools/ilvm/ilvm.c accepts 3 and
+     * dispatches music/sfx/release to the engine). */
+    need(bytecode[4] === 1 || bytecode[4] === 2 || bytecode[4] === 3,
+         "bytecode version must be 1, 2 or 3");
     var dataLen = bytecode.length + (assets ? assets.length : 0);
     if (dataLen > BANK) {
       refuse("toy-data-bank-full", "the bytecode (" + bytecode.length +
@@ -638,6 +639,12 @@
     rom.set(bank0, 0);
     rom.set(bytecode, ILVM_BYTES);
     if (assets) rom.set(assets, ILVM_BYTES + bytecode.length);
+    /* The song trailer the interpreter's first sound op reads (card #215;
+     * docs/ROM-SOUND.md §6): at the data bank's last 32 bytes, the song
+     * count then up to 8 (offset, bank) entries.  No songs ship yet (#199
+     * writes the converter half), so buildToyRom pins n = 0 — a byte the
+     * console reads and the test proves. */
+    rom[ILVM_BYTES + SONG_TABLE_OFF] = 0;
     return rom;
   }
 
@@ -645,6 +652,7 @@
     BANK: BANK,
     ILVM_BYTES: ILVM_BYTES,
     TOY_DATA_BANK: TOY_DATA_BANK,
+    SONG_TABLE_OFF: SONG_TABLE_OFF,
     buildToyRom: buildToyRom,
     MAX_REGIONS: MAX_REGIONS,
     MAX_ROM_BANKS: MAX_ROM_BANKS,

@@ -213,9 +213,9 @@ The cards filed, one per kind — and one for the operand gate:
 - <a id="135"></a>**#135** — `sfx()`, 3 instructions. This is about the
   **export carrying the call**, not about #71/#113's audible sound.
   (Closed by #197, 2026-11-01: the encoder has `music`/`sfx`/`release` ops
-  and the C emitter lowers them; the ROM's interpreter reads them once the
-  #198 engine link lands, so the sound container is version 3 and
-  `buildToyRom` refuses it until then.)
+  and the C emitter lowers them; the ROM's interpreter reads the version 3
+  sound container since #215, 2026-11-02, when the sound ops began calling
+  the HuTrack engine bank.)
 - <a id="136"></a>**#136** — the `raster(line, spec)` table form, 2
   instructions.
 - <a id="137"></a>**#137** — builtins beyond `rgb`: `abs()` and `sr()`.

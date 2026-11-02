@@ -1857,6 +1857,16 @@
 
   function cell(v) { return { v: v }; }
 
+  /* note(midi): the PSG's 12-bit frequency divider, the Lua prelude's
+   * numeric branch with the same double arithmetic (docs/ROM-SOUND.md §7).
+   * Exported: tools/ilvm/gen-note-table.js builds the interpreter's ROM
+   * table from THIS function, so the console's answer cannot drift from the
+   * browser's. */
+  function noteFrequency(midi) {
+    var f = 7159090 / (64 * 440 * Math.pow(2, (midi - 69) / 12));
+    return Math.max(0, Math.min(4095, Math.floor(f + 0.5))) | 0;
+  }
+
   function runProgram(program, host, options) {
     options = options || {};
     var maxInstructions = options.maxInstructions || MAX_INSTRUCTIONS;
@@ -2255,12 +2265,8 @@
       case "sqrt": return fixed(Math.sqrt(args[0]));
       case "ramp": return fixed(rampAt(args[0], args[1]));
       case "ramp_int": return Math.floor(rampAt(args[0], args[1]) + 0.5) | 0;
-      case "note": {
-        /* the Lua prelude's numeric branch, the same double arithmetic:
-         * F = 7,159,090 / (64 * 440 * 2^((midi - 69) / 12)) */
-        var f = 7159090 / (64 * 440 * Math.pow(2, (args[0] - 69) / 12));
-        return Math.max(0, Math.min(4095, Math.floor(f + 0.5))) | 0;
-      }
+      case "note":
+        return noteFrequency(args[0]);
       case "sr": return host.status() | 0;   /* #119, the host's own model */
       default:
         fail(line, "the IL has no builtin `" + name + "`");
@@ -2413,6 +2419,7 @@
     compile: compile,
     create: create,
     runProgram: runProgram,
+    noteFrequency: noteFrequency,
     ToyError: ToyError,
     WIDTH: WIDTH,
     HEIGHT: HEIGHT,

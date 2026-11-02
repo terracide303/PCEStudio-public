@@ -9,8 +9,10 @@
  * Loads one bytecode container, runs toy_boot(), then `frames` frames the
  * way the console's main loop does (frame, then raster(0..223) when the toy
  * has a callback), and writes vram.bin (65536 B, words little-endian),
- * cram.bin (1024 B), sat.bin (512 B), regs.txt and pool.bin (the table
- * pool, one int32 per cell, #174's fault evidence).  Those are the same
+ * cram.bin (1024 B), sat.bin (512 B), regs.txt, pool.bin (the table
+ * pool, one int32 per cell, #174's fault evidence) and psg.txt (card #215:
+ * one "frame reg value" line per PSG write, in order, from ilvm_sound.c's
+ * host half).  Those are the same
  * layouts the Mednafen dump uses, so a host run can be compared with the
  * browser before an emulator is involved.
  *
@@ -44,6 +46,7 @@
  * writes this harness's SATB image, so the header's toy_sprite lands in
  * the same 256 words the console's VRAM/DSR path ends with. */
 #include "toy_runtime.h"
+#include "ilvm_sound.h"
 
 const uint8_t *ilvm_program;
 int ilvm_has_raster(void);
@@ -79,6 +82,28 @@ void toy_display_on(void) {}
 
 /* toy_rgb is the shared header's (tools/toyc/toy_runtime.h), the same
  * 9-bit formula the console runs. */
+
+/* ---- the PSG write recorder (#215) -------------------------------------
+ *
+ * ilvm_sound.c's host half calls this instead of the hardware registers,
+ * so a host run records the same write streams the console's engine and
+ * upload code send the PSG.  The browser's sound.events cap at
+ * SOUND_EVENTS_MAX (65536) writes and so does this recorder; psg.txt holds
+ * one "frame reg value" line per write, in order. */
+#define PSG_EVENTS_MAX 65536
+static int32_t cur_frame;
+static int32_t psg_frame[PSG_EVENTS_MAX];
+static uint8_t psg_reg[PSG_EVENTS_MAX];
+static uint8_t psg_value[PSG_EVENTS_MAX];
+static int32_t npsg;
+
+void ilvm_host_psg_write(uint8_t reg, uint8_t value) {
+  if (npsg >= PSG_EVENTS_MAX) return;
+  psg_frame[npsg] = cur_frame;
+  psg_reg[npsg] = reg;
+  psg_value[npsg] = value;
+  npsg++;
+}
 
 /* ---- the SAT (#186) ---- */
 
@@ -206,6 +231,8 @@ int main(int argc, char **argv) {
   }
 
   toy_boot();
+  cur_frame = 0;   /* sound writes during init() are frame 0, as the
+                    * browser's sound.frame starts at 0 */
   for (i = 0; i < frames; i++) {
     int pl;
     for (pl = 0; pl < npad_lines; pl++) {
@@ -213,6 +240,8 @@ int main(int argc, char **argv) {
         pads[pad_lines[pl].pad - 1] = pad_lines[pl].bits;
       }
     }
+    cur_frame = i;
+    ilvm_sound_tick();             /* before frame(), the browser's order */
     toy_frame(i);
     if (ilvm_has_raster()) {
       for (l = 0; l < 224; l++) toy_raster(l);
@@ -232,6 +261,12 @@ int main(int argc, char **argv) {
   snprintf(path, sizeof path, "%s/pool.bin", argv[2]);
   f = fopen(path, "wb");
   put_u32(f, ilvm_table_cells(), ilvm_table_cell_count());
+  fclose(f);
+  snprintf(path, sizeof path, "%s/psg.txt", argv[2]);
+  f = fopen(path, "w");
+  for (i = 0; i < npsg; i++) {
+    fprintf(f, "%d %d %d\n", psg_frame[i], psg_reg[i], psg_value[i]);
+  }
   fclose(f);
   free(buf);
   return 0;
