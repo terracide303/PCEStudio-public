@@ -782,9 +782,10 @@ what this card is about, and it now equals the F the studio writes, which
 §8's trace confirms write for write (note 92 writes, sfx 48, over 24
 frames; `tests/check-rom-sound.js` PASS). With the image unchanged,
 `check-ilvm` (348 checks) and `check-export-games` (67 checks, and every
-captured frame still diff 0 against the browser) are green. #238 is
-closed on this evidence; the F half of #216's finding is done, and the R1
-half is #113.
+captured frame still diff 0 against the browser) are green. #238's F half
+is proven on this evidence; the card stays open on the board for its
+audible clause, which #113 blocks, and its code half and this register
+proof are both in the committed image.
 
 **Reproducing all of it** (nothing is written to the repository):
 
