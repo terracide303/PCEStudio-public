@@ -185,7 +185,13 @@ collections (the wrong-`sum` bug above).
 **Re-measured 2026-11-01 by #207**, on the tree after the sprite (#188–#192)
 and sound-front-end (#197) cards: the refusals are unchanged in kind, the
 outcomes are unchanged (PLATFORMER is still the only one of the five that
-exports), and the ROM shas moved with the rebuilt `renderer/ilvm.bin`. What
+exports), and the ROM shas moved with the rebuilt `renderer/ilvm.bin`.
+Since #213/#214 the image is the 32 KiB one with the HuTrack banks and the
+toy data bank is physical 4, so every ROM is **40,960 B**; the shas in the
+table are the ones `tests/check-export-games.js` pins on that image
+(2026-11-02). The overrun/worst/Hz figures are still #207's measurements —
+the interpreter's behaviour is unchanged, as every picture hash in that
+suite stayed diff 0. What
 #207 skipped, because it is not done: **#148** (the 127-constant pool) is
 open; **#198** (the HuTrack engine linked into the interpreter image) is
 parked, so `renderer/pce-rom.js:626` still refuses a version 3 container and
@@ -220,11 +226,11 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 | **TOWER** `toys/tower` | **no** — `error: pce-rom: bytecode version must be 1 or 2` (`renderer/pce-rom.js:626`; a version 3 container carries the sound ops). #186 carried `sat`, #187 `not` and #197 `sfx`; TOWER's bytecode route is otherwise clean, so it now encodes as a version 3 sound container and buildToyRom refuses it — the gate the committed interpreter needs until #198 links the engine in. The gate's Error names no line. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
 | **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`; refused by `renderer/pce-ilbc.js:335` because `raster` has no entry in its OPS table). #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind (#136). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
 | **DUSK RUN** `toys/dusk-run` | **no** — `error: pce-rom: bytecode version must be 1 or 2` (`renderer/pce-rom.js:626`; a version 3 container carries the sound ops). #187 carried `not` and #197 `sfx`, its old refusals; DUSK RUN's bytecode route is otherwise clean, so it now encodes as a version 3 sound container and buildToyRom refuses it until #198 links the engine in. The gate's Error names no line. #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
-| **PLATFORMER** `toys/platformer` | **yes** — 24,576 B, sha256 `7bff6fc79ea199cf…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 308 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
-| *control* `tools/toys/palette.lua` | **yes** — 24,576 B, sha256 `fa2a3bf584caa3bc…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 111 | **626** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
-| *control #183* `tools/toys/arity.lua` | **yes** — 24,576 B, sha256 `fea4bc6bff47a016…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 111 | **783** lines | **too slow** | — |
-| *control #187* `tools/toys/not.lua` | **yes** — 24,576 B, sha256 `9cbcb2ce3c37824c…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **106** lines | **60 Hz** | — |
-| *control #191* `tools/toys/sprite.lua` | **yes** — 24,576 B, sha256 `7f8ce59af4846f50…`, three constant sprite specs (the full spec; a partial one with `hflip`/`cgx`; `spbg`/`cgy`/`vflip`), so `sprite()` is carried end to end (#188 encoder, #189 interpreter, #190 cgen) | **diff 0** (its constant picture is pinned as one hash; `tests/check-ilvm.js` also compares the saved SAT word for word) | 0 | **101** lines | **60 Hz** | — |
+| **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `b05f34cc5117aac3…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 308 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
+| *control* `tools/toys/palette.lua` | **yes** — 40,960 B, sha256 `7a7474e7d96b1fa6…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 111 | **626** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
+| *control #183* `tools/toys/arity.lua` | **yes** — 40,960 B, sha256 `de8c223749fe9912…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 111 | **783** lines | **too slow** | — |
+| *control #187* `tools/toys/not.lua` | **yes** — 40,960 B, sha256 `90eaad46d54edc53…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **106** lines | **60 Hz** | — |
+| *control #191* `tools/toys/sprite.lua` | **yes** — 40,960 B, sha256 `80458fd1d549713a…`, three constant sprite specs (the full spec; a partial one with `hflip`/`cgx`; `spbg`/`cgy`/`vflip`), so `sprite()` is carried end to end (#188 encoder, #189 interpreter, #190 cgen) | **diff 0** (its constant picture is pinned as one hash; `tests/check-ilvm.js` also compares the saved SAT word for word) | 0 | **101** lines | **60 Hz** | — |
 
 ### What this says, plainly
 
@@ -416,7 +422,7 @@ every line it occurs on.
   and below the soft stack's deepest use. A canary at `$2116`–`$211F`
   survived all four toys (palette, parallax, status-bar, sky-gradient); the
   safety argument is in docs/ROM_LAYOUT.md. **Re-run by #175 on the image
-  that carries the table pool** (256 int32 cells, 1,024 B in `.bss`;
+  that carries the table pool** (then 256 int32 cells, 1,024 B in `.bss`;
   `tools/gen/ilvm.json`'s `section_sizes`/`table_pool`, `.bss` 6,529 B): a
   scratch build of the same sources wrote `A5 A4 A7 A6 A1 A0 A3 A2 AD AC` at
   `$2116` in `main()` before `toy_boot()`, and the save-state BaseRAM after a
@@ -424,6 +430,11 @@ every line it occurs on.
   updates, parallax 8, status-bar 18, sky-gradient 7). Control: the same
   build with one deliberate write to `$2116+3` after `toy_boot()` read back
   `A5 A4 A7 00 A1 A0 A3 A2 AD AC`, so the instrument does see a breach.
+  **#214 moved the deepest cell**: the pool is 192 cells (768 B), the HuTrack
+  engine's `.bss` now sits at `$37CE-$3BF4` (docs/ROM-SOUND.md §5), and the
+  new canary (`tools/ilvm/stack-canary.sh`, cells `$2130/$2132`) measured the
+  soft stack at `$3C7F` for the deepest toy. `$2120-$2127` is still above
+  that, so the #169 cells are safe; the probe was re-run, not assumed.
 - **Rule 2 is owed.** Per the workshop rule, this suite's breaks were written
   by the same seat that wrote it (`tests/check-measure-rom.js`: a heavy toy,
   a light toy, a middle-band toy, and two pictures). A cold break by another

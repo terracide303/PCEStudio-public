@@ -1,21 +1,23 @@
 # Sound in the exported ROM (#194, step 1)
 
 The exported toy ROM is the IL interpreter image
-[`renderer/ilvm.bin`](../renderer/ilvm.bin) (16,384 B, built once by
-[`tools/ilvm/build.sh`](../tools/ilvm/build.sh) with llvm-mos) plus the toy's
-bytecode in the next physical bank. Since #197 the two cartridge front ends
-carry the whole sound surface — the encoder has `music`/`sfx`/`release` ops
-and the `note` builtin (`renderer/pce-ilbc.js`, container version 3), and the
-C emitter lowers them — but the committed interpreter reads only container
-versions 1 and 2, so `buildToyRom` refuses a sound toy's version 3 container
-until #198 links the engine in. That is where TOWER and DUSK RUN stop today;
-NOVA TIDE stops on its first `raster` ([`ROM_SPEED.md`](ROM_SPEED.md) §#193).
+[`renderer/ilvm.bin`](../renderer/ilvm.bin) (32,768 B since #213, built once
+by [`tools/ilvm/build.sh`](../tools/ilvm/build.sh) with llvm-mos) plus the
+toy's bytecode in the next physical bank. Since #197 the two cartridge front
+ends carry the whole sound surface — the encoder has `music`/`sfx`/`release`
+ops and the `note` builtin (`renderer/pce-ilbc.js`, container version 3), and
+the C emitter lowers them — but the committed interpreter reads only
+container versions 1 and 2, so `buildToyRom` refuses a sound toy's version 3
+container until #198 links the engine in. That is where TOWER and DUSK RUN
+stop today; NOVA TIDE stops on its first `raster`
+([`ROM_SPEED.md`](ROM_SPEED.md) §#193).
 
 This page is the design half: **how the vendored HuTrack engine
 ([`vendor/hutrack/`](../vendor/hutrack/VENDORED.md), MIT) links beside the C
 interpreter, and what it costs.** Every size below was measured on
-2026-11-01 with the toolchain on this machine; the projections that are not
-yet built are marked as projections. The implementation is split into
+2026-11-01 with the toolchain on this machine, and §5's RAM partition was
+measured and asserted by #214 on 2026-11-02; projections that are not yet
+built are marked as projections. The implementation is split into
 #197–#200 (the end of this page); #196 is this note.
 
 The two facts that decide the design:
@@ -25,10 +27,11 @@ The two facts that decide the design:
    with each other (the pitch tables must be mapped at page 4 and the code
    runs at page 5), so the image grows from 16 KiB to 32 KiB and every toy
    ROM from 24,576 B to 40,960 B.
-2. **The engine's RAM does not fit beside today's interpreter.** 93 B of
-   zero page and 1,063 B of BaseRAM, against a zero page that is already
-   full and 1,122 B of stack headroom. The partition below is the proposal;
-   #198 proves it with the build's own assertions and a Mednafen canary.
+2. **The engine's RAM did not fit beside the interpreter.** 94 B of zero
+   page and 1,062 B of BaseRAM, against a zero page the compiler fills and
+   1,122 B of stack headroom. #214 builds the partition below and has
+   `build.sh` assert it; a Mednafen canary measures the stack's high-water
+   mark.
 
 ## 1. The two toolchains, and why the image is concatenation
 
@@ -194,97 +197,126 @@ the VBlank wait, and the tick runs before them, so the measurement's phase
 reconstruction is unaffected — but that is a **claim to re-measure** in
 #198 with `tools/measure-rom.js`, not a fact yet.
 
-## 5. The zero page and BaseRAM budget, measured
+## 5. The zero page and BaseRAM budget, measured and asserted (#214)
+
+Every figure in this section is read from a built ELF (or from the engine's
+staging assembly), not from a declaration. `tools/ilvm/build.sh` prints the
+partition on every build, writes it into `tools/gen/ilvm.json`'s
+`ram_budget`, and **fails the build** if the interpreter's page reaches the
+engine's, if either extent leaves its window, or if the stack headroom is
+under `STACK_MARGIN = 787 B` — the floor this page named before the
+partition existed and still names.
+
+Both facts come from the interpreter's own ELF, so nothing here is a
+constant that can drift away from the code:
+
+| fact | where it is read |
+|---|---|
+| interpreter zero-page end | the `.zp.bss` + `.zp` sections' `vma + size` |
+| interpreter heap start (`__heap_start`) | `llvm-nm` on the built ELF |
 
 ### Zero page (`$2000-$20FF`)
 
 The HuC6280's zero page is one 256-byte page at `$2000`; zero-page
 addressing cannot reach BaseRAM, where HuTrack's variables otherwise live.
+The llvm-mos 24 compiler's LTO backend places interpreter variables in the
+page automatically and **fills whatever budget it is given**: moving the
+palette arrays to `.bss` by hand does not leave the page empty, because the
+backend then moves other small globals in (`slot_cap`, `xargs`, the ilvm
+statics). The lever is the driver's own `-mlto-zp` flag (the SDK's
+`mos-pce.cfg` sets `-mlto-zp=224`, the whole page). `build.sh` passes
+`-mlto-zp=96`, so the interpreter gets `$2020-$207F` and **the page ends at
+`$2080` with 96 B used** (measured: `.zp.bss` `$2020-$2077` + `.zp`
+`$2078-$207F`).
 
 | owner | bytes | addresses | how measured |
 |---|---|---|---|
 | llvm-mos imaginary registers `__rc0-31` | 32 | `$2000-$201F` | `pce-imag-regs.ld` (fixed by the ABI) |
-| the interpreter: `.zp.bss` 216 + `.zp` 8 | **224** | `$2020-$20FF` | `llvm-nm` on the built ELF |
-| **HuTrack: `_hk` scratch + engine state** | **93** | `$2000-$205C` in an engine-only assembly | `llvm-nm`/`.sym`, `_hk.R1` → `HuTrack.F.ptr` |
-| total | **349** in a 256-byte page | | over by **93 B** |
+| the interpreter (`-mlto-zp=96`) | **96** | `$2020-$207F` | `llvm-objdump -h` on the built ELF |
+| **HuTrack: `_hk` scratch + engine state** | **94** | `$2080-$20DD` | `.sym`: `EngineZp.start` → `EngineZp.end` |
+| free | 34 | `$20DE-$20FF` | |
+| **total** | **224 used of 256** | | fits |
 
-The interpreter's 216 B are not all state: **128 B are the four pending
-palette arrays** (`toy_pend_pal_a_lo/hi`, `toy_pend_pal_w_lo/hi`, 32 B
-each), and 64 B the two pending VRAM address arrays; the remainder is 24
-scalars. The palette arrays are written by `frame()` and applied in the
-next VBlank (`apply_base()`), so they can live in BaseRAM at the cost of a
-few cycles in a once-per-frame loop (#198 measures that cost with #169's
-counter).
-
-**Proposed partition (the arithmetic):** move the four palette arrays from
-`.zp.bss` to `.bss` (128 B → BaseRAM), leaving the interpreter 96 B at
-`$2020-$207F` and placing HuTrack's 93 B at `$2080-$20DC`, with 35 B spare.
-The engine's `.zp` is placed by the staging assembly:
-
-```
-    .zp
-    .org $2080
-    .bss
-    .org <__bss_end from the llvm image>
-    .include "HuTrack/HuTrack_vars.inc"
-```
-
-measured to put `_hk.R1` at `$2080` and `HuTrack.returnVec` at the `.org`
-address. `tools/ilvm/build.sh` asserts the interpreter's own zero-page end
-is at most `$2080` (a build that grows it fails loudly instead of silently
-overlapping the engine).
+The engine's `.zp` is placed by the staging assembly, whose base
+`build-engine.sh` substitutes from the design ($2080); the build asserts
+`interpreter end <= $2080` and `engine end <= $2100`. The old note said 93 B
+for the engine; the extent label measures **94** (`HuTrack.F.ptr` is two
+bytes, `$20DC-$20DD`, which an address-of-last-label count drops).
 
 ### BaseRAM (`$2200-$3FFF`, 7,680 B; the soft stack grows down from `$4000`)
 
-| owner | bytes | addresses | how measured |
+| line | bytes | addresses | how measured |
 |---|---|---|---|
-| interpreter `.bss` (table pool 1,024, closures 800, constants 512, raster line tables 3,584, …) | **6,558** | `$2200-$3B9D` | `llvm-nm`, `__heap_start` = `$3B9E` |
-| **HuTrack `.bss`** | **1,063** | `$2200-$2626` in the engine-only assembly | `.sym`: `HuTrack.returnVec` → `HuTrackEngine.VarEnd` (857 B of it is zeroed by `Init`, `VarStart` `$22CE`) |
-| both, today | **7,621 of 7,680** | | 59 B for the stack: does not fit |
-| stack headroom today | **1,122** | `$3B9E-$4000` | `0x4000 - __heap_start` |
+| interpreter before #214 (`__heap_start`) | 6,558 | `$2200-$3B9D` | `llvm-nm` |
+| `-mlto-zp=96`: 128 B of globals leave the page | +128 | | the build's own sections |
+| `MAX_CLOS` 32 → 16 (`clos` 800 → 400) | −400 | | measured below |
+| `TABLE_POOL_CELLS` 256 → 192 (`cells` 1,024 → 768) | −256 | | NOVA needs 183, STARFALL 172, TOWER 33 (`TABLES-PLAN.md` §2.1) |
+| raster line tables 256 B/page-aligned → 224 B/32-byte-aligned (3,584 → 3,136) | −448 | | 14 arrays for 224 lines; the padding was dead |
+| **interpreter after #214** | **5,582** | `$2200-$37CD`, heap start **`$37CE`** | `llvm-nm` |
+| **HuTrack `.bss`** | **1,062** | `$37CE-$3BF3` | `.sym`: `HuTrack.returnVec` → `EngineBss.end` |
+| **both** | **6,644 of 7,680** | | |
+| **stack headroom** | **1,036** | `$3BF4-$4000` | `0x4000 − engine end` |
 
-**Proposed partition (projection, not yet built):**
+The engine's `.bss` is placed at the llvm image's `__heap_start` (the
+staging assembly gets it from `build-engine.sh`, which `build.sh` hands
+`ENGINE_BSS_BASE`); the build asserts the engine starts at or above the
+interpreter's heap and ends below `$4000`. The old note's 1,063 B for the
+engine is **1,062** by the extent label (`VarEnd − returnVec` = `$426`).
 
-| change | BaseRAM | zero page | note |
+**Why `MAX_CLOS` 16 and not 8.** The first projection spent 600 B on eight
+slots. The host harness (`-DILVM_HOST`, 60 frames) says that is not safe:
+eight slots diverge from 32 on PLATFORMER's VRAM and parallax's registers,
+twelve still diverge on parallax's VRAM, and fourteen and sixteen match 32
+on palette, PLATFORMER, parallax and DUSK RUN. Sixteen is two slots above
+the measured edge and keeps every toy that runs today. The games' 30–44
+closure sites need more than even 32 and were never runnable on this route
+(their function/global/slot counts exceed the interpreter's arrays too); a
+closure-count refusal is still owed (it is not in this card).
+
+**Why 32-byte alignment.** The 14 line arrays existed at 256 B each for 224
+lines; the page alignment cost 32 B of dead padding each. At 224 B and
+32-byte alignment they are contiguous (14 × 224 = 3,136). `lda table,x` can
+now cross a page (+1 cycle on that load); every stored raster capture still
+compares diff 0 against the browser (check-ilvm's four ILVM captures).
+
+### The stack canary (#214)
+
+`tools/ilvm/ilvm.c` has a compile-time probe (`-DTOY_STACK_PROBE`, absent
+from the shipped image): at every `exec()` entry it reads the llvm-mos
+soft-stack pointer (`$2000/$2001`, after the prologue) and keeps the lowest
+value in `$2130` plus the call count in `$2132` — free cells above the #169
+measurement block, which ends at `$2127`. `tools/ilvm/stack-canary.sh`
+rebuilds the same sources with the probe, places the engine banks against
+that image, builds a ROM from `tools/toys/loud.lua` and runs it in Mednafen;
+`tools/mcs-extract.py --ram` brings the two words back. Measured
+2026-11-02 on this machine (`VIDEO_DRIVER=sdl`):
+
+| toy | exec() calls | lowest frame | stack used |
 |---|---|---|---|
-| move the palette arrays to `.bss` | +128 | −128 | needed for the page |
-| `MAX_CLOS` 32 → 8 (`clos` 800 → 200 B) | −600 | | the encoder gains a closure-count refusal (#172's pool precedent) |
-| `TABLE_POOL_CELLS` 256 → 192 (`cells` 1,024 → 768 B) | −256 | | `ilbc-table-ram`'s documented limit moves with it |
-| HuTrack `.bss` | +1,063 | | at `__bss_end` |
-| HuTrack `.zp` | | +93 | at `$2080` |
-| **total** | **6,893** | **189** | **stack headroom 787 B** (70 % of today's) |
+| `tools/toys/loud.lua` (frame → level1 → level2 → level3 → leaf, five frames; PLATFORMER's shape) | 1,598–1,615 over three runs | `$3C7F` | **897 B** |
+| the same toy with one more level (`level4`, six frames) | 1,764 | `$3BCD` | **1,075 B** |
+| palette / PLATFORMER / parallax (the first probe, 16 KiB image) | — | `$3E13-$3E15` | 491–493 B |
 
-The engine's `.bss` is placed at the llvm image's `__bss_end` (generated
-into the staging assembly, so no custom linker script is needed); the build
-asserts the last engine byte is below `$4000`. The measured stack use is
-493 B, so 787 B is 1.6× the high-water mark of three toys. If #198's canary
-says it is not enough, two more savings are available and named here rather
-than discovered later: a generated engine vars file with 8 song slots
-(`song_bank`/`song_ptr` 192 → 24 B) and 16-byte name fields (96 → 32 B),
-saving 232 B, which raises the headroom to **1,019 B**; and the 14 raster
-line tables are 256-byte-aligned (3,584 B) for 224 lines, so 32-byte
-alignment would save 448 B at a small indexed-access cost. Neither is in
-the recommendation yet.
+The lowest address is deterministic across runs; the call count only tracks
+how long Mednafen ran before the save.
 
-**The stack is the risk, and it is measured.** A scratch build of the
-interpreter wrote the lowest `exec()` frame address to RAM cells
-(`&r[0]`, the 128-byte register array), and three exported toys ran in
-Mednafen, each in a quiet window with no other emulator running:
+So the measured loud toy uses 897 B of the 1,036 B allowance, leaving
+**139 B**; one level deeper reaches the engine block by 39 B. The budget is
+therefore accepted for the call trees the shipping toys and games express,
+not for arbitrary depth: **six nested interpreter frames are the boundary** —
+five fit with 139 B to spare, six overwrite the engine's last 39 B — and
+the interpreter has no depth guard or encoder refusal yet, so a deeper toy
+would overwrite the engine's last variables rather than fault. That guard
+(+ the engine-vars trims named below) is the follow-up if a game ever needs
+it. The probe image differs from the shipped one by the probe block (~31 B
+of code); its `__heap_start` is the shipped `$37CE`, so the measured
+headroom is the shipped headroom.
 
-| toy | updates in the run | lowest `exec()` frame | stack used |
-|---|---|---|---|
-| `tools/toys/palette.lua` | 75 | `$3E15` | **491 B** |
-| `toys/platformer` | 306 | `$3E13` | **493 B** |
-| `toys/parallax.lua` | 12 | `$3E15` | **491 B** |
-
-The probe's own witness that it is reading a growing stack and not one
-fixed address: in the PLATFORMER run the **first** `exec()` (the chunk call)
-sat at `$3F7B`, 133 B below `$4000`, and 1,963 `exec()` calls reached
-`$3E13` — three nested frames of the 128-byte register file plus locals.
-That is a measured high-water mark for these toys, not a bound for the
-games that do not export yet; #198 re-runs it on the final image and on
-every game that starts exporting, and the budget is accepted only if the
-mark stays above the engine block.
+If more room is needed, the savings this card did not take are still named
+here: the engine's 64 song slots (192 B → 24 B for 8, plus the `cpx #64`
+bound in `QueueSong`) and its 48-byte name fields (96 → 32, plus the
+parser's copy limit), 232 B together; `TABLE_POOL_CELLS` 184 (still covers
+NOVA's 183) for 32 B more. None is in the partition.
 
 ## 6. Song and instrument data
 
@@ -426,9 +458,21 @@ first (§4).
 ## 9. Reproducing the measurements
 
 ```sh
-# interpreter image and its section/symbol sizes
-LLVM_MOS=/Volumes/External/pce-tools/llvm-mos tools/ilvm/build.sh
-"$LLVM_MOS/bin/llvm-nm" -S tools/gen/ilvm.pce.elf   # .zp.bss 216, .bss to __heap_start
+# interpreter image, the engine banks, and the asserted partition (#214):
+# build.sh prints the zero-page and BaseRAM lines and fails the build if
+# either budget is broken.
+LLVM_MOS=/Volumes/External/pce-tools/llvm-mos PCEAS4=pceas4 tools/ilvm/build.sh
+"$LLVM_MOS/bin/llvm-nm" -S tools/gen/ilvm.pce.elf   # __heap_start, .zp.bss
+python3 -m json.tool tools/gen/ilvm.json | grep -A24 ram_budget
+python3 -m json.tool tools/gen/hutrack-image.json | grep -A18 '"ram"'
+
+# the stack canary: a probe build of the same sources, the loud toy, and a
+# Mednafen save state (VIDEO_DRIVER=sdl; ~15 s).  It prints the high-water
+# mark and exits non-zero if the stack reaches the engine block.
+LLVM_MOS=/Volumes/External/pce-tools/llvm-mos PCEAS4=pceas4 \
+  tools/ilvm/stack-canary.sh                 # tools/toys/loud.lua
+LLVM_MOS=/Volumes/External/pce-tools/llvm-mos PCEAS4=pceas4 \
+  tools/ilvm/stack-canary.sh path/to/other.lua
 
 # engine sizes and the engine-only RAM (needs pceas4, docs/BUILD.md).
 # The staging assembly is this, with the §3 patch applied to a COPY of lib/:
@@ -452,8 +496,9 @@ PCE_INCLUDE=<staged lib> pceas4 -raw -o engine.bin engine.asm
 # tests/check-hutrack-seq.js pins both numbers and re-runs the comparison.
 ```
 
-The exact numbers in this page are from those commands on 2026-11-01; a
-toolchain change that moves them is a change to this page.
+The exact numbers in this page are from those commands on 2026-11-01, and
+§5's partition and canary from the same commands on 2026-11-02; a toolchain
+change that moves them is a change to this page.
 
 ## What is not proven
 
@@ -461,14 +506,19 @@ toolchain change that moves them is a change to this page.
   yet.** The two banks are concatenated after the unchanged llvm-mos image
   and every existing toy ROM still runs and captures identically (the five
   example ROMs: palette, parallax, status-bar, sprite, tables). The
-  narrowed window, the RAM partition and the tick are not exercised until
-  #215's interpreter ops call in, and the llvm-mos + pceas image has not
-  played a sound on a console yet.
-- **The zero-page/RAM partition is arithmetic.** The 96/93-byte split and
-  the 787-byte stack headroom (1,019 with the optional engine-vars trim) are
-  projections from measured sizes; #198 builds them with assertions, and the
-  stack canary is measured on the final image. The 491–493 B high-water mark
-  is three toys, none of them a game that does not export yet.
+  narrowed window and the tick are not exercised until #215's interpreter
+  ops call in, and the llvm-mos + pceas image has not played a sound on a
+  console yet.
+- **The RAM partition is built and asserted (#214), but not exercised by a
+  sound call.** `build.sh` fails if the interpreter's zero page reaches the
+  engine's, if either extent leaves its window, or if the stack headroom is
+  under 787 B; the measured headroom is 1,036 B. The canary's high-water mark
+  is 897 B for the deepest toy-shaped call tree, 139 B below the engine —
+  and one frame deeper reaches it, with no depth guard or encoder refusal
+  yet (named above as the follow-up).
+- **The canary is one toy and one machine.** It measures the interpreter's
+  soft stack, not the engine's (the engine runs on the 6502 stack and its
+  own `.bss`); Mednafen only, no real console.
 - **The tick's placement is a design decision.** It matches the browser's
   toy-frame model and therefore the trace; it slows music in a toy slower
   than 60 Hz. Wall-clock tempo is not attempted.
@@ -483,7 +533,9 @@ toolchain change that moves them is a change to this page.
   witnessed is the console playing it — a toy's `music(index)` needs #198's
   image, so #199's Mednafen half is open.
 - **Rule 2 is owed** for any check #198–#200 write: the author is not the
-  seat that can prove it.
+  seat that can prove it. #214's build assertions are the design seat's own;
+  a cold seat should move `ENGINE_ZP_BASE` down and raise `STACK_MARGIN` and
+  watch `build.sh` fail.
 
 ## The slices
 
@@ -491,7 +543,12 @@ toolchain change that moves them is a change to this page.
 |---|---|---|---|
 | **#196** (this page) | done | the measured link design and budgets | the numbers reproduce; no suite red |
 | **#197** | done | the encoder and the C emitter carry `note`, `sfx`, `release`, `music`; the version 3 container and its gate | `check-ilvm`, `check-romcheck`, `check-agent-core` green; a note/sfx toy encodes and the host harness runs it |
-| **#198** | open | the engine linked: two banks, 32 KiB image, data bank 4, wrappers, tick, zp/RAM partition and assertions | a note toy and an sfx toy play in Mednafen; `check-ilvm`, `check-export-games` green |
+| **#212** | done | the HuTrack engine as a standalone two-bank pceas image | code `$A000-$BEC4`, tables `$8000-$8B34`, `check-hutrack-image` green |
+| **#213** | done | the engine banks linked into a 32 KiB `renderer/ilvm.bin`, data bank 4 | every existing toy ROM runs and captures identically |
+| **#214** | done | the zero-page and stack budgets asserted; the stack canary measured | `build.sh` fails on a broken budget (shown by a mutation); the measured depth is above (§5) |
+| **#215** | open | the interpreter ops for note/sfx/release/music call the engine; the per-toy-frame tick; version 3 accepted | `tests/check-rom-sound.js`; version 1 and 2 containers still run; `check-ilvm` green |
+| **#216** | open | a note toy and an sfx toy play in Mednafen | the PSG writes match the studio's frame by frame; the command is above |
+| **#198** | open | the umbrella: everything #212–#216 links | a note toy and an sfx toy play in Mednafen; `check-ilvm`, `check-export-games` green |
 | **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (needs #198) |
 | **#200** | open | `tests/check-rom-sound.js`, the trace build, the docs | the Mednafen trace equals the studio's for note and sfx; the suites green; a cold break by another seat |
 

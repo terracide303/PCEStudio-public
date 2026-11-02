@@ -66,7 +66,15 @@ extern const uint8_t *ilvm_program;
 #define MAX_REGS 32            /* the two toys need 21; the encoder's limit
                                 * is 128, the interpreter's is this */
 #define MAX_UPS 6              /* the parallax chunk captures 5 */
-#define MAX_CLOS 32
+/* #214: the closure table is the budget's biggest lever (25 B a slot) and the
+ * zero-page/BaseRAM partition spends it on HuTrack's variables.  16 is the
+ * smallest value measured safe across the toys that run today (the host
+ * harness at 60 frames: 16 matches 32 on palette, PLATFORMER, parallax and
+ * DUSK RUN; 12 already diverges on parallax, 8 on PLATFORMER — see
+ * docs/ROM-SOUND.md §5).  The games' 30-44 closure sites need more than even
+ * 32 and are a separate, pre-existing limit (the encoder has no closure-count
+ * refusal yet). */
+#define MAX_CLOS 16
 #define MAX_GLOBALS 32
 #define MAX_FUNCS 32
 /* #183: a call carries up to eight arguments.  Four ride in exec()'s C
@@ -79,10 +87,12 @@ extern const uint8_t *ilvm_program;
 #define CALL_ARGS 4            /* the four exec() takes directly */
 #define MAX_SLOTS 32           /* first cut: the table toys need 7; the
                                 * encoder's limit is 255 */
-#define MAX_TABLE_CELLS 256    /* the fixed table pool: 1 KiB of BaseRAM
-                                * (docs/TABLES-PLAN.md §2.1).  Must equal
-                                * renderer/pce-ilbc.js's TABLE_POOL_CELLS;
-                                * checkTablesRun asserts the two are equal. */
+#define MAX_TABLE_CELLS 192    /* the fixed table pool: 768 B of BaseRAM
+                                * (docs/TABLES-PLAN.md §2.1 says 192 covers
+                                * the three games' 172/33/183 cells).  Must
+                                * equal renderer/pce-ilbc.js's
+                                * TABLE_POOL_CELLS; checkTablesRun asserts the
+                                * two are equal. */
 
 struct fninfo {
   uint16_t codeOff;
@@ -135,6 +145,29 @@ static void map_data_bank(uint8_t bank) { (void)bank; }
 static void map_data_bank(uint8_t bank) {
   __asm__ volatile ("tam #$04" : : "a" (bank));
 }
+#endif
+
+/* ---- the stack canary (#214) ------------------------------------------ *
+ * The shipped image has no probe.  tools/ilvm/stack-canary.sh rebuilds the
+ * same sources with -DTOY_STACK_PROBE, so every exec() entry records the
+ * lowest address it has seen and the number of calls, in the free cells of
+ * the measurement page above $2127 (docs/ROM_LAYOUT.md; the #169 block ends
+ * at $2127 and $2116-$211F is the old canary).  The recorded address is the
+ * llvm-mos soft-stack pointer itself ($2000/$2001, read after exec's
+ * prologue), so it is the true bottom of the frame, not a local's address:
+ *     stack high-water = $4000 - lowest exec frame.
+ * Mednafen's save state (tools/mcs-extract.py --ram) carries the two words
+ * back; the script prints them.
+ *
+ * The block is inline, not a helper call: one call added ~400 B to exec and
+ * the 16 KiB image has no room for that, while the inline form costs ~31 B. */
+#ifdef TOY_STACK_PROBE
+/* $2000/$2001 is the llvm-mos soft-stack pointer (`__do_init_stack` writes
+ * $4000 there and `__get_current_stack_top` reads it); __rc0/__rc1 are
+ * reserved for it, so no other code uses them. */
+#define STACK_PROBE_SP    ((volatile uint8_t *)0x2000)  /* u16, LE */
+#define STACK_PROBE_LOW   ((volatile uint8_t *)0x2130)  /* u16, LE */
+#define STACK_PROBE_CALLS ((volatile uint8_t *)0x2132)  /* u16, LE */
 #endif
 
 /* ---- byte readers (data bank 4) --------------------------------------- */
@@ -200,6 +233,24 @@ static int32_t exec(uint8_t fid, uint8_t clh,
   uint16_t pc, tgt, base;
   uint8_t op, d, g, u, k, i, n, aa, bb, s, kind;
   int32_t av, bv, v;
+
+#ifdef TOY_STACK_PROBE
+  {
+    uint16_t a = (uint16_t)STACK_PROBE_SP[0] |
+                 ((uint16_t)STACK_PROBE_SP[1] << 8);
+    uint16_t lo = (uint16_t)STACK_PROBE_LOW[0] |
+                  ((uint16_t)STACK_PROBE_LOW[1] << 8);
+    uint16_t n = (uint16_t)STACK_PROBE_CALLS[0] |
+                 ((uint16_t)STACK_PROBE_CALLS[1] << 8);
+    if (lo == 0 || a < lo) {
+      STACK_PROBE_LOW[0] = (uint8_t)(a & 0xFF);
+      STACK_PROBE_LOW[1] = (uint8_t)(a >> 8);
+    }
+    n++;
+    STACK_PROBE_CALLS[0] = (uint8_t)(n & 0xFF);
+    STACK_PROBE_CALLS[1] = (uint8_t)(n >> 8);
+  }
+#endif
 
   if (fault || fid >= nfunc) { fault = 1; return 0; }
   fn = &fns[fid];

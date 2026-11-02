@@ -41,12 +41,12 @@
  },
  "ilvm": {
   "bytes": 32768,
-  "sha256": "d4ad2bae75f371b110ea4c6cb5e274e007bf79542c5f865d51d9b9c91b4270dc"
+  "sha256": "b803f2e5476bb7a5c07f23883db25307bf811c58ab13c93bd1777960ff48c439"
  },
  "name": "tableops-ilvm",
  "rom": "tools/gen/tableops-ilvm.pce",
  "rom_bytes": 40960,
- "rom_sha256": "2b658b2f550070ca7814b68e14b61227dbc0603578997197710b1d3135209642",
+ "rom_sha256": "a4656fcd74842ea2879a550fe980842785b271d148457f64c3ef432cb81ed163",
  "source": "tools/toys/tables.lua",
  "source_sha256": "746bfbeece78ec9c5e98b83bc5b882efdc688a2aad594b3b109f41a601c432ad"
 }

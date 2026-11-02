@@ -22,6 +22,16 @@
 # §1-2).  The toy's bytecode moves to physical bank 4, which ilvm.c maps
 # into MPR2 ($4000-$5FFF) with TAM #$04.
 #
+# #214 spends the RAM before the engine calls into it, and asserts the
+# result.  The interpreter is compiled with -mlto-zp=96 so its zero page
+# ends at $2080; the engine's 94 B of zero page start there.  Its .bss is
+# placed at the interpreter's measured __heap_start, and the stack headroom
+# ($4000 - the last engine byte) must keep the 787 B margin docs/ROM-SOUND.md
+# §5 names.  The build reads both facts from the built ELF, prints the
+# partition, writes it to tools/gen/ilvm.json's ram_budget, and exits
+# non-zero if either budget is broken.  The stack high-water mark itself is
+# measured by tools/ilvm/stack-canary.sh, not here.
+#
 # Needs the prebuilt llvm-mos SDK (external, never vendored — the PCEAS rule
 # in docs/DECISIONS.md): /Volumes/External II/pce-tools/llvm-mos/llvm-mos,
 # override with LLVM_MOS.
@@ -50,7 +60,14 @@ if ! command -v "${PCEAS4:-pceas4}" >/dev/null 2>&1 && \
 fi
 
 mkdir -p tools/gen
-"$CC" -Os -Itools/toyc \
+# #214: -mlto-zp=96 is the zero-page budget the interpreter is allowed, and
+# the first half of the HuTrack partition.  The SDK's driver config sets
+# -mlto-zp=224 (the whole page at $2020-$20FF); the flag is the driver's own
+# switch, so the LTO backend places at most 96 B of the interpreter's
+# variables at $2020-$207F and the engine's 94 B take $2080-$20DD.  The
+# assertions below read the built ELF, so a toolchain that ignores the flag
+# fails the build instead of silently overlapping the engine.
+"$CC" -Os -mlto-zp=96 -Itools/toyc \
   -Wl,--defsym,__rom_bank0=0xc000 \
   -Wl,--defsym,__rom_bank0_size=0x4000 \
   -o "$OUT" tools/ilvm/ilvm_runtime.c tools/ilvm/ilvm.c
@@ -61,9 +78,56 @@ if [ "$BYTES" != "16384" ]; then
   exit 1
 fi
 
+# #214: the two RAM facts the partition needs, read from the interpreter's
+# own ELF (not from a constant in this script): where its zero page ends, and
+# where its .bss/heap start.  build-engine.sh places the engine against them.
+BUDGET=$(python3 -I - "$LLVM_MOS" tools/gen/ilvm.pce.elf <<'PY'
+import subprocess
+import sys
+
+llvm, elf = sys.argv[1:3]
+
+# .zp.bss and .zp are where the LTO backend put the interpreter's
+# zero-page variables; their end is the page's claim on $2020-$20FF.  The
+# ELF's VMA is 0x00f820xx (the PCE's RAM mirror), so mask to 16 bits.
+zp_end = 0
+for line in subprocess.run([llvm + "/bin/llvm-objdump", "-h", elf],
+                           capture_output=True, text=True).stdout.splitlines():
+    parts = line.split()
+    if len(parts) >= 4 and parts[1] in (".zp.bss", ".zp"):
+        try:
+            end = (int(parts[3], 16) & 0xFFFF) + int(parts[2], 16)
+        except ValueError:
+            continue
+        zp_end = max(zp_end, end)
+
+heap = None
+for line in subprocess.run([llvm + "/bin/llvm-nm", elf],
+                           capture_output=True, text=True).stdout.splitlines():
+    parts = line.split()
+    if len(parts) == 3 and parts[2] == "__heap_start":
+        heap = int(parts[0], 16) & 0xFFFF
+
+if not zp_end or heap is None:
+    raise SystemExit("cannot read the interpreter's zero page or heap start "
+                     "from %s" % elf)
+print("0x%04X 0x%04X" % (zp_end, heap))
+PY
+)
+ZP_END=${BUDGET%% *}
+HEAP_START=${BUDGET##* }
+ENGINE_ZP_BASE=0x2080      # docs/ROM-SOUND.md §5's engine zero-page base
+STACK_MARGIN=787           # docs/ROM-SOUND.md §5's stack headroom floor
+if [ $((ZP_END)) -gt $((ENGINE_ZP_BASE)) ]; then
+  echo "interpreter zero page ends at $ZP_END, past the engine's $ENGINE_ZP_BASE" >&2
+  exit 1
+fi
+
 # #213: assemble the engine into its own two banks (vendor/hutrack is staged
 # into tools/gen/hutrack-stage; the build verifies the patch sites itself).
-tools/ilvm/build-engine.sh
+# #214: its RAM is placed against the interpreter's measured ELF.
+ENGINE_ZP_BASE=$ENGINE_ZP_BASE ENGINE_BSS_BASE=$HEAP_START \
+  tools/ilvm/build-engine.sh
 
 ENGINE_CODE=tools/gen/hutrack-code.bin
 ENGINE_TABLES=tools/gen/hutrack-tables.bin
@@ -84,13 +148,19 @@ if [ "$BYTES" != "32768" ]; then
   exit 1
 fi
 
-python3 -I - "$LLVM_MOS" "$OUT" tools/gen/ilvm.pce.elf "$BIN" <<'PY'
+python3 -I - "$LLVM_MOS" "$OUT" tools/gen/ilvm.pce.elf "$BIN" \
+  "$ZP_END" "$HEAP_START" "$ENGINE_ZP_BASE" "$STACK_MARGIN" <<'PY'
 import hashlib
 import json
 import subprocess
 import sys
 
-llvm, rom, elf, binpath = sys.argv[1:5]
+llvm, rom, elf, binpath, zp_end, heap, engine_zp_base, stack_margin = \
+    sys.argv[1:9]
+zp_end = int(zp_end, 0)
+heap = int(heap, 0)
+engine_zp_base = int(engine_zp_base, 0)
+stack_margin = int(stack_margin, 0)
 
 def sha(path):
     with open(path, "rb") as fh:
@@ -140,7 +210,7 @@ functions = {name: symbols[name]["size"] for name in symbols if name in (
 
 # #175: the table pool is ilvm.c's static `cells` array, placed by the linker
 # in .bss.  Record it by name so the section sizes can be read as
-# "heap + pool": 256 int32 cells = 1024 B.
+# "heap + pool": 192 int32 cells = 768 B (#214).
 table_pool = {"symbol": "cells", "section": None, "address": None,
               "bytes": 0, "cells": None}
 if "cells" in symbols:
@@ -152,6 +222,63 @@ if "cells" in symbols:
     table_pool["section"] = {"b": ".bss", "d": ".data",
                              "t": ".text"}.get(table_pool["section"],
                                                table_pool["section"])
+
+# #214: the RAM partition, asserted here rather than in a note.  The
+# interpreter's measured zero-page end must not reach the engine's base; the
+# engine's measured extents must stay inside the page and below the stack;
+# and the stack headroom ($4000 - the last engine byte) must keep the margin
+# docs/ROM-SOUND.md §5 names.  A toolchain change, a model change or a grown
+# table fails the build instead of shipping an image that overlaps.
+engine = json.load(open("tools/gen/hutrack-image.json"))
+ram = engine["ram"]
+eng_zp = ram["zero_page"]
+eng_bss = ram["bss"]
+
+errors = []
+if zp_end > engine_zp_base:
+    errors.append("interpreter zero page ends at $%04X, past the engine's "
+                  "$%04X" % (zp_end, engine_zp_base))
+if eng_zp["start"] != engine_zp_base:
+    errors.append("engine zero page starts at $%04X, not $%04X" %
+                  (eng_zp["start"], engine_zp_base))
+if eng_zp["end"] > 0x2100:
+    errors.append("engine zero page ends at $%04X, past the zero page" %
+                  eng_zp["end"])
+if eng_bss["start"] < heap:
+    errors.append("engine .bss starts at $%04X, below the interpreter's heap "
+                  "start $%04X" % (eng_bss["start"], heap))
+if eng_bss["end"] > 0x4000:
+    errors.append("engine .bss ends at $%04X, past the stack base" %
+                  eng_bss["end"])
+headroom = 0x4000 - eng_bss["end"]
+if headroom < stack_margin:
+    errors.append("stack headroom is %d B, under the %d B margin docs/"
+                  "ROM-SOUND.md names" % (headroom, stack_margin))
+if errors:
+    for e in errors:
+        print("budget: " + e, file=sys.stderr)
+    raise SystemExit(1)
+
+budget = {
+    "zero_page": {
+        "interpreter_start": 0x2020,
+        "interpreter_end": zp_end,
+        "interpreter_bytes": zp_end - 0x2020,
+        "engine_start": eng_zp["start"],
+        "engine_end": eng_zp["end"],
+        "engine_bytes": eng_zp["bytes"],
+        "free_bytes": 0x2100 - eng_zp["end"],
+    },
+    "base_ram": {
+        "interpreter_heap_start": heap,
+        "engine_start": eng_bss["start"],
+        "engine_end": eng_bss["end"],
+        "engine_bytes": eng_bss["bytes"],
+        "stack_base": 0x4000,
+        "stack_headroom": headroom,
+        "stack_margin": stack_margin,
+    },
+}
 
 out = {
     "image": binpath,
@@ -168,9 +295,10 @@ out = {
     "sizes": sizes,
     "section_sizes": section_sizes,
     "table_pool": table_pool,
+    "ram_budget": budget,
     "functions": functions,
     "cc": run([llvm + "/bin/mos-pce-clang", "--version"]).splitlines()[0],
-    "flags": "-Os -Wl,--defsym,__rom_bank0=0xc000 "
+    "flags": "-Os -mlto-zp=96 -Wl,--defsym,__rom_bank0=0xc000 "
              "-Wl,--defsym,__rom_bank0_size=0x4000 "
              "+ HuTrack banks from tools/ilvm/build-engine.sh",
 }
@@ -178,6 +306,16 @@ with open("tools/gen/ilvm.json", "w") as fh:
     json.dump(out, fh, indent=1, sort_keys=True)
 print("built %s: %d bytes, sha256 %s" % (binpath, out["bytes"],
                                          out["sha256"][:16]))
+zp = budget["zero_page"]
+ba = budget["base_ram"]
+print("zero page   interpreter $2020-$%04X (%d B) | engine $%04X-$%04X "
+      "(%d B) | %d B free" %
+      (zp["interpreter_end"], zp["interpreter_bytes"], zp["engine_start"],
+       zp["engine_end"], zp["engine_bytes"], zp["free_bytes"]))
+print("BaseRAM     interpreter heap starts $%04X | engine $%04X-$%04X (%d B)"
+      " | stack headroom %d B (margin %d)" %
+      (ba["interpreter_heap_start"], ba["engine_start"], ba["engine_end"],
+       ba["engine_bytes"], ba["stack_headroom"], ba["stack_margin"]))
 for symbol in sorted(functions):
     print("  %-18s %5d B" % (symbol, functions[symbol]))
 PY

@@ -500,6 +500,8 @@ allocated to C objects; the soft stack grows down from `$4000` and the
 deepest call tree in the four measured toys does not reach this page. A
 canary written at `$2116`–`$211F` survived palette, parallax, status-bar and
 sky-gradient runs (one each), which proves the stack never descended as far
-as `$2120`; the canary check is recorded in `docs/ROM_SPEED.md`. The cells
+as `$2120`; the canary check is recorded in `docs/ROM_SPEED.md`.  #214's
+probe (cells `$2130`/`$2132`, `tools/ilvm/stack-canary.sh`) measured the
+soft stack at `$3C7F` for the deepest toy, still above `$2120`. The cells
 are little-endian and are not cleared by the ROM; Mednafen powers up with
 zeroed RAM, which is why `updates` starts from 0.

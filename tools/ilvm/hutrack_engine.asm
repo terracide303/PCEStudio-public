@@ -25,22 +25,26 @@
 ; at page 6 for the same reason.  The interpreter owns pages 6 and 7, so the
 ; engine code moves to page 5.
 ;
-; RAM (zero page and BaseRAM) is placed provisionally here; #214 owns the
-; real partition.  Only the code/tables bank layout and the entry-point
-; addresses are this card's output.
-
-;---------------------------------------------------------------- RAM
-; docs/ROM-SOUND.md §5: the engine's zero page starts at $2080, after the
-; interpreter's $2020-$207F; its .bss goes at the llvm image's __bss_end.
-; $2200 is BaseRAM's start and stands in until #214 substitutes __bss_end.
-ENGINE_ZP_BASE  = $2080
-ENGINE_BSS_BASE = $2200
+; RAM (zero page and BaseRAM) is placed by tools/ilvm/build-engine.sh (#214):
+; @@ENGINE_ZP_BASE@@ is the interpreter's zero-page end and
+; @@ENGINE_BSS_BASE@@ the llvm image's __heap_start, both measured from the
+; built interpreter ELF before this file is assembled.  Only the code/tables
+; bank layout and the entry-point addresses are fixed here.
+;
+; EngineZp.start/end and EngineBss.end exist so the build reports the engine's
+; own extents rather than guessing them from the symbol names.
+ENGINE_ZP_BASE  = @@ENGINE_ZP_BASE@@
+ENGINE_BSS_BASE = @@ENGINE_BSS_BASE@@
 
     .zp
     .org ENGINE_ZP_BASE
+EngineZp.start:
     .bss
     .org ENGINE_BSS_BASE
     .include "HuTrack/HuTrack_vars.inc"
+EngineBss.end:
+    .zp
+EngineZp.end:
 
 ;---------------------------------------------------------------- bank 2: code, page 5
     .code

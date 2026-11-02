@@ -198,7 +198,7 @@
                                 * rest through its extra-argument block (#183) */
   var CALL_ARGS = 4;           /* what the C signature carries directly */
   var TABLE_ARRAY_CAP = 16;    /* a register-key array's first-cut capacity */
-  var TABLE_POOL_CELLS = 256;  /* the interpreter's fixed pool (docs/TABLES-PLAN.md §2.1) */
+  var TABLE_POOL_CELLS = 192;  /* the interpreter's fixed pool (#214: 768 B; docs/TABLES-PLAN.md §2.1) */
   var MAX_SLOTS = 255;         /* a slot id is one byte */
   var MAX_FIELDS = 255;        /* field ids 0..254; nfields is one byte */
 

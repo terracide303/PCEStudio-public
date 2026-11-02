@@ -6,46 +6,66 @@
  "bytes": 32768,
  "cc": "clang version 24.0.0git (https://github.com/llvm-mos/llvm-mos a40207a371b60ff787ece46817d9c0f62eada719)",
  "data_bank": "physical 4, appended per toy by renderer/pce-rom.js",
- "flags": "-Os -Wl,--defsym,__rom_bank0=0xc000 -Wl,--defsym,__rom_bank0_size=0x4000 + HuTrack banks from tools/ilvm/build-engine.sh",
+ "flags": "-Os -mlto-zp=96 -Wl,--defsym,__rom_bank0=0xc000 -Wl,--defsym,__rom_bank0_size=0x4000 + HuTrack banks from tools/ilvm/build-engine.sh",
  "functions": {
-  "exec": 9724,
+  "exec": 9726,
   "lua_idiv": 120,
   "lua_mod": 170,
-  "main": 2410,
+  "main": 2423,
   "operand": 107,
   "toy_frame": 198
  },
  "image": "renderer/ilvm.bin",
  "llvm_bytes": 16384,
- "llvm_sha256": "43afcf8f51ae9f07a91eb3ef6ed421a6069f2c01c11bc70b869c4b3964cdc8bd",
+ "llvm_sha256": "881455d2ea22984d4da4de06996e34fbca6186d7a2eea347c876ba01c01b2fe6",
+ "ram_budget": {
+  "base_ram": {
+   "engine_bytes": 1062,
+   "engine_end": 15348,
+   "engine_start": 14286,
+   "interpreter_heap_start": 14286,
+   "stack_base": 16384,
+   "stack_headroom": 1036,
+   "stack_margin": 787
+  },
+  "zero_page": {
+   "engine_bytes": 94,
+   "engine_end": 8414,
+   "engine_start": 8320,
+   "free_bytes": 34,
+   "interpreter_bytes": 96,
+   "interpreter_end": 8320,
+   "interpreter_start": 8224
+  }
+ },
  "rom": "tools/gen/ilvm.pce",
  "section_sizes": {
-  ".bss": 6552,
+  ".bss": 5576,
   ".comment": 204,
   ".data": 0,
-  ".early_start": 404,
+  ".early_start": 383,
   ".llvm_sympart": 30,
   ".noinit": 5,
   ".rodata": 90,
   ".shstrtab": 125,
   ".strtab": 8541,
   ".symtab": 9232,
-  ".text": 15880,
+  ".text": 15901,
   ".vector": 10,
   ".zp": 8,
-  ".zp.bss": 216,
+  ".zp.bss": 88,
   ".zp.data": 0
  },
- "sha256": "d4ad2bae75f371b110ea4c6cb5e274e007bf79542c5f865d51d9b9c91b4270dc",
+ "sha256": "b803f2e5476bb7a5c07f23883db25307bf811c58ab13c93bd1777960ff48c439",
  "sizes": {
-  "bss": 6781,
+  "bss": 5677,
   "data": 0,
   "text": 16384
  },
  "table_pool": {
-  "address": 16267160,
-  "bytes": 1024,
-  "cells": 256,
+  "address": 16266440,
+  "bytes": 768,
+  "cells": 192,
   "section": ".bss",
   "symbol": "cells"
  }

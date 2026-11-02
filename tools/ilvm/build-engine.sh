@@ -25,8 +25,14 @@
 # HuTrack (docs/BUILD.md, docs/HUTRACK.md).  `PCEAS4` overrides the default
 # `pceas4`.  `OUT` moves the output tree (the test builds into $TMPDIR).
 #
-# This card does NOT touch renderer/ilvm.bin or renderer/pce-rom.js; linking
-# the two banks into the interpreter is #213.
+# #214: the engine's RAM placement is not provisional any more.
+#   ENGINE_ZP_BASE   the engine's zero page (default $2080; build.sh asserts
+#                    the interpreter's page ends there or below)
+#   ENGINE_BSS_BASE  the engine's .bss, at the interpreter image's
+#                    __heap_start (default $2200, which is BaseRAM's start and
+#                    only right when the image has no .bss)
+# Both are substituted into the staging copy of hutrack_engine.asm and
+# reported as measured extents in hutrack-image.json.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 ROOT="$(pwd)"
@@ -40,6 +46,8 @@ esac
 STAGE="${STAGE:-$OUT/hutrack-stage}"
 ENGINE_ASM="$ROOT/tools/ilvm/hutrack_engine.asm"
 VENDOR="$ROOT/vendor/hutrack/lib"
+ENGINE_ZP_BASE="${ENGINE_ZP_BASE:-0x2080}"
+ENGINE_BSS_BASE="${ENGINE_BSS_BASE:-0x2200}"
 
 if ! command -v "$PCEAS4" >/dev/null 2>&1 && [ ! -x "$PCEAS4" ]; then
   echo "PCEAS 4.x not found: set PCEAS4 or install pceas4 (docs/BUILD.md)" >&2
@@ -52,11 +60,38 @@ mkdir -p "$STAGE"
 cp -R "$VENDOR" "$STAGE/lib"
 cp "$ENGINE_ASM" "$STAGE/engine.asm"
 
-python3 -I - "$ROOT" "$STAGE" <<'PY'
+python3 -I - "$ROOT" "$STAGE" "$ENGINE_ZP_BASE" "$ENGINE_BSS_BASE" <<'PY'
 import os
 import sys
 
-root, stage = sys.argv[1:3]
+root, stage, zp_base, bss_base = sys.argv[1:5]
+
+# #214: the RAM addresses are measured from the interpreter image by
+# build.sh, not written into the asm.  Both must be plain 16-bit hex values;
+# a typo would otherwise assemble a .org somewhere harmless and hide.
+for name, value in (("ENGINE_ZP_BASE", zp_base),
+                    ("ENGINE_BSS_BASE", bss_base)):
+    if not (value.startswith("0x") or value.startswith("$")):
+        raise SystemExit("%s=%r is not a hex address" % (name, value))
+    try:
+        n = int(value.replace("$", "0x"), 16)
+    except ValueError:
+        raise SystemExit("%s=%r is not a hex address" % (name, value))
+    if not (0x2000 <= n <= 0x4000):
+        raise SystemExit("%s=$%04X is not in the HuC6280 RAM page" %
+                         (name, n))
+
+asm = os.path.join(stage, "engine.asm")
+with open(asm, encoding="utf-8") as fh:
+    text = fh.read()
+for token, value in (("@@ENGINE_ZP_BASE@@", zp_base),
+                     ("@@ENGINE_BSS_BASE@@", bss_base)):
+    if token not in text:
+        raise SystemExit("%s has no %s: the staging template changed" %
+                         (os.path.relpath(asm, stage), token))
+    text = text.replace(token, value)
+with open(asm, "w", encoding="utf-8") as fh:
+    fh.write(text)
 
 # (file, vendor line number, expected line).  Patch by line rather than by
 # text so the two identical parser sites are individually proven, and fail
@@ -107,13 +142,14 @@ PY
 (cd "$STAGE" && PCE_INCLUDE="$STAGE/lib" "$PCEAS4" -raw -o engine.bin engine.asm)
 
 #---------------------------------------------------------------- extract + header + report
-python3 -I - "$ROOT" "$STAGE" "$OUT" "$PCEAS4" <<'PY'
+python3 -I - "$ROOT" "$STAGE" "$OUT" "$PCEAS4" "$ENGINE_ZP_BASE" \
+  "$ENGINE_BSS_BASE" <<'PY'
 import json
 import os
 import subprocess
 import sys
 
-root, stage, out, pceas = sys.argv[1:5]
+root, stage, out, pceas, zp_base, bss_base = sys.argv[1:7]
 
 BANK_BYTES = 8192
 CODE_BANK = 2
@@ -184,12 +220,35 @@ if any(b != 0xFF for b in code[code_bytes:]):
 if any(b != 0xFF for b in tables[tables_bytes:]):
     raise SystemExit("table bank has non-$FF bytes after HuTrack.Tables.end")
 
-# RAM placement is provisional here (#214 owns the partition), but it is the
-# one docs/ROM-SOUND.md §5 measured, so keep the build honest about it.
-if symbols.get("_hk.R1", {}).get("addr") != 0x2080:
-    raise SystemExit("_hk.R1 is not at $2080")
-if symbols.get("HuTrack.returnVec", {}).get("addr") != 0x2200:
-    raise SystemExit("HuTrack.returnVec is not at the .bss base ($2200)")
+# ---- the engine's RAM extents (#214) ---------------------------------------
+# The placement came from build.sh as ENGINE_ZP_BASE/ENGINE_BSS_BASE; the
+# labels in the staging asm report how much the engine really uses, so the
+# manifest carries measured extents instead of the design's estimate.
+required.update({"EngineZp.start": None, "EngineZp.end": None,
+                 "EngineBss.end": None})
+for name in required:
+    need(name)
+
+zp_start = need("EngineZp.start")
+zp_end = need("EngineZp.end")
+bss_start = need("HuTrack.returnVec")
+bss_end = need("EngineBss.end")
+if zp_start != int(zp_base, 0):
+    raise SystemExit("EngineZp.start is $%04X, expected %s" %
+                     (zp_start, zp_base))
+if bss_start != int(bss_base, 0):
+    raise SystemExit("HuTrack.returnVec is $%04X, expected .bss base %s" %
+                     (bss_start, bss_base))
+if symbols.get("_hk.R1", {}).get("addr") != zp_start:
+    raise SystemExit("_hk.R1 is not at the zero-page base $%04X" % zp_start)
+if zp_end <= zp_start or zp_end > 0x2100:
+    raise SystemExit("engine zero page $%04X-$%04X leaves the zero-page "
+                     "window" % (zp_start, zp_end))
+if bss_end <= bss_start or bss_end > 0x4000:
+    raise SystemExit("engine .bss $%04X-$%04X is outside BaseRAM below the "
+                     "stack" % (bss_start, bss_end))
+zp_bytes = zp_end - zp_start
+bss_bytes = bss_end - bss_start
 
 def write(path, data):
     with open(path, "wb") as fh:
@@ -280,6 +339,11 @@ manifest = {
                        os.path.join(out, "hutrack-tables.bin"), root),
                    "image_bytes": len(tables)},
     },
+    # #214: the engine's own RAM extents, measured from the staging assembly.
+    "ram": {
+        "zero_page": {"start": zp_start, "end": zp_end, "bytes": zp_bytes},
+        "bss": {"start": bss_start, "end": bss_end, "bytes": bss_bytes},
+    },
     "symbols": {entry["symbol"]: {"addr": entry["addr"],
                                   "bank": entry["bank"]}
                 for entry in interface},
@@ -295,6 +359,10 @@ print("engine code    bank %d: $%04X-$%04X  %4d B of %d  (%d free)" %
 print("engine tables  bank %d: $%04X-$%04X  %4d B of %d  (%d free)" %
       (TABLES_BANK, tab_start, tab_end, tables_bytes, BANK_BYTES,
        BANK_BYTES - tables_bytes))
+print("engine RAM     zero page $%04X-$%04X  %3d B" %
+      (zp_start, zp_end, zp_bytes))
+print("engine RAM     .bss      $%04X-$%04X  %4d B" %
+      (bss_start, bss_end, bss_bytes))
 print("symbols:")
 for entry in interface:
     where = ("RAM $%04X" % entry["addr"]) if entry["bank"] is None else \

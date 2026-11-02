@@ -146,7 +146,7 @@ already uses for closures (one static slot per closure site, `cgen-closure-loop`
 when the value can escape). The safety rule is the same and is stated in §2.6:
 a site whose table escapes *and* can run more than once is refused.
 
-*Why 256 cells.* The pool must hold the largest toy, because `ilvm.bin` is one
+*Why 256 cells (and why it is 192 now).* The pool must hold the largest toy, because `ilvm.bin` is one
 fixed image shared by every ROM. At the proposed sizing rule (below) the three
 games need **172 (STARFALL), 33 (TOWER) and 183 (NOVA, after #177)** cells; a
 256-cell pool (1,024 B) covers all three with 73 cells of headroom. The pool is
@@ -160,7 +160,10 @@ the card that builds the image (#175): `tools/gen/ilvm.json`'s section sizes
 plus the `$2116–$211F` stack canary of docs/ROM_SPEED.md. If it does not fit,
 `TABLE_POOL_CELLS` comes down (192 cells = 768 B still covers all three at
 172/33/183) and the encoder's constant moves with it — the two are asserted
-equal by name in #174.
+equal by name in #174. **#214 took that option**: the shipped pool is 192
+cells (768 B) so HuTrack's `.bss` fits below the stack (docs/ROM-SOUND.md
+§5), and `ilvm.c`'s `MAX_TABLE_CELLS` and `pce-ilbc.js`'s `TABLE_POOL_CELLS`
+are both 192.
 
 *Address.* The pool is not at a hand-picked address: it is a `static` array in
 the interpreter's `.bss`, placed by the llvm-mos linker below the stack base

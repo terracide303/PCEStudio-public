@@ -109,22 +109,26 @@ volatile uint8_t toy_host_mode;
 static uint8_t toy_cr;  /* the CR the toy last asked for (#186: the display-on
                          * writes must not drop the toy's SB bit) */
 
-/* The line table: 14 page-aligned arrays indexed by VDW line, so the IRQ
- * handler's `lda array,x` never crosses a page (viewer.asm's reason). */
-volatile uint8_t toy_r_op[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_bxr_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_bxr_hi[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_byr_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_byr_hi[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_cr[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_a1_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_a1_hi[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_v1_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_v1_hi[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_a2_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_a2_hi[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_v2_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_v2_hi[256] __attribute__((aligned(256)));
+/* The line table: 14 arrays indexed by VDW line.  #214 shrank them from 256
+ * bytes/page-aligned to the 224 lines the handler serves, 32-byte aligned:
+ * the page alignment cost 32 B of padding each (448 B, the difference from
+ * the BaseRAM budget in docs/ROM-SOUND.md §5).  `lda array,x` with x up to
+ * 223 can now cross a page (one extra cycle for that load); the handler
+ * still fits the blank and every raster capture compares diff 0. */
+volatile uint8_t toy_r_op[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_bxr_lo[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_bxr_hi[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_byr_lo[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_byr_hi[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_cr[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_a1_lo[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_a1_hi[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_v1_lo[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_v1_hi[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_a2_lo[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_a2_hi[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_v2_lo[224] __attribute__((aligned(32)));
+volatile uint8_t toy_r_v2_hi[224] __attribute__((aligned(32)));
 
 volatile uint8_t toy_collect_line;
 

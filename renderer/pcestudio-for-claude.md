@@ -852,7 +852,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | C compiler (Export…) | function calls with up to 8 arguments | a ninth parameter or argument is cgen-arity |
 | C compiler (Export…) | closures and upvalues | one static slot per site; a closure created in a loop is refused when a function value can be stored |
 | C compiler (Export…) | int, bool, function and table globals | the IL must declare the global's type (cgen-global) |
-| C compiler (Export…) | tables: int array keys, string fields | a static pool of 256 cells, one slot per table site; an escaping site that runs more than once is cgen-table-escape |
+| C compiler (Export…) | tables: int array keys, string fields | a static pool of 192 cells, one slot per table site; an escaping site that runs more than once is cgen-table-escape |
 | C compiler (Export…) | vram[...] writes | vset; a vram read (vget) is cgen-op |
 | C compiler (Export…) | pal(addr, word) and rgb(r, g, b) | rgb and note are the value-returning builtins lowered |
 | C compiler (Export…) | reg("BXR", v), reg("BYR", v), reg("CR", v) | the three registers a toy may write |
@@ -866,7 +866,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | bytecode (every .pce) | 32-bit integer arithmetic and comparisons | add sub mul mod idiv band bor bxor shl shr; eq lt le; unm, bnot and logical not |
 | bytecode (every .pce) | rgb(r, g, b) and note(midi) | the two builtins with a bytecode form (note is a MIDI number to the PSG's 12-bit F); min/max/floor/abs/clamp/sr and the fixed helpers do not encode here |
 | bytecode (every .pce) | pal(), reg(BXR/BYR/CR), vram[...] writes | vram reads (vget) have no bytecode form |
-| bytecode (every .pce) | tables: int array keys and string fields | the interpreter's fixed pool of 256 cells |
+| bytecode (every .pce) | tables: int array keys and string fields | the interpreter's fixed pool of 192 cells |
 | bytecode (every .pce) | pad[n].field |  |
 | bytecode (every .pce) | sat(i, k, v) and sprite(i, spec) |  |
 | bytecode (every .pce) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | a sound toy's container is version 3, which the committed interpreter does not read — export refuses the ROM until the engine link lands.  The host harness runs the same ops today. |
@@ -897,7 +897,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | bytecode (every .pce) | ilbc-range | a value past one byte: more than 127 constants, 128 registers, 255 functions or globals, or a setlist index/count |
 | bytecode (every .pce) | ilbc-table-escape | a table site that can run more than once and escapes; one static slot would alias two tables |
 | bytecode (every .pce) | ilbc-table-key | a table base that is not a register, or a key that is neither a string field nor an int operand |
-| bytecode (every .pce) | ilbc-table-ram | the table slots need more than the interpreter's 256 cells, or a key/field is past its slot's shape |
+| bytecode (every .pce) | ilbc-table-ram | the table slots need more than the interpreter's 192 cells, or a key/field is past its slot's shape |
 
 A refusal is not a crash: the exported ROM cannot carry the construct, so the finding names it and the line. The browser may still run the toy — the CONSOLE tab answers that question (renderer/pce-validate.js).
 

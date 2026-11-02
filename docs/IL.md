@@ -1146,7 +1146,8 @@ read it — so a sound toy encodes fully but does not export a faulting ROM.
 The **v2 table section** (at the offset in header byte 20, between the global
 names and the code) is `nslots u8`, then one entry per table site in program
 order: `base u16, cap u8, nfields u8`. `base` is the slot's first cell in the
-interpreter's fixed pool of `TABLE_POOL_CELLS` (256) 4-byte cells; the array
+interpreter's fixed pool of `TABLE_POOL_CELLS` (192 since #214) 4-byte
+cells; the array
 part is `cap` cells (1-based index `i` at `base+i-1`), then `nfields` field
 cells (field id `f` at `base+cap+f`). Field ids are program-wide and assigned
 by first appearance of the string key, so a name means the same field

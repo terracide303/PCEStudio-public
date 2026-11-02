@@ -157,7 +157,7 @@ const GAME_PINS = {
    * with any interpreter change (#187's opcode moved all three). */
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
-    rom: "6a30111599e134a2945225607b8878636a3eeb2aba1bc552c24a6f1aa1e68ad4",
+    rom: "b05f34cc5117aac38eb4984534372b7c0453ee68ae9a6942efa693c3ca841742",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
@@ -173,7 +173,7 @@ const GAME_PINS = {
   "SPRITE": {
     kind: "toy",
     toy: "tools/toys/sprite.lua",
-    rom: "ba70d18473e6bbf60ad4dae4053ead9b5e385cb95c7b14d229c071a1087d2b3e",
+    rom: "80458fd1d549713a998beddeafb8d19aca338f4d38eeb3833f347976206e4860",
     frames: [1994475180]
   }
 };
@@ -182,7 +182,7 @@ const GAME_PINS = {
  * toy builds to one ROM and its picture repeats every eight frames. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "1af88081cb9f2d40f6d67a171ea556082f06498728f50d6203934a93bc7e4a7a",
+  rom: "7a7474e7d96b1fa66f44c29bc52cb49b7b1fea11893a6a63c4d29cbf57beab76",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -195,7 +195,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "fff2461f16cf07561aec0e083e91c981f96b315108cbd248a66df1f47e667e42",
+  rom: "de8c223749fe991297e7d2019739b49af36e5c6da226bcb3827870f12fbe7988",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -212,7 +212,7 @@ const WIDE = {
  * hashes are the whole cycle. */
 const NOT = {
   toy: "tools/toys/not.lua",
-  rom: "907c7878363f77a0e78b7b8d361b75410a1c8267e0676c8e1b1824f077ffff52",
+  rom: "90eaad46d54edc53a2530f29784c367a0dc22455f3097e6101a8d4cdf6bceeff",
   frames: [2266090996, 2632876444, 887268600, 1464026320]
 };
 
