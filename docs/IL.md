@@ -1290,6 +1290,14 @@ form — the browser host's toy surface has none, so the bytecode carries what
 the surface has (docs/ROM-SOUND.md §7).  Every container carrying one of
 these ops is version 3, even with no tables.
 
+Their console behaviour is proven on Mednafen, not just in the host harness:
+`tests/check-rom-sound.js` builds a **test-only** image (`TRACE=1`; it
+refuses to write `renderer/ilvm.bin`) whose sound-op glue and two SFX
+reservation routines append every PSG write to BaseRAM, and the extracted
+log equals the studio runtime's `rt.sound.events` for `tools/toys/note.lua`
+and `tools/toys/sfx.lua` over 24 toy frames — 92 and 48 writes, same order,
+same registers, same values (docs/ROM-SOUND.md §8).
+
 `arith` ops are 0 add, 1 sub, 2 mul, 3 mod, 4 idiv, 5 band, 6 bor, 7 bxor,
 8 shl, 9 shr; `cmp` ops are 0 eq, 1 lt, 2 le; `reg` ids are 0 BXR, 1 BYR,
 2 CR; builtin 0 is `rgb`, builtin 1 is `note` — a MIDI number to the PSG's 12-bit F, the same 7,159,090 / (64 × 440 × 2^((midi-69)/12)) the host uses,
@@ -1343,6 +1351,13 @@ The toy's container is **physical bank 4**, and `ilvm.c` maps it into the
 MPR2 window (`$4000-$5FFF`) with `TAM #$04` at boot. The image is committed
 as `renderer/ilvm.bin` (32,768 B, sha256 in `tools/gen/ilvm.json`), like
 `renderer/viewer-bank0.bin`; the browser never invokes a compiler.
+
+`tools/ilvm/build.sh` has one test-only variant: `TRACE=1` assembles a PSG
+write log (307 B of BaseRAM) into the engine's `.bss` and **refuses to write
+`renderer/ilvm.bin`**. It is the instrument `tests/check-rom-sound.js` uses
+to compare the console's sound-op writes with the browser host's
+(docs/ROM-SOUND.md §8); no committed image carries it, and the trace build
+still asserts the stack margin (824 B against 787 B).
 
 Register-file semantics mirror `pce-cgen.js`: 32-bit wrapping `add/sub/mul`,
 Lua's floor `%` and `//`, shifts out of range 0, Lua truthiness for `br`,

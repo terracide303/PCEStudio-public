@@ -43,9 +43,25 @@
  * logic the console's glue runs, but not the 6502.  The console half's own
  * code is the SndGlue routines pinned by tests/check-hutrack-image.js
  * (fixed addresses, extents, bss), and the image they live in is pinned by
- * check-ilvm/check-export-games' ROM shas.  No emulator runs here; music()
- * with songs is unexercised while buildToyRom writes n = 0 (#199), which is
- * exactly why music() only appears in the no-op pins below.
+ * check-ilvm/check-export-games' ROM shas.
+ *
+ * 3. the console trace (#200).  A trace build of the interpreter
+ *    (TRACE=1, never renderer/ilvm.bin) appends every PSG write the console
+ *    makes — the glue's own writes and, through line-pinned patches in the
+ *    staged vendor copy, the two SFX reservation routines' — to three
+ *    parallel BaseRAM arrays for toy frames 0..23 (docs/ROM-SOUND.md §8).
+ *    tools/toys/note.lua and tools/toys/sfx.lua are exported against that
+ *    image, run in Mednafen, and the autosaved state's log is compared with
+ *    renderer/pce-toyhost.js's rt.sound.events for the same frames: same
+ *    order, same registers, same values.  The arrays are filled with $EE at
+ *    reset and the test checks the tail beyond the count still holds it,
+ *    so a log the stack had overwritten cannot pass silently.  This needs
+ *    Mednafen, llvm-mos and PCEAS 4.x (SKIP without them); it does not need
+ *    the system cc.
+ *
+ *    The trace is what #238 and #239 were proved by: the first run of this
+ *    suite found note(60)'s F as 268 (the low-byte clamp) and the first
+ *    SFX's reserve missing (SndGlueMap's zero-song loop overran snd_owned).
  */
 
 "use strict";
@@ -53,10 +69,11 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawnSync } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 
 const il = require("../renderer/pce-il.js");
 const ilbc = require("../renderer/pce-ilbc.js");
+const romLib = require("../renderer/pce-rom.js");
 
 const ROOT = path.join(__dirname, "..");
 const ILVM_C = path.join(ROOT, "tools", "ilvm", "ilvm.c");
@@ -119,6 +136,124 @@ function framesFromEvents(events) {
   for (const e of events)
     (out[e.f] = out[e.f] || []).push([e.reg, e.value]);
   return out;
+}
+
+/* ---- the console trace (#200) ---------------------------------------- *
+ * The trace build's symbols (tools/gen/hutrack-image.json's psg_trace) and
+ * a Mednafen run are the only emulator-side pieces; this file's other
+ * checks stay host-only and cheap. */
+const TRACE_FRAMES = 24;           /* the image's PSG_TRACE_FRAMES */
+const TRACE_FILL = 0xEE;           /* PsgTraceReset's tail witness */
+
+function haveCommand(cmd) {
+  return spawnSync("bash", ["-c", "command -v " + cmd],
+                   { encoding: "utf8" }).status === 0;
+}
+function findLlvmMos() {
+  const roots = [process.env.LLVM_MOS,
+                 "/Volumes/External/pce-tools/llvm-mos",
+                 "/Volumes/External II/pce-tools/llvm-mos"];
+  for (const r of roots)
+    if (r && fs.existsSync(path.join(r, "bin", "mos-pce-clang"))) return r;
+  return null;
+}
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/* Run one ROM in Mednafen and return its autosaved state (or null).  The
+ * route is capture-toy.sh's: pce module, SDL video (the OpenGL driver can
+ * stall at video init when the display sleeps), -autosave 1 and SIGINT for
+ * a clean exit between frames — never a synthesized key event. */
+function mednafenState(rom, scratch) {
+  const home = path.join(scratch, "mednafen-home");
+  const mcs = path.join(home, "mcs");
+  fs.mkdirSync(mcs, { recursive: true });
+  const started = Date.now();
+  const child = spawn("mednafen", [
+    "-force_module", "pce", "-video.driver", "sdl",
+    "-autosave", "1", "-sound", "0", rom
+  ], { env: Object.assign({}, process.env, { MEDNAFEN_HOME: home }),
+       stdio: "ignore" });
+  sleepMs(7000);
+  child.kill("SIGINT");
+  for (let i = 0; i < 40 && child.exitCode === null; i++) sleepMs(500);
+  if (child.exitCode === null) child.kill("SIGKILL");
+  sleepMs(1000);
+  const states = fs.readdirSync(mcs).filter((f) => f.endsWith(".mca"))
+    .map((f) => path.join(mcs, f))
+    .filter((f) => fs.statSync(f).mtimeMs >= started - 1000);
+  return states.length ? states[0] : null;
+}
+
+function readTrace(ram, trace) {   /* ram.bin -> [{f, reg, value}] + checks */
+  const at = (a) => a - 0x2000;
+  const ok = ram[at(trace.psg_trace_ok)];
+  const count = ram[at(trace.psg_trace_count)];
+  const f = ram.slice(at(trace.psg_trace_f),
+                      at(trace.psg_trace_f) + trace.capacity);
+  const r = ram.slice(at(trace.psg_trace_r),
+                      at(trace.psg_trace_r) + trace.capacity);
+  const v = ram.slice(at(trace.psg_trace_v),
+                      at(trace.psg_trace_v) + trace.capacity);
+  const events = [];
+  for (let i = 0; i < count; i++)
+    events.push({ f: f[i], reg: r[i], value: v[i] });
+  let tail = true;
+  for (let i = count; i < trace.capacity; i++)
+    if (f[i] !== TRACE_FILL || r[i] !== TRACE_FILL || v[i] !== TRACE_FILL)
+      tail = false;
+  return { ok, count, events, tail };
+}
+
+/* One toy: build it against the trace image, run it, compare the log with
+ * the studio's writes for the same frames, and check the log's own health. */
+function checkOneTrace(toy, label, image, scratch) {
+  const trace = JSON.parse(fs.readFileSync(
+    path.join(ROOT, "tools", "gen", "hutrack-image.json"), "utf8")).psg_trace;
+  check(!!trace, label + ": the trace build reports its log addresses");
+  if (!trace) return;
+
+  const source = fs.readFileSync(toy, "utf8");
+  const encoded = ilbc.encode(il.compile(source,
+    { chunkName: path.basename(toy) }));
+  const romPath = path.join(scratch, label + "-trace.pce");
+  fs.writeFileSync(romPath, Buffer.from(romLib.buildToyRom({
+    bank0: fs.readFileSync(image), bytecode: encoded.bytes })));
+
+  const state = mednafenState(romPath, scratch);
+  check(!!state, label + ": Mednafen autosaved a state");
+  if (!state) return;
+  const dump = path.join(scratch, label + "-dump");
+  const ex = spawnSync("python3", ["-I",
+    path.join(ROOT, "tools", "mcs-extract.py"), state, dump, "--ram"],
+    { encoding: "utf8" });
+  check(ex.status === 0, label + ": mcs-extract reads BaseRAM");
+  if (ex.status !== 0) return;
+
+  const got = readTrace(fs.readFileSync(path.join(dump, "ram.bin")), trace);
+  eq(label + ": the trace build's reset ran (ok byte is $A5)",
+     got.ok, 0xA5);
+
+  /* the studio's PSG writes for the same frames */
+  const rt = il.create(source, { chunkName: path.basename(toy) });
+  rt.load();
+  for (let f = 0; f < TRACE_FRAMES; f++) rt.frame(f);
+  const want = rt.sound.events.filter((e) => e.f < TRACE_FRAMES)
+    .map((e) => [e.f, e.reg, e.value]);
+  const mine = got.events.map((e) => [e.f, e.reg, e.value]);
+
+  check(got.events.length > 0,
+        label + ": the log recorded PSG writes (" + got.events.length + ")");
+  eq(label + ": the console wrote exactly the studio's stream over " +
+     TRACE_FRAMES + " frames (" + want.length + " writes, frame for frame)",
+     mine, want);
+  check(got.tail,
+        label + ": the log's unfilled tail is still $" + TRACE_FILL.toString(16)
+        .toUpperCase() + " (the stack did not overwrite it)");
+  eq(label + ": the last recorded frame is inside the window",
+     got.events.length ? got.events[got.events.length - 1].f : null,
+     want.length ? want[want.length - 1][0] : null);
 }
 
 /* compile + encode + run one toy on both hosts, then compare the write
@@ -379,6 +514,54 @@ if (probe.error) {
     fs.rmSync(silentDir, { recursive: true, force: true });
   }
   fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+/* ---- 3. the console trace (#200) -------------------------------------- */
+{
+  const llvm = findLlvmMos();
+  const missing = [];
+  if (!haveCommand("mednafen")) missing.push("Mednafen");
+  if (!haveCommand("pceas4")) missing.push("PCEAS 4.x");
+  if (!llvm) missing.push("llvm-mos");
+  if (!haveCommand("python3")) missing.push("python3");
+  if (missing.length) {
+    skipped.push("the Mednafen PSG trace (" + missing.join(", ") + " missing)");
+    console.log("SKIP  the Mednafen PSG trace: " + missing.join(", ") +
+                " missing");
+  } else {
+    /* One Mednafen at a time: another seat may be running one from this
+     * account, and two runs make both captures wrong (docs/ROM_SPEED.md). */
+    let busy = false;
+    for (let i = 0; i < 30; i++) {
+      if (spawnSync("pgrep", ["-x", "mednafen"]).status !== 0) break;
+      busy = i === 29;
+      sleepMs(2000);
+    }
+    if (busy) {
+      skipped.push("the Mednafen PSG trace (another mednafen is running)");
+      console.log("SKIP  the Mednafen PSG trace: another mednafen is running");
+    } else {
+      const scratch = fs.mkdtempSync(
+        path.join(os.tmpdir(), "romsound-trace-"));
+      const image = path.join(scratch, "ilvm-trace.bin");
+      const build = spawnSync(
+        path.join(ROOT, "tools", "ilvm", "build.sh"), [],
+        { cwd: ROOT, encoding: "utf8",
+          env: Object.assign({}, process.env,
+                             { TRACE: "1", BIN: image, LLVM_MOS: llvm }) });
+      check(build.status === 0,
+            "trace image builds (TRACE=1, never renderer/ilvm.bin)");
+      if (build.status === 0) {
+        for (const spec of [["tools/toys/note.lua", "note"],
+                            ["tools/toys/sfx.lua", "sfx"]])
+          checkOneTrace(path.join(ROOT, spec[0]), spec[1], image, scratch);
+      } else {
+        console.log("      " + ((build.stderr || build.stdout || "")
+          .trim().split("\n").slice(-3).join(" | ")));
+      }
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  }
 }
 
 if (skipped.length) console.log("SKIP  " + skipped.join("; "));

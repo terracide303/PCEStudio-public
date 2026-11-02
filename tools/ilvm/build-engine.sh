@@ -31,6 +31,12 @@
 #   ENGINE_BSS_BASE  the engine's .bss, at the interpreter image's
 #                    __heap_start (default $2200, which is BaseRAM's start and
 #                    only right when the image has no .bss)
+#
+# #200: PSG_TRACE=1 assembles the test-only PSG write trace — the glue's
+# writes plus the two SFX reservation routines', patched into the staged
+# vendor copy by pinned line — and reports its BaseRAM addresses under
+# psg_trace in tools/gen/hutrack-image.json.  The shipped builds leave it
+# unset and are byte-identical to before.
 # Both are substituted into the staging copy of hutrack_engine.asm and
 # reported as measured extents in hutrack-image.json.
 set -euo pipefail
@@ -48,6 +54,11 @@ ENGINE_ASM="$ROOT/tools/ilvm/hutrack_engine.asm"
 VENDOR="$ROOT/vendor/hutrack/lib"
 ENGINE_ZP_BASE="${ENGINE_ZP_BASE:-0x2080}"
 ENGINE_BSS_BASE="${ENGINE_BSS_BASE:-0x2200}"
+# #200: PSG_TRACE=1 assembles the test-only PSG write log (docs/ROM-SOUND.md
+# §8).  It adds 307 B of BaseRAM (7 B of state + three 100-byte arrays) and
+# ~10 B of code per traced write; the shipped
+# builds leave it unset and the image is byte-identical to before.
+PSG_TRACE="${PSG_TRACE:-0}"
 
 if ! command -v "$PCEAS4" >/dev/null 2>&1 && [ ! -x "$PCEAS4" ]; then
   echo "PCEAS 4.x not found: set PCEAS4 or install pceas4 (docs/BUILD.md)" >&2
@@ -78,11 +89,13 @@ if ! cmp -s "$NT_SCRATCH/note-table.inc" "$STAGE/note-table.inc" || \
   exit 1
 fi
 
-python3 -I - "$ROOT" "$STAGE" "$ENGINE_ZP_BASE" "$ENGINE_BSS_BASE" <<'PY'
+python3 -I - "$ROOT" "$STAGE" "$ENGINE_ZP_BASE" "$ENGINE_BSS_BASE" \
+  "$PSG_TRACE" <<'PY'
 import os
 import sys
 
-root, stage, zp_base, bss_base = sys.argv[1:5]
+root, stage, zp_base, bss_base, psg_trace = sys.argv[1:6]
+trace_build = psg_trace == "1"
 
 # #214: the RAM addresses are measured from the interpreter image by
 # build.sh, not written into the asm.  Both must be plain 16-bit hex values;
@@ -103,7 +116,10 @@ asm = os.path.join(stage, "engine.asm")
 with open(asm, encoding="utf-8") as fh:
     text = fh.read()
 for token, value in (("@@ENGINE_ZP_BASE@@", zp_base),
-                     ("@@ENGINE_BSS_BASE@@", bss_base)):
+                     ("@@ENGINE_BSS_BASE@@", bss_base),
+                     ("@@PSG_TRACE_DEFINE@@",
+                      "PSG_TRACE = 1" if trace_build
+                     else "; PSG trace not enabled")):
     if token not in text:
         raise SystemExit("%s has no %s: the staging template changed" %
                          (os.path.relpath(asm, stage), token))
@@ -142,6 +158,42 @@ for rel, line_no, expected, owner in SITES:
         fh.writelines(lines)
     print("patched %s:%d (%s): MAP_BANK.4 -> MAP_BANK" % (rel, line_no, owner))
 
+# #200's trace build: the two SFX reservation routines are the only engine
+# code a note()/sfx() toy runs (setChanForSFX's reservation writes and
+# chanReleaseSFX's release writes), so their PSG writes get a trace call in
+# the staged copy.  Applied after the MAP_BANK patches and in descending
+# line order, so each pinned line number is still the vendor one.
+TRACE_SITES = [
+    ("HuTrack/HuTrack_lib.asm", 259, "stz $809", "PSGT_Z 9"),
+    ("HuTrack/HuTrack_lib.asm", 255, "stz $807", "PSGT_Z 7"),
+    ("HuTrack/HuTrack_lib.asm", 254, "stz $804", "PSGT_Z 4"),
+    ("HuTrack/HuTrack_lib.asm", 253, "stx $800", "PSGT_X 0"),
+    ("HuTrack/HuTrack_lib.asm", 227, "sta $805", "PSGT_A 5"),
+    ("HuTrack/HuTrack_lib.asm", 224, "stz $809", "PSGT_Z 9"),
+    ("HuTrack/HuTrack_lib.asm", 220, "stz $807", "PSGT_Z 7"),
+    ("HuTrack/HuTrack_lib.asm", 219, "stz $804", "PSGT_Z 4"),
+    ("HuTrack/HuTrack_lib.asm", 218, "stx $800", "PSGT_X 0"),
+]
+if trace_build:
+    for rel, line_no, expected, macro in TRACE_SITES:
+        p = os.path.join(stage, "lib", rel)
+        with open(p, newline="") as fh:
+            lines = fh.readlines()
+        if line_no > len(lines) or lines[line_no - 1].strip() != expected:
+            found = (lines[line_no - 1].strip() if line_no <= len(lines)
+                     else "<EOF>")
+            raise SystemExit(
+                "staged %s:%d is %r, expected %r — vendor/hutrack moved; "
+                "update the trace patch in tools/ilvm/build-engine.sh" %
+                (rel, line_no, found, expected))
+        line = lines[line_no - 1]
+        eol = "\r\n" if line.endswith("\r\n") else "\n"
+        indent = line[:len(line) - len(line.lstrip())]
+        lines.insert(line_no, indent + macro + eol)   # after the write
+        with open(p, "w", newline="") as fh:
+            fh.writelines(lines)
+        print("traced %s:%d (%s): %s" % (rel, line_no, expected, macro))
+
 # The narrowed window is the whole patch: no full-window mapping may survive
 # in the code sources.  (hutrack.inc keeps the MAP_BANK.4 macro definition
 # itself — an unused macro is harmless — so only .asm call sites count.)
@@ -161,13 +213,14 @@ PY
 
 #---------------------------------------------------------------- extract + header + report
 python3 -I - "$ROOT" "$STAGE" "$OUT" "$PCEAS4" "$ENGINE_ZP_BASE" \
-  "$ENGINE_BSS_BASE" <<'PY'
+  "$ENGINE_BSS_BASE" "$PSG_TRACE" <<'PY'
 import json
 import os
 import subprocess
 import sys
 
-root, stage, out, pceas, zp_base, bss_base = sys.argv[1:7]
+root, stage, out, pceas, zp_base, bss_base, psg_trace = sys.argv[1:8]
+trace_build = psg_trace == "1"
 
 BANK_BYTES = 8192
 CODE_BANK = 2
@@ -271,19 +324,19 @@ if any(b != 0xFF for b in tables[glue_end - tab_start:]):
 # labels in the staging asm report how much the engine really uses, so the
 # manifest carries measured extents instead of the design's estimate.
 required.update({"EngineZp.start": None, "EngineZp.end": None,
-                 "EngineBss.end": None})
+                 "EngineBss.start": None, "EngineBss.end": None})
 for name in required:
     need(name)
 
 zp_start = need("EngineZp.start")
 zp_end = need("EngineZp.end")
-bss_start = need("HuTrack.returnVec")
+bss_start = need("EngineBss.start")
 bss_end = need("EngineBss.end")
 if zp_start != int(zp_base, 0):
     raise SystemExit("EngineZp.start is $%04X, expected %s" %
                      (zp_start, zp_base))
 if bss_start != int(bss_base, 0):
-    raise SystemExit("HuTrack.returnVec is $%04X, expected .bss base %s" %
+    raise SystemExit("EngineBss.start is $%04X, expected .bss base %s" %
                      (bss_start, bss_base))
 if symbols.get("_hk.R1", {}).get("addr") != zp_start:
     raise SystemExit("_hk.R1 is not at the zero-page base $%04X" % zp_start)
@@ -295,12 +348,25 @@ if bss_end <= bss_start or bss_end > 0x4000:
                      "stack" % (bss_start, bss_end))
 glue_bss_start = need("SndGlueBss.start")
 glue_bss_end = need("SndGlueBss.end")
-if not (bss_start < glue_bss_start < glue_bss_end <= bss_end):
+if not (bss_start <= glue_bss_start < glue_bss_end <= bss_end):
     raise SystemExit("glue .bss $%04X-$%04X is not inside the engine's "
                      ".bss $%04X-$%04X" % (glue_bss_start, glue_bss_end,
                                            bss_start, bss_end))
 zp_bytes = zp_end - zp_start
 bss_bytes = bss_end - bss_start
+
+# #200: the trace build's log addresses (docs/ROM-SOUND.md §8).  The test
+# reads them from BaseRAM in a Mednafen save state; they only exist when
+# PSG_TRACE=1 assembled the arrays.
+psg_trace_report = None
+if trace_build:
+    names = ["psg_trace_ok", "psg_trace_count", "psg_trace_frame",
+             "psg_trace_seen", "psg_trace_reg", "psg_trace_val",
+             "psg_trace_f", "psg_trace_r", "psg_trace_v"]
+    psg_trace_report = {name: need(name) for name in names}
+    psg_trace_report.update({"frames": 24, "capacity": 100,
+                             "format": "three parallel arrays: frame, "
+                                       "register, value (one byte each)"})
 
 def write(path, data):
     with open(path, "wb") as fh:
@@ -424,6 +490,7 @@ manifest = {
     "symbols": {entry["symbol"]: {"addr": entry["addr"],
                                   "bank": entry["bank"]}
                 for entry in interface},
+    "psg_trace": psg_trace_report,
     "symbol_header": os.path.relpath(
         os.path.join(out, "hutrack-symbols.h"), root),
 }
@@ -446,6 +513,13 @@ print("engine RAM     zero page $%04X-$%04X  %3d B" %
       (zp_start, zp_end, zp_bytes))
 print("engine RAM     .bss      $%04X-$%04X  %4d B" %
       (bss_start, bss_end, bss_bytes))
+if psg_trace_report:
+    print("trace log      BaseRAM   $%04X/$%04X/$%04X (f/r/v), %d frames, "
+          "%d entries" % (psg_trace_report["psg_trace_f"],
+                          psg_trace_report["psg_trace_r"],
+                          psg_trace_report["psg_trace_v"],
+                          psg_trace_report["frames"],
+                          psg_trace_report["capacity"]))
 print("symbols:")
 for entry in interface:
     where = ("RAM $%04X" % entry["addr"]) if entry["bank"] is None else \

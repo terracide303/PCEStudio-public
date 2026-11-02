@@ -36,17 +36,58 @@
 ENGINE_ZP_BASE  = @@ENGINE_ZP_BASE@@
 ENGINE_BSS_BASE = @@ENGINE_BSS_BASE@@
 
+; #200's trace build: build-engine.sh replaces this line with
+; `PSG_TRACE = 1` when PSG_TRACE=1, and with nothing otherwise.  The shipped
+; image is assembled with the token commented out, so none of the trace code
+; or RAM below exists in it (docs/ROM-SOUND.md §8).
+@@PSG_TRACE_DEFINE@@
+PSG_TRACE_FRAMES = 24          ; the window the trace covers: frames 0..23
+PSG_TRACE_CAP    = 100         ; entries held by the three arrays below
+
     .zp
     .org ENGINE_ZP_BASE
 EngineZp.start:
     .bss
     .org ENGINE_BSS_BASE
-    .include "HuTrack/HuTrack_vars.inc"
+EngineBss.start:
+
+; #200's PSG write trace (docs/ROM-SOUND.md §8).  Only a PSG_TRACE build
+; carries it, and it sits at the BOTTOM of the engine's .bss: the llvm-mos
+; soft stack sweeps down through this BaseRAM after SndGlueReset (#239), so a
+; log at the top of the partition would be overwritten between frames.  At
+; the bottom it is below every address the stack has been measured at, and
+; the interpreter's own globals below it are the proof that the stack cannot
+; go further without breaking the interpreter first.  PsgTraceReset fills
+; the arrays with $EE; the test checks the fill beyond the count survived,
+; which is this card's witness that the stack did not reach the log.  The
+; log is three parallel arrays so every access is one Y-indexed load/store
+; (a 300-byte flat entry array would cross a page).
+    .ifdef PSG_TRACE
+psg_trace_ok:    .ds 1         ; $A5 once SndGlueReset ran; corruption check
+psg_trace_count: .ds 1         ; 0..PSG_TRACE_CAP
+psg_trace_frame: .ds 2         ; the toy frame, set by SndGlueTick
+psg_trace_seen:  .ds 1         ; the first tick is frame 0, not an increment
+psg_trace_reg:   .ds 1         ; the write's register (A at the call)
+psg_trace_val:   .ds 1         ; the write's value
+psg_trace_f:     .ds PSG_TRACE_CAP
+psg_trace_r:     .ds PSG_TRACE_CAP
+psg_trace_v:     .ds PSG_TRACE_CAP
+    .endif
 
 ; The sound-op glue's own state (card #220; design: docs/ROM-SOUND.md §7).
 ; The interpreter's sfx/music/tick ops live in the tables bank at $9000 and
 ; keep their state here, inside the engine's .bss, so the C side carries
 ; none and the llvm image pays nothing but the wrapper calls.
+;
+; #239: this block is at the BOTTOM of the engine's .bss, not after HuTrack's
+; own variables.  The llvm-mos soft stack sweeps down through the partition
+; after SndGlueReset (the #200 trace build measured the evidence: bytes at
+; $3B64 were stack spill while a fill at $373E survived a 345-frame run), so
+; state kept at the top held power-on stack bytes at the first sound op and
+; the reserve was skipped.  HuTrack's vars stay above and are the engine's
+; own, initialised by Init/playSong before music reads them; the glue's
+; reservation state must survive every frame instead.  tests/check-rom-sound
+; .js and tools/toys/sfx-once.lua read it back from a save state.
 SndGlueBss.start:
 snd_mapped:      .ds 1
 snd_n_songs:     .ds 1
@@ -61,6 +102,9 @@ snd_active:      .ds 1
 snd_tmp:         .ds 1
 snd_args_frames: .ds 2
 SndGlueBss.end:
+
+    .include "HuTrack/HuTrack_vars.inc"
+
 EngineBss.end:
     .zp
 EngineZp.end:
@@ -69,6 +113,36 @@ EngineZp.end:
     .code
     .bank $02, "Engine"
     .org $A000
+
+; #200's trace hooks: assembled only under PSG_TRACE.  Each macro follows a
+; PSG write that has just happened, with `sta psg_trace_val` recording the
+; value and A carrying the register number to PsgTraceLog (the tables bank,
+; mapped whenever the engine runs; docs/ROM-SOUND.md §8).  PsgTraceLog
+; preserves X, Y and P; A may be clobbered, and every call site leaves A
+; dead (the vendor patches too — the line after each write reloads it or
+; branches on a flag the routine preserved).
+PSGT_A .macro                  ; the value is in A
+    .ifdef PSG_TRACE
+    sta psg_trace_val
+    lda #\1
+    jsr PsgTraceLog
+    .endif
+    .endm
+PSGT_X .macro                  ; the value is in X
+    .ifdef PSG_TRACE
+    stx psg_trace_val
+    lda #\1
+    jsr PsgTraceLog
+    .endif
+    .endm
+PSGT_Z .macro                  ; stz: the value is 0
+    .ifdef PSG_TRACE
+    stz psg_trace_val
+    lda #\1
+    jsr PsgTraceLog
+    .endif
+    .endm
+
     .include "HuTrack/hutrack.inc"
 
 HuTrackCode.start:
@@ -149,7 +223,14 @@ SndGlueMap:
     lda #8
 .nok:
     sta snd_n_songs
-    beq .done
+    ; #239: `sta` sets no flags, so the old `beq .done` tested the CMP's Z
+    ; (n_songs == 9, never true after the clamp) and never skipped the loop.
+    ; With buildToyRom's n = 0 trailer that ran Y 0..255, writing song_lo/hi/
+    ; bank up to $3964 and over snd_owned ($386D): the first SFX saw $CF at
+    ; snd_owned[0], skipped its reserve, and the toy stayed silent.  Test the
+    ; stored count itself, and only loop for a real song list.
+    cmp #1
+    bcc .done
     cly
 .loop:
     tya
@@ -172,9 +253,15 @@ SndGlueMap:
 
 ; ---- SndGlueReset: ilvm_sound_reset for every boot: all glue state idle.
 SndGlueReset:
+    .ifdef PSG_TRACE
+    jsr PsgTraceReset
+    .endif
     stz snd_mapped
+    stz snd_n_songs
     stz snd_tick
     stz snd_active
+    stz snd_args_frames
+    stz snd_args_frames+1
     ldx #5
 .loop:
     stz snd_owned,x
@@ -230,9 +317,13 @@ SndGlueSfx:
     bcc .chin
     jmp .out
 .chin:
-    lda <_hk.EAX0.m
+    ; #238: F is 12 bits, so the clamp belongs on the HIGH byte's low nibble
+    ; (EAX0.h); masking the low byte (EAX0.m) chopped bits 4-7 of F, e.g.
+    ; note(60)'s 428 arrived as 268.  The browser writes freq & 0xFF to R2
+    ; and (freq >> 8) & 0x0F to R3.
+    lda <_hk.EAX0.h
     and #$0F
-    sta <_hk.EAX0.m
+    sta <_hk.EAX0.h
     lda <_hk.EAX0.u
     and #$1F
     sta <_hk.EAX0.u
@@ -269,24 +360,32 @@ SndGlueSfx:
 .reserved:
     ; the 32-step square: reset the waveform pointer, fill R6, start WAVEFORM
     stx $800
+    PSGT_X 0
     lda #$40
     sta $804
+    PSGT_A 4
     stz $804
+    PSGT_Z 4
     cly
 .wave:
     lda SndGlueWave,y
     sta $806
+    PSGT_A 6
     iny
     cpy #32
     bne .wave
     stx $800
+    PSGT_X 0
     lda <_hk.EAX0.m
     sta $802
+    PSGT_A 2
     lda <_hk.EAX0.h
     sta $803
+    PSGT_A 3
     lda <_hk.EAX0.u
     ora #$80
     sta $804
+    PSGT_A 4
     lda snd_args_frames
     sta snd_frames_lo,x
     lda snd_args_frames+1
@@ -371,6 +470,9 @@ SndGlueMusic:
 ; whose frames reach 0 is released), then the engine tick when a song is
 ; queued — the browser's tickSound order, releases first, then the player.
 SndGlueTick:
+    .ifdef PSG_TRACE
+    jsr PsgTraceTick           ; frame 0 is the first tick, not an increment
+    .endif
     lda snd_active
     beq .out
     cly
@@ -404,6 +506,80 @@ SndGlueTick:
     jsr HuTrackTick
 .out:
     rts
+
+; ---- the PSG write trace (card #200; design: docs/ROM-SOUND.md §8) ------
+; Test builds only.  Every PSG write in the glue and in the two SFX
+; reservation routines (patched into the staged vendor copy by
+; build-engine.sh) calls PsgTraceLog with the register in A and the value in
+; psg_trace_val.  The window is frames 0..PSG_TRACE_FRAMES-1 and at most
+; PSG_TRACE_CAP writes; the arrays are read from a Mednafen save state's
+; BaseRAM.  PsgTraceLog preserves X, Y and P and may clobber A.
+.ifdef PSG_TRACE
+PsgTraceReset:
+    lda #$EE                   ; the test's "the stack did not reach here"
+    ldx #PSG_TRACE_CAP-1
+.fill:
+    sta psg_trace_f,x
+    sta psg_trace_r,x
+    sta psg_trace_v,x
+    dex
+    bpl .fill
+    lda #$A5                   ; the test's "reset ran" and corruption check
+    sta psg_trace_ok
+    stz psg_trace_count
+    stz psg_trace_frame
+    stz psg_trace_frame+1
+    stz psg_trace_seen
+    rts
+
+; One call per toy frame, at the top of SndGlueTick (before frame()).  The
+; tick before frame(0) is frame 0; every later tick increments.
+PsgTraceTick:
+    pha
+    php
+    lda psg_trace_seen
+    beq .first
+    inc psg_trace_frame
+    bne .done
+    inc psg_trace_frame+1
+    bra .done
+.first:
+    lda #1
+    sta psg_trace_seen
+.done:
+    plp
+    pla
+    rts
+
+; A = register, psg_trace_val = value.  No-op past the window or the cap.
+PsgTraceLog:
+    sta psg_trace_reg
+    php
+    pha
+    phx
+    phy
+    lda psg_trace_frame+1
+    bne .out
+    lda psg_trace_frame
+    cmp #PSG_TRACE_FRAMES
+    bcs .out
+    ldy psg_trace_count
+    cpy #PSG_TRACE_CAP
+    bcs .out
+    sta psg_trace_f,y
+    lda psg_trace_reg
+    sta psg_trace_r,y
+    lda psg_trace_val
+    sta psg_trace_v,y
+    iny
+    sty psg_trace_count
+.out:
+    ply
+    plx
+    pla
+    plp
+    rts
+.endif
 
 SndGlueWave:
     .db 31,31,31,31,31,31,31,31,31,31,31,31,31,31,31,31

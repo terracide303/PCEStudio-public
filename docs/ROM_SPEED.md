@@ -184,19 +184,23 @@ collections (the wrong-`sum` bug above).
 
 **Re-measured 2026-11-01 by #207**, on the tree after the sprite (#188–#192)
 and sound-front-end (#197) cards; **re-pinned 2026-11-02 by #221** after
-#220/#221 landed the sound interpreter.  The image is the 32 KiB one with
-the HuTrack banks and the toy data bank is physical 4, so every ROM is
-**40,960 B**; the shas in the table are the ones
+#220/#221 landed the sound interpreter, **and again by #200** after the
+trace image's two glue fixes (#238's F byte, #239's `.bss`).  The image is
+the 32 KiB one with the HuTrack banks and the toy data bank is physical 4,
+so every ROM is **40,960 B**; the shas in the table are the ones
 `tests/check-export-games.js` pins on the new image (2026-11-02, image
-sha256 `1814d7c36079ca63…`).  The overrun/worst/Hz figures are #207's
+sha256 `dad10ffd05661956…`).  The overrun/worst/Hz figures are #207's
 measurements — the interpreter's behaviour for these toys is unchanged, and
 #221's old/new Mednafen diffs are in [`ROM-SOUND.md`](ROM-SOUND.md) §10.
 What moved on 2026-11-02: **#215**'s interpreter reads the version 3
 container, so **TOWER** now stops at the 8 KiB data bank (8,524 B of
 bytecode) and **DUSK RUN** builds — but it does not play (the interpreter
 refuses its container at load; see its row and #222). **#148** (the
-127-constant pool), **#216** (a sound toy on a console) and **#200** (the
-Mednafen trace) remain open.
+127-constant pool) remains open; **#216** (a sound toy on a console) and
+**#200** (the Mednafen trace) are closed on [`ROM-SOUND.md`](ROM-SOUND.md)
+§11 and §8. The `TRACE=1` build is test-only — it refuses to write
+`renderer/ilvm.bin` — so every figure here is the shipped non-trace image;
+the trace changes no toy's picture.
 
 The #169 table above measures four example toys. This one asks the question a
 person asks about the *games*: **does the export build STARFALL, TOWER, NOVA
@@ -223,12 +227,12 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 | **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants` (`renderer/pce-ilbc.js:462`, `MAX_CONST = 127`); the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. `sprite()` is carried for 21 of its 31 specs since #188–#190; the other ten are **#211**, and the pool refuses first. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
 | **TOWER** `toys/tower` | **no** — `toy-data-bank-full`: `pce-rom: the bytecode (8524 B) and assets (0 B) need 8524 bytes; the interpreter reads one 8 KiB data bank` (`renderer/pce-rom.js`). #186 carried `sat`, #187 `not`, #197 `sfx`, and #215's interpreter reads the version 3 container — so the encoding now passes the version gate and stops at the bank: 8,524 B against the 8,192-byte data bank. The refusal names no line. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
 | **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`; refused by `renderer/pce-ilbc.js:335` because `raster` has no entry in its OPS table). #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind (#136). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
-| **DUSK RUN** `toys/dusk-run` | **yes** — 40,960 B, sha256 `6524513ae6879f82…`, **and it runs but its picture is not the browser's yet.** #222 raised `MAX_REGS` 41 / `MAX_FUNCS` 41 / `MAX_UPS` 20 (upvalue pool) / `MAX_CLOS` 48 (boot/transient split), so the container loads and executes; a Mednafen save state at 20 s is VRAM/CRAM/SAT **diff 0 against browser frame 3**, and the host harness matches for 900 frames. The runtime's base-VRAM buffer (32 words a frame) was dropping DUSK's 64/68/208-word build frames; it now writes an over-buffer word through instead ([`ROM-SOUND.md`](ROM-SOUND.md) §10). What is left is the raster backend: one replay display frame per toy frame, and the best replay frame in a 20 s movie is **16 bytes off** on row 16 (scanline latency) — **#223**. `tests/check-export-games.js` pins the ROM sha and asserts the screen is not black and not yet a browser frame. #184's validator note still applies: the 8-frame probe measured the BUILD (frame 7 = build step 7, 675,190 cycles), and the 300-frame performance is 390,744 cycles (18.3 Hz), so the validator accepts the toy. | **no — draws, not the browser's picture** (16 bytes, row 16; #223) | **2** | **1568** lines | **too slow** (2 updates in 600 frames, the ~7 s boot) | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
-| **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `378b0fcf7341fef3…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 308 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
-| *control* `tools/toys/palette.lua` | **yes** — 40,960 B, sha256 `83a3f912c1b83cc1…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 111 | **626** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
-| *control #183* `tools/toys/arity.lua` | **yes** — 40,960 B, sha256 `73925817a04be835…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 111 | **783** lines | **too slow** | — |
-| *control #187* `tools/toys/not.lua` | **yes** — 40,960 B, sha256 `a29563f29100536f…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **106** lines | **60 Hz** | — |
-| *control #191* `tools/toys/sprite.lua` | **yes** — 40,960 B, sha256 `467ce0c80258b1ed…`, three constant sprite specs (the full spec; a partial one with `hflip`/`cgx`; `spbg`/`cgy`/`vflip`), so `sprite()` is carried end to end (#188 encoder, #189 interpreter, #190 cgen) | **diff 0** (its constant picture is pinned as one hash; `tests/check-ilvm.js` also compares the saved SAT word for word) | 0 | **101** lines | **60 Hz** | — |
+| **DUSK RUN** `toys/dusk-run` | **yes** — 40,960 B, sha256 `f8966298b403b2c8…`, **and it runs but its picture is not the browser's yet.** #222 raised `MAX_REGS` 41 / `MAX_FUNCS` 41 / `MAX_UPS` 20 (upvalue pool) / `MAX_CLOS` 48 (boot/transient split), so the container loads and executes; a Mednafen save state at 20 s is VRAM/CRAM/SAT **diff 0 against browser frame 3**, and the host harness matches for 900 frames. The runtime's base-VRAM buffer (32 words a frame) was dropping DUSK's 64/68/208-word build frames; it now writes an over-buffer word through instead ([`ROM-SOUND.md`](ROM-SOUND.md) §10). What is left is the raster backend: one replay display frame per toy frame, and the best replay frame in a 20 s movie is **16 bytes off** on row 16 (scanline latency) — **#223**. `tests/check-export-games.js` pins the ROM sha and asserts the screen is not black and not yet a browser frame. #184's validator note still applies: the 8-frame probe measured the BUILD (frame 7 = build step 7, 675,190 cycles), and the 300-frame performance is 390,744 cycles (18.3 Hz), so the validator accepts the toy. | **no — draws, not the browser's picture** (16 bytes, row 16; #223) | **2** | **1568** lines | **too slow** (2 updates in 600 frames, the ~7 s boot) | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
+| **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `92cbb21a1ffad2a0…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 308 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
+| *control* `tools/toys/palette.lua` | **yes** — 40,960 B, sha256 `ea12c2a1b81c2eb5…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 111 | **626** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
+| *control #183* `tools/toys/arity.lua` | **yes** — 40,960 B, sha256 `024006a4233066b6…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 111 | **783** lines | **too slow** | — |
+| *control #187* `tools/toys/not.lua` | **yes** — 40,960 B, sha256 `05ac6dc5c7ddc330…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **106** lines | **60 Hz** | — |
+| *control #191* `tools/toys/sprite.lua` | **yes** — 40,960 B, sha256 `96a25bb584fe6cc9…`, three constant sprite specs (the full spec; a partial one with `hflip`/`cgx`; `spbg`/`cgy`/`vflip`), so `sprite()` is carried end to end (#188 encoder, #189 interpreter, #190 cgen) | **diff 0** (its constant picture is pinned as one hash; `tests/check-ilvm.js` also compares the saved SAT word for word) | 0 | **101** lines | **60 Hz** | — |
 
 ### What this says, plainly
 
@@ -344,10 +348,11 @@ their own, the rest already did:
   first, so it is backlog, not `QUEUE: auto`.
 - Already open: **#148** (the 127-constant pool, `renderer/pce-ilbc.js:462`),
   **#136** (`raster(line, spec)`, `renderer/pce-ilbc.js:335`), **#137** (the
-  builtins other than `rgb`/`note`, `main.lua:466` and `:570`),
-  **#198** (the sound umbrella: the engine linked, a note/sfx toy on a
-  console (#216) and the trace (#200) still behind it), and (from this
-  re-measurement) **#222** (DUSK RUN's interpreter capacity).
+  builtins other than `rgb`/`note`, `main.lua:466` and `:570`), and (from
+  this re-measurement) **#222** (DUSK RUN's interpreter capacity). The
+  sound umbrella **#198** is closed: the engine is linked, both toys run in
+  Mednafen (#216) and their writes match the studio's (#200,
+  [`ROM-SOUND.md`](ROM-SOUND.md) §8); the PSG's R1 stays unwritten (#113).
 
 ## ROM CHECK: the five games' exact blockers (card #193)
 

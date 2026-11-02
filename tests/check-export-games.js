@@ -142,7 +142,7 @@ const GAME_PINS = {
    * with any interpreter change (#187's opcode moved all three). */
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
-    rom: "378b0fcf7341fef34a327353e0fbc5b9934cacf6a1fa495bad363ecd3d6e7223",
+    rom: "92cbb21a1ffad2a06a5912410f9b28fbbaca65a28fafa5f33f3f66ae7d5c90df",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
@@ -164,7 +164,7 @@ const GAME_PINS = {
    * base takes ~7 s on the dummy SDL driver. */
   "DUSK RUN": {
     toy: "toys/dusk-run/main.lua",
-    rom: "6524513ae6879f823d1a6a68f5a6e538cdd8786e1b3327e1915bd18e99d31148",
+    rom: "f8966298b403b2c86c981235584ccd9979150fc7ce3ccc0859c3eabb6dbd1901",
     frames: [],
     unmatched: "the container runs and draws; no captured frame is the browser's picture yet (raster scanline latency, #223)",
     measureFrames: 600,
@@ -181,7 +181,7 @@ const GAME_PINS = {
   "SPRITE": {
     kind: "toy",
     toy: "tools/toys/sprite.lua",
-    rom: "467ce0c80258b1eddfd549370dc85ad7bf2b39ebc1db9a8282b6be0665a0a259",
+    rom: "96a25bb584fe6cc96f5a844c72aa34ad3c0cda27d6308356afff4d6e1cbb13b1",
     frames: [1994475180]
   }
 };
@@ -190,7 +190,7 @@ const GAME_PINS = {
  * toy builds to one ROM and its picture repeats every eight frames. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "83a3f912c1b83cc1027bfebf176f2d9c2c92b4f5168ceef9c29d3d376ecd3e94",
+  rom: "ea12c2a1b81c2eb564f70f7c29be674489b1b47ca85f7456a793f2f1c73e4f64",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -203,7 +203,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "73925817a04be835b864ea737dbee96b20ee22fad39a1baa43571bd8e97502a5",
+  rom: "024006a4233066b602eb96a3a6bfebae451f4d0ac711c8d8a70d1b6600e56dc4",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -220,7 +220,7 @@ const WIDE = {
  * hashes are the whole cycle. */
 const NOT = {
   toy: "tools/toys/not.lua",
-  rom: "a29563f29100536f32cd31f3cb101c66000949e9fb6eeec747eb4f1cf9c321e6",
+  rom: "05ac6dc5c7ddc3305aa77a330be473cd4fbb7bd8494e4dc87ac2bb49545860d9",
   frames: [2266090996, 2632876444, 887268600, 1464026320]
 };
 

@@ -181,6 +181,28 @@ The consequential measurement is the waveform correlation: 0.864 over the
 first 1.4 s at its best lag. The pitch and level measurements above are
 unaffected because they do not depend on that phase.
 
+## The engine in the interpreter image (#213, #200)
+
+Since #213 the exported toy's interpreter image carries this same engine as
+two physical banks (`renderer/ilvm.bin`, 32 KiB): code at page 5, the pitch
+tables at page 4, and the sound-op glue in the tables bank's free space
+([`ROM-SOUND.md`](ROM-SOUND.md) §§1–2). `tools/ilvm/build-engine.sh` stages
+`vendor/hutrack/lib` into `tools/gen/hutrack-stage` and patches the copy,
+never the vendored tree: the three `MAP_BANK.4` song-window call sites in
+every build, and — only when `PSG_TRACE=1` — a `PSGT_*` call after each PSG
+write in `setChanForSFX` and `chanReleaseSFX`. Both patches name the vendor
+line and its expected text, so a vendor update fails the build instead of
+silently tracing less or mapping the wrong window.
+
+`TRACE=1 tools/ilvm/build.sh` assembles the test-only image with a
+`(frame, register, value)` log in BaseRAM and refuses to overwrite
+`renderer/ilvm.bin`; the shipped image is the non-trace build. The trace is
+what proves the embedded engine's writes are the browser player's for
+`tools/toys/note.lua` and `tools/toys/sfx.lua` — 92 and 48 writes over 24
+toy frames, frame for frame (`tests/check-rom-sound.js` §3,
+[`ROM-SOUND.md`](ROM-SOUND.md) §8). The trace pinned the two glue defects
+#238 and #239; both fixes are in the shipped image.
+
 ## The export (step 3)
 
 The browser cannot run HuTrack's Python converter or PCEAS, so the export
@@ -285,12 +307,20 @@ port of the engine produces the same PSG sequence and the recording's
 pitches and levels (measurements above).  Step 3 proves the browser can
 produce the console's ROM: our converter's includes match HuTrack's Python
 converter's byte for byte on two songs, and our assembly of them plus the
-committed engine banks is the same 139,264 bytes PCEAS emits.
+committed engine banks is the same 139,264 bytes PCEAS emits. The same
+engine inside the toy interpreter image writes the browser player's PSG
+stream for note() and sfx() (#200's trace, 92 and 48 writes over 24 frames,
+frame for frame).
 
 Not proven here:
 
 - **The recording is Mednafen, not hardware.** No real PC Engine or MiSTer run
-  of this ROM exists yet.
+  of this ROM exists yet. The interpreter-image trace (#200) is Mednafen and
+  one machine too.
+- **The trace compares writes, not cycle offsets or audio.** It proves the
+  console's register stream is the browser player's for 24 toy frames; it
+  does not measure when inside the frame each write lands, and the toys are
+  still master-muted because R1 is never written (#113).
 - **Our DMF has not been opened in Furnace** (Furnace is not installed here).
   It is written against the format the vendored reader consumes — legacy DMF
   24, the shape Furnace exports — and the converter accepts it, but a Furnace

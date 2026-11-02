@@ -8,11 +8,14 @@ ends carry the whole sound surface — the encoder has `music`/`sfx`/`release`
 ops and the `note` builtin (`renderer/pce-ilbc.js`, container version 3), and
 the C emitter lowers them. Since #215 the committed interpreter reads
 container version 3 and calls the engine, so a sound toy exports; **§11
-(2026-11-02) is the console check: both sound toys run in Mednafen, the
-engine and the glue execute, and three defects keep them silent or off
-pitch — #238 (F masked on the low byte), #113 (the main amplitude R1 is
-never written) and #239 (dirty glue `.bss`). With the first two fixed in a
-scratch image the recordings match the studio's model.** TOWER
+(2026-11-02) is the console check, and §8's trace (#200) is the
+write-for-write proof: the console's PSG writes for `tools/toys/note.lua`
+and `tools/toys/sfx.lua` equal the studio's over 24 toy frames.** The
+trace pinned the two glue defects — #238 (F clamped on the low byte) and
+#239 (the zero-song loop overran `snd_owned`, so the first SFX's reserve
+was skipped) — and both fixes are in the committed image. #113 (R1, the PSG's main
+amplitude) is still open, so the toys' audio stays master-muted — the
+writes are right, the output is not yet audible. TOWER
 still stops earlier, at the 8 KiB data bank (8,524 B of bytecode), and
 DUSK RUN exports but does not play on the committed image (its container
 needs more registers/functions/upvalues than the interpreter has — §10).
@@ -37,7 +40,7 @@ The two facts that decide the design:
 2. **The engine's RAM did not fit beside the interpreter.** 94 B of zero
    page and 1,111 B of BaseRAM, against a zero page the compiler fills and
    1,122 B of stack headroom in the projection (1,036 B after #214, 977 B
-   after #215). #214 builds the partition below and has
+   after #215, 1,131 B after #222). #214 builds the partition below and has
    `build.sh` assert it; a Mednafen canary measures the stack's high-water
    mark.
 
@@ -280,12 +283,15 @@ staging assembly gets it from `build-engine.sh`, which `build.sh` hands
 interpreter's heap and ends below `$4000`. The engine extent is **1,111 B**
 after #215/#220 (`.sym`: `EngineBss.end − HuTrack.returnVec`); #214's
 1,062 B was the pre-#215 extent, and the 1,063 B in the original design
-was an address-of-last-label count. `snd_args_frames`, the `sfx()` frames
-cell the glue owns, is the engine's last variable at `$3C2D`.
-`tests/check-hutrack-image.js`'s scratch run of `build-engine.sh` alone (its
-own placeholder BaseRAM base, no C image) places it at `$2655`; that is a
-different build, not the shipped address, and `tools/gen/hutrack-symbols.h`
-after `build.sh` carries the real `$3C2D`.
+was an address-of-last-label count. The glue's 49 B of state is the **first**
+block of that `.bss` (`$373E-$376E`, #239's fix), so the soft stack reaches
+the engine's own variables before the glue's: `snd_args_frames`, the `sfx()`
+frames cell, is at `$376D`, and `HuTrack.returnVec` starts the HuTrack
+variables at `$376F`. `tests/check-hutrack-image.js`'s scratch run of
+`build-engine.sh` alone (its own placeholder BaseRAM base, no C image)
+places the glue at `$2655`; that is a different build, not the shipped
+address, and `tools/gen/hutrack-symbols.h` after `build.sh` carries the real
+addresses.
 
 **Why `MAX_CLOS` 16 and not 8.** The first projection spent 600 B on eight
 slots. The host harness (`-DILVM_HOST`, 60 frames) says that is not safe:
@@ -472,15 +478,52 @@ convention across the boundary.
 
 The project's proven instrument for "what did the console actually do" is
 the autosaved BaseRAM of a Mednafen run (`tools/mcs-extract.py --ram`;
-#169). The test builds a **trace-enabled interpreter** — a compile-time
-flag, like `TOY_RASTER_BUILD`, never the shipped image — that appends every
-PSG write to a reserved BaseRAM log as `(frame delta, reg, value)`. A toy
-with `note()` and an `sfx()` and no music (so the engine's per-frame tick
-is not in the trace) is exported, run in Mednafen, and the log is compared
-with `renderer/pce-toyhost.js`'s recorded events for the same frames: same
-order, same registers, same values. The log lives only in the test build,
-so it does not enter the RAM budget above. The same run's audio can be
-captured (`tools/capture-psg.sh`'s route) as the ear's second opinion.
+#169). #200 turns it into a trace. `TRACE=1 tools/ilvm/build.sh` builds a
+**test-only** image that appends every PSG write to three parallel BaseRAM
+arrays as `(frame, register, value)`; the build **refuses to write
+`renderer/ilvm.bin`** with `TRACE=1`, so the shipped image never carries
+the log. `tests/check-rom-sound.js` (§3 of that file) builds the image,
+exports `tools/toys/note.lua` and `tools/toys/sfx.lua` against it, runs
+each in Mednafen, extracts BaseRAM and compares the log with
+`renderer/pce-il.js`'s `rt.sound.events` for the same frames: same order,
+same registers, same values.
+
+- **The log.** `psg_trace_ok`/`count`/`frame`/`seen`/`reg`/`val` at
+  `$373E-$3744`, then the 100-entry arrays `f`/`r`/`v` at
+  `$3745`/`$37A9`/`$380D` (`tools/gen/hutrack-image.json`'s `psg_trace`
+  block). Three parallel arrays, not one 300-byte record array, so every
+  access is one Y-indexed load/store inside a page. The window is toy
+  frames 0..23 and at most 100 writes.
+- **The hooks.** The glue's own writes are instrumented in
+  `tools/ilvm/hutrack_engine.asm` behind `.ifdef PSG_TRACE`. The two SFX
+  reservation routines (`setChanForSFX`'s reserve and `chanReleaseSFX`'s
+  release) are instrumented by `tools/ilvm/build-engine.sh`, which inserts
+  a macro call after each PSG write in the **staged** vendor copy by pinned
+  line number and expected text — `vendor/hutrack/` stays pristine, and a
+  vendor move fails the build instead of silently tracing less.
+- **The witnesses.** `PsgTraceReset` (run from `SndGlueReset`) fills all
+  three arrays with `$EE` and sets a `$A5` "reset ran" byte; the test
+  requires both, so a log the soft stack overwrote cannot pass. The trace
+  image's engine `.bss` is **1,418 B** (the shipped image's 1,111 B plus
+  307 B of log) and `build.sh` still asserts the 787 B stack margin
+  (**824 B** measured); the shipped image's partition is unchanged
+  (`$373E-$3B94`, 1,111 B, headroom 1,131 B per §5).
+- **What it measured (2026-11-02).** note: **92 writes over 24 frames**,
+  equal frame for frame to the studio's; sfx: **48 writes**, equal. The
+  trace pins both glue defects: note(60)'s F arrived as 268 instead of 428
+  (#238), and the first SFX's reserve was missing because the zero-song
+  loop had overrun `snd_owned` (#239). Both fixes are in the committed
+  image (`renderer/ilvm.bin` sha256 `dad10ffd05661956…`), and the moved
+  ROM shas are re-pinned in `tests/check-ilvm.js`,
+  `tests/check-export-games.js` and `tests/dumps/*-ilvm/meta.json`.
+- **Honest limits.** Mednafen, one machine, no real console. The window is
+  24 toy frames and 100 writes, so a longer run is sampled, not traced end
+  to end. Both toys make no `music()` call, so the engine's own per-frame
+  tick is not in the trace (the host-harness half of the same test pins
+  the tick's order separately). The toys are still master-muted until
+  #113 writes R1; the trace leaves R1 unwritten on both sides, which is why
+  the write comparison can be exact while the audio is silent. Rule 2's
+  cold break on this test is owed — the design seat wrote it.
 
 A toy with music is a stronger test but a different one: it exposes the
 tick's caller, which is why the tick is designed to match the host model
@@ -610,6 +653,21 @@ card **#223** carries the raster picture. TOWER is different: it stops
 earlier, at `toy-data-bank-full` (8,524 B of bytecode against the 8 KiB
 bank), which is a refusal with a message and no ROM.
 
+**#200 re-pinned again**, for the second image change (2026-11-02):
+`renderer/ilvm.bin` is sha256 `dad10ffd05661956…`, 32,768 B, and the ROM
+shas in the table above, `tests/check-ilvm.js`, `tests/check-export-games.js`
+and `tests/dumps/*-ilvm/meta.json` moved with it. The image change is
+sound-only — #238's F byte and #239's glue `.bss` placement and zero-song
+guard — and no toy's picture moved. That is measured, not assumed:
+`check-export-games` re-ran the Mednafen capture route on the new image
+and palette, arity, not, sprite and PLATFORMER are still
+**diff 0** against the browser, and `check-ilvm`'s dump comparison is green
+with the old capture frames (they are the browser's, and the browser did
+not change). The dump frames and RAM images are deliberately **not**
+recaptured: the #221 procedure above is what makes them evidence for the
+new image, and re-running the same argument for a sound-only change would
+only re-capture the same pictures.
+
 ## 11. What Mednafen says (#216): the toys run, and the glue has defects
 
 Measured 2026-11-02 on this machine, Mednafen 1.32.1 with the sound route
@@ -674,6 +732,20 @@ Moving the glue `.bss` 64 B higher did not stop it, so the write is not
 simply the soft stack reaching the partition. Root cause is open (card
 **#239**); until it is fixed, an R1 write must be unconditional at the start
 of `sfx()`, not gated on a channel being newly owned.
+
+**What #200's image changed (2026-11-02).** The committed image is now
+`dad10ffd05661956…` and carries both repairs the trace forced: the F clamp
+moved to `_hk.EAX0.h`, and the glue's state moved to the **bottom** of the
+engine's `.bss` — below the soft stack's measured reach, which the trace
+build's `$EE` tail witnesses — while `SndGlueMap`'s zero-song loop now
+tests the stored count (`cmp #1 / bcc .done`) instead of a `beq` that read
+the stale flags of a `sta`, so the `n = 0` trailer no longer writes song
+pointers over `snd_owned`. §8's trace is the proof of effect: the
+console's PSG writes equal the studio's for both toys, frame for frame. The
+audio table above is **not** re-recorded because #113 (R1) is still open:
+the chip stays master-muted, so a new WAV would only repeat peak 0. #238
+and #239 remain open on the board for the audio/save-state evidence their
+own cards name; their code half is in this image.
 
 **Reproducing all of it** (nothing is written to the repository):
 
@@ -740,12 +812,13 @@ a test. The exact fixes a later card must carry — the first diff is the form
 
 ## What is not proven
 
-- **A note toy and an sfx toy run in Mednafen; they do not yet play on the
-  committed image.** §11 measures both, proves the engine and the glue
-  execute, and names the three defects that keep them silent or wrong. What
-  is unproven is anything about a *real console* (Mednafen only), the
-  in-frame timing (pitches and levels per slot, not sample-exact PCM — that
-  needs #200's trace build), and the cause of the dirty glue `.bss`.
+- **A note toy and an sfx toy run in Mednafen, and §8's trace (#200) shows
+  their register writes are the studio's; they do not yet *sound* on the
+  committed image.** The remaining silence is R1 (#113), not a write-order
+  or glue defect. What is unproven is anything about a *real console*
+  (Mednafen only), the in-frame timing (the trace pins the order of writes,
+  not their cycle offsets), and the audio itself, which needs #113 before a
+  recording can say anything new.
 - **The RAM partition is built and asserted (#214), and #215's sound code
   is inside it.** `build.sh` fails if the interpreter's zero page reaches
   the engine's, if either extent leaves its window, or if the stack headroom
@@ -768,15 +841,18 @@ a test. The exact fixes a later card must carry — the first diff is the form
 - **The SEQUENCER adapter and the noise effect are landed (#199)** and their
   data half is measured by `tests/check-hutrack-seq.js`; the console half is
   still unwitnessed — #216 showed the engine executes (its glue and
-  `setChanForSFX` reach the PSG, §11), but a song needs the three defects
-  fixed and `buildToyRom` to stop pinning the trailer at n = 0.
+  `setChanForSFX` reach the PSG, §11), and #200 fixed two of the three glue
+  defects the trace found, but a song still needs #113 (R1) and
+  `buildToyRom` to stop pinning the trailer at n = 0.
 - **Rule 2 is owed** for any check #198–#200 and #220/#221 write: the author
   is not the seat that can prove it. #214's build assertions are the design
   seat's own; a cold seat should move `ENGINE_ZP_BASE` down and raise
   `STACK_MARGIN` and watch `build.sh` fail; the re-pin's old/new frame diffs
   should be re-run with an image whose sound ops are broken, and DUSK RUN's
   black verdict should be attacked by an interpreter that *does* load its
-  container.
+  container. For #200's trace specifically: break a traced write (drop one
+  of the `PSGT_*` calls), or stop `PsgTraceReset` filling the tail, and the
+  test must go red — that is the break this card closes on.
 
 ## The slices
 
@@ -795,7 +871,7 @@ a test. The exact fixes a later card must carry — the first diff is the form
 | **#216** | done (§11) | a note toy and an sfx toy run in Mednafen, recorded and measured | both ROMs run; the register/audio difference is listed: F masked (#238), R1 missing (#113), dirty glue `.bss` (#239); the command is §11 |
 | **#198** | done | the umbrella: everything #212–#216 links | a note toy and an sfx toy run in Mednafen (they do not yet play: #113/#238/#239); `check-ilvm`, `check-export-games` green |
 | **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (#216) |
-| **#200** | open | `tests/check-rom-sound.js`, the trace build, the docs | the Mednafen trace equals the studio's for note and sfx; the suites green; a cold break by another seat |
+| **#200** | done (2026-11-02) | `tests/check-rom-sound.js` §3, the `TRACE=1` build and these docs | PASS: the Mednafen trace equals the studio's for note (92 writes) and sfx (48) over 24 frames; `check-ilvm` (348) and `check-export-games` (67) green with the re-pinned shas. **Rule 2's cold break is still owed** — this table records the evidence, not the proof |
 
 The umbrella (#194) closes when #196–#200 are done. TOWER stays blocked on
 the 8 KiB data bank (#138), NOVA TIDE on `raster(line, spec)` (#136), and

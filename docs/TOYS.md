@@ -310,6 +310,17 @@ cycles after the one before (`pce-song.js`'s order-preserving default), and a
 song started in `init()` shares frame 0's column order with that frame's
 first tick, so no two writes claim the same instant.
 
+**On the console (#200).** The same surface runs in the exported ROM: the
+interpreter's `music`/`sfx`/`release` ops call the HuTrack engine banks and
+`note()` reads the same 512-entry table. `tests/check-rom-sound.js` proves
+the console's PSG writes are the browser player's for `tools/toys/note.lua`
+and `tools/toys/sfx.lua` — 92 and 48 writes over 24 toy frames, same order,
+same registers, same values — using a test-only `TRACE=1` build that logs
+every write to BaseRAM and refuses to replace `renderer/ilvm.bin`
+(docs/ROM-SOUND.md §8). The toys are still silent in Mednafen's **audio**
+until #113 writes the PSG's main amplitude (R1): the write stream is right,
+the chip is master-muted.
+
 **Limits.** 6 channels; F is the PSG's 12-bit divider (`note()` returns it; the
 same value from a MIDI number in both runtimes); volume is AL, 0..31; an SFX
 lasts 1..600 frames. The SFX waveform is fixed (a square) — a toy with more

@@ -46,6 +46,12 @@
 # symbol bytes).  tests/check-ilvm.js rebuilds it and compares the SHA when
 # the toolchains are present; without llvm-mos or PCEAS 4.x it prints SKIP,
 # the same rule as the other PCEAS/llvm rebuild checks.
+#
+# #200's trace build (docs/ROM-SOUND.md §8):
+#   TRACE=1 BIN=/scratch/ilvm-trace.bin tools/ilvm/build.sh
+# assembles the test-only PSG write log and refuses to write the shipped
+# image.  tools/gen/hutrack-image.json's psg_trace block carries the log's
+# BaseRAM addresses; tests/check-rom-sound.js builds and runs it.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -53,7 +59,6 @@ LLVM_MOS="${LLVM_MOS:-/Volumes/External II/pce-tools/llvm-mos/llvm-mos}"
 [ -x "$LLVM_MOS/bin/mos-pce-clang" ] || { [ -x /Volumes/External/pce-tools/llvm-mos/bin/mos-pce-clang ] && LLVM_MOS=/Volumes/External/pce-tools/llvm-mos; }
 CC="$LLVM_MOS/bin/mos-pce-clang"
 OUT=tools/gen/ilvm.pce
-BIN=renderer/ilvm.bin
 
 if [ ! -x "$CC" ]; then
   echo "llvm-mos not found at $LLVM_MOS (set LLVM_MOS to the SDK root)" >&2
@@ -89,11 +94,22 @@ mkdir -p tools/gen
 #      __heap_start) cannot have moved, and the build asserts it did not.
 ENGINE_ZP_BASE=0x2080      # docs/ROM-SOUND.md §5's engine zero-page base
 STACK_MARGIN=787           # docs/ROM-SOUND.md §5's stack headroom floor
+# #200: TRACE=1 builds the test-only PSG write trace (docs/ROM-SOUND.md §8)
+# with 307 B of BaseRAM for the log; it must never replace the shipped image,
+# so BIN is required to point outside renderer/ilvm.bin.  The partition
+# assertions still run: the trace build keeps the 787 B margin (855 B).
+TRACE="${TRACE:-0}"
+BIN="${BIN:-renderer/ilvm.bin}"
+if [ "$TRACE" = "1" ] && [ "$BIN" = "renderer/ilvm.bin" ]; then
+  echo "TRACE=1 refuses to overwrite renderer/ilvm.bin; set BIN to a" \
+       "scratch path (docs/ROM-SOUND.md §8)" >&2
+  exit 2
+fi
 
 # Pass 1: the engine with a placeholder .bss base, just to get the header's
 # code addresses (build-engine.sh also verifies the note table and the
 # patch sites, so both passes prove them).
-ENGINE_ZP_BASE=$ENGINE_ZP_BASE ENGINE_BSS_BASE=0x2200 \
+ENGINE_ZP_BASE=$ENGINE_ZP_BASE ENGINE_BSS_BASE=0x2200 PSG_TRACE="$TRACE" \
   tools/ilvm/build-engine.sh >/dev/null
 
 compile_c() {   # $1 = output path
@@ -165,7 +181,7 @@ fi
 # final C image against it.  The second compile must land on the same
 # zp_end/__heap_start the engine was placed from, or the chicken-egg broke.
 ENGINE_ZP_BASE=$ENGINE_ZP_BASE ENGINE_BSS_BASE=$HEAP_START \
-  tools/ilvm/build-engine.sh
+  PSG_TRACE="$TRACE" tools/ilvm/build-engine.sh
 
 cp "$OUT" "$OUT.pass1"
 compile_c "$OUT"
