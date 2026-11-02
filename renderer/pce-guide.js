@@ -145,8 +145,8 @@ function frame(t, f)
   if sy < 64 then sy = 64 end
   if sy > 64 + 208 then sy = 64 + 208 end
   -- SAT entry 0 is four words: Y, X, pattern<<1, palette | flags.  Written
-  -- with sat() because sprite(0, { ... }) takes a table, which the console
-  -- export cannot lower (section 8); sat() is the same four hardware words.
+  -- with sat() because that is the same four hardware words and reads
+  -- plainly; sprite(0, { ... }) is carried when its fields are constants.
   sat(0, 0, sy)               -- Y
   sat(0, 1, sx)               -- X
   sat(0, 2, 0x100 << 1)       -- pattern 0x100, the SAT stores it shifted
@@ -410,8 +410,8 @@ function guide() {
       p("- Use only the calls in this guide. If a call is not here, it does " +
         "not exist; do not invent ppu.toys or SNES API."),
       p("- Keep the code inside the cartridge-ready Lua subset in section 8 " +
-        "(integers, no string values, and tables only if the person does " +
-        "not need a cartridge). The studio's Check button compiles the same " +
+        "(integers, no string values, and tables only with int array keys " +
+        "and string fields). The studio's Check button compiles the same " +
         "file through its IL and refuses what that subset refuses."),
       p("- Never say the toy works. Ask the person what they see, or for the " +
         "error line, and then say what you think is happening.")
@@ -508,8 +508,8 @@ function guide() {
         "putsprite writes a 16 x 16 sprite pattern; both encode the " +
         "hardware's bitplane layout, which is the part first toys get " +
         "wrong. It is also inside the cartridge subset: the sprite is placed " +
-        "with four sat() words because sprite(i, spec) takes a table, and the " +
-        "console back end cannot lower tables (section 8)."),
+        "with four sat() words, the same four hardware words sprite(i, spec) " +
+        "writes (section 8; sprite is carried when its fields are constants)."),
       code("lua", STARTER),
       p("What to point at when it does not show: reg(\"CR\", 0xC0) turns " +
         "sprites on; pal(0x101, ...) is sprite palette 0 colour 1, the " +
@@ -600,12 +600,14 @@ function guide() {
         "(il-mixed), and integer maths makes a frame reproducible. t is " +
         "f/60 seconds, but prefer f when you need a frame count."),
       h3("8. No strings, and keep tables simple"),
-      p("The cartridge subset has no string values (il-string). A table the " +
-        "toy builds can now be read back in the browser (t[i] and t.x run in " +
-        "both runtimes), but the console export has no tables yet, so a toy " +
-        "that must become a cartridge should fill tables with constant keys " +
-        "and read them back through constants (the toys do), or use separate " +
-        "globals. for i = a, b, step do is fine; pairs/ipairs are not."),
+      p("The cartridge subset has no string values (il-string). Tables with " +
+        "int array keys and string fields are carried by both routes, in a " +
+        "fixed pool of 192 cells; a table site that can run more than once " +
+        "and escapes is refused (cgen-table-escape / ilbc-table-escape), and " +
+        "a shape the pool cannot serve is cgen-table-ram / ilbc-table-ram. " +
+        "So keep table shapes constant and simple, and do not hand one out " +
+        "from a function that runs again. for i = a, b, step do is fine; " +
+        "pairs/ipairs are not."),
       h3("9. print() is not the browser console"),
       p("print(...) adds a line to the studio's log, not to devtools. It is " +
         "useful, but a print in frame() runs 60 times a second and fills the " +
@@ -679,7 +681,7 @@ function guide() {
         "only calls from section 4; integers; reg(\"CR\", 0xC0) before the " +
         "first sprite; the BAT filled; sprite patterns through putsprite; " +
         "the raster callback a few writes per line; no string values; no " +
-        "table reads if the toy must export."),
+        "escaping table site if the toy must export."),
       p("If the person has a project already, it carries NOTES.md, the resume " +
         "note: what the game is, what works, what does not, the decisions " +
         "and the next step. Read it before you change anything. At the end " +

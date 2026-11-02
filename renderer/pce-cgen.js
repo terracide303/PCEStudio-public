@@ -1378,7 +1378,7 @@
    * these lists anywhere, so a feature added to (or refused by) this file
    * cannot go stale in the docs.  `refused` is REFUSALS itself. */
   var FEATURES = {
-    route: "C compiler — the Studio's Export (pce-cgen -> llvm-mos)",
+    route: "C compiler — checked by the Studio's Export; built with llvm-mos",
     carried: [
       { id: "chunk", label: "the file's top-level statements",
         detail: "run once by toy_boot",

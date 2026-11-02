@@ -68,13 +68,19 @@
       <code>sfx()</code>, <code>release()</code> and <code>music()</code>. The interpreter image grew from 16 KiB to 32 KiB.
       <span class="status ok">tested on the host harness; its ROM checks still pass</span></li>
     <li>The build now checks the memory budgets (zero page and stack) and fails if the engine breaks them.</li>
-    <li><span class="status soon">not yet</span> Playing the sound in Mednafen, music data in ROMs, and the sound
-      trace test are the next steps. A game with sound still cannot be called finished.</li>
+    <li><span class="status soon">not yet</span> At this build the sound had only been checked on the host
+      harness: not heard in Mednafen, and the trace test not written. <b>Measured later on 2 November</b>: the
+      trace test is green (#200), and the committed image's Mednafen recordings are audible — <code>note()</code>
+      at 261/330/392/523 Hz and <code>sfx()</code> at 559 then 131 Hz, the pitches the studio writes. Music data
+      in ROMs is still the next step (#199): the ROM's song table has no song data yet, so a song plays in the
+      studio but not in the exported ROM.</li>
   </ul>
   <h3>Export of the example games</h3>
   <ul>
     <li><b>DUSK RUN</b>: the interpreter can now load its program (it used to refuse it, leaving a black screen).
-      <span class="status soon">built; its picture is being compared with the browser</span></li>
+      Its VRAM, colours and sprites are byte-equal to the browser's at frame 3; its displayed picture is still off by
+      16 bytes on row 16 (one scanline's first 16 pixels lag the write, #227).
+      <span class="status soon">built; its picture is not the browser's yet</span></li>
     <li><b>TOWER</b> still does not export: its bytecode (8,524 bytes) is larger than the 8 KiB data bank.</li>
     <li>The test and build tools now find their programs after the work drive was renamed.</li>
   </ul>
@@ -130,7 +136,9 @@
   <ul>
     <li>No ROM has run on a real PC Engine or a flash cart yet.</li>
     <li>STARFALL does not export (constant pool and sprite specs); NOVA TIDE stops on its <code>raster</code> table; TOWER on its data size.</li>
-    <li>Sound in exported ROMs, music data in ROMs, and a tracker are in progress.</li>
+    <li>DUSK RUN exports and its state matches the browser's, but its displayed picture is 16 bytes off on row 16 (#227).</li>
+    <li>Notes and effects play in exported ROMs. Music data in ROMs (#199), and a tracker (#226 onward), are in progress.</li>
+    <li>Planned, not built: the Lua-to-console compiler (#101), the assembly chain (#224–#237), and opening an existing ROM in the studio (#202).</li>
     <li>Export error reports and a developer export (source out) are planned.</li>
   </ul>
   <p>Found something wrong? <a href="https://github.com/terracide303/PCEStudio-public/issues/new/choose">Report it</a>.</p>

@@ -10,6 +10,7 @@ ROM. Make a game by hand, or let an AI such as Claude make it with you.
 **Try it:** <https://pcestudio.terracides.com> · **Testers' guide:** <https://pcestudio.terracides.com/renderer/testers.html>
 · **Claude Code manual:** <https://pcestudio.terracides.com/renderer/claude-code.html>
 · **Release notes:** <https://pcestudio.terracides.com/renderer/release-notes.html> · **Roadmap:** <https://pcestudio.terracides.com/renderer/roadmap.html>
+· **Credits:** <https://pcestudio.terracides.com/renderer/credits.html>
 · **Report a bug or an idea:** [Issues](https://github.com/terracide303/PCEStudio-public/issues/new/choose)
 
 ---
@@ -36,7 +37,8 @@ palettes, sprite table, registers, scanlines, sound.
 - **Add art and sound**: drop a PNG, a WAV or a MIDI file on **Add Source** and it becomes tiles, sprites, a
   tilesheet, a palette, a sample or a song, fitted to what the console can do. Assets are listed by name with previews.
 - **Check** a toy against the console's limits (sprites per line, VRAM, frame time) with the validator.
-- **Export a `.pce`** from the page, with nothing to install, for an emulator or a flash cart (simple toys for now).
+- **Export a `.pce`** from the page, with nothing to install, for an emulator or a flash cart. Which games
+  export today is in [Export to a ROM](#export-to-a-rom).
 - **Make toys with an AI**: a guide file for chat assistants, and an MCP server for Claude Code that can write, run,
   look at, check and export a toy by itself.
 
@@ -93,19 +95,26 @@ Each toy's own `README.md` says how it was made and which keys it uses. A toy's 
 
 ## Export to a ROM
 
-The studio compiles a toy to a small bytecode and glues it to a fixed interpreter ROM, all in the browser
-([`docs/EXPORT.md`](docs/EXPORT.md), [`docs/IL.md`](docs/IL.md)). The simple example toys in `toys/*.lua`
-(parallax, status bar, sky gradient, palette cycle) export today, and so does **PLATFORMER** (#186 carried
-the `sat` instruction — its ROM runs in Mednafen at 30 Hz). `sprite()` is carried too, for a spec whose
-slot and fields are constants (#188–#190; its ROM runs at 60 Hz). **DUSK RUN** also builds a 40,960-byte
-ROM and now loads, runs and draws: #222 raised the interpreter's capacities (41 registers, 41 functions,
-a 19-upvalue closure in a pooled upvalue table) and its VM state is byte-equal to the browser's at browser
-frame 3. Its *displayed* picture is not the browser's yet — the raster backend shows one replay frame per
-GUI frame and 16 pixels of one line lag the write (#223). The other three games — STARFALL, TOWER and NOVA TIDE — do not yet: each is stopped by a named
-finding, and [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five
-(STARFALL's 127-constant pool and the ten sprite specs it cannot pin to constants; TOWER's 8,524-byte
-bytecode against the 8 KiB data bank; NOVA TIDE's `raster` table), with the `raster` table form and the
-interpreter's capacity behind those. Carrying them is the next big piece of work. The ROMs are checked in
+The studio checks a toy against both cartridge routes — a C compiler and a bytecode interpreter — and
+builds the `.pce` in the browser from the bytecode and a fixed interpreter image
+([`docs/EXPORT.md`](docs/EXPORT.md), [`docs/IL.md`](docs/IL.md)). Since the sound engine joined the image,
+that image is 32 KiB and every toy ROM is 40,960 bytes.
+
+The simple example toys in `toys/*.lua` (parallax, status bar, sky gradient, palette cycle) export today,
+and so does **PLATFORMER** (#186 carried the `sat` instruction — its ROM runs in Mednafen at 30 Hz).
+`sprite()` is carried too, for a spec whose slot and fields are constants (#188–#190; its ROM runs at
+60 Hz). **DUSK RUN** also builds a 40,960-byte ROM and loads, runs and draws: #222 raised the interpreter's
+capacities (41 registers, 41 functions, a 19-upvalue closure in a pooled upvalue table) and its VRAM, colours
+and sprites are byte-equal to the browser's at frame 3. Its *displayed* picture is not the browser's yet — the raster
+backend shows one replay frame per GUI frame, and the best replay frame is 16 bytes off on row 16 (one
+scanline's first 16 pixels lag the write, #227).
+
+The other three games — STARFALL, TOWER and NOVA TIDE — do not yet: each is stopped by a named finding, and
+[`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five (STARFALL's
+127-constant pool and the ten sprite specs it cannot pin to constants; TOWER's 8,524-byte bytecode against
+the 8 KiB data bank; NOVA TIDE's `raster` table), with the `raster` table form and the interpreter's
+capacity behind those. Carrying them is the next big piece of work. Sound effects and notes play in an
+exported ROM (measured in Mednafen); a song's data is not in the ROM yet (#199). The ROMs are checked in
 Mednafen; nothing has run on a real console yet.
 
 ## Project files
@@ -135,8 +144,9 @@ sh tests/all.sh
 ```
 
 builds the ROMs the suites read and runs every `tests/check-*.js` and `tests/*-mutation.js`, one verdict each. It needs
-Node.js and the PC Engine assembler `pceas` on your `PATH` (how to get it: [`docs/BUILD.md`](docs/BUILD.md)). A few suites
-need extra tools (an emulator, a headless Chrome, llvm-mos) and print `SKIP` with the reason when those are missing.
+Node.js and the PC Engine assembler `pceas` on your `PATH` (`pceas4` too, for the HuTrack rebuild; how to get
+them: [`docs/BUILD.md`](docs/BUILD.md)). A few suites need extra tools (an emulator, a headless Chrome,
+llvm-mos) and print `SKIP` with the reason when those are missing.
 
 Most suites compare the engine's output with the same toy run two ways (Lua and the compiled bytecode) frame by frame,
 and the mutation suites break the engine on purpose to show the tests notice.
@@ -145,12 +155,14 @@ and the mutation suites break the engine on purpose to show the tests notice.
 
 - **Export of the five games**: PLATFORMER exports and runs in Mednafen at 30 Hz (re-measured
   2026-11-01); the sprite toy runs at 60 Hz; DUSK RUN exports, loads and draws (its state matches the
-  browser's at frame 3 after #222), but its displayed frame is 16 pixels of one line off the browser's
-  — the raster backend's replay (#223). STARFALL, TOWER and
+  browser's at frame 3 after #222), but its displayed frame is not the browser's yet: the best replay
+  frame is 16 bytes off on row 16 — the raster backend's replay (#227). STARFALL, TOWER and
   NOVA TIDE stop on named findings — STARFALL on the 127-constant pool and ten sprite specs it cannot
   pin, TOWER on its 8,524-byte bytecode against the 8 KiB data bank, NOVA TIDE on the `raster` table —
   and [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code, Lua line and refusing file:line
   for each. All five run in the browser.
+- **Music data in a ROM**: `note()`, `sfx()` and `release()` play in an exported ROM, measured in
+  Mednafen, but a song's data is not in the ROM yet (#199), so `music()` has nothing to play there.
 - **Real hardware**: nothing has been tried on a console or a flash cart.
 - **Phones and tablets**, **CD-ROM, Arcade Card and SuperGrafx** are not designed for.
 - The MCP server and the studio have been tested on **macOS** only. Linux and Windows should work (plain Node.js and

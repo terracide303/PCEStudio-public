@@ -1,8 +1,8 @@
 # The studio — ppu.toys' layout and editor, mapped to the PC Engine (#75, #77)
 
-**Decision.** the maintainer, 2026-10-28 (`docs/DECISIONS.md`): "look as much as possible to ppu toys". The studio
+**Decision.** The maintainer, 2026-10-28 (`docs/DECISIONS.md`): "look as much as possible to ppu toys". The studio
 page follows ppu.toys' Studio in layout, panels, workflow, keyboard shortcuts and how examples and docs sit
-beside the code, so someone who knows ppu.toys feels at home. The same day he added: "we can take whatever
+beside the code, so someone who knows ppu.toys feels at home. The same day the maintainer added: "we can take whatever
 from their website if needed, they are fine with that" — so where adapting their CSS or page structure is
 quicker than rebuilding it, this page does, with the credit below.
 
@@ -14,14 +14,38 @@ opt-in in Settings, and every ppu.toys shortcut with a PCE meaning works. **#78 
 the Layers controls (BG and sprites gated through CR, plus a view-only mode), the CRT look, SND's honest
 state, markers, the scrubber's frame length, the resolution label following the dot clock, and the pad keys
 on the focused output. **#115 exports a toy `.pce` from the page** through route 1's interpreter (§9);
-the compiled route is still a CLI path, and the static-picture export was already proven in the editor.
+the compiled route is checked in the page and built where llvm-mos is installed, and the static-picture export
+was already proven in the editor.
+
+---
+
+## Current state (docs pass, 2026-11-02)
+
+This page is the design record from October 2026, kept as the history of why the studio is shaped this way.
+Where its "not proven / what comes next" lists below are now out of date, this section is the current answer:
+
+- **The page's Export** builds a toy by route 1 in the browser: a 40,960-byte ROM (a 32 KiB interpreter image
+  with the sound engine plus the 8 KiB data bank). It also runs the C route's ROM CHECK, so it refuses a toy that
+  route cannot carry. The C route is no longer a CLI-only path; `renderer/pce-cgen.js` checks it in the page, and
+  the MCP's `export_pce` builds the interpreter route. DUSK RUN's VRAM, colours and sprites match the browser's at
+  frame 3.
+- **Sound in a toy works**: `note()`, `sfx()`, `release()` and `music()` are in the toy API, and notes and effects
+  play in an exported ROM, measured in Mednafen. A song's data is not in the ROM yet (#199), so `music()` plays in
+  the studio, not on the console.
+- **The agent link exists**: the AGENT drawer connects an open tab over the relay (#166, #167), and the same tool
+  core runs in the browser and in the stdio server.
+- **The SEQUENCER's songs play in a toy** with `music(0)`; the song is the toy's `song.json`.
+- **The assembly chain is planned**: the browser PCEAS proof works (#224), `docs/ASM.md` is written (#225), and
+  the project view, include file, HuCard builder and HuC6280 core are #230–#235. Opening an existing ROM is #202,
+  inside that chain. The compiler to native console code (#101) and the tracker (#226 onward) are planned, not
+  built.
 
 ---
 
 ## 0. What is taken from ppu.toys, and under what licence
 
 ppu.toys is **MIT, Copyright (c) 2026 Liora Labs**. Its served files are not in the public repository, but
-the maintainer's 2026-10-28 update allows taking them with credit. The credit comment is at the top of
+The maintainer's 2026-10-28 update allows taking them with credit. The credit comment is at the top of
 [`renderer/studio.html`](../renderer/studio.html); this table is the full list.
 
 | ppu.toys source (URL) | what was adapted | where it lives |
@@ -213,8 +237,8 @@ Sign-in pill is gone.
 **What ppu.toys does.** Its Studio is built on [dockview](https://dockview.dev/), whose split view puts a
 `dv-sash` element (4 px, `cursor: ew-resize`) between panels and drags the panel boundary under the pointer;
 the library clamps each panel to its declared minimum/maximum and the layout is serialised, not saved to
-`localStorage` by the studio. the maintainer, 2026-10-29: "in ppu.toys he can resize the regions — e.g. drag the
-divider between the code editor and the panel dock (SPRITES etc.) up or down." We read dockview's sash CSS
+`localStorage` by the studio. The maintainer, 2026-10-29: the regions can be resized — e.g. drag the
+divider between the code editor and the panel dock (SPRITES etc.) up or down. We read dockview's sash CSS
 in ppu.toys' served stylesheet (`App-6Y57MjOu.css`); **dockview itself is not taken** — its split view is a
 library with its own layout model, its own DOM and 100+ rules, and this page has three fixed region pairs.
 
@@ -503,7 +527,7 @@ language is `paste-language`, an opening fence with no close is `paste-fence`, a
 **A single `.lua` is a new toy, not a new `main.lua` (#145).** Before this card a drop or paste
 replaced `main.lua` and kept the toy's `tiles.json`/`palettes.json`/`sprites.json`. That was wrong twice
 over: the SCREEN, SPRITES and PALETTES panels draw that file set, and the toy BOOTS from it (#117), so a
-game that does not overwrite all of VRAM showed the previous toy's art. the maintainer, 2026-10-29: after dragging
+game that does not overwrite all of VRAM showed the previous toy's art. The maintainer, 2026-10-29: after dragging
 a new `main.lua` in, the SCREEN panel still showed STARFALL's stars and a `pceglobals.lua` tab stayed
 open. Now the drop/paste installs the same file set `Open… → From file…` gives a plain `.lua` —
 `main.lua` plus the empty default `tiles.json`, `palettes.json`, `sprites.json`, `waves.json`, which
@@ -1208,17 +1232,17 @@ hand-built expected state, not with the page's own opinion.
 ppu.toys has `Export to ROM` (and a `Cart` mode) because a SNES toy compiles to a cartridge. PCEStudio's
 toy compiler is **#31**; of its routes, **route 1** is the one the page can run: the toy's IL is encoded
 as bytecode (`renderer/pce-ilbc.js`) and executed by the committed HuC6280 interpreter
-(`renderer/ilvm.bin`), glued into a 24,576 B `.pce` by `renderer/pce-rom.js`'s `buildToyRom()`. The
+(`renderer/ilvm.bin`), glued into a 40,960 B `.pce` by `renderer/pce-rom.js`'s `buildToyRom()`. The image
+is 32 KiB and carries the HuTrack sound engine; the bytecode is the next 8 KiB bank. The
 `Export…` button is wired to that whole path in `renderer/studio.html` — `fetch("ilvm.bin")`, encode,
 build, download — with no compiler, no install and no Node (`docs/IL.md` §14.4).
 
-The dialog is #87's spec. The title is **Export to ROM** with a close `×`. The toy is analysed with the
-CONSOLE tab's own checks (#98): when one of them is an error, the dialog leads with *"This toy can't run
-on the PC Engine as written yet. The compiler's findings point at what to change:"* and lists the
-findings, each with its `main.lua:N` link; nothing is built. A toy the console accepts but the route-1
-encoder refuses (for example `timer()`) gets the encoder's own `ilbc-*` finding in the same list. A
-runnable toy is built and downloaded as `<title>.pce`; the dialog prints the bytecode size, the projected
-frame cost and whether the interpreter route meets 60 Hz. The footer is always there and always true:
+The dialog is #87's spec. The title is **Export to ROM** with a close `×`. The toy is analysed first with
+**ROM CHECK** (#193), which runs both cartridge front ends — the C compiler's check (`renderer/pce-cgen.js`)
+and the bytecode encoder's (`renderer/pce-ilbc.js`) — and returns every finding at once, each with its
+`main.lua:N` link; nothing is built when one is an error. A runnable toy is built and downloaded as
+`<title>.pce`; the dialog prints the bytecode size, the projected frame cost and whether the interpreter
+route meets 60 Hz. The footer is always there and always true:
 *"Experimental: frame timing is a static estimate, checked on an emulator, not on hardware."*
 
 The static-picture path is separate and unchanged: the editor paints VRAM/CRAM/registers and
@@ -1237,7 +1261,7 @@ The static-picture path is separate and unchanged: the editor paints VRAM/CRAM/r
   title, author and tag chips, and a search box) and `/t/<id>` (the picture, the title, the author, the
   tags, `Play full screen`, `Raw output`, `Fork`, and the source under file tabs) are the reference for
   `renderer/browse.html` and `renderer/toy.html`. The example toys of #29 plus the demos (STARFALL,
-  OAK WOODS, CITY, PLATFORMER, TOWER, DUSK RUN) are the gallery's content — #151 took the
+  OAK WOODS, CITY, PLATFORMER, TOWER, DUSK RUN, NOVA TIDE) are the gallery's content — #151 took the
   parallax, road, status-bar and palette-cycle effects out of Browse, though their files stay in
   `toys/`; the sources are `renderer/gallery-toys.js`, generated from `toys/*.lua` by `tools/gallery.js`, so a card,
   a toy's page, the studio and `tests/check-examples.js` all read the same bytes. The studio's top bar
@@ -1661,14 +1685,15 @@ comparison with their page is claimed.
   the side-by-sides are the evidence, and no pixel-diff against ppu.toys' page is claimed.
 * **`Check` is not the validator.** `Check` is determinism + Lua/IL agreement; cycles, sprites per line
   and source budgets are `#32`/`#61`, run by the **CONSOLE** tab (§3.6) rather than by the Check button.
-* **The toy export is route 1 only.** #115 wires the page to the IL interpreter
-  (`renderer/ilvm.bin`); the compiled route (#31 A-C) is still a CLI path, route 2 (#101) is the direct
-  generator that has not been built, and route 1's 60 Hz verdict is `pce-validate.js`'s static estimate,
-  not a per-toy capture. Sound in toys (#71) and the agent link (#24) are also absent: `SND`, the AGENT
-  drawer and the `NEEDS #31` export dialog say so in the page. The asset importer is #117, which landed;
-  its limits are the bullet below. The
-  SEQUENCER (§3.10) is a song editor, not a toy's sound: what it plays is `pce-song.js`'s engine, and a
-  toy cannot play a sequencer song until #71 gives toys a music call.
+* **The toy export, then and now.** When this page was written the page's export was route 1 only, the
+  compiled route (#31 A-C) was a CLI path, route 2 (#101) was the direct generator that had not been built,
+  and sound in toys (#71) and the agent link (#24) were absent: `SND`, the AGENT drawer and the
+  `NEEDS #31` export dialog said so in the page. Since then the page runs both routes' checks and builds
+  route 1, notes and effects play in the exported ROM, the agent link is live, and the SEQUENCER's songs
+  play through `music(0)` (the toy's `song.json`). Still not proven: route 2 (#101) is planned, not built;
+  a song's data in the ROM is #199; the export's frame timing is the validator's static estimate, not a
+  per-toy capture; and no ROM has run on real hardware. The asset importer is #117, which landed; its
+  limits are the bullet below.
 * **#94's SEQUENCER is a grid, and its tests are the builder's.** Not proven: the DMF export (#96),
   Undo/Redo, a resolution picker and note values shorter than a step; the panel's DOM and CSS are judged by
   the screenshot, not a pixel comparison; the AudioContext path (`▶ Play song`) is not exercised
@@ -1799,7 +1824,8 @@ comparison with their page is claimed.
   tab, make it editable, drop the `showingGlobals` guards, break the select's seek or its reset, or reduce
   the frame box to `object-fit: contain`, and the checks must catch each.
 * **#80's gallery is a static gallery, and its pages are its own documents.** There is no backend: the
-  wall is the five `toys/` examples, "Play a random toy" picks among what the page shows, and there is no
+  wall is the eight `toys/` entries in `TOYS_META` (sky gradient, STARFALL, OAK WOODS, CITY, PLATFORMER,
+  TOWER, DUSK RUN, NOVA TIDE), "Play a random toy" picks among what the page shows, and there is no
   heart, account, comment or publication — those would be invented numbers or dead buttons. The cards are
   frame-60 stills, not video clips. `Play full screen` is a page layout, not the browser's Fullscreen API
   (which needs a user gesture). A toy's page shows one source file (`main.lua`); the generated

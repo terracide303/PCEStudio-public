@@ -65,7 +65,7 @@ Rules that keep the conversation working:
 
 - Use only the calls in this guide. If a call is not here, it does not exist; do not invent ppu.toys or SNES API.
 
-- Keep the code inside the cartridge-ready Lua subset in section 8 (integers, no string values, and tables only if the person does not need a cartridge). The studio's Check button compiles the same file through its IL and refuses what that subset refuses.
+- Keep the code inside the cartridge-ready Lua subset in section 8 (integers, no string values, and tables only with int array keys and string fields). The studio's Check button compiles the same file through its IL and refuses what that subset refuses.
 
 - Never say the toy works. Ask the person what they see, or for the error line, and then say what you think is happening.
 
@@ -152,7 +152,7 @@ Keyboard: the studio's keys are I/J/K/L for the D-pad directions up/left/down/ri
 
 ## 5. A complete first program
 
-This file is complete and runs as it is. Copy it whole, then change one thing at a time. puttile writes a background character and putsprite writes a 16 x 16 sprite pattern; both encode the hardware's bitplane layout, which is the part first toys get wrong. It is also inside the cartridge subset: the sprite is placed with four sat() words because sprite(i, spec) takes a table, and the console back end cannot lower tables (section 8).
+This file is complete and runs as it is. Copy it whole, then change one thing at a time. puttile writes a background character and putsprite writes a 16 x 16 sprite pattern; both encode the hardware's bitplane layout, which is the part first toys get wrong. It is also inside the cartridge subset: the sprite is placed with four sat() words, the same four hardware words sprite(i, spec) writes (section 8; sprite is carried when its fields are constants).
 
 ```lua
 -- main.lua — one 16x16 sprite you can move, on a solid field.
@@ -228,8 +228,8 @@ function frame(t, f)
   if sy < 64 then sy = 64 end
   if sy > 64 + 208 then sy = 64 + 208 end
   -- SAT entry 0 is four words: Y, X, pattern<<1, palette | flags.  Written
-  -- with sat() because sprite(0, { ... }) takes a table, which the console
-  -- export cannot lower (section 8); sat() is the same four hardware words.
+  -- with sat() because that is the same four hardware words and reads
+  -- plainly; sprite(0, { ... }) is carried when its fields are constants.
   sat(0, 0, sy)               -- Y
   sat(0, 1, sx)               -- X
   sat(0, 2, 0x100 << 1)       -- pattern 0x100, the SAT stores it shifted
@@ -824,7 +824,7 @@ Stay in whole numbers: `x // 16`, not `x / 16` or 1.5. The studio's IL is a fixe
 
 ### 8. No strings, and keep tables simple
 
-The cartridge subset has no string values (il-string). A table the toy builds can now be read back in the browser (t[i] and t.x run in both runtimes), but the console export has no tables yet, so a toy that must become a cartridge should fill tables with constant keys and read them back through constants (the toys do), or use separate globals. for i = a, b, step do is fine; pairs/ipairs are not.
+The cartridge subset has no string values (il-string). Tables with int array keys and string fields are carried by both routes, in a fixed pool of 192 cells; a table site that can run more than once and escapes is refused (cgen-table-escape / ilbc-table-escape), and a shape the pool cannot serve is cgen-table-ram / ilbc-table-ram. So keep table shapes constant and simple, and do not hand one out from a function that runs again. for i = a, b, step do is fine; pairs/ipairs are not.
 
 ### 9. print() is not the browser console
 
@@ -836,7 +836,7 @@ The studio's Check answers whether the toy runs in the page. A cartridge has a s
 
 Keep to the carried lists below from the first version. They are generated from the two compilers' own tables, so they are what the code does, not a summary of it.
 
-Two routes build a .pce, and this page lists what each carries today. The C route is C compiler — the Studio's Export (pce-cgen -> llvm-mos). The interpreter route is bytecode interpreter — MCP export_pce and the page's Export. A toy the Studio exports must pass both; a toy exported over MCP needs the interpreter route. The lists below are the compilers' own tables (renderer/pce-cgen.js and renderer/pce-ilbc.js), not a summary: a feature added to either compiler appears here without a second edit.
+Two routes build a .pce, and this page lists what each carries today. The C route is C compiler — checked by the Studio's Export; built with llvm-mos. The interpreter route is bytecode interpreter — MCP export_pce and the page's Export. A toy the Studio exports must pass both; a toy exported over MCP needs the interpreter route. The lists below are the compilers' own tables (renderer/pce-cgen.js and renderer/pce-ilbc.js), not a summary: a feature added to either compiler appears here without a second edit.
 
 The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in the gutter, and shows 'ROM: ok' or 'ROM: N problems' beside Export. The same check is the MCP tool rom_check, which returns every finding at once as {code, line, message}.
 
@@ -1199,7 +1199,7 @@ The limits a toy lives inside, each enforced where the table says.
 
 ## 11. Before you answer
 
-Check the code against this list before sending it: the whole file; only calls from section 4; integers; reg("CR", 0xC0) before the first sprite; the BAT filled; sprite patterns through putsprite; the raster callback a few writes per line; no string values; no table reads if the toy must export.
+Check the code against this list before sending it: the whole file; only calls from section 4; integers; reg("CR", 0xC0) before the first sprite; the BAT filled; sprite patterns through putsprite; the raster callback a few writes per line; no string values; no escaping table site if the toy must export.
 
 If the person has a project already, it carries NOTES.md, the resume note: what the game is, what works, what does not, the decisions and the next step. Read it before you change anything. At the end of the session, give the person the updated NOTES.md and the code, and tell them to Save project (Project… → Save project): the one file holds the game and the note, so the next session starts where this one stopped.
 

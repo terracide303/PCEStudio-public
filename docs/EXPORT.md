@@ -1,11 +1,45 @@
 # The browser's .pce (card #9)
 
-`renderer/pce-rom.js` builds a HuCard ROM in the browser from one picture:
-the constant viewer code bank plus the data banks at the fixed places of
-[`ROM_LAYOUT.md`](ROM_LAYOUT.md). For the sample scenes its output is
-**byte-for-byte equal** to the ROM PCEAS assembles from
-`tools/gen/viewerN.asm`, and that ROM shows the picture in Mednafen.  #16
-extends the agreement to the raster viewers: a picture with a `raster`
+`renderer/pce-rom.js` builds a HuCard ROM in the browser. It has two callers:
+
+- **the picture ROM** — one static picture: the constant viewer code bank plus
+  the data banks at the fixed places of [`ROM_LAYOUT.md`](ROM_LAYOUT.md). For
+  the sample scenes its output is **byte-for-byte equal** to the ROM PCEAS
+  assembles from `tools/gen/viewerN.asm`, and that ROM shows the picture in
+  Mednafen. That is the rest of this page.
+- **the toy ROM** — `buildToyRom()`, the studio's **Export…** and the MCP's
+  `export_pce` (see below).
+
+## The toy ROM
+
+A toy is compiled to the IL, encoded as bytecode (`renderer/pce-ilbc.js`) and
+glued to the committed interpreter image `renderer/ilvm.bin`. Since #213 the
+image is **32,768 B** and carries the HuTrack sound engine; the bytecode lives
+in the next 8 KiB data bank (physical bank 4), so every exported toy ROM is
+**40,960 bytes**. No compiler runs in the page: the image is committed and the
+build is `renderer/pce-il.js` → `renderer/pce-ilbc.js` →
+`renderer/pce-rom.js`'s `buildToyRom()`.
+
+Which toys export today, measured in Mednafen, is
+[`ROM_SPEED.md`](ROM_SPEED.md): the simple example toys (parallax, status bar,
+sky gradient, palette cycle), PLATFORMER at 30 Hz, and the sprite toy at 60 Hz.
+DUSK RUN builds and its state matches the browser's at frame 3, but its
+displayed picture is not the browser's yet — the best replay frame is 16 bytes
+off on row 16 (#227). STARFALL, TOWER and NOVA TIDE are refused with a named
+finding and line. `note()` and `sfx()` play on the console, measured in
+Mednafen, and `release()` is carried as well; a song's data is not in the ROM
+yet (#199).
+
+The studio's Export… runs the C route's check first as well
+(`renderer/pce-cgen.js`), so the page refuses a toy that route cannot carry
+even when the bytecode could. The MCP's `export_pce` uses the interpreter
+route documented here; the page's Export also builds with it, after that
+check. The evidence is `tests/check-export-games.js` and
+`tests/check-ilvm.js`.
+
+## The picture ROM
+
+#16 extends the agreement to the raster viewers: a picture with a `raster`
 table builds the same fixed-layout table image the PCEAS path
 (`tools/genviewer.py`, `vraster1-10`) encodes, byte for byte.
 

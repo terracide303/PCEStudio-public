@@ -55,11 +55,11 @@
 </header>
 
 <main class="tg">
-  <span class="kicker">Beta 1 · October 2026</span>
+  <span class="kicker">Beta 1 · November 2026</span>
   <h1>Welcome, tester</h1>
   <p class="lede">PCEStudio is a PC Engine (TurboGrafx-16) studio that runs in your browser. You write small
   programs, called <b>toys</b>, in Lua. They run on a model of the console's real graphics and sound chips, and
-  simple toys can be exported as a <code>.pce</code> ROM. Thank you for trying it this early. Every bug you
+  many toys can be exported as a <code>.pce</code> ROM. Thank you for trying it this early. Every bug you
   report makes it better.</p>
 
   <div class="box warn">
@@ -157,8 +157,8 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
     <tr><td><b>Paste &amp; Run</b></td><td>Takes Lua from the clipboard into <code>main.lua</code> and runs it.</td></tr>
     <tr><td><b>Check</b></td><td>The validator: does the toy fit the console's limits (sprites per line, VRAM,
       frame time)?</td></tr>
-    <tr><td><b>Export…</b></td><td>Builds a <code>.pce</code> ROM in the browser. Only simple toys for now
-      (see section 6).</td></tr>
+    <tr><td><b>Export…</b></td><td>Builds a <code>.pce</code> ROM in the browser. Which toys export today
+      is in section 6.</td></tr>
     <tr><td><b>Save file</b> / <b>Open…</b></td><td>Saves the whole toy (code and assets) as one
       <code>.pce.json</code> file, and opens one again. Use this to send us a toy that shows a bug.</td></tr>
     <tr><td><b>Project…</b></td><td>Save or open a whole project as one <code>.pcestudio</code>: the game,
@@ -237,13 +237,14 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
   <p>Known and on the board. No need to report these, but tell us if one of them stops you completely.</p>
   <table>
     <tr><th>Area</th><th>What happens</th><th>Status</th></tr>
-    <tr><td>Export to <code>.pce</code></td><td>Only the simple example toys export, plus PLATFORMER (#186
+    <tr><td>Export to <code>.pce</code></td><td>The simple example toys export, and so do PLATFORMER (#186
       carried the <code>sat</code> instruction; re-measured 2026-11-01, it runs at 30 Hz) and the sprite toy
       (#190 carried <code>sprite()</code> for a spec whose slot and fields are constants; it runs at 60 Hz).
       DUSK RUN also builds a 40,960-byte ROM and, since #222, loads, runs and draws (41 registers, 41
       functions, a pooled 19-upvalue closure; its state is byte-equal to the browser's at frame 3). Its
-      displayed frame is not the browser's yet: the raster backend shows one replay frame per GUI frame and
-      16 pixels of one line lag the write (#223). STARFALL, TOWER and NOVA TIDE
+      displayed frame is not the browser's yet: the raster backend shows one replay frame per GUI frame,
+      and the best replay frame is 16 bytes off on row 16 (one scanline's first 16 pixels lag the write,
+      #227). STARFALL, TOWER and NOVA TIDE
       stop on named findings, and the page's Export and the MCP's <code>export_pce</code> stop at different
       ones: the page first runs the C route (STARFALL's <code>abs</code> at <code>main.lua:466</code>,
       TOWER's <code>not</code> at <code>:329</code>, NOVA TIDE's and DUSK RUN's <code>unm</code> at
@@ -257,24 +258,28 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
       panel can show old pictures. Reload the page before dropping a new file.</td><td class="status soon">being fixed</td></tr>
     <tr><td>Game art in ASSETS</td><td>Art that a game draws in code shows only in VRAM, not as named assets with
       a preview.</td><td class="status soon">being built</td></tr>
-    <tr><td>Sound in an exported ROM</td><td>The sound interpreter landed (2026-11-02): a toy that calls
-      <code>sfx()</code>, <code>note()</code> or <code>music()</code> encodes and builds, and the host
-      harness's PSG writes match the studio's for the same frames. The remaining step is hearing it on a
-      console — the Mednafen trace/audio comparison (#216).</td><td class="status soon">being tested</td></tr>
+    <tr><td>Sound in an exported ROM</td><td>The sound engine is in the ROM (2026-11-02): a toy that calls
+      <code>sfx()</code>, <code>note()</code> or <code>release()</code> encodes and builds, and the
+      recordings are audible in Mednafen at the pitches the studio writes (note 261/330/392/523 Hz,
+      sfx 559/131 Hz); the console's PSG writes match the studio's over the traced frames. A song's data
+      is not in the ROM yet (#199).</td><td class="status ok">notes play; songs planned</td></tr>
     <tr><td>What the ROM can run, while you write</td><td>ROM CHECK (and the MCP's <code>rom_check</code>)
       now reports the exact findings for both routes while you write. It is a front-end check: it does not
       build the ROM or run it, so the frame rate still needs Export and an emulator.</td>
       <td class="status ok">built; front end only</td></tr>
-    <tr><td>Claude Code: songs</td><td>Through the MCP server a toy's <code>music(0)</code> encodes, and
-      since 2026-11-02 the sound interpreter builds it into the ROM; the console trace is #216.</td>
-      <td class="status soon">being tested</td></tr>
+    <tr><td>Claude Code: songs</td><td>Through the MCP server a toy's <code>music(0)</code> encodes and
+      <code>song_write</code> writes its <code>song.json</code>, so the song plays in the studio. The ROM's
+      song table still has no song data (#199), so the exported ROM plays no music yet.</td>
+      <td class="status soon">studio only</td></tr>
     <tr><td>Connect Claude (live link)</td><td>New and lightly tested: if Connect does not give you a working
       command, or Claude says no studio tab is connected, please report it.</td><td class="status soon">please test</td></tr>
-    <tr><td>Export error reports</td><td>When an export is refused, the studio sends the error message (code, line
-      and finding text, never your code or art) so that we can fix the commonest gaps first. This is not optional.</td>
-      <td class="status soon">coming</td></tr>
-    <tr><td>Old files after an update</td><td>Your browser may keep old copies. Reload with
-      <kbd>Shift</kbd> (see section 1).</td><td class="status soon">being fixed</td></tr>
+    <tr><td>Export error reports</td><td>Planned: when an export is refused, the studio will send only the
+      finding code, line and message — never your code, art or file names — so we can fix the commonest gaps
+      first.</td><td class="status soon">planned</td></tr>
+    <tr><td>Old files after an update</td><td>The site sends <code>no-cache</code> for pages, scripts and data,
+      and the deploy stamps every local script and stylesheet with the build's version, so a reload gets the live
+      files. If a page still looks old, reload fully with <kbd>Shift</kbd> (see section 1).</td>
+      <td class="status ok">fixed</td></tr>
     <tr><td>Phones and tablets</td><td>Not designed for them yet.</td><td class="status no">not planned for beta</td></tr>
     <tr><td>CD-ROM, Arcade Card, SuperGrafx</td><td>Only the standard HuCard console is modelled.</td>
       <td class="status no">not planned for beta</td></tr>
@@ -318,6 +323,10 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
   under the GNU GPL, version 3 or later. The sound core is derived from Mednafen's PSG (GPL) and Blip_Buffer
   (LGPL). The idea and the studio's shape come from <a href="https://ppu.toys">ppu.toys</a>, with its author's
   blessing. Fengari, CodeMirror and HuTrack keep their own MIT licences.</p>
+  <p>The full list of people and projects PCEStudio stands on is on the
+  <a href="credits.html">credits page</a>. What we plan to build next, and why, is on the
+  <a href="roadmap.html">roadmap</a>; what has already changed is in the
+  <a href="release-notes.html">release notes</a>.</p>
   <p>PC Engine and TurboGrafx-16 are trademarks of their owners. PCEStudio is a fan project, not affiliated
   with NEC, Hudson Soft or Konami.</p>
 </main>

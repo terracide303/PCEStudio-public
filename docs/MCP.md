@@ -17,9 +17,11 @@ working-folder fence and for `export_pce`'s `.pce`, and
 `renderer/ilvm.bin`); the studio's AGENT panel (#167) loads the same core
 with a browser host, so the page and the server run the same tools.
 
-> Status: **part 1 of card #36** (the headless server). The studio's AGENT
-> panel that connects to it is part 3 (#104); the agent skill with recipes is
-> part 2 (#103), and it is in `plugin/skills/creating-pce-toys/` — read
+> Status: this page documents the **stdio server** (part 1 of card #36). The
+> one tool core also runs in the browser: the studio's AGENT drawer (planned
+> as part 3, #104; built as #166, #167) loads `renderer/pce-agent-tools.js`
+> with a browser host and can be driven live over the relay. The agent skill
+> with recipes is part 2 (#103), in `plugin/skills/creating-pce-toys/` — read
 > `SKILL.md` first, then `recipes/`. The server does not edit
 > `renderer/studio.html`.
 
@@ -723,16 +725,17 @@ Example call:
 Example reply:
 
 ```json
-{"ok":true,"bytes":24576,
+{"ok":true,"bytes":40960,
  "sha256":"fb53b96fa2d77311…",
- "path":"/tmp/pce-mcp/parallax.pce",
+ "path":"$TMPDIR/pce-mcp/parallax.pce",
  "route":"#100's browser route, no compiler: renderer/pce-il.js -> renderer/pce-ilbc.js -> renderer/pce-rom.js buildToyRom over the committed renderer/ilvm.bin",
- "bytecode_bytes":1115,"ilvm_bytes":16384,"assets":[],
+ "bytecode_bytes":1115,"ilvm_bytes":32768,"assets":[],
  "note":"the llvm-mos route (tools/toyc) exists where llvm-mos is installed but is not called here; this is the beta's route"}
 ```
 
-The `.pce` is 16 KiB of interpreter image plus one 8 KiB data bank holding
-the bytecode (and, later, assets). The file is written where the reply says.
+The `.pce` is 32 KiB of interpreter image (with the HuTrack sound engine)
+plus one 8 KiB data bank holding the bytecode (and, later, assets) — 40,960
+bytes. The file is written where the reply says.
 
 ### `docs(topic)`
 
@@ -757,11 +760,13 @@ Example reply:
            {"id":"registers","title":"Registers"},
            {"id":"palettes","title":"Palettes and colour"},
            {"id":"sprites","title":"Sprites and the SAT"},
+           {"id":"status","title":"The VDC's status flags"},
            {"id":"raster","title":"Raster: changes per line"},
            {"id":"pads","title":"Pads"},{"id":"timer","title":"The timer"},
            {"id":"passwords","title":"Passwords"},
            {"id":"sound","title":"Sound: the PSG"},
            {"id":"budgets","title":"Budgets and limits"},
+           {"id":"writing-for-the-rom","title":"Writing for the ROM"},
            {"id":"refusals","title":"Refusal codes"}]}
 ```
 
@@ -786,10 +791,12 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
   a colour table, not the VCE's control and address registers. `CR` bits 2–7
   have no manual page (`docs/MANUALS.md` §4, GAP 7 is the 262/263-line bit).
 - **PSG writes are recorded, not heard here.** There is no audio tool in part
-  1; `toy_run` reports the write count, and the model that renders the PCM is
-  `renderer/pce-psg.js`.
-- **No browser, no studio, no live link.** The AGENT panel that drives an
-  open studio is #104; this server is headless.
+  1; `toy_run` reports the write count and what each channel played, and the
+  model that renders the PCM is `renderer/pce-psg.js`.
+- **The stdio server is headless; the studio is the other host.** The AGENT
+  drawer loads the same tool core with a browser host, so a live tab can be
+  driven over the relay (#166, #167). This page documents the stdio route,
+  which needs no tab and no relay.
 - **No llvm-mos export.** `export_pce` is #100's route; `tools/toyc` (A/C
   llvm-mos) is present where installed and not used.
 - The PCE gaps in `docs/MANUALS.md` §15.3 stay gaps: no mid-line VCE write
@@ -805,13 +812,14 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
 - 1536 tiles max per picture (`source-tiles`); sprite imports hold 16 palette
   rows and 64 SAT entries total, past which `source_add` refuses
   (`source-palettes`, `source-sat`).
-- A `.pce` is 24 KiB: 16 KiB committed interpreter + one 8 KiB data bank. A
-  bytecode-plus-assets payload past 8 KiB is refused by `toy-data-bank-full`.
+- A `.pce` is 40,960 bytes: a 32 KiB committed interpreter (with the HuTrack
+  sound engine) plus one 8 KiB data bank. A bytecode-plus-assets payload past
+  8 KiB is refused by `toy-data-bank-full`.
 
 ## Evidence
 
 `node tests/check-mcp.js` starts `tools/mcp/server.js`, speaks MCP over
-stdio, and asserts 315 checks:
+stdio, and asserts 333 checks:
 
 - `initialize`, `ping`, and `tools/list` with all fourteen tools and their
   schemas;
