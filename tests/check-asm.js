@@ -5,9 +5,13 @@
  *
  *   node tests/check-asm.js
  *
- * NOTE ON AUTHORSHIP: written by the builder (@design) because the card's
- * close condition needs this diff script.  Per the workshop's role split it
- * is flagged for a cold read/break by another seat before the card closes.
+ * NOTE ON AUTHORSHIP: the #224 body was written by the builder (@design)
+ * because the card's close condition needs this diff script, then cold-broken
+ * by another seat (16 breaks, 11 caught).  The #251 additions marked below
+ * were written by @test to close the four holes that break found — each is
+ * proven to turn this file red (board note on #251) — and rule 2 applies
+ * again: a different seat must re-break the extended check before #251
+ * closes.
  *
  * What it proves, and how:
  *
@@ -27,12 +31,26 @@
  *                 .sym byte-for-byte.  For a source *without* .list the
  *                 wrapper prepends one, renumbers the listing back to the
  *                 caller's lines and returns it — hello.asm is checked for
- *                 that (non-empty, starts at line 1, no injected .list line).
+ *                 that (first numbered line '    1', last '  134', 134 of
+ *                 them, and no .list text anywhere in it: the assertion
+ *                 matches the numbered-listing shape, which the old
+ *                 ^[ \t]*\.list\b regex could never match).
  *   error         tests/asm/error.asm has a deliberate `lda #$GG` on line 5.
  *                 assemble() must return status 1, no bytes, and exactly
- *                 [{line: 5, message: "Syntax error in expression!"}]; the
- *                 native binary's own stdout is required to carry the same
- *                 line and message, so the expected text is not invented here.
+ *                 [{line: 5, message: "Syntax error in expression!",
+ *                 file: "error.asm"}]; the native binary's own stdout is
+ *                 required to carry the same line and message, so the
+ *                 expected text is not invented here.  The failed assembly
+ *                 must also leave process.exitCode as it found it (the
+ *                 wasm's exit(1) goes through Emscripten's quit hook).
+ *   include error tests/asm/include-error.asm includes lib/bad.inc, whose
+ *                 line 3 is invalid; the diagnostic must be attributed to
+ *                 lib/bad.inc — file, line and message all cross-checked
+ *                 against the native binary's parsed stdout, not invented.
+ *   raw:false     assemble(hello, {raw: false}) must equal native
+ *                 `pceas hello.asm` *without* -raw — the 8704 B image with
+ *                 PCEAS's own header — byte for byte, so a wrapper that
+ *                 ignored raw:false cannot hide (the -raw image is 8192 B).
  *   repeatable    the same source assembled twice yields the same bytes
  *                 (each call gets a fresh module instance).
  *
@@ -51,7 +69,16 @@
  * NOT PROVEN: the native binary is the only reference, so a shared PCEAS bug
  * (or a wrong native build) would cancel; the wasm is not run in a browser
  * page (Node only); and the 4.x interpreter build path is out of reach of
- * this 3.23 artefact.
+ * this 3.23 artefact.  Of the #251 additions: the exitCode capture assumes
+ * the wasm's quit hook sets process.exitCode rather than hard-exiting the
+ * process (a hard exit would still fail the suite, just without a named
+ * line); the .list leak assertion can only fire if the returned listing
+ * contains .list text, and PCEAS 3.23 never emits the directive — the
+ * renumbering checks (count, first '    1', last '  134') carry the
+ * observable half of that property, and the leak break here was proven
+ * with a mutant that emits the injected line itself; and the breaks were
+ * chosen by this seat — rule 2: a different seat must re-break in its own
+ * ways before #251 closes.
  */
 
 const fs = require("fs");
@@ -117,8 +144,8 @@ function stage(cwdRel, entryRel, extra) {
   return { dir, entry: entryRel, files };
 }
 
-function runNative(dir, entry) {
-  const res = spawnSync(NATIVE, ["-raw", entry], {
+function runNative(dir, entry, args) {
+  const res = spawnSync(NATIVE, (args || ["-raw"]).concat(entry), {
     cwd: dir, encoding: "utf8", maxBuffer: 16 * 1024 * 1024
   });
   if (res.error) {
@@ -126,6 +153,27 @@ function runNative(dir, entry) {
                     res.error.message);
   }
   return res;
+}
+
+// Parse native PCEAS stdout into {file, line, message} diagnostics with the
+// same shape parseDiagnostics() uses in renderer/pce-asm.js: a #[n] name
+// header sets the current file, a 5-char number field sets the line, and the
+// 7-space-indented message closes the pair.
+function parseNativeDiagnostics(text) {
+  const out = [];
+  let file = null;
+  let line = null;
+  for (const s of text.split(/\r?\n/)) {
+    const header = /^#\[\d+\]\s+(.*)$/.exec(s);
+    if (header) { file = header[1]; line = null; continue; }
+    const field = s.slice(0, 5);
+    if (/^\s*\d+\s*$/.test(field)) { line = parseInt(field, 10); continue; }
+    if (line !== null && /^ {7}\S/.test(s)) {
+      out.push({ file: file, line: line, message: s.slice(7).trim() });
+      line = null;
+    }
+  }
+  return out;
 }
 
 if (PCEAS.includes("/") && !fs.existsSync(NATIVE)) {
@@ -217,11 +265,24 @@ for (const sample of SAMPLES) {
     check(r.listing.length > 0, "hello: no listing returned without .list");
     check(/^#\[1\]\s+tools\/hello\.asm$/m.test(r.listing),
           "hello: listing does not start at tools/hello.asm");
-    check(!/^[ \t]*\.list\b/m.test(r.listing),
+    // hello.asm has no .list text of its own, so any .list anywhere in the
+    // returned listing is the injected line leaking — in a numbered listing
+    // line (which the old ^[ \t]*\.list\b regex could never match) or raw.
+    check(!/\.list\b/.test(r.listing),
           "hello: the injected .list line leaked into the listing");
     const numbered = r.listing.split("\n").filter(l => /^\s*\d+\s/.test(l));
     check(numbered.length === 134,
           `hello: listing has ${numbered.length} numbered lines, want 134`);
+    check(numbered.length > 0 && numbered[0].slice(0, 5) === "    1",
+          "hello: the first numbered listing line is " +
+          JSON.stringify(numbered[0] && numbered[0].slice(0, 5)) +
+          ", want '    1' (the renumbering must undo the injected .list)");
+    check(numbered.length > 0 &&
+          numbered[numbered.length - 1].slice(0, 5) === "  134",
+          "hello: the last numbered listing line is " +
+          JSON.stringify(numbered[numbered.length - 1] &&
+                         numbered[numbered.length - 1].slice(0, 5)) +
+          ", want '  134'");
   }
 }
 
@@ -234,10 +295,18 @@ for (const sample of SAMPLES) {
   check(/\n\s+5\s/.test(nativeOut) &&
         /Syntax error in expression!/.test(nativeOut),
         "error: native pceas did not report line 5 as expected");
+  // The wasm's exit(1) goes through Emscripten's quit hook, which sets
+  // process.exitCode; the wrapper must restore it.  Capture the comparison
+  // here, before this file's own final exitCode assignment can mask a leak.
+  const exitCodeBefore = process.exitCode;
   const r = asm.assemble(staged.files["error.asm"], {
     filename: "error.asm",
     includes: staged.files
   });
+  check(process.exitCode === exitCodeBefore,
+        "error: assemble() left process.exitCode " + process.exitCode +
+        " after the failed assembly (the wasm's exit(1) leaked into the " +
+        "test process; the wrapper must restore it)");
   check(r.status !== 0, "error: wasm pceas accepted error.asm");
   check(r.bytes.length === 0, "error: wasm returned bytes for a failed assembly");
   check(r.errors.length === 1, `error: ${r.errors.length} diagnostics, want 1`);
@@ -248,6 +317,69 @@ for (const sample of SAMPLES) {
         r.errors[0].message === "Syntax error in expression!",
         "error: the diagnostic message is " +
         JSON.stringify(r.errors[0] && r.errors[0].message));
+  check(r.errors[0] && r.errors[0].file === "error.asm",
+        "error: the diagnostic file is " +
+        JSON.stringify(r.errors[0] && r.errors[0].file) +
+        ", want error.asm");
+}
+
+// ---- include attribution: an error inside an included file --------------
+// No diagnostic from an included file existed before #251, so the wrapper's
+// file attribution was never exercised.  include-error.asm includes
+// lib/bad.inc, whose line 3 is invalid; the native binary's stdout is parsed
+// for the expected {file, line, message}, then the wasm must return exactly
+// that triple — proving the file names the include, not the includer.
+{
+  const staged = stage("tests/asm", "include-error.asm");
+  const native = runNative(staged.dir, "include-error.asm");
+  check(native.status !== 0, "incerr: native pceas accepted include-error.asm");
+  const nativeErrs = parseNativeDiagnostics(native.stdout + native.stderr);
+  check(nativeErrs.length === 1 && nativeErrs[0].file === "lib/bad.inc",
+        "incerr: native pceas did not report one lib/bad.inc diagnostic: " +
+        JSON.stringify(nativeErrs));
+  const r = asm.assemble(staged.files["include-error.asm"], {
+    filename: "include-error.asm",
+    includes: staged.files
+  });
+  check(r.status !== 0, "incerr: wasm pceas accepted include-error.asm");
+  check(r.bytes.length === 0,
+        "incerr: wasm returned bytes for a failed assembly");
+  const got = r.errors.map(e => ({ file: e.file, line: e.line,
+                                   message: e.message }));
+  check(JSON.stringify(got) === JSON.stringify(nativeErrs),
+        "incerr: wasm diagnostics differ from native PCEAS 3.23's: " +
+        JSON.stringify(got) + " vs " + JSON.stringify(nativeErrs));
+}
+
+// ---- raw:false: PCEAS's own header, parity with native without -raw -----
+// Every check-asm call site passed -raw, so a wrapper that ignored
+// {raw: false} was invisible.  Native `pceas hello.asm` (no -raw) writes the
+// 8704 B image with PCEAS's own header; the wasm with {raw: false} must
+// match it byte for byte.  The -raw image is 8192 B, so an ignored raw:false
+// cannot pass this.
+{
+  const staged = stage(".", "tools/hello.asm");
+  const native = runNative(staged.dir, "tools/hello.asm", []);
+  const nativeFile = path.join(staged.dir, "tools/hello.pce");
+  check(native.status === 0 && fs.existsSync(nativeFile),
+        "rawfalse: native pceas (no -raw) did not write tools/hello.pce: " +
+        (native.stdout + native.stderr).trim().split("\n").slice(-3).join(" | "));
+  if (fs.existsSync(nativeFile)) {
+    const nativeBytes = fs.readFileSync(nativeFile);
+    const r = asm.assemble(staged.files["tools/hello.asm"], {
+      filename: "tools/hello.asm",
+      includes: staged.files,
+      raw: false
+    });
+    check(r.status === 0, "rawfalse: wasm pceas failed: " +
+          JSON.stringify(r.errors.slice(0, 3)));
+    check(r.errors.length === 0,
+          "rawfalse: wasm reported diagnostics on hello.asm");
+    check(r.bytes.length === nativeBytes.length,
+          `rawfalse: wasm ${r.bytes.length} B vs native ${nativeBytes.length} B`);
+    check(Buffer.compare(Buffer.from(r.bytes), nativeBytes) === 0,
+          "rawfalse: the header image differs from native pceas without -raw");
+  }
 }
 
 // ---- repeatability ------------------------------------------------------
@@ -311,10 +443,14 @@ if (failures.length === 0) {
   console.log(`PASS: ${checks} checks — six sources assemble byte-identically ` +
               `to the native PCEAS 3.23 (hello, viewer, generated scene1 and ` +
               `viewer1 with .include/.incbin, features with macros, banks), ` +
-              `the listing and symbol table match the native .lst/.sym, ` +
-              `error.asm reports line 5 and its message, and the interpreter ` +
-              `4.x source is refused identically by both 3.23 builds (same ` +
-              `diagnostics, raw stdout byte for byte)`);
+              `the listing and symbol table match the native .lst/.sym, the ` +
+              `prepended-.list renumbering returns lines 1..134 with no ` +
+              `injected line, raw:false matches native without -raw byte for ` +
+              `byte, error.asm reports line 5, its message, its file and ` +
+              `leaves process.exitCode alone, a lib/bad.inc error is ` +
+              `attributed to the include, and the interpreter 4.x source is ` +
+              `refused identically by both 3.23 builds (same diagnostics, ` +
+              `raw stdout byte for byte)`);
   process.exitCode = 0;
 } else {
   console.log(`FAIL: ${failures.length} of ${checks} checks failed`);
