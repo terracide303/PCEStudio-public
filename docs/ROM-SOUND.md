@@ -7,7 +7,12 @@ toy's bytecode in the next physical bank. Since #197 the two cartridge front
 ends carry the whole sound surface — the encoder has `music`/`sfx`/`release`
 ops and the `note` builtin (`renderer/pce-ilbc.js`, container version 3), and
 the C emitter lowers them. Since #215 the committed interpreter reads
-container version 3 and calls the engine, so a sound toy exports; TOWER
+container version 3 and calls the engine, so a sound toy exports; **§11
+(2026-11-02) is the console check: both sound toys run in Mednafen, the
+engine and the glue execute, and three defects keep them silent or off
+pitch — #228 (F masked on the low byte), #113 (the main amplitude R1 is
+never written) and #229 (dirty glue `.bss`). With the first two fixed in a
+scratch image the recordings match the studio's model.** TOWER
 still stops earlier, at the 8 KiB data bank (8,524 B of bytecode), and
 DUSK RUN exports but does not play on the committed image (its container
 needs more registers/functions/upvalues than the interpreter has — §10).
@@ -605,23 +610,149 @@ card **#223** carries the raster picture. TOWER is different: it stops
 earlier, at `toy-data-bank-full` (8,524 B of bytecode against the 8 KiB
 bank), which is a refusal with a message and no ROM.
 
+## 11. What Mednafen says (#216): the toys run, and the glue has defects
+
+Measured 2026-11-02 on this machine, Mednafen 1.32.1 with the sound route
+[`tools/capture-hutrack.sh`](../tools/capture-hutrack.sh) established:
+`pce_fast`, `-pce_fast.ocmultiplier 1`, `-sound.driver dummy`,
+`-sound.rate 44100`, `-soundrecord`, `-video.driver sdl`, SIGINT for a clean
+exit between frames. Two toys, both exported with
+[`tools/ilvm/emit.js`](../tools/ilvm/emit.js) and no compiler:
+
+| toy | what it plays |
+|---|---|
+| [`tools/toys/note.lua`](../tools/toys/note.lua) | C4/E4/G4/C5 (`note(60/64/67/72)`), 12 toy frames each (200.6 ms), repeating every 48 frames. F 428/339/285/214 = **261.4/329.7/392.1/523.0 Hz** |
+| [`tools/toys/sfx.lua`](../tools/toys/sfx.lua) | every 60 frames: channel 1 a raw **F 200 (559.3 Hz)** for 10 frames; channel 2 `note(48)` (**F 855, 130.8 Hz**) for a 600-frame budget, cut by `release(2)` at frame 50 |
+
+**On the committed image (`renderer/ilvm.bin`, sha256 `90d4a655…`) both
+toys are silent.** ROMs: note 40,960 B `7a8f2896…`, sfx 40,960 B
+`d727e2a0…`. Both WAVs have peak 0. A Mednafen save state (the
+`tools/mcs-extract.py` route) shows the glue **did** run — channel 0
+selected, R5 = `$FF`, R4 = `$8F`, the 32-step square uploaded — and gives
+the difference to the studio in one line each:
+
+- **R1 (the PSG's main amplitude, `$0801`) is 0**, so the chip is
+  master-muted. Neither `note()` nor `sfx()` writes it; HuTrack's Init does
+  (`vendor/hutrack/lib/HuTrack/HuTrack_lib.asm:37`, `Global.SetVolume =
+  $FF`), and a toy with no `music()` never runs Init. This is card **#113**
+  in the studio's own model too: `rt.renderSound()` for the same toy
+  renders peak 0 on this tree.
+- **The console's F is masked on the wrong byte.** `SndGlueSfx`
+  ([`tools/ilvm/hutrack_engine.asm:233`](../tools/ilvm/hutrack_engine.asm))
+  does `lda <_hk.EAX0.m / and #$0F / sta <_hk.EAX0.m` — the low byte — where
+  the 12-bit clamp belongs on the high byte (`_hk.EAX0.h`). The value is
+  `F' = (F & $0F) | (F & $0F00)`: note(60)'s **428 became 268** (417 Hz, the
+  save state's `CH0.frequency`), note(48)'s 855 became 775 (144 Hz), and
+  the sfx toy's raw 200 became 8 (13,982 Hz).
+
+**With those two writes changed in a scratch image** (`renderer/ilvm.bin`
+`92d6dc42…`, built by `tools/ilvm/build.sh`; not committed — it moves every
+pinned ROM sha and is card #228 plus #113) the same two toys play, and the
+recording matches the studio's `pce-psg` render of the same frames. The
+studio column needed the same R1 write for the same reason: on this tree
+`rt.renderSound()` is silent too (measured, peak 0 — #113), so it is the
+studio with `soundWrite(1, 0xff)` added at the reserve:
+
+| toy | studio `rt.renderSound()` for the same frames | Mednafen, committed image | Mednafen, scratch image `92d6dc42…` |
+|---|---|---|---|
+| note | 261 / 330 / 392 / 523 Hz, RMS 369–370 | silent (peak 0); PSG state F 268 for note 60, R1 0 | 330 / 392 / 523 / 261 Hz (the capture began on the second note and repeats through C4/E4/G4/C5), RMS 368–370 |
+| sfx | 559 Hz for 167 ms, then 131 Hz for 334 ms; RMS 367 / 371 | silent (peak 0) | 559 Hz for 170 ms (RMS 360), 131 Hz for 341 ms (RMS 367), repeating every 1,003 ms |
+
+Every pitch is the F the studio writes, within 1 Hz (the analyser's 1 Hz
+DFT grid), and the levels agree within 2%. ROMs from the scratch image:
+note 40,960 B `34be5540…`, sfx 40,960 B `55038a0a…`.
+
+**A third defect, measured and not yet fixed: the glue's state is not clean
+at the first sound op.** A toy that calls `sfx()` **once** at frame 0 (or
+every frame with a constant F) stays silent even on the scratch image: the
+save state shows `snd_owned` and `snd_tick` in the glue's `.bss` holding
+stack-like garbage (`snd_owned[0] = $CF`, `snd_tick = 4`), so the reserve is
+skipped (no R5, no R1) and a non-zero `snd_tick` makes the per-frame tick
+run the engine with uninitialised state, which mutes the chip. The note and
+sfx toys recover only because they reserve again every 12 / 60 frames.
+Moving the glue `.bss` 64 B higher did not stop it, so the write is not
+simply the soft stack reaching the partition. Root cause is open (card
+**#229**); until it is fixed, an R1 write must be unconditional at the start
+of `sfx()`, not gated on a channel being newly owned.
+
+**Reproducing all of it** (nothing is written to the repository):
+
+```sh
+# the two ROMs and their recordings, from the committed image
+tools/capture-rom-sound.sh tools/toys/note.lua note
+tools/capture-rom-sound.sh tools/toys/sfx.lua sfx
+node tools/rom-sound-pitch.js "$TMPDIR/pce-rom-sound/note/note.wav" \
+     --period-ms 200.6 --slots 4          # silent: peak 0
+node tools/rom-sound-pitch.js "$TMPDIR/pce-rom-sound/sfx/sfx.wav" \
+     --period-ms 1003 --window-ms 60:140  # silent: peak 0
+
+# the studio's own output for the same frames (silent on this tree: #113)
+node tools/rom-sound-pitch.js --studio tools/toys/note.lua --frames 48 \
+     --period-ms 200.6 --slots 4
+
+# the scratch image: apply the two changes above to the asm and to
+# renderer/pce-toyhost.js's sfx() (soundWrite(1, 0xff) before the reserve),
+# in a COPY of the tree (this seat cloned it to $TMPDIR/fiximg; the shipped
+# renderer/ilvm.bin is not touched), then
+LLVM_MOS=/Volumes/External/pce-tools/llvm-mos PCEAS4=pceas4 \
+  tools/ilvm/build.sh                      # 32,768 B, sha256 92d6dc42…
+tools/capture-rom-sound.sh tools/toys/note.lua note-fixed \
+  "$TMPDIR/fiximg/renderer/ilvm.bin"
+node tools/rom-sound-pitch.js "$TMPDIR/pce-rom-sound/note-fixed/note-fixed.wav" \
+     --period-ms 200.6 --slots 4          # 330/392/523/261 Hz, RMS 368-370
+tools/capture-rom-sound.sh tools/toys/sfx.lua sfx-fixed \
+  "$TMPDIR/fiximg/renderer/ilvm.bin"
+node tools/rom-sound-pitch.js "$TMPDIR/pce-rom-sound/sfx-fixed/sfx-fixed.wav" \
+     --period-ms 1003 --slots 4           # 559 Hz blip, 131 Hz note
+```
+
+The analyser measures a slot's fundamental as the peak of a Hann-windowed
+DFT (50–1500 Hz) over the middle of the slot, and the first sound's onset as
+the first 5 ms block over 10% of the loudest block; it is an instrument, not
+a test. The exact fixes a later card must carry — the first diff is the form
+`92d6dc42…` was built with (R1 at the reserve); #113 should ship it
+**unconditional** at `sfx()` entry, as the paragraph above says:
+
+```diff
+--- a/tools/ilvm/hutrack_engine.asm
+ .chin:
+-    lda <_hk.EAX0.m
++    lda <_hk.EAX0.h
+     and #$0F
+-    sta <_hk.EAX0.m
++    sta <_hk.EAX0.h
+...
+     lda #1
+     sta snd_owned,x
++    lda #$FF
++    sta $801            ; R1: the main amplitude HuTrack's Init sets
+     jsr HuTrackEngine.setChanForSFX
+```
+
+```diff
+--- a/renderer/pce-toyhost.js          (the studio's side, with #113)
+         if (!sound.sfx[ch].owned) {
+           sound.sfx[ch].owned = true;
++          soundWrite(1, 0xff);
+           if (sound.player) sound.player.reserve(ch);
+           else lib.reserveWrites(ch, soundWrite);
+```
+
 ## What is not proven
 
-- **The engine now has a caller, but no sound has been heard on a console
-  yet.** #215's ops call `SndGlue*` and the front ends carry the calls;
-  `tests/check-rom-sound.js` proves the host half's PSG writes equal the
-  studio's for the same frames, and §10 proves the existing pictures are
-  unchanged. What is still open is **#216**: a note toy and an sfx toy run
-  in Mednafen and their PSG writes (or audio) are compared with the studio's
-  for the same frames. The llvm-mos + pceas image has not played a sound on
-  a console.
+- **A note toy and an sfx toy run in Mednafen; they do not yet play on the
+  committed image.** §11 measures both, proves the engine and the glue
+  execute, and names the three defects that keep them silent or wrong. What
+  is unproven is anything about a *real console* (Mednafen only), the
+  in-frame timing (pitches and levels per slot, not sample-exact PCM — that
+  needs #200's trace build), and the cause of the dirty glue `.bss`.
 - **The RAM partition is built and asserted (#214), and #215's sound code
   is inside it.** `build.sh` fails if the interpreter's zero page reaches
   the engine's, if either extent leaves its window, or if the stack headroom
-  is under 787 B; the measured headroom is 977 B. The canary's high-water
-  mark is 912 B for the deepest toy-shaped call tree, 65 B below the engine —
-  and one frame deeper reaches it, with no depth guard or encoder refusal
-  yet (named above as the follow-up).
+  is under 787 B; the measured headroom after #222 is 1,131 B (§5). The
+  canary's high-water mark is 1,083 B for the deepest toy-shaped call tree,
+  48 B above the engine block — and one frame deeper reaches it, with no
+  depth guard or encoder refusal yet (named above as the follow-up).
 - **The canary is one toy and one machine.** It measures the interpreter's
   soft stack, not the engine's (the engine runs on the 6502 stack and its
   own `.bss`); Mednafen only, no real console.
@@ -635,9 +766,10 @@ bank), which is a refusal with a message and no ROM.
   bracket by design; the frame-rate effect on a 30 Hz toy (TOWER, DUSK RUN)
   is measured in #198/#200.
 - **The SEQUENCER adapter and the noise effect are landed (#199)** and their
-  data half is measured by `tests/check-hutrack-seq.js`; what is not yet
-  witnessed is the console playing it — the image now exists (#215), so
-  that half is #216's Mednafen trace.
+  data half is measured by `tests/check-hutrack-seq.js`; the console half is
+  still unwitnessed — #216 showed the engine executes (its glue and
+  `setChanForSFX` reach the PSG, §11), but a song needs the three defects
+  fixed and `buildToyRom` to stop pinning the trailer at n = 0.
 - **Rule 2 is owed** for any check #198–#200 and #220/#221 write: the author
   is not the seat that can prove it. #214's build assertions are the design
   seat's own; a cold seat should move `ENGINE_ZP_BASE` down and raise
@@ -660,8 +792,8 @@ bank), which is a refusal with a message and no ROM.
 | **#221** | done | land #220's image and re-pin what it changed | every re-pinned ROM sha has an old/new Mednafen diff (§10); `check-ilvm` and `check-export-games` green; DUSK RUN's black verdict and TOWER's refusal documented |
 | **#222** | open (umbrella) | the interpreter's capacities: DUSK RUN's container needs 41 registers, 41 functions and 19 upvalues (MAX_REGS 32, MAX_FUNCS 32, MAX_UPS 6) | **done**: MAX_REGS 41 / MAX_FUNCS 41 / MAX_UPS 20 with the pool; the container loads, runs and its state is diff 0 against browser frame 3; build.sh asserts (headroom 1,131 B) and the canary measures 1,083 B. **Left**: the displayed picture (16 bytes on row 16) is #223 |
 | **#223** | open | the raster backend shows one replay frame per toy frame and one scanline's first 16 pixels lag the write | DUSK RUN's Mednafen picture diff 0 against a browser frame, pinned in check-export-games |
-| **#216** | open | a note toy and an sfx toy play in Mednafen | the PSG writes match the studio's frame by frame; the command is above |
-| **#198** | open | the umbrella: everything #212–#216 links | a note toy and an sfx toy play in Mednafen; `check-ilvm`, `check-export-games` green |
+| **#216** | done (§11) | a note toy and an sfx toy run in Mednafen, recorded and measured | both ROMs run; the register/audio difference is listed: F masked (#228), R1 missing (#113), dirty glue `.bss` (#229); the command is §11 |
+| **#198** | done | the umbrella: everything #212–#216 links | a note toy and an sfx toy run in Mednafen (they do not yet play: #113/#228/#229); `check-ilvm`, `check-export-games` green |
 | **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (#216) |
 | **#200** | open | `tests/check-rom-sound.js`, the trace build, the docs | the Mednafen trace equals the studio's for note and sfx; the suites green; a cold break by another seat |
 
