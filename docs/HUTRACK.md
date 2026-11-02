@@ -319,8 +319,11 @@ Not proven here:
   one machine too.
 - **The trace compares writes, not cycle offsets or audio.** It proves the
   console's register stream is the browser player's for 24 toy frames; it
-  does not measure when inside the frame each write lands, and the toys are
-  still master-muted because R1 is never written (#113).
+  does not measure when inside the frame each write lands, and at the time
+  it was recorded the toys were master-muted because R1 was never written.
+  **#113 has since fixed that** — `sfx()` writes R1 `$FF` on both sides, the
+  trace records it (94/49 writes), and docs/ROM-SOUND.md §11's WAVs are
+  audible — but the audio is still Mednafen, not hardware.
 - **Our DMF has not been opened in Furnace** (Furnace is not installed here).
   It is written against the format the vendored reader consumes — legacy DMF
   24, the shape Furnace exports — and the converter accepts it, but a Furnace

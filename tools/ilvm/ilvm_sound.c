@@ -116,6 +116,11 @@ void ilvm_sfx(uint8_t ch, int32_t freq, int32_t volume, int32_t frames) {
   if (frames < 1) frames = 1;
   if (frames > SFX_FRAMES_MAX) frames = SFX_FRAMES_MAX;
 
+  /* #113: the browser's sfx() writes R1 = $FF first, unconditionally — the
+   * main amplitude HuTrack's Reset sets, which an SFX-only toy never gets.
+   * The console's SndGlueSfx writes the same byte before its reserve. */
+  PSG_WRITE(1, 0xFF);
+
   if (!sfx_owned[ch]) {
     sfx_owned[ch] = 1;
     /* The browser's reserveWrites, byte for byte: inProgress and waitNote

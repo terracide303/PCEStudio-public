@@ -140,7 +140,7 @@ These are the names and ranges the runtime enforces. A value past a range is ref
 | pad[n].<button> | controller n, read-only, refreshed before frame() | n 1..5; up, down, left, right, i, ii, select, run |
 | note(name or MIDI) | the PSG's 12-bit F divider for a note name (Lua only) or a MIDI number (both runtimes); feed it to sfx() | a MIDI number 0..127; the result is clamped to 0..4095, and the IL carries no strings so a cartridge uses the number |
 | music(index) | plays song index from the start — the whole engine restarts, as HuTrack's playSong does | an index into the songs the runtime was given: a toy's song.json / songs.json through pce-seq.js songsFromFiles (0..songs-1); no song file is music-range |
-| sfx(channel, freq, volume, frames) | takes the channel (HuTrack's reserve), loads a 32-step square, sets F = freq and AL = volume, and gives it back after frames | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 |
+| sfx(channel, freq, volume, frames) | writes the PSG's main amplitude R1 = $FF (HuTrack's Reset does, so an SFX alone is heard), takes the channel (HuTrack's reserve), loads a 32-step square, sets F = freq and AL = volume, and gives it back after frames | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 |
 | release(channel) | gives a channel back now (HuTrack's release): control and noise off, and the music waits for a fresh note on it | channel 0..5; a channel no SFX owns is left alone |
 | password.pack(v) / password.unpack(code) | a save as a short code starting P1 | an integer -1073741824..1073741823, a string of at most 64 bytes, a table of at most 32 entries nested 6 deep; password-value, password-code |
 | print(...) | one line in the studio's log | at most 200 lines |
@@ -1148,7 +1148,7 @@ A release does not resume the middle of a held note: the music waits for the nex
 | --- | --- | --- |
 | note(name or MIDI) | the PSG's 12-bit F divider for a note name (Lua only) or a MIDI number (both runtimes); feed it to sfx() | a MIDI number 0..127; the result is clamped to 0..4095, and the IL carries no strings so a cartridge uses the number |
 | music(index) | plays song index from the start — the whole engine restarts, as HuTrack's playSong does | an index into the songs the runtime was given: a toy's song.json / songs.json through pce-seq.js songsFromFiles (0..songs-1); no song file is music-range |
-| sfx(channel, freq, volume, frames) | takes the channel (HuTrack's reserve), loads a 32-step square, sets F = freq and AL = volume, and gives it back after frames | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 |
+| sfx(channel, freq, volume, frames) | writes the PSG's main amplitude R1 = $FF (HuTrack's Reset does, so an SFX alone is heard), takes the channel (HuTrack's reserve), loads a 32-step square, sets F = freq and AL = volume, and gives it back after frames | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 |
 | release(channel) | gives a channel back now (HuTrack's release): control and noise off, and the music waits for a fresh note on it | channel 0..5; a channel no SFX owns is left alone |
 
 | register | name | what a write does | manual |

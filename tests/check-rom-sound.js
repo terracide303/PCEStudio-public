@@ -378,9 +378,9 @@ if (probe.error) {
     check(note.events.length > 40,
           "note toy: the run recorded PSG writes (" + note.events.length +
           ") — a toy whose sfx never fired would record none");
-    eq("note toy: the harness's frame 0 writes (44 per channel: the 5-write " +
-       "reserve and the 39-write upload)", note.got[0] ? note.got[0].length : 0,
-       88);
+    eq("note toy: the harness's frame 0 writes (45 per channel: R1 $FF, " +
+       "the 5-write reserve and the 39-write upload)",
+       note.got[0] ? note.got[0].length : 0, 90);
     eq("note toy: note(60)'s F 428 reaches R2/R3 in frame 0",
        note.want[0].filter((w) => w[0] === 2 || w[0] === 3).slice(0, 2),
        [[2, F(60) & 0xff], [3, (F(60) >> 8) & 0x0f]]);
@@ -396,13 +396,13 @@ if (probe.error) {
        [[], [], [], [], []]);
 
     const sfx = runBoth(SFX_TOY, "sfx/release");
-    eq("sfx toy: frame 0 is channel 1's reserve (5) + upload (39)",
-       sfx.want[0].length, 44);
+    eq("sfx toy: frame 0 is R1 $FF, channel 1's reserve (5) + upload (39)",
+       sfx.want[0].length, 45);
     eq("sfx toy: note(48)'s F 855 reaches R2/R3",
        sfx.want[0].filter((w) => w[0] === 2 || w[0] === 3),
        [[2, F(48) & 0xff], [3, (F(48) >> 8) & 0x0f]]);
-    eq("sfx toy: frame 1 is channel 2's reserve (4, no R9) + upload (39)",
-       sfx.want[1].length, 43);
+    eq("sfx toy: frame 1 is R1 $FF, channel 2's reserve (4, no R9) + " +
+       "upload (39)", sfx.want[1].length, 44);
     eq("sfx toy: the 1200 Hz F is 0x4B0 in R2/R3",
        sfx.want[1].filter((w) => w[0] === 2 || w[0] === 3),
        [[2, 0xb0], [3, 0x04]]);
@@ -411,10 +411,11 @@ if (probe.error) {
        sfx.want[2],
        [[0, 2], [4, 0], [7, 0],
         [0, 1], [4, 0], [7, 0], [9, 0]]);
-    eq("sfx toy: frame 3 re-fires channel 1 with a fresh reserve (5) and " +
-       "upload (39)",
+    eq("sfx toy: frame 3 re-fires channel 1 with R1 $FF, a fresh reserve (5) " +
+       "and upload (39)",
        sfx.want[3],
-       [[0, 1], [4, 0], [7, 0], [9, 0], [5, 0xff],
+       [[1, 0xff],
+        [0, 1], [4, 0], [7, 0], [9, 0], [5, 0xff],
         [0, 1], [4, 0x40], [4, 0]].concat(
           Array.from({ length: 32 }, (_, i) => [6, i < 16 ? 31 : 0])).concat(
           [[0, 1], [2, F(48) & 0xff], [3, (F(48) >> 8) & 0x0f],
@@ -438,33 +439,37 @@ if (probe.error) {
     eq("substitutes: frame 0's clamped stream (the six live sfx, the two " +
        "bad channels, release and music wrote nothing)",
        subs[0],
-       [/* sfx(0, 65535, 100, -5): reserve, freq 0xFFF, vol 4, frames 1 */
-        [0, 0], [4, 0], [7, 0], [9, 0], [5, 0xff],
+       [/* sfx(0, 65535, 100, -5): R1 $FF, reserve, freq 0xFFF, vol 4,
+         * frames 1 */
+        [1, 0xff], [0, 0], [4, 0], [7, 0], [9, 0], [5, 0xff],
         [0, 0], [4, 0x40], [4, 0]]
          .concat(Array.from({ length: 32 }, (_, i) => [6, i < 16 ? 31 : 0]))
          .concat([[0, 0], [2, 0xff], [3, 0x0f], [4, 0x80 | 4],
-                  /* sfx(1, -3, -2, 700): freq 0xFFD, vol 30, frames 600 */
-                  [0, 1], [4, 0], [7, 0], [9, 0], [5, 0xff],
+                  /* sfx(1, -3, -2, 700): R1 $FF, freq 0xFFD, vol 30,
+                   * frames 600 */
+                  [1, 0xff], [0, 1], [4, 0], [7, 0], [9, 0], [5, 0xff],
                   [0, 1], [4, 0x40], [4, 0]])
          .concat(Array.from({ length: 32 }, (_, i) => [6, i < 16 ? 31 : 0]))
          .concat([[0, 1], [2, 0xfd], [3, 0x0f], [4, 0x80 | 30],
-                  /* sfx(2, note(-1), 3, 2): F 4095 */
-                  [0, 2], [4, 0], [7, 0], [5, 0xff],
+                  /* sfx(2, note(-1), 3, 2): R1 $FF, F 4095 */
+                  [1, 0xff], [0, 2], [4, 0], [7, 0], [5, 0xff],
                   [0, 2], [4, 0x40], [4, 0]])
          .concat(Array.from({ length: 32 }, (_, i) => [6, i < 16 ? 31 : 0]))
          .concat([[0, 2], [2, 0xff], [3, 0x0f], [4, 0x80 | 3],
-                  /* sfx(3, note(512), 3, 2): F 0 */
-                  [0, 3], [4, 0], [7, 0], [5, 0xff],
+                  /* sfx(3, note(512), 3, 2): R1 $FF, F 0 */
+                  [1, 0xff], [0, 3], [4, 0], [7, 0], [5, 0xff],
                   [0, 3], [4, 0x40], [4, 0]])
          .concat(Array.from({ length: 32 }, (_, i) => [6, i < 16 ? 31 : 0]))
          .concat([[0, 3], [2, 0x00], [3, 0x00], [4, 0x80 | 3],
-                  /* sfx(4, note(700), 3, 2): F 0 (clamped to entry 511) */
-                  [0, 4], [4, 0], [7, 0], [5, 0xff],
+                  /* sfx(4, note(700), 3, 2): R1 $FF, F 0 (clamped to
+                   * entry 511) */
+                  [1, 0xff], [0, 4], [4, 0], [7, 0], [5, 0xff],
                   [0, 4], [4, 0x40], [4, 0]])
          .concat(Array.from({ length: 32 }, (_, i) => [6, i < 16 ? 31 : 0]))
          .concat([[0, 4], [2, 0x00], [3, 0x00], [4, 0x80 | 3],
-                  /* sfx(5, note(76), 1, 2): F 170, a normal last channel */
-                  [0, 5], [4, 0], [7, 0], [5, 0xff],
+                  /* sfx(5, note(76), 1, 2): R1 $FF, F 170, a normal last
+                   * channel */
+                  [1, 0xff], [0, 5], [4, 0], [7, 0], [5, 0xff],
                   [0, 5], [4, 0x40], [4, 0]])
          .concat(Array.from({ length: 32 }, (_, i) => [6, i < 16 ? 31 : 0]))
          .concat([[0, 5], [2, F(76) & 0xff], [3, (F(76) >> 8) & 0x0f],

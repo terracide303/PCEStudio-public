@@ -1727,11 +1727,13 @@ comparison with their page is claimed.
   the same write stream with the balance and master at `$FF`: RMS 908 → 5899, peak 6158 → 6933. The
   panel's live view now reads the voice `on` in `wave` mode, and `tests/check-toys.js`'s `sfxPairs()`
   expects the same byte. Still not proven: no Mednafen recording of the toy's SFX exists — the PCM is
-  `pce-psg.js`'s output for the writes — and the toy's own SFX is silent until something writes the
+  `pce-psg.js`'s output for the writes — and the toy's own SFX was silent until something wrote the
   PSG's main amplitude R1 `$FF`: `music()` does that in its Reset, but a toy that calls only `sfx()`
-  (the live example in `tests/check-studio.js` does) leaves R1 at its power-on zero. The reference
+  (the live example in `tests/check-studio.js` does) left R1 at its power-on zero. The reference
   `setChanForSFX` does not write R1 either — on the console the engine's Reset did — so this is the
-  host's power-on state, not the SFX's write sequence.
+  host's power-on state, not the SFX's write sequence. **#113 has since landed**: `sfx()` writes
+  R1 `$FF` on every call in the host, `ilvm_sound.c` and the console glue; the live example's PCM is
+  asserted non-silent, and docs/ROM-SOUND.md §11 records the audible ROM WAVs.
 * **The SPRITES panel (#86) is not proved by a cold break.** Its checks in `tests/check-studio.js` were
   written by the builder, so rule 2 is owed: another seat, another model, breaks the model, the panel and
   the file round-trip and the checks must catch every break. Also not proven: the stub DOM draws no canvas

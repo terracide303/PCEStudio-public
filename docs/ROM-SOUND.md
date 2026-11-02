@@ -13,9 +13,12 @@ write-for-write proof: the console's PSG writes for `tools/toys/note.lua`
 and `tools/toys/sfx.lua` equal the studio's over 24 toy frames.** The
 trace pinned the two glue defects — #238 (F clamped on the low byte) and
 #239 (the zero-song loop overran `snd_owned`, so the first SFX's reserve
-was skipped) — and both fixes are in the committed image. #113 (R1, the PSG's main
-amplitude) is still open, so the toys' audio stays master-muted — the
-writes are right, the output is not yet audible. TOWER
+was skipped) — and both fixes are in the committed image. #113 (R1, the PSG's
+main amplitude) is fixed in the same image: `sfx()` now writes R1 = `$FF`
+unconditionally before its reserve, on the studio host and in the console
+glue, so a toy with no `music()` is heard. §11 measured both toys' WAVs on
+the committed image (`renderer/ilvm.bin` `46ccefb656d18ca9…`): note.lua
+plays 261/330/392/523 Hz and sfx.lua 559/131 Hz, non-silent. TOWER
 still stops earlier, at the 8 KiB data bank (8,524 B of bytecode), and
 DUSK RUN exports but does not play on the committed image (its container
 needs more registers/functions/upvalues than the interpreter has — §10).
@@ -513,17 +516,21 @@ same registers, same values.
   trace pins both glue defects: note(60)'s F arrived as 268 instead of 428
   (#238), and the first SFX's reserve was missing because the zero-song
   loop had overrun `snd_owned` (#239). Both fixes are in the committed
-  image (`renderer/ilvm.bin` sha256 `dad10ffd05661956…`), and the moved
+  image (`renderer/ilvm.bin` sha256 `dad10ffd05661956…`, #200's image;
+  #113 moved it to `46ccefb6…` with the R1 write, §11), and the moved
   ROM shas are re-pinned in `tests/check-ilvm.js`,
   `tests/check-export-games.js` and `tests/dumps/*-ilvm/meta.json`.
+  **After #113** the same trace records **94 writes** for note and **49**
+  for sfx — the one extra R1 = `$FF` per `sfx()` call, still equal to the
+  studio's stream frame for frame — on image `46ccefb656d18ca9…`.
 - **Honest limits.** Mednafen, one machine, no real console. The window is
   24 toy frames and 100 writes, so a longer run is sampled, not traced end
   to end. Both toys make no `music()` call, so the engine's own per-frame
   tick is not in the trace (the host-harness half of the same test pins
-  the tick's order separately). The toys are still master-muted until
-  #113 writes R1; the trace leaves R1 unwritten on both sides, which is why
-  the write comparison can be exact while the audio is silent. Rule 2's
-  cold break on this test is owed — the design seat wrote it.
+  the tick's order separately). Before #113 the toys were master-muted
+  because neither side wrote R1; since #113 both sides write it, the trace
+  records it, and §11's WAVs are audible. Rule 2's cold break on this test
+  is owed — the design seat wrote it.
 
 A toy with music is a stronger test but a different one: it exposes the
 tick's caller, which is why the tick is designed to match the host model
@@ -668,6 +675,17 @@ recaptured: the #221 procedure above is what makes them evidence for the
 new image, and re-running the same argument for a sound-only change would
 only re-capture the same pictures.
 
+**#113 re-pinned for the third image change (2026-11-02):**
+`renderer/ilvm.bin` is sha256 `46ccefb656d18ca9…`, 32,768 B, and the same
+ROM shas moved again. The change is two instructions and one C write —
+`SndGlueSfx` writes `$801 = $FF` before its reserve (and the trace logs it),
+`ilvm_sound.c`'s host half writes the same byte, and
+`renderer/pce-toyhost.js`'s `sfx()` writes `soundWrite(1, 0xff)` — so no
+toy's picture can move. `check-export-games` re-ran the Mednafen capture
+route on this image (the same five controls and games, diff 0 against the
+browser), and `check-ilvm` is green with the re-pinned dumps; §11 records
+the audible WAVs this image produces.
+
 ## 11. What Mednafen says (#216): the toys run, and the glue has defects
 
 Measured 2026-11-02 on this machine, Mednafen 1.32.1 with the sound route
@@ -742,15 +760,17 @@ tests the stored count (`cmp #1 / bcc .done`) instead of a `beq` that read
 the stale flags of a `sta`, so the `n = 0` trailer no longer writes song
 pointers over `snd_owned`. §8's trace is the proof of effect: the
 console's PSG writes equal the studio's for both toys, frame for frame. The
-audio table above is **not** re-recorded because #113 (R1) is still open:
-the chip stays master-muted, so a new WAV would only repeat peak 0. #239
+audio table above was **not** re-recorded while #113 (R1) was open: the chip
+stayed master-muted, so a new WAV would only have repeated peak 0. #239
 remains open on the board for the audio/save-state evidence its card names;
-its code half is in this image.
+its code half is in this image. **#113 has since landed** (the next
+subsection): the committed image's WAVs are audible.
 
 **#238's F on the committed image (2026-11-02).** `tools/ilvm/build.sh`
-run from this tree (to a scratch `BIN`) reproduces the committed
-`dad10ffd05661956…` byte for byte (32,768 B), so the image carries the
-`_hk.EAX0.h` clamp. The card's own instrument, a Mednafen save state
+run from this tree (to a scratch `BIN`) reproduced the then-committed
+`dad10ffd05661956…` byte for byte (32,768 B), so the image carried the
+`_hk.EAX0.h` clamp (#113's image `46ccefb6…` carries it too — §11). The
+card's own instrument, a Mednafen save state
 (pce_fast, `-autosave 1`, SDL video, one emulator at a time), now reads the
 corrected 12-bit F out of the PSG's `SCHn.frequency` records:
 
@@ -770,42 +790,61 @@ is the documented mask `(F & $0F) | (F & $0F00)`; note(60)'s, note(48)'s
 and raw 200's values are the ones §11 measured on `90d4a655…`, and
 note(64)'s 259 is that mask applied to 339.
 
-`PSG.globalbalance` (R1) reads `$00` in all three runs, so the chip is
-still master-muted by #113 and a WAV cannot yet measure these pitches. The
+`PSG.globalbalance` (R1) read `$00` in all three runs before #113, so the
+chip was master-muted and a WAV could not yet measure these pitches. The
 state's `SCH0`–`SCH5` sections are the six PSG channels (their `frequency`
 record is the 12-bit divider) and `PSG.globalbalance` is R1;
 `tools/mcs-extract.py` walks the same gzip container but keeps only the
 VDC/VCE records, so these were read with a scratch parser over its
-sections. The audible table above (scratch image `92d6dc42…`, which carried
-both the F and the R1 writes) remains the sound evidence. The register content is
+sections. The register content is
 what this card is about, and it now equals the F the studio writes, which
-§8's trace confirms write for write (note 92 writes, sfx 48, over 24
-frames; `tests/check-rom-sound.js` PASS). With the image unchanged,
+§8's trace confirms write for write (after #113: note 94 writes, sfx 49,
+over 24 frames; `tests/check-rom-sound.js` PASS). With that image,
 `check-ilvm` (348 checks) and `check-export-games` (67 checks, and every
 captured frame still diff 0 against the browser) are green. #238's F half
-is proven on this evidence; the card stays open on the board for its
-audible clause, which #113 blocks, and its code half and this register
-proof are both in the committed image.
+is proven on this evidence and its audible clause is measurable since
+#113; closing the card is the card's own seat's step.
+
+**#113 on the committed image (2026-11-02).** The committed image is
+`renderer/ilvm.bin` sha256 `46ccefb656d18ca9…`, 32,768 B;
+`tools/ilvm/build.sh` reproduces it byte for byte from this tree. Two
+changes from #200's image: `SndGlueSfx` writes `$801 = $FF` before its
+reserve (and `PSGT_A 1` logs it in the trace build), and
+`renderer/pce-toyhost.js`'s `sfx()` writes `soundWrite(1, 0xff)` first on
+the studio side (with `ilvm_sound.c`'s host half matching). The two toys
+run exactly where they did: `tests/check-rom-sound.js` is green, its trace
+now equal to the studio for **94** (note) and **49** (sfx) writes, R1
+included. The recordings, made on this image with the §11 route:
+
+| toy | ROM (40,960 B) | Mednafen WAV |
+|---|---|---|
+| `tools/toys/note.lua` | `ddb2b84849bdeb70…` | **261 / 330 / 392 / 523 Hz, RMS 368–370** (peak 440) |
+| `tools/toys/sfx.lua` | `586b35a5b2ab1583…` | **559 Hz (RMS 368), then 131 Hz (RMS 371)**, repeating every 1,003 ms |
+
+The studio's `rt.renderSound()` for the same frames is non-silent too and
+gives the same pitches — note.lua renders 261/330/392/523 Hz at RMS
+368–370 with `soundWrite(1, 0xff)` in place. That is the audible half of
+#216's finding closed; #239's one-shot `sfx-once.lua` state evidence and
+#238's close remain with their cards, and the ordering reason the R1 write
+is unconditional (not gated on a new ownership) is still #239's.
 
 **Reproducing all of it** (nothing is written to the repository):
 
 ```sh
-# the two ROMs and their recordings, from the committed image
+# the two ROMs and their recordings, from the committed image (#113)
 tools/capture-rom-sound.sh tools/toys/note.lua note
 tools/capture-rom-sound.sh tools/toys/sfx.lua sfx
 node tools/rom-sound-pitch.js "$TMPDIR/pce-rom-sound/note/note.wav" \
-     --period-ms 200.6 --slots 4          # silent: peak 0
+     --period-ms 200.6 --slots 4          # 261/330/392/523 Hz, RMS 368-370
 node tools/rom-sound-pitch.js "$TMPDIR/pce-rom-sound/sfx/sfx.wav" \
-     --period-ms 1003 --window-ms 60:140  # silent: peak 0
+     --period-ms 1003 --window-ms 60:140  # 559 Hz blip, 131 Hz note
 
-# the studio's own output for the same frames (silent on this tree: #113)
+# the studio's own output for the same frames (non-silent since #113)
 node tools/rom-sound-pitch.js --studio tools/toys/note.lua --frames 48 \
      --period-ms 200.6 --slots 4
 
-# the scratch image: apply the two changes above to the asm and to
-# renderer/pce-toyhost.js's sfx() (soundWrite(1, 0xff) before the reserve),
-# in a COPY of the tree (this seat cloned it to $TMPDIR/fiximg; the shipped
-# renderer/ilvm.bin is not touched), then
+# the pre-#113 scratch image, kept as the historical measurement: apply the
+# two changes below to a COPY of the tree, then
 LLVM_MOS=/Volumes/External/pce-tools/llvm-mos PCEAS4=pceas4 \
   tools/ilvm/build.sh                      # 32,768 B, sha256 92d6dc42…
 tools/capture-rom-sound.sh tools/toys/note.lua note-fixed \
@@ -821,9 +860,9 @@ node tools/rom-sound-pitch.js "$TMPDIR/pce-rom-sound/sfx-fixed/sfx-fixed.wav" \
 The analyser measures a slot's fundamental as the peak of a Hann-windowed
 DFT (50–1500 Hz) over the middle of the slot, and the first sound's onset as
 the first 5 ms block over 10% of the loudest block; it is an instrument, not
-a test. The exact fixes a later card must carry — the first diff is the form
-`92d6dc42…` was built with (R1 at the reserve); #113 should ship it
-**unconditional** at `sfx()` entry, as the paragraph above says:
+a test. **#113 landed these two changes** — the F clamp is #238's and was
+already in the image — with the R1 write **unconditional** at `sfx()`
+entry, not gated on a new ownership (the #239 defense):
 
 ```diff
 --- a/tools/ilvm/hutrack_engine.asm
@@ -834,31 +873,36 @@ a test. The exact fixes a later card must carry — the first diff is the form
 -    sta <_hk.EAX0.m
 +    sta <_hk.EAX0.h
 ...
-     lda #1
-     sta snd_owned,x
+ .framesok:
+     jsr SndGlueMap
 +    lda #$FF
 +    sta $801            ; R1: the main amplitude HuTrack's Init sets
++    PSGT_A 1
+     lda #1
+     sta snd_active
+...
      jsr HuTrackEngine.setChanForSFX
 ```
 
 ```diff
---- a/renderer/pce-toyhost.js          (the studio's side, with #113)
+--- a/renderer/pce-toyhost.js          (the studio's side, #113)
+@@ sfx(): after the range checks, before the reserve
++        soundWrite(1, 0xff);
          if (!sound.sfx[ch].owned) {
            sound.sfx[ch].owned = true;
-+          soundWrite(1, 0xff);
            if (sound.player) sound.player.reserve(ch);
            else lib.reserveWrites(ch, soundWrite);
 ```
 
 ## What is not proven
 
-- **A note toy and an sfx toy run in Mednafen, and §8's trace (#200) shows
-  their register writes are the studio's; they do not yet *sound* on the
-  committed image.** The remaining silence is R1 (#113), not a write-order
-  or glue defect. What is unproven is anything about a *real console*
-  (Mednafen only), the in-frame timing (the trace pins the order of writes,
-  not their cycle offsets), and the audio itself, which needs #113 before a
-  recording can say anything new.
+- **A note toy and an sfx toy run *and sound* in Mednafen, and §8's trace
+  (#200) shows their register writes are the studio's.** Since #113 the
+  committed image writes R1 and §11 records the WAVs: note at
+  261/330/392/523 Hz, sfx at 559/131 Hz, levels within 2% of the studio's
+  render. What is still unproven is anything about a *real console*
+  (Mednafen only) and the in-frame timing (the trace pins the order of
+  writes, not their cycle offsets).
 - **The RAM partition is built and asserted (#214), and #215's sound code
   is inside it.** `build.sh` fails if the interpreter's zero page reaches
   the engine's, if either extent leaves its window, or if the stack headroom
@@ -882,8 +926,8 @@ a test. The exact fixes a later card must carry — the first diff is the form
   data half is measured by `tests/check-hutrack-seq.js`; the console half is
   still unwitnessed — #216 showed the engine executes (its glue and
   `setChanForSFX` reach the PSG, §11), and #200 fixed two of the three glue
-  defects the trace found, but a song still needs #113 (R1) and
-  `buildToyRom` to stop pinning the trailer at n = 0.
+  defects the trace found; #113 has since added the R1 write, so a song's
+  remaining blocker is `buildToyRom` pinning the trailer at n = 0.
 - **Rule 2 is owed** for any check #198–#200 and #220/#221 write: the author
   is not the seat that can prove it. #214's build assertions are the design
   seat's own; a cold seat should move `ENGINE_ZP_BASE` down and raise
@@ -908,8 +952,8 @@ a test. The exact fixes a later card must carry — the first diff is the form
 | **#221** | done | land #220's image and re-pin what it changed | every re-pinned ROM sha has an old/new Mednafen diff (§10); `check-ilvm` and `check-export-games` green; DUSK RUN's black verdict and TOWER's refusal documented |
 | **#222** | open (umbrella) | the interpreter's capacities: DUSK RUN's container needs 41 registers, 41 functions and 19 upvalues (MAX_REGS 32, MAX_FUNCS 32, MAX_UPS 6) | **done**: MAX_REGS 41 / MAX_FUNCS 41 / MAX_UPS 20 with the pool; the container loads, runs and its state is diff 0 against browser frame 3; build.sh asserts (headroom 1,131 B) and the canary measures 1,083 B. **Left**: the displayed picture (16 bytes on row 16) is #223 |
 | **#223** | open | the raster backend shows one replay frame per toy frame and one scanline's first 16 pixels lag the write | DUSK RUN's Mednafen picture diff 0 against a browser frame, pinned in check-export-games |
-| **#216** | done (§11) | a note toy and an sfx toy run in Mednafen, recorded and measured | both ROMs run; the register/audio difference is listed: F masked (#238), R1 missing (#113), dirty glue `.bss` (#239); the command is §11 |
-| **#198** | done | the umbrella: everything #212–#216 links | a note toy and an sfx toy run in Mednafen (they do not yet play: #113/#238/#239); `check-ilvm`, `check-export-games` green |
+| **#216** | done (§11) | a note toy and an sfx toy run in Mednafen, recorded and measured | both ROMs run; the register/audio differences were listed: F masked (#238), R1 missing (#113), dirty glue `.bss` (#239); #113 and #238's F are now in the image and the WAVs are audible (§11); the command is §11 |
+| **#198** | done | the umbrella: everything #212–#216 links | a note toy and an sfx toy run and play in Mednafen since #113; `check-ilvm`, `check-export-games` green |
 | **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (#216) |
 | **#200** | done (2026-11-02) | `tests/check-rom-sound.js` §3, the `TRACE=1` build and these docs | PASS: the Mednafen trace equals the studio's for note (92 writes) and sfx (48) over 24 frames; `check-ilvm` (348) and `check-export-games` (67) green with the re-pinned shas. **Rule 2's cold break is still owed** — this table records the evidence, not the proof |
 

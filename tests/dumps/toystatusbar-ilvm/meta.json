@@ -46,7 +46,7 @@
  "name": "toystatusbar-ilvm",
  "rom": "tools/gen/toystatusbar-ilvm.pce",
  "rom_bytes": 40960,
- "rom_sha256": "71634a91ce65dac5cf6808023370e718e5ae7afaa8fde538318656c0098e0ddb",
+ "rom_sha256": "c5ab0a88d537b5350c168bd657589f99839b7a67bcff66439e24a1ac38cfce1b",
  "source": "toys/status-bar.lua",
  "source_sha256": "0d52e4536692190ac82169fb636620fb5e38cce0379630876822011a2a25de33"
 }

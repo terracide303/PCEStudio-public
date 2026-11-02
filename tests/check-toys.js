@@ -1271,7 +1271,10 @@ function releasePairs(ch) {
  * (the host's documented waveform: 16 full steps, 16 zero), then F and
  * AL — R4 = $80 | volume, waveform mode with the channel enabled (bit 7),
  * DDA clear (bit 6), so pce-psg.js steps the 32 samples just uploaded.
- * The balance is reserve's $FF, both sides full. */
+ * The balance is reserve's $FF, both sides full.  Since #113 the host's
+ * sfx() writes the main amplitude R1 = $FF first (HuTrack's Reset does;
+ * an SFX-only toy never runs that Reset) — before the reserve, so that
+ * write belongs to expectedSound, not here. */
 function sfxPairs(ch, freq, volume) {
   const out = [[0, ch], [4, 0x40], [4, 0x00]];
   for (let i = 0; i < 32; i++) out.push([6, i < 16 ? 31 : 0]);
@@ -1311,7 +1314,7 @@ function expectedSound() {
   frames[0] = resetPairs().concat(notePairs(0, MELODY_F, SONG_WAVE, 0x00, CTL));
   for (let f = 1; f <= 9; f++) frames[f] = holdPairs(0, MELODY_F, CTL);
   frames[10] = holdPairs(0, MELODY_F, CTL)
-    .concat(reservePairs(0), sfxPairs(0, SFX_F, SFX_VOL));
+    .concat([[1, 0xff]], reservePairs(0), sfxPairs(0, SFX_F, SFX_VOL));
   for (let f = 11; f <= 14; f++) frames[f] = [];
   frames[15] = releasePairs(0);
   frames[16] = notePairs(0, MELODY_F, SONG_WAVE, CTL, CTL);
@@ -1354,8 +1357,9 @@ function checkSound() {
      expect.frames.map((p) => p.length));
   eq("sound: the song starts with both Reset rounds and the first note",
      lua.counts[0], 446 + 42);
-  eq("sound: the SFX takes channel 0 (reserve, a 32-step square, F and AL)",
-     lua.counts[10], 5 + 44);
+  eq("sound: the SFX takes channel 0 (R1 $FF, reserve, a 32-step square, " +
+     "F and AL)",
+     lua.counts[10], 5 + 45);
   eq("sound: no music writes while the SFX owns the channel",
      lua.counts.slice(11, 15), [0, 0, 0, 0]);
   eq("sound: release silences the channel and the music waits for a note",

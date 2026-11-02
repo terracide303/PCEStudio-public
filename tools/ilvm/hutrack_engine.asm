@@ -348,6 +348,9 @@ SndGlueSfx:
     sta snd_args_frames+1
 .framesok:
     jsr SndGlueMap
+    lda #$FF
+    sta $801            ; R1: the main amplitude HuTrack's Init sets (#113)
+    PSGT_A 1
     lda #1
     sta snd_active
     ldx <_hk.EAX0.l

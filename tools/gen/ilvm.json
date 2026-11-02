@@ -17,7 +17,7 @@
  },
  "image": "renderer/ilvm.bin",
  "llvm_bytes": 16384,
- "llvm_sha256": "619c5d562f9f4f7ccc148ba33a91b685f20f2d90401302f3e901d49402cee4ea",
+ "llvm_sha256": "eccd395db05a5ab1d73256c4459c32137c4747ed5e4ea2642c55711207f5c8d2",
  "ram_budget": {
   "base_ram": {
    "engine_bytes": 1111,
@@ -56,7 +56,7 @@
   ".zp.bss": 88,
   ".zp.data": 0
  },
- "sha256": "dad10ffd0566195628aa13c681982c1f28cd791d14aee41b64ab14588488b67d",
+ "sha256": "46ccefb656d18ca91108277b75853964fb4c5170429030fb22ac68f3e0615f8d",
  "sizes": {
   "bss": 5533,
   "data": 0,

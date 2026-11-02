@@ -34,10 +34,10 @@
  *
  * What it does NOT prove, and says so in a NOTE line when it runs:
  *
- *   - The game has no sound a person can hear.  It calls sfx() and the PSG
- *     writes happen, but with no music() the host never sets the master
- *     amplitude R1, so its PCM renders silent (card #113).  The test prints
- *     the PCM's RMS; when #113 lands the line stops saying 0.
+ *   - The game's sound is a headless PCM render, not a recording.  It calls
+ *     sfx() with no music(); since #113 the host writes the PSG's main
+ *     amplitude R1 `$FF` at sfx() entry, so the PCM renders non-silent.  The
+ *     test prints the PCM's RMS.
  *   - The VDC's CC flag is used only for the ship: a bullet against a drone
  *     is still `hit()` arithmetic, because the hardware reports sprite #0
  *     against the others and #0 is the ship.
@@ -304,7 +304,8 @@ function checkPlay() {
   const rms = Math.sqrt(sum / pcm.length);
   if (rms === 0) {
     note("the game's sound renders silent (PCM RMS 0): it calls sfx() with no " +
-         "music(), so the host never sets the PSG's master amplitude R1 — card #113");
+         "music(); #113's R1 $FF write (sfx()'s first write) is missing — " +
+         "a regression, not the engine");
   } else {
     note("the game's sound renders non-silent PCM (RMS " + rms.toFixed(1) + ")");
   }
@@ -494,7 +495,8 @@ function writeDumps(kept, last, collision) {
     firstLifeLostInStillRun: collision.lost,
     stripFrames: frames,
     strip: "strip.png (" + cols + "x" + rows + " cells of " + WIDTH + "x" + HEIGHT + ")",
-    sound: "sfx-only: PSG writes happen, PCM is silent until card #113 sets R1",
+    sound: "sfx-only: PSG writes happen and the PCM renders non-silent " +
+           "(#113 writes R1 $FF); this is the host's render, not a recording",
   };
   fs.writeFileSync(path.join(DUMPS, "evidence.json"),
                    JSON.stringify(evidence, null, 2) + "\n");

@@ -16,5 +16,5 @@
     599
   ],
   "strip": "strip.png (2x4 cells of 256x224)",
-  "sound": "sfx-only: PSG writes happen, PCM is silent until card #113 sets R1"
+  "sound": "sfx-only: PSG writes happen and the PCM renders non-silent (#113 writes R1 $FF); this is the host's render, not a recording"
 }

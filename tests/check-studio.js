@@ -4312,6 +4312,14 @@ function checkAudioPanel(page) {
   const livePcm = studio.audioLivePcm();
   eq("#97: the live PCM is pce-psg.js's render of those writes",
      livePcm.samples, rt.renderSound().pcm.length);
+  /* #113: sfx() writes the PSG's main amplitude R1 = $FF (HuTrack's Reset
+   * does; an SFX-only toy never runs that Reset), so a toy that calls sfx()
+   * with no music() is heard instead of master-muted. */
+  check(events.some((e) => e.reg === 1 && e.value === 255),
+        "#113: the sfx-only toy writes R1 $FF before its reserve");
+  check(livePcm.peak > 0,
+        "#113: an sfx-only toy's live PCM is not silent (peak " +
+        livePcm.peak + ")");
 
   /* ---- the render the panel plays -------------------------------------- */
   studio.loadExample("palette", true);

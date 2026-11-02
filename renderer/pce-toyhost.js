@@ -31,8 +31,10 @@
  *
  * Sound (#71): the host runs one song on renderer/pce-song.js's player, one
  * VBlank per toy frame, and lets the toy take a channel for an SFX and give
- * it back (HuTrack's reserve/release channel hand-off). Every PSG write is
- * recorded as {f, t, reg, value}, the input renderer/pce-psg.js already
+ * it back (HuTrack's reserve/release channel hand-off). sfx() writes the PSG's
+ * main amplitude R1 = $FF first (#113): the engine's Reset did it on the
+ * console, and a toy with no music() never runs that Reset.  Every PSG write
+ * is recorded as {f, t, reg, value}, the input renderer/pce-psg.js already
  * takes; renderSound() is that model's own output. pce-song.js and
  * pce-psg.js are resolved when a host is created, not when this file loads,
  * so a page may load them in any order (renderer/studio.html loads the PSG
@@ -225,8 +227,10 @@
               "song.json / songs.json through pce-seq.js songsFromFiles " +
               "(0..songs-1); no song file is music-range" },
     { call: "sfx(channel, freq, volume, frames)",
-      what: "takes the channel (HuTrack's reserve), loads a 32-step square, " +
-            "sets F = freq and AL = volume, and gives it back after frames",
+      what: "writes the PSG's main amplitude R1 = $FF (HuTrack's Reset does, " +
+            "so an SFX alone is heard), takes the channel (HuTrack's " +
+            "reserve), loads a 32-step square, sets F = freq and AL = " +
+            "volume, and gives it back after frames",
       limits: "channel 0..5, freq 0..4095, volume 0..31, frames 1..600" },
     { call: "release(channel)",
       what: "gives a channel back now (HuTrack's release): control and noise " +
@@ -841,6 +845,17 @@
                        "sfx-range");
         frames = intIn(frames, "an SFX length in frames", 1, SFX_FRAMES_MAX,
                        "sfx-range");
+        /* #113: the PSG's main amplitude.  HuTrackEngine.Reset writes R1 =
+         * $FF before an engine plays anything (vendor/hutrack/
+         * HuTrack_lib.asm), but a toy that never calls music() never runs
+         * that Reset, and pce-psg.js's power-on R1 is 0 — so the channel's
+         * own writes are right and the chip is master-muted.  The reference's
+         * setChanForSFX writes no R1 because the engine's Reset already had;
+         * this host has no engine on an SFX-only toy, so it writes R1 here.
+         * Unconditional per call, not gated on the channel being newly
+         * owned: on the console a reserve can be skipped (#239), and the
+         * register this write guards must not depend on that. */
+        soundWrite(1, 0xff);
         if (!sound.sfx[ch].owned) {
           sound.sfx[ch].owned = true;
           if (sound.player) sound.player.reserve(ch);

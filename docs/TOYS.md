@@ -149,7 +149,7 @@ frames. `t` is deterministic (`f/60`), not wall-clock: a frame is reproducible.
 | `rgb(r, g, b)` | a VCE word from 3-bit channels | channels are masked to 0..7 |
 | `note(name or MIDI)` | the PSG's 12-bit F for a note | `toy-error` on a bad name |
 | `music(index)` | play song `index` from the start (#71) | an index into the songs the runtime was given; none or past them is `music-range` |
-| `sfx(channel, freq, volume, frames)` | take `channel`, play a 32-step square at F = `freq`, AL = `volume`, for `frames` frames, then give it back | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 (`sfx-range`) |
+| `sfx(channel, freq, volume, frames)` | write R1 `$FF` (the PSG's main amplitude), take `channel`, play a 32-step square at F = `freq`, AL = `volume`, for `frames` frames, then give it back | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 (`sfx-range`) |
 | `release(channel)` | give a channel back now; the music waits for a fresh note | channel 0..5 (`sfx-range`); a channel no SFX owns is left alone |
 | `password.pack(v)` / `password.unpack(code)` | a save as a short code | `password-value` / `password-code` |
 | `print(...)` | the page's log (not the console) | captured, 200 lines |
@@ -286,6 +286,10 @@ one PSG channel to an SFX and `release(channel)` hands it back, as
 
 - **reserve** writes the channel's select, control 0, noise off, the LFO off
   on channels 0/1 (the hardware couples them) and balance both sides full;
+  before it, `sfx()` writes the PSG's **main amplitude R1 = `$FF`** on every
+  call (#113) — the write HuTrack's `Reset` makes, which a toy with no
+  `music()` never reaches. Without it the channel's own writes are right and
+  the chip is master-muted;
 - the **SFX** loads a 32-step square in `.copy.wave`'s shape (the DDA/wave
   toggles reset the PSG's wave pointer, the 32 R6 writes fill it), then sets
   F and AL, and is **given back automatically** after `frames` frames;
@@ -317,9 +321,11 @@ the console's PSG writes are the browser player's for `tools/toys/note.lua`
 and `tools/toys/sfx.lua` — 92 and 48 writes over 24 toy frames, same order,
 same registers, same values — using a test-only `TRACE=1` build that logs
 every write to BaseRAM and refuses to replace `renderer/ilvm.bin`
-(docs/ROM-SOUND.md §8). The toys are still silent in Mednafen's **audio**
-until #113 writes the PSG's main amplitude (R1): the write stream is right,
-the chip is master-muted.
+(docs/ROM-SOUND.md §8). Since #113 the toys are audible in Mednafen's
+**audio** too: `sfx()` writes the PSG's main amplitude R1 and the
+`SndGlueSfx` glue writes it on the console, so the committed image plays
+`note.lua` at 261/330/392/523 Hz and `sfx.lua` at 559/131 Hz
+(docs/ROM-SOUND.md §11).
 
 **Limits.** 6 channels; F is the PSG's 12-bit divider (`note()` returns it; the
 same value from a MIDI number in both runtimes); volume is AL, 0..31; an SFX
