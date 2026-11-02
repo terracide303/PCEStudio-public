@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCEStudio Credits</title>
+<meta name="description" content="Who made the ideas, code, tools and art that PCEStudio is built on.">
+<link rel="stylesheet" href="pce-gallery.css">
+<style>
+  /* the testers' page: pce-gallery.css's tokens and site header, a reading column of its own */
+  .tg { max-width: 760px; margin: 0 auto; padding: 32px 16px 80px; color: var(--text2);
+        font: 15px/1.65 var(--sans); }
+  .tg h1 { font: 700 30px/1.2 var(--display); color: var(--text); margin: 6px 0 10px; }
+  .tg h2 { font: 600 19px/1.3 var(--sans); color: var(--text); margin: 40px 0 10px;
+           padding-top: 18px; border-top: 1px solid var(--line2); }
+  .tg h3 { font: 600 15px/1.3 var(--sans); color: var(--text); margin: 22px 0 6px; }
+  .tg p, .tg li { max-width: 68ch; }
+  .tg a { color: var(--accent); }
+  .tg code, .tg kbd { font: 13px var(--mono); background: var(--code); border: 1px solid var(--line2);
+                      border-radius: 4px; padding: 1px 5px; color: var(--text); }
+  .tg pre { font: 13px/1.5 var(--mono); background: var(--code); border: 1px solid var(--line2);
+            border-radius: 6px; padding: 12px 14px; overflow-x: auto; color: var(--text); }
+  .tg .kicker { font: 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .tg .lede { font-size: 17px; color: var(--text); }
+  .tg .box { background: var(--pane); border: 1px solid var(--line); border-radius: 8px;
+             padding: 14px 18px; margin: 18px 0; }
+  .tg .box.warn { border-color: var(--accent); }
+  .tg table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 14px; }
+  .tg th, .tg td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line2); vertical-align: top; }
+  .tg th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .tg .status { font: 12px var(--mono); white-space: nowrap; }
+  .tg .ok { color: #7ad7a0; } .tg .no { color: var(--bad); } .tg .soon { color: var(--accent); }
+  .tg ol li, .tg ul li { margin: 4px 0; }
+  .tg .toc { columns: 2; column-gap: 32px; padding-left: 18px; font-size: 14px; }
+  @media (max-width: 560px) { .tg .toc { columns: 1; } .tg h1 { font-size: 24px; } }
+</style>
+</head>
+<body>
+<header class="site-head">
+  <a class="brand" href="browse.html" title="PCEStudio home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">PCE<span class="brand-dot">·</span>studio</span>
+  </a>
+  <nav class="site-nav" aria-label="Site">
+    <a href="studio.html">Studio</a>
+    <a href="browse.html">Browse</a>
+    <a href="docs.html">Docs</a>
+    <a href="testers.html">Beta testers</a>
+    <a href="release-notes.html">Release notes</a>
+    <a href="roadmap.html">Roadmap</a>
+    <a href="claude-code.html">Claude Code</a>
+    <a href="credits.html" class="is-on" aria-current="page">Credits</a>
+    <a href="https://github.com/terracide303/PCEStudio-public" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<main class="tg">
+  <span class="kicker">Thank you</span>
+  <h1>Credits</h1>
+  <p class="lede">PCEStudio stands on other people's work. Here is whose, and what we took. If we missed
+  someone or got a detail wrong, <a href="https://github.com/terracide303/PCEStudio-public/issues/new/choose">tell us</a>
+  and we will fix it.</p>
+  <table>
+    <tr><th>Who</th><th>What we use</th><th>Link</th></tr>
+    <tr><td>turboxray</td><td>The idea of putting an interpreter in the ROM, which is how the browser export works. <b>HuTrack</b>, the HuC6280 sound engine and DefleMask converter inside the exported ROMs (MIT). The generic PCEAS framework that HuTrack's example uses. A Mesen 2 sprite sheet script, used with his permission to test our sprites against a second emulator.</td><td><a href="https://github.com/Turboxray/HuTrack">github.com/Turboxray/HuTrack</a></td></tr>
+    <tr><td>ppu.toys (Liora Labs)</td><td>The idea and the shape of the studio, and parts of its code (MIT), used with the author's blessing.</td><td><a href="https://ppu.toys">ppu.toys</a></td></tr>
+    <tr><td>Mednafen</td><td>Our sound chip model is derived from the PSG core of Mednafen (GPL-2.0-or-later). Mednafen is also the emulator we check exported ROMs against.</td><td><a href="https://mednafen.github.io">mednafen.github.io</a></td></tr>
+    <tr><td>Blip_Buffer, Shay Green</td><td>The band-limited sound buffer our PSG output uses (LGPL-2.1-or-later).</td><td>—</td></tr>
+    <tr><td>Fengari</td><td>Lua running in your browser (MIT).</td><td><a href="https://fengari.io">fengari.io</a></td></tr>
+    <tr><td>CodeMirror, Marijn Haverbeke and contributors</td><td>The code editor (MIT).</td><td><a href="https://codemirror.net">codemirror.net</a></td></tr>
+    <tr><td>PCEAS and its lineage</td><td>The PC Engine assembler, used to build the interpreter and the sound engine, derived from the MagicKit assembler; later changes by Ulrich Hecht (2014, Simplified BSD). Its licence text is kept beside our copy.</td><td>—</td></tr>
+    <tr><td>Furnace and DefleMask</td><td>The DMF song format our reader follows, and the way their trackers work, which guides our tracker plan.</td><td><a href="https://github.com/tildearrow/furnace">Furnace</a></td></tr>
+    <tr><td>Brullov</td><td>The <i>Oak Woods</i> pack and its character, used in the OAK WOODS demo on this website only. It is not part of the repository and not covered by its licence.</td><td><a href="https://brullov.art">brullov.art</a></td></tr>
+    <tr><td>Anokolisa</td><td><i>Action Pack – CITY</i>, used in the CITY demo on this website only. It is not part of the repository.</td><td><a href="https://www.patreon.com/Anokolisa">patreon.com/Anokolisa</a></td></tr>
+  </table>
+  <p>PCEStudio's own code is free software under the GNU General Public License, version 3 or later.
+  The source is on <a href="https://github.com/terracide303/PCEStudio-public">GitHub</a>. <i>PC Engine</i> and
+  <i>TurboGrafx-16</i> are trademarks of their owners; PCEStudio is a fan project and is not affiliated with NEC,
+  Hudson Soft or Konami.</p>
+</main>
+</body>
+</html>
