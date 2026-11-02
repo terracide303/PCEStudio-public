@@ -9,6 +9,7 @@ ROM. Make a game by hand, or let an AI such as Claude make it with you.
 
 **Try it:** <https://pcestudio.terracides.com> · **Testers' guide:** <https://pcestudio.terracides.com/renderer/testers.html>
 · **Claude Code manual:** <https://pcestudio.terracides.com/renderer/claude-code.html>
+· **Release notes:** <https://pcestudio.terracides.com/renderer/release-notes.html>
 · **Report a bug or an idea:** [Issues](https://github.com/terracide303/PCEStudio-public/issues/new/choose)
 
 ---
