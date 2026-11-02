@@ -176,7 +176,7 @@ version** ([`LICENSE`](LICENSE)).
   parts taken from **ppu.toys** (Liora Labs) are MIT.
 - The idea, and the shape of the studio, come from **[ppu.toys](https://ppu.toys)**, a studio for the SNES, with its
   author's blessing.
-- The browser export's interpreter-in-the-ROM idea is turboxray's.
+- The browser export's interpreter-in-the-ROM idea is turboxray's, who also wrote **HuTrack** (MIT), the sound engine in the exported ROMs, and a Mesen 2 sprite script we use, with permission, to test our sprites. Full credits: <https://pcestudio.terracides.com/renderer/credits.html>.
 - HuC, the PC Engine C compiler, is **not** in this repository. `tools/build-huc.sh` downloads it when you want the
   optional comparison against it.
 - **Demo art.** OAK WOODS uses the *Oak Woods* pack and its character by **Brullov** ([brullov.art](https://brullov.art));
