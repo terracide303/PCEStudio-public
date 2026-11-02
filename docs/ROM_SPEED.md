@@ -183,22 +183,20 @@ collections (the wrong-`sum` bug above).
 ## The real games, measured (cards #180, #207)
 
 **Re-measured 2026-11-01 by #207**, on the tree after the sprite (#188–#192)
-and sound-front-end (#197) cards: the refusals are unchanged in kind, the
-outcomes are unchanged (PLATFORMER is still the only one of the five that
-exports), and the ROM shas moved with the rebuilt `renderer/ilvm.bin`.
-Since #213/#214 the image is the 32 KiB one with the HuTrack banks and the
-toy data bank is physical 4, so every ROM is **40,960 B**; the shas in the
-table are the ones `tests/check-export-games.js` pins on that image
-(2026-11-02). The overrun/worst/Hz figures are still #207's measurements —
-the interpreter's behaviour is unchanged, as every picture hash in that
-suite stayed diff 0. What
-#207 skipped, because it is not done: **#148** (the 127-constant pool) is
-open; **#198** (the HuTrack engine linked into the interpreter image) is
-parked, so `renderer/pce-rom.js:626` still refuses a version 3 container and
-TOWER and DUSK RUN cannot build; **#199** landed its data half but its second
-close needs #198; **#200** (the trace test and the docs) has no
-`tests/check-rom-sound.js` in this tree. Nothing that was measured here can
-move until those land.
+and sound-front-end (#197) cards; **re-pinned 2026-11-02 by #221** after
+#220/#221 landed the sound interpreter.  The image is the 32 KiB one with
+the HuTrack banks and the toy data bank is physical 4, so every ROM is
+**40,960 B**; the shas in the table are the ones
+`tests/check-export-games.js` pins on the new image (2026-11-02, image
+sha256 `1814d7c36079ca63…`).  The overrun/worst/Hz figures are #207's
+measurements — the interpreter's behaviour for these toys is unchanged, and
+#221's old/new Mednafen diffs are in [`ROM-SOUND.md`](ROM-SOUND.md) §10.
+What moved on 2026-11-02: **#215**'s interpreter reads the version 3
+container, so **TOWER** now stops at the 8 KiB data bank (8,524 B of
+bytecode) and **DUSK RUN** builds — but it does not play (the interpreter
+refuses its container at load; see its row and #222). **#148** (the
+127-constant pool), **#216** (a sound toy on a console) and **#200** (the
+Mednafen trace) remain open.
 
 The #169 table above measures four example toys. This one asks the question a
 person asks about the *games*: **does the export build STARFALL, TOWER, NOVA
@@ -223,14 +221,14 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 | toy | exports? | picture matches? | overruns | worst update | verdict | validator's static estimate |
 |-----|----------|------------------|----------|--------------|---------|-----------------------------|
 | **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants` (`renderer/pce-ilbc.js:462`, `MAX_CONST = 127`); the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. `sprite()` is carried for 21 of its 31 specs since #188–#190; the other ten are **#211**, and the pool refuses first. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
-| **TOWER** `toys/tower` | **no** — `error: pce-rom: bytecode version must be 1 or 2` (`renderer/pce-rom.js:626`; a version 3 container carries the sound ops). #186 carried `sat`, #187 `not` and #197 `sfx`; TOWER's bytecode route is otherwise clean, so it now encodes as a version 3 sound container and buildToyRom refuses it — the gate the committed interpreter needs until #198 links the engine in. The gate's Error names no line. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
+| **TOWER** `toys/tower` | **no** — `toy-data-bank-full`: `pce-rom: the bytecode (8524 B) and assets (0 B) need 8524 bytes; the interpreter reads one 8 KiB data bank` (`renderer/pce-rom.js`). #186 carried `sat`, #187 `not`, #197 `sfx`, and #215's interpreter reads the version 3 container — so the encoding now passes the version gate and stops at the bank: 8,524 B against the 8,192-byte data bank. The refusal names no line. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
 | **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`; refused by `renderer/pce-ilbc.js:335` because `raster` has no entry in its OPS table). #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind (#136). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
-| **DUSK RUN** `toys/dusk-run` | **no** — `error: pce-rom: bytecode version must be 1 or 2` (`renderer/pce-rom.js:626`; a version 3 container carries the sound ops). #187 carried `not` and #197 `sfx`, its old refusals; DUSK RUN's bytecode route is otherwise clean, so it now encodes as a version 3 sound container and buildToyRom refuses it until #198 links the engine in. The gate's Error names no line. #184 moved the validator's sample: its 8-frame probe measured the toy's BUILD (137 steps; frame 7 is build step 7, `frame()` 675,190 cycles) and refused at 1,054,292 cycles, but the studio's default 300-frame performance puts the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz), so the validator accepts it and the encoder is reached. | — | — | — | — | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
-| **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `b05f34cc5117aac3…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 308 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
-| *control* `tools/toys/palette.lua` | **yes** — 40,960 B, sha256 `7a7474e7d96b1fa6…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 111 | **626** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
-| *control #183* `tools/toys/arity.lua` | **yes** — 40,960 B, sha256 `de8c223749fe9912…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 111 | **783** lines | **too slow** | — |
-| *control #187* `tools/toys/not.lua` | **yes** — 40,960 B, sha256 `90eaad46d54edc53…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **106** lines | **60 Hz** | — |
-| *control #191* `tools/toys/sprite.lua` | **yes** — 40,960 B, sha256 `80458fd1d549713a…`, three constant sprite specs (the full spec; a partial one with `hflip`/`cgx`; `spbg`/`cgy`/`vflip`), so `sprite()` is carried end to end (#188 encoder, #189 interpreter, #190 cgen) | **diff 0** (its constant picture is pinned as one hash; `tests/check-ilvm.js` also compares the saved SAT word for word) | 0 | **101** lines | **60 Hz** | — |
+| **DUSK RUN** `toys/dusk-run` | **yes** — 40,960 B, sha256 `731f798284fe3fe6…`, **and it does not play**: Mednafen records an all-black screen for the whole run while the counters advance (202 updates in 300 frames, 1 overrun, worst 414 lines, 30 Hz — a counter verdict is not a picture). The shipped interpreter refuses its container at boot, before one pixel: a `-DILVM_HOST` probe says function 0 needs 39 registers (`MAX_REGS` 32) and the container has 41 functions (`MAX_FUNCS` 32); raising both in a scratch build moves the refusal to 15 upvalues (`MAX_UPS` 6). **#222** carries the capacity work. `tests/check-export-games.js` pins the ROM sha and asserts every captured frame is black ([`ROM-SOUND.md`](ROM-SOUND.md) §10). #184's validator note still applies: the 8-frame probe measured the BUILD (frame 7 = build step 7, 675,190 cycles), and the 300-frame performance is 390,744 cycles (18.3 Hz), so the validator accepts the toy. | **no — all-black** (324 captured frames) | **1** | **414** lines | **30 Hz** counters only | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
+| **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `ff6097dd7330b659…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 308 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
+| *control* `tools/toys/palette.lua` | **yes** — 40,960 B, sha256 `a47a9ff6cfb43a39…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 111 | **626** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
+| *control #183* `tools/toys/arity.lua` | **yes** — 40,960 B, sha256 `31075210415be63f…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 111 | **783** lines | **too slow** | — |
+| *control #187* `tools/toys/not.lua` | **yes** — 40,960 B, sha256 `2dc998ad9ae3067f…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **106** lines | **60 Hz** | — |
+| *control #191* `tools/toys/sprite.lua` | **yes** — 40,960 B, sha256 `ffc256555d8d2ba7…`, three constant sprite specs (the full spec; a partial one with `hflip`/`cgx`; `spbg`/`cgy`/`vflip`), so `sprite()` is carried end to end (#188 encoder, #189 interpreter, #190 cgen) | **diff 0** (its constant picture is pinned as one hash; `tests/check-ilvm.js` also compares the saved SAT word for word) | 0 | **101** lines | **60 Hz** | — |
 
 ### What this says, plainly
 
@@ -247,16 +245,23 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   measure reads 0 updates mid-boot; and the interpreter's display-on keeps
   the toy's CR, so the sprites' SB bit survives `toy_display_on` (`docs/IL.md`
   §14, the compiled runtime's `toy_cr` shadow).
-- **The other four stop on different kinds.** STARFALL on the 127-constant
-  pool and the 10 `sprite` specs the walker cannot pin; TOWER and DUSK RUN
-  on the version 3 sound container (their bytecode routes are otherwise
-  clean now that `sfx` carries, and the committed interpreter refuses
-  version 3 until #198 links the engine in); NOVA TIDE on
-  `raster(line, spec)`. #186 moved TOWER, NOVA TIDE and DUSK RUN past
-  `sat`, #187 moved DUSK RUN past logical `not`, #188–#190 carried `sprite`
-  itself for every spec whose slot and fields are constants, and #197 moved
-  TOWER and DUSK RUN past `sfx` and NOVA TIDE past `note` and `sfx`, so the
-  table's refusals are each the toy's next gap, not one shared one.
+- **The other three stop on their own next gap, and DUSK RUN builds but
+  does not play.** STARFALL on the 127-constant pool and the 10 `sprite`
+  specs the walker cannot pin; TOWER on the 8 KiB data bank (8,524 B of
+  bytecode — a *refusal with a message*, no ROM); NOVA TIDE on
+  `raster(line, spec)`. DUSK RUN encodes fully and builds a 40,960 B ROM,
+  but its container needs more interpreter capacity than the image has
+  (39 registers / 41 functions / 15 upvalues against 32 / 32 / 6), so the
+  interpreter faults at boot and Mednafen shows black — a *built ROM that
+  shows nothing*, which is worse than a refusal because nothing names it;
+  #222 carries the fix and `tests/check-export-games.js` now asserts the
+  black screen so the verdict cannot silently change. #186 moved TOWER,
+  NOVA TIDE and DUSK RUN past `sat`, #187 moved DUSK RUN past logical
+  `not`, #188–#190 carried `sprite` itself for every spec whose slot and
+  fields are constants, #197 moved TOWER and DUSK RUN past `sfx` and NOVA
+  TIDE past `note` and `sfx`, and #215's interpreter reads the version 3
+  container, so the table's outcomes are each the toy's next real gap, not
+  one shared one.
 - **DUSK RUN's validator refusal was the probe, not the toy (#184).** The
   export validates with an 8-frame run and judges its last frame; DUSK RUN
   builds its landscape over 137 frames, so frame 7 is build step 7 and costs
@@ -267,8 +272,10 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   validator now runs a refused probe on to 300 frames before refusing; the
   8-frame ceiling still refuses a toy that is over it in its steady state
   (`tests/check-validate.js` V07).  DUSK RUN now reaches the encoder and,
-  with #187 carrying logical `not` and #197 `sfx`, encodes fully — then
-  stops at buildToyRom's version-3 gate, which #198 lifts.  Its **route-1**
+  with #187 carrying logical `not` and #197 `sfx`, encodes fully; #215's
+  interpreter reads its version 3 container, so `buildToyRom` builds the
+  ROM — and the console still shows nothing, for a different reason (the
+  interpreter's load-time capacity, above).  Its **route-1**
   projection is still 0.71 Hz steady-state (84.95 frames per update) — the
   compiled-route estimate is what the validator prices; the export builds
   the interpreter.
@@ -310,8 +317,12 @@ performance, so the toy reaches the encoder), **#185**
 export), **#187** (closed 2026-11-01: logical `not` carried; DUSK RUN
 moves to its first `sfx`, TOWER's pin survives — its sfx is scanned first)
 and **#197** (closed 2026-11-01: `note` and the `sfx` instruction carried;
-TOWER and DUSK RUN's bytecode routes encode fully and stop at the version 3
-sound-container gate, NOVA TIDE moves to its first `raster`).
+so TOWER and DUSK RUN's bytecode routes encoded fully, and at that point
+stopped at the version 3 sound-container gate; NOVA TIDE moved to its first
+`raster`). **#215**, **#220** and **#221** (2026-11-02: the sound
+interpreter landed and the version 3 container is read; TOWER moved on to
+the data bank and DUSK RUN built — the black-screen verdict above — and
+**#222** is the interpreter-capacity card the verdict added).
 The rest are the existing #133–#138 umbrellas.
 
 ### The cards #207 added (the refusals this re-measurement leaves)
@@ -333,8 +344,9 @@ their own, the rest already did:
 - Already open: **#148** (the 127-constant pool, `renderer/pce-ilbc.js:462`),
   **#136** (`raster(line, spec)`, `renderer/pce-ilbc.js:335`), **#137** (the
   builtins other than `rgb`/`note`, `main.lua:466` and `:570`),
-  **#198** (the version 3 gate, `renderer/pce-rom.js:626`, with #199 and
-  #200 behind it).
+  **#198** (the sound umbrella: the engine linked, a note/sfx toy on a
+  console (#216) and the trace (#200) still behind it), and (from this
+  re-measurement) **#222** (DUSK RUN's interpreter capacity).
 
 ## ROM CHECK: the five games' exact blockers (card #193)
 
@@ -375,19 +387,23 @@ every line it occurs on.
   route). Both routes carry `sprite(i, spec)` for a constant spec (#188 on
   the bytecode, #190 in C); STARFALL's ten refused sprites are the specs its
   walker cannot pin to constants, not the instruction. STARFALL additionally
-  exhausts the 127-constant pool, and TOWER and DUSK RUN encode a version 3
-  sound container the committed image refuses until #198.
+  exhausts the 127-constant pool; TOWER's bytecode now passes the version
+  gate and exceeds the 8 KiB data bank (8,524 B); DUSK RUN's bytecode passes
+  and its container fits the bank — what stops it on the console is the
+  interpreter's RAM capacity at load (#222), which no front-end check
+  reports.
 - **The two routes differ, and that is the point of checking both.** TOWER's
   `not`, NOVA TIDE's `unm` and the `raster(line, spec)` calls are refused by
   the C route, while the bytecode opcode table carries `not`, `unm`, `sfx`,
   `music` and `release` (not `raster`). NOVA TIDE's MCP `export_pce` is
   therefore stopped by its `raster`, not by its `unm`; TOWER and DUSK RUN's
   bytecode lists are empty now that `sfx` carries (#197), so their MCP
-  export passes the encoder and stops one step later at buildToyRom's
-  version-3 gate (the committed interpreter reads versions 1 and 2 only,
-  until #198 links the sound engine in). A toy is exportable by the studio
-  only when both lists are empty, and by MCP `export_pce` when the bytecode
-  list is and the built container is one the committed interpreter runs.
+  export passes the encoder and stops one step later: TOWER at
+  `toy-data-bank-full` (8,524 B) and DUSK RUN at nothing — its ROM builds
+  and shows black (the interpreter's load-time capacity, #222; a toy is
+  exportable by the studio only when both lists are empty, and by MCP
+  `export_pce` when the bytecode list is and the built container is one the
+  committed interpreter runs.
 - **These are front-end findings, not a verdict on speed.** The ROM's frame
   rate is the #169/#180 measurement (`tools/measure-rom.js`); this table says
   only whether the ROM can be built, and the exact constructs that stop it.

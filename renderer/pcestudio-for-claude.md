@@ -869,7 +869,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | bytecode (every .pce) | tables: int array keys and string fields | the interpreter's fixed pool of 192 cells |
 | bytecode (every .pce) | pad[n].field |  |
 | bytecode (every .pce) | sat(i, k, v) and sprite(i, spec) |  |
-| bytecode (every .pce) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | a sound toy's container is version 3, which the committed interpreter does not read — export refuses the ROM until the engine link lands.  The host harness runs the same ops today. |
+| bytecode (every .pce) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | a sound toy's container is version 3, which the committed interpreter reads: note and sfx match the browser on the host harness, music runs on the engine with the ROM's song table (docs/ROM-SOUND.md). |
 
 ### Refused today
 

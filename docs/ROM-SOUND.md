@@ -6,10 +6,12 @@ by [`tools/ilvm/build.sh`](../tools/ilvm/build.sh) with llvm-mos) plus the
 toy's bytecode in the next physical bank. Since #197 the two cartridge front
 ends carry the whole sound surface — the encoder has `music`/`sfx`/`release`
 ops and the `note` builtin (`renderer/pce-ilbc.js`, container version 3), and
-the C emitter lowers them — but the committed interpreter reads only
-container versions 1 and 2, so `buildToyRom` refuses a sound toy's version 3
-container until #198 links the engine in. That is where TOWER and DUSK RUN
-stop today; NOVA TIDE stops on its first `raster`
+the C emitter lowers them. Since #215 the committed interpreter reads
+container version 3 and calls the engine, so a sound toy exports; TOWER
+still stops earlier, at the 8 KiB data bank (8,524 B of bytecode), and
+DUSK RUN exports but does not play on the committed image (its container
+needs more registers/functions/upvalues than the interpreter has — §10).
+NOVA TIDE stops on its first `raster`
 ([`ROM_SPEED.md`](ROM_SPEED.md) §#193).
 
 This page is the design half: **how the vendored HuTrack engine
@@ -28,8 +30,9 @@ The two facts that decide the design:
    runs at page 5), so the image grows from 16 KiB to 32 KiB and every toy
    ROM from 24,576 B to 40,960 B.
 2. **The engine's RAM did not fit beside the interpreter.** 94 B of zero
-   page and 1,062 B of BaseRAM, against a zero page the compiler fills and
-   1,122 B of stack headroom. #214 builds the partition below and has
+   page and 1,111 B of BaseRAM, against a zero page the compiler fills and
+   1,122 B of stack headroom in the projection (1,036 B after #214, 977 B
+   after #215). #214 builds the partition below and has
    `build.sh` assert it; a Mednafen canary measures the stack's high-water
    mark.
 
@@ -253,15 +256,24 @@ bytes, `$20DC-$20DD`, which an address-of-last-label count drops).
 | `TABLE_POOL_CELLS` 256 → 192 (`cells` 1,024 → 768) | −256 | | NOVA needs 183, STARFALL 172, TOWER 33 (`TABLES-PLAN.md` §2.1) |
 | raster line tables 256 B/page-aligned → 224 B/32-byte-aligned (3,584 → 3,136) | −448 | | 14 arrays for 224 lines; the padding was dead |
 | **interpreter after #214** | **5,582** | `$2200-$37CD`, heap start **`$37CE`** | `llvm-nm` |
-| **HuTrack `.bss`** | **1,062** | `$37CE-$3BF3` | `.sym`: `HuTrack.returnVec` → `EngineBss.end` |
-| **both** | **6,644 of 7,680** | | |
-| **stack headroom** | **1,036** | `$3BF4-$4000` | `0x4000 − engine end` |
+| **#215's `ilvm_sound.c` and the glue's frame cell** | **+10** | heap start **`$37D8`** | `llvm-nm` on the #215/#220 build |
+| **interpreter after #215/#220** | **5,592** | `$2200-$37D7`, heap start **`$37D8`** | `llvm-nm` |
+| **HuTrack `.bss`** | **1,111** | `$37D8-$3C2E` | `.sym`: `HuTrack.returnVec` → `EngineBss.end` |
+| **both** | **6,703 of 7,680** | | |
+| **stack headroom** | **977** | `$3C2F-$4000` | `0x4000 − engine end` |
 
 The engine's `.bss` is placed at the llvm image's `__heap_start` (the
 staging assembly gets it from `build-engine.sh`, which `build.sh` hands
 `ENGINE_BSS_BASE`); the build asserts the engine starts at or above the
-interpreter's heap and ends below `$4000`. The old note's 1,063 B for the
-engine is **1,062** by the extent label (`VarEnd − returnVec` = `$426`).
+interpreter's heap and ends below `$4000`. The engine extent is **1,111 B**
+after #215/#220 (`.sym`: `EngineBss.end − HuTrack.returnVec`); #214's
+1,062 B was the pre-#215 extent, and the 1,063 B in the original design
+was an address-of-last-label count. `snd_args_frames`, the `sfx()` frames
+cell the glue owns, is the engine's last variable at `$3C2D`.
+`tests/check-hutrack-image.js`'s scratch run of `build-engine.sh` alone (its
+own placeholder BaseRAM base, no C image) places it at `$2655`; that is a
+different build, not the shipped address, and `tools/gen/hutrack-symbols.h`
+after `build.sh` carries the real `$3C2D`.
 
 **Why `MAX_CLOS` 16 and not 8.** The first projection spent 600 B on eight
 slots. The host harness (`-DILVM_HOST`, 60 frames) says that is not safe:
@@ -293,24 +305,28 @@ that image, builds a ROM from `tools/toys/loud.lua` and runs it in Mednafen;
 
 | toy | exec() calls | lowest frame | stack used |
 |---|---|---|---|
-| `tools/toys/loud.lua` (frame → level1 → level2 → level3 → leaf, five frames; PLATFORMER's shape) | 1,598–1,615 over three runs | `$3C7F` | **897 B** |
-| the same toy with one more level (`level4`, six frames) | 1,764 | `$3BCD` | **1,075 B** |
+| `tools/toys/loud.lua` (frame → level1 → level2 → level3 → leaf, five frames; PLATFORMER's shape) on the #215/#220 image | 1,283 | `$3C70` | **912 B** |
+| the same toy with one more level (`level4`, six frames), #214 image | 1,764 | `$3BCD` | **1,075 B** |
 | palette / PLATFORMER / parallax (the first probe, 16 KiB image) | — | `$3E13-$3E15` | 491–493 B |
 
 The lowest address is deterministic across runs; the call count only tracks
-how long Mednafen ran before the save.
+how long Mednafen ran before the save. The five-level row was re-measured
+on 2026-11-02 after #220 landed (the shipped image's `__heap_start` is
+`$37D8` and the script prints the same 977 B headroom).
 
-So the measured loud toy uses 897 B of the 1,036 B allowance, leaving
-**139 B**; one level deeper reaches the engine block by 39 B. The budget is
+So the measured loud toy uses 912 B of the 977 B allowance, leaving
+**65 B**; the #214 run's six-level tree needed 1,075 B against its then
+1,036 B allowance, 39 B over, and this image's allowance is 10 B smaller,
+so that depth is deeper still — not re-measured here. The budget is
 therefore accepted for the call trees the shipping toys and games express,
-not for arbitrary depth: **six nested interpreter frames are the boundary** —
-five fit with 139 B to spare, six overwrite the engine's last 39 B — and
-the interpreter has no depth guard or encoder refusal yet, so a deeper toy
-would overwrite the engine's last variables rather than fault. That guard
-(+ the engine-vars trims named below) is the follow-up if a game ever needs
-it. The probe image differs from the shipped one by the probe block (~31 B
-of code); its `__heap_start` is the shipped `$37CE`, so the measured
-headroom is the shipped headroom.
+not for arbitrary depth: **five nested interpreter frames fit with 65 B to
+spare; six reach the engine block**, and the interpreter has no depth guard
+or encoder refusal yet, so a deeper toy would overwrite the engine's last
+variables rather than fault. That guard (+ the engine-vars trims named
+below) is the follow-up if a game ever needs it. The probe image differs
+from the shipped one by the probe block (~31 B of code); the script prints
+the shipped `__heap_start`, so the measured headroom is the shipped
+headroom.
 
 If more room is needed, the savings this card did not take are still named
 here: the engine's 64 song slots (192 B → 24 B for 8, plus the `cpx #64`
@@ -418,17 +434,19 @@ run (`HUTRACK_PYTHON`), its includes are the second opinion, exactly as
   would be a new toy-surface feature, not a bytecode carry of what exists.
   A card that adds `musicStop()` (or similar) to the host surface adds the
   IL form and the engine's `HuTrackEngine.stop` with it.
-- **The version 3 container (#197).** Any container with a sound op or a
-  `note` builtin is version 3 — the version 2 header layout (28 bytes, an
-  empty one-byte table section when there are no tables), since the #194
-  engine shares the v2 shape. `buildToyRom` refuses version 3 until #198
-  links the engine into the committed interpreter — the same gate that
-  refused version 2 containers before #175's interpreter learned to read
-  them. The gate fires before the bank-size check, so a sound toy that
-  would exceed the 8,192-byte data bank (TOWER's 8,524 B) refuses for the
-  same version reason a fitting one (DUSK RUN's 7,470 B) does: uniformly,
-  and never as a ROM that would fault on ops `20`–`22`. `release(ch)` on a
-  channel no sfx owns is a no-op, exactly as on the host.
+- **The version 3 container (#197, read since #215).** Any container with a
+  sound op or a `note` builtin is version 3 — the version 2 header layout
+  (28 bytes, an empty one-byte table section when there are no tables),
+  since the #194 engine shares the v2 shape. #215's interpreter accepts
+  versions 1, 2 and 3 (`toy_boot()`'s `ver` check); `buildToyRom` still
+  refuses a *version number* outside 1-3, the same gate that refused
+  version 2 before #175's interpreter learned to read it. The data-bank
+  check now comes first for a sound toy that will not fit: TOWER's 8,524 B
+  of bytecode refuses `toy-data-bank-full` (the message says the
+  interpreter reads one 8 KiB data bank) before any ROM exists; DUSK RUN's
+  7,470 B fits the bank and builds (§10's verdict is about the interpreter's
+  RAM limits, not the bank). `release(ch)` on a channel no sfx owns is a
+  no-op, exactly as on the host.
 
 The engine's code is called by fixed address, never through a C prototype:
 the pceas `.sym` file gives `HuTrackTick`, `HuTrackEngine.Init`,
@@ -500,20 +518,88 @@ The exact numbers in this page are from those commands on 2026-11-01, and
 §5's partition and canary from the same commands on 2026-11-02; a toolchain
 change that moves them is a change to this page.
 
+## 10. What #221 re-pinned, and the evidence
+
+#220 landed the sound ops in the interpreter (`renderer/ilvm.bin` sha256
+`1814d7c36079ca63…`, 32,768 B). Every toy ROM embeds that image, so every
+pinned ROM sha moved. The pins were changed **after** the pictures were
+compared, not instead of comparing them: each toy was built twice — once
+with the old image (`git show 1b76c08:renderer/ilvm.bin`, sha256
+`b803f2e5476bb7a5…`) and once with the new one — and both ROMs were run in
+Mednafen with the same route as `tools/capture-ilvm.sh` (`-qtrecord`,
+`-pce.slstart 3 -pce.slend 234`, 256x224, SIGINT, no input). The comparison
+is byte-for-byte on the decoded RGB frame.
+
+| toy | old ROM sha256 | new ROM sha256 | frame 0 | a later frame |
+|---|---|---|---|---|
+| `tools/toys/palette.lua` | `f073c605…` | `a47a9ff6…` | identical | old 239 = new 116, identical (the 8-picture cycle) |
+| `toys/parallax.lua` | `af11f340…` | `34ee53d6…` | identical | old 395 = new 474, identical |
+| `toys/status-bar.lua` | `40cac99e…` | `26fe5da6…` | identical | old 392 = new 514, identical |
+| `tools/toys/sprite.lua` | `ff0f3c57…` | `ffc25655…` | identical | old 474 = new 15, identical (static picture) |
+| `tools/toys/arity.lua` | `06ecb262…` | `31075210…` | identical | old 389 = new 120, identical |
+| `tools/toys/not.lua` | `0d262ed6…` | `2dc998ad…` | identical | old 399 = new 89, identical |
+| `toys/platformer/main.lua` | `8639685c…` | `ff6097dd…` | identical | old 576 = new 496, identical |
+
+For palette, sprite, arity, not and PLATFORMER the **set of distinct
+pictures is equal** (9, 2, 17, 5 and 3 pictures; every old frame has an
+exact twin in the new capture). Parallax and status-bar are continuous
+animations — their BXR is a function of the toy frame `f`
+(`toys/parallax.lua` :91-94, `toys/status-bar.lua` :90-91), and the two
+ROMs advance `f` at slightly different wall rates, so the two captures
+sample different phases: parallax has 13 old-only pictures (first seen at
+old frames 283, 322, 361, 400, 439-441, 478-480, 517-519) and 4 new-only
+(394, 433, 472, 511); status-bar has 28 and 7. The boot picture and the
+chosen later pair are byte-identical in both. **Not proven:** that each
+unmatched picture is an adjacent scroll phase of one the other run
+sampled — a one-pixel scroll shift changes many pixels, so the diff
+percentage cannot show it, and this card did not replay the two runs
+frame-for-frame. The measured claim is the table's: frame 0 and a later
+frame are identical, and five of the seven toys have equal picture sets.
+The larger proof that these toys still behave as the browser does is
+`check-ilvm`'s dump comparison, which is unchanged (§10's last paragraph).
+
+The pinned hashes in `tests/dumps/*-ilvm/meta.json`, `tests/check-ilvm.js`
+and `tests/check-export-games.js` are the **new** shas above (ILVM sha256
+`1814d7c36079ca63…` in all four meta files). The dump *frames* and RAM
+images themselves are not recaptured: they are the old image's run, and
+the diffs above are what makes them evidence for the new one. `check-ilvm`
+re-emits every toy from the new image and asserts the new ROM sha; the
+captures it compares against the browser are unchanged because every
+picture is.
+
+**DUSK RUN exports and does not play.** It builds a 40,960 B ROM
+(sha256 `731f7982…`) and `tests/check-export-games.js` pins it, but
+Mednafen shows an **all-black screen for the whole run** while the counters
+advance (202 updates in 300 frames, 1 overrun, worst 414 lines, 30 Hz —
+a counter verdict is not a playable picture). The shipped interpreter
+refuses the container at boot before writing a pixel: a `-DILVM_HOST`
+probe of `toy_boot()` reports function 0 at **39 registers** against
+`MAX_REGS` 32 and **41 functions** against `MAX_FUNCS` 32
+(`tools/ilvm/ilvm.c:70,83`); raising both in a scratch build moves the
+refusal to function 20's **15 upvalues** against `MAX_UPS` 6. The
+interpreter has no diagnostic for this (a fault is a silent black screen),
+and the encoder has no refusal either. That capacity work is **#222**;
+until it lands there is no browser picture to pin, so the pin records the
+ROM sha and `tests/check-export-games.js` asserts every captured frame is
+black. TOWER is different: it stops earlier, at `toy-data-bank-full`
+(8,524 B of bytecode against the 8 KiB bank), which is a refusal with a
+message and no ROM.
+
 ## What is not proven
 
-- **The 32 KiB image is built and committed (#213); nothing calls the engine
-  yet.** The two banks are concatenated after the unchanged llvm-mos image
-  and every existing toy ROM still runs and captures identically (the five
-  example ROMs: palette, parallax, status-bar, sprite, tables). The
-  narrowed window and the tick are not exercised until #215's interpreter
-  ops call in, and the llvm-mos + pceas image has not played a sound on a
-  console yet.
-- **The RAM partition is built and asserted (#214), but not exercised by a
-  sound call.** `build.sh` fails if the interpreter's zero page reaches the
-  engine's, if either extent leaves its window, or if the stack headroom is
-  under 787 B; the measured headroom is 1,036 B. The canary's high-water mark
-  is 897 B for the deepest toy-shaped call tree, 139 B below the engine —
+- **The engine now has a caller, but no sound has been heard on a console
+  yet.** #215's ops call `SndGlue*` and the front ends carry the calls;
+  `tests/check-rom-sound.js` proves the host half's PSG writes equal the
+  studio's for the same frames, and §10 proves the existing pictures are
+  unchanged. What is still open is **#216**: a note toy and an sfx toy run
+  in Mednafen and their PSG writes (or audio) are compared with the studio's
+  for the same frames. The llvm-mos + pceas image has not played a sound on
+  a console.
+- **The RAM partition is built and asserted (#214), and #215's sound code
+  is inside it.** `build.sh` fails if the interpreter's zero page reaches
+  the engine's, if either extent leaves its window, or if the stack headroom
+  is under 787 B; the measured headroom is 977 B. The canary's high-water
+  mark is 912 B for the deepest toy-shaped call tree, 65 B below the engine —
   and one frame deeper reaches it, with no depth guard or encoder refusal
   yet (named above as the follow-up).
 - **The canary is one toy and one machine.** It measures the interpreter's
@@ -530,12 +616,15 @@ change that moves them is a change to this page.
   is measured in #198/#200.
 - **The SEQUENCER adapter and the noise effect are landed (#199)** and their
   data half is measured by `tests/check-hutrack-seq.js`; what is not yet
-  witnessed is the console playing it — a toy's `music(index)` needs #198's
-  image, so #199's Mednafen half is open.
-- **Rule 2 is owed** for any check #198–#200 write: the author is not the
-  seat that can prove it. #214's build assertions are the design seat's own;
-  a cold seat should move `ENGINE_ZP_BASE` down and raise `STACK_MARGIN` and
-  watch `build.sh` fail.
+  witnessed is the console playing it — the image now exists (#215), so
+  that half is #216's Mednafen trace.
+- **Rule 2 is owed** for any check #198–#200 and #220/#221 write: the author
+  is not the seat that can prove it. #214's build assertions are the design
+  seat's own; a cold seat should move `ENGINE_ZP_BASE` down and raise
+  `STACK_MARGIN` and watch `build.sh` fail; the re-pin's old/new frame diffs
+  should be re-run with an image whose sound ops are broken, and DUSK RUN's
+  black verdict should be attacked by an interpreter that *does* load its
+  container.
 
 ## The slices
 
@@ -546,12 +635,16 @@ change that moves them is a change to this page.
 | **#212** | done | the HuTrack engine as a standalone two-bank pceas image | code `$A000-$BEC4`, tables `$8000-$8B34`, `check-hutrack-image` green |
 | **#213** | done | the engine banks linked into a 32 KiB `renderer/ilvm.bin`, data bank 4 | every existing toy ROM runs and captures identically |
 | **#214** | done | the zero-page and stack budgets asserted; the stack canary measured | `build.sh` fails on a broken budget (shown by a mutation); the measured depth is above (§5) |
-| **#215** | open | the interpreter ops for note/sfx/release/music call the engine; the per-toy-frame tick; version 3 accepted | `tests/check-rom-sound.js`; version 1 and 2 containers still run; `check-ilvm` green |
+| **#215** | done | the interpreter ops for note/sfx/release/music call the engine; the per-toy-frame tick; version 3 accepted | `tests/check-rom-sound.js` PASS; version 1 and 2 containers still run; `check-ilvm` green |
+| **#220** | done | the sound ops fit the 32 KiB image (the note table and the cold glue moved to the engine's tables bank) | `build.sh` exits 0, `ilvm.bin` stays 32 KiB, `check-hutrack-image` green |
+| **#221** | done | land #220's image and re-pin what it changed | every re-pinned ROM sha has an old/new Mednafen diff (§10); `check-ilvm` and `check-export-games` green; DUSK RUN's black verdict and TOWER's refusal documented |
+| **#222** | open | the interpreter's capacities: DUSK RUN's container needs 39 registers, 41 functions and 15 upvalues (MAX_REGS 32, MAX_FUNCS 32, MAX_UPS 6) | DUSK RUN's ROM draws a picture in Mednafen and matches the browser; the RAM/stack budget still asserts (`build.sh`) |
 | **#216** | open | a note toy and an sfx toy play in Mednafen | the PSG writes match the studio's frame by frame; the command is above |
 | **#198** | open | the umbrella: everything #212–#216 links | a note toy and an sfx toy play in Mednafen; `check-ilvm`, `check-export-games` green |
-| **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (needs #198) |
+| **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (#216) |
 | **#200** | open | `tests/check-rom-sound.js`, the trace build, the docs | the Mednafen trace equals the studio's for note and sfx; the suites green; a cold break by another seat |
 
-The umbrella (#194) closes when #196–#200 are done. TOWER, DUSK RUN and
-NOVA TIDE stay blocked until #198–#200: `docs/ROM_SPEED.md` has their
-refusal lines.
+The umbrella (#194) closes when #196–#200 are done. TOWER stays blocked on
+the 8 KiB data bank (#138), NOVA TIDE on `raster(line, spec)` (#136), and
+DUSK RUN exports but needs the interpreter's capacity (#222);
+`docs/ROM_SPEED.md` has their measured lines.

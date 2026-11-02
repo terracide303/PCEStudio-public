@@ -96,13 +96,14 @@ The studio compiles a toy to a small bytecode and glues it to a fixed interprete
 ([`docs/EXPORT.md`](docs/EXPORT.md), [`docs/IL.md`](docs/IL.md)). The simple example toys in `toys/*.lua`
 (parallax, status bar, sky gradient, palette cycle) export today, and so does **PLATFORMER** (#186 carried
 the `sat` instruction — its ROM runs in Mednafen at 30 Hz). `sprite()` is carried too, for a spec whose
-slot and fields are constants (#188–#190; its ROM runs at 60 Hz). The other four games — STARFALL,
-TOWER, NOVA TIDE and DUSK RUN — do not yet: each is stopped by a named finding, and
-[`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five (STARFALL's
-127-constant pool and the ten sprite specs it cannot pin to constants; TOWER's and DUSK RUN's sound,
-which now encodes but waits on the interpreter's engine link; NOVA TIDE's `raster` table), with the
-`raster` table form, the sound engine and the 8 KiB data bank behind those. Carrying them is the next
-big piece of work. The ROMs are checked in
+slot and fields are constants (#188–#190; its ROM runs at 60 Hz). **DUSK RUN** also builds a 40,960-byte
+ROM (#215's sound interpreter), but it does **not** play: the interpreter refuses its container for
+capacity (39 registers / 41 functions / 15 upvalues against 32 / 32 / 6) and Mednafen shows a black screen
+(#222). The other three games — STARFALL, TOWER and NOVA TIDE — do not yet: each is stopped by a named
+finding, and [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five
+(STARFALL's 127-constant pool and the ten sprite specs it cannot pin to constants; TOWER's 8,524-byte
+bytecode against the 8 KiB data bank; NOVA TIDE's `raster` table), with the `raster` table form and the
+interpreter's capacity behind those. Carrying them is the next big piece of work. The ROMs are checked in
 Mednafen; nothing has run on a real console yet.
 
 ## Project files
@@ -140,12 +141,13 @@ and the mutation suites break the engine on purpose to show the tests notice.
 
 ## What does not work yet
 
-- **Export of four of the five games**: PLATFORMER exports and runs in Mednafen at 30 Hz (re-measured
-  2026-11-01); the sprite toy runs at 60 Hz. STARFALL, TOWER, NOVA TIDE and DUSK RUN stop on named findings —
-  STARFALL on the 127-constant pool and ten sprite specs it cannot pin, TOWER and DUSK RUN on the version 3
-  sound container (they encode, but the interpreter's HuTrack engine link is not built yet), NOVA TIDE on the
-  `raster` table — and [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code, Lua line and
-  refusing file:line for each. All five run in the browser.
+- **Export of the five games**: PLATFORMER exports and runs in Mednafen at 30 Hz (re-measured
+  2026-11-01); the sprite toy runs at 60 Hz; DUSK RUN exports but shows a black screen (its container
+  needs more interpreter registers/functions/upvalues than the image has — #222). STARFALL, TOWER and
+  NOVA TIDE stop on named findings — STARFALL on the 127-constant pool and ten sprite specs it cannot
+  pin, TOWER on its 8,524-byte bytecode against the 8 KiB data bank, NOVA TIDE on the `raster` table —
+  and [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code, Lua line and refusing file:line
+  for each. All five run in the browser.
 - **Real hardware**: nothing has been tried on a console or a flash cart.
 - **Phones and tablets**, **CD-ROM, Arcade Card and SuperGrafx** are not designed for.
 - The MCP server and the studio have been tested on **macOS** only. Linux and Windows should work (plain Node.js and

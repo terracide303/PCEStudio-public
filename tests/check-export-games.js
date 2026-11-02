@@ -21,7 +21,7 @@
  *      source line the table names is checked against the IL (a function's
  *      definition line, the 128th constant, the refused instruction's own
  *      line, or the first refused builtin's line — or null, when the
- *      refusal names none: the version gate's plain Error), so the
+ *      refusal names none: the data bank's plain Error), so the
  *      table's "line" column is reproducible and not a comment.  A blocker
  *      that lands moves the refusal: this pin goes red and asks for the
  *      table and the pin to be updated — a tripwire, not a broken test.
@@ -32,6 +32,9 @@
  *      A game whose one-time build outlasts the default 300-frame measure
  *      or 5.5 s capture tail is pinned with its own measure frame count and
  *      capture length (GAME_PINS) — PLATFORMER is that game since #186.
+ *      A game that exports but does not play (DUSK RUN, #221) is pinned as
+ *      its ROM sha plus an all-black screen, asserted frame by frame; its
+ *      browser frames are not consulted because the ROM never draws one.
  *      Two controls prove the capture-and-compare instrument works on a
  *      toy that exports: tools/toys/palette.lua (its ROM sha and its
  *      eight-frame picture cycle are pinned) and, for #183,
@@ -80,11 +83,13 @@ const ROM_BYTES = 40960;            /* 32 KiB image + one data bank */
 /* The card's five games and the outcome docs/ROM_SPEED.md records (2026-10-31;
  * DUSK RUN moved to the encoder's refusal by #184, the three games' sat
  * refusals moved on by #186, PLATFORMER now builds and moved to GAME_PINS
- * below, and #197 carried note and the sfx instruction: TOWER and DUSK RUN
- * moved to the version gate and NOVA TIDE to its first raster, 2026-11-01).
+ * below, #197 carried note and the sfx instruction, and #215's interpreter
+ * reads the version-3 container: TOWER now stops at the data bank and NOVA
+ * TIDE at its first raster, 2026-11-02.  DUSK RUN also builds and moved to
+ * GAME_PINS below; it exports but does not play — see its pin).
  * `where` is the source line the table names; null is what the validator's
  * own finding can say (it names no line for a frame-wide budget) or what a
- * plain Error without function or pc says (the version gate).  `message` is
+ * refusal without function or pc says (the data bank).  `message` is
  * a substring of the refusal the suite insists on, so a message that loses
  * its detail fails too. */
 const GAMES = [
@@ -115,30 +120,6 @@ const GAMES = [
     expect: { code: "ilbc-op",
               message: "instruction raster (function 34, pc 53) has no bytecode form" },
     where: "main.lua:530"
-  },
-  {
-    /* #184's decision: the 8-display-frame ceiling keeps its number, the
-     * per-op/raster pricing is unchanged (part C's held-out 1,510 cycles a
-     * call, -7.4%), and DUSK RUN's frame() is unchanged.  What moved is the
-     * frame the ceiling is applied to: at an 8-frame probe the validator
-     * sampled the toy's BUILD (BUILD_STEPS = 137; frame 7 is build step 7,
-     * 675,190 cycles of frame() plus 379,102 of raster), not its animation.
-     * The same model over the studio's default 300-frame performance puts
-     * the steady state at 390,744 cycles = 3.27 display frames (18.3 Hz) —
-     * the number toys/dusk-run/README.md and tests/check-dusk-run.js already
-     * record at 600 frames — so the validator now extends a refused probe to
-     * the performance before refusing.  #186 carried the encoder's sat
-     * refusal, #187 carried `not`, and #197 carried the sfx instruction —
-     * so DUSK RUN's bytecode route now encodes fully and buildToyRom
-     * refuses the version-3 container instead (the #198 engine link admits
-     * it; until then the committed interpreter reads only versions 1 and
-     * 2).  The gate throws a plain Error with no code and no function or
-     * pc, so the table's `where` is null and exportToy records code
-     * "error". */
-    name: "DUSK RUN", toy: "toys/dusk-run/main.lua",
-    expect: { code: "error",
-              message: "pce-rom: bytecode version must be 1 or 2" },
-    where: null
   }
 ];
 
@@ -159,10 +140,30 @@ const GAME_PINS = {
    * with any interpreter change (#187's opcode moved all three). */
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
-    rom: "b05f34cc5117aac38eb4984534372b7c0453ee68ae9a6942efa693c3ca841742",
+    rom: "ff6097dd7330b659dc9eb00c5a4955f18b0b788ed86e69b90358e4e73f561725",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
+  },
+  /* #221: DUSK RUN now encodes fully (#186 sat, #187 not, #197 sfx) and
+   * buildToyRom builds a 40,960 B ROM, so it leaves GAMES.  **It does not
+   * play.**  Mednafen records an all-black screen for the whole run while
+   * the counters advance (202 updates in 300 frames, 30 Hz), because the
+   * committed interpreter refuses the container at load, before writing one
+   * pixel: a `-DILVM_HOST` probe says function 0 needs 39 registers against
+   * MAX_REGS 32 and the container has 41 functions against MAX_FUNCS 32
+   * (tools/ilvm/ilvm.c:70,83); raising both in a scratch build moves the
+   * refusal to function 20's 15 upvalues against MAX_UPS 6.  So there is no
+   * browser picture to pin — a black frame is not the game — and the pin
+   * records the ROM sha and requires every captured frame to be black.
+   * Card #222 carries the interpreter-capacity work that would let it play;
+   * docs/ROM_SPEED.md's row says the same. */
+  "DUSK RUN": {
+    toy: "toys/dusk-run/main.lua",
+    rom: "731f798284fe3fe66056d03b47070f8de2e58e6375cdda1c0d456d78219e0b3f",
+    frames: [],
+    black: "interpreter refuses the container at load (39 registers > MAX_REGS 32, 41 functions > MAX_FUNCS 32, 15 upvalues > MAX_UPS 6); Mednafen shows black",
+    measureFrames: 300
   },
   /* #191: tools/toys/sprite.lua, the sprite op on the exported route.  It
    * is not one of the card's five games, so `kind: "toy"` keeps it out of
@@ -175,7 +176,7 @@ const GAME_PINS = {
   "SPRITE": {
     kind: "toy",
     toy: "tools/toys/sprite.lua",
-    rom: "80458fd1d549713a998beddeafb8d19aca338f4d38eeb3833f347976206e4860",
+    rom: "ffc256555d8d2ba7cacb23ee85e90a1b49cedd88f87efd0b30b65b7d4c1c00bf",
     frames: [1994475180]
   }
 };
@@ -184,7 +185,7 @@ const GAME_PINS = {
  * toy builds to one ROM and its picture repeats every eight frames. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "7a7474e7d96b1fa66f44c29bc52cb49b7b1fea11893a6a63c4d29cbf57beab76",
+  rom: "a47a9ff6cfb43a3959eb6c9d38c821eb238a0b9d1ea09d32309fd88b17cfbffb",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -197,7 +198,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "de8c223749fe991297e7d2019739b49af36e5c6da226bcb3827870f12fbe7988",
+  rom: "31075210415be63f93065f1dc6dbe2166a35d9881a8258ba9fe493bc9cd5cc1f",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -214,7 +215,7 @@ const WIDE = {
  * hashes are the whole cycle. */
 const NOT = {
   toy: "tools/toys/not.lua",
-  rom: "90eaad46d54edc53a2530f29784c367a0dc22455f3097e6101a8d4cdf6bceeff",
+  rom: "2dc998ad9ae3067fc0110afe1e113cf83c78f683082d35ad8a55b86c3e3f8a54",
   frames: [2266090996, 2632876444, 887268600, 1464026320]
 };
 
@@ -311,8 +312,8 @@ function constantCeiling(program) {
  *   - an ilbc-op refusal's "(function N, pc P)" instruction,
  *   - an ilbc-builtin refusal's first uncarried builtin (only rgb and note
  *     have a bytecode form; the message names no function or pc).
- * A game whose `where` is null (TOWER and DUSK RUN: the version gate's
- * plain Error names no line) skips this entirely. */
+ * A game whose `where` is null (TOWER: the data bank's plain Error names no
+ * line) skips this entirely. */
 function checkedWhere(game, program) {
   if (game.name === "STARFALL") {
     const hit = constantCeiling(program);
@@ -543,17 +544,35 @@ function compareCapture(framesDir, files, want) {
   return best;
 }
 
+/* The captured frames that have any non-black pixel.  A game that exports
+ * but does not play is pinned as an all-black screen: this is the
+ * frame-by-frame assertion of that verdict, not a stand-in for a picture it
+ * never drew.  An empty list is the verdict (DUSK RUN, #221). */
+function notBlack(framesDir, files) {
+  const lit = [];
+  for (const file of files) {
+    const img = decodePng(fs.readFileSync(path.join(framesDir, file)));
+    let any = false;
+    for (let i = 0; i < img.pixels.length; i++) {
+      if (img.pixels[i] !== 0) { any = true; break; }
+    }
+    if (any) lit.push(file);
+  }
+  return lit;
+}
+
 /* ---- checks ------------------------------------------------------------ */
 
 async function main() {
   console.log("check-export-games: #180 the five games through export_pce's " +
               "route, and Mednafen on what builds");
 
-  /* The five card games: four are refused in GAMES, and each that starts
+  /* The five card games: three are refused in GAMES, and each that starts
    * exporting moves to GAME_PINS — the card's games are still all five.
    * GAME_PINS also holds toys that are not card games (#191's SPRITE,
    * marked kind: "toy"), so the five-game tripwire counts only the game
-   * pins. */
+   * pins.  DUSK RUN's pin is a build with no picture (all black, #221);
+   * the loop below still measures it and asserts the screen. */
   const gamePins = Object.keys(GAME_PINS).filter(function (n) {
     return GAME_PINS[n].kind !== "toy";
   });
@@ -725,23 +744,35 @@ async function main() {
                     m.json.worstUpdateLines + " lines, " + m.json.verdict);
       }
 
-      /* 2. the picture, against the browser's frames */
+      /* 2. the picture, against the browser's frames — or, for a game that
+       * exports but does not play, the all-black screen and the reason. */
+      let want = null, cmp = null;
       const cap = await captureFrames(romPath, dir, pin.captureMs);
       if (cap.error) {
         check(false, w.name + ": the picture captured — " + cap.error);
         continue;
       }
-      const want = browserFrames(w.toy);
-      const cmp = compareCapture(cap.frames, cap.files, want);
-      if (cmp.match >= 0) {
-        console.log("      " + w.name + ": captured frame " + cmp.file +
-                    " is diff 0 against browser frame " + cmp.match);
+      if (pin.black) {
+        const lit = notBlack(cap.frames, cap.files);
+        check(lit.length === 0, w.name + ": every captured frame is black " +
+              "(the screen Mednafen shows: does not play)" +
+              (lit.length ? " — " + lit.length + " of " + cap.files.length +
+               " frames have pixels, first " + lit[0] : ""));
+        console.log("      " + w.name + ": " + cap.files.length +
+                    " captured frames, all black; " + pin.black);
+      } else {
+        want = browserFrames(w.toy);
+        cmp = compareCapture(cap.frames, cap.files, want);
+        if (cmp.match >= 0) {
+          console.log("      " + w.name + ": captured frame " + cmp.file +
+                      " is diff 0 against browser frame " + cmp.match);
+        }
+        check(cmp.match >= 0, w.name + ": the emulator's picture is diff 0 " +
+              "against a browser frame" +
+              (cmp.match < 0 ? " (closest browser frame " + cmp.best +
+               ", first differing line " + cmp.line + ", " + cmp.diff +
+               " bytes differ)" : ""));
       }
-      check(cmp.match >= 0, w.name + ": the emulator's picture is diff 0 " +
-            "against a browser frame" +
-            (cmp.match < 0 ? " (closest browser frame " + cmp.best +
-             ", first differing line " + cmp.line + ", " + cmp.diff +
-             " bytes differ)" : ""));
 
       /* 3. the pin: the ROM sha, and for the controls their picture cycle */
       if (w.key === "control") {
@@ -768,8 +799,16 @@ async function main() {
       } else if (pin.rom) {
         eq(w.name + ": the ROM is the pinned one", sha256(w.out.rom),
            pin.rom);
-        check(cmp.match >= 0 && pin.frames.indexOf(want[cmp.match].hash) >= 0,
-              w.name + ": the emulator matches one of the pinned pictures");
+        if (pin.black) {
+          /* The pin's picture evidence is the black screen the branch above
+           * asserted; there is no browser frame to match. */
+          check(!!m.json && m.json.frames > 0,
+                w.name + ": the counters advance on the black screen");
+        } else {
+          check(cmp.match >= 0 &&
+                pin.frames.indexOf(want[cmp.match].hash) >= 0,
+                w.name + ": the emulator matches one of the pinned pictures");
+        }
       }
     }
   } finally {

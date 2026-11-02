@@ -1714,7 +1714,7 @@
       { id: "sound", label: "music(song), sfx(ch, freq, volume, frames), " +
         "release(ch) and note(midi)",
         detail: "a sound toy's container is version 3, which the committed " +
-                "interpreter reads since #215: note and sfx match the " +
+                "interpreter reads: note and sfx match the " +
                 "browser on the host harness, music runs on the engine " +
                 "with the ROM's song table (docs/ROM-SOUND.md).",
         ops: ["music", "sfx", "release"] }

@@ -41,12 +41,12 @@
  },
  "ilvm": {
   "bytes": 32768,
-  "sha256": "78095d9d71d5ece3e28fea8c0e10099393ee18944167a5c0e83ca1368bb9bab5"
+  "sha256": "1814d7c36079ca63f9ff27e871180ad87469d7a83885912184da4d03446b9377"
  },
  "name": "toystatusbar-ilvm",
  "rom": "tools/gen/toystatusbar-ilvm.pce",
  "rom_bytes": 40960,
- "rom_sha256": "dab6799b92e8840fa6a1a966001f6c4919c96dbadd28df97ae8ed4af0aa67419",
+ "rom_sha256": "26fe5da6f35366384b9f2c45c48a4ff91963cee329733afa6261891cd7fb7115",
  "source": "toys/status-bar.lua",
  "source_sha256": "0d52e4536692190ac82169fb636620fb5e38cce0379630876822011a2a25de33"
 }
