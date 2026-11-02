@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /*
- * tests/check-rom-sound.js — cards #215 and #220: the interpreter's sound
- * ops (note/sfx/release/music and the per-frame sound tick), end to end,
- * with the studio's host as the model (docs/ROM-SOUND.md §7).
+ * tests/check-rom-sound.js — cards #215, #220 and #200: the interpreter's
+ * sound ops (note/sfx/release/music and the per-frame sound tick), end to
+ * end, with the studio's host as the model (docs/ROM-SOUND.md §7), and
+ * #200's Mednafen PSG-write trace (§8).
  *
- * NOTE: written by @design as part of #215/#220 because the cards' close
- * conditions need a check; per the workshop role split it is flagged for
+ * NOTE: written by @design as part of #215/#220/#200 because the cards'
+ * close conditions need a check; per the workshop role split it is flagged for
  * @review to read cold (rule 2).
  *
  * What it proves, and how:
@@ -39,12 +40,6 @@
  *      trailer read and tick are lazy (ilvm_sound.c's header), and a toy
  *      that never calls the ops must cause no PSG write at all.
  *
- * Honest limits: the harness runs the HOST half of ilvm_sound.c — the same
- * logic the console's glue runs, but not the 6502.  The console half's own
- * code is the SndGlue routines pinned by tests/check-hutrack-image.js
- * (fixed addresses, extents, bss), and the image they live in is pinned by
- * check-ilvm/check-export-games' ROM shas.
- *
  * 3. the console trace (#200).  A trace build of the interpreter
  *    (TRACE=1, never renderer/ilvm.bin) appends every PSG write the console
  *    makes — the glue's own writes and, through line-pinned patches in the
@@ -52,16 +47,25 @@
  *    parallel BaseRAM arrays for toy frames 0..23 (docs/ROM-SOUND.md §8).
  *    tools/toys/note.lua and tools/toys/sfx.lua are exported against that
  *    image, run in Mednafen, and the autosaved state's log is compared with
- *    renderer/pce-toyhost.js's rt.sound.events for the same frames: same
- *    order, same registers, same values.  The arrays are filled with $EE at
- *    reset and the test checks the tail beyond the count still holds it,
- *    so a log the stack had overwritten cannot pass silently.  This needs
- *    Mednafen, llvm-mos and PCEAS 4.x (SKIP without them); it does not need
- *    the system cc.
+ *    the studio runtime's rt.sound.events (renderer/pce-il.js, which drives
+ *    renderer/pce-toyhost.js) for the same frames: same order, same
+ *    registers, same values.  The arrays are filled with $EE at reset and
+ *    the test checks the tail beyond the count still holds it, so a log the
+ *    stack had overwritten cannot pass silently.  This needs Mednafen,
+ *    llvm-mos and PCEAS 4.x (SKIP without them); it does not need the
+ *    system cc.
  *
- *    The trace is what #238 and #239 were proved by: the first run of this
- *    suite found note(60)'s F as 268 (the low-byte clamp) and the first
- *    SFX's reserve missing (SndGlueMap's zero-song loop overran snd_owned).
+ *    The trace pinned #238 and #239: note(60)'s F arrived as 268 (the
+ *    low-byte clamp) and the first SFX's reserve was missing (SndGlueMap's
+ *    zero-song loop overran snd_owned).
+ *
+ * Honest limits of 0-2: the harness runs the HOST half of ilvm_sound.c —
+ * the same logic the console's glue runs, but not the 6502.  The console
+ * half's own code is the SndGlue routines pinned by
+ * tests/check-hutrack-image.js (fixed addresses, extents, bss), and the
+ * image they live in is pinned by check-ilvm/check-export-games' ROM shas.
+ * Section 3 runs Mednafen, one machine, frames 0..23 and at most 100 writes;
+ * docs/ROM-SOUND.md §8 carries its limits.
  */
 
 "use strict";
