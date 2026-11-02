@@ -32,9 +32,10 @@
  *      A game whose one-time build outlasts the default 300-frame measure
  *      or 5.5 s capture tail is pinned with its own measure frame count and
  *      capture length (GAME_PINS) — PLATFORMER is that game since #186.
- *      A game that exports but does not play (DUSK RUN, #221) is pinned as
- *      its ROM sha plus an all-black screen, asserted frame by frame; its
- *      browser frames are not consulted because the ROM never draws one.
+ *      A game that exports and runs but whose displayed frame is not the
+ *      browser's yet (DUSK RUN, #222/#223) is pinned as its ROM sha plus
+ *      `unmatched`: the capture must be not black AND not a browser frame,
+ *      so either half going stale fails and asks for a re-pin.
  *      Two controls prove the capture-and-compare instrument works on a
  *      toy that exports: tools/toys/palette.lua (its ROM sha and its
  *      eight-frame picture cycle are pinned) and, for #183,
@@ -85,8 +86,9 @@ const ROM_BYTES = 40960;            /* 32 KiB image + one data bank */
  * refusals moved on by #186, PLATFORMER now builds and moved to GAME_PINS
  * below, #197 carried note and the sfx instruction, and #215's interpreter
  * reads the version-3 container: TOWER now stops at the data bank and NOVA
- * TIDE at its first raster, 2026-11-02.  DUSK RUN also builds and moved to
- * GAME_PINS below; it exports but does not play — see its pin).
+ * TIDE at its first raster, 2026-11-02.  DUSK RUN builds, loads, runs and
+ * draws since #222, and moved to GAME_PINS below; its displayed frame is
+ * not the browser's yet (#223) — see its pin).
  * `where` is the source line the table names; null is what the validator's
  * own finding can say (it names no line for a frame-wide budget) or what a
  * refusal without function or pc says (the data bank).  `message` is
@@ -140,30 +142,33 @@ const GAME_PINS = {
    * with any interpreter change (#187's opcode moved all three). */
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
-    rom: "ff6097dd7330b659dc9eb00c5a4955f18b0b788ed86e69b90358e4e73f561725",
+    rom: "378b0fcf7341fef34a327353e0fbc5b9934cacf6a1fa495bad363ecd3d6e7223",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
   },
-  /* #221: DUSK RUN now encodes fully (#186 sat, #187 not, #197 sfx) and
-   * buildToyRom builds a 40,960 B ROM, so it leaves GAMES.  **It does not
-   * play.**  Mednafen records an all-black screen for the whole run while
-   * the counters advance (202 updates in 300 frames, 30 Hz), because the
-   * committed interpreter refuses the container at load, before writing one
-   * pixel: a `-DILVM_HOST` probe says function 0 needs 39 registers against
-   * MAX_REGS 32 and the container has 41 functions against MAX_FUNCS 32
-   * (tools/ilvm/ilvm.c:70,83); raising both in a scratch build moves the
-   * refusal to function 20's 15 upvalues against MAX_UPS 6.  So there is no
-   * browser picture to pin — a black frame is not the game — and the pin
-   * records the ROM sha and requires every captured frame to be black.
-   * Card #222 carries the interpreter-capacity work that would let it play;
-   * docs/ROM_SPEED.md's row says the same. */
+  /* #222: DUSK RUN's container now loads and runs: MAX_REGS 41 carries the
+   * frame hook's 41 registers, MAX_FUNCS 41 its 41 functions, and the upvalue
+   * pool carries function 39's 19 upvalues.  **It draws, and it is not yet
+   * the browser's picture.**  The interpreter's VRAM/CRAM/SAT are byte-equal
+   * to the browser's at frame 3 (a Mednafen save state, `-DILVM_HOST` parity
+   * in check-ilvm), but the raster backend shows a collected frame on one
+   * display frame per toy frame: DUSK's build step takes ~37 display frames
+   * (docs/ROM_SPEED.md's 0.26 Hz build projection), so a short capture's
+   * tail is a stale screen, and the best replay frame found in a 20 s movie
+   * differs by 16 bytes on one scanline (row 16, the raster write's line
+   * latency).  Until that is pinned, the pin records the ROM sha and asserts
+   * the game is NOT black and NOT yet a browser frame; a capture that does
+   * match fails here and asks for its hash.  Card #223 carries the raster
+   * picture.  It also needs its own capture window: the boot that draws the
+   * base takes ~7 s on the dummy SDL driver. */
   "DUSK RUN": {
     toy: "toys/dusk-run/main.lua",
-    rom: "731f798284fe3fe66056d03b47070f8de2e58e6375cdda1c0d456d78219e0b3f",
+    rom: "6524513ae6879f823d1a6a68f5a6e538cdd8786e1b3327e1915bd18e99d31148",
     frames: [],
-    black: "interpreter refuses the container at load (39 registers > MAX_REGS 32, 41 functions > MAX_FUNCS 32, 15 upvalues > MAX_UPS 6); Mednafen shows black",
-    measureFrames: 300
+    unmatched: "the container runs and draws; no captured frame is the browser's picture yet (raster scanline latency, #223)",
+    measureFrames: 600,
+    captureMs: 12000
   },
   /* #191: tools/toys/sprite.lua, the sprite op on the exported route.  It
    * is not one of the card's five games, so `kind: "toy"` keeps it out of
@@ -176,7 +181,7 @@ const GAME_PINS = {
   "SPRITE": {
     kind: "toy",
     toy: "tools/toys/sprite.lua",
-    rom: "ffc256555d8d2ba7cacb23ee85e90a1b49cedd88f87efd0b30b65b7d4c1c00bf",
+    rom: "467ce0c80258b1eddfd549370dc85ad7bf2b39ebc1db9a8282b6be0665a0a259",
     frames: [1994475180]
   }
 };
@@ -185,7 +190,7 @@ const GAME_PINS = {
  * toy builds to one ROM and its picture repeats every eight frames. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "a47a9ff6cfb43a3959eb6c9d38c821eb238a0b9d1ea09d32309fd88b17cfbffb",
+  rom: "83a3f912c1b83cc1027bfebf176f2d9c2c92b4f5168ceef9c29d3d376ecd3e94",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -198,7 +203,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "31075210415be63f93065f1dc6dbe2166a35d9881a8258ba9fe493bc9cd5cc1f",
+  rom: "73925817a04be835b864ea737dbee96b20ee22fad39a1baa43571bd8e97502a5",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -215,7 +220,7 @@ const WIDE = {
  * hashes are the whole cycle. */
 const NOT = {
   toy: "tools/toys/not.lua",
-  rom: "2dc998ad9ae3067fc0110afe1e113cf83c78f683082d35ad8a55b86c3e3f8a54",
+  rom: "a29563f29100536f32cd31f3cb101c66000949e9fb6eeec747eb4f1cf9c321e6",
   frames: [2266090996, 2632876444, 887268600, 1464026320]
 };
 
@@ -760,6 +765,21 @@ async function main() {
                " frames have pixels, first " + lit[0] : ""));
         console.log("      " + w.name + ": " + cap.files.length +
                     " captured frames, all black; " + pin.black);
+      } else if (pin.unmatched) {
+        /* #222: the game draws but no frame is the browser's yet.  Both
+         * halves are asserted, so the pin cannot go stale silently. */
+        const lit = notBlack(cap.frames, cap.files);
+        check(lit.length > 0, w.name + ": the screen is not black — the " +
+              "container runs and draws");
+        want = browserFrames(w.toy);
+        cmp = compareCapture(cap.frames, cap.files, want);
+        check(cmp.match < 0, w.name + ": no captured frame is the browser's " +
+              "picture yet; one is (browser frame " + cmp.match +
+              ") — pin its hash and delete `unmatched`");
+        console.log("      " + w.name + ": " + cap.files.length +
+                    " captured frames, not black, no browser match (closest " +
+                    "frame " + cmp.best + ", " + cmp.diff + " bytes differ); " +
+                    pin.unmatched);
       } else {
         want = browserFrames(w.toy);
         cmp = compareCapture(cap.frames, cap.files, want);
@@ -804,6 +824,10 @@ async function main() {
            * asserted; there is no browser frame to match. */
           check(!!m.json && m.json.frames > 0,
                 w.name + ": the counters advance on the black screen");
+        } else if (pin.unmatched) {
+          /* The unmatched branch above asserted the picture's state. */
+          check(!!m.json && m.json.frames > 0,
+                w.name + ": the counters advance while it draws");
         } else {
           check(cmp.match >= 0 &&
                 pin.frames.indexOf(want[cmp.match].hash) >= 0,

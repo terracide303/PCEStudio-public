@@ -223,12 +223,12 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 | **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants` (`renderer/pce-ilbc.js:462`, `MAX_CONST = 127`); the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. `sprite()` is carried for 21 of its 31 specs since #188–#190; the other ten are **#211**, and the pool refuses first. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
 | **TOWER** `toys/tower` | **no** — `toy-data-bank-full`: `pce-rom: the bytecode (8524 B) and assets (0 B) need 8524 bytes; the interpreter reads one 8 KiB data bank` (`renderer/pce-rom.js`). #186 carried `sat`, #187 `not`, #197 `sfx`, and #215's interpreter reads the version 3 container — so the encoding now passes the version gate and stops at the bank: 8,524 B against the 8,192-byte data bank. The refusal names no line. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
 | **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`; refused by `renderer/pce-ilbc.js:335` because `raster` has no entry in its OPS table). #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind (#136). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
-| **DUSK RUN** `toys/dusk-run` | **yes** — 40,960 B, sha256 `731f798284fe3fe6…`, **and it does not play**: Mednafen records an all-black screen for the whole run while the counters advance (202 updates in 300 frames, 1 overrun, worst 414 lines, 30 Hz — a counter verdict is not a picture). The shipped interpreter refuses its container at boot, before one pixel: a `-DILVM_HOST` probe says function 0 needs 39 registers (`MAX_REGS` 32) and the container has 41 functions (`MAX_FUNCS` 32); raising both in a scratch build moves the refusal to 15 upvalues (`MAX_UPS` 6). **#222** carries the capacity work. `tests/check-export-games.js` pins the ROM sha and asserts every captured frame is black ([`ROM-SOUND.md`](ROM-SOUND.md) §10). #184's validator note still applies: the 8-frame probe measured the BUILD (frame 7 = build step 7, 675,190 cycles), and the 300-frame performance is 390,744 cycles (18.3 Hz), so the validator accepts the toy. | **no — all-black** (324 captured frames) | **1** | **414** lines | **30 Hz** counters only | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
-| **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `ff6097dd7330b659…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 308 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
-| *control* `tools/toys/palette.lua` | **yes** — 40,960 B, sha256 `a47a9ff6cfb43a39…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 111 | **626** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
-| *control #183* `tools/toys/arity.lua` | **yes** — 40,960 B, sha256 `31075210415be63f…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 111 | **783** lines | **too slow** | — |
-| *control #187* `tools/toys/not.lua` | **yes** — 40,960 B, sha256 `2dc998ad9ae3067f…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **106** lines | **60 Hz** | — |
-| *control #191* `tools/toys/sprite.lua` | **yes** — 40,960 B, sha256 `ffc256555d8d2ba7…`, three constant sprite specs (the full spec; a partial one with `hflip`/`cgx`; `spbg`/`cgy`/`vflip`), so `sprite()` is carried end to end (#188 encoder, #189 interpreter, #190 cgen) | **diff 0** (its constant picture is pinned as one hash; `tests/check-ilvm.js` also compares the saved SAT word for word) | 0 | **101** lines | **60 Hz** | — |
+| **DUSK RUN** `toys/dusk-run` | **yes** — 40,960 B, sha256 `6524513ae6879f82…`, **and it runs but its picture is not the browser's yet.** #222 raised `MAX_REGS` 41 / `MAX_FUNCS` 41 / `MAX_UPS` 20 (upvalue pool) / `MAX_CLOS` 48 (boot/transient split), so the container loads and executes; a Mednafen save state at 20 s is VRAM/CRAM/SAT **diff 0 against browser frame 3**, and the host harness matches for 900 frames. The runtime's base-VRAM buffer (32 words a frame) was dropping DUSK's 64/68/208-word build frames; it now writes an over-buffer word through instead ([`ROM-SOUND.md`](ROM-SOUND.md) §10). What is left is the raster backend: one replay display frame per toy frame, and the best replay frame in a 20 s movie is **16 bytes off** on row 16 (scanline latency) — **#223**. `tests/check-export-games.js` pins the ROM sha and asserts the screen is not black and not yet a browser frame. #184's validator note still applies: the 8-frame probe measured the BUILD (frame 7 = build step 7, 675,190 cycles), and the 300-frame performance is 390,744 cycles (18.3 Hz), so the validator accepts the toy. | **no — draws, not the browser's picture** (16 bytes, row 16; #223) | **2** | **1568** lines | **too slow** (2 updates in 600 frames, the ~7 s boot) | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
+| **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `378b0fcf7341fef3…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 308 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
+| *control* `tools/toys/palette.lua` | **yes** — 40,960 B, sha256 `83a3f912c1b83cc1…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 111 | **626** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
+| *control #183* `tools/toys/arity.lua` | **yes** — 40,960 B, sha256 `73925817a04be835…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 111 | **783** lines | **too slow** | — |
+| *control #187* `tools/toys/not.lua` | **yes** — 40,960 B, sha256 `a29563f29100536f…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **106** lines | **60 Hz** | — |
+| *control #191* `tools/toys/sprite.lua` | **yes** — 40,960 B, sha256 `467ce0c80258b1ed…`, three constant sprite specs (the full spec; a partial one with `hflip`/`cgx`; `spbg`/`cgy`/`vflip`), so `sprite()` is carried end to end (#188 encoder, #189 interpreter, #190 cgen) | **diff 0** (its constant picture is pinned as one hash; `tests/check-ilvm.js` also compares the saved SAT word for word) | 0 | **101** lines | **60 Hz** | — |
 
 ### What this says, plainly
 
@@ -245,17 +245,18 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   measure reads 0 updates mid-boot; and the interpreter's display-on keeps
   the toy's CR, so the sprites' SB bit survives `toy_display_on` (`docs/IL.md`
   §14, the compiled runtime's `toy_cr` shadow).
-- **The other three stop on their own next gap, and DUSK RUN builds but
-  does not play.** STARFALL on the 127-constant pool and the 10 `sprite`
-  specs the walker cannot pin; TOWER on the 8 KiB data bank (8,524 B of
-  bytecode — a *refusal with a message*, no ROM); NOVA TIDE on
-  `raster(line, spec)`. DUSK RUN encodes fully and builds a 40,960 B ROM,
-  but its container needs more interpreter capacity than the image has
-  (39 registers / 41 functions / 15 upvalues against 32 / 32 / 6), so the
-  interpreter faults at boot and Mednafen shows black — a *built ROM that
-  shows nothing*, which is worse than a refusal because nothing names it;
-  #222 carries the fix and `tests/check-export-games.js` now asserts the
-  black screen so the verdict cannot silently change. #186 moved TOWER,
+- **The other three stop on their own next gap, and DUSK RUN builds, runs
+  and draws — but its displayed frame is not the browser's yet.** STARFALL
+  on the 127-constant pool and the 10 `sprite` specs the walker cannot pin;
+  TOWER on the 8 KiB data bank (8,524 B of bytecode — a *refusal with a
+  message*, no ROM); NOVA TIDE on `raster(line, spec)`. DUSK RUN's
+  container now fits the interpreter's arrays (#222: 41 registers, 41
+  functions, a 19-upvalue closure, 27 boot closures), and its VM state is
+  byte-equal to the browser's; the runtime's dropped build-frame writes are
+  fixed too. What remains is the raster backend's display: one replay frame
+  per toy frame, and 16 pixels of one scanline lag the write (#223).
+  `tests/check-export-games.js` asserts the screen is not black and not yet
+  a browser frame, so the verdict cannot silently change. #186 moved TOWER,
   NOVA TIDE and DUSK RUN past `sat`, #187 moved DUSK RUN past logical
   `not`, #188–#190 carried `sprite` itself for every spec whose slot and
   fields are constants, #197 moved TOWER and DUSK RUN past `sfx` and NOVA

@@ -958,10 +958,13 @@ function checkRebuild() {
  * the diff, or this check would only prove that two things fail alike. */
 const HOST_TOY = "toys/parallax.lua";
 const HOST_FRAMES = 8;
+/* #222: the constant table is read from the container through konst(), and
+ * the register bound moved into the operand byte's own range check (the
+ * encoder never emits a register past the function's nregs). */
 const OPERAND_BODY =
+  "  if (o < 0x80) return r[o];\n" +
   "  if (o == 0xFF) return 0;\n" +
-  "  if (o < 0x80) return o < MAX_REGS ? r[o] : 0;\n" +
-  "  return kvals[o & 0x7F];";
+  "  return konst((uint8_t)(o & 0x7F));";
 
 function bytesDiff(a, b) {
   return Math.abs(a.length - b.length) + diff(a, b);
@@ -1058,8 +1061,8 @@ function checkHostParity() {
   if (ilvmSource.indexOf(OPERAND_BODY) < 0) return;
   const mutantSource = path.join(tmp, "ilvm_mutant.c");
   fs.writeFileSync(mutantSource, ilvmSource.replace(OPERAND_BODY,
-    "  if (o == 0xFF) return r[0];\n" +
     "  if (o < 0x80) return r[0];\n" +
+    "  if (o == 0xFF) return r[0];\n" +
     "  return r[0];"));
   const mutant = path.join(tmp, "hostvm-mutant");
   check(buildHostvm(mutant, mutantSource),

@@ -97,7 +97,13 @@ ENGINE_ZP_BASE=$ENGINE_ZP_BASE ENGINE_BSS_BASE=0x2200 \
   tools/ilvm/build-engine.sh >/dev/null
 
 compile_c() {   # $1 = output path
-  "$CC" -Os -mlto-zp=96 -Itools/toyc -Itools/gen \
+  # #222: the fixed bank holds 16,339 B before .early_start (link.ld pins it
+  # at 0xffd3); the capacity work added ~320 B.  ICF folds identical
+  # functions and an inline threshold of 50 keeps LTO from expanding the
+  # closure/constant helpers — together they recover the ~30 B needed.
+  # build.sh asserts the image is 16,384 B, so a future growth fails here.
+  "$CC" -Os -Wl,--icf=all -mllvm -inline-threshold=50 -mlto-zp=96 \
+    -Itools/toyc -Itools/gen \
     -Wl,--defsym,__rom_bank0=0xc000 \
     -Wl,--defsym,__rom_bank0_size=0x4000 \
     -o "$1" tools/ilvm/ilvm_runtime.c tools/ilvm/ilvm.c tools/ilvm/ilvm_sound.c

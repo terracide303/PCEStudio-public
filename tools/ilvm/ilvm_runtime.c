@@ -333,10 +333,17 @@ void toy_vram_set(int32_t addr, int32_t word) {
       toy_pend_vram_w_lo[n] = (uint8_t)w;
       toy_pend_vram_w_hi[n] = (uint8_t)(w >> 8);
       toy_pend_nvram = (uint8_t)(n + 1);
-    } else {
-      measure_flag(0x01);
+      return;
     }
-    return;
+    /* #222: the buffer is full.  Writing the word through is the alternative
+     * to dropping it: a game's build step writes up to 208 VRAM words
+     * (DUSK RUN's font step) and a frame that loses them never draws the
+     * browser's picture.  The write lands during the previous frame's
+     * display, so THAT display frame may tear; the next replay frame, built
+     * from the complete VRAM, is the toy's picture.  bit 0 of MEAS flags
+     * records the frame, so a capture can tell the two kinds apart. */
+    measure_flag(0x01);
+    /* fall through to the direct write below */
   }
   /* Set MAWR, then select the VRAM data register (R02, VWR) before the word:
    * after a register write the VDC's select latch still holds that register,

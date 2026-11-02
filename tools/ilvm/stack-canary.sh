@@ -10,8 +10,9 @@
 # how much of it a toy really uses:
 #
 #   1. rebuild the interpreter from the same sources with -DTOY_STACK_PROBE
-#      (tools/ilvm/ilvm.c writes the lowest exec() frame and the exec count to
-#      $2130/$2132), place the engine banks against that image's __heap_start
+#      (tools/ilvm/ilvm.c keeps the lowest exec() frame in its .bss word
+#      probe_low; the script reads the word's address from the image's
+#      symbols), place the engine banks against that image's __heap_start
 #      exactly as tools/ilvm/build.sh does, and make a 32 KiB probe image;
 #   2. encode the toy and build a ROM from the probe image (no compiler);
 #   3. run it in Mednafen, take the autosaved state, and read the two words
@@ -77,7 +78,10 @@ OUT="$SCRATCH/engine" STAGE="$SCRATCH/engine/hutrack-stage" \
   ENGINE_ZP_BASE=0x2080 ENGINE_BSS_BASE=0x2200 \
   tools/ilvm/build-engine.sh > "$SCRATCH/build-engine-p1.log"
 
-"$CC" -Os -DTOY_STACK_PROBE -mlto-zp=96 -Itools/toyc -Itools/gen \
+# #222: the same size flags build.sh uses, so the probe image fits the two
+# 16 KiB banks with the probe block added.
+"$CC" -Os -Wl,--icf=all -mllvm -inline-threshold=50 -DTOY_STACK_PROBE \
+  -mlto-zp=96 -Itools/toyc -Itools/gen \
   -Wl,--defsym,__rom_bank0=0xc000 \
   -Wl,--defsym,__rom_bank0_size=0x4000 \
   -o "$SCRATCH/probe.pce" tools/ilvm/ilvm_runtime.c tools/ilvm/ilvm.c \
@@ -87,20 +91,25 @@ if [ "$BYTES" != "16384" ]; then
   echo "probe image is $BYTES bytes; expected 16384" >&2
   exit 1
 fi
-HEAP=$(python3 -I - "$LLVM_MOS" "$SCRATCH/probe.pce.elf" <<'PY'
+BUDGET=$(python3 -I - "$LLVM_MOS" "$SCRATCH/probe.pce.elf" <<'PY'
 import subprocess
 import sys
 llvm, elf = sys.argv[1:3]
+heap = low = None
 for line in subprocess.run([llvm + "/bin/llvm-nm", elf],
                            capture_output=True, text=True).stdout.splitlines():
     parts = line.split()
     if len(parts) == 3 and parts[2] == "__heap_start":
-        print("0x%04X" % (int(parts[0], 16) & 0xFFFF))
-        break
-else:
-    raise SystemExit("no __heap_start in " + elf)
+        heap = int(parts[0], 16) & 0xFFFF
+    elif len(parts) == 3 and parts[2] == "probe_low":
+        low = int(parts[0], 16) & 0xFFFF
+if heap is None or low is None:
+    raise SystemExit("no __heap_start/probe_low in " + elf)
+print("0x%04X 0x%04X" % (heap, low))
 PY
 )
+HEAP=${BUDGET%% *}
+LOW_ADDR=${BUDGET##* }
 
 OUT="$SCRATCH/engine" STAGE="$SCRATCH/engine/hutrack-stage" \
   ENGINE_ZP_BASE=0x2080 ENGINE_BSS_BASE="$HEAP" \
@@ -167,17 +176,16 @@ import struct
 
 S = "$SCRATCH"
 ram = open(S + "/dump/ram.bin", "rb").read()
-low = struct.unpack_from("<H", ram, 0x130)[0]   # \$2130: lowest exec() frame
-calls = struct.unpack_from("<H", ram, 0x132)[0] # \$2132: exec() calls
+addr = int("$LOW_ADDR", 0)
+low = struct.unpack_from("<H", ram, addr - 0x2000)[0]  # probe_low (.bss)
 if low == 0:
-    raise SystemExit("the probe never ran: no exec() call reached \$2130")
+    raise SystemExit("the probe never ran: probe_low is still zero")
 depth = 0x4000 - low
 engine = json.load(open(S + "/engine/hutrack-image.json"))["ram"]
 bss_end = engine["bss"]["end"]
 headroom = 0x4000 - bss_end
 print("== stack canary")
 print("  toy                %s" % "$TOY")
-print("  exec() calls       %d" % calls)
 print("  lowest exec frame  \$%04X" % low)
 print("  stack high-water   %d B" % depth)
 print("  engine .bss        \$%04X-\$%04X (%d B)" %

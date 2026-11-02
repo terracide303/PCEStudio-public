@@ -97,9 +97,10 @@ The studio compiles a toy to a small bytecode and glues it to a fixed interprete
 (parallax, status bar, sky gradient, palette cycle) export today, and so does **PLATFORMER** (#186 carried
 the `sat` instruction — its ROM runs in Mednafen at 30 Hz). `sprite()` is carried too, for a spec whose
 slot and fields are constants (#188–#190; its ROM runs at 60 Hz). **DUSK RUN** also builds a 40,960-byte
-ROM (#215's sound interpreter), but it does **not** play: the interpreter refuses its container for
-capacity (39 registers / 41 functions / 15 upvalues against 32 / 32 / 6) and Mednafen shows a black screen
-(#222). The other three games — STARFALL, TOWER and NOVA TIDE — do not yet: each is stopped by a named
+ROM and now loads, runs and draws: #222 raised the interpreter's capacities (41 registers, 41 functions,
+a 19-upvalue closure in a pooled upvalue table) and its VM state is byte-equal to the browser's at browser
+frame 3. Its *displayed* picture is not the browser's yet — the raster backend shows one replay frame per
+GUI frame and 16 pixels of one line lag the write (#223). The other three games — STARFALL, TOWER and NOVA TIDE — do not yet: each is stopped by a named
 finding, and [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five
 (STARFALL's 127-constant pool and the ten sprite specs it cannot pin to constants; TOWER's 8,524-byte
 bytecode against the 8 KiB data bank; NOVA TIDE's `raster` table), with the `raster` table form and the
@@ -142,8 +143,9 @@ and the mutation suites break the engine on purpose to show the tests notice.
 ## What does not work yet
 
 - **Export of the five games**: PLATFORMER exports and runs in Mednafen at 30 Hz (re-measured
-  2026-11-01); the sprite toy runs at 60 Hz; DUSK RUN exports but shows a black screen (its container
-  needs more interpreter registers/functions/upvalues than the image has — #222). STARFALL, TOWER and
+  2026-11-01); the sprite toy runs at 60 Hz; DUSK RUN exports, loads and draws (its state matches the
+  browser's at frame 3 after #222), but its displayed frame is 16 pixels of one line off the browser's
+  — the raster backend's replay (#223). STARFALL, TOWER and
   NOVA TIDE stop on named findings — STARFALL on the 127-constant pool and ten sprite specs it cannot
   pin, TOWER on its 8,524-byte bytecode against the 8 KiB data bank, NOVA TIDE on the `raster` table —
   and [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code, Lua line and refusing file:line

@@ -67,20 +67,41 @@ extern const uint8_t *ilvm_program;
 #define PROG ((const uint8_t *)0x4000)
 #endif
 
-#define MAX_REGS 32            /* the two toys need 21; the encoder's limit
-                                * is 128, the interpreter's is this */
-#define MAX_UPS 6              /* the parallax chunk captures 5 */
-/* #214: the closure table is the budget's biggest lever (25 B a slot) and the
- * zero-page/BaseRAM partition spends it on HuTrack's variables.  16 is the
- * smallest value measured safe across the toys that run today (the host
- * harness at 60 frames: 16 matches 32 on palette, PLATFORMER, parallax and
- * DUSK RUN; 12 already diverges on parallax, 8 on PLATFORMER — see
- * docs/ROM-SOUND.md §5).  The games' 30-44 closure sites need more than even
- * 32 and are a separate, pre-existing limit (the encoder has no closure-count
- * refusal yet). */
-#define MAX_CLOS 16
+#define MAX_REGS 41            /* #222: the toys need 21; the games more —
+                                * DUSK RUN's chunk has 39 and its frame hook
+                                * 41 (tools/ilvm/ilvm.c's boot check).  A
+                                * local array per exec() frame, so the stack
+                                * high-water is depth x 41 words; the canary
+                                * and docs/ROM-SOUND.md §5 carry the measured
+                                * figure.  The encoder's limit is 128. */
+#define MAX_UPS 20             /* #222: the toys capture at most 5; DUSK
+                                * RUN's frame hook captures 19.  Storage is
+                                * the pooled `ups` below, not a per-closure
+                                * array: 16 closures x 19 cells would not fit
+                                * the BaseRAM partition. */
+/* #214: the closure table is the budget's biggest lever and the
+ * zero-page/BaseRAM partition spends it on HuTrack's variables.  #222 keeps
+ * the boot/transient split measured on the host: the containers' top-level
+ * function definitions are created during toy_boot() and must stay valid for
+ * the whole run (DUSK RUN: 27), while closures created later are callbacks
+ * that live only inside the call that made them (DUSK RUN: 30 closures in
+ * 60 frames).  Boot slots are never reused; later closures take a ring above
+ * them.  The ring was 16 with every closure in it for the toys; a game that
+ * creates a closure per frame needs the split, not a bigger ring.  The
+ * table is two bytes a slot (fid and the upvalue pool base, below). */
+#define MAX_CLOS 48
 #define MAX_GLOBALS 32
-#define MAX_FUNCS 32
+#define MAX_FUNCS 41           /* #222: DUSK RUN's container has 41.  The
+                                * encoder has no function-count refusal, so
+                                * the boot check is the only guard. */
+/* #222: the upvalue cells live in one pool.  A per-closure array of MAX_UPS
+ * cells x MAX_CLOS slots (19 x 48 int32 = 3,648 B) cannot fit beside the
+ * engine; the pool holds what boot needs (72 cells measured: DUSK RUN uses
+ * 70 of 96, the toys at most 11) plus a transient ring for the callbacks.
+ * The ring is at least MAX_UPS so any one closure fits after a wrap. */
+#define UP_PERM 72
+#define UP_TRANS 24
+#define UP_POOL (UP_PERM + UP_TRANS)
 /* #183: a call carries up to eight arguments.  Four ride in exec()'s C
  * parameters (a0..a3); a fifth to eighth ride in `xargs`, a fixed
  * extra-argument block exec() copies into r[4..7] at entry.  The block is
@@ -89,8 +110,9 @@ extern const uint8_t *ilvm_program;
  * with four or fewer arguments writes zeroes and keeps its old bytecode. */
 #define MAX_ARGS 8
 #define CALL_ARGS 4            /* the four exec() takes directly */
-#define MAX_SLOTS 32           /* first cut: the table toys need 7; the
-                                * encoder's limit is 255 */
+#define MAX_SLOTS 16           /* #222: the table toys need 7 (tables.lua);
+                                * the encoder allows 255, and the boot check
+                                * is the interpreter's own guard. */
 #define MAX_TABLE_CELLS 192    /* the fixed table pool: 768 B of BaseRAM
                                 * (docs/TABLES-PLAN.md §2.1 says 192 covers
                                 * the three games' 172/33/183 cells).  Must
@@ -98,6 +120,9 @@ extern const uint8_t *ilvm_program;
                                 * TABLE_POOL_CELLS; checkTablesRun asserts the
                                 * two are equal. */
 
+/* #222: llvm-mos does not pad this struct (uint16 fields need no alignment
+ * on the 6502), so a slot is 9 B and 32 slots were 288 B; MAX_FUNCS 41 is
+ * 369 B, the 81 B the capacity costs (docs/ROM-SOUND.md §5). */
 struct fninfo {
   uint16_t codeOff;
   uint16_t codeEnd;
@@ -107,14 +132,22 @@ struct fninfo {
   uint8_t nups;
 };
 
+/* #222: a closure is its function id and where its captured cells sit in
+ * the pool, two bytes.  `exec()` still takes the handle (the slot index) as
+ * before, so the runtime's entry points and the call opcode are unchanged. */
 struct closure {
   uint8_t fid;
-  int32_t up[MAX_UPS];
+  uint8_t upbase;
 };
 
 static struct fninfo fns[MAX_FUNCS];
 static struct closure clos[MAX_CLOS];
-static int32_t kvals[128];
+static int32_t ups[UP_POOL];
+/* #222: the constant table is read from the container's own bytes through
+ * this offset table (2 B a constant) instead of being decoded into 128
+ * int32 (512 B).  The data bank is mapped for the whole run, and a read
+ * from it costs what a RAM read costs. */
+static uint16_t koff[128];
 static int32_t globals[MAX_GLOBALS];
 /* #183's extra-argument block: call writes arguments 5..8 here, the callee
  * copies them into r[4..7] on entry.  Static like the rest of the VM state,
@@ -140,7 +173,11 @@ int ilvm_table_cell_count(void) { return MAX_TABLE_CELLS; }
 static uint8_t nfunc, nglobal, nconst;
 static uint16_t constTabOff;
 static uint8_t init_slot, frame_slot, raster_slot;
-static uint8_t clos_next;
+static uint8_t clos_next;       /* the ring's next slot, after boot */
+static uint8_t boot_end;        /* the first slot the ring may reuse */
+static uint8_t perm_next;       /* the first free permanent upvalue cell */
+static uint8_t trans_next;      /* the transient ring's next cell */
+static uint8_t in_boot;         /* 1 until toy_boot()'s exec() calls end */
 static uint8_t fault;
 
 #ifdef ILVM_HOST
@@ -169,14 +206,15 @@ static void map_sound_banks(void) { }
 /* ---- the stack canary (#214) ------------------------------------------ *
  * The shipped image has no probe.  tools/ilvm/stack-canary.sh rebuilds the
  * same sources with -DTOY_STACK_PROBE, so every exec() entry records the
- * lowest address it has seen and the number of calls, in the free cells of
- * the measurement page above $2127 (docs/ROM_LAYOUT.md; the #169 block ends
- * at $2127 and $2116-$211F is the old canary).  The recorded address is the
+ * lowest address it has seen, in the free cells of the measurement page
+ * above $2127 (docs/ROM_LAYOUT.md; the #169 block ends at $2127 and
+ * $2116-$211F is the old canary).  The recorded address is the
  * llvm-mos soft-stack pointer itself ($2000/$2001, read after exec's
  * prologue), so it is the true bottom of the frame, not a local's address:
  *     stack high-water = $4000 - lowest exec frame.
- * Mednafen's save state (tools/mcs-extract.py --ram) carries the two words
- * back; the script prints them.
+ * Mednafen's save state (tools/mcs-extract.py --ram) carries the word back;
+ * the script prints it.  #222 dropped the call counter: the probe block is
+ * inline in exec and the 16 KiB banks had no room for it.
  *
  * The block is inline, not a helper call: one call added ~400 B to exec and
  * the 16 KiB image has no room for that, while the inline form costs ~31 B. */
@@ -185,8 +223,10 @@ static void map_sound_banks(void) { }
  * $4000 there and `__get_current_stack_top` reads it); __rc0/__rc1 are
  * reserved for it, so no other code uses them. */
 #define STACK_PROBE_SP    ((volatile uint8_t *)0x2000)  /* u16, LE */
-#define STACK_PROBE_LOW   ((volatile uint8_t *)0x2130)  /* u16, LE */
-#define STACK_PROBE_CALLS ((volatile uint8_t *)0x2132)  /* u16, LE */
+/* #222: the high-water word lives in .bss (the script reads its address
+ * from the probe image's symbols), not at the fixed $2130: the byte-packed
+ * store there cost 12 B the 16 KiB banks did not have. */
+static uint16_t probe_low;
 #endif
 
 /* ---- byte readers (data bank 4) --------------------------------------- */
@@ -278,10 +318,42 @@ __attribute__((noinline)) static int32_t lua_shr(int32_t x, int32_t n) {
 
 /* ---- operands --------------------------------------------------------- */
 
+/* #222: read constant `i` from the container's own bytes.  A name or nil is
+ * never a value (the load-time scan refuses unknown types; docs/IL.md §14). */
+__attribute__((noinline)) static int32_t konst(uint8_t i) {
+  uint16_t off;
+  uint8_t t;
+  off = koff[i];
+  t = rb(off);
+  if (t == 0) return ri32((uint16_t)(off + 1));
+  if (t == 1) return rb((uint16_t)(off + 1));
+  return 0;
+}
+
+/* #222: take `n` upvalue cells — permanently while toy_boot() runs, from
+ * the transient ring afterwards.  Returns 0xFF when boot's region is full;
+ * a transient request that does not fit the ring wraps to its start.  The
+ * ring is at least MAX_UPS cells, so any one closure fits after a wrap. */
+/* noinline: inlined twice it cost 154 B the 16 KiB banks do not have. */
+__attribute__((noinline)) static uint8_t up_alloc(uint8_t n) {
+  uint8_t base;
+  if (in_boot) {
+    if ((uint16_t)perm_next + n > UP_PERM) return 0xFF;
+    base = perm_next;
+    perm_next = (uint8_t)(perm_next + n);
+    return base;
+  }
+  base = trans_next;
+  if ((uint16_t)base + n > UP_POOL) base = perm_next;
+  trans_next = (uint8_t)(base + n);
+  if (trans_next >= UP_POOL) trans_next = perm_next;
+  return base;
+}
+
 __attribute__((noinline)) static int32_t operand(const int32_t *r, uint8_t o) {
+  if (o < 0x80) return r[o];
   if (o == 0xFF) return 0;
-  if (o < 0x80) return o < MAX_REGS ? r[o] : 0;
-  return kvals[o & 0x7F];
+  return konst((uint8_t)(o & 0x7F));
 }
 
 /* ---- the interpreter -------------------------------------------------- */
@@ -296,19 +368,10 @@ static int32_t exec(uint8_t fid, uint8_t clh,
 
 #ifdef TOY_STACK_PROBE
   {
-    uint16_t a = (uint16_t)STACK_PROBE_SP[0] |
-                 ((uint16_t)STACK_PROBE_SP[1] << 8);
-    uint16_t lo = (uint16_t)STACK_PROBE_LOW[0] |
-                  ((uint16_t)STACK_PROBE_LOW[1] << 8);
-    uint16_t n = (uint16_t)STACK_PROBE_CALLS[0] |
-                 ((uint16_t)STACK_PROBE_CALLS[1] << 8);
-    if (lo == 0 || a < lo) {
-      STACK_PROBE_LOW[0] = (uint8_t)(a & 0xFF);
-      STACK_PROBE_LOW[1] = (uint8_t)(a >> 8);
-    }
-    n++;
-    STACK_PROBE_CALLS[0] = (uint8_t)(n & 0xFF);
-    STACK_PROBE_CALLS[1] = (uint8_t)(n >> 8);
+    av = (int32_t)((uint16_t)STACK_PROBE_SP[0] |
+                   ((uint16_t)STACK_PROBE_SP[1] << 8));
+    if (probe_low == 0 || (uint16_t)av < probe_low)
+      probe_low = (uint16_t)av;
   }
 #endif
 
@@ -335,14 +398,14 @@ static int32_t exec(uint8_t fid, uint8_t clh,
     switch (op) {
     case 0x01:                     /* const */
       d = rb(pc++); k = rb(pc++);
-      r[d] = kvals[k];
+      r[d] = konst(k);
       break;
     case 0x02:                     /* move */
       d = rb(pc++); r[d] = operand(r, rb(pc++));
       break;
     case 0x03:                     /* getglobal */
       d = rb(pc++); g = rb(pc++);
-      r[d] = g < nglobal ? globals[g] : 0;
+      r[d] = globals[g];
       break;
     case 0x04:                     /* setglobal */
       g = rb(pc++);
@@ -351,29 +414,34 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       break;
     case 0x05:                     /* getupval */
       d = rb(pc++); u = rb(pc++);
-      r[d] = u < MAX_UPS ? clos[clh].up[u] : 0;
+      r[d] = ups[(uint16_t)clos[clh].upbase + u];
       break;
     case 0x06:                     /* setupval */
       u = rb(pc++);
-      if (u < MAX_UPS) clos[clh].up[u] = operand(r, rb(pc++));
-      else pc++;
+      ups[(uint16_t)clos[clh].upbase + u] = operand(r, rb(pc++));
       break;
     case 0x07: {                   /* closure */
       const struct fninfo *tf;
+      uint8_t base;
       d = rb(pc++); k = rb(pc++);
       if (k >= nfunc) { fault = 1; return 0; }
-      tf = &fns[k];
-      if (tf->nups > MAX_UPS) { fault = 1; return 0; }
+      tf = &fns[k];   /* nups was checked for every function at boot */
+      base = up_alloc(tf->nups);
+      if (base == 0xFF) { fault = 1; return 0; }
       u = clos_next;
-      clos_next = (uint8_t)(clos_next + 1);
-      if (clos_next >= MAX_CLOS) clos_next = 1;
+      if (u >= MAX_CLOS) { fault = 1; return 0; }
+      clos_next = (uint8_t)(u + 1);
+      /* During boot boot_end is MAX_CLOS, so a full table is a fault; after
+       * boot it is the first free slot and the ring wraps there. */
+      if (clos_next == MAX_CLOS) clos_next = boot_end;
       clos[u].fid = k;
+      clos[u].upbase = base;
       for (i = 0; i < tf->nups; i++) {
         uint8_t kind = rb((uint16_t)(tf->upOff + i * 2));
         uint8_t idx = rb((uint16_t)(tf->upOff + i * 2 + 1));
-        if (kind == 0) clos[u].up[i] = idx < MAX_REGS ? r[idx] : 0;
-        else if (kind == 1) clos[u].up[i] = idx < MAX_UPS ? clos[clh].up[idx] : 0;
-        else clos[u].up[i] = 0;    /* _ENV: a name, never a value */
+        if (kind == 0) ups[base + i] = r[idx];
+        else if (kind == 1) ups[base + i] = ups[(uint16_t)clos[clh].upbase + idx];
+        else ups[base + i] = 0;    /* _ENV: a name, never a value */
       }
       r[d] = u;
       break;
@@ -397,7 +465,7 @@ static int32_t exec(uint8_t fid, uint8_t clh,
         if (i < CALL_ARGS) args[i] = av;
         else xargs[i - CALL_ARGS] = av;
       }
-      if (u >= MAX_CLOS || clos[u].fid >= nfunc) { fault = 1; return 0; }
+      if (clos[u].fid >= nfunc) { fault = 1; return 0; }
       v = exec(clos[u].fid, u, args[0], args[1], args[2], args[3]);
       if (d != 0xFF) r[d] = v;
       break;
@@ -662,13 +730,17 @@ void toy_boot(void) {
 
   fault = 0;
   clos_next = 1;
+  boot_end = MAX_CLOS;
+  perm_next = 0;
+  trans_next = UP_PERM;
+  in_boot = 1;
   nfunc = 0; nglobal = 0; nconst = 0; nslots = 0;
   init_slot = 0xFF; frame_slot = 0xFF; raster_slot = 0xFF;
   map_sound_banks();           /* the glue's reset/tick jsr page 4 */
   ilvm_sound_reset();
 
   map_data_bank(DATA_BANK);
-  if (rb(0) != 'I' || rb(1) != 'L' || rb(2) != 'B' || rb(3) != 'C') {
+  if (rw(0) != 0x4C49 || rw(2) != 0x4342) {   /* "IL" "BC" */
     fault = 1;
     toy_display_on();
     return;
@@ -712,14 +784,17 @@ void toy_boot(void) {
     }
   }
 
-  /* The constant pool as 32-bit values (names are never values). */
+  /* The constant pool's offsets (a name or nil is never a value).  The
+   * values are read from the container when used (konst): 2 B a constant
+   * instead of 4, the RAM the capacity raise spends. */
   off = constTabOff;
   for (i = 0; i < nconst; i++) {
     uint8_t t = rb(off);
-    if (t == 0) { kvals[i] = ri32((uint16_t)(off + 1)); off = (uint16_t)(off + 5); }
-    else if (t == 1) { kvals[i] = rb((uint16_t)(off + 1)); off = (uint16_t)(off + 2); }
-    else if (t == 3) { kvals[i] = 0; off = (uint16_t)(off + 1); }
-    else if (t == 2) { kvals[i] = 0; off = (uint16_t)(off + 2 + rb((uint16_t)(off + 1))); }
+    koff[i] = off;
+    if (t == 0) off = (uint16_t)(off + 5);
+    else if (t == 1) off = (uint16_t)(off + 2);
+    else if (t == 3) off = (uint16_t)(off + 1);
+    else if (t == 2) off = (uint16_t)(off + 2 + rb((uint16_t)(off + 1)));
     else { fault = 1; toy_display_on(); return; }
   }
 
@@ -748,9 +823,11 @@ void toy_boot(void) {
   for (i = 0; i < MAX_GLOBALS; i++) globals[i] = -1;
 
   /* The chunk is function 0 and is not a closure value (pce-cgen.js calls
-   * it directly).  Closure 0 is its identity: upvalue 0 is _ENV. */
-  clos[0].fid = 0;
-  for (i = 0; i < MAX_UPS; i++) clos[0].up[i] = 0;
+   * it directly).  Closure 0 is its identity: its cells are the pool's
+   * first ones, zeroed, so upvalue 0 is _ENV. */
+  /* clos[0] is {fid 0, upbase 0}: .bss is zero at boot. */
+  /* fns[0].nups <= MAX_UPS <= UP_PERM: the table loop above checked it. */
+  perm_next = fns[0].nups;
   (void)exec(0, 0, 0, 0, 0, 0);
 
   if (init_slot != 0xFF && globals[init_slot] >= 0 &&
@@ -759,6 +836,10 @@ void toy_boot(void) {
     (void)exec(clos[h].fid, h, 0, 0, 0, 0);
   }
 
+  /* #222: everything boot created stays; later closures take the ring
+   * above it. */
+  in_boot = 0;
+  boot_end = clos_next;
   toy_display_on();
 }
 

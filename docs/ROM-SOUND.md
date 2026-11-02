@@ -258,9 +258,16 @@ bytes, `$20DC-$20DD`, which an address-of-last-label count drops).
 | **interpreter after #214** | **5,582** | `$2200-$37CD`, heap start **`$37CE`** | `llvm-nm` |
 | **#215's `ilvm_sound.c` and the glue's frame cell** | **+10** | heap start **`$37D8`** | `llvm-nm` on the #215/#220 build |
 | **interpreter after #215/#220** | **5,592** | `$2200-$37D7`, heap start **`$37D8`** | `llvm-nm` |
-| **HuTrack `.bss`** | **1,111** | `$37D8-$3C2E` | `.sym`: `HuTrack.returnVec` → `EngineBss.end` |
-| **both** | **6,703 of 7,680** | | |
-| **stack headroom** | **977** | `$3C2F-$4000` | `0x4000 − engine end` |
+| #222 `MAX_FUNCS` 32 → 41 (`fninfo` is 9 B a slot: llvm-mos pads nothing) | +81 | | 41 × 9 − 32 × 9 (`llvm-nm` on both objects) |
+| #222 closure table 16 × 25 → 48 × 2 (`fid`, `upbase`; the old slot was 1 + 6 × int32) | −304 | | 400 → 96 B; the upvalues move to the pool below |
+| #222 upvalue pool (`ups`, 72 permanent + 24 transient cells) | +384 | | the boot closures' 70 cells + the callbacks' ring |
+| #222 constant offsets (`koff` 128 × 2) replace `kvals` (128 × 4); `konst()` reads the container | −256 | | 512 → 256 B; the data bank is mapped for the run |
+| #222 `MAX_SLOTS` 32 → 16 (`slot_base`/`cap`/`nfields`) | −64 | | 128 → 64 B; the largest table is tables.lua's 7 sites |
+| #222 the ring's state (`boot_end`, `perm_next`, `trans_next`, `in_boot`) | +4 | | |
+| **interpreter after #222** | **5,438** | `$2200-$373D`, heap start **`$373E`** | `llvm-nm` on `build.sh`'s image (`90d4a655…`) |
+| **HuTrack `.bss`** | **1,111** | `$373E-$3B94` | `.sym`: `HuTrack.returnVec` → `EngineBss.end` |
+| **both** | **6,549 of 7,680** | | |
+| **stack headroom** | **1,131** | `$3B95-$4000` | `0x4000 − engine end` |
 
 The engine's `.bss` is placed at the llvm image's `__heap_start` (the
 staging assembly gets it from `build-engine.sh`, which `build.sh` hands
@@ -296,37 +303,38 @@ compares diff 0 against the browser (check-ilvm's four ILVM captures).
 `tools/ilvm/ilvm.c` has a compile-time probe (`-DTOY_STACK_PROBE`, absent
 from the shipped image): at every `exec()` entry it reads the llvm-mos
 soft-stack pointer (`$2000/$2001`, after the prologue) and keeps the lowest
-value in `$2130` plus the call count in `$2132` — free cells above the #169
-measurement block, which ends at `$2127`. `tools/ilvm/stack-canary.sh`
-rebuilds the same sources with the probe, places the engine banks against
-that image, builds a ROM from `tools/toys/loud.lua` and runs it in Mednafen;
-`tools/mcs-extract.py --ram` brings the two words back. Measured
-2026-11-02 on this machine (`VIDEO_DRIVER=sdl`):
+value in the `.bss` word `probe_low`. `tools/ilvm/stack-canary.sh` rebuilds
+the same sources with the probe, places the engine banks against that
+image, builds a ROM from the toy (default `tools/toys/loud.lua`) and runs it
+in Mednafen; `tools/mcs-extract.py --ram` brings the word back, at the
+address `llvm-nm` gives for `probe_low`. Measured 2026-11-02 on this machine
+(`VIDEO_DRIVER=sdl`), #222 image (`90d4a655…`, headroom 1,131 B):
 
-| toy | exec() calls | lowest frame | stack used |
-|---|---|---|---|
-| `tools/toys/loud.lua` (frame → level1 → level2 → level3 → leaf, five frames; PLATFORMER's shape) on the #215/#220 image | 1,283 | `$3C70` | **912 B** |
-| the same toy with one more level (`level4`, six frames), #214 image | 1,764 | `$3BCD` | **1,075 B** |
-| palette / PLATFORMER / parallax (the first probe, 16 KiB image) | — | `$3E13-$3E15` | 491–493 B |
+| toy | lowest frame | stack used |
+|---|---|---|
+| `tools/toys/loud.lua` (frame → level1 → level2 → level3 → leaf, five frames; PLATFORMER's shape) | `$3BC5` | **1,083 B** |
+| `toys/dusk-run/main.lua` (the game the capacity work is for) | `$3BC5` | **1,083 B** |
 
-The lowest address is deterministic across runs; the call count only tracks
-how long Mednafen ran before the save. The five-level row was re-measured
-on 2026-11-02 after #220 landed (the shipped image's `__heap_start` is
-`$37D8` and the script prints the same 977 B headroom).
+Both toys are five `exec()` frames deep. The lowest address is
+deterministic across runs. `MAX_REGS` 41 makes each frame's register array
+164 B (was 128 B at 32), so the high-water rose from 912 B to **1,083 B**
+and the #222 budget above raised the allowance to 1,131 B: **48 B left**.
+The probe no longer counts calls: the inline block had to fit the 16 KiB
+banks and the counter alone no longer did; `probe_low` staying zero is the
+"probe never ran" evidence. The probe moved out of `$2130` for the same
+reason (the byte-packed store there cost 12 B); the #169 measurement block
+still ends at `$2127`.
 
-So the measured loud toy uses 912 B of the 977 B allowance, leaving
-**65 B**; the #214 run's six-level tree needed 1,075 B against its then
-1,036 B allowance, 39 B over, and this image's allowance is 10 B smaller,
-so that depth is deeper still — not re-measured here. The budget is
-therefore accepted for the call trees the shipping toys and games express,
-not for arbitrary depth: **five nested interpreter frames fit with 65 B to
-spare; six reach the engine block**, and the interpreter has no depth guard
-or encoder refusal yet, so a deeper toy would overwrite the engine's last
-variables rather than fault. That guard (+ the engine-vars trims named
-below) is the follow-up if a game ever needs it. The probe image differs
-from the shipped one by the probe block (~31 B of code); the script prints
-the shipped `__heap_start`, so the measured headroom is the shipped
-headroom.
+The budget is therefore accepted for the call trees the shipping toys and
+games express, not for arbitrary depth: **five nested interpreter frames
+fit with 48 B to spare; six reach the engine block**, and the interpreter
+has no depth guard or encoder refusal yet, so a deeper toy would overwrite
+the engine's last variables rather than fault. That guard (+ the engine-vars
+trims named below) is the follow-up if a game ever needs it. The probe image
+differs from the shipped one by the probe block; the script prints its own
+`__heap_start` (`$3740`, two bytes above the shipped `$373E` because of the
+probe word), so the measurement is on the shipped partition to within that
+word.
 
 If more room is needed, the savings this card did not take are still named
 here: the engine's 64 song slots (192 B → 24 B for 8, plus the `cpx #64`
@@ -567,23 +575,35 @@ re-emits every toy from the new image and asserts the new ROM sha; the
 captures it compares against the browser are unchanged because every
 picture is.
 
-**DUSK RUN exports and does not play.** It builds a 40,960 B ROM
-(sha256 `731f7982…`) and `tests/check-export-games.js` pins it, but
-Mednafen shows an **all-black screen for the whole run** while the counters
-advance (202 updates in 300 frames, 1 overrun, worst 414 lines, 30 Hz —
-a counter verdict is not a playable picture). The shipped interpreter
-refuses the container at boot before writing a pixel: a `-DILVM_HOST`
-probe of `toy_boot()` reports function 0 at **39 registers** against
-`MAX_REGS` 32 and **41 functions** against `MAX_FUNCS` 32
-(`tools/ilvm/ilvm.c:70,83`); raising both in a scratch build moves the
-refusal to function 20's **15 upvalues** against `MAX_UPS` 6. The
-interpreter has no diagnostic for this (a fault is a silent black screen),
-and the encoder has no refusal either. That capacity work is **#222**;
-until it lands there is no browser picture to pin, so the pin records the
-ROM sha and `tests/check-export-games.js` asserts every captured frame is
-black. TOWER is different: it stops earlier, at `toy-data-bank-full`
-(8,524 B of bytecode against the 8 KiB bank), which is a refusal with a
-message and no ROM.
+**DUSK RUN loads, runs and draws; its displayed picture is not the
+browser's yet.** #222 raised the interpreter's capacities — `MAX_REGS` 41
+(the frame hook's register count), `MAX_FUNCS` 41 (the container's function
+count), `MAX_UPS` 20 with the upvalue **pool** (function 39's 19 upvalues
+do not fit 16 closures × a per-closure array), and `MAX_CLOS` 48 with the
+boot/transient split (27 boot closures stay valid; later callbacks share a
+ring above them). The ROM is 40,960 B (sha256 `6524513a…`). Its VM state is
+now byte-equal to the browser's: a Mednafen save state at 20 s has
+VRAM/CRAM/SAT **diff 0 against browser frame 3**, and the `-DILVM_HOST`
+harness matches the browser for 900 frames.
+
+The runtime's base-VRAM buffer was the second half: it held 32 words a
+frame and **dropped** the rest (MEAS flags bit 0), and DUSK's build steps
+write 64 (sprites), 68 (landscape) and 208 (the font step) VRAM words.
+`tools/ilvm/ilvm_runtime.c` now writes an over-buffer word through instead
+of dropping it, which keeps the final VRAM exact; that display frame may
+tear, and the next replay frame is the toy's picture.
+
+**What is still not the browser's picture.** The raster backend arms the
+RCR chain once per toy frame, so only **one display frame** per toy frame
+is a replay; DUSK's build step takes ~37 display frames (the 0.26 Hz build
+projection in ROM_SPEED.md), so a short capture's tail is a stale screen.
+The best replay frame in a 20 s movie is **16 bytes off** — row 16,
+columns 0–15, one colour channel — the raster write's scanline latency
+(`apply_entry0`/RCR ordering). `tests/check-export-games.js` pins DUSK's
+ROM sha and asserts the screen is **not black and not yet a browser frame**;
+card **#223** carries the raster picture. TOWER is different: it stops
+earlier, at `toy-data-bank-full` (8,524 B of bytecode against the 8 KiB
+bank), which is a refusal with a message and no ROM.
 
 ## What is not proven
 
@@ -638,7 +658,8 @@ message and no ROM.
 | **#215** | done | the interpreter ops for note/sfx/release/music call the engine; the per-toy-frame tick; version 3 accepted | `tests/check-rom-sound.js` PASS; version 1 and 2 containers still run; `check-ilvm` green |
 | **#220** | done | the sound ops fit the 32 KiB image (the note table and the cold glue moved to the engine's tables bank) | `build.sh` exits 0, `ilvm.bin` stays 32 KiB, `check-hutrack-image` green |
 | **#221** | done | land #220's image and re-pin what it changed | every re-pinned ROM sha has an old/new Mednafen diff (§10); `check-ilvm` and `check-export-games` green; DUSK RUN's black verdict and TOWER's refusal documented |
-| **#222** | open | the interpreter's capacities: DUSK RUN's container needs 39 registers, 41 functions and 15 upvalues (MAX_REGS 32, MAX_FUNCS 32, MAX_UPS 6) | DUSK RUN's ROM draws a picture in Mednafen and matches the browser; the RAM/stack budget still asserts (`build.sh`) |
+| **#222** | open (umbrella) | the interpreter's capacities: DUSK RUN's container needs 41 registers, 41 functions and 19 upvalues (MAX_REGS 32, MAX_FUNCS 32, MAX_UPS 6) | **done**: MAX_REGS 41 / MAX_FUNCS 41 / MAX_UPS 20 with the pool; the container loads, runs and its state is diff 0 against browser frame 3; build.sh asserts (headroom 1,131 B) and the canary measures 1,083 B. **Left**: the displayed picture (16 bytes on row 16) is #223 |
+| **#223** | open | the raster backend shows one replay frame per toy frame and one scanline's first 16 pixels lag the write | DUSK RUN's Mednafen picture diff 0 against a browser frame, pinned in check-export-games |
 | **#216** | open | a note toy and an sfx toy play in Mednafen | the PSG writes match the studio's frame by frame; the command is above |
 | **#198** | open | the umbrella: everything #212–#216 links | a note toy and an sfx toy play in Mednafen; `check-ilvm`, `check-export-games` green |
 | **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (#216) |

@@ -236,9 +236,10 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
     <tr><td>Export to <code>.pce</code></td><td>Only the simple example toys export, plus PLATFORMER (#186
       carried the <code>sat</code> instruction; re-measured 2026-11-01, it runs at 30 Hz) and the sprite toy
       (#190 carried <code>sprite()</code> for a spec whose slot and fields are constants; it runs at 60 Hz).
-      DUSK RUN also builds a 40,960-byte ROM now (#215's sound interpreter reads its container), but it does
-      <b>not</b> play: the interpreter refuses its container for capacity (39 registers, 41 functions and 15
-      upvalues against 32, 32 and 6) and Mednafen shows a black screen (#222). STARFALL, TOWER and NOVA TIDE
+      DUSK RUN also builds a 40,960-byte ROM and, since #222, loads, runs and draws (41 registers, 41
+      functions, a pooled 19-upvalue closure; its state is byte-equal to the browser's at frame 3). Its
+      displayed frame is not the browser's yet: the raster backend shows one replay frame per GUI frame and
+      16 pixels of one line lag the write (#223). STARFALL, TOWER and NOVA TIDE
       stop on named findings, and the page's Export and the MCP's <code>export_pce</code> stop at different
       ones: the page first runs the C route (STARFALL's <code>abs</code> at <code>main.lua:466</code>,
       TOWER's <code>not</code> at <code>:329</code>, NOVA TIDE's and DUSK RUN's <code>unm</code> at
