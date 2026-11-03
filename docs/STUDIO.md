@@ -35,6 +35,9 @@ Where its "not proven / what comes next" lists below are now out of date, this s
 - **The agent link exists**: the AGENT drawer connects an open tab over the relay (#166, #167), and the same tool
   core runs in the browser and in the stdio server.
 - **The SEQUENCER's songs play in a toy** with `music(0)`; the song is the toy's `song.json`.
+- **A real controller plays the Run view and a toy's page** (#262): the Gamepad API, USB or Bluetooth, Chrome and
+  Safari, with a CONTROLS drawer that shows each pad, lights the buttons down and remaps one by pressing it; the
+  table is saved in the browser (§3.12).
 - **The assembly chain is planned**: the browser PCEAS proof works (#224), `docs/ASM.md` is written (#225), and
   the project view, include file, HuCard builder and HuC6280 core are #230–#235. Opening an existing ROM is #202,
   inside that chain. The compiler to native console code (#101) and the tracker (#226 onward) are planned, not
@@ -1000,6 +1003,35 @@ Not proven: the staff's pixels are judged by a screenshot, not a pixel compariso
 browser takes and the fallback path is what the checks take, so only the fallback is exercised headlessly;
 accidentals are not carried within a bar; and rule 2 is owed (the tests were written with the panel).
 
+### 3.12 CONTROLS: a real controller (#262)
+
+The **CONTROLS** drawer (bottom of the output column; `?bottom=controls` opens it) is where a person sees and fixes a
+controller. It is the browser's **Gamepad API** — USB or Bluetooth, Chrome and Safari — read by
+`renderer/pce-gamepad.js` and drawn by `renderer/studio-panel-controls.js`:
+
+* **One row per connected pad**, with the browser's own `id` and whether it is mapped as a Standard Gamepad, and a
+  **live picture** of the ten PCE buttons (D-pad, I, II, Select, Run, III, IV) with the ones down lit.
+* **The mapping table**: each action and the controller button it is on. **Change** waits for the next button pressed
+  on any pad and makes it that action's source; **Cancel** leaves the table alone; **Reset to defaults** puts the
+  standard layout back. The table is **saved in the browser** (`localStorage`, key `pcestudio.gamepad.v1`), so the
+  studio and `toy.html` on the same origin share it.
+* **The defaults** are the Standard Gamepad: A → I, B → II, Back → Select, Start → Run; the d-pad buttons and the left
+  stick (dead zone 0.5) → the four direction bits; X → III, Y → IV. A pad the browser does not map to `standard` may
+  order its buttons differently — the table is the fix.
+* **Playing.** The page polls the controller **before every frame** it runs and merges the first pad into pad 1
+  beside the keyboard's own object (`heldPad`), so IJKL/NM/OP and a controller work at once and a gamepad frame goes
+  through the same `runtime.setPad` a keyboard frame does. A second connected pad is pad 2 (`runtime.setPad(2, …)`).
+  `renderer/toy.html` polls the same table from `renderer/pce-gamepad.js` in the player's `onInput` hook, so a toy's
+  own page takes a controller the same way.
+* **What is not carried**: III/IV reach the browser's pad object, but the toy API's `pad[n]` is the 2-button pad's
+  eight fields and the cartridge routes do not carry a 6-button pad yet (`docs/PADS.md`, GAP 10), so no toy can read
+  III/IV today. A browser with no Gamepad API (or none connected) gets a sentence in the drawer, not a hidden failure.
+* The headless MCP/test driver is untouched: it still calls the runtime's `setPad` with a scripted pad and never loads
+  this input route. `tests/check-gamepad.js` feeds synthetic Gamepad-API states into the page's own poller and asserts
+  every bit; see §11.2.
+
+---
+
 ## 4. The Docs panel (the generated #61 reference)
 
 The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel under the top bar:
@@ -1052,6 +1084,7 @@ The top-bar **`Docs`** button (and `?docs=<chapter>`) opens a full-width panel u
 | Tab | insert two spaces in the editor (CodeMirror's `Tab`, and the textarea fallback's) |
 | Escape | close the panels/settings/open popovers, the export dialog and the Docs panel |
 | IJKL, N/M, O, P (output focused) | 2-button pad 1: D-pad, I, II, Select, Run (the PCE pad; multitap pads 2–5 are in the runtime but not on the keyboard) |
+| a USB/Bluetooth controller (Chrome, Safari) | pad 1 from the first connected pad, pad 2 from the second, every frame, beside the keyboard; the mapping and its remap are in the CONTROLS drawer (§3.12) |
 | Enter / Tab / Shift+Tab (REGISTERS table) | poke the typed HEX or DECIMAL value at the current frame and stay / move to the next / previous visible row |
 | Escape (REGISTERS table) | cancel the edit (the box snaps back to the value in force) |
 | ↑ / ↓ (REGISTERS table) | move between rows |
@@ -1533,8 +1566,16 @@ status-bar 54400, palette-cycle 52416`, and `toy.html?id=road&selftest=1` reads 
 frame's backdrop — the same shape of check #90 added after a black screenshot passed a model check — and
 the digest is the `pce-toys.js` state the page ran, computed in the page.
 
-### 11.3 Screenshots
+**The #262 controller run** is `tests/check-gamepad.js`, four command-line Chrome loads with no synthetic OS input.
+The pages' `?gamepadtest=1` installs a synthetic provider returning the Gamepad API's own object shape (the same
+objects a real pad gives), presses each button in turn through the page's poller and the play loop's own
+`stepForward`, and publishes what `runtime.pad` held: every PCE bit alone, the left stick's four directions and its
+0.5 dead zone, two pads as pad 1 and pad 2, a held key beside a pad button, a remap begun with `begin("i")` and
+finished by the next press, and the browser store read back on a later page load. The CONTROLS drawer's own text is
+read back too. The suite says, when it runs, that **no physical controller was read** — that is the person's
+five-second check in the drawer.
 
+### 11.3 Screenshots
 The pairs are under `$TMPDIR/pcestudio-design-75/` (§1). `side-by-side-studio.png` puts our Studio beside
 theirs at the same 1600×1000: the column split lands at x=980, the code rows on the same scanlines
 (50/80/116), the dock tab strip on the same scanline (472/473), and the output header/transport/scrubber in

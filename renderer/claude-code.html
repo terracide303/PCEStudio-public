@@ -301,6 +301,10 @@ function frame(t, f) end</code></pre>
     <li><b>Code only</b> (art drawn in code, no <code>source_add</code>): ask Claude to write <code>main.lua</code>
     to a file, then drag it into the studio or use <b>Paste &amp; Run</b>. A plain <code>.lua</code> starts a new toy
     with no art, which is why the art route above is the one to use when there is any art.</li>
+    <li><b>Play it with a controller</b>: a USB or Bluetooth gamepad in Chrome or Safari drives the studio's Run view
+    and the toy's own page — D-pad or left stick, I/II, Select/Run. The <b>CONTROLS</b> drawer (bottom of the output
+    column) lists each connected pad, lights the buttons as you press them, and remaps one by pressing it; the table
+    is saved in the browser and the keyboard keeps working beside it. A second pad is player 2.</li>
     <li>Claude writes inside the folder you started it in; a <code>toy_save</code> path outside that folder is
     refused with <code>save-path</code>. If the file isn't where you expect, ask for the reply's
     <code>path</code>.</li>

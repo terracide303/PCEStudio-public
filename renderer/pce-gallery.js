@@ -120,9 +120,11 @@
     var step = 1000 / 60;
     var rt = null, index = 0, raf = null, last = 0, running = false;
     var error = null, lastFrame = null, torn = false;
-    /* the live pad: the page mutates this object, so the frame after a key
-     * sees it without the page and the runtime holding two copies */
-    var pad = {};
+    /* the live pads: the page mutates these objects, so the frame after a key
+     * or a controller button sees it without the page and the runtime
+     * holding two copies.  pad 1 is the keyboard's and the first gamepad's,
+     * pad 2 the second gamepad's (#262). */
+    var pad = {}, pad2 = {};
 
     function now() {
       return (typeof performance !== "undefined" && performance.now)
@@ -145,7 +147,12 @@
     }
 
     function runOne() {
+      /* #262: a page that reads controllers refreshes its pads here — before
+       * the frame, on every route into the runtime (play and the synchronous
+       * frames()), so a scripted test and a person see the same path. */
+      if (opts.onInput) opts.onInput();
       rt.setPad(1, pad);
+      rt.setPad(2, pad2);
       lastFrame = rt.frame(index);
       index++;
       draw(canvas, lastFrame);
@@ -217,9 +224,13 @@
       /* The pad the page fills from the keys: the object is shared with the
        * runtime, so a key held between frames is seen.  `pad()` is what the
        * evidence reads back, and `state()` is the live SAT the test uses to
-       * find the ship. */
+       * find the ship.  #262 adds the second pad, the runtime's own two-pad
+       * object (what reached the toy) and the per-frame input hook. */
       setPad: function (buttons) { pad = buttons || {}; return pad; },
+      setPad2: function (buttons) { pad2 = buttons || {}; return pad2; },
       pad: function () { return pad; },
+      pad2: function () { return pad2; },
+      runtimePad: function () { return rt ? rt.pad : null; },
       state: function () { return rt ? rt.state : null; },
       dispose: function () { torn = true; pause(); disposeRuntime(); }
     };

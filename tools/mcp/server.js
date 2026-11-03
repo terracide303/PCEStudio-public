@@ -183,6 +183,14 @@ const host = {
     return fs.readFileSync(path.join(ROOT, "renderer", "ilvm.bin"));
   },
 
+  /* asm_build's built-in include (#231): the studio's own pce.inc.  The
+   * mcp-pack walk follows this readFileSync(path.join(ROOT, ...)) to carry
+   * the file in the download. */
+  readAsmInc: function () {
+    return fs.readFileSync(path.join(ROOT, "renderer", "asm", "pce.inc"),
+                           "utf8");
+  },
+
   /* toy_save's path rules, before the envelope is built (the envelope's
    * title defaults to the resolved name's): resolve against the working
    * folder, add the studio's own extension — docs/STUDIO.md §3.7a: .pce.json

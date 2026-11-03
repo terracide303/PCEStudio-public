@@ -1,0 +1,80 @@
+/*
+ * studio-panel-controls.css — the CONTROLS drawer's own styles (card #262).
+ *
+ * A row per connected pad with a live picture of the ten PCE buttons, then
+ * the mapping table and its Change / Reset controls.  The colours are the
+ * page's tokens, so the panel keeps the same chrome as the other drawers
+ * (#102's split).
+ */
+
+.ctl-note {
+  margin: 4px 0 8px;
+  font: 11px/1.45 var(--mono);
+  color: var(--dim);
+}
+.ctl-none {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 3px;
+  color: var(--muted);
+  font: 12px var(--mono);
+}
+
+.ctl-pad {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  background: var(--sunken);
+}
+.ctl-pad-head { font: 12px var(--mono); color: var(--text); }
+.ctl-pad-id { color: var(--dim); }
+
+.pad-pic {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.pad-cell {
+  min-width: 26px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  text-align: center;
+  font: 600 11px/1.2 var(--mono);
+  color: var(--dim);
+  background: var(--pane);
+}
+.pad-cell.is-down {
+  color: var(--accent-ink);
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.ctl-map {
+  margin-top: 4px;
+  border-top: 1px solid var(--line2);
+}
+.ctl-row {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--line2);
+  font: 12px var(--mono);
+}
+.ctl-row.is-waiting { color: var(--accent); }
+.ctl-action { color: var(--text); }
+.ctl-source { color: var(--muted); }
+.ctl-waiting { color: var(--accent); }
+
+.ctl-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.ctl-foot .ctl-note { margin: 0; }

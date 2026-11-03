@@ -141,7 +141,7 @@
   },
   {
     "name": "asm_build",
-    "description": "Assemble the session's assembly project (#230) with renderer/pce-asm.js — PCEAS 3.23 in WebAssembly, the same assembler the studio runs as an assembly project is typed. The entry is main.asm, then main.s, then the first .s/.asm (or pass entry); every other file is an include, so .inc files resolve by name. On success it returns the image's byte count, its sha256, bytes per bank (from the listing), the listing and the symbol table; on a syntax error it returns the errors with their file and line and no bytes. No ROM is built here: the HuCard builder is a later card.",
+    "description": "Assemble the session's assembly project (#230) with renderer/pce-asm.js — PCEAS 3.23 in WebAssembly, the same assembler the studio runs as an assembly project is typed. The entry is main.asm, then main.s, then the first .s/.asm (or pass entry); every other file is an include, so .inc files resolve by name. .include \"pce.inc\" resolves to the studio's own hardware include (renderer/asm/pce.inc, #231) without a copy in the project; a project file of the same name wins. On success it returns the image's byte count, its sha256, bytes per bank (from the listing), the listing and the symbol table; on a syntax error it returns the errors with their file and line and no bytes. No ROM is built here: the studio's HuCard builder (renderer/pce-card.js, #231) turns the image into the .pce the Export button downloads.",
     "inputSchema": {
       "type": "object",
       "properties": {

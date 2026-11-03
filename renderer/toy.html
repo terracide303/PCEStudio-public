@@ -132,6 +132,7 @@
 <script src="pce-toys.js"></script>
 <script src="gallery-toys.js"></script>
 <script src="pce-gallery.js"></script>
+<script src="pce-gamepad.js"></script>
 <script>
 "use strict";
 (function () {
@@ -219,9 +220,20 @@
     tagHost.appendChild(chip);
   }
 
+  /* #262: the browser's Gamepad API, USB or Bluetooth, in Chrome and Safari.
+   * One pad -> PCE pad 1, a second -> pad 2.  The poll happens before every
+   * frame the player runs (onInput), so a frame from a controller takes the
+   * same route into the runtime as a frame from the keyboard. */
+  const gamepad = (PCEStudio.gamepad)
+    ? PCEStudio.gamepad.shared() : null;
+
   player = gallery.player(canvas, toy.source, {
     songs: toy.songs,
     files: toy.files,
+    onInput() {
+      if (gamepad) gamepad.poll();
+      syncPads();
+    },
     onFrame(frame, index) {
       if (index % 10 === 0 || index < 3) status(index);
     },
@@ -232,35 +244,41 @@
    * PAD_KEYS (ppu.toys' SNES pad on the PCE's two-button pad): IJKL is the
    * D-pad, N/M are I/II, O is Select, P is Run.  The page mutates one object
    * and the player shares it with the runtime, so a held key is seen by the
-   * next frame. */
+   * next frame.  #262 merges the controller into pad 1 beside the keyboard
+   * and gives pad 2 to the second controller. */
   const PAD_KEYS = {
     KeyI: "up", KeyK: "down", KeyJ: "left", KeyL: "right",
     KeyN: "i", KeyM: "ii", KeyO: "select", KeyP: "run"
   };
   const heldPad = {};
+  function syncPads() {
+    if (!player) return;
+    const g = gamepad ? gamepad.players() : [{}, {}];
+    player.setPad(Object.assign({}, heldPad, g[0]));
+    player.setPad2(g[1]);
+  }
   function releasePad() {
     for (const k of Object.keys(heldPad)) delete heldPad[k];
-    if (player) player.setPad(heldPad);
+    syncPads();
   }
-  canvas.addEventListener("focus", () => {
-    if (player) player.setPad(heldPad);
-  });
+  canvas.addEventListener("focus", () => syncPads());
   canvas.addEventListener("blur", () => {
-    /* a keyup that lands elsewhere must not leave a button held down */
+    /* a keyup that lands elsewhere must not leave a button held down; a
+     * controller does not need the canvas focused, so its bits stay */
     releasePad();
   });
   canvas.addEventListener("keydown", (e) => {
     const button = PAD_KEYS[e.code];
     if (!button) return;
     heldPad[button] = true;
-    if (player) player.setPad(heldPad);
+    syncPads();
     e.preventDefault();
   });
   canvas.addEventListener("keyup", (e) => {
     const button = PAD_KEYS[e.code];
     if (!button) return;
     delete heldPad[button];
-    if (player) player.setPad(heldPad);
+    syncPads();
     e.preventDefault();
   });
 
@@ -433,6 +451,125 @@
     el.hidden = false;
     el.textContent = JSON.stringify(out);
     document.title = (out.error ? "FAIL" : "PADTEST") + " — " + toy.title;
+  }
+  /* #262's evidence route: a synthetic Gamepad API provider feeds the same
+   * poller, the same per-frame merge and the same runtime.setPad a real pad
+   * does — no OS input, no real controller.  Every PCE bit is pressed on its
+   * own and read back from the runtime's own two-pad object, in both
+   * directions (d-pad buttons and the left stick), with a second pad and
+   * with the keyboard held beside it.  tests/check-gamepad.js launches this
+   * page and asserts the numbers; the page only reports. */
+  if (qs.get("gamepadtest")) {
+    pause();
+    const out = { id: toy.id };
+    const G = PCEStudio.gamepad;
+    const names = ["up", "down", "left", "right", "i", "ii", "select", "run",
+                   "iii", "iv"];
+    const fake = (buttons, axes, name) => ({
+      id: name || "synthetic pad", index: 0, connected: true,
+      mapping: "standard", timestamp: 0,
+      buttons: Array.from({ length: 17 }, (_, i) => ({
+        pressed: !!(buttons && buttons[i]), value: buttons && buttons[i] ? 1 : 0
+      })),
+      axes: axes || [0, 0, 0, 0]
+    });
+    let fakes = [];
+    const provider = () => fakes;
+    try {
+      if (!G) throw new Error("renderer/pce-gamepad.js did not load");
+      gamepad.setProvider(provider);
+      /* what the browser's store held before this run (the reload check);
+       * the bit checks below want the standard layout, so reset it now */
+      out.loadedI = JSON.stringify(gamepad.mapping().i);
+      gamepad.resetMapping();
+      /* one action a frame: the bit is down and none of the other nine is */
+      const only = (bits, action) => {
+        const got = Object.keys(bits).sort();
+        return got.length === 1 && got[0] === action;
+      };
+      out.bits = {};
+      const BUTTON = { up: 12, down: 13, left: 14, right: 15,
+                       i: 0, ii: 1, select: 8, run: 9, iii: 2, iv: 3 };
+      for (const a of names) {
+        fakes = [fake({ [BUTTON[a]]: true })];
+        player.reset();
+        player.frames(1);
+        const p = player.runtimePad() || {};
+        out.bits[a] = !!(p[1] && p[1][a]);
+        out["alone_" + a] = only((p[1] || {}), a);
+      }
+      /* the left stick, through the same route */
+      const stick = (axes, action) => {
+        fakes = [fake({}, axes)];
+        player.reset();
+        player.frames(1);
+        const p = (player.runtimePad() || {})[1] || {};
+        return only(p, action);
+      };
+      out.stickUp = stick([0, -1], "up");
+      out.stickDown = stick([0, 1], "down");
+      out.stickLeft = stick([-1, 0], "left");
+      out.stickRight = stick([1, 0], "right");
+      out.stickDead = (() => {
+        fakes = [fake({}, [0.4, -0.4])];
+        player.reset();
+        player.frames(1);
+        const p = (player.runtimePad() || {})[1] || {};
+        return Object.keys(p).length === 0;
+      })();
+      /* two pads are two players */
+      fakes = [fake({ 12: true }, null, "pad one"),
+               fake({ 13: true }, null, "pad two")];
+      player.reset();
+      player.frames(1);
+      const two = player.runtimePad() || {};
+      out.twoPads = !!(two[1] && two[1].up && two[2] && two[2].down &&
+                       !two[1].down && !two[2].up);
+      /* keyboard and controller at once: pad 1 carries both */
+      fakes = [fake({ 12: true })];
+      canvas.focus();
+      canvas.dispatchEvent(new KeyboardEvent("keydown",
+        { code: "KeyL", key: "l", bubbles: true, cancelable: true }));
+      player.reset();
+      player.frames(1);
+      const both = (player.runtimePad() || {})[1] || {};
+      out.keyboardAndPad = !!(both.up && both.right);
+      canvas.dispatchEvent(new KeyboardEvent("keyup",
+        { code: "KeyL", key: "l", bubbles: true, cancelable: true }));
+      /* remap by pressing: begin on I, press X (button 2), and the same
+       * synthetic pad now presses I */
+      fakes = [fake({})];
+      gamepad.begin("i");
+      fakes = [fake({ 2: true })];
+      gamepad.poll();
+      const cap = gamepad.captured();
+      out.remapped = !!(cap && cap.action === "i" && cap.source.button === 2);
+      out.mappingI = gamepad.mapping().i;
+      out.mappingSaved = (() => {
+        try { return typeof localStorage !== "undefined" &&
+          /"button":2/.test(localStorage.getItem(G.STORE_KEY) || ""); }
+        catch (e) { return false; }
+      })();
+      player.reset();
+      player.frames(1);
+      out.remapReachesToy = !!((player.runtimePad() || {})[1] || {}).i;
+      /* the saved table is what a reload reads back */
+      gamepad.loadMapping();
+      out.mappingReloaded = JSON.stringify(gamepad.mapping().i) === '[{"button":2}]';
+      if (qs.get("gamepadsave")) {
+        out.savedI = JSON.stringify(gamepad.mapping().i);
+      } else {
+        gamepad.resetMapping();
+        out.mappingReset = JSON.stringify(gamepad.mapping().i) === '[{"button":0}]';
+      }
+      fakes = [];
+    } catch (e) {
+      out.error = (e && e.code ? e.code + ": " : "") + ((e && e.message) || e);
+    }
+    const el = $("selftest");
+    el.hidden = false;
+    el.textContent = JSON.stringify(out);
+    document.title = (out.error ? "FAIL" : "GAMEPADTEST") + " — " + toy.title;
   }
 
 })();
