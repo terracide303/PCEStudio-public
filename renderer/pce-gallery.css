@@ -328,3 +328,9 @@ body:not(.is-play) .toy-playbar { display: none; }
   .toy-page { grid-template-columns: minmax(0, 1fr); }
   .browse-heading h1 { font-size: 30px; }
 }
+
+/* "Support me": yellow so it is the one link people see (the maintainer, 2026-11-03) */
+.site-nav a.support-link, a.support-link {
+  background: #ffd23f; color: #1b1400; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+  text-decoration: none; }
+.site-nav a.support-link:hover, a.support-link:hover { background: #ffe27a; color: #1b1400; }

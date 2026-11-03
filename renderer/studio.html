@@ -1137,6 +1137,9 @@
     .workspace { border-right: 0; border-bottom: 1px solid var(--line2); }
     .account, .doc-head .saved { display: none; }
   }
+  /* "Support me": yellow, the one button people see (the maintainer, 2026-11-03) */
+  a.support-link, .btn.support-link { background: #ffd23f; color: #1b1400; font-weight: 700; border-color: #ffd23f; }
+  a.support-link:hover, .btn.support-link:hover { background: #ffe27a; color: #1b1400; }
 </style>
 </head>
 <body>
@@ -1173,7 +1176,7 @@
          title="Resources: the compilers, emulators, trackers and documents PCEStudio is built with">Resources</a>
       <a class="btn" id="btn-tricks" href="tricks.html"
          title="Hardware tricks: the raster bar, palette cycling, line-scroll parallax, fades and the sprite budget, each with a toy to open here">Tricks</a>
-      <a class="btn" id="btn-support" href="https://ko-fi.com/terracide" target="_blank" rel="noopener"
+      <a class="btn support-link" id="btn-support" href="https://ko-fi.com/terracide" target="_blank" rel="noopener"
          title="Support the maker of PCEStudio">Support me</a>
       <button type="button" class="btn" id="btn-save">Save file</button>
       <button type="button" class="btn" id="btn-project" aria-haspopup="dialog"
