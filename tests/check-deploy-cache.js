@@ -17,7 +17,8 @@
  *   3. DIR/index.html redirects to renderer/browse.html, keeps the guide link,
  *      and has a plain 'Open the studio' link to renderer/studio.html.
  *   4. DIR/.htaccess sets `Cache-Control "no-cache"` for .html .js .json .md
- *      .css (the five the card names) and matches nothing else.
+ *      .css .inc (the first five the card names; .inc is #231's include file)
+ *      and matches nothing else.
  *   5. Every local <script src>/<link href> under DIR/renderer carries
  *      ?v=<git short hash> (or &v=, for a URL that already has a query).
  *   6. The repository's own HTML was NOT touched by that run, and carries no
@@ -133,6 +134,9 @@ try {
   const lines = (dry.stdout || "").split(/\r?\n/).map((l) => l.trim());
   check(lines.includes(".htaccess"),
         "--dry lists .htaccess on a line of its own (deploy.sh skips dotfiles)");
+  check(lines.includes("renderer/asm/pce.inc"),
+        "--dry uploads renderer/asm/pce.inc (the studio fetches it for " +
+        "assembly projects, #231)");
 
   /* 3. the site root lands on Browse */
   const indexFile = path.join(stage, "index.html");
@@ -152,8 +156,9 @@ try {
   check(/mod_headers\.c/.test(ht), ".htaccess is guarded by <IfModule mod_headers.c>");
   check(/Header\s+set\s+Cache-Control\s+"no-cache"/.test(ht),
         ".htaccess sets Cache-Control \"no-cache\"");
-  check(/\\\.\(html\|js\|json\|md\|css\)/.test(ht),
-        ".htaccess matches exactly .html .js .json .md .css (images and fonts stay cached)");
+  check(/\\\.\(html\|js\|json\|md\|css\|inc\)/.test(ht),
+        ".htaccess matches exactly .html .js .json .md .css .inc (images and " +
+        "fonts stay cached)");
   check(!/\b(png|jpg|jpeg|gif|svg|woff2?|ttf)\b/.test(ht.replace(/#.*/g, "")),
         "control: .htaccess matches no image or font extension");
 

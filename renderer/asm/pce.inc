@@ -1,241 +1,325 @@
 ;;
-;; pce.inc — the PC Engine's hardware, as PCEAS equates.  (card #231)
+;; pce.inc — PCEStudio's hardware names for HuC6280 assembly (card #231)
 ;;
-;; Written for PCEStudio from docs/MANUALS.md, the studio's reading of the
-;; Hudson manuals — VDC (H7-x), VCE (H6-x), HuC6280 hardware (H8-x) and the
-;; PSG (PB-x) — plus the measured notes in MANUALS §15 where a manual says
-;; nothing (marked "measured" below).  Every name carries its page; nothing
-;; here is copied from HuC or any other SDK, and the names are our own.
+;; This file is ours.  The values come from the register tables in
+;; docs/MANUALS.md, which cite the Hudson manuals by page (H7-x HuC6270 VDC,
+;; H6-x HuC6260 VCE, H8-x HuC6280 hardware, S8-x software, P8-x PSG) and
+;; Charles MacDonald's measured notes for the few fields the manuals leave
+;; open.  No text or spelling is copied from HuC, HuCC or HuDK; where a
+;; manual has no page for a bit, the comment says so.
 ;;
-;; Use:
+;; Use it from a PCEAS source:
 ;;
-;;         .include "pce.inc"
+;;       .include "pce.inc"
 ;;
-;; The studio and the MCP server answer this include name themselves — it is
-;; built in — so an assembly project needs no copy of this file.  (PCEAS
-;; 3.23 accepts both `NAME = $12` and `.equ NAME, $12`; this file uses the
-;; plain form, as our examples do.)
+;; Every name is a `NAME = value` constant, so `.ifndef` sees it as defined
+;; and including the file twice is harmless.  PCEAS writes a bare `$nn`
+;; operand as a zero-page address, not an immediate; use `#` for values.
 ;;
-;; The addresses below are LOGICAL and need MPR0 = $FF (I/O) before use:
-;; the device map is VDC $0000-$0003, VCE $0400-$0407, PSG $0800-$080F,
-;; timer $0C00/$0C01, joypad $1000, IRQ $1402/$1403 (H8-24).
-;;
-;; The VDC is programmed through st0/st1/st2 (PCEAS's own mnemonics for the
-;; register-address / data-low / data-high write sequence): a register name
-;; below goes in st0, e.g. `st0 #VDC_CR / st1 #CR_BB / st2 #$00`.
-;;
+.ifndef PCE_INC
+PCE_INC = 1
 
-;; ---- 1. memory, the MPRs, zero page, stack ------------------------------
+;; ---------------------------------------------------------------------------
+;; CPU: MPR banks and the card's memory map
+;; ---------------------------------------------------------------------------
+;; Eight MPRs each map one 8 KiB physical bank into one 8 KiB logical window.
+;; TAMi/TMAi take a one-hot mask (H8-8, S8-10): MPR0 = $01, ..., MPR7 = $80.
+MPR0_MASK = $01
+MPR1_MASK = $02
+MPR2_MASK = $04
+MPR3_MASK = $08
+MPR4_MASK = $10
+MPR5_MASK = $20
+MPR6_MASK = $40
+MPR7_MASK = $80
 
-;; The CPU sees 64 KB through eight 8 KB windows; the TAMi/TMAi value names
-;; the physical 8 KB block (S8-10, H8-9).  Blocks $00-$F6 are HuCard ROM —
-;; a HuCard decodes $00-$7F, 1 MB (H8-10/11, MANUALS §15.1 GAP 4) — and
-;; $F7-$FF are the fixed pages below.
-MPR_SAVE_RAM    = $F7          ; save RAM (H8-9; the tutorial names it, MANUALS §5.3)
-MPR_RAM         = $F8          ; 8 KB work RAM at $1F0000-$1F1FFF (H8-9)
-MPR_IO          = $FF          ; the I/O block, $1FE000-$1FFFFF (H8-9, H8-24)
+BANK_SIZE       = $2000      ; 8 KiB in one MPR window
+BANK_MASK       = $1FFF      ; the address bits inside one bank
+CARD_BANK_FIRST = $00
+CARD_BANK_LAST  = $7F        ; a HuCard decodes 128 banks = 1 MB
+CARD_BANKS      = 128
+CARD_BYTES      = $100000
 
-ZEROPAGE        = $2000        ; zero page (H8-3)
-STACK           = $2100        ; the 256-byte stack (H8-3, H8-11)
+BANK_WORK_RAM   = $F8        ; the 8 KiB work RAM (H8-9)
+BANK_IO         = $FF        ; the device page
 
-;; ---- 2. the interrupt vectors ------------------------------------------
+;; The MPR a program normally uses, from the reset state (H8-7/H8-18):
+;; MPR7 = 0 after reset, so $E000-$FFFF is physical bank 0 and the reset
+;; vector is at physical $1FFE/$1FFF.  The other windows are chosen by the
+;; program; the viewer uses MPR0 = I/O and MPR1 = work RAM.
+RESET_MPR7_BANK = $00
 
-;; The five vectors sit in the last ten bytes of a bank (H8-12/13).  The
-;; HuCard builder (renderer/pce-card.js) checks the reset vector at the end
-;; of the first bank; after reset MPR7 = 0, so the machine boots from
-;; physical bank 0 (H8-18, measured).
-VEC_IRQ2        = $FFF6        ; also BRK (H8-17)
-VEC_IRQ1        = $FFF8
-VEC_TIMER       = $FFFA
-VEC_NMI         = $FFFC
-VEC_RESET       = $FFFE
+;; ---------------------------------------------------------------------------
+;; Device windows, logical addresses with MPR0 = $FF (H8-24)
+;; ---------------------------------------------------------------------------
+VDC_REG       = $0000   ; write: register select (AR)
+VDC_STATUS    = $0000   ; read:  status (SR)
+VDC_DATA_LO   = $0002   ; VDC data, low byte
+VDC_DATA_HI   = $0003   ; VDC data, high byte
+VCE_CR        = $0400   ; VCE control
+VCE_CTA_LO    = $0402   ; colour-table address, low
+VCE_CTA_HI    = $0403   ; colour-table address, high
+VCE_CTW_LO    = $0404   ; colour-table write, low
+VCE_CTW_HI    = $0405   ; colour-table write, high (auto-increments CTA)
+VCE_CTR_LO    = $0404   ; colour-table read, low
+VCE_CTR_HI    = $0405   ; colour-table read, high (auto-increments CTA)
+PSG_BASE      = $0800   ; PSG register 0; add the register number
+TIMER_COUNT   = $0C00   ; write: reload; read: downcounter
+TIMER_CONTROL = $0C01   ; bit 0 = start
+JOY_PORT      = $1000   ; port K/O: read pads, write SEL/CLR
+IRQ_DISABLE   = $1402   ; interrupt disable (0 = enabled)
+IRQ_REQUEST   = $1403   ; read request; a write acknowledges the timer
 
-;; ---- 3. VDC (HuC6270) — logical $0000-$0003 ----------------------------
+;; ---------------------------------------------------------------------------
+;; HuC6270 VDC — register numbers written to VDC_REG (AR)
+;; ---------------------------------------------------------------------------
+VDC_MAWR  = $00     ; VRAM write address
+VDC_MAAR  = $01     ; VRAM read address
+VDC_VWR   = $02     ; VRAM write data (low, then high starts the write)
+VDC_VRR   = $02     ; VRAM read data
+VDC_CR    = $05     ; control
+VDC_RCR   = $06     ; raster compare
+VDC_BXR   = $07     ; background X scroll (10 bits)
+VDC_BYR   = $08     ; background Y scroll (9 bits)
+VDC_MWR   = $09     ; memory width / screen geometry
+VDC_HSR   = $0A     ; horizontal sync
+VDC_HDR   = $0B     ; horizontal display
+VDC_VPR   = $0C     ; vertical sync
+VDC_VDR   = $0D     ; vertical display
+VDC_VCR   = $0E     ; vertical front porch
+VDC_DCR   = $0F     ; block-transfer control
+VDC_SOUR  = $10     ; block-transfer source
+VDC_DESR  = $11     ; block-transfer destination
+VDC_LENR  = $12     ; block-transfer length (words - 1)
+VDC_DVSSR = $13     ; VRAM-to-SATB source address
 
-VDC_REG         = $0000        ; read: status; write: register address (H7-3, H7-25)
-VDC_REG_H       = $0001        ; register address, high byte
-VDC_DATA        = $0002        ; read/write data, low byte (H7-25)
-VDC_DATA_H      = $0003        ; data, high byte
+;; SR bits read at VDC_STATUS (H7-4).  A read clears CC/OR/RR/DS/DV;
+;; BSY is not cleared.
+VDC_SR_CC  = $01    ; sprite #0 collision
+VDC_SR_OR  = $02    ; more than 16 sprite strips on a line
+VDC_SR_RR  = $04    ; raster compare match
+VDC_SR_DS  = $08    ; SATB transfer done
+VDC_SR_DV  = $10    ; VRAM-to-VRAM transfer done
+VDC_SR_VD  = $20    ; vertical blanking
+VDC_SR_BSY = $40    ; a VRAM access is in flight
 
-;; Register numbers (write to VDC_REG).  R04 is forbidden (H7-3).
-VDC_MAWR        = $00          ; VRAM write address (H7-5)
-VDC_MAAR        = $01          ; VRAM read address (H7-5)
-VDC_VWR         = $02          ; VRAM data, write port (H7-5)
-VDC_VRR         = $02          ; VRAM data, read port — same number (H7-5)
-VDC_CR          = $05          ; control (H7-6)
-VDC_RCR         = $06          ; raster line compare (H7-6)
-VDC_BXR         = $07          ; background X scroll (H7-7)
-VDC_BYR         = $08          ; background Y scroll (H7-7)
-VDC_MWR         = $09          ; memory width (H7-8/9)
-VDC_HSR         = $0A          ; horizontal sync (H7-7)
-VDC_HDR         = $0B          ; horizontal display (H7-7)
-VDC_VPR         = $0C          ; vertical sync (H7-7)
-VDC_VDR         = $0D          ; vertical display (H7-7)
-VDC_VCR         = $0E          ; vertical display end (H7-7)
-VDC_DCR         = $0F          ; DMA control (H7-11)
-VDC_SOUR        = $10          ; DMA source (H7-12)
-VDC_DESR        = $11          ; DMA destination (H7-12)
-VDC_LENR        = $12          ; DMA length; LENR = words - 1; the write of the
-                               ; HIGH byte starts the transfer (H7-12, §15.1 GAP 2)
-VDC_DVSSR       = $13          ; DMA VRAM-SATB source (H7-12)
+;; CR fields (H7-6)
+VDC_CR_IE_CC  = $0001   ; enable the collision interrupt
+VDC_CR_IE_OC  = $0002   ; enable the sprite-overflow interrupt
+VDC_CR_IE_RC  = $0004   ; enable the raster-compare interrupt
+VDC_CR_IE_VC  = $0008   ; enable the VBlank interrupt
+VDC_CR_EX_BOTH_IN  = $0000
+VDC_CR_EX_VSYNC_IN = $0010
+VDC_CR_EX_BOTH_OUT = $0030
+VDC_CR_SB  = $0040   ; sprites on
+VDC_CR_BB  = $0080   ; background on
+VDC_CR_TE_DISPLAY = $0000
+VDC_CR_TE_BURST   = $0100
+VDC_CR_TE_HSYNC   = $0200
+VDC_CR_DR  = $0400   ; DRAM refresh addresses (unused on a HuCard)
+VDC_CR_IW_1   = $0000   ; MAWR/MAAR step +1 word
+VDC_CR_IW_32  = $0800   ; +32 words
+VDC_CR_IW_64  = $1000   ; +64 words
+VDC_CR_IW_128 = $1800   ; +128 words
 
-;; Status (read from VDC_REG).  D5-D0 clear on a read, and a flag is set
-;; only if its interrupt-enable bit is set (H7-4, §15.1 GAP 6).
-SR_CC           = $01          ; sprite collision (H7-4)
-SR_OR           = $02          ; sprite overflow (H7-4)
-SR_RR           = $04          ; raster hit (H7-4)
-SR_DS           = $08          ; DMA done (H7-4)
-SR_DV           = $10          ; vertical blank (H7-4)
-SR_VD           = $20          ; vertical display (H7-4)
-SR_BSY          = $40          ; the CPU's VRAM access is in flight (H7-4)
+;; MWR fields (H7-8/9).  The VM codes are 1, 2 and 4 dot clocks; the
+;; measured notes say codes 1 and 2 both behave as 2-dot (MANUALS §15.1).
+VDC_MWR_VM_1  = $00
+VDC_MWR_VM_2  = $01
+VDC_MWR_VM_4  = $03
+VDC_MWR_SM_1  = $00
+VDC_MWR_SM_2  = $04
+VDC_MWR_SM_4  = $0C
+VDC_MWR_SCREEN_32x32  = $00
+VDC_MWR_SCREEN_64x32  = $10
+VDC_MWR_SCREEN_128x32 = $20
+VDC_MWR_SCREEN_32x64  = $40
+VDC_MWR_SCREEN_64x64  = $50
+VDC_MWR_SCREEN_128x64 = $60
+VDC_MWR_CM = $80     ; 4-clock mode: colour group bit 7
 
-;; CR fields.  Or together and write with st1/st2.
-CR_IE_CC        = $01          ; IRQ on sprite collision (H7-6)
-CR_IE_OC        = $02          ; IRQ on sprite overflow (H7-6)
-CR_IE_RC        = $04          ; IRQ on raster hit (H7-6)
-CR_IE_VC        = $08          ; IRQ on vertical blank (H7-6)
-CR_EX_IN        = $00          ; EX: both pins inputs (H7-6)
-CR_EX_VSYNC_IN  = $10          ; EX: VSYNC input (H7-6)
-CR_EX_OUT       = $30          ; EX: both pins outputs (H7-6)
-CR_SB           = $40          ; sprites on; next horizontal display (H7-6)
-CR_BB           = $80          ; background on; next horizontal display (H7-6)
-CR_TE_DISPLAY   = $00          ; DISP pins: display position (H7-6)
-CR_TE_BURST     = $100         ; DISP pins: burst position (H7-6)
-CR_TE_HSYNC     = $200         ; DISP pins: internal HSYNC (H7-6)
-CR_DR           = $400         ; DRAM refresh (SRAM VRAM ignores it) (H7-6)
-CR_IW_1         = $000         ; MAWR/MAAR auto-increment, words (H7-6)
-CR_IW_32        = $800
-CR_IW_64        = $1000
-CR_IW_128       = $1800
+;; DCR fields (H7-11)
+VDC_DCR_DSC   = $01  ; SATB-transfer-done interrupt
+VDC_DCR_DVC   = $02  ; VRAM-transfer-done interrupt
+VDC_DCR_SRC_DEC = $04  ; source counts down instead of up
+VDC_DCR_DST_DEC = $08  ; destination counts down instead of up
+VDC_DCR_DSR   = $10  ; repeat the VRAM-to-SATB transfer every VBlank
 
-;; MWR fields.  VM/SM: code 0 = 1 dot, codes 1 and 2 are both 2-dot, code
-;; 3 = 4-dot (H7-8; §15.1 GAP 9 measured).  SCREEN: code 0 = 32x32,
-;; 1 = 64x32, 2 and 3 = 128x32, 4 = 32x64, 5 = 64x64, 6 and 7 = 128x64
-;; (H7-8/9).  CM picks the 4-colour bitplane pair in 4-dot mode (H7-9).
-MWR_VM_1DOT     = $00
-MWR_VM_2DOT     = $01
-MWR_VM_4DOT     = $03
-MWR_SM_1DOT     = $00
-MWR_SM_2DOT     = $04
-MWR_SM_4DOT     = $0C
-MWR_SCREEN_32x32 = $00
-MWR_SCREEN_64x32 = $10
-MWR_SCREEN_128x32 = $20
-MWR_SCREEN_32x64 = $40
-MWR_SCREEN_64x64 = $50
-MWR_SCREEN_128x64 = $60
-MWR_CM          = $80
+;; Window register fields (H7-9/10/11).  The stored values are N-1 except
+;; VDS (back porch - 2) and VCR (N, not N-1).
+VDC_HSR_HSW_MASK = $001F
+VDC_HSR_HDS_SHIFT = 8
+VDC_HDR_HDW_MASK = $007F
+VDC_HDR_HDE_SHIFT = 8
+VDC_VPR_VSW_MASK = $001F
+VDC_VPR_VDS_SHIFT = 8
+VDC_VDR_VDW_MASK = $01FF
+VDC_VCR_MASK     = $00FF
 
-;; DCR (H7-11): bits 0/1 are done-IRQ enables, bits 2/3 the decrement
-;; selects, bit 4 the SATB auto-repeat.
-DCR_DSC         = $01          ; SATB-done IRQ (H7-11)
-DCR_DVC         = $02          ; VRAM-done IRQ (H7-11)
-DCR_SDEC        = $04          ; source decrements (H7-11)
-DCR_DDEC        = $08          ; destination decrements (H7-11)
-DCR_DSR         = $10          ; VRAM->SATB auto-repeat, after the display (H7-11)
+;; The canonical 256x240 window this repo's viewer writes (H7-9/10).
+VDC_HSR_256x240 = $0202   ; HDS = 2, HSW = 2
+VDC_HDR_256x240 = $041F   ; HDE = 4, HDW = 31
+VDC_VPR_256x240 = $0F02   ; VDS = 15, VSW = 2
+VDC_VDR_256x240 = $00EF   ; VDW = 239 (240 lines)
+VDC_VCR_256x240 = $000C
 
-;; ---- 4. VCE (HuC6260) — logical $0400-$0407 ----------------------------
+;; RCR counts from 64 at the top of the sweep, so RCR = scan line + $40;
+;; values below $40 never fire (Tech Notes pp. 8-9).
+VDC_RCR_BASE = $40
 
-VCE_CR          = $0400        ; control (H6-3)
-VCE_CTA_L       = $0402        ; colour table address (H6-3)
-VCE_CTA_H       = $0403
-VCE_CTW_L       = $0404        ; colour data (H6-3)
-VCE_CTW_H       = $0405        ; the write of the HIGH byte commits the colour
-                               ; and steps the address (H6-3/4)
-;; A colour word is G8-6, R5-3, B2-0 (H6-3) — nine bits per channel.
-;; The CR bits the manual documents are DCC (bits 1-0), the dot clock
-;; division (H6-3); D2 edge blur, D7 black-and-white and D6-D3 no effect
-;; are measured (MANUALS §15.1 GAP 7).  The examples set D2 and divide-by-4.
-VCE_CR_DCC_DIV4  = $00          ; 5.37 MHz dot clock, 256 px wide (H6-3)
-VCE_CR_DCC_DIV3  = $01          ; 7.16 MHz dot clock (H6-3)
-VCE_CR_BLUR      = $04          ; edge blur (measured, §15.1 GAP 7)
-VCE_CR_BW        = $80          ; black and white (measured, §15.1 GAP 7)
+;; ---------------------------------------------------------------------------
+;; VRAM words
+;; ---------------------------------------------------------------------------
+;; BAT word: 12-bit character code + 4-bit palette (H7-14).
+BAT_CHAR_MASK = $0FFF
+BAT_CG_SHIFT  = 12
+BAT_CG_MASK   = $F000
+;; A BAT word is `char | (cg << BAT_CG_SHIFT)`; write the shifts out, because
+;; PCEAS' `=` is a constant, not a function.
 
-;; ---- 5. PSG (HuC6280's sound half) — logical $0800-$080F -----------------
+;; One background character is 16 VRAM words: four 8x8 planes, CH0..CH3.
+CHAR_WORDS = 16
+CHAR_MASK  = $0FFF
 
-;; R0 selects the channel that R1-R7 act on (0-5; a select alone makes no
-;; sound); R2/R3 are the 12-bit frequency divider, low byte first; R4 is
-;; channel control, R5 the per-channel balance; R6 is one 5-bit sample of
-;; the 32-step wave (or the held level in DDA mode); R7 is noise; R8/R9 the
-;; LFO (PB-2..PB-6).
-PSG_SELECT      = $0800        ; channel select (PB-2)
-PSG_MAINVOL     = $0801        ; main amplitude, one nibble per side (PB-3)
-PSG_FREQ_LO     = $0802        ; frequency LSB (PB-3)
-PSG_FREQ_HI     = $0803        ; frequency MSB, high 4 bits (PB-3)
-PSG_CTRL        = $0804        ; channel control (PB-3)
-PSG_BALANCE     = $0805        ; per-channel L/R volume (PB-4)
-PSG_WAVE        = $0806        ; waveform data (PB-4)
-PSG_NOISE       = $0807        ; noise enable and frequency, channels 4-5 (PB-6)
-PSG_LFO_FREQ    = $0808        ; LFO rate (PB-6)
-PSG_LFO_CTRL    = $0809        ; LFO trigger and depth (PB-6)
+;; A sprite pattern code addresses a 64-word cell: four 16-word SG blocks
+;; (H7-24).  In the SAT the pattern code sits in bits 1-10 of word 2; bit 0
+;; is the 4-colour mode select.
+SPRITE_CELL_WORDS = 64
+SAT_PATTERN_SHIFT = 1
+SAT_PATTERN_MASK  = $07FE
+SAT_4COLOUR      = $0001
 
-PSG_CTRL_ON     = $80          ; channel on (PB-3)
-PSG_CTRL_DDA    = $40          ; DDA mode: the wave data is the held level (PB-3/4)
+;; SAT word 3 fields (H7-21; bit positions are the figure and this repo's
+;; measured sprite scenes, MANUALS §13).
+SAT_W3_PAL_MASK = $000F
+SAT_W3_SPBG     = $0080   ; 1 = in front of the background
+SAT_W3_CGX      = $0100   ; two sprites side by side
+SAT_W3_HFLIP    = $0800
+SAT_W3_CGY_SHIFT = 12
+SAT_W3_CGY_MASK  = $3000
+SAT_W3_VFLIP    = $8000
 
-PSG_NOISE_ON    = $80          ; noise on (channels 4 and 5 only) (PB-6)
+;; SAT word 0/1 are Y and X, 10 bits each; the display's top-left corner is
+;; SAT coordinate (32,64) (H7-21).
+SAT_Y_MASK = $03FF
+SAT_X_MASK = $03FF
+SAT_X_ORIGIN = 32
+SAT_Y_ORIGIN = 64
+SAT_ENTRIES = 64
+SAT_WORDS   = SAT_ENTRIES * 4
+SAT_VRAM_WORD = $7F00     ; the viewer puts the SAT here for the DSR DMA
 
-PSG_LFO_TRIGGER = $80          ; write 1 to restart the LFO cycle (PB-6/8)
-PSG_LFO_OFF     = $00          ; LFO depth: off / 0-shift / 2-bit / 4-bit (PB-6/8)
-PSG_LFO_0SHIFT  = $01
-PSG_LFO_2BIT    = $02
-PSG_LFO_4BIT    = $03
+;; ---------------------------------------------------------------------------
+;; HuC6260 VCE — 512 x 9-bit colours (H6-1/3/4/5)
+;; ---------------------------------------------------------------------------
+VCE_COLOURS = 512
+;; A colour word is G bits 8-6, R bits 5-3, B bits 2-0.
+VCE_G_SHIFT = 6
+VCE_R_SHIFT = 3
+VCE_B_SHIFT = 0
+VCE_CHANNEL_MASK = $07
+VCE_COLOUR_MASK  = $01FF
+;; $100 is colour 0 of the first sprite palette: the border/overscan colour
+;; (Tech Notes pp. 1-2).  $000 is the background's colour 0.
+VCE_BORDER_INDEX  = $100
+VCE_BACKDROP_INDEX = $000
 
-;; ---- 6. timer — logical $0C00/$0C01 -------------------------------------
+;; VCE CR ($0400) fields.  DCC bits 1-0 pick the dot clock.  The manual
+;; gives two values (H6-3); the /2 clock and D2 are from measured notes
+;; (pcetech §6) and D2's meaning is NOT PROVEN (MANUALS §15.3).
+VCE_CR_CLOCK_4 = $00    ; /4, 5.37 MHz, 256-dot display
+VCE_CR_CLOCK_3 = $01    ; /3, 7.16 MHz, 336-dot display
+VCE_CR_CLOCK_2 = $02    ; /2, 10.74 MHz, 512-dot display
+VCE_CR_CLOCK_2B = $03   ; the same /2 clock (measured notes)
+VCE_CR_DCC_MASK = $03
+VCE_CR_D2 = $04         ; edge blur / line select: NOT PROVEN
+VCE_CR_MONO = $80       ; black and white
 
-;; 7-bit: the counter counts down from the reload value at 6.992 kHz
-;; (fMASTER/1024, independent of CSL/CSH); $00 counts as 1 and $7F as 128;
-;; an IRQ is raised on the 0 -> $7F underflow and the counter reloads at
-;; once (H8-20/21, §15.1 GAP 3 measured).  Read the counter twice and
-;; compare — one read can be invalid (H8-21).
-TIMER_COUNTER   = $0C00        ; write: reload; read: downcounter (H8-20/22)
-TIMER_CTRL      = $0C01        ; bit 0 START (H8-20/22)
-TIMER_START     = $01
-TIMER_1_TICK    = $00          ; reload values: 1 tick (H8-21, §15.1 GAP 3)
-TIMER_128_TICKS = $7F          ; 128 ticks (H8-21, §15.1 GAP 3)
+;; ---------------------------------------------------------------------------
+;; HuC6280 PSG — ten registers reached through PSG_BASE (P8-2)
+;; ---------------------------------------------------------------------------
+PSG_R0_CHANNEL   = PSG_BASE + 0   ; $0800 channel select (0-5)
+PSG_R1_MAIN_VOL  = PSG_BASE + 1   ; $0801 L/R master level, one nibble each
+PSG_R2_FREQ_LO   = PSG_BASE + 2   ; $0802 frequency, low 8 bits
+PSG_R3_FREQ_HI   = PSG_BASE + 3   ; $0803 frequency, high 4 bits (F != 0)
+PSG_R4_CONTROL   = PSG_BASE + 4   ; $0804 on, DDA, 5-bit attenuation
+PSG_R5_CHAN_VOL  = PSG_BASE + 5   ; $0805 L/R channel level, one nibble each
+PSG_R6_WAVE      = PSG_BASE + 6   ; $0806 5-bit wave sample
+PSG_R7_NOISE     = PSG_BASE + 7   ; $0807 noise on + 5-bit frequency (ch 5/6)
+PSG_R8_LFO_FREQ  = PSG_BASE + 8   ; $0808 LFO frequency
+PSG_R9_LFO_CTRL  = PSG_BASE + 9   ; $0809 LFO trigger + shift
 
-;; ---- 7. interrupt enable and request — logical $1402/$1403 ---------------
+PSG_CHANNELS = 6
+PSG_WAVE_LENGTH = 32              ; 32 five-bit samples per cycle
+PSG_WAVE_MASK   = $1F
 
-;; $1402 disables interrupts: 0 = enabled; all cleared (enabled) at reset
-;; (H8-16, H8-18/24).  $1403 reads the requests — IRQ2, IRQ1, TIQ — and ANY
-;; write to it resets the timer request (H8-15, §15.1 GAP 3).
-IRQ_DISABLE     = $1402        ; H8-16, H8-24
-IRQD_IRQ2       = $01          ; 1 = IRQ2 disabled (H8-16)
-IRQD_IRQ1       = $02          ; 1 = IRQ1 disabled (H8-16)
-IRQD_TIMER      = $04          ; 1 = timer IRQ disabled (H8-16)
-IRQ_STATUS      = $1403        ; H8-15, H8-24
-IRQR_IRQ2       = $01          ; request bits (H8-15)
-IRQR_IRQ1       = $02
-IRQR_TIQ        = $04          ; the timer request; any write resets it
+PSG_CTRL_ON    = $80
+PSG_CTRL_DDA   = $40
+PSG_CTRL_AL_MASK = $1F             ; 1.5 dB per step, max at $1F
+PSG_VOL_MASK   = $0F               ; one 4-bit level per side (3 dB/step)
+PSG_VOL_LEFT_SHIFT = 4             ; high nibble = left
+PSG_VOL_RIGHT_SHIFT = 0            ; low nibble = right
+PSG_NOISE_ON   = $80
+PSG_NOISE_FREQ_MASK = $1F
+PSG_LFO_TRIGGER = $80
+PSG_LFO_CTRL_MASK = $03
+PSG_LFO_OFF     = 0
+PSG_LFO_SHIFT_1 = 1
+PSG_LFO_SHIFT_2 = 2
+PSG_LFO_SHIFT_4 = 3
 
-;; ---- 8. joypad — logical $1000 ------------------------------------------
+;; ---------------------------------------------------------------------------
+;; Timer (H8-20/21, pcetech §2.2)
+;; ---------------------------------------------------------------------------
+TIMER_RELOAD_MASK = $7F      ; 7-bit reload; $00 counts as 1 tick
+TIMER_START       = $01      ; TIMER_CONTROL bit 0
+TIMER_TICKS_PER_SEC = 6991   ; OSC1 / 3 / 1024 at 21.48 MHz
 
-;; Not in any Hudson manual — the protocol below is the measured note
-;; (MANUALS §15.1 GAP 3, pcetech §4) as our own runtime drives it
-;; (tools/toyc/toy_runtime.c).  In short:
-;;
-;;   1. write PAD_TAP_RESET ($01 then $03) to reset the Turbo Tap so pad 1
-;;      is next; the pad needs ~10 cycles after each write (a PHA/PLA/NOP/NOP
-;;      works) before a read is stable;
-;;   2. write PAD_SEL_1 ($01), wait, READ the pad — the D-pad is on D3-D0;
-;;   3. write PAD_SEL_0 ($00), wait, READ the pad — the buttons are on D3-D0;
-;;   4. repeat 2-3 for each pad the multitap holds.
-;;
-;; The inputs are INVERTED on the wire: a read bit is 0 while its button is
-;; held.  The read byte also carries D7 CD sense, D6 country, and D5/D4
-;; always 1 (measured, §15.1 GAP 3).
-JOYPAD          = $1000
-PAD_SEL_1       = $01          ; write: SEL high, the D-pad comes out on D3-D0
-PAD_SEL_0       = $00          ; write: SEL low, the buttons come out on D3-D0
-PAD_TAP_RESET   = $03          ; write (after $01): CLR 0 -> 1, back to pad 1
+;; ---------------------------------------------------------------------------
+;; Interrupt controller (H8-15/16, H8-24)
+;; ---------------------------------------------------------------------------
+IRQ_DISABLE_NONE  = $00      ; 0 = enabled
+IRQ_DISABLE_IRQ2  = $01
+IRQ_DISABLE_IRQ1  = $02
+IRQ_DISABLE_TIMER = $04
+IRQ_REQUEST_IRQ2  = $01
+IRQ_REQUEST_IRQ1  = $02
+IRQ_REQUEST_TIMER = $04
 
-;; Read bits, 0 = held.
-PAD_II          = $01          ; D0, SEL low (buttons)
-PAD_I           = $02          ; D1
-PAD_SELECT      = $04          ; D2
-PAD_RUN         = $08          ; D3
-PAD_LEFT        = $01          ; D0, SEL high (D-pad)
-PAD_DOWN        = $02          ; D1
-PAD_RIGHT       = $04          ; D2
-PAD_UP          = $08          ; D3
-PAD_CD_SENSE    = $80          ; D7: a CD-ROM^2 unit is attached (measured)
-PAD_COUNTRY     = $40          ; D6: country (measured)
+;; Vectors, at the end of the bank mapped to $E000-$FFFF (H8-12/13).
+VECTOR_IRQ2 = $FFF6
+VECTOR_IRQ1 = $FFF8
+VECTOR_TIMER = $FFFA
+VECTOR_NMI  = $FFFC
+VECTOR_RESET = $FFFE
+
+;; ---------------------------------------------------------------------------
+;; Joypad, port K at $1000 (H8-19; protocol from pcetech §4, PADS.md)
+;; ---------------------------------------------------------------------------
+;; A write drives SEL (bit 0) and CLR (bit 1); a read returns K.  The inputs
+;; are inverted: 0 means pressed.  The five-pad read is
+;;     write $01, write $03          ; reset the tap to pad 1
+;;     for each pad:
+;;       write $01, delay, read     ; SEL = 1: the D-pad
+;;       write $00, delay, read     ; SEL = 0: the buttons
+;; A short delay after every SEL change is required.
+JOY_SEL = $01
+JOY_CLR = $02
+JOY_CLR_ENABLE = $00      ; CLR low enables the port
+JOY_CD = $80              ; D7: CD sense (polarity differs between sources)
+JOY_COUNTRY = $40         ; D6: 0 = Japan, 1 = US
+JOY_ALWAYS_HIGH = $30     ; D5/D4 read 1
+JOY_NONE = $0F            ; an unconnected pad reads $0F
+
+;; SEL = 1 (D-pad), D3..D0
+JOY_PAD_LEFT  = $08
+JOY_PAD_RIGHT = $04
+JOY_PAD_DOWN  = $02
+JOY_PAD_UP    = $01
+;; SEL = 0 (buttons), D3..D0
+JOY_BTN_RUN    = $08
+JOY_BTN_SELECT = $04
+JOY_BTN_II     = $02
+JOY_BTN_I      = $01
+
+.endif

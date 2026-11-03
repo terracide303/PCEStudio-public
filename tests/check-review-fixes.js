@@ -378,6 +378,9 @@ const EXPECTED_SCENES = [
    * picture is one frame of a running animation, and check.js renders it
    * diff 0 at the capture's crop like the other still saves. */
   "tableops-ilvm",
+  /* #231: the first assembly program's HuCard (examples/asm-first): the
+   * background colour and the 8x8 tile, captured by tools/capture-card.sh */
+  "asm-first",
 ];
 
 function outputProblems(stdout, status) {

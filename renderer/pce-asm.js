@@ -5,14 +5,8 @@
  *   const { bytes, errors, listing, sym, out, status } = asm.assemble(
  *     sourceText, {
  *       includes: { "lib/foo.inc": "..." },
- *       builtinIncludes: { "pce.inc": "<the text>" },  // card #231
  *       filename: "main.asm"          // optional; diagnostics name it
  *     });
- *
- * builtinIncludes answers `.include "pce.inc"` without a project copy of
- * the file: the studio's own hardware equates (renderer/asm/pce.inc, from
- * docs/MANUALS.md).  A project file of the same name wins — built-ins are
- * written to the instance's filesystem before `includes`.
  *
  * The work is done by vendor/pceas/: PCEAS 3.23 (the MagicKit assembler,
  * uli/huc@52a556a) compiled to WebAssembly with Emscripten.  See
@@ -264,10 +258,6 @@
 
     var filename = options.filename || "main.asm";
     var includes = options.includes || {};
-    // Built-in includes (card #231): files the caller provides so a source
-    // can `.include "pce.inc"` without carrying its own copy.  Project
-    // files win — the built-ins are written first, `includes` after.
-    var builtins = options.builtinIncludes || {};
     var wantListing = options.listing !== false;
     var source = sourceText;
     // PCEAS writes a .lst only while its .list switch is on, and the switch
@@ -302,11 +292,6 @@
                       (stderr ? ": " + stderr.trim() : ""));
     }
 
-    Object.keys(builtins).forEach(function (name) {
-      var dir = dirname(name);
-      if (dir) mod.FS.mkdirTree(dir);
-      mod.FS.writeFile(name, fileValue(builtins[name]));
-    });
     Object.keys(includes).forEach(function (name) {
       var dir = dirname(name);
       if (dir) mod.FS.mkdirTree(dir);
@@ -406,19 +391,14 @@
    * The first field is bank:address; continuation lines (no source line
    * number) carry it too.  `bytes` counts emitted bytes, `from`/`to` are the
    * address span they cover (to exclusive), so a gap inside a bank shows as
-   * bytes < to - from rather than disappearing.  Bank numbers follow .bank /
-   * physical bank order as PCEAS prints them.  Addresses are bank-relative.
-   *
-   * bankRegions() (card #231) splits each bank into its CONTIGUOUS runs:
-   * every gap in the addresses starts a new region.  The HuCard builder
-   * needs regions, not the merged per-bank span — a merged span cannot tell
-   * "code at $E000 and data at $1000" (fine) from a run that really crossed
-   * the bank's top (overflow).  Note the listing itself shows at most a few
-   * lines of bytes for one long .db, so an oversized .db is invisible to
-   * both readers — PCEAS drops the excess silently (measured).
+   * bytes < to - from rather than disappearing.  `first` is the address of
+   * the first byte-emitting line in listing order (the #231 builder uses it
+   * to catch a source that ran past $FFFF and wrapped: `from` has become the
+   * low wrapped address by then).  Bank numbers follow .bank / physical bank
+   * order as PCEAS prints them.
    */
-  function bankRegions(listing) {
-    var regions = [];
+  function bankSizes(listing) {
+    var byBank = {}, order = [];
     var lines = String(listing || "").split(/\r?\n/);
     /* The listing's byte field starts at column 16: five characters of line
      * number, two spaces, the seven-character bank:address, two spaces.  A
@@ -446,40 +426,21 @@
         pos += 3;
       }
       if (!count) continue;
-      var r = regions[regions.length - 1];
-      /* A run continues the previous one when it is the same bank and the
-       * address picks up exactly where the last byte ended; any gap (an
-       * .org, an instruction further down, a spill PCEAS moved) is a new
-       * region. */
-      if (!r || r.bank !== bank || addr !== r.to) {
-        r = { bank: bank, bytes: 0, from: addr, to: addr };
-        regions.push(r);
-      }
-      r.bytes += count;
-      r.to = addr + count;
-    }
-    return regions;
-  }
-
-  function bankSizes(listing) {
-    var byBank = {}, order = [];
-    var regions = bankRegions(listing);
-    for (var i = 0; i < regions.length; i++) {
-      var r = regions[i];
-      var b = byBank[r.bank];
+      var b = byBank[bank];
       if (!b) {
-        b = byBank[r.bank] = { bank: r.bank, bytes: 0, from: r.from,
-                               to: r.to };
-        order.push(r.bank);
+        b = byBank[bank] = { bank: bank, bytes: 0, from: addr, to: addr,
+                             first: addr };
+        order.push(bank);
       }
-      b.bytes += r.bytes;
-      if (r.from < b.from) b.from = r.from;
-      if (r.to > b.to) b.to = r.to;
+      b.bytes += count;
+      if (addr < b.from) b.from = addr;
+      if (addr + count > b.to) b.to = addr + count;
     }
     order.sort(function (a, b) { return a - b; });
     return order.map(function (n) {
       var b = byBank[n];
-      return { bank: b.bank, bytes: b.bytes, from: b.from, to: b.to };
+      return { bank: b.bank, bytes: b.bytes, from: b.from, to: b.to,
+               first: b.first };
     });
   }
 
@@ -488,8 +449,7 @@
     ready: ready,
     wasmPath: wasmPath,
     entryName: entryName,
-    bankSizes: bankSizes,
-    bankRegions: bankRegions
+    bankSizes: bankSizes
   };
   return api;
 });

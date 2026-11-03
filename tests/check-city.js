@@ -679,9 +679,9 @@ function writeStrip(files) {
     const ox = (i % cols) * cell, oy = Math.floor(i / cols) * ch;
     for (let y = 0; y < ch; y++) for (let x = 0; x < cell; x++) {
       /* the character's own corner of the screen: he walks from x 8 to the
-       * middle at 96, and the middle pose's art (the 40-px run frame centred
-       * in its pair) spans x 108..147, so x 8..152, y 100..220 holds every
-       * pose whole */
+       * middle at 96, and the middle pose's art (the 40-px run frame at its
+       * place in the sheet's 72-px cell, #206) spans x 105..144, so x 8..152,
+       * y 100..220 holds every pose whole */
       const sx = 8 + x, sy = 100 + y;
       if (sx >= WIDTH || sy >= HEIGHT) continue;
       const si = (sy * WIDTH + sx) * 3, oi = ((oy + y) * w + ox + x) * 4;

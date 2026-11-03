@@ -1874,12 +1874,10 @@
       }
       const includes = {};
       for (const f of session.files) if (f.name !== entry) includes[f.name] = f.source;
-      /* #231: pce.inc is built in; a project file of the same name wins
-       * (the wrapper writes built-ins before `includes`). */
-      const builtinIncludes = {};
-      if (typeof host.readAsmInc === "function") {
+      /* #231: pce.inc is built in; a project file of the same name wins. */
+      if (includes["pce.inc"] == null && typeof host.readAsmInc === "function") {
         try {
-          builtinIncludes["pce.inc"] = await host.readAsmInc();
+          includes["pce.inc"] = await host.readAsmInc();
         } catch (e) { /* no pce.inc: the project's own copy still resolves */ }
       }
       try {
@@ -1889,8 +1887,7 @@
       }
       let r;
       try {
-        r = asmLib.assemble(file.source, { filename: entry, includes: includes,
-                                           builtinIncludes: builtinIncludes });
+        r = asmLib.assemble(file.source, { filename: entry, includes: includes });
       } catch (e) {
         refuse("asm-error", errorMessage(e));
       }

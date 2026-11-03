@@ -357,7 +357,7 @@ function listZip(zip) {
     const asmWrite = await client.call("file_write", {
       name: "main.asm",
       source: "\t.include \"pce.inc\"\n\t.code\n\t.bank 0\n" +
-        "\t.org $E000\nstart:\n\tlda #MPR_IO\n\trts\n"
+        "\t.org $E000\nstart:\n\tlda #BANK_IO\n\trts\n"
     });
     check(!asmWrite.isError && asmWrite.body && asmWrite.body.ok,
           "file_write adds an assembly source to the unpacked server");
@@ -368,7 +368,7 @@ function listZip(zip) {
     check(asmBuilt.body && asmBuilt.body.bytes > 0 &&
           /start/.test(asmBuilt.body.sym || ""),
           "the unpacked assembler returns the image and its symbols");
-    check(asmBuilt.body && /MPR_IO/.test(asmBuilt.body.sym || ""),
+    check(asmBuilt.body && /BANK_IO/.test(asmBuilt.body.sym || ""),
           "the unpacked server's built-in pce.inc travelled with the pack");
   } catch (e) {
     check(false, "the unpacked server ran a toy end to end: " + e.message);

@@ -1137,6 +1137,9 @@
     .workspace { border-right: 0; border-bottom: 1px solid var(--line2); }
     .account, .doc-head .saved { display: none; }
   }
+  /* "Support me": yellow, the one button people see (the maintainer, 2026-11-03) */
+  a.support-link, .btn.support-link { background: #ffd23f; color: #1b1400; font-weight: 700; border-color: #ffd23f; }
+  a.support-link:hover, .btn.support-link:hover { background: #ffe27a; color: #1b1400; }
 </style>
 </head>
 <body>
@@ -1158,7 +1161,7 @@
       <span class="rom-status" id="rom-status"
             title="The ROM CHECK drawer: what both cartridge routes carry, as you type">ROM: —</span>
       <button type="button" class="btn btn-accent" id="btn-export"
-              title="Export to ROM — build this toy's .pce in this page (IL bytecode on the interpreter, no compiler)">Export…</button>
+              title="Export to ROM — a toy builds its .pce in this page (IL bytecode on the interpreter, no compiler); an assembly project assembles and downloads its HuCard">Export…</button>
       <button type="button" class="btn" id="btn-panels" aria-haspopup="true"
               aria-expanded="false">Panels ▾</button>
       <button type="button" class="btn btn-icon" id="btn-settings"
@@ -1173,7 +1176,7 @@
          title="Resources: the compilers, emulators, trackers and documents PCEStudio is built with">Resources</a>
       <a class="btn" id="btn-tricks" href="tricks.html"
          title="Hardware tricks: the raster bar, palette cycling, line-scroll parallax, fades and the sprite budget, each with a toy to open here">Tricks</a>
-      <a class="btn" id="btn-support" href="https://ko-fi.com/terracide" target="_blank" rel="noopener"
+      <a class="btn support-link" id="btn-support" href="https://ko-fi.com/terracide" target="_blank" rel="noopener"
          title="Support the maker of PCEStudio">Support me</a>
       <button type="button" class="btn" id="btn-save">Save file</button>
       <button type="button" class="btn" id="btn-project" aria-haspopup="dialog"
@@ -2109,6 +2112,9 @@
      compiler; pce-rom.js has no dependency of its own. -->
 <script src="pce-ilbc.js"></script>
 <script src="pce-rom.js"></script>
+<!-- #231: the assembly project's HuCard builder and the include file it
+     supplies to every assembly project (renderer/asm/pce.inc). -->
+<script src="pce-card.js"></script>
 <script src="pce-validate.js"></script>
 <script src="pce-panels.js"></script>
 <script src="pce-editor.js"></script>
@@ -2172,10 +2178,6 @@
      the URL its ready() is given. -->
 <script src="../vendor/pceas/pceas.js"></script>
 <script src="pce-asm.js"></script>
-<!-- #231: the HuCard builder — turns the assembler's banks into the .pce
-     the Export button downloads; pce.inc (its sibling in asm/) is fetched
-     by the page and handed to pce-asm.js as a built-in include. -->
-<script src="pce-card.js"></script>
 <script src="pce-agent-tools.js"></script>
 <!-- #87: the generated pceglobals.lua document, built from the register,
      pad and helper tables above (the ppuglobals.lua tab ppu.toys has). -->
@@ -3758,10 +3760,29 @@ const ASM_WASM_URL = "../vendor/pceas/pceas.wasm";
 let asmReport = null;
 let asmTimer = null;
 let asmReady = null;
+let asmInclude = null;      /* renderer/asm/pce.inc, supplied as "pce.inc" */
 
 function asmModel() {
   return typeof window !== "undefined" && window.PCEStudio
     ? window.PCEStudio.asm || null : null;
+}
+
+/* #231: every assembly project can `.include "pce.inc"` without carrying a
+ * copy: the studio fetches the canonical file beside this page and hands it
+ * to PCEAS as an include.  A project file of that name wins (the loop below
+ * adds only when the file set has none).  A failed fetch is not fatal — a
+ * project that does not include it still assembles. */
+function loadPceInclude() {
+  if (asmInclude != null) return Promise.resolve(asmInclude);
+  if (typeof fetch !== "function") return Promise.resolve(null);
+  return fetch("asm/pce.inc")
+    .then((res) => (res && res.ok ? res.arrayBuffer() : null))
+    .then((buf) => {
+      if (!buf) return null;
+      asmInclude = new TextDecoder().decode(new Uint8Array(buf));
+      return asmInclude;
+    })
+    .catch(() => null);
 }
 
 function isAssemblyProject() {
@@ -3784,7 +3805,8 @@ function loadAsm() {
   if (!A) return Promise.resolve(null);
   asmReady = Promise.resolve()
     .then(() => A.ready({ wasmUrl: ASM_WASM_URL }))
-    .then(() => loadAsmInc())
+    .then(() => loadPceInclude())
+    .then(() => A)
     .catch((e) => {
       asmReady = null;
       asmReport = { ok: false, entry: asmEntryName(), errors: [{
@@ -3796,27 +3818,6 @@ function loadAsm() {
       return null;
     });
   return asmReady;
-}
-
-/* #231: the built-in include, renderer/asm/pce.inc.  Fetched once, beside
- * the page; a fetch that fails leaves a project's own pce.inc copy (if any)
- * to resolve, and an include of the name with no copy fails in the
- * assembler like any missing include.  Read through arrayBuffer() so the
- * test harness's fetch shim (no .text()) serves it too. */
-let asmIncText = null;
-function loadAsmInc() {
-  if (asmIncText !== null) return Promise.resolve(asmIncText);
-  return Promise.resolve()
-    .then(() => fetch("../renderer/asm/pce.inc"))
-    .then((res) => {
-      if (!res.ok) throw new Error("cannot fetch renderer/asm/pce.inc (" +
-                                   res.status + ")");
-      return res.arrayBuffer();
-    })
-    .then((buf) => {
-      asmIncText = new TextDecoder().decode(new Uint8Array(buf));
-      return asmIncText;
-    });
 }
 
 function assembleAsm() {
@@ -3832,12 +3833,11 @@ function assembleAsm() {
   const src = findFile(entry);
   const includes = {};
   for (const f of files) if (f.name !== entry) includes[f.name] = f.source;
+  if (asmInclude != null && includes["pce.inc"] == null)
+    includes["pce.inc"] = asmInclude;
   let r;
   try {
-    r = A.assemble(src ? src.source : "", {
-      filename: entry, includes: includes,
-      builtinIncludes: asmIncText !== null ? { "pce.inc": asmIncText } : {}
-    });
+    r = A.assemble(src ? src.source : "", { filename: entry, includes: includes });
   } catch (e) {
     asmReport = { ok: false, entry: entry, errors: [{ file: entry, line: 0,
       message: e && e.message ? e.message : String(e) }],
@@ -3876,43 +3876,59 @@ function scheduleAsmBuild() {
   asmTimer = setTimeout(() => { asmTimer = null; runAsmBuild(); }, 300);
 }
 
-/* #231: Export for an assembly project — the HuCard builder (pce-card.js)
- * turns the last good assembly into a .pce (header + banks, $FF-padded to
- * 48 banks) and the browser downloads it.  A card the builder refuses is
- * not downloaded; the toast names the error and its sizes. */
-function exportAsmCard() {
-  runAsmBuild().then(() => {
-    const r = asmReport;
-    if (!r || !r.ok) {
-      toast("Export refused: fix the assembler errors first.");
-      return;
+/* ---- #231: Export is a HuCard for an assembly project ------------------ *
+ * Assemble (the page already does on every edit), hand the banks to
+ * renderer/pce-card.js, and download the .pce.  The result carries the bytes
+ * whatever the download did, so tests/check-studio.js can hold them against
+ * the Node build. */
+function asmCardModel() {
+  return typeof window !== "undefined" && window.PCEStudio
+    ? window.PCEStudio.card || null : null;
+}
+
+function asmCardFileName() {
+  let base = (toyTitle || "card").replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  if (!base) base = "card";
+  return base.replace(/\.(asm|s|lua|json|pce)$/i, "") + ".pce";
+}
+
+function exportAssembly(opts) {
+  return runAsmBuild().then((rep) => {
+    if (!rep || !rep.ok) {
+      const first = rep && rep.errors && rep.errors[0];
+      const where = first
+        ? (first.file || rep.entry || "main.asm") + ":" + first.line + ": " +
+          first.message
+        : "the assembler reported no bytes";
+      toast("Assembly failed: " + where);
+      return { ok: false, code: "asm-error", errors: rep ? rep.errors : [],
+               downloaded: false };
     }
-    const C = typeof window !== "undefined" && window.PCEStudio
-      ? window.PCEStudio.card : null;
-    const A = asmModel();
+    const C = asmCardModel();
     if (!C || typeof C.build !== "function") {
-      toast("Export refused: renderer/pce-card.js did not load.");
-      return;
+      toast("the HuCard builder did not load (pce-card.js)");
+      return { ok: false, code: "card-module", downloaded: false };
     }
-    let card;
+    let rom;
     try {
-      card = C.build(r.bytes, {
-        layout: A && typeof A.bankRegions === "function"
-          ? A.bankRegions(r.listing) : null,
-        pad: true
-      });
+      rom = C.build({ bytes: rep.bytes, banks: rep.banks,
+                      pad384: !!(opts && opts.pad384) });
     } catch (e) {
-      toast("Export refused: " + (e.code ? e.code + " — " : "") + e.message);
-      return;
+      toast(e && e.message ? e.message : String(e));
+      return { ok: false, code: (e && e.code) || "card-error",
+               message: e && e.message ? e.message : String(e),
+               downloaded: false };
     }
-    const name = asmEntryName().replace(/\.[^./]*$/, "") + ".pce";
-    if (downloadBytes(name, card)) {
-      toast("Downloaded " + name + " (" + card.length + " B, " +
-            card[0] + " banks).");
-    } else {
-      toast("Built " + name + " (" + card.length + " B, " + card[0] +
-            " banks), but this browser could not save it.");
-    }
+    const name = asmCardFileName();
+    const downloaded = downloadBytes(name, rom.bytes,
+                                     "application/octet-stream");
+    toast("Exported " + name + " (" + rom.size + " B, " + rom.imageBanks +
+          " bank" + (rom.imageBanks === 1 ? "" : "s") + ")" +
+          (downloaded ? "." : " — the browser did not start the download."));
+    return { ok: true, name: name, bytes: Array.from(rom.bytes),
+             size: rom.size, banks: rom.imageBanks,
+             vector: rom.vector, downloaded: downloaded };
   });
 }
 
@@ -3971,8 +3987,7 @@ function renderAsmReport() {
   if (banks) {
     banks.textContent = r.banks.map((b) =>
       "bank " + b.bank + ": " + b.bytes + " B (" +
-      hex4(b.from) + "–" + hex4(b.to - 1) + ")").join(" · ") +
-      cardReadout();
+      hex4(b.from) + "–" + hex4(b.to - 1) + ")").join(" · ");
   }
   if (listing) {
     let text = "";
@@ -3988,26 +4003,6 @@ function renderAsmReport() {
     if (e.line > 0 && (!e.file || e.file === activeFile)) bad.push(e.line);
   }
   markAsmGutter(bad);
-}
-
-/* #231: what the Export button will write — the .pce the HuCard builder
- * makes of the last good assembly, or the named error that will refuse it.
- * The builder itself is pce-card.js; this only previews it in the readout. */
-function cardReadout() {
-  if (!asmReport || !asmReport.ok) return "";
-  const C = typeof window !== "undefined" && window.PCEStudio
-    ? window.PCEStudio.card : null;
-  if (!C || typeof C.build !== "function") return "";
-  try {
-    const out = C.build(asmReport.bytes, {
-      layout: asmModel() && typeof asmModel().bankRegions === "function"
-        ? asmModel().bankRegions(asmReport.listing) : null,
-      pad: true
-    });
-    return " · card: " + out.length + " B (" + out[0] + " banks, padded)";
-  } catch (e) {
-    return " · card: " + (e.code ? e.code + " — " : "") + e.message;
-  }
 }
 
 /* The generated tab (#87). `showingGlobals` means the editor is showing the
@@ -6663,10 +6658,10 @@ function bind() {
   });
   bindDrops();
   $("btn-export").addEventListener("click", () => {
+    /* #231: an assembly project assembles and downloads its HuCard directly;
+     * the toy dialog is about the IL route and the absent main.lua. */
     if (isAssemblyProject()) {
-      /* #231: assemble (waiting for the wasm and pce.inc), build the card,
-       * download the .pce — or say the named error that refused it. */
-      exportAsmCard();
+      exportAssembly();
       return;
     }
     $("export-modal").hidden = false;
@@ -7504,6 +7499,11 @@ const studio = {
     bytes: Array.from(asmReport.bytes)
   } : null),
   asmBuild: () => runAsmBuild(),
+  /* #231: the Export button's action for an assembly project — assemble,
+   * build the HuCard with renderer/pce-card.js, download it. */
+  exportAssembly: exportAssembly,
+  asmCardName: asmCardFileName,
+  asmCardModel: asmCardModel,
   /* #87 — the generated pceglobals.lua tab. globals() is its text (what the
    * editor shows); showGlobals() opens it; globalsOpen() says whether the
    * editor is showing it. */
