@@ -88,6 +88,11 @@
   </table>
   <h2>3. Assembly for serious developers</h2>
   <p>Many PC Engine developers write assembly. They need no interpreter, no size limit and full control.</p>
+  <div class="box"><b>How we fit with the tools you already use.</b> PCEStudio is meant to sit beside the
+  emulators and assemblers developers trust, not to replace them. Build and look inside here, in the browser,
+  with the chip views and an AI beside you; take the project out as plain files and debug it in
+  <a href="https://github.com/drhelius/Geargrafx">Geargrafx</a> or Mednafen if you want a full debugger.
+  Our own Run panel will stay small on purpose. We are reading what Geargrafx offers (#253) before deciding how far to work with it.</div>
   <div class="box"><b>What you can bring today.</b> Plain PCEAS assembly is the realistic route to reuse once the
   assembly project (#230) and the include file and HuCard builder (#231) land: most plain PCEAS/MagicKit source
   should carry over, with the include-file and macro differences to fix. HuC/HuCC C code and other assemblers
@@ -107,6 +112,7 @@
     <tr><td>Send a build to a flash cart</td><td>Research first: what a browser can do with a Turbo EverDrive or a programmable HuCard.</td><td class="status no">planned</td></tr>
     <tr><td>Run panel and debugger (#235)</td><td>Step, registers, memory, disassembly and breakpoints. Opening any .pce (#202) falls out of it.</td><td class="status no">planned</td></tr>
     <tr><td>Lua toys that call assembly routines</td><td>Fast inner loops in assembly, the rest in Lua.</td><td class="status no">planned</td></tr>
+    <tr><td>Work with Geargrafx (research first, #253)</td><td>Symbol files it loads by itself, and possibly Claude building here and running and breaking there through its MCP server. Not started: the card only reads what it offers.</td><td class="status no">planned</td></tr>
     <tr><td>Take the project out as source</td><td>A plain folder with the assembly, assets and a build script, so nobody is locked in.</td><td class="status no">planned</td></tr>
   </table>
   <h2>4. Working with an AI</h2>
@@ -133,7 +139,7 @@
     <tr><td>Accounts and cloud save</td><td>Only if it can be done with little data and clear privacy.</td><td class="status no">planned</td></tr>
   </table>
   <h2>What we will not build</h2>
-  <p>CD-ROM, Arcade Card and SuperGrafx support are not planned. Art from commercial games is never shipped
+  <p>A rival to Geargrafx or Mednafen: no full emulator and no full debugger. CD-ROM, Arcade Card and SuperGrafx support are not planned. Art from commercial games is never shipped
   with the studio, and sprite ripping is only for your own ROMs and files.</p>
   <p>Have an idea, or want something moved up? <a href="https://github.com/terracide303/PCEStudio-public/issues/new/choose">Tell us</a>.</p>
 </main>
