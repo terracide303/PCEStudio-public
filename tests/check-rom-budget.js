@@ -50,6 +50,7 @@ const guide = require("../renderer/pce-guide.js");
 
 const ROOT = path.join(__dirname, "..");
 const ILVM_C = path.join(ROOT, "tools", "ilvm", "ilvm.c");
+const GUIDE_PATH = path.join(ROOT, "renderer", "pcestudio-for-claude.md");
 const SKILL = path.join(ROOT, "plugin", "skills", "creating-pce-toys",
                         "SKILL.md");
 const MCP_DOC = path.join(ROOT, "docs", "MCP.md");
@@ -284,6 +285,18 @@ function compareRows(name, rows) {
 function checkDocs() {
   const markdown = guide.markdown();
   compareRows("the guide", guideBudgetRows(markdown));
+
+  /* The committed guide too, not only the generator: a hand-typed number in
+   * renderer/pcestudio-for-claude.md must fail here as well as in
+   * check-guide's artifact test. */
+  const committed = fs.readFileSync(GUIDE_PATH, "utf8");
+  compareRows("the committed guide", guideBudgetRows(committed));
+  const guideMutated = committed.replace("| data bank | 8,160 B |",
+                                         "| data bank | 8,192 B |");
+  check(guideBudgetRows(guideMutated)["data bank"] === 8192 &&
+        guideBudgetRows(guideMutated)["data bank"] !==
+          limit("data-bank").limit,
+        "a changed number in the committed guide differs from the constant");
 
   /* The guide is generated: changing a limit in the module changes its
    * bytes.  This is what makes a number typed into the guide impossible. */
