@@ -4,9 +4,12 @@
  * `<name>.pcestudio` is a ZIP (renderer/pce-zip.js) whose layout is the SAME
  * as an unpacked project folder:
  *
- *   project.json          format "pcestudio/1", title, author, created and
- *                         modified, and the file list with each file's kind
+ *   project.json          format "pcestudio/1", kind ("toy" or "assembly"),
+ *                         title, author, created and modified, and the file
+ *                         list with each file's kind
  *   main.lua              the toy, and any other .lua
+ *   main.asm, *.s, *.inc  an assembly project's sources and includes (#230):
+ *                         kind "assembly"; main.lua is not required
  *   tiles.json, palettes.json, sprites.json, waves.json,
  *   sources.json (#156), samples.json, instruments.json, songs.json
  *   NOTES.md              the resume note — goal, what works, what does not,
@@ -32,7 +35,10 @@
  *   project-json     project.json is not JSON / not an object
  *   project-main     the archive has no main.lua
  *   project-name     a file name that is a path or unsafe
- *   project-code     a save that would leave out main.lua
+ *   project-code     a save that would leave out main.lua (a toy) or every
+ *                    .s/.asm source (an assembly project)
+ *   project-main     a toy archive with no main.lua
+ *   project-asm      an assembly archive with no .s/.asm source
  *
  * Docs: docs/PROJECT-FORMAT.md.  Evidence: tests/check-project.js.
  */
@@ -51,6 +57,15 @@
   var ART_DIR = "art/";
   var VERSIONS_DIR = "versions/";
   var MAX_VERSIONS = 8;       /* "a handful"; the oldest is never dropped */
+  /* #230: a project is a toy (main.lua, the default) or an assembly project
+   * (.s/.asm sources and .inc includes, no Lua toy).  project.json's `kind`
+   * says which; a project.json written before #230 has none and is a toy. */
+  var KIND_TOY = "toy";
+  var KIND_ASSEMBLY = "assembly";
+
+  function isAsmSource(name) {
+    return /\.(s|asm)$/i.test(String(name || ""));
+  }
 
   function refuse(code, message) {
     var e = new Error(message);
@@ -74,9 +89,26 @@
     var n = String(name || "");
     if (n === NOTES_NAME) return "notes";
     if (/\.lua$/.test(n)) return "lua";
+    if (/\.[sS]$/.test(n) || /\.asm$/i.test(n)) return "asm";
+    if (/\.inc$/i.test(n)) return "inc";
     if (KINDS[n]) return KINDS[n];
     if (/\.md$/i.test(n)) return "notes";
     return "json";
+  }
+
+  /* The project's kind.  A project.json's own `kind` wins; when it has none
+   * (every project written before #230) the file set decides: no Lua and at
+   * least one .s/.asm is an assembly project, anything else is a toy. */
+  function kindOf(project) {
+    var p = project || {};
+    if (p.kind === KIND_ASSEMBLY || p.kind === KIND_TOY) return p.kind;
+    var files = p.files || [], lua = false, asm = false;
+    for (var i = 0; i < files.length; i++) {
+      var n = files[i] && files[i].name;
+      if (/\.lua$/i.test(String(n || ""))) lua = true;
+      if (isAsmSource(n)) asm = true;
+    }
+    return !lua && asm ? KIND_ASSEMBLY : KIND_TOY;
   }
 
   function isSongKind(kind) { return kind === "song"; }
@@ -161,7 +193,7 @@
    * original bytes), so unticking art visibly removes its weight. */
   function groupOf(file) {
     var kind = fileKind(file.name);
-    if (kind === "lua") return "code";
+    if (kind === "lua" || kind === "asm" || kind === "inc") return "code";
     if (kind === "notes") return "notes";
     if (isSongKind(kind)) return "songs";
     return "assets";
@@ -229,6 +261,7 @@
     var p = project || {}, inc = defaultInclude(include);
     var doc = {
       format: FORMAT,
+      kind: kindOf(p),
       title: String(p.title || ""),
       author: String(p.author || ""),
       created: p.created || "",
@@ -265,18 +298,25 @@
   function entries(project, include) {
     var p = project || {}, inc = defaultInclude(include);
     var doc = projectDoc(p, inc), out = [];
+    var kind = kindOf(p);
     out.push({ name: "project.json",
                bytes: zip.utf8Encode(JSON.stringify(doc, null, 2) + "\n") });
-    var hasMain = false;
+    var hasMain = false, hasAsm = false;
     for (var i = 0; i < (p.files || []).length; i++) {
       var f = p.files[i];
       if (!inc[groupOf(f)]) continue;
       if (f.name === "main.lua") hasMain = true;
+      if (isAsmSource(f.name)) hasAsm = true;
       out.push({ name: safeName(f.name),
                  bytes: zip.utf8Encode(f.source == null ? "" : f.source) });
     }
-    if (!hasMain)
+    if (kind === KIND_ASSEMBLY) {
+      if (!hasAsm)
+        throw refuse("project-code", "an assembly project needs a .s or .asm " +
+                     "file: tick code");
+    } else if (!hasMain) {
       throw refuse("project-code", "a project needs main.lua: tick code");
+    }
     if (inc.art) {
       for (i = 0; i < (p.art || []).length; i++) {
         var a = p.art[i];
@@ -389,14 +429,25 @@
       versions.push(v);
     }
     versions.sort(function (a, b) { return a.dir < b.dir ? -1 : 1; });
-    var hasMain = false;
-    for (i = 0; i < files.length; i++) if (files[i].name === "main.lua") hasMain = true;
-    if (!hasMain) throw refuse("project-main", "the project has no main.lua");
+    var hasMain = false, hasAsm = false;
+    for (i = 0; i < files.length; i++) {
+      if (files[i].name === "main.lua") hasMain = true;
+      if (isAsmSource(files[i].name)) hasAsm = true;
+    }
+    var kind = kindOf(doc);
+    if (kind === KIND_ASSEMBLY) {
+      if (!hasAsm)
+        throw refuse("project-asm", "an assembly project has no .s or .asm " +
+                     "source in it");
+    } else if (!hasMain) {
+      throw refuse("project-main", "the project has no main.lua");
+    }
     var notes = null;
     for (i = 0; i < files.length; i++)
       if (files[i].name === NOTES_NAME) notes = files[i].source;
     return {
       format: FORMAT,
+      kind: kind,
       title: typeof doc.title === "string" ? doc.title : "",
       author: typeof doc.author === "string" ? doc.author : "",
       created: typeof doc.created === "string" ? doc.created : "",
@@ -451,7 +502,8 @@
    * sizes, the notes' first lines, the versions and the originals.  It reads
    * the parsed project, never the page's live state. */
   function describe(project) {
-    var p = project || {}, out = { title: p.title || "", files: [],
+    var p = project || {}, out = { title: p.title || "", kind: kindOf(p),
+                                   files: [],
                                    notes: firstLines(p.notes || "", 4),
                                    versions: [], art: [] };
     for (var i = 0; i < (p.files || []).length; i++) {
@@ -474,7 +526,11 @@
     ART_DIR: ART_DIR,
     VERSIONS_DIR: VERSIONS_DIR,
     MAX_VERSIONS: MAX_VERSIONS,
+    KIND_TOY: KIND_TOY,
+    KIND_ASSEMBLY: KIND_ASSEMBLY,
     fileKind: fileKind,
+    kindOf: kindOf,
+    isAsmSource: isAsmSource,
     groupOf: groupOf,
     titleFromName: titleFromName,
     zipName: zipName,

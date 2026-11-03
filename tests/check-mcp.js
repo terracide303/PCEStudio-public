@@ -9,7 +9,8 @@
  *      capabilities.tools, serverInfo) and `ping`.
  *   2. `tools/list` lists every tool with a schema: toy_write, toy_run,
  *      source_add, frame_png, registers_get, register_set, validate,
- *      export_pce, docs — each an object schema with properties.
+ *      export_pce, docs, project_save/project_open, and #230's file_read,
+ *      file_write and asm_build — each an object schema with properties.
  *   3. It writes #29's parallax toy, runs 60 frames, and the PNG at frame 60
  *      is #29/check-examples' frame 60: the committed
  *      tests/dumps/examples/parallax.png, decoded pixel for pixel.  Frame 60
@@ -587,8 +588,9 @@ function usedChannels(song) {
     check(!list.error, "tools/list answers without a JSON-RPC error");
     const tools = list.result.tools || [];
     const names = tools.map((t) => t.name).sort();
-    eq("tools/list lists exactly the server's fourteen tools", names, [
-      "docs", "export_pce", "frame_png", "project_open", "project_save",
+    eq("tools/list lists exactly the server's seventeen tools", names, [
+      "asm_build", "docs", "export_pce", "file_read", "file_write",
+      "frame_png", "project_open", "project_save",
       "register_set", "registers_get", "rom_check", "song_write",
       "source_add", "toy_run", "toy_save", "toy_write", "validate"
     ]);
@@ -624,6 +626,16 @@ function usedChannels(song) {
     eq("project_open requires path",
        list.result.tools.filter((t) => t.name === "project_open")[0]
            .inputSchema.required, ["path"]);
+    /* #230: an assembly project's file set and build */
+    eq("file_read requires name",
+       list.result.tools.filter((t) => t.name === "file_read")[0]
+           .inputSchema.required, ["name"]);
+    eq("file_write requires name and source",
+       list.result.tools.filter((t) => t.name === "file_write")[0]
+           .inputSchema.required, ["name", "source"]);
+    eq("asm_build takes an entry source",
+       list.result.tools.filter((t) => t.name === "asm_build")[0]
+           .inputSchema.properties.entry.type, "string");
     eq("source_add's kinds are the picture kinds and song",
        list.result.tools.filter((t) => t.name === "source_add")[0]
            .inputSchema.properties.kind.enum,

@@ -318,6 +318,22 @@
   .editor .cm-variable, .editor .cm-variable-2 { color: var(--text2); }
   .editor .cm-operator { color: var(--muted); }
   .editor.no-gutter .CodeMirror-gutters { display: none; }
+  /* #230: an assembly project's readout sits under the editor — the status,
+     bytes per bank, and the listing (with the errors above it). */
+  .code-pane.is-asm { grid-template-rows: 30px 36px minmax(0, 1fr) minmax(90px, 34%); }
+  .asm-readout {
+    border-top: 1px solid var(--line2); background: var(--pane2);
+    padding: 8px 12px; overflow: auto; min-height: 0;
+  }
+  .asm-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .asm-status { font: 11px var(--mono); color: var(--muted); }
+  .asm-status.is-ok { color: var(--cyan); }
+  .asm-status.is-bad { color: var(--accent); }
+  .asm-banks { font: 11px var(--mono); color: var(--dim); }
+  .asm-listing {
+    margin: 6px 0 0; max-height: 26vh; overflow: auto; color: var(--text2);
+    font: 11px/1.45 var(--mono); white-space: pre;
+  }
   .assets { padding: 14px 18px; overflow: auto; }
   .assets h2 {
     font-size: 11px; letter-spacing: 0.1em; color: var(--muted);
@@ -1188,6 +1204,18 @@
         <div class="editor" id="editor-pane">
           <pre class="gutter" id="gutter" aria-hidden="true">1</pre>
           <textarea id="source" spellcheck="false" aria-label="Toy source"></textarea>
+        </div>
+        <!-- #230: an assembly project's build while it is typed.  The status
+             is bytes and banks (or the error count), the line under it the
+             listing with the errors above it; the editor's gutter marks the
+             active file's error lines. -->
+        <div class="asm-readout" id="asm-readout" hidden>
+          <div class="asm-head">
+            <span class="asm-status" id="asm-status">ASM: —</span>
+            <span class="asm-banks" id="asm-banks"></span>
+          </div>
+          <pre class="asm-listing" id="asm-listing"
+               aria-label="Assembler listing"></pre>
         </div>
         <div class="assets" id="assets-pane" hidden>
           <h2>ASSETS</h2>
@@ -2137,6 +2165,13 @@
      and the AGENT panel runs Claude's calls through it.  It reads every module
      above at load, so it comes after them. -->
 <script src="relay-config.js"></script>
+<!-- #230: PCEAS 3.23 in WebAssembly and its wrapper (#224).  The studio
+     assembles an assembly project on every edit with these; the MCP server's
+     asm_build calls the same wrapper, so both return the same bytes.  The
+     vendored script defines createPceas; the wrapper fetches the .wasm from
+     the URL its ready() is given. -->
+<script src="../vendor/pceas/pceas.js"></script>
+<script src="pce-asm.js"></script>
 <script src="pce-agent-tools.js"></script>
 <!-- #87: the generated pceglobals.lua document, built from the register,
      pad and helper tables above (the ppuglobals.lua tab ppu.toys has). -->
@@ -3079,6 +3114,19 @@ function stepForward() {
 function applySource() {
   clearError();
   pause();
+  /* #230: an assembly project has no Lua toy to build a runtime from.  Its
+   * "apply" is the assembler: errors and the listing appear under the editor,
+   * and there is nothing on the output canvas to run yet (#231/#232-235). */
+  if (isAssemblyProject()) {
+    if (runtime) { try { runtime.dispose(); } catch (e) { /* already gone */ } }
+    runtime = null;
+    currentFrame = -1;
+    /* show the readout at once ("ASM: —"), then the build fills it */
+    renderAsmReport();
+    runAsmBuild();
+    $("saved").textContent = "saved in this browser";
+    return true;
+  }
   padLog = [];
   try { rebuild(); }
   catch (e) {
@@ -3149,6 +3197,13 @@ function tick(now) {
 }
 
 function play() {
+  /* #230: no CPU model runs an assembly project's bytes yet.  Say so rather
+   * than leave the previous toy's picture on the canvas. */
+  if (isAssemblyProject()) {
+    toast("An assembly project builds bytes and a listing; running them needs " +
+          "the HuCard builder (#231) and the CPU core (#232-235).");
+    return;
+  }
   if (!runtime && !applySource()) return;
   /* #144: only a playhead parked on the last frame (where a scrub can put it)
    * restarts from 0; one that has played past Length resumes where it is. */
@@ -3658,11 +3713,19 @@ function findFile(name) {
 function mainSource() {
   const f = findFile("main.lua");
   if (f) return f.source;
+  /* #230: an assembly project has no Lua toy; the previous toy's source must
+   * not stand in for one. */
+  if (isAssemblyProject()) return "";
   return current.source || "";
 }
 
 function fileKind(name) {
   if (/\.lua$/.test(name)) return "lua";
+  /* #230: an assembly project's files.  `.s`/`.asm` are sources, `.inc` an
+   * include; all three are code, and a project with one is an assembly
+   * project (there is no main.lua). */
+  if (/\.s$|\.asm$/i.test(name)) return "asm";
+  if (/\.inc$/i.test(name)) return "inc";
   if (/^NOTES\.md$/.test(name)) return "notes";
   if (/^tiles\.json$/.test(name)) return "tiles";
   if (/^palettes\.json$/.test(name)) return "palettes";
@@ -3673,6 +3736,188 @@ function fileKind(name) {
   if (/^instruments\.json$/.test(name)) return "instruments";
   if (/^songs?\.json$/.test(name)) return "song";
   return "json";
+}
+
+/* ---- #230: an assembly project ---------------------------------------- *
+ * A project whose files include a .s/.asm source (and normally .inc
+ * includes) is an assembly project: there is no main.lua, the editor shows
+ * one tab per file, and every edit assembles the entry with
+ * renderer/pce-asm.js (PCEAS 3.23 in WebAssembly).  The result — errors with
+ * their file and line, the listing, bytes per bank — is shown under the
+ * editor and the active file's error lines are marked in the gutter.
+ *
+ * The entry is renderer/pce-asm.js's own rule (main.asm, then main.s, then
+ * the first .s/.asm), and every OTHER project file goes to PCEAS as an
+ * include, so a .inc or an included .s is found by the name PCEAS is asked
+ * to include.  No ROM is built here: that is #231's HuCard builder. */
+const ASM_WASM_URL = "../vendor/pceas/pceas.wasm";
+let asmReport = null;
+let asmTimer = null;
+let asmReady = null;
+
+function asmModel() {
+  return typeof window !== "undefined" && window.PCEStudio
+    ? window.PCEStudio.asm || null : null;
+}
+
+function isAssemblyProject() {
+  return files.some((f) => fileKind(f.name) === "asm" ||
+                           fileKind(f.name) === "inc");
+}
+
+function asmEntryName() {
+  const A = asmModel();
+  return A && typeof A.entryName === "function"
+    ? A.entryName(files) : "main.asm";
+}
+
+/* Load the wasm once.  Node's pce-asm.js resolves immediately; a browser
+ * fetches the .wasm from the page's own URL.  A failed load is reported like
+ * an assembler error and retried on the next edit. */
+function loadAsm() {
+  if (asmReady) return asmReady;
+  const A = asmModel();
+  if (!A) return Promise.resolve(null);
+  asmReady = Promise.resolve()
+    .then(() => A.ready({ wasmUrl: ASM_WASM_URL }))
+    .catch((e) => {
+      asmReady = null;
+      asmReport = { ok: false, entry: asmEntryName(), errors: [{
+        file: null, line: 0,
+        message: "the assembler did not load: " + (e && e.message ? e.message : e)
+      }], bytes: new Uint8Array(0), byteLength: 0, banks: [], listing: "",
+        sym: "", status: -1 };
+      renderAsmReport();
+      return null;
+    });
+  return asmReady;
+}
+
+function assembleAsm() {
+  const A = asmModel();
+  const entry = asmEntryName();
+  if (!A) {
+    asmReport = { ok: false, entry: entry, errors: [{ file: null, line: 0,
+      message: "renderer/pce-asm.js did not load" }], bytes: new Uint8Array(0),
+      byteLength: 0, banks: [], listing: "", sym: "", status: -1 };
+    renderAsmReport();
+    return asmReport;
+  }
+  const src = findFile(entry);
+  const includes = {};
+  for (const f of files) if (f.name !== entry) includes[f.name] = f.source;
+  let r;
+  try {
+    r = A.assemble(src ? src.source : "", { filename: entry, includes: includes });
+  } catch (e) {
+    asmReport = { ok: false, entry: entry, errors: [{ file: entry, line: 0,
+      message: e && e.message ? e.message : String(e) }],
+      bytes: new Uint8Array(0), byteLength: 0, banks: [], listing: "",
+      sym: "", status: -1 };
+    renderAsmReport();
+    return asmReport;
+  }
+  const errors = r.errors || [];
+  asmReport = {
+    ok: errors.length === 0 && r.status === 0,
+    entry: entry,
+    errors: errors,
+    bytes: r.bytes,
+    byteLength: r.bytes ? r.bytes.length : 0,
+    banks: typeof A.bankSizes === "function" ? A.bankSizes(r.listing) : [],
+    listing: r.listing || "",
+    sym: r.sym || "",
+    status: r.status
+  };
+  renderAsmReport();
+  return asmReport;
+}
+
+/* Assemble now (after the wasm is ready).  Returns a Promise because a
+ * browser's first call fetches the .wasm; the edit path ignores it and the
+ * evidence awaits it. */
+function runAsmBuild() {
+  return loadAsm().then(() => assembleAsm());
+}
+
+function scheduleAsmBuild() {
+  if (!isAssemblyProject()) return;
+  if (typeof setTimeout !== "function") { runAsmBuild(); return; }
+  if (asmTimer) clearTimeout(asmTimer);
+  asmTimer = setTimeout(() => { asmTimer = null; runAsmBuild(); }, 300);
+}
+
+function hex4(n) {
+  return "$" + Math.max(0, Number(n) || 0).toString(16).toUpperCase()
+    .padStart(4, "0");
+}
+
+let asmProblemLines = [];
+let asmCodeMarks = [];
+
+/* The active file's lines with a finding, marked in the gutter.  CodeMirror
+ * gets its own marker (as ROM CHECK's does); the textarea fallback's gutter
+ * is drawn by drawGutter(). */
+function markAsmGutter(lines) {
+  if (editor) {
+    for (const n of asmCodeMarks)
+      editor.setGutterMarker(n - 1, "CodeMirror-linenumbers", null);
+    asmCodeMarks = [];
+    for (const n of lines) {
+      const el = document.createElement("span");
+      el.className = "rom-line";
+      el.textContent = String(n);
+      editor.setGutterMarker(n - 1, "CodeMirror-linenumbers", el);
+      asmCodeMarks.push(n);
+    }
+  }
+  asmProblemLines = lines;
+  drawGutter();
+}
+
+function renderAsmReport() {
+  const on = isAssemblyProject();
+  const pane = $("code-pane");
+  if (pane) pane.classList.toggle("is-asm", on);
+  const box = $("asm-readout");
+  if (box) box.hidden = !on;
+  if (!on) { markAsmGutter([]); return; }
+  const r = asmReport;
+  const status = $("asm-status"), banks = $("asm-banks");
+  const listing = $("asm-listing");
+  if (!r) {
+    if (status) { status.textContent = "ASM: —"; status.className = "asm-status"; }
+    if (banks) banks.textContent = "";
+    if (listing) listing.textContent = "";
+    return;
+  }
+  const n = r.errors.length;
+  if (status) {
+    status.textContent = n
+      ? "ASM: " + n + " error" + (n === 1 ? "" : "s")
+      : "ASM: " + r.byteLength + " B · " + r.banks.length + " bank" +
+        (r.banks.length === 1 ? "" : "s");
+    status.className = "asm-status" + (n ? " is-bad" : " is-ok");
+  }
+  if (banks) {
+    banks.textContent = r.banks.map((b) =>
+      "bank " + b.bank + ": " + b.bytes + " B (" +
+      hex4(b.from) + "–" + hex4(b.to - 1) + ")").join(" · ");
+  }
+  if (listing) {
+    let text = "";
+    if (n) {
+      text += r.errors.map((e) =>
+        (e.file ? e.file + ":" : "") + (e.line || "?") + ": " + e.message)
+        .join("\n") + "\n\n";
+    }
+    listing.textContent = text + (r.listing || "");
+  }
+  const bad = [];
+  for (const e of r.errors) {
+    if (e.line > 0 && (!e.file || e.file === activeFile)) bad.push(e.line);
+  }
+  markAsmGutter(bad);
 }
 
 /* The generated tab (#87). `showingGlobals` means the editor is showing the
@@ -3724,6 +3969,9 @@ function drawGutter() {
   const lines = $("source").value.split("\n").length;
   const bad = {};
   for (const n of romProblemLines) bad[n] = true;
+  /* #230: an assembly project's findings use the same gutter, separately
+   * from ROM CHECK's (which has no Lua toy to check here). */
+  for (const n of asmProblemLines) bad[n] = true;
   let out = "";
   for (let i = 1; i <= lines; i++) out += i + (bad[i] ? " ✗" : "") + "\n";
   $("gutter").textContent = out;
@@ -3859,6 +4107,12 @@ function onEditorChange() {
   current.source = mainSource();
   setSaved("edited — Run to apply");
   persistToy();
+  /* #230: an assembly project assembles on every edit — there is no Lua toy
+   * to compile or run, so none of the Lua paths below apply. */
+  if (isAssemblyProject()) {
+    scheduleAsmBuild();
+    return;
+  }
   /* #98: the CONSOLE tab answers as the Lua changes — the file the toy runs
    * is main.lua, so an edit there is a new input for the compiler. */
   if (f && f.name === "main.lua") {
@@ -3919,8 +4173,11 @@ function updateFileTabs() {
   while (host.firstChild) host.removeChild(host.firstChild);
   /* ppu.toys' file bar carries the code files; an asset gets a tab while it
    * is the file in the editor, and the ASSETS tab lists the whole set.  #162:
-   * NOTES.md is a tab beside main.lua the moment a project has one. */
+   * NOTES.md is a tab beside main.lua the moment a project has one.  #230: an
+   * assembly project's .s/.asm/.inc files each get a tab. */
   const shown = files.filter((f) => fileKind(f.name) === "lua" ||
+                                    fileKind(f.name) === "asm" ||
+                                    fileKind(f.name) === "inc" ||
                                     f.name === "NOTES.md" ||
                                     f.name === activeFile);
   for (const f of shown) {
@@ -3935,24 +4192,31 @@ function updateFileTabs() {
   /* #87: ppuglobals.lua's counterpart. It is generated from the build and
    * read-only, so it is a tab and not a file of the toy (it is not in the
    * envelope and studio.files() does not list it). It sits with the code
-   * files, before the `+`. */
-  const g = document.createElement("button");
-  g.type = "button";
-  g.className = "file-tab" + (showingGlobals ? " is-on" : "");
-  g.id = "tab-globals";
-  g.textContent = GLOBALS_NAME;
-  g.title = GLOBALS_NAME + " — generated: the register and constant names " +
-    "a toy may use (read-only, not saved)";
-  g.addEventListener("click", showGlobals);
-  host.appendChild(g);
+   * files, before the `+`.  #230: it is a Lua document, so an assembly
+   * project does not show it. */
+  if (!isAssemblyProject()) {
+    const g = document.createElement("button");
+    g.type = "button";
+    g.className = "file-tab" + (showingGlobals ? " is-on" : "");
+    g.id = "tab-globals";
+    g.textContent = GLOBALS_NAME;
+    g.title = GLOBALS_NAME + " — generated: the register and constant names " +
+      "a toy may use (read-only, not saved)";
+    g.addEventListener("click", showGlobals);
+    host.appendChild(g);
+  }
   const add = document.createElement("button");
   add.type = "button";
   add.className = "file-tab file-add";
   add.id = "btn-newfile";
-  add.title = "One Lua file per toy; assets are the files beside it";
+  add.title = isAssemblyProject()
+    ? "Assembly files arrive with the project; add them with Project… → Save, or write them with the MCP file_write tool"
+    : "One Lua file per toy; assets are the files beside it";
   add.textContent = "+";
   add.addEventListener("click", () =>
-    toast("One Lua file per toy; the asset files beside main.lua are imported as its art (#117)."));
+    toast(isAssemblyProject()
+      ? "Assembly files arrive with the project; the MCP file_write tool adds one."
+      : "One Lua file per toy; the asset files beside main.lua are imported as its art (#117)."));
   host.appendChild(add);
 }
 
@@ -4001,6 +4265,8 @@ function selectFile(name) {
   $("doc-title").textContent = name;
   updateFileTabs();
   renderAssets();
+  /* #230: the gutter marks the newly active file's own findings. */
+  if (isAssemblyProject()) renderAsmReport();
   selectCodeTab("code");
   return true;
 }
@@ -4055,8 +4321,10 @@ function loadExample(id, quiet, noApply) {
   panelDirty = true;
   if (editor) editor.setOption("mode", "lua");
   $("doc-title").textContent = ex.name;
+  $("engine-status").textContent = current.mode === "il" ? "IL (#31)" : "Lua 5.3";
   updateFileTabs();
   renderAssets();
+  renderAsmReport();
   /* #145: an example just loaded is the point unsaved edits are measured
    * from; a new .lua dropped now displaces nothing the person wrote. */
   savePoint = toyEnvelopeText();
@@ -4082,8 +4350,12 @@ function toyEnvelope() {
   current.source = mainSource();
   /* #160: the envelope is renderer/pce-source.js's one builder, which the
    * MCP server's toy_save calls too — one format, so a toy saved from
-   * Claude Code opens here and this file's Save opens there. */
-  return PCEStudio.source.envelope(toyTitle || "", toyDescription || "", files);
+   * Claude Code opens here and this file's Save opens there.  #230: an
+   * assembly project says so, so the autosave restore knows main.lua is not
+   * its entry file. */
+  const env = PCEStudio.source.envelope(toyTitle || "", toyDescription || "", files);
+  if (isAssemblyProject()) env.kind = "assembly";
+  return env;
 }
 
 function toyEnvelopeText() {
@@ -4103,7 +4375,7 @@ function parseToyFile(text, fileName) {
   if (!/^\s*\{/.test(text)) {
     /* A plain .lua is a one-file toy; the asset files get their defaults. */
     const title = String(fileName || "toy.lua").replace(/\.(lua|txt)$/i, "");
-    return { version: TOY_VERSION, title: title, description: "",
+    return { version: TOY_VERSION, kind: "toy", title: title, description: "",
              files: newToyFiles(text), sources: [] };
   }
   let env;
@@ -4117,6 +4389,9 @@ function parseToyFile(text, fileName) {
     throw toyRefuse("toy-file-version", "a toy file is version " +
       TOY_VERSION + " (got " + JSON.stringify(env.version) + "); its shape " +
       "follows ppu.toys' packed toy, docs/PPU-TOYS.md §3");
+  /* #230: an assembly project's envelope says kind "assembly"; it is the
+   * same file set, entered at main.asm instead of main.lua. */
+  const kind = env.kind === "assembly" ? "assembly" : "toy";
   if (!Array.isArray(env.files) || env.files.length === 0)
     throw toyRefuse("toy-file-files", "the toy file has no files");
   const seen = {};
@@ -4132,14 +4407,20 @@ function parseToyFile(text, fileName) {
     seen[f.name] = true;
     out.push({ name: f.name, kind: fileKind(f.name), source: f.source });
   }
-  if (!seen["main.lua"])
+  if (kind === "assembly") {
+    if (!out.some((f) => fileKind(f.name) === "asm"))
+      throw toyRefuse("toy-file-asm", "an assembly project's envelope has " +
+        "no .s or .asm source");
+  } else if (!seen["main.lua"]) {
     throw toyRefuse("toy-file-main", "the toy file has no main.lua");
+  }
   if (env.sources !== undefined &&
       (!Array.isArray(env.sources) || env.sources.length))
     throw toyRefuse("toy-file-sources", "binary sources are card #24; " +
       "this card carries text files only");
   return {
     version: TOY_VERSION,
+    kind: kind,
     title: typeof env.title === "string" ? env.title : "",
     description: typeof env.description === "string" ? env.description : "",
     files: out,
@@ -4239,28 +4520,40 @@ function installToy(env, fileName, opts) {
     .replace(/\.(pce\.json|pce\.studio|json|lua|txt)$/i, "");
   toyDescription = env.description || "";
   current.example = null;
-  activeFile = "main.lua";
+  /* #230: an assembly project enters at main.asm (or its first source) and
+   * has no Lua to run; a toy enters at main.lua. */
+  const asm = env.kind === "assembly" || isAssemblyProject();
+  activeFile = asm ? asmEntryName() : "main.lua";
   current.source = mainSource();
   if (o.keepHistory) {
-    setEditorTextKeepingHistory(current.source);
+    setEditorTextKeepingHistory(findFile(activeFile) ? findFile(activeFile).source : current.source);
   } else {
+    /* #230: enter the ENTRY file's own text; mainSource() is "" for an
+     * assembly project (there is no main.lua). */
+    const entryFile = findFile(activeFile);
     switchingFile = true;
-    setEditorText(current.source);
+    setEditorText(asm ? (entryFile ? entryFile.source : "") : current.source);
     switchingFile = false;
   }
-  if (editor) editor.setOption("mode", "lua");
-  $("doc-title").textContent = "main.lua";
+  if (editor) editor.setOption("mode", asm ? null : "lua");
+  $("doc-title").textContent = activeFile;
+  $("engine-status").textContent = asm ? "PCEAS 3.23"
+    : (current.mode === "il" ? "IL (#31)" : "Lua 5.3");
   updateFileTabs();
   renderAssets();
   /* a paste/drop shows the code it brought */
   if (o.keepHistory) selectCodeTab("code");
-  notifyAssetEdit("tiles.json");
-  /* #94: a toy with no song.json gives the SEQUENCER a fresh song rather
-   * than the previous toy's. */
-  notifyAssetEdit("song.json");
-  /* #92: a different toy is a different main.lua, so the SCANLINES panel
-   * adopts the band block the new toy carries (or starts one). */
-  if (scanlinesApi()) scanlinesApi().invalidate();
+  /* #230: a toy after an assembly project puts the assembler readout away. */
+  renderAsmReport();
+  if (!asm) {
+    notifyAssetEdit("tiles.json");
+    /* #94: a toy with no song.json gives the SEQUENCER a fresh song rather
+     * than the previous toy's. */
+    notifyAssetEdit("song.json");
+    /* #92: a different toy is a different main.lua, so the SCANLINES panel
+     * adopts the band block the new toy carries (or starts one). */
+    if (scanlinesApi()) scanlinesApi().invalidate();
+  }
   panelDirty = true;
   if (o.apply !== false) applySource();
   if (o.persist !== false) {
@@ -4638,7 +4931,7 @@ const PROJECT_MAX_RECENT = 5;
  * silently. */
 const PROJECT_RECENT_BYTES = 2 * 1024 * 1024;
 const PROJECT_GROUPS = [
-  ["code", "code (.lua)"],
+  ["code", "code (.lua, .s/.asm, .inc)"],
   ["assets", "assets / sources"],
   ["songs", "songs"],
   ["notes", "NOTES.md"],
@@ -5055,6 +5348,7 @@ function projectFromToy(env, name) {
   let notes = null;
   for (const f of filesOut) if (f.name === "NOTES.md") notes = f.source;
   return { format: projectModel().FORMAT,
+           kind: env.kind === "assembly" ? "assembly" : "toy",
            title: env.title || projectModel().titleFromName(name),
            author: "", created: "", modified: "", files: filesOut,
            notes: notes, art: [], versions: [] };
@@ -5117,11 +5411,16 @@ function applyLoadedProject(loaded, opts) {
   const mode = o.mode === "add" ? "add" : "replace";
   const proj = loaded.project;
   const title = proj.title || P.titleFromName(loaded.name);
+  const asmProject = proj.kind === P.KIND_ASSEMBLY ||
+                     (!proj.files.some((f) => fileKind(f.name) === "lua") &&
+                      proj.files.some((f) => fileKind(f.name) === "asm"));
 
   if (mode === "replace") {
     if (!load.code)
       return { ok: false, error: { code: "project-code",
-        message: "replace needs code: main.lua is the toy" } };
+        message: "replace needs code: " +
+          (asmProject ? "the .s/.asm sources are the project"
+                      : "main.lua is the toy") } };
     if (!o.force && hasUnsavedEdits())
       return { ok: false, needsConfirm: true, mode: mode, title: title };
     stashReplacedToy();
@@ -5144,25 +5443,39 @@ function applyLoadedProject(loaded, opts) {
     toyTitle = title;
     toyDescription = "";
     current.example = null;
-    activeFile = "main.lua";
+    /* #230: an assembly project has no main.lua; it opens at its entry
+     * source and assembles instead of building a Lua runtime. */
+    activeFile = asmProject ? asmEntryName() : "main.lua";
     current.source = mainSource();
+    /* The editor shows the ENTRY file.  For a toy that is main.lua's source
+     * (current.source); for an assembly project mainSource() is "" by design,
+     * so read the entry file itself. */
+    const entryFile = findFile(activeFile);
+    const entryText = asmProject ? (entryFile ? entryFile.source : "")
+                                 : current.source;
     switchingFile = true;
-    setEditorText(current.source);
+    setEditorText(entryText);
     switchingFile = false;
-    if (editor) editor.setOption("mode", "lua");
-    $("doc-title").textContent = "main.lua";
+    if (editor) editor.setOption("mode", asmProject ? null : "lua");
+    $("doc-title").textContent = activeFile;
+    $("engine-status").textContent = asmProject ? "PCEAS 3.23"
+      : (current.mode === "il" ? "IL (#31)" : "Lua 5.3");
     updateFileTabs();
     renderAssets();
-    notifyAssetEdit("tiles.json");
-    notifyAssetEdit("song.json");
-    if (scanlinesApi()) scanlinesApi().invalidate();
+    renderAsmReport();
+    if (!asmProject) {
+      notifyAssetEdit("tiles.json");
+      notifyAssetEdit("song.json");
+      if (scanlinesApi()) scanlinesApi().invalidate();
+    }
     panelDirty = true;
     applySource();
     persistToy();
     savePoint = toyEnvelopeText();
     renderProjectVersions();
-    toast("Opened " + loaded.name + ".");
-    return { ok: true, mode: mode, title: title,
+    toast("Opened " + loaded.name +
+          (asmProject ? " (assembly project)." : "."));
+    return { ok: true, mode: mode, title: title, kind: asmProject ? "assembly" : "toy",
              files: files.map((f) => f.name), art: artFiles.length,
              versions: projectVersions.length };
   }
@@ -5773,6 +6086,22 @@ function runFrames(count, exampleId, mode) {
 }
 
 function checkToy() {
+  /* #230: Check on an assembly project is an assemble: the report is the
+   * bytes and the listing (or the first error with its line). */
+  if (isAssemblyProject()) {
+    return runAsmBuild().then((r) => {
+      const message = r && r.ok
+        ? "ASM: " + r.byteLength + " B · " + r.banks.length + " bank(s) · no errors"
+        : "ASM: " + ((r && r.errors[0])
+            ? (r.errors[0].file || asmEntryName()) + ":" +
+              (r.errors[0].line || "?") + ": " + r.errors[0].message
+            : "the assembler did not run");
+      setSaved(r && r.ok ? "assembled " + r.byteLength + " B"
+                         : "assembly failed");
+      toast(message);
+      return { same: !!(r && r.ok), ilSame: null, message: message };
+    });
+  }
   const id = current.example ? current.example.id : "current source";
   try {
     const lua1 = runFrames(40, null, "lua");
@@ -5917,6 +6246,13 @@ function answerNewToy(yes) {
  * frame all come back coded and with the line the runtime named. */
 function runToy() {
   clearError();
+  /* #230: Run on an assembly project assembles it; there is no toy to play. */
+  if (isAssemblyProject()) {
+    runAsmBuild();
+    toast("Assembled " + asmEntryName() + " — the bytes, listing and bank " +
+          "sizes are under the editor.");
+    return true;
+  }
   try {
     if (!applySource()) return false;   /* applySource already showed it */
   } catch (e) {
@@ -6237,6 +6573,14 @@ function bind() {
   });
   bindDrops();
   $("btn-export").addEventListener("click", () => {
+    /* #230: no ROM yet — the HuCard builder is #231.  Say it instead of
+     * opening a dialog that would try to build the absent main.lua. */
+    if (isAssemblyProject()) {
+      runAsmBuild();
+      toast("No ROM yet: an assembly project assembles to bytes and a " +
+            "listing; the HuCard builder is #231.");
+      return;
+    }
     $("export-modal").hidden = false;
     exportToy();
   });
@@ -7060,6 +7404,18 @@ const studio = {
   fileNames: () => files.map((f) => f.name),
   activeFile: () => activeFile,
   selectFile: selectFile,
+  /* #230 — the assembly project: its kind, the last build (errors, bytes,
+   * bytes per bank, the listing) and a way to assemble on demand (the page
+   * itself assembles as the editor changes). */
+  kind: () => (isAssemblyProject() ? "assembly" : "toy"),
+  asmEntry: asmEntryName,
+  asm: () => (asmReport ? {
+    ok: asmReport.ok, entry: asmReport.entry, errors: asmReport.errors,
+    byteLength: asmReport.byteLength, banks: asmReport.banks,
+    listing: asmReport.listing, sym: asmReport.sym, status: asmReport.status,
+    bytes: Array.from(asmReport.bytes)
+  } : null),
+  asmBuild: () => runAsmBuild(),
   /* #87 — the generated pceglobals.lua tab. globals() is its text (what the
    * editor shows); showGlobals() opens it; globalsOpen() says whether the
    * editor is showing it. */
@@ -7077,6 +7433,8 @@ const studio = {
     drawGutter();
     persistToy();
     setSaved("edited — Run to apply");
+    /* #230: an assembly project assembles on the same edit. */
+    if (isAssemblyProject()) { scheduleAsmBuild(); return; }
     /* text set through this path is an asset edit too */
     if (activeFile === "tiles.json" || activeFile === "palettes.json") {
       notifyAssetEdit(activeFile);

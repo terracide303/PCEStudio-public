@@ -18,6 +18,9 @@
 #   * renderer/ilvm.bin — not a require(), but server.js reads it in
 #     export_pce (the IL bytecode interpreter image); without it that tool is
 #     broken in the pack.
+#   * vendor/pceas/{pceas.js,pceas.wasm} — the assembler renderer/pce-asm.js
+#     loads by name and reads from disk (#230); the walk cannot see either, so
+#     asm_build would be broken in the pack without this pair.
 #   * plugin/skills/creating-pce-toys/ — the recipes and SKILL.md, which the
 #     README says to link into a Claude Code session.
 #   * LICENSE (GPL-3.0, so the download carries the licence) and README.txt.
@@ -70,6 +73,12 @@ function add(rel, why) {
   }
 }
 add("tools/mcp/server.js", "the pack");
+/* #230: renderer/pce-asm.js loads the vendored PCEAS by nodeRequire() and
+ * reads its .wasm with readFileSync(__dirname + ...), so neither name is one
+ * of the walked forms.  Both must travel or asm_build cannot assemble in the
+ * download. */
+add("vendor/pceas/pceas.js", "renderer/pce-asm.js");
+add("vendor/pceas/pceas.wasm", "renderer/pce-asm.js");
 out.sort().forEach((f) => console.log(f));
 ' > "$FILES"
 

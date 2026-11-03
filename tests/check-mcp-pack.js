@@ -9,7 +9,8 @@
  *   1. it builds the pack with `sh tools/mcp-pack.sh <tmp>/pcestudio-mcp.zip`
  *      and requires exit 0, a non-empty zip, and a zip that carries
  *      tools/mcp/server.js, the walked renderer modules, renderer/ilvm.bin,
- *      the skill (plugin/skills/creating-pce-toys/SKILL.md + its recipes),
+ *      the vendor/pceas assembler (#230's asm_build), the skill
+ *      (plugin/skills/creating-pce-toys/SKILL.md + its recipes),
  *      LICENSE and a 10-line README.txt — and NOT tests/ or docs/;
  *   2. it unzips it into a NEW EMPTY directory under $TMPDIR, whose only
  *      entry is pcestudio-mcp/, and starts
@@ -232,7 +233,11 @@ function listZip(zip) {
   for (const f of ["tools/mcp/server.js", "renderer/ilvm.bin", "LICENSE",
                    "README.txt", "plugin/skills/creating-pce-toys/SKILL.md",
                    RECIPE, "vendor/fengari/fengari-node.js",
-                   "vendor/fengari/fengari-web.js"]) {
+                   "vendor/fengari/fengari-web.js",
+                   /* #230: the assembler asm_build loads by name and reads
+                    * from disk; the require walk cannot see either */
+                   "vendor/pceas/pceas.js", "vendor/pceas/pceas.wasm",
+                   "vendor/pceas/LICENSE"]) {
     check(listing.has(f), "the pack carries " + f);
   }
   for (const f of ["renderer/pce-il.js", "renderer/pce-sprites.js",
@@ -343,6 +348,23 @@ function listZip(zip) {
      * module paths it would use are the unpacked ones. */
     check(fs.existsSync(path.join(folder, "renderer", "pce-sprites.js")),
           "the pixel code the frame came from is the unpacked copy");
+
+    /* #230: asm_build assembles from the unpacked pack — the vendored PCEAS
+     * (.js and .wasm) travelled, so the download's assembler is not a
+     * missing-file refusal. */
+    const asmWrite = await client.call("file_write", {
+      name: "main.asm",
+      source: "\t.code\n\t.bank 0\n\t.org $E000\nstart:\n\tlda #$01\n\trts\n"
+    });
+    check(!asmWrite.isError && asmWrite.body && asmWrite.body.ok,
+          "file_write adds an assembly source to the unpacked server");
+    const asmBuilt = await client.call("asm_build", {});
+    check(!asmBuilt.isError && asmBuilt.body && asmBuilt.body.ok,
+          "asm_build assembles from the unpacked pack" +
+          (asmBuilt.isError ? ": " + JSON.stringify(asmBuilt.body) : ""));
+    check(asmBuilt.body && asmBuilt.body.bytes > 0 &&
+          /start/.test(asmBuilt.body.sym || ""),
+          "the unpacked assembler returns the image and its symbols");
   } catch (e) {
     check(false, "the unpacked server ran a toy end to end: " + e.message);
   } finally {

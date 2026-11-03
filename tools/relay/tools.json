@@ -101,6 +101,64 @@
     }
   },
   {
+    "name": "file_read",
+    "description": "Read one file of the loaded project's file set (#230): the text exactly as file_write or project_open left it. An assembly project is a set of .s/.asm sources and .inc includes beside NOTES.md; a Lua toy is main.lua beside its asset files. A name that is not in the file set is refused (file-missing), and the reply names every file the session holds so a caller can see what there is.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "the flat file name, e.g. main.asm or lib.inc"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "file_write",
+    "description": "Write one file into the session's file set (#230): add it, or replace the file with that name. This is how an assembly project is built up over an MCP session — file_write main.asm, file_write lib.inc, then asm_build to assemble. The name is a flat safe name (no path); a file set with .s/.asm files and no main.lua is an assembly project, and one with main.lua is a Lua toy. Writing main.lua updates the source the toy tools run. project_save writes the result as a .pcestudio.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "the flat file name, e.g. main.asm or lib.inc"
+        },
+        "source": {
+          "type": "string",
+          "description": "the whole file's text"
+        }
+      },
+      "required": [
+        "name",
+        "source"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "asm_build",
+    "description": "Assemble the session's assembly project (#230) with renderer/pce-asm.js — PCEAS 3.23 in WebAssembly, the same assembler the studio runs as an assembly project is typed. The entry is main.asm, then main.s, then the first .s/.asm (or pass entry); every other file is an include, so .inc files resolve by name. On success it returns the image's byte count, its sha256, bytes per bank (from the listing), the listing and the symbol table; on a syntax error it returns the errors with their file and line and no bytes. No ROM is built here: the HuCard builder is a later card.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "entry": {
+          "type": "string",
+          "description": "the source to assemble (default: main.asm, then main.s, then the first .s/.asm)"
+        },
+        "listing": {
+          "type": "boolean",
+          "default": true,
+          "description": "include the PCEAS listing in the reply (default true)"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "toy_run",
     "description": "Run the loaded toy's main.lua for `frames` video frames (0..frames-1) through the IL runtime, with an optional pad script, and return the final state: registers, raster table shape, VRAM/CRAM/SAT digests, log lines, PSG write count and per-channel sound activity (notes started and the instrument each sounds with), so music() can be seen without hearing it. The toy's asset files are imported into VRAM/CRAM/SAT before init() (#117) and the song files are its music(index) slots (#161). A run is fresh and deterministic; t is f/60, not the clock.",
     "inputSchema": {

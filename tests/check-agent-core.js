@@ -13,9 +13,9 @@
  *      for byte — and the core's own TOOLS table, in both its branches, must
  *      match it.  (The capture was taken from the old tools/mcp/server.js
  *      the day of the #166 split, to prove the split changed nothing; #163
- *      added project_save and project_open, and the fixture was re-taken
- *      then.  A tool the core gains without the fixture being re-taken fails
- *      here.)
+ *      added project_save and project_open, #230 added file_read, file_write
+ *      and asm_build, and the fixture was re-taken each time.  A tool the
+ *      core gains without the fixture being re-taken fails here.)
  *   3. the core RUNS in a node:vm context that has nothing but the renderer
  *      modules: no require, no process, no fs, no Buffer, no module — the
  *      browser branch of the UMD, the one the studio tab will load (#167).
@@ -160,7 +160,9 @@ function buildSandbox() {
     seq: require(path.join(ROOT, "renderer", "pce-seq.js")),
     project: require(path.join(ROOT, "renderer", "pce-project.js")),
     romcheck: require(path.join(ROOT, "renderer", "pce-romcheck.js")),
-    assets: require(path.join(ROOT, "renderer", "pce-assets.js"))
+    assets: require(path.join(ROOT, "renderer", "pce-assets.js")),
+    /* #230: the assembler wrapper the page loads beside the core */
+    asm: require(path.join(ROOT, "renderer", "pce-asm.js"))
   };
   ctx.PCEStudio = PCEStudio;
   vm.runInContext(core, ctx, { filename: "pce-agent-tools.js" });

@@ -62,6 +62,7 @@ an unpacked copy is literal (the readers skip `dir/` entries anyway).
 ```json
 {
   "format": "pcestudio/1",
+  "kind": "toy",
   "title": "Demo game",
   "author": "the maintainer",
   "created": "2026-10-31T10:00:00.000Z",
@@ -88,11 +89,35 @@ cannot be loaded, and a file present but unlisted is still read). A project
 whose `format` is not `pcestudio/1`, or that has no `project.json` or no
 `main.lua`, is refused with a code (below) — the studio never half-opens one.
 
+`kind` is `"toy"` (the default, and what every `project.json` written before
+#230 says by having none) or `"assembly"` (#230). An **assembly project** is a
+file set of `.s`/`.asm` sources and `.inc` includes with no `main.lua`:
+
+```
+<name>.pcestudio
+├── project.json          kind "assembly"
+├── main.asm              the entry (or main.s / the first .s/.asm)
+├── lib.inc               includes, found by the name the source .includes
+├── NOTES.md
+└── art/, versions/       as above
+```
+
+The entry is `main.asm`, then `main.s`, then the first `.s`/`.asm` in the
+project; every other file is passed to PCEAS as an include. The studio
+assembles it as it is edited with `renderer/pce-asm.js`, showing errors by
+file and line, the listing and bytes per bank; the MCP tool `asm_build` runs
+the same assembler. No ROM is built yet (the HuCard builder is a later card). A toy
+save still requires `main.lua` (`project-code`); an assembly save requires at
+least one `.s`/`.asm` (`project-code`), and an assembly archive without one is
+refused on open (`project-asm`).
+
 ### Kinds
 
 | kind | names |
 |---|---|
 | `lua` | `*.lua` |
+| `asm` | `*.s`, `*.asm` (#230) |
+| `inc` | `*.inc` (#230) |
 | `notes` | `NOTES.md` (and any other `*.md`) |
 | `tiles` `palettes` `sprites` `waves` | the panel documents |
 | `sources` | `sources.json` |

@@ -42,6 +42,14 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
+  /* The browser global to read createPceas from.  `root` belongs to the UMD
+   * wrapper above, not to this factory: a function expression passed as an
+   * argument is created in the wrapper's CALLER scope, so it cannot see the
+   * wrapper's parameters.  #230 found this when the first page tried to
+   * assemble; the Node path never reads it. */
+  var GLOBAL = typeof self !== "undefined" ? self
+    : (typeof globalThis !== "undefined" ? globalThis : {});
+
   var IS_NODE = typeof process === "object" &&
                 process !== null &&
                 !!process.versions && !!process.versions.node;
@@ -67,8 +75,8 @@
     if (createPceas) return createPceas;
     if (IS_NODE) {
       createPceas = nodeRequire("../vendor/pceas/pceas.js");
-    } else if (typeof root.createPceas === "function") {
-      createPceas = root.createPceas;
+    } else if (typeof GLOBAL.createPceas === "function") {
+      createPceas = GLOBAL.createPceas;
     } else {
       throw new Error("pce-asm: load vendor/pceas/pceas.js before assembling " +
                       "in a browser, or call ready() with wasmUrl");
@@ -354,10 +362,89 @@
     };
   }
 
+  /*
+   * Which file is the entry: main.asm or main.s by convention, else the
+   * first .asm/.s in project order.  An assembly project saves every file
+   * flat, so the name is also what PCEAS' diagnostics and .sym carry.
+   * Includes are every OTHER file (a .inc, or a .s pulled in by .include);
+   * the callers build that map, because a project also holds NOTES.md.
+   */
+  function entryName(files) {
+    var names = [];
+    for (var i = 0; i < (files || []).length; i++) {
+      var f = files[i];
+      names.push(typeof f === "string" ? f : String(f && f.name || ""));
+    }
+    var sources = names.filter(function (n) { return /\.(s|asm)$/i.test(n); });
+    if (sources.indexOf("main.asm") >= 0) return "main.asm";
+    if (sources.indexOf("main.s") >= 0) return "main.s";
+    return sources[0] || "main.asm";
+  }
+
+  /*
+   * Bytes per bank, read from PCEAS' listing (#230's size readout).  A line
+   * that emitted bytes carries them in the one place the listing states them:
+   *
+   *       10  01:E000  01 02 03  	.db $01, $02, $03, $04
+   *           01:E003  04
+   *
+   * The first field is bank:address; continuation lines (no source line
+   * number) carry it too.  `bytes` counts emitted bytes, `from`/`to` are the
+   * address span they cover (to exclusive), so a gap inside a bank shows as
+   * bytes < to - from rather than disappearing.  Bank numbers follow .bank /
+   * physical bank order as PCEAS prints them.
+   */
+  function bankSizes(listing) {
+    var byBank = {}, order = [];
+    var lines = String(listing || "").split(/\r?\n/);
+    /* The listing's byte field starts at column 16: five characters of line
+     * number, two spaces, the seven-character bank:address, two spaces.  A
+     * continuation line has seven spaces where the line number goes, so the
+     * address lands in the same place.  Bytes are `XX ` pairs; the field ends
+     * at the first place the next pair is not exactly one space away (the
+     * padding before the source is two or more spaces, or a tab).  Reading
+     * bytes by column, not by splitting the tail, keeps a source word like
+     * `adc` (two hex letters) out of the count. */
+    var at = /^\s*(?:\d+\s+)?([0-9A-Fa-f]{2}):([0-9A-Fa-f]{4})/;
+    function pair(text, i) {
+      return i + 1 < text.length &&
+             /^[0-9A-Fa-f]{2}$/.test(text.slice(i, i + 2));
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var m = at.exec(line);
+      if (!m) continue;
+      var bank = parseInt(m[1], 16);
+      var addr = parseInt(m[2], 16);
+      var pos = 16, count = 0;
+      while (pair(line, pos)) {
+        count++;
+        if (line.charAt(pos + 2) !== " " || !pair(line, pos + 3)) break;
+        pos += 3;
+      }
+      if (!count) continue;
+      var b = byBank[bank];
+      if (!b) {
+        b = byBank[bank] = { bank: bank, bytes: 0, from: addr, to: addr };
+        order.push(bank);
+      }
+      b.bytes += count;
+      if (addr < b.from) b.from = addr;
+      if (addr + count > b.to) b.to = addr + count;
+    }
+    order.sort(function (a, b) { return a - b; });
+    return order.map(function (n) {
+      var b = byBank[n];
+      return { bank: b.bank, bytes: b.bytes, from: b.from, to: b.to };
+    });
+  }
+
   var api = {
     assemble: assemble,
     ready: ready,
-    wasmPath: wasmPath
+    wasmPath: wasmPath,
+    entryName: entryName,
+    bankSizes: bankSizes
   };
   return api;
 });

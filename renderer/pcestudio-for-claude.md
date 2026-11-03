@@ -38,6 +38,9 @@ The server needs Node and nothing else: no npm install, no compiler. The link is
 | toy_save | save the whole toy — code, art, songs — as one .pce.json the person opens in the studio |
 | project_open | resume a project: a .pcestudio file or an unpacked project folder, with NOTES.md's text returned first |
 | project_save | save the session as a project — one .pcestudio, or the same layout unpacked into a folder so git holds the history; pass the updated NOTES.md as notes |
+| file_write | add or replace one file of an assembly project: .s/.asm sources and .inc includes, no main.lua |
+| file_read | read one file of the project's file set back exactly as it was written |
+| asm_build | assemble the assembly project with the same PCEAS the studio runs: bytes and sha256, bytes per bank, the listing and symbols — or the errors with file and line |
 | export_pce | build the HuCard .pce from the same IL the studio runs |
 | docs | the reference chapters, generated from the runtime's tables |
 | registers_get | read a VDC, VCE or PSG register with its range |

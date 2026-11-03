@@ -154,6 +154,17 @@
  * spots: the fake socket is not the network (the relay's own side is
  * tests/check-relay.js), and the stub canvas records draw calls, not pixels.
  *
+ * #230 (checkAssemblyProject): an assembly project in the studio.  A real
+ * .pcestudio with kind "assembly" is opened through the page's own Open; the
+ * page must show a tab per .s/.inc file (and no pceglobals.lua), assemble it
+ * with renderer/pce-asm.js, show the bytes and bytes-per-bank readout and the
+ * listing, mark a syntax error on its own line in the gutter with its file
+ * and message, clear the mark when the file is fixed, and Save -> Open on a
+ * fresh page must return the same files and the same image bytes (sha256).
+ * The page's bytes are compared with a direct Node assembly, not with
+ * themselves.  Blind spots: the stub canvas records calls, not pixels, and
+ * there is no ROM to run yet (#231+).
+ *
  * Not measured here: layout and CSS (a screenshot is the evidence, under
  * $TMPDIR and described in docs/STUDIO.md), a real canvas's pixels (the stub
  * context records the calls, not the rendered result), the toy
@@ -186,6 +197,10 @@ const ILVM = path.join(__dirname, "..", "renderer", "ilvm.bin");
  * module it used, so "the archive is a project" is measured, not assumed. */
 const projectFormat = require("../renderer/pce-project.js");
 const zipFormat = require("../renderer/pce-zip.js");
+/* #230 — the assembler the page runs, for the expected bytes of the page's
+ * own assembly report. */
+const asmFormat = require("../renderer/pce-asm.js");
+const cryptoFormat = require("crypto");
 
 /* The three toy sources are read from tests/check-il.js's own text instead of
  * requiring it: at this revision check-il.js runs its whole suite when
@@ -8359,6 +8374,181 @@ async function checkGalleryBrowser() {
 }
 
 /* ---- main ------------------------------------------------------------- */
+/* ---- #230: an assembly project in the studio -------------------------- *
+ * Opens a real .pcestudio whose kind is "assembly" through the page's own
+ * Open, and measures what the page does with it: a tab per .s/.inc file, the
+ * build shown under the editor (bytes per bank and the listing), the error
+ * marked on its line in the gutter, the fixed file assembling again, and the
+ * page's own Save -> Open returning the same bytes.  The page assembles with
+ * renderer/pce-asm.js in WebAssembly; this check compares its bytes with a
+ * direct Node assembly of the same files, so the page and the wrapper are
+ * held together rather than agreeing with themselves. */
+const ASM_GOOD = [
+  "\t.code",
+  "\t.bank 0",
+  "\t.org $E000",
+  "\t.include \"lib.inc\"",
+  "start:",
+  "\tlda #VALUE",
+  "\tsta $0000",
+  "\trts",
+  "\t.org $FFF6",
+  "\t.dw start, start, start, start, start",
+  ""
+].join("\n");
+const ASM_LIB = "VALUE = $12\n";
+const ASM_BROKEN = ASM_GOOD.replace("\tlda #VALUE", "\tlda #$GG");
+
+function asmExtra() {
+  const wasmFile = path.join(__dirname, "..", "vendor", "pceas", "pceas.wasm");
+  return {
+    WebAssembly: WebAssembly,
+    TextDecoder: TextDecoder,
+    TextEncoder: TextEncoder,
+    URL: URL,
+    Blob: Blob,
+    fetch: (url) => {
+      const file = path.resolve(RENDERER, String(url));
+      return Promise.resolve({
+        ok: true, status: 200,
+        arrayBuffer: () => {
+          const b = fs.readFileSync(file);
+          return Promise.resolve(b.buffer.slice(b.byteOffset,
+                                                b.byteOffset + b.byteLength));
+        }
+      });
+    }
+  };
+}
+
+function asmProjectBytes() {
+  return projectFormat.build({
+    kind: projectFormat.KIND_ASSEMBLY,
+    title: "asm demo", author: "",
+    created: "2026-11-03T00:00:00.000Z", modified: "2026-11-03T00:00:00.000Z",
+    files: [
+      { name: "main.asm", source: ASM_GOOD },
+      { name: "lib.inc", source: ASM_LIB },
+      { name: "NOTES.md", source: "# asm demo\n\n## Goal\nassemble the demo\n" }
+    ],
+    art: [], versions: []
+  });
+}
+
+function shaOf(bytes) {
+  return cryptoFormat.createHash("sha256").update(Buffer.from(bytes)).digest("hex");
+}
+
+async function checkAssemblyProject() {
+  const page = runPage("?paused=1", makeStorage(), asmExtra());
+  const S = page.sandbox.PCEStudio;
+  const studio = S.studio;
+  check(!!S.asm && typeof S.asm.assemble === "function",
+        "#230: the page loads renderer/pce-asm.js");
+
+  /* 1. the page's own Open of an assembly .pcestudio */
+  const opened = studio.project.openBytes(asmProjectBytes(),
+                                          { apply: true, force: true });
+  check(opened && opened.ok && opened.kind === "assembly",
+        "#230: Open applies an assembly .pcestudio");
+  eq("#230: the assembly project is a toy no longer", studio.kind(), "assembly");
+  eq("#230: every .s/.inc file is in the file set",
+     studio.fileNames(), ["main.asm", "lib.inc", "NOTES.md"]);
+  eq("#230: the editor opens at the entry source",
+     studio.activeFile(), "main.asm");
+  const tabNames = page.dom.get("file-tabs").children.map((c) => c.textContent);
+  check(tabNames.indexOf("main.asm") >= 0 && tabNames.indexOf("lib.inc") >= 0 &&
+        tabNames.indexOf("NOTES.md") >= 0,
+        "#230: an editor tab per file (" + tabNames.join(", ") + ")");
+  check(tabNames.indexOf("pceglobals.lua") < 0,
+        "#230: the Lua-only pceglobals.lua tab is not shown");
+  check(!page.dom.get("asm-readout").hidden &&
+        page.dom.get("code-pane").classList.contains("is-asm"),
+        "#230: the assembler readout is shown under the editor");
+  eq("#230: the page is not running a Lua toy", studio.state(), null);
+
+  /* 2. it assembles, and the bytes equal the wrapper's own */
+  const built = await studio.asmBuild();
+  check(!!built && built.ok, "#230: the opened project assembles");
+  eq("#230: the entry is main.asm", built.entry, "main.asm");
+  check(built.byteLength === 8192,
+        "#230: the image is 8192 B (got " + built.byteLength + ")");
+  check(/start:/.test(built.listing), "#230: the reply carries the listing");
+  eq("#230: bytes per bank are shown from the listing",
+     built.banks.map((b) => [b.bank, b.bytes]),
+     asmFormat.bankSizes(built.listing).map((b) => [b.bank, b.bytes]));
+  eq("#230: the status reads bytes and banks",
+     page.dom.get("asm-status").textContent,
+     "ASM: 8192 B · 1 bank");
+  check(/bank 0: 16 B \(\$E000–\$FFFF\)/.test(
+          page.dom.get("asm-banks").textContent),
+        "#230: the readout names the bank's bytes and address span");
+  const direct = asmFormat.assemble(ASM_GOOD, {
+    filename: "main.asm", includes: { "lib.inc": ASM_LIB }
+  });
+  eq("#230: the page's bytes are the wrapper's bytes",
+     shaOf(built.bytes), shaOf(direct.bytes));
+
+  /* 3. a syntax error lands on its line, with its message */
+  studio.selectFile("main.asm");
+  studio.setEditorText(ASM_BROKEN);
+  const bad = await studio.asmBuild();
+  check(bad && !bad.ok, "#230: the broken file does not assemble");
+  eq("#230: the error names the file, line and message",
+     bad.errors.map((e) => [e.file, e.line, e.message]),
+     [["main.asm", 6, "Syntax error in expression!"]]);
+  eq("#230: the status counts the error",
+     page.dom.get("asm-status").textContent, "ASM: 1 error");
+  check(/main\.asm:6: Syntax error/.test(page.dom.get("asm-listing").textContent),
+        "#230: the error is written above the listing");
+  const gutterLines = page.dom.get("gutter").textContent.split("\n");
+  check(/✗/.test(gutterLines[5] || "") && !/✗/.test(gutterLines[4] || ""),
+        "#230: the gutter marks line 6 and not line 5");
+  check(/✗/.test(gutterLines[5] || ""), "#230: the error is shown on its line");
+
+  /* 4. the fixed file assembles again and the mark goes */
+  studio.setEditorText(ASM_GOOD);
+  const fixed = await studio.asmBuild();
+  check(fixed && fixed.ok, "#230: the fixed file assembles");
+  eq("#230: the clean build keeps the same bytes", shaOf(fixed.bytes),
+     shaOf(direct.bytes));
+  check(!/✗/.test(page.dom.get("gutter").textContent),
+        "#230: the fixed build clears the gutter mark");
+  eq("#230: the autosave envelope knows it is an assembly project",
+     JSON.parse(studio.envelopeText()).kind, "assembly");
+
+  /* 5. Save -> Open through the page returns the same project and bytes */
+  const saved = studio.project.save({ name: "asm-demo", include: {
+    code: true, assets: true, songs: true, notes: true, art: true,
+    versions: true } });
+  check(saved.ok && saved.bytes && saved.bytes.length > 0,
+        "#230: Save project builds an assembly .pcestudio");
+  const parsed = projectFormat.parseBytes(saved.bytes);
+  eq("#230: the archive says kind assembly", parsed.kind, "assembly");
+  eq("#230: ... and holds both sources and the notes",
+     parsed.files.map((f) => f.name + ":" + f.kind),
+     ["main.asm:asm", "lib.inc:inc", "NOTES.md:notes"]);
+
+  /* a fresh page, opened with the page's own Open project route */
+  const page2 = runPage("?paused=1", makeStorage(), asmExtra());
+  const studio2 = page2.sandbox.PCEStudio.studio;
+  const reopened = studio2.project.openBytes(saved.bytes,
+                                             { apply: true, force: true });
+  check(reopened && reopened.ok && reopened.kind === "assembly",
+        "#230: a fresh page opens the saved project");
+  const again = await studio2.asmBuild();
+  check(again && again.ok, "#230: the reopened project assembles");
+  eq("#230: save -> open returns the same files",
+     studio2.fileNames(), ["main.asm", "lib.inc", "NOTES.md"]);
+  eq("#230: save -> open returns the same bytes (sha256)",
+     shaOf(again.bytes), shaOf(direct.bytes));
+
+  /* 6. no ROM yet: Export says so instead of opening the toy dialog */
+  clickOne(page, "btn-export");
+  check(/No ROM yet/.test(page.dom.get("toast").textContent),
+        "#230: Export says there is no ROM for an assembly project yet");
+}
+
 async function main() {
   const started = Date.now();
   let page;
@@ -8399,6 +8589,7 @@ async function main() {
   await checkAgentPanel();
   checkGallery(page);
   await checkProject(page);
+  await checkAssemblyProject();
 
   let browser = "not-requested";
   let galleryBrowser = "not-requested";

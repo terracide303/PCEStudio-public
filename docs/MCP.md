@@ -129,6 +129,16 @@ One toy at a time, in one process:
   returns the note's text first; `toy_write` edits the toy inside the project
   and a `project_save` writes it back. `toy_save` stays for the plain toy
   file.
+- `file_write` / `file_read` / `asm_build` (#230) are an **assembly project**:
+  a file set of `.s`/`.asm` sources and `.inc` includes with no `main.lua`.
+  `file_write` builds it up (or replaces one file), `file_read` reads one
+  back, and `asm_build` assembles it with `renderer/pce-asm.js` — PCEAS 3.23
+  in WebAssembly, the same assembler the studio runs — returning the image's
+  byte count and sha256, bytes per bank, the listing and the symbol table, or
+  the errors with their file and line. `project_save` writes the set as a
+  `.pcestudio` whose `project.json` says `"kind": "assembly"`, and
+  `project_open` loads it back. No ROM is built: the HuCard builder is a
+  later card.
 - `toy_run` imports the asset files into VRAM, CRAM and the SAT **before
   `init()`**, exactly as the studio does (#117, #153) — the one importer, no
   second model — and its reply carries the import's summary as `assets`.
@@ -341,6 +351,82 @@ Refusals: `open-path` (a missing path, or one outside the working folder),
 `project-host` (the host cannot open by path — a browser tab), and the
 project format's own `project-format`, `project-json`, `project-main`,
 `project-name`, plus the toy's compile and song refusals (`il-…`, `seq-json`).
+An assembly project opens with `kind: "assembly"` and an `entry` instead of
+being compiled; `asm_build` is its build.
+
+### `file_read(name)`
+
+Reads one file of the loaded file set (#230) exactly as `file_write` or
+`project_open` left it.
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `name` | string | a flat file name, e.g. `main.asm`, `lib.inc`, `main.lua` |
+
+The reply carries `source`, `bytes`, the file's `kind` (`asm`, `inc`, `lua`,
+`notes`, `asset`), the `project_kind` (`toy` or `assembly`) and every file
+name the session holds. A name the session does not hold is `file-missing`.
+
+```json
+{"name":"file_read","arguments":{"name":"lib.inc"}}
+```
+
+```json
+{"ok":true,"name":"lib.inc","kind":"inc","project_kind":"assembly",
+ "bytes":11,"source":"VALUE = $12\n","files":["main.asm","lib.inc"]}
+```
+
+### `file_write(name, source)`
+
+Writes one file into the session's file set (#230): adds it, or replaces the
+file with that name. This is how an assembly project is built up —
+`file_write` `main.asm`, `file_write` `lib.inc`, then `asm_build`. The name
+is flat and safe (letters, digits, dot, dash, underscore; no path). A set
+with `.s`/`.asm` sources and no `main.lua` is an assembly project; one with
+`main.lua` is a Lua toy, and writing `main.lua` updates the text `toy_run`
+runs.
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `name` | string | the flat file name, e.g. `main.asm` or `lib.inc` |
+| `source` | string | the whole file's text |
+
+Refusals: `file-name` (an unsafe name), `file-source` (a non-text source).
+
+### `asm_build(entry?, listing?)`
+
+Assembles the session's assembly project (#230) with `renderer/pce-asm.js`,
+the same wrapper the studio uses, so the bytes are the studio's bytes.
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `entry` | string, optional | the source to assemble; default `main.asm`, then `main.s`, then the first `.s`/`.asm` |
+| `listing` | boolean, optional | include the PCEAS listing (default `true`) |
+
+Every other file is passed to PCEAS as an include, so `.inc` files resolve by
+the name the source `.include`s. On success the reply is:
+
+```json
+{"ok":true,"tool":"asm_build","entry":"main.asm","bytes":8192,
+ "sha256":"1335f509…","banks":[{"bank":0,"bytes":16,"from":57344,"to":65536}],
+ "errors":[],"status":0,"sym":"Bank\tAddr\tLabel…","listing":"…"}
+```
+
+`banks` is bytes per bank read from the listing (`from`/`to` are the emitted
+address span, `to` exclusive). On a syntax error it returns `ok:false`,
+`bytes:0`, no `sha256`, and `errors` with `file`, `line` and `message`, the
+line numbers in the source file as written:
+
+```json
+{"ok":false,"tool":"asm_build","entry":"main.asm","bytes":0,
+ "banks":[],"status":1,
+ "errors":[{"file":"main.asm","line":6,"message":"Syntax error in expression!"}]}
+```
+
+Refusals before assembly: `asm-missing` (the module did not load),
+`no-files`, `asm-entry` (an unsafe, non-source or absent entry), `asm-load`
+(the wasm could not load) and `asm-error`. No ROM is written: the HuCard
+builder is a later card.
 
 ### `toy_run(frames, pad)`
 
@@ -851,9 +937,9 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
 ## Evidence
 
 `node tests/check-mcp.js` starts `tools/mcp/server.js`, speaks MCP over
-stdio, and asserts 333 checks:
+stdio, and asserts 342 checks:
 
-- `initialize`, `ping`, and `tools/list` with all fourteen tools and their
+- `initialize`, `ping`, and `tools/list` with all seventeen tools and their
   schemas;
 - #29's parallax toy written, 60 frames run, and the PNG at frame 60 equal
   to `tests/dumps/examples/parallax.png` (check-examples' frame 60) pixel
@@ -904,6 +990,13 @@ stdio, and asserts 333 checks:
   with no `NOTES.md` gets the studio's template; `open-path` fences the
   working folder and `project-format` refuses a ZIP that is not a project;
 - `docs` chapter list, a chapter's own numbers, and a refused unknown topic.
+
+`node tests/check-asm-project.js` holds #230's assembly project to the same
+standard: `file_write` builds a `.s`/`.inc` set, `asm_build` reports a syntax
+error's file, line and message, a fixed file assembles, its sha256 and byte
+count equal a direct `renderer/pce-asm.js` assembly, `project_save` writes a
+`.pcestudio` whose `project.json` says `"kind": "assembly"`, and a fresh
+server `project_open`s it and assembles the same bytes again.
 
 `node tests/check-rom-budget.js` holds the budget to the code: every limit
 equals the `tools/ilvm/ilvm.c` `#define` that owns it (or the JavaScript

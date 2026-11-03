@@ -77,7 +77,8 @@
                              require("./pce-sat.js"), require("./pce-editor.js"),
                              require("./pce-seq.js"), require("./pce-project.js"),
                              require("./pce-romcheck.js"),
-                             require("./pce-assets.js"));
+                             require("./pce-assets.js"),
+                             require("./pce-asm.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.agentTools = factory(root.PCEStudio.il, root.PCEStudio.ilbc,
@@ -85,17 +86,34 @@
       root.PCEStudio.sprites, root.PCEStudio.toyhost, root.PCEStudio.panels,
       root.PCEStudio.psg, root.PCEStudio.source, root.PCEStudio.sat,
       root.PCEStudio.editor, root.PCEStudio.seq, root.PCEStudio.project,
-      root.PCEStudio.romcheck, root.PCEStudio.assets);
+      root.PCEStudio.romcheck, root.PCEStudio.assets,
+      root.PCEStudio.asm);
   }
 })(typeof self !== "undefined" ? self : this, function (il, ilbc, romLib, docs,
   validateLib, sprites, toyhost, panels, psg, sourceLib, satLib, editorLib,
-  seqLib, projectLib, romcheck, assets) {
+  seqLib, projectLib, romcheck, assets, asmLib) {
   "use strict";
 
   const MAIN = "main.lua";
   const NOTES = "NOTES.md";             /* a project's resume note (#162/#163) */
   const MAX_FRAMES = 600;               /* 10 s at 60 Hz, the frame_png cap */
   const DEFAULT_FRAMES = 60;
+
+  /* #230: an assembly project's files.  `.s`/`.asm` are sources, `.inc` an
+   * include; a session with assembly files and no main.lua is an assembly
+   * project (the same rule renderer/pce-project.js's kindOf uses). */
+  function isAsmSource(name) { return /\.(s|asm)$/i.test(String(name || "")); }
+  function isAsmFile(name) {
+    return isAsmSource(name) || /\.inc$/i.test(String(name || ""));
+  }
+  function kindOfFiles(files) {
+    let lua = false, asm = false;
+    for (const f of files || []) {
+      if (String(f && f.name) === MAIN) lua = true;
+      if (isAsmSource(f && f.name)) asm = true;
+    }
+    return !lua && asm ? "assembly" : "toy";
+  }
 
   /* The toy host's own pad contract (renderer/pce-toyhost.js). */
   const PAD_FIELDS = toyhost.PAD_FIELDS;
@@ -985,6 +1003,70 @@
       }
     },
     {
+      name: "file_read",
+      description: "Read one file of the loaded project's file set (#230): the " +
+        "text exactly as file_write or project_open left it. An assembly " +
+        "project is a set of .s/.asm sources and .inc includes beside NOTES.md; " +
+        "a Lua toy is main.lua beside its asset files. A name that is not in " +
+        "the file set is refused (file-missing), and the reply names every " +
+        "file the session holds so a caller can see what there is.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string",
+                  description: "the flat file name, e.g. main.asm or lib.inc" }
+        },
+        required: ["name"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "file_write",
+      description: "Write one file into the session's file set (#230): add it, " +
+        "or replace the file with that name. This is how an assembly project " +
+        "is built up over an MCP session — file_write main.asm, file_write " +
+        "lib.inc, then asm_build to assemble. The name is a flat safe name (no " +
+        "path); a file set with .s/.asm files and no main.lua is an assembly " +
+        "project, and one with main.lua is a Lua toy. Writing main.lua updates " +
+        "the source the toy tools run. project_save writes the result as a " +
+        ".pcestudio.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string",
+                  description: "the flat file name, e.g. main.asm or lib.inc" },
+          source: { type: "string",
+                    description: "the whole file's text" }
+        },
+        required: ["name", "source"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "asm_build",
+      description: "Assemble the session's assembly project (#230) with " +
+        "renderer/pce-asm.js — PCEAS 3.23 in WebAssembly, the same assembler " +
+        "the studio runs as an assembly project is typed. The entry is " +
+        "main.asm, then main.s, then the first .s/.asm (or pass entry); every " +
+        "other file is an include, so .inc files resolve by name. On success " +
+        "it returns the image's byte count, its sha256, bytes per bank (from " +
+        "the listing), the listing and the symbol table; on a syntax error it " +
+        "returns the errors with their file and line and no bytes. No ROM is " +
+        "built here: the HuCard builder is a later card.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          entry: { type: "string",
+                   description: "the source to assemble (default: main.asm, " +
+                     "then main.s, then the first .s/.asm)" },
+          listing: { type: "boolean", default: true,
+                     description: "include the PCEAS listing in the reply " +
+                       "(default true)" }
+        },
+        additionalProperties: false
+      }
+    },
+    {
       name: "toy_run",
       description: "Run the loaded toy's main.lua for `frames` video frames " +
         "(0..frames-1) through the IL runtime, with an optional pad script, and " +
@@ -1254,7 +1336,8 @@
   function createSession(host) {
     const session = {
       files: null,         /* [{name, source}] as written */
-      source: null,        /* main.lua's text */
+      source: null,        /* main.lua's text (null for an assembly project) */
+      kind: "toy",         /* "toy" or "assembly" (#230) */
       songs: [],           /* the compiled songs the toy's files carry (#161) */
       project: null,       /* {title, author, created, modified} once a
                             * project was opened or saved (#163); toy_write
@@ -1270,6 +1353,7 @@
     function resetToy() {
       session.files = null;
       session.source = null;
+      session.kind = "toy";
       session.songs = [];
       session.runtime = null;
       session.frames = [];
@@ -1291,6 +1375,14 @@
       if (!session.source) {
         refuse("no-toy", "no toy is loaded; call toy_write first (main.lua is " +
                "required)");
+      }
+    }
+    /* #230: project_save / file_read / asm_build work on an assembly project
+     * too, where there is no main.lua and therefore no session.source. */
+    function requireFiles() {
+      if (!session.files || !session.files.length) {
+        refuse("no-files", "no files are loaded; call toy_write (a Lua toy) or " +
+               "file_write (an assembly project) first");
       }
     }
     function requireRun() {
@@ -1677,6 +1769,144 @@
       };
     }
 
+    /* ---- #230 — files and an assembly project ----------------------------- *
+     * An assembly project is a file set with .s/.asm sources and .inc
+     * includes and no main.lua.  file_write builds it up, file_read reads it
+     * back, asm_build assembles it with the same renderer/pce-asm.js the
+     * studio runs, and project_save writes the set as a .pcestudio whose
+     * project.json says kind "assembly".  No second format or assembler. */
+
+    function flatFileName(name, code) {
+      if (typeof name !== "string" ||
+          !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) ||
+          name.indexOf("..") >= 0) {
+        refuse(code || "file-name", "unsafe file name " + JSON.stringify(name) +
+               "; use letters, digits, dot, dash and underscore (flat, no path)");
+      }
+      return name;
+    }
+
+    function fileComponent(name) {
+      if (isAsmSource(name)) return "asm";
+      if (/\.inc$/i.test(name)) return "inc";
+      if (name === MAIN) return "lua";
+      if (name === NOTES) return "notes";
+      return "asset";
+    }
+
+    function fileNames() {
+      return (session.files || []).map(function (f) { return f.name; });
+    }
+
+    function toolFileRead(args) {
+      requireFiles();
+      const name = flatFileName(args.name, "file-missing");
+      const file = session.files.filter(function (f) { return f.name === name; })[0];
+      if (!file) {
+        refuse("file-missing", "no file named " + JSON.stringify(name) +
+               "; the session holds " + fileNames().join(", "));
+      }
+      return {
+        ok: true,
+        name: name,
+        kind: fileComponent(name),
+        project_kind: session.kind,
+        bytes: utf8Length(file.source),
+        source: file.source,
+        files: fileNames(),
+        note: "the file exactly as file_write or project_open left it"
+      };
+    }
+
+    function toolFileWrite(args) {
+      const name = flatFileName(args.name, "file-name");
+      if (typeof args.source !== "string") {
+        refuse("file-source", "source must be the whole file's text");
+      }
+      if (!session.files) session.files = [];
+      const cur = session.files.filter(function (f) { return f.name === name; })[0];
+      if (cur) cur.source = args.source;
+      else session.files.push({ name: name, source: args.source });
+      session.kind = kindOfFiles(session.files);
+      if (name === MAIN) {
+        session.source = args.source;
+      } else if (session.kind === "assembly" && !session.files.some(
+                   function (f) { return f.name === MAIN; })) {
+        /* an assembly project has no Lua toy to run; the toy tools refuse
+         * with no-toy rather than run a stale main.lua */
+        session.source = null;
+      }
+      return {
+        ok: true,
+        name: name,
+        kind: fileComponent(name),
+        project_kind: session.kind,
+        bytes: utf8Length(args.source),
+        files: fileNames(),
+        note: session.kind === "assembly"
+          ? "an assembly project: asm_build assembles " + asmLib.entryName(session.files)
+          : "a Lua toy: main.lua is the file toy_run runs"
+      };
+    }
+
+    async function toolAsmBuild(args) {
+      if (!asmLib) {
+        refuse("asm-missing", "renderer/pce-asm.js did not load, so there is " +
+               "no assembler in this session");
+      }
+      requireFiles();
+      const entry = flatFileName(
+        args.entry == null || args.entry === ""
+          ? asmLib.entryName(session.files) : args.entry, "asm-entry");
+      if (!isAsmSource(entry)) {
+        refuse("asm-entry", "the entry must be a .s or .asm source, got " +
+               JSON.stringify(entry));
+      }
+      const file = session.files.filter(function (f) { return f.name === entry; })[0];
+      if (!file) {
+        refuse("asm-entry", "no file named " + JSON.stringify(entry) +
+               "; the session holds " + fileNames().join(", "));
+      }
+      const includes = {};
+      for (const f of session.files) if (f.name !== entry) includes[f.name] = f.source;
+      try {
+        await asmLib.ready(host.asmWasmUrl ? { wasmUrl: host.asmWasmUrl } : undefined);
+      } catch (e) {
+        refuse("asm-load", "the assembler did not load: " + errorMessage(e));
+      }
+      let r;
+      try {
+        r = asmLib.assemble(file.source, { filename: entry, includes: includes });
+      } catch (e) {
+        refuse("asm-error", errorMessage(e));
+      }
+      const errors = (r.errors || []).map(function (e) {
+        return { file: e.file || entry, line: e.line || 0,
+                 message: e.message };
+      });
+      const banks = typeof asmLib.bankSizes === "function"
+        ? asmLib.bankSizes(r.listing) : [];
+      const out = {
+        ok: errors.length === 0 && r.status === 0,
+        tool: "asm_build",
+        entry: entry,
+        bytes: r.bytes ? r.bytes.length : 0,
+        banks: banks,
+        errors: errors,
+        status: r.status,
+        files: fileNames(),
+        note: "renderer/pce-asm.js (PCEAS 3.23 in WebAssembly) — the same " +
+              "assembler and the same inputs the studio's assembly project " +
+              "uses; bytes are the raw HuCard image pceas -raw writes"
+      };
+      if (out.ok) {
+        out.sha256 = sha256Hex(r.bytes);
+        out.sym = r.sym || "";
+      }
+      if (args.listing !== false) out.listing = r.listing || "";
+      return out;
+    }
+
     /* ---- toy_save (#160): the toy as the studio's own file ----------------
      * The whole session — main.lua, every asset file, sources.json's named
      * sources, the songs — written as ONE pce.studio/1 envelope, built by
@@ -1704,7 +1934,12 @@
         ? resolved.name.replace(/\.(pce\.json|pce\.studio)$/i, "")
         : String(args.title);
       const description = args.description == null ? "" : String(args.description);
-      const text = sourceLib.envelopeText(title, description, session.files);
+      /* #230: the studio's envelope carries kind "assembly" for an assembly
+       * project so its autosave/open knows main.asm is the entry; a Lua toy's
+       * envelope stays byte-identical to sourceLib.envelopeText's. */
+      const env = sourceLib.envelope(title, description, session.files);
+      if (session.kind === "assembly") env.kind = "assembly";
+      const text = JSON.stringify(env, null, 2) + "\n";
       const wrote = await host.saveEnvelope({
         path: resolved.path, title: title, description: description, text: text
       });
@@ -1768,7 +2003,8 @@
     }
 
     async function toolProjectSave(args) {
-      requireToy();
+      /* #230: an assembly project has files but no main.lua. */
+      requireFiles();
       if (!projectLib) {
         refuse("project-host", "renderer/pce-project.js did not load, so the " +
                "project format is missing");
@@ -1804,6 +2040,7 @@
       }
 
       const project = {
+        kind: session.kind,
         title: title,
         author: held.author || "",
         created: held.created || now,
@@ -1832,6 +2069,7 @@
       return {
         ok: true,
         format: projectLib.FORMAT,
+        kind: session.kind,
         path: wrote.path,
         folder: !!resolved.folder,
         title: title,
@@ -1842,9 +2080,9 @@
         bytes: zipBytes ? zipBytes.length : null,
         entries: entries.length,
         note: resolved.folder
-          ? "the unpacked project folder — project.json, main.lua, the asset " +
-            "files and NOTES.md; commit it and git holds the history; " +
-            "project_open {path} resumes it"
+          ? "the unpacked project folder — project.json, the code (main.lua " +
+            "or the .s/.asm sources), the asset files and NOTES.md; commit it " +
+            "and git holds the history; project_open {path} resumes it"
           : "one .pcestudio (the studio's project format): the person opens " +
             "it with Project… → Open (or drops it on the page), and a later " +
             "session resumes it with project_open"
@@ -1875,6 +2113,53 @@
          * format's own refusals, before the session is touched */
         refuse(errorCode(e), errorMessage(e));
       }
+      const title = proj.title || projectLib.titleFromName(read.path || args.path);
+      const files = proj.files.map(function (f) {
+        return { name: f.name, source: f.source };
+      });
+      const savedNotes = proj.notes == null
+        ? "This project has no NOTES.md yet. Before you change anything, " +
+          "write one — goal, what works, what does not, the decisions, the " +
+          "next step — and pass it to project_save as notes."
+        : String(proj.notes);
+
+      /* #230: an assembly project has .s/.asm sources and no main.lua; there
+       * is nothing to compile, and asm_build is its build. */
+      const kind = proj.kind || projectLib.kindOf(proj);
+      if (kind === "assembly") {
+        resetToy();
+        session.files = files;
+        session.kind = "assembly";
+        session.source = null;
+        session.songs = [];
+        session.project = { title: title, author: proj.author,
+                            created: proj.created, modified: proj.modified };
+        const entry = asmLib ? asmLib.entryName(files) : "main.asm";
+        return {
+          content: [
+            { type: "text", text: savedNotes },
+            { type: "text", text: JSON.stringify({
+              ok: true,
+              format: proj.format,
+              kind: "assembly",
+              path: read.path,
+              folder: !!read.folder,
+              title: title,
+              notes: proj.notes != null,
+              files: files.map(function (f) { return f.name; }),
+              entry: entry,
+              created: proj.created,
+              modified: proj.modified,
+              note: "the assembly project is loaded: file_read/file_write edit " +
+                    "its .s/.asm/.inc files, asm_build assembles " + entry +
+                    " (bytes, banks, listing or errors), and project_save " +
+                    "writes it back (pass the updated NOTES.md as notes); the " +
+                    "first text block of this reply is NOTES.md"
+            }) }
+          ]
+        };
+      }
+
       const main = proj.files.filter(function (f) { return f.name === MAIN; })[0];
       if (!main) refuse("project-main", "the project has no main.lua");
       /* same gate as toy_write: a project whose code does not compile, or
@@ -1886,24 +2171,16 @@
         refuse(errorCode(e), errorMessage(e));
       }
       const songs = toySongs(proj.files);
-      const files = proj.files.map(function (f) {
-        return { name: f.name, source: f.source };
-      });
       resetToy();
       session.files = files;
       session.source = main.source;
       session.songs = songs;
-      const title = proj.title || projectLib.titleFromName(read.path || args.path);
       session.project = { title: title, author: proj.author,
                           created: proj.created, modified: proj.modified };
 
       /* NOTES.md's text is the FIRST content block: the resuming session
        * reads what the last one learned before it reads anything else. */
-      const first = proj.notes == null
-        ? "This project has no NOTES.md yet. Before you change anything, " +
-          "write one — goal, what works, what does not, the decisions, the " +
-          "next step — and pass it to project_save as notes."
-        : String(proj.notes);
+      const first = savedNotes;
       return {
         content: [
           { type: "text", text: first },
@@ -2362,6 +2639,10 @@
       toy_save: toolToySave,
       project_save: toolProjectSave,
       project_open: toolProjectOpen,
+      /* #230: an assembly project's file set and its build */
+      file_read: toolFileRead,
+      file_write: toolFileWrite,
+      asm_build: toolAsmBuild,
       toy_run: toolToyRun,
       source_add: toolSourceAdd,
       song_write: toolSongWrite,
