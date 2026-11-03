@@ -678,6 +678,18 @@ Takes no arguments:
 {"name":"rom_check","arguments":{}}
 ```
 
+The reply also carries a **budget** block: one row for every capacity the
+console interpreter enforces — the data bank, constants, functions, registers,
+upvalues, boot upvalue cells, globals, closures, table slots, table cells and
+arguments. Each row
+is `{id, label, used, limit, left, percent, status, refusal, source, what}`.
+`status` is `"ok"`, `"near"` past 80% or `"over"` past 100%. An over row names
+the finding code that refuses the toy (`refusal`), and that finding appears in
+`findings` too. The interpreter reads one 8 KiB data bank, and its last 32 B
+hold the song trailer, so the budget's data bank is **8,160 B**. A sprite spec
+the walker cannot pin to constants and the `raster(line, spec)` table form are
+findings on the console route, not capacities.
+
 Example reply (abridged — one toy, both routes):
 
 ```json
@@ -686,7 +698,15 @@ Example reply (abridged — one toy, both routes):
   {"code":"cgen-op","line":324,
    "message":"function fn@320, IL line 324, instruction `sfx`: not lowered by this backend (...)"},
   {"code":"ilbc-op","line":324,
-   "message":"instruction sfx (function 36, pc 9) has no bytecode form"}],
+   "message":"instruction sfx (function 36, pc 9) has no bytecode form"},
+  {"code":"toy-data-bank-full","line":null,
+   "message":"the bytecode (8524 B) needs 8524 bytes; the data bank has 8160 usable bytes after the 32-byte song trailer"}],
+ "budget":{"ok":false,"near":3,"over":4,
+  "rows":[{"id":"data-bank","label":"data bank","used":8524,"limit":8160,
+           "left":-364,"percent":104.5,"status":"over",
+           "refusal":"toy-data-bank-full","source":"renderer/pce-rom.js SONG_TABLE_OFF (an 8,192 B bank less the 32 B song trailer)","what":"the bytecode the interpreter reads"}],
+  "features":{"sprites":0,"rasterTables":0},
+  "note":"each limit is the console interpreter's (tools/ilvm/ilvm.c); near is past 80%, over past 100% and is refused by the finding in `refusal`. ..."},
  "carried":{"cgen":[{"id":"chunk","label":"...","detail":"..."}],
            "ilbc":[{"id":"hooks","label":"...","detail":"...","ops":[]}]},
  "refused":{"cgen":{"cgen-op":"..."},"ilbc":{"ilbc-op":"..."}},
@@ -698,6 +718,16 @@ Example reply (abridged — one toy, both routes):
 not carry. `ok:true` and an empty `findings` array is the answer PLATFORMER
 gets; a toy refused by the IL front end (`il-syntax`, `il-op`, …) has that
 one finding and the compiler checks are skipped.
+
+The rules that go with the budget, in the guide and the skill too:
+
+- Run `rom_check` before you write the first line and after every change.
+- A change that turns the budget red is undone or reworked before you move on.
+- Stop adding content at 80% of any limit, and say so.
+- When the person asks for something that will not fit, name the limit and
+  offer a smaller version instead of building it.
+- A toy that only runs in the browser is allowed only when the person says so
+  in words — "browser only" — and the toy's NOTES.md then says it.
 
 ### `export_pce(name, out)`
 
@@ -814,7 +844,9 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
   (`source-palettes`, `source-sat`).
 - A `.pce` is 40,960 bytes: a 32 KiB committed interpreter (with the HuTrack
   sound engine) plus one 8 KiB data bank. A bytecode-plus-assets payload past
-  8 KiB is refused by `toy-data-bank-full`.
+  8 KiB is refused by `toy-data-bank-full`; the usable size is 8,160 B,
+  because the bank's last 32 B hold the song trailer that `rom_check`'s
+  budget reports against.
 
 ## Evidence
 
@@ -872,6 +904,15 @@ stdio, and asserts 333 checks:
   with no `NOTES.md` gets the studio's template; `open-path` fences the
   working folder and `project-format` refuses a ZIP that is not a project;
 - `docs` chapter list, a chapter's own numbers, and a refused unknown topic.
+
+`node tests/check-rom-budget.js` holds the budget to the code: every limit
+equals the `tools/ilvm/ilvm.c` `#define` that owns it (or the JavaScript
+module's constant — the data bank, the constant pool, the table pool and the
+argument count), PLATFORMER is all ok, DUSK RUN's near rows include the 41
+registers and 41 functions `docs/ROM_SPEED.md` records, TOWER is over on the
+data bank with
+`toy-data-bank-full`, and the numbers the guide and SKILL.md print are those
+constants field for field.
 
 Written by @design because the card names the file. Per workshop rule 2, a
 **cold break by another seat is owed** before this closes the card.

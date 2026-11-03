@@ -34,7 +34,7 @@ The server needs Node and nothing else: no npm install, no compiler. The link is
 | song_write | compose the toy's song.json from a step list with the SEQUENCER's built-in instruments; music(0) plays it |
 | frame_png | the picture at a frame, as a PNG you can look at |
 | validate | check it against the hardware's limits, with file:line findings |
-| rom_check | what the exported ROM can and cannot run: both cartridge front ends over main.lua, every finding at once with its line, plus the carried/refused lists |
+| rom_check | what the exported ROM can and cannot run: both cartridge front ends over main.lua, every finding at once with its line, plus the budget (each interpreter limit: used, left, percent) and the carried/refused lists |
 | toy_save | save the whole toy — code, art, songs — as one .pce.json the person opens in the studio |
 | project_open | resume a project: a .pcestudio file or an unpacked project folder, with NOTES.md's text returned first |
 | project_save | save the session as a project — one .pcestudio, or the same layout unpacked into a folder so git holds the history; pass the updated NOTES.md as notes |
@@ -833,6 +833,26 @@ print(...) adds a line to the studio's log, not to devtools. It is useful, but a
 ## 8. Writing for the ROM
 
 The studio's Check answers whether the toy runs in the page. A cartridge has a second question: can the export build this toy, and what will the console do with it? The ROM CHECK drawer answers that as the file is typed — it marks the lines in the gutter and shows 'ROM: ok' or 'ROM: N problems' beside Export — and the same check is the MCP tool rom_check. Fix every finding before promising a ROM.
+
+**Never make a game that cannot export.** The console interpreter has fixed capacities, and rom_check's budget block reports each one — what the toy uses, what is left, and what percent — beside the findings. These rules are the job, not advice:
+
+Run `rom_check` before you write the first line and after every change. A change that turns the budget red is undone or reworked before you move on. Stop adding content at 80% of any limit, and say so. When the person asks for something that will not fit, name the limit and offer a smaller version instead of building it. A toy that only runs in the browser is allowed only when the person says so in words — "browser only" — and the toy's NOTES.md then says it.
+
+A row past 80% is `near`; past 100% is `over`, and the row names the finding that refuses the toy. A sprite spec the walker cannot pin to constants, and the `raster(line, spec)` table form, are findings on the console route, not capacities.
+
+| limit | value | what it is |
+| --- | --- | --- |
+| data bank | 8,160 B | the bytecode the interpreter reads |
+| constants | 127 | distinct int/bool/nil constants in the container |
+| functions | 41 | function ids the interpreter's table holds |
+| registers | 41 | registers in the toy's busiest function |
+| upvalues | 20 | upvalues in the toy's most-capturing function |
+| upvalue cells at boot | 72 | captured cells the boot closures take from the permanent pool (a loop can capture more) |
+| globals | 32 | named globals |
+| closures at boot | 48 | closure sites in the chunk and init() (a loop can make more) |
+| table slots | 16 | table sites with their own fixed pool slot |
+| table cells | 192 | cells in the fixed table pool |
+| arguments | 8 | parameters a function takes or a call passes |
 
 Keep to the carried lists below from the first version. They are generated from the two compilers' own tables, so they are what the code does, not a summary of it.
 

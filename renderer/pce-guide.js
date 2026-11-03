@@ -35,6 +35,7 @@ const toys = require("./pce-toys.js");
 const il = require("./pce-il.js");
 const psg = require("./pce-psg.js");
 const validate = require("./pce-validate.js");
+const romcheck = require("./pce-romcheck.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const TOY_FILES = ["parallax.lua", "sky-gradient.lua", "road.lua",
@@ -335,7 +336,9 @@ function guide() {
                      "findings"],
         ["rom_check", "what the exported ROM can and cannot run: both " +
                       "cartridge front ends over main.lua, every finding at " +
-                      "once with its line, plus the carried/refused lists"],
+                      "once with its line, plus the budget (each interpreter " +
+                      "limit: used, left, percent) and the carried/refused " +
+                      "lists"],
         ["toy_save", "save the whole toy — code, art, songs — as one " +
                      ".pce.json the person opens in the studio"],
         ["project_open", "resume a project: a .pcestudio file or an unpacked " +
@@ -616,6 +619,11 @@ function guide() {
   });
 
   /* 8. the subset: generated from both compilers' own tables (#193) ------- */
+  const budgetRows = romcheck.LIMITS.map(function (limit) {
+    return [limit.label, limit.unit === "B" ? num(limit.limit) + " B"
+                                            : String(limit.limit),
+            limit.what];
+  });
   sections.push({
     id: "rom", title: "8. Writing for the ROM",
     blocks: [
@@ -625,6 +633,23 @@ function guide() {
         "as the file is typed — it marks the lines in the gutter and shows " +
         "'ROM: ok' or 'ROM: N problems' beside Export — and the same check " +
         "is the MCP tool rom_check. Fix every finding before promising a ROM."),
+      p("**Never make a game that cannot export.** The console interpreter " +
+        "has fixed capacities, and rom_check's budget block reports each one " +
+        "— what the toy uses, what is left, and what percent — beside the " +
+        "findings. These rules are the job, not advice:"),
+      p("Run `rom_check` before you write the first line and after every " +
+        "change. A change that turns the budget red is undone or reworked " +
+        "before you move on. Stop adding content at 80% of any limit, and " +
+        "say so. When the person asks for something that will not fit, name " +
+        "the limit and offer a smaller version instead of building it. A " +
+        "toy that only runs in the browser is allowed only when the person " +
+        "says so in words — \"browser only\" — and the toy's NOTES.md then " +
+        "says it."),
+      p("A row past 80% is `near`; past 100% is `over`, and the row names " +
+        "the finding that refuses the toy. A sprite spec the walker cannot " +
+        "pin to constants, and the `raster(line, spec)` table form, are " +
+        "findings on the console route, not capacities."),
+      table(["limit", "value", "what it is"], budgetRows),
       p("Keep to the carried lists below from the first version. They are " +
         "generated from the two compilers' own tables, so they are what the " +
         "code does, not a summary of it.")

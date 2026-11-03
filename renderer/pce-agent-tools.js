@@ -1198,13 +1198,15 @@
     },
     {
       name: "rom_check",
-      description: "What the exported ROM can and cannot run (#193): run BOTH " +
+      description: "What the exported ROM can and cannot run: run BOTH " +
         "cartridge front ends over the loaded main.lua — the C route " +
         "(renderer/pce-cgen.js, the page's Export) and the bytecode route " +
         "(renderer/pce-ilbc.js, the interpreter image every .pce carries) — " +
         "without building anything. Returns every finding at once as " +
-        "{code, line, message}, plus the compilers' own carried and refused " +
-        "feature lists.",
+        "{code, line, message}, plus a budget block (each interpreter " +
+        "capacity: used, limit, left, percent; near past 80%, over past " +
+        "100%) and the compilers' own carried and refused feature lists. " +
+        "Run it before writing and after every change.",
       inputSchema: {
         type: "object",
         properties: {},
@@ -2243,13 +2245,16 @@
         return {
           ok: report.ok,
           findings: report.findings,
+          budget: report.budget,
           carried: report.carried,
           refused: report.refused,
           routes: report.routes,
-          note: "renderer/pce-romcheck.js (#193): the C route and the " +
-                "bytecode route, every refusal at once; line is the Lua " +
-                "line in main.lua, null when the finding is about the file " +
-                "as a whole"
+          note: "renderer/pce-romcheck.js: the C route and the bytecode " +
+                "route, every refusal at once; line is the Lua line in " +
+                "main.lua, null when the finding is about the file as a " +
+                "whole. budget lists each interpreter capacity with used, " +
+                "limit, left and percent: near past 80%, over past 100% " +
+                "and refused by its `refusal` code"
         };
       } catch (e) {
         refuse(errorCode(e), errorMessage(e));

@@ -99,6 +99,44 @@
       n ? n + " problem" + (n === 1 ? "" : "s") +
           " — the exported ROM will refuse this toy until they are fixed."
         : "ok — both cartridge routes carry this toy."));
+
+    /* #261: the budget follows the verdict and precedes the findings, so
+     * the numbers that decide whether there is room are read first. */
+    var budget = report.budget;
+    if (!budget || !budget.rows || !budget.rows.length) {
+      host.appendChild(el("p", "rom-budget-empty",
+        "BUDGET — no IL to measure (fix the first finding, then check again)"));
+    } else {
+      var details = el("details", "rom-budget");
+      details.open = true;
+      var head = budget.over ? "BUDGET — " + budget.over + " over, " +
+                              budget.near + " near"
+               : budget.near ? "BUDGET — " + budget.near + " near"
+               : "BUDGET — every limit under 80%";
+      details.appendChild(el("summary", null, head));
+      var table = el("table", "rom-budget-table");
+      var headRow = el("tr");
+      ["limit", "used", "left", "percent", "status"].forEach(function (text) {
+        headRow.appendChild(el("th", null, text));
+      });
+      table.appendChild(headRow);
+      for (var b = 0; b < budget.rows.length; b++) {
+        var row = budget.rows[b];
+        var tr = el("tr", "is-" + row.status);
+        tr.appendChild(el("td", null, row.label));
+        tr.appendChild(el("td", null, row.used == null ? "—" : String(row.used)));
+        tr.appendChild(el("td", null, row.left == null ? "—" : String(row.left)));
+        tr.appendChild(el("td", null,
+          row.percent == null ? "—" : row.percent + "%"));
+        var cell = el("td", "rom-budget-status is-" + row.status, row.status);
+        if (row.status === "over") cell.title = row.refusal;
+        tr.appendChild(cell);
+        table.appendChild(tr);
+      }
+      details.appendChild(table);
+      details.appendChild(el("p", "rom-budget-note", budget.note));
+      host.appendChild(details);
+    }
     if (n) {
       var list = el("ul", "rom-list");
       for (var i = 0; i < report.findings.length; i++) {

@@ -443,7 +443,7 @@
   },
   {
     "name": "rom_check",
-    "description": "What the exported ROM can and cannot run (#193): run BOTH cartridge front ends over the loaded main.lua — the C route (renderer/pce-cgen.js, the page's Export) and the bytecode route (renderer/pce-ilbc.js, the interpreter image every .pce carries) — without building anything. Returns every finding at once as {code, line, message}, plus the compilers' own carried and refused feature lists.",
+    "description": "What the exported ROM can and cannot run: run BOTH cartridge front ends over the loaded main.lua — the C route (renderer/pce-cgen.js, the page's Export) and the bytecode route (renderer/pce-ilbc.js, the interpreter image every .pce carries) — without building anything. Returns every finding at once as {code, line, message}, plus a budget block (each interpreter capacity: used, limit, left, percent; near past 80%, over past 100%) and the compilers' own carried and refused feature lists. Run it before writing and after every change.",
     "inputSchema": {
       "type": "object",
       "properties": {},

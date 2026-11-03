@@ -825,6 +825,21 @@
   .rom-carried summary { cursor: pointer; color: var(--text2); }
   .rom-carried p { margin: 6px 0 0; }
   .rom-carried b { color: var(--muted); font-weight: 600; }
+  .rom-budget, .rom-budget-empty { margin: 0 0 9px;
+    color: var(--muted); font: 11px var(--mono); }
+  .rom-budget summary { cursor: pointer; color: var(--text2); }
+  .rom-budget-table { border-collapse: collapse; margin-top: 6px; }
+  .rom-budget-table th, .rom-budget-table td {
+    text-align: right; padding: 1px 9px 1px 0; font-weight: 400; }
+  .rom-budget-table th:first-child, .rom-budget-table td:first-child {
+    text-align: left; }
+  .rom-budget-table th { color: var(--text2); }
+  .rom-budget-table tr.is-near td { color: #e8b24b; }
+  .rom-budget-table tr.is-over td { color: var(--bad); }
+  .rom-budget-status.is-ok { color: var(--green); }
+  .rom-budget-status.is-near { color: #e8b24b; }
+  .rom-budget-status.is-over { color: var(--bad); font-weight: 700; }
+  .rom-budget-note { margin: 6px 0 0; }
   .rom-line { color: var(--bad); font-weight: 700; }
   .marker-list { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; }
   .marker {

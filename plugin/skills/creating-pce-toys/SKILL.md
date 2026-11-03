@@ -116,6 +116,43 @@ Every one of these is enforced in code; the numbers are the code's.
 | PSG voices | 6 voices (channels 0..5); an SFX lasts 1..600 frames | `sfx-range` |
 | ROM | **1 MB** = 128 x 8 KiB banks | `validate-rom` |
 
+### The ROM budget
+
+A toy must be able to export as a `.pce`. The console interpreter has fixed
+capacities, and `rom_check` returns a `budget` block: one row per limit with
+`used`, `limit`, `left` and `percent`. A row past **80%** is `near`; past
+**100%** is `over`, and the row names the finding that refuses the toy. The
+numbers are the interpreter's own, checked against its source by
+`tests/check-rom-budget.js`.
+
+| limit | value | what runs out |
+| --- | --- | --- |
+| data bank | **8,160 B** | the bytecode; the bank's last 32 B are the song trailer |
+| constants | **127** | distinct int/bool/nil constants |
+| functions | **41** | function ids |
+| registers | **41** | registers in the busiest function |
+| upvalues | **20** | captures in the most-capturing function |
+| upvalue cells at boot | **72** | cells the boot closures take from the permanent pool |
+| globals | **32** | named globals |
+| closures at boot | **48** | closure sites in the chunk and `init()` |
+| table slots | **16** | table sites with a fixed pool slot |
+| table cells | **192** | cells in the fixed table pool |
+| arguments | **8** | parameters a function takes or a call passes |
+
+A `sprite(i, spec)` whose spec the walker cannot pin to constants, and the
+`raster(line, spec)` table form, are refusal findings on the console route,
+not capacities.
+
+The rules:
+
+- Run `rom_check` before you write the first line and after every change.
+- A change that turns the budget red is undone or reworked before you move on.
+- Stop adding content at 80% of any limit, and say so.
+- When the person asks for something that will not fit, name the limit and
+  offer a smaller version instead of building it.
+- A toy that only runs in the browser is allowed only when the person says so
+  in words — "browser only" — and the toy's NOTES.md then says it.
+
 Two costs worth internalising, because they decide the shape of a toy:
 
 - **A `raster(line)` callback costs cycles on all 224 lines.** The table form —
