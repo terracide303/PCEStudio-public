@@ -194,9 +194,11 @@ sha256 `46ccefb656d18ca9…`).  The overrun/worst/Hz figures are #207's
 measurements — the interpreter's behaviour for these toys is unchanged, and
 #221's old/new Mednafen diffs are in [`ROM-SOUND.md`](ROM-SOUND.md) §10.
 What moved on 2026-11-02: **#215**'s interpreter reads the version 3
-container, so **TOWER** now stops at the 8 KiB data bank (8,524 B of
-bytecode) and **DUSK RUN** builds — but it does not play (the interpreter
-refuses its container at load; see its row and #222). **#148** (the
+container, so **DUSK RUN** builds — but it does not play (the interpreter
+refuses its container at load; see its row and #222). What moved on
+2026-11-03: **TOWER was reworked in place** for the gallery export — 7,862 B
+of bytecode, no capacity over — so it builds, runs and its Mednafen picture
+is the browser's (see its row). **#148** (the
 127-constant pool) remains open; **#216** (a sound toy on a console) and
 **#200** (the Mednafen trace) are closed on [`ROM-SOUND.md`](ROM-SOUND.md)
 §11 and §8. The `TRACE=1` build is test-only — it refuses to write
@@ -226,7 +228,7 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 | toy | exports? | picture matches? | overruns | worst update | verdict | validator's static estimate |
 |-----|----------|------------------|----------|--------------|---------|-----------------------------|
 | **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants` (`renderer/pce-ilbc.js:462`, `MAX_CONST = 127`); the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. `sprite()` is carried for 21 of its 31 specs since #188–#190; the other ten are **#211**, and the pool refuses first. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
-| **TOWER** `toys/tower` | **no** — `toy-data-bank-full`: `pce-rom: the bytecode (8524 B) and assets (0 B) need 8524 bytes; the interpreter reads one 8 KiB data bank` (`renderer/pce-rom.js`). #186 carried `sat`, #187 `not`, #197 `sfx`, and #215's interpreter reads the version 3 container — so the encoding now passes the version gate and stops at the bank: 8,524 B against the 8,192-byte data bank. The refusal names no line. | — | — | — | — | 463,075 cycles · 3.88 frames · **15.5 Hz** |
+| **TOWER** `toys/tower` | **yes** — 40,960 B, sha256 `727baf12d96dcde…`; reworked in place for the gallery export (2026-11-03): 7,862 B of bytecode in the 8,160 B data bank, 27 functions, 32 registers, 47 boot upvalue cells, 6 arguments, and no row over its interpreter capacity. The art is still drawn by the toy; the rework merges the thirteen art callbacks into four generators, writes the background map as floor/ladder runs (blank cells stay at the runtime's zero, the same blank tile) and computes only the two sprite planes this art uses. The first 12 frames are one picture (the gem starts bobbing at 12), so the capture's tail is diff 0 against the browser's early frame. | **diff 0** — the captured tail is the browser's early picture | **4** | **2,896** lines | **too slow** (4 updates in 1,200 frames: the ~20 s one-time build, then ~5 updates a second) | 485,384 cycles · 4.07 frames · **14.7 Hz** (the model, not the console; the interpreted build and frames are much slower) |
 | **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`; refused by `renderer/pce-ilbc.js:335` because `raster` has no entry in its OPS table). #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind (#136). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
 | **DUSK RUN** `toys/dusk-run` | **yes** — 40,960 B, sha256 `5c01dc368ccb390e…`, **and it runs but its picture is not the browser's yet.** #222 raised `MAX_REGS` 41 / `MAX_FUNCS` 41 / `MAX_UPS` 20 (upvalue pool) / `MAX_CLOS` 48 (boot/transient split), so the container loads and executes; a Mednafen save state at 20 s is VRAM/CRAM/SAT **diff 0 against browser frame 3**, and the host harness matches for 900 frames. The runtime's base-VRAM buffer (32 words a frame) was dropping DUSK's 64/68/208-word build frames; it now writes an over-buffer word through instead ([`ROM-SOUND.md`](ROM-SOUND.md) §10). What is left is the raster backend: one replay display frame per toy frame, and the best replay frame in a 20 s movie is **16 bytes off** on row 16 (scanline latency) — **#227**. `tests/check-export-games.js` pins the ROM sha and asserts the screen is not black and not yet a browser frame. #184's validator note still applies: the 8-frame probe measured the BUILD (frame 7 = build step 7, 675,190 cycles), and the 300-frame performance is 390,744 cycles (18.3 Hz), so the validator accepts the toy. | **no — draws, not the browser's picture** (16 bytes, row 16; #227) | **2** | **1568** lines | **too slow** (2 updates in 600 frames, the ~7 s boot) | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
 | **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `0401fad836db3d76…` (#186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode) | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 308 | **311** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
@@ -250,12 +252,15 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   measure reads 0 updates mid-boot; and the interpreter's display-on keeps
   the toy's CR, so the sprites' SB bit survives `toy_display_on` (`docs/IL.md`
   §14, the compiled runtime's `toy_cr` shadow).
-- **The other three stop on their own next gap, and DUSK RUN builds, runs
-  and draws — but its displayed frame is not the browser's yet.** STARFALL
-  on the 127-constant pool and the 10 `sprite` specs the walker cannot pin;
-  TOWER on the 8 KiB data bank (8,524 B of bytecode — a *refusal with a
-  message*, no ROM); NOVA TIDE on `raster(line, spec)`. DUSK RUN's
-  container now fits the interpreter's arrays (#222: 41 registers, 41
+- **Two games still stop on their own next gap, and TOWER now builds.** STARFALL
+  stops on the 127-constant pool and the 10 `sprite` specs the walker cannot
+  pin, NOVA TIDE on `raster(line, spec)`. TOWER was reworked in place for the
+  gallery export (2026-11-03): its bytecode is 7,862 B with no capacity over,
+  it builds a 40,960 B ROM, and its Mednafen picture is the browser's. Its
+  one-time build draws the tower in about 20 s of wall and a frame then takes
+  about 11 video frames (~5 updates a second) — the interpreter's speed, not
+  a game rule. DUSK RUN's
+  container fits the interpreter's arrays (#222: 41 registers, 41
   functions, a 19-upvalue closure, 27 boot closures), and its VM state is
   byte-equal to the browser's; the runtime's dropped build-frame writes are
   fixed too. What remains is the raster backend's display: one replay frame
@@ -291,16 +296,17 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   only a built ROM can, and PLATFORMER's is the first: 30 Hz where the
   model's route-1 pricing said 81.2 Hz, the interpreter's per-operation
   cost the model does not price.
-- **The studio page refuses earlier than the MCP for four of the five.**
+- **The studio page refuses earlier than the MCP for two of the five (four
+  before the 2026-11-03 TOWER rework).**
   Its Export runs `renderer/pce-cgen.js` first: STARFALL stops on
   `cgen-op` for the `abs` builtin (`main.lua:466`; #190 carried the
   sprites cgen can resolve, so its old `sprite` finding at `main.lua:406`
-  moved), TOWER on `cgen-op` `not` (`main.lua:329`; #197 carried its
-  `sfx`), NOVA TIDE and DUSK RUN on `cgen-op` `unm` (`main.lua:29` and
-  `:62`), and only PLATFORMER reaches the encoder — it is the one game the
-  page's Export and the MCP's `export_pce` agree on. So the page's
-  one-line finding for those four is a C-emitter or validator finding, not
-  the bytecode refusal in the table.
+  moved), NOVA TIDE and DUSK RUN on `cgen-op` `unm` (`main.lua:29` and
+  `:62`), and PLATFORMER and TOWER reach the encoder — they are the two
+  games the page's Export and the MCP's `export_pce` agree on (TOWER's
+  rework removed its logical `not`, so the C route carries it too). So the
+  page's one-line finding for STARFALL, NOVA TIDE and DUSK RUN is a
+  C-emitter or validator finding, not the bytecode refusal in the table.
 - **Carrying the first refusals would not finish the job.** #178's
   projections put STARFALL at 9,186 B, TOWER at 8,379 B and NOVA TIDE at
   9,287 B — all over the interpreter's 8,192-byte data bank (#138), before
@@ -337,7 +343,8 @@ Every refusal below is measured on this tree; the first three had no card of
 their own, the rest already did:
 
 - **#209** — the C route has no logical `not` (`cgen-op` at
-  `renderer/pce-cgen.js:697`; TOWER `main.lua:329`, DUSK RUN `main.lua:401`),
+  `renderer/pce-cgen.js:697`; DUSK RUN `main.lua:401` — TOWER's rework
+  removed its `not`, so the card now names one toy),
   though route 1 has carried opcode 0x11 since #187.
 - **#210** — the C route has no unary minus (`cgen-op` at
   `renderer/pce-cgen.js:697`; NOVA TIDE `main.lua:29`, DUSK RUN
@@ -378,7 +385,7 @@ every line it occurs on.
 | | bytecode | `ilbc-range` | 168 | more than 127 constants (the 128th is first seen here) |
 | | bytecode | `ilbc-builtin` | 466, 570 | builtins `abs`, `sr` |
 | | bytecode | `ilbc-op` | 498, 646 | `raster(line, spec)` |
-| **TOWER** | C compiler | `cgen-op` | 329 | logical `not` |
+| **TOWER** | — | — | — | **none: `rom_check` answers `ok:true`** |
 | **NOVA TIDE** | C compiler | `cgen-op` | 29 | unary minus (`unm`) |
 | | C compiler | `cgen-op` | 530, 531, 532, 533, 534 | `raster(line, spec)` |
 | | bytecode | `ilbc-op` | 530, 531, 532, 533, 534 | `raster(line, spec)` |
@@ -388,26 +395,25 @@ every line it occurs on.
 
 ### What the table says, plainly
 
-- **PLATFORMER is the only one of the five both routes carry.** That agrees
-  with #180's measurement: its export builds and runs at 30 Hz. The other
-  four stop on constructs no route carries yet: `raster(line, spec)` (both
-  routes), and `unm`, `not` and the builtins other than `rgb`/`note` (the C
+- **PLATFORMER and TOWER are carried by both routes.** That agrees
+  with #180's measurement: PLATFORMER's export builds and runs at 30 Hz, and
+  TOWER's reworked bytecode builds and matches the browser's picture. STARFALL
+  and NOVA TIDE stop on constructs no route carries yet: `raster(line, spec)`
+  (both routes), and `unm` and the builtins other than `rgb`/`note` (the C
   route). Both routes carry `sprite(i, spec)` for a constant spec (#188 on
   the bytecode, #190 in C); STARFALL's ten refused sprites are the specs its
   walker cannot pin to constants, not the instruction. STARFALL additionally
-  exhausts the 127-constant pool; TOWER's bytecode now passes the version
-  gate and exceeds the 8 KiB data bank (8,524 B); DUSK RUN's bytecode passes
+  exhausts the 127-constant pool; DUSK RUN's bytecode passes
   and its container fits the bank — what stops it on the console is the
   interpreter's RAM capacity at load (#222), which no front-end check
   reports.
-- **The two routes differ, and that is the point of checking both.** TOWER's
-  `not`, NOVA TIDE's `unm` and the `raster(line, spec)` calls are refused by
-  the C route, while the bytecode opcode table carries `not`, `unm`, `sfx`,
+- **The two routes differ, and that is the point of checking both.** NOVA
+  TIDE's `unm` and the `raster(line, spec)` calls are refused by the C route,
+  while the bytecode opcode table carries `not`, `unm`, `sfx`,
   `music` and `release` (not `raster`). NOVA TIDE's MCP `export_pce` is
   therefore stopped by its `raster`, not by its `unm`; TOWER and DUSK RUN's
-  bytecode lists are empty now that `sfx` carries (#197), so their MCP
-  export passes the encoder and stops one step later: TOWER at
-  `toy-data-bank-full` (8,524 B) and DUSK RUN at nothing — its ROM builds
+  bytecode lists are empty now that `sfx` carries (#197),
+  and DUSK RUN's ROM builds
   and shows black (the interpreter's load-time capacity, #222; a toy is
   exportable by the studio only when both lists are empty, and by MCP
   `export_pce` when the bytecode list is and the built container is one the

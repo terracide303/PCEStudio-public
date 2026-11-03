@@ -131,7 +131,8 @@ const TOYS_META = [
     tags: ["playable", "sprites"],
     blurb: "An original climber: J and L run, I and K climb the ladders, N " +
       "jumps. Dodge the rolling boulders, take the hearts and the hammer, and " +
-      "reach a gem to make the next round faster.",
+      "reach a gem to make the next round faster. It also exports as a HuCard " +
+      "ROM.",
     effect: "a playable climber"
   },
   /* #151: the maintainer's endless runner, copied into toys/ unchanged.  Five

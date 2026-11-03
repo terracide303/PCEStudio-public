@@ -31,13 +31,13 @@
  *     fits one 60 Hz frame, VRAM fits 32,768 words and no sprite line
  *     overflows.
  *
- * WHAT IT DOES NOT PROVE, and says so in a NOTE when it runs: the console
- * Export path refuses the toy — renderer/pce-ilbc.js has no bytecode form
- * for `sfx` (its first, at main.lua:324), and `table`, which is how TOWER
- * keeps its boulders, hearts and state, is missing too — so the toy is
- * browser-only for now, as toys/tower/README.md says.  Also per
- * workshop rule 2 a cold break by another seat is owed before this closes
- * the card.
+ * THE CONSOLE EXPORT: the toy now encodes — every interpreter capacity is
+ * under its limit and both routes carry it — so this check also asserts the
+ * bytecode builds and states its size.  The ROM's Mednafen picture, the sha
+ * and the browser-frame match are tests/check-export-games.js's evidence;
+ * this file proves the browser and IL runtimes still play the same game.
+ * Per workshop rule 2 a cold break by another seat is owed before the card
+ * closes.
  */
 "use strict";
 
@@ -343,15 +343,18 @@ function checkBudgets() {
               b.ratio60.toFixed(2) + "x60 Hz), VRAM " + b.vram.words +
               " words, " + b.sprites.requested + " strips on the busiest line");
 
-  /* the browser-only finding, recorded rather than failed: the console
-   * encoder cannot carry `sfx` or a Lua table yet. */
+  /* The console export: the toy encodes, so a change that takes it back over
+   * an interpreter capacity fails here as well as in rom_check. */
   try {
-    ilbc.encode(il.compile(source));
-    note("the console export carries this toy now — toys/tower/README.md " +
-         "says it is browser-only for sfx and tables; update it");
+    const encoded = ilbc.encode(il.compile(source));
+    check(encoded.size <= 8160,
+          "the bytecode is " + encoded.size + " B of the 8,160 B data bank");
+    console.log("  export: bytecode " + encoded.size + " B, " +
+                encoded.functions + " functions, " + encoded.globals +
+                " globals");
   } catch (e) {
-    note("browser-only for now: the console export refuses the toy (" +
-         e.code + ": " + e.message + ") — toys/tower/README.md says so");
+    check(false, "the console export refuses the toy (" + e.code + ": " +
+                 e.message + ")");
   }
   return rep;
 }

@@ -16,11 +16,13 @@
  *      rounded to 0.1, and `status` is ok / near past 80 / over past 100.
  *      PLATFORMER is all ok; DUSK RUN's near rows are the ones docs/ROM_SPEED
  *      records (data bank 91.5%, constants 89.8%, functions 100%, registers
- *      100%, globals 96.9%, upvalues 95%); TOWER is OVER on the data bank
- *      (8,524 B against 8,160) with the finding that refuses it.
- *   3. The finding is in the report.  TOWER's rom_check carries
- *      toy-data-bank-full in `findings`, so ok is false — a budget the
- *      author must act on, not a number beside a green light.
+ *      100%, globals 96.9%, upvalues 95%); TOWER, reworked in place for the
+ *      gallery export, is near on the data bank (7,862 B of 8,160, 96.3%),
+ *      constants and globals, and over on no capacity — its report has no
+ *      finding and the interpreter's boot check accepts it.
+ *   3. The finding is in the report when a capacity is over.  TOWER no
+ *      longer is; DUSK RUN's arithmetic above covers the over case, and this
+ *      file's own guide/SKILL checks keep the refusal codes honest.
  *   4. The guide and the skill print the same numbers.  The guide's budget
  *      table is generated from LIMITS (changing a limit in the module
  *      changes the generated Markdown); SKILL.md's table is parsed and
@@ -216,33 +218,30 @@ function checkTower() {
   const r = reportOf("TOWER");
   checkArithmetic("TOWER", r);
   const bank = row(r, "data-bank");
-  eq("TOWER: the data bank is 8,524 B", bank.used, 8524);
-  eq("TOWER: the data bank is over", bank.status, "over");
-  eq("TOWER: 364 B past the 8,160 B usable bank", bank.left, -364);
-  eq("TOWER: 104.5% of the data bank", bank.percent, 104.5);
-  eq("TOWER: the over row names toy-data-bank-full", bank.refusal,
-     "toy-data-bank-full");
-  eq("TOWER: the budget is not ok", r.budget.ok, false);
-  check(r.findings.some(function (f) { return f.code === "toy-data-bank-full"; }),
-        "TOWER: the report carries the toy-data-bank-full finding");
-  check(r.findings.some(function (f) {
-    return f.code === "toy-data-bank-full" &&
-           /8,?524/.test(f.message) && /8,?160/.test(f.message);
-  }), "TOWER: the finding names the used and usable bytes");
-  eq("TOWER: rom_check is not ok", r.ok, false);
-  /* The same toy is over on functions and registers too — the interpreter's
-   * boot check, which has no compiler-side refusal. */
-  eq("TOWER: 44 functions against 41", row(r, "functions").used, 44);
-  eq("TOWER: the functions are over", row(r, "functions").status, "over");
-  eq("TOWER: 43 registers against 41", row(r, "registers").used, 43);
-  eq("TOWER: the registers are over", row(r, "registers").status, "over");
-  eq("TOWER: 90 boot upvalue cells against 72",
-     row(r, "upvalue-cells").used, 90);
-  eq("TOWER: the boot upvalue cells are over",
-     row(r, "upvalue-cells").status, "over");
-  check(r.findings.some(function (f) {
-    return f.code === "rom-budget" && /functions/.test(f.message);
-  }), "TOWER: the interpreter's capacity finding is in the report");
+  eq("TOWER: the data bank is 7,862 B", bank.used, 7862);
+  eq("TOWER: the data bank is near, not over", bank.status, "near");
+  eq("TOWER: 298 B left in the 8,160 B usable bank", bank.left, 298);
+  eq("TOWER: 96.3% of the data bank", bank.percent, 96.3);
+  eq("TOWER: no over row", r.budget.over, 0);
+  eq("TOWER: the budget is ok", r.budget.ok, true);
+  eq("TOWER: rom_check has no finding", r.findings, []);
+  eq("TOWER: rom_check is ok", r.ok, true);
+  /* The four rows past 80% are the reworked toy's headroom; no row is over
+   * an interpreter capacity. */
+  const near = r.budget.rows.filter(function (x) {
+    return x.status === "near";
+  }).map(function (x) { return x.id; }).sort();
+  eq("TOWER: the near rows are the data bank, constants and globals", near,
+     ["constants", "data-bank", "globals"]);
+  eq("TOWER: 27 functions against 41", row(r, "functions").used, 27);
+  eq("TOWER: the functions are ok", row(r, "functions").status, "ok");
+  eq("TOWER: 32 registers against 41", row(r, "registers").used, 32);
+  eq("TOWER: the registers are ok", row(r, "registers").status, "ok");
+  eq("TOWER: 47 boot upvalue cells against 72",
+     row(r, "upvalue-cells").used, 47);
+  eq("TOWER: the boot upvalue cells are ok",
+     row(r, "upvalue-cells").status, "ok");
+  eq("TOWER: 6 arguments on the widest call", row(r, "arguments").used, 6);
 }
 
 /* ---- 3. the guide and the skill print the same numbers ----------------- */
@@ -372,8 +371,8 @@ async function checkDrawerAndTool() {
   const drawn = flat(textOf(host));
   check(drawn.indexOf("BUDGET") >= 0, "the drawer draws a BUDGET block");
   check(drawn.indexOf("data bank") >= 0, "the drawer lists the data bank");
-  check(drawn.indexOf("104.5%") >= 0, "the drawer prints the percent");
-  check(drawn.indexOf("over") >= 0, "the drawer marks the over row");
+  check(drawn.indexOf("96.3%") >= 0, "the drawer prints the percent");
+  check(drawn.indexOf("near") >= 0, "the drawer marks the near row");
 
   global.PCEStudio = { romcheck: romcheck };
   const session = agentTools.createSession({});
@@ -409,7 +408,7 @@ async function checkDrawerAndTool() {
     process.exitCode = 1;
   } else {
     console.log("PASS  ROM budget: the limits are the code's, PLATFORMER " +
-                "ok, DUSK RUN near, TOWER over on the data bank, the guide " +
+                "ok, DUSK RUN near, TOWER near and exportable, the guide " +
                 "and skill print the same numbers, the rules are in all " +
                 "three files, drawer == MCP");
   }

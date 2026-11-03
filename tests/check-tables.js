@@ -82,9 +82,9 @@ const TOYS = [
     sites: 6, cells: 33, arrayCells: 33, fieldCells: 0,
     shapes: { array: 6, record: 0, mixed: 0, empty: 0, nested: 0 },
     escaping: 6, reexecuting: 0,
-    ops: { table: 0, setlist: 0, tget: 24, tset: 0, total: 24, il: 793 },
-    exact: 8379, over: true, by: 187,
-    at3: 8475, at4: 8507, at6: 8571 },
+    ops: { table: 0, setlist: 0, tget: 24, tset: 0, total: 24, il: 810 },
+    exact: 7720, over: false, by: 472,
+    at3: 7813, at4: 7844, at6: 7906 },
   { rel: "toys/nova-tide/main.lua", name: "NOVA TIDE",
     sites: 27, cells: 183, arrayCells: 178, fieldCells: 5,
     shapes: { array: 22, record: 5, mixed: 0, empty: 0, nested: 0 },
@@ -123,7 +123,7 @@ function checkToy(t) {
      cap.exact.by], [t.exact, t.over, t.by]);
   eq(t.name + ": 3/4/6 B range",
      cap.projections.map(function (p) { return [p.assumed, p.bytes, p.over]; }),
-     [[3, t.at3, true], [4, t.at4, true], [6, t.at6, true]]);
+     [[3, t.at3, t.over], [4, t.at4, t.over], [6, t.at6, t.over]]);
 
   /* The CLI is the thing a person runs; it must exit 0 on every toy, even
    * where the export refuses. */
@@ -151,7 +151,7 @@ function checkBlankNote(towerRun) {
      "NOTE line not found");
   ok("and still prints the budgets it does have",
      /route 1 \(the interpreter/.test(towerRun.stdout) &&
-     /ROM ~30657 B/.test(towerRun.stdout));
+     /ROM ~29224 B/.test(towerRun.stdout));
 }
 
 /* The projections are a model; its v2 sizing gets its own control on the

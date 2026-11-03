@@ -135,13 +135,30 @@ def parse_png(data):
 def main():
     if len(sys.argv) < 3:
         print(f"usage: {sys.argv[0]} IN.mov OUT.png [CROPW CROPH [XSTEP]]\n"
-              f"       {sys.argv[0]} IN.mov --all OUTDIR [CROPW CROPH [XSTEP]]",
+              f"       {sys.argv[0]} IN.mov --all OUTDIR [CROPW CROPH [XSTEP]]\n"
+              f"       {sys.argv[0]} IN.mov --tail N OUTDIR [CROPW CROPH [XSTEP]]",
               file=sys.stderr)
         return 2
     src = sys.argv[1]
     all_mode = sys.argv[2] == "--all"
-    out = sys.argv[3] if all_mode else sys.argv[2]
-    crop_args = sys.argv[4:] if all_mode else sys.argv[3:]
+    tail_mode = sys.argv[2] == "--tail"
+    if tail_mode:
+        try:
+            n_tail = int(sys.argv[3])
+        except (IndexError, ValueError):
+            print("--tail needs a frame count", file=sys.stderr)
+            return 2
+        if n_tail < 1:
+            print("--tail needs a positive count", file=sys.stderr)
+            return 2
+        out = sys.argv[4] if len(sys.argv) > 4 else None
+        if not out:
+            print("--tail needs an output directory", file=sys.stderr)
+            return 2
+        crop_args = sys.argv[5:]
+    else:
+        out = sys.argv[3] if all_mode else sys.argv[2]
+        crop_args = sys.argv[4:] if all_mode else sys.argv[3:]
     crop = (int(crop_args[0]), int(crop_args[1])) if len(crop_args) >= 2 else None
     xstep = int(crop_args[2]) if len(crop_args) >= 3 else 1
 
@@ -159,6 +176,37 @@ def main():
         return cw, ch, [b"".join(r[x * 3:x * 3 + 3]
                                  for x in range(0, cw * xstep, xstep))
                         for r in rows[:ch]]
+
+    if tail_mode:
+        # Only the last N complete PNGs: a long capture (a toy with a slow
+        # boot) costs minutes to decode every frame in pure Python, and the
+        # callers that use this mode compare only the tail.
+        os.makedirs(out, exist_ok=True)
+        hits = []
+        hit = 0
+        while True:
+            hit = data.find(PNG_SIG, hit)
+            if hit < 0:
+                break
+            v = valid_png_at(data, hit)
+            if not v:
+                hit += 1
+                continue
+            w, h, end = v
+            hits.append((hit, end))
+            hit = end
+        if not hits:
+            print("no valid PNG frame found", file=sys.stderr)
+            return 1
+        keep = hits[-n_tail:]
+        rw = rh = 0
+        for n, (start, end) in enumerate(keep):
+            rw, rh, rows = parse_png(data[start:end])
+            rw, rh, rows = crop_rows(rows, rw, rh)
+            path = os.path.join(out, "frame%04d.png" % n)
+            write_png(path, rw, rh, rows)
+        print(f"wrote {len(keep)} tail frames to {out} ({rw}x{rh})")
+        return 0
 
     if all_mode:
         # Every complete PNG the container carries, in order: #31 part A

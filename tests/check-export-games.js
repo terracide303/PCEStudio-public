@@ -84,35 +84,21 @@ const ROM_BYTES = 40960;            /* 32 KiB image + one data bank */
 /* The card's five games and the outcome docs/ROM_SPEED.md records (2026-10-31;
  * DUSK RUN moved to the encoder's refusal by #184, the three games' sat
  * refusals moved on by #186, PLATFORMER now builds and moved to GAME_PINS
- * below, #197 carried note and the sfx instruction, and #215's interpreter
- * reads the version-3 container: TOWER now stops at the data bank and NOVA
- * TIDE at its first raster, 2026-11-02.  DUSK RUN builds, loads, runs and
- * draws since #222, and moved to GAME_PINS below; its displayed frame is
- * not the browser's yet (#227) — see its pin).
+ * below, #197 carried note and the sfx instruction, #215's interpreter reads
+ * the version-3 container, and the 2026-11-03 gallery rework moved TOWER to
+ * GAME_PINS: it builds and its Mednafen picture is the browser's.  STARFALL
+ * stops on the constant pool and NOVA TIDE on its first raster.  DUSK RUN
+ * builds, loads, runs and draws since #222 and is pinned below; its displayed
+ * frame is not the browser's yet (#227) — see its pin).
  * `where` is the source line the table names; null is what the validator's
- * own finding can say (it names no line for a frame-wide budget) or what a
- * refusal without function or pc says (the data bank).  `message` is
- * a substring of the refusal the suite insists on, so a message that loses
+ * own finding can say (it names no line for a frame-wide budget).  `message`
+ * is a substring of the refusal the suite insists on, so a message that loses
  * its detail fails too. */
 const GAMES = [
   {
     name: "STARFALL", toy: "toys/demo-game/main.lua",
     expect: { code: "ilbc-range", message: "more than 127 constants" },
     where: "main.lua:168"
-  },
-  {
-    /* #186 carried sat, #187 `not`, and #197 carried the sfx instruction —
-     * so TOWER's bytecode route encodes fully and buildToyRom refused the
-     * version-3 container (the committed interpreter only read versions 1
-     * and 2).  #215's interpreter reads version 3, so TOWER's encoding now
-     * passes the version gate and stops at the data bank instead: its
-     * bytecode (8,524 B) is over the 8 KiB data bank the interpreter reads.
-     * The refusal names no function or pc, so the table's `where` is null
-     * and exportToy records the buildToyRom code. */
-    name: "TOWER", toy: "toys/tower/main.lua",
-    expect: { code: "toy-data-bank-full",
-              message: "the interpreter reads one 8 KiB data bank" },
-    where: null
   },
   {
     /* #186 carried sat and #197 carried note and sfx; NOVA TIDE's next
@@ -129,6 +115,28 @@ const GAMES = [
  * picture-cycle hashes, and the measure/capture wall time its boot needs —
  * see PLATFORMER's comment), added with its row in docs/ROM_SPEED.md. */
 const GAME_PINS = {
+  /* TOWER was reworked in place for the gallery export (2026-11-03): the
+   * bytecode is 7,862 B of the 8,160 B data bank and no interpreter capacity
+   * is over, so it builds a 40,960 B ROM.  Its init draws the tower through
+   * the interpreter and takes ~20 s of wall on the dummy SDL driver (the art
+   * loops are thousands of interpreted instructions), then a frame() takes
+   * ~11 video frames; the measure therefore runs 1,800 frames and the
+   * capture 40 s, and only the movie's last 12 frames are decoded (--tail;
+   * decoding every frame of a 40 s movie in pure Python takes minutes).
+   * The game state moves every frame (boulders, hearts, the gem), so the
+   * pin is the ROM sha plus "the captured picture is one of the browser's
+   * frames" over the browser's first 600 frames: the ROM's toy frame at the
+   * capture is what it is, and framesAny says the sha, not a small hash
+   * cycle, is the stable half of the pin. */
+  "TOWER": {
+    toy: "toys/tower/main.lua",
+    rom: "727baf12d96dcdee0344bb77b1ac11924694dec0dc8ae67aeabe906dcaebdf60",
+    framesAny: true,
+    measureFrames: 1800,
+    captureMs: 40000,
+    captureTail: true,
+    browserFrames: 600
+  },
   /* #186: sat carried, so PLATFORMER builds.  Its one-time build (init()
    * draws the whole map and the sprite patterns through the interpreter)
    * takes ~7 s of wall on the dummy SDL driver: the default 300-frame
@@ -381,7 +389,7 @@ function measure(romPath, frames) {
 /* A `-qtrecord` run: the route tools/capture-ilvm.sh proves.  The movie's
  * frames are the emulated picture, so the dummy SDL video driver is enough
  * and no key or mouse event is sent.  Returns the frame directory. */
-async function captureFrames(romPath, outDir, sleepMs) {
+async function captureFrames(romPath, outDir, sleepMs, tailOnly) {
   const movie = path.join(outDir, "capture.mov");
   const home = path.join(outDir, "home");
   fs.mkdirSync(path.join(home, "mcs"), { recursive: true });
@@ -425,7 +433,8 @@ async function captureFrames(romPath, outDir, sleepMs) {
   }
   const frames = path.join(outDir, "frames");
   const m = spawnSync("python3",
-    ["-I", MOVFRAMES, movie, "--all", frames, "256", "224", "4"],
+    ["-I", MOVFRAMES, movie, tailOnly ? "--tail" : "--all",
+     ...(tailOnly ? [String(CAPTURE_TAIL)] : []), frames, "256", "224", "4"],
     { cwd: ROOT, encoding: "utf8", timeout: 120000 });
   if (m.status !== 0) {
     return { error: "movframes.py failed: " +
@@ -515,13 +524,16 @@ function sampleHash(pixels) {
   return h;
 }
 
-/* The browser's run of the same toy: the first BROWSER_FRAMES frames. */
-function browserFrames(toyPath) {
+/* The browser's run of the same toy: the first `count` frames (60 by
+ * default).  A game with a long one-time build may be captured hundreds of
+ * toy frames in, so its pin asks for a wider window (TOWER: 600). */
+function browserFrames(toyPath, count) {
   const source = fs.readFileSync(path.join(ROOT, toyPath), "utf8");
   const browser = toys.create(source, { budgetMs: 2000 });
   browser.load();
   const frames = [];
-  for (let f = 0; f < BROWSER_FRAMES; f++) {
+  const n = count || BROWSER_FRAMES;
+  for (let f = 0; f < n; f++) {
     const g = browser.frame(f);
     frames.push({ pixels: g.pixels, hash: sampleHash(g.pixels) });
   }
@@ -752,7 +764,8 @@ async function main() {
       /* 2. the picture, against the browser's frames — or, for a game that
        * exports but does not play, the all-black screen and the reason. */
       let want = null, cmp = null;
-      const cap = await captureFrames(romPath, dir, pin.captureMs);
+      const cap = await captureFrames(romPath, dir, pin.captureMs,
+                                      pin.captureTail);
       if (cap.error) {
         check(false, w.name + ": the picture captured — " + cap.error);
         continue;
@@ -771,7 +784,7 @@ async function main() {
         const lit = notBlack(cap.frames, cap.files);
         check(lit.length > 0, w.name + ": the screen is not black — the " +
               "container runs and draws");
-        want = browserFrames(w.toy);
+        want = browserFrames(w.toy, pin.browserFrames);
         cmp = compareCapture(cap.frames, cap.files, want);
         check(cmp.match < 0, w.name + ": no captured frame is the browser's " +
               "picture yet; one is (browser frame " + cmp.match +
@@ -781,7 +794,7 @@ async function main() {
                     "frame " + cmp.best + ", " + cmp.diff + " bytes differ); " +
                     pin.unmatched);
       } else {
-        want = browserFrames(w.toy);
+        want = browserFrames(w.toy, pin.browserFrames);
         cmp = compareCapture(cap.frames, cap.files, want);
         if (cmp.match >= 0) {
           console.log("      " + w.name + ": captured frame " + cmp.file +
@@ -826,6 +839,16 @@ async function main() {
                 w.name + ": the counters advance on the black screen");
         } else if (pin.unmatched) {
           /* The unmatched branch above asserted the picture's state. */
+          check(!!m.json && m.json.frames > 0,
+                w.name + ": the counters advance while it draws");
+        } else if (pin.framesAny) {
+          /* A game whose picture changes every frame cannot pin a small
+           * cycle of hashes; the ROM sha pins the bytes and the comparison
+           * above proves the captured frame is the browser's at the toy
+           * frame the ROM reached. */
+          check(cmp.match >= 0,
+                w.name + ": the emulator's picture is one of the browser's " +
+                "frames");
           check(!!m.json && m.json.frames > 0,
                 w.name + ": the counters advance while it draws");
         } else {
