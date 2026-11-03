@@ -163,6 +163,9 @@ and the mutation suites break the engine on purpose to show the tests notice.
   for each. All five run in the browser.
 - **Music data in a ROM**: `note()`, `sfx()` and `release()` play in an exported ROM, measured in
   Mednafen, but a song's data is not in the ROM yet (#199), so `music()` has nothing to play there.
+- **Assembly**: the PCEAS assembler runs in the browser (`vendor/pceas/`), but only as a proof (#224): you cannot
+  yet build a project or a game from `.s` files in the studio, and a Lua toy cannot call assembly. The design is
+  written ([`docs/ASM.md`](docs/ASM.md)); the steps are on the [roadmap](https://pcestudio.terracides.com/renderer/roadmap.html).
 - **Real hardware**: nothing has been tried on a console or a flash cart.
 - **Phones and tablets**, **CD-ROM, Arcade Card and SuperGrafx** are not designed for.
 - The MCP server and the studio have been tested on **macOS** only. Linux and Windows should work (plain Node.js and
