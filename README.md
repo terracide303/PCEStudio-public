@@ -101,20 +101,20 @@ builds the `.pce` in the browser from the bytecode and a fixed interpreter image
 that image is 32 KiB and every toy ROM is 40,960 bytes.
 
 The simple example toys in `toys/*.lua` (parallax, status bar, sky gradient, palette cycle, road) export today,
-and so does **PLATFORMER** (#186 carried the `sat` instruction — its ROM runs in Mednafen at 30 Hz).
-`sprite()` is carried too, for a spec whose slot and fields are constants (#188–#190; its ROM runs at
-60 Hz). **DUSK RUN** also builds a 40,960-byte ROM and loads, runs and draws: #222 raised the interpreter's
-capacities (41 registers, 41 functions, a 19-upvalue closure in a pooled upvalue table) and its VRAM, colours
+and so does **PLATFORMER** (its ROM runs in Mednafen at 30 Hz).
+`sprite()` is carried too, for a spec whose slot and fields are constants (its ROM runs at
+60 Hz). **DUSK RUN** also builds a 40,960-byte ROM and loads, runs and draws: the interpreter's
+capacities were raised (41 registers, 41 functions, a 19-upvalue closure in a pooled upvalue table), and DUSK RUN's VRAM, colours
 and sprites are byte-equal to the browser's at frame 3. Its *displayed* picture is not the browser's yet — the raster
 backend shows one replay frame per GUI frame, and the best replay frame is 16 bytes off on row 16 (one
-scanline's first 16 pixels lag the write, #227).
+scanline's first 16 pixels lag the write).
 
 The other three games — STARFALL, TOWER and NOVA TIDE — do not yet: each is stopped by a named finding, and
 [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five (STARFALL's
 127-constant pool and the ten sprite specs it cannot pin to constants; TOWER's 8,524-byte bytecode against
 the 8 KiB data bank; NOVA TIDE's `raster` table), with the `raster` table form and the interpreter's
 capacity behind those. Carrying them is the next big piece of work. Sound effects and notes play in an
-exported ROM (measured in Mednafen); a song's data is not in the ROM yet (#199). The ROMs are checked in
+exported ROM (measured in Mednafen); a song's data is not in the ROM yet. The ROMs are checked in
 Mednafen; nothing has run on a real console yet.
 
 ## Project files
@@ -155,15 +155,15 @@ and the mutation suites break the engine on purpose to show the tests notice.
 
 - **Export of the five games**: PLATFORMER exports and runs in Mednafen at 30 Hz (re-measured
   2026-11-01); the sprite toy runs at 60 Hz; DUSK RUN exports, loads and draws (its state matches the
-  browser's at frame 3 after #222), but its displayed frame is not the browser's yet: the best replay
-  frame is 16 bytes off on row 16 — the raster backend's replay (#227). STARFALL, TOWER and
+  browser's at frame 3), but its displayed frame is not the browser's yet: the best replay
+  frame is 16 bytes off on row 16 — the raster backend's replay. STARFALL, TOWER and
   NOVA TIDE stop on named findings — STARFALL on the 127-constant pool and ten sprite specs it cannot
   pin, TOWER on its 8,524-byte bytecode against the 8 KiB data bank, NOVA TIDE on the `raster` table —
   and [`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code, Lua line and refusing file:line
   for each. All five run in the browser.
 - **Music data in a ROM**: `note()`, `sfx()` and `release()` play in an exported ROM, measured in
-  Mednafen, but a song's data is not in the ROM yet (#199), so `music()` has nothing to play there.
-- **Assembly**: the PCEAS assembler runs in the browser (`vendor/pceas/`), but only as a proof (#224): you cannot
+  Mednafen, but a song's data is not in the ROM yet, so `music()` has nothing to play there.
+- **Assembly**: the PCEAS assembler runs in the browser (`vendor/pceas/`), but only as a proof: you cannot
   yet build a project or a game from `.s` files in the studio, and a Lua toy cannot call assembly. The design is
   written ([`docs/ASM.md`](docs/ASM.md)); the steps are on the [roadmap](https://pcestudio.terracides.com/renderer/roadmap.html).
 - **Real hardware**: nothing has been tried on a console or a flash cart.

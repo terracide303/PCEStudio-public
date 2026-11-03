@@ -239,14 +239,13 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
   <p>Known and on the board. No need to report these, but tell us if one of them stops you completely.</p>
   <table>
     <tr><th>Area</th><th>What happens</th><th>Status</th></tr>
-    <tr><td>Export to <code>.pce</code></td><td>The simple example toys export, and so do PLATFORMER (#186
-      carried the <code>sat</code> instruction; re-measured 2026-11-01, it runs at 30 Hz) and the sprite toy
-      (#190 carried <code>sprite()</code> for a spec whose slot and fields are constants; it runs at 60 Hz).
-      DUSK RUN also builds a 40,960-byte ROM and, since #222, loads, runs and draws (41 registers, 41
+    <tr><td>Export to <code>.pce</code></td><td>The simple example toys export, and so do PLATFORMER (the
+      <code>sat</code> instruction is carried; re-measured 2026-11-01, it runs at 30 Hz) and the sprite toy
+      (<code>sprite()</code> is carried for a spec whose slot and fields are constants; it runs at 60 Hz).
+      DUSK RUN also builds a 40,960-byte ROM and loads, runs and draws (41 registers, 41
       functions, a pooled 19-upvalue closure; its state is byte-equal to the browser's at frame 3). Its
       displayed frame is not the browser's yet: the raster backend shows one replay frame per GUI frame,
-      and the best replay frame is 16 bytes off on row 16 (one scanline's first 16 pixels lag the write,
-      #227). STARFALL, TOWER and NOVA TIDE
+      and the best replay frame is 16 bytes off on row 16 (one scanline's first 16 pixels lag the write). STARFALL, TOWER and NOVA TIDE
       stop on named findings, and the page's Export and the MCP's <code>export_pce</code> stop at different
       ones: the page first runs the C route (STARFALL's <code>abs</code> at <code>main.lua:466</code>,
       TOWER's <code>not</code> at <code>:329</code>, NOVA TIDE's and DUSK RUN's <code>unm</code> at
@@ -261,23 +260,23 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
       no longer show the previous toy's art. If the old toy has unsaved edits, the studio asks before replacing
       them and keeps the old file set recoverable. A dropped <code>.pcestudio</code> envelope still opens as its
       own file set. (The old behaviour — keep the previous toy's art and reload the page — is fixed.)</td>
-      <td class="status ok">fixed (#145)</td></tr>
+      <td class="status ok">fixed</td></tr>
     <tr><td>Game art in ASSETS</td><td>A game's art shows up in ASSETS as named sources with a preview when the
-      toy carries a <code>sources.json</code> — Add Source writes one for the art it imports (#156). Art a game draws
+      toy carries a <code>sources.json</code> — Add Source writes one for the art it imports. Art a game draws
       purely in code, with no asset file, still shows only in VRAM: there is no file to preview.</td>
-      <td class="status ok">fixed (#156)</td></tr>
+      <td class="status ok">fixed</td></tr>
     <tr><td>Sound in an exported ROM</td><td>The sound engine is in the ROM (2026-11-02): a toy that calls
       <code>sfx()</code>, <code>note()</code> or <code>release()</code> encodes and builds, and the
       recordings are audible in Mednafen at the pitches the studio writes (note 261/330/392/523 Hz,
       sfx 559/131 Hz); the console's PSG writes match the studio's over the traced frames. A song's data
-      is not in the ROM yet (#199).</td><td class="status ok">notes play; songs planned</td></tr>
+      is not in the ROM yet.</td><td class="status ok">notes play; songs planned</td></tr>
     <tr><td>What the ROM can run, while you write</td><td>ROM CHECK (and the MCP's <code>rom_check</code>)
       now reports the exact findings for both routes while you write. It is a front-end check: it does not
       build the ROM or run it, so the frame rate still needs Export and an emulator.</td>
       <td class="status ok">built; front end only</td></tr>
     <tr><td>Claude Code: songs</td><td>Through the MCP server a toy's <code>music(0)</code> encodes and
       <code>song_write</code> writes its <code>song.json</code>, so the song plays in the studio. The ROM's
-      song table still has no song data (#199), so the exported ROM plays no music yet.</td>
+      song table still has no song data, so the exported ROM plays no music yet.</td>
       <td class="status soon">studio only</td></tr>
     <tr><td>Connect Claude (live link)</td><td>New and lightly tested: if Connect does not give you a working
       command, or Claude says no studio tab is connected, please report it.</td><td class="status soon">please test</td></tr>

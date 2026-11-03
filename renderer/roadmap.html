@@ -68,13 +68,13 @@
     <span class="status no">planned</span> is decided but not started.</div>
   <h2>1. Games that really export</h2>
   <p>A studio is only as good as what you can play outside it. Today PLATFORMER and the simple example toys export
-  and run in an emulator; DUSK RUN builds and draws, but its displayed picture is not the browser's yet (#227), and
+  and run in an emulator; DUSK RUN builds and draws, but its displayed picture is not the browser's yet, and
   nothing has run on a real console.</p>
   <table>
     <tr><th>Feature</th><th>Why we want it</th><th>State</th></tr>
     <tr><td>The five example games export</td><td>They are the test of every limit in the exporter. Each refusal teaches us what is missing.</td><td class="status soon">in progress</td></tr>
     <tr><td>Bigger games (bank switching, the larger mapper)</td><td>The interpreter ROM has one 8 KiB data bank. Real games are larger.</td><td class="status no">planned</td></tr>
-    <tr><td>A compiler from Lua to console code (#101)</td><td>Instead of an interpreter in the ROM, the studio would translate a game once into HuC6280 machine code. That is how games reach 60 Hz and fit in real cartridges, and it is what ppu.toys does for the SNES. Planned, not built.</td><td class="status no">planned</td></tr>
+    <tr><td>A compiler from Lua to console code</td><td>Instead of an interpreter in the ROM, the studio would translate a game once into HuC6280 machine code. That is how games reach 60 Hz and fit in real cartridges, and it is what ppu.toys does for the SNES. Planned, not built.</td><td class="status no">planned</td></tr>
     <tr><td>Faster output</td><td>PLATFORMER runs at 30 Hz through the interpreter; small toys reach 60 Hz. A direct code generator would reach 60 Hz for real games.</td><td class="status no">planned</td></tr>
     <tr><td>Save data (backup RAM)</td><td>Many games need to remember progress.</td><td class="status no">planned</td></tr>
     <tr><td>A test on real hardware</td><td>Nothing is proven until a console or a flash cart runs it.</td><td class="status no">planned</td></tr>
@@ -84,8 +84,8 @@
   <table>
     <tr><th>Feature</th><th>Why we want it</th><th>State</th></tr>
     <tr><td>Sound engine inside the exported ROM</td><td>The ROM can play notes and effects through the HuTrack engine. Note and effect recordings in Mednafen are audible, at the pitches the studio writes.</td><td class="status ok">notes play</td></tr>
-    <tr><td>Music data in ROMs</td><td>The SEQUENCER song and the built-in instruments, as HuTrack data. The ROM's song table has no song data yet (#199).</td><td class="status soon">in progress</td></tr>
-    <tr><td>A full tracker (#226 onward)</td><td>Pattern grid, instruments and waves, built on the same data the ROM plays. Dropping a .dmf file becomes one way to load a song into it. The survey is done (#226); the tracker itself is planned.</td><td class="status no">planned</td></tr>
+    <tr><td>Music data in ROMs</td><td>The SEQUENCER song and the built-in instruments, as HuTrack data. The ROM's song table has no song data yet.</td><td class="status soon">in progress</td></tr>
+    <tr><td>A full tracker</td><td>Pattern grid, instruments and waves, built on the same data the ROM plays. Dropping a .dmf file becomes one way to load a song into it. The survey is done; the tracker itself is planned.</td><td class="status no">planned</td></tr>
   </table>
   <h2>3. Assembly for serious developers</h2>
   <p>Many PC Engine developers write assembly. They need no interpreter, no size limit and full control.</p>
@@ -93,27 +93,26 @@
   emulators and assemblers developers trust, not to replace them. Build and look inside here, in the browser,
   with the chip views and an AI beside you; take the project out as plain files and debug it in
   <a href="https://github.com/drhelius/Geargrafx">Geargrafx</a> or Mednafen if you want a full debugger.
-  Our own Run panel will stay small on purpose. We are reading what Geargrafx offers (#253) before deciding how far to work with it.</div>
+  Our own Run panel will stay small on purpose. We are reading what Geargrafx offers before deciding how far to work with it.</div>
   <div class="box"><b>What you can bring today.</b> Plain PCEAS assembly is the realistic route to reuse once the
-  assembly project (#230) and the include file and HuCard builder (#231) land: most plain PCEAS/MagicKit source
+  assembly project and the include file and HuCard builder land: most plain PCEAS/MagicKit source
   should carry over, with the include-file and macro differences to fix. HuC/HuCC C code and other assemblers
-  are a rewrite today, not a port. The planned routes are a developer export for HuCC and PCEAS projects
-  (#249) and a native compiler (#101); the full porting notes come with #237.</div>
+  are a rewrite today, not a port. The planned routes are a developer export for HuCC and PCEAS projects and a native compiler; the full porting notes come with the assembly docs.</div>
   <table>
     <tr><th>Feature</th><th>Why we want it</th><th>State</th></tr>
-    <tr><td>The assembler in your browser</td><td>PCEAS compiled to WebAssembly, so .s files assemble on the page. The WebAssembly proof works (#224); wiring it into a project is planned.</td><td class="status soon">in progress</td></tr>
-    <tr><td>Assembly projects and a HuCard builder (#230, #231)</td><td>Write a whole game in assembly with our register include file, and build a .pce.</td><td class="status no">planned</td></tr>
-    <tr><td>A HuC6280 CPU in the studio (#232–#235)</td><td>Run any program live next to the chip panels, instead of only toys.</td><td class="status no">planned</td></tr>
-    <tr><td>Open an existing ROM in the studio (#202)</td><td>Drop in a .pce you made (or own) to look inside it: its picture, palettes, sprites and sound, and to step through its code. Good for checking your own builds and learning from your own homebrew.</td><td class="status no">planned</td></tr>
+    <tr><td>The assembler in your browser</td><td>PCEAS compiled to WebAssembly, so .s files assemble on the page. The WebAssembly proof works; wiring it into a project is planned.</td><td class="status soon">in progress</td></tr>
+    <tr><td>Assembly projects and a HuCard builder</td><td>Write a whole game in assembly with our register include file, and build a .pce.</td><td class="status no">planned</td></tr>
+    <tr><td>A HuC6280 CPU in the studio</td><td>Run any program live next to the chip panels, instead of only toys.</td><td class="status no">planned</td></tr>
+    <tr><td>Open an existing ROM in the studio</td><td>Drop in a .pce you made (or own) to look inside it: its picture, palettes, sprites and sound, and to step through its code. Good for checking your own builds and learning from your own homebrew.</td><td class="status no">planned</td></tr>
     <tr><td>A profiler: CPU cost per scanline and per frame</td><td>Show how much of each frame your main loop and interrupt handlers use. This is a gap in today's debuggers.</td><td class="status no">planned</td></tr>
     <tr><td>A live map of every ROM bank</td><td>See what is in each bank, how full it is and what moved after the last build. Squeezing out the last bytes is a long-running headache.</td><td class="status no">planned</td></tr>
     <tr><td>Symbol files other emulators load</td><td>Write <code>.sym</code> files so Geargrafx and Mednafen show your labels. We aim to work with the tools you already use, not replace them.</td><td class="status no">planned</td></tr>
     <tr><td>Compression with the trade-off shown</td><td>Show each asset's size saving and decompression time with ZX0.</td><td class="status no">planned</td></tr>
     <tr><td>A source folder for HuCC and PCEAS users</td><td>Export a project as plain files with a Makefile, so you can build it with your own toolchain.</td><td class="status no">planned</td></tr>
     <tr><td>Send a build to a flash cart</td><td>Research first: what a browser can do with a Turbo EverDrive or a programmable HuCard.</td><td class="status no">planned</td></tr>
-    <tr><td>Run panel and debugger (#235)</td><td>Step, registers, memory, disassembly and breakpoints. Opening any .pce (#202) falls out of it.</td><td class="status no">planned</td></tr>
+    <tr><td>Run panel and debugger</td><td>Step, registers, memory, disassembly and breakpoints. Opening any .pce falls out of it.</td><td class="status no">planned</td></tr>
     <tr><td>Lua toys that call assembly routines</td><td>Fast inner loops in assembly, the rest in Lua.</td><td class="status no">planned</td></tr>
-    <tr><td>Work with Geargrafx (research first, #253)</td><td>Symbol files it loads by itself, and possibly Claude building here and running and breaking there through its MCP server. Not started: the card only reads what it offers.</td><td class="status no">planned</td></tr>
+    <tr><td>Work with Geargrafx (research first)</td><td>Symbol files it loads by itself, and possibly Claude building here and running and breaking there through its MCP server. Not started: the card only reads what it offers.</td><td class="status no">planned</td></tr>
     <tr><td>Take the project out as source</td><td>A plain folder with the assembly, assets and a build script, so nobody is locked in.</td><td class="status no">planned</td></tr>
   </table>
   <h2>4. Working with an AI</h2>
