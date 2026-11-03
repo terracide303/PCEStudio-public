@@ -19,12 +19,12 @@
  *      PLATFORMER) each reach the outcome the table records: either a
  *      refusal with that code and message, or a built 40,960-byte ROM.  The
  *      source line the table names is checked against the IL (a function's
- *      definition line, the 128th constant, the refused instruction's own
- *      line, or the first refused builtin's line — or null, when the
- *      refusal names none: the data bank's plain Error), so the
- *      table's "line" column is reproducible and not a comment.  A blocker
- *      that lands moves the refusal: this pin goes red and asks for the
- *      table and the pin to be updated — a tripwire, not a broken test.
+ *      definition line, the refused instruction's own line, or the first
+ *      refused builtin's line — or null, when the refusal names none: the
+ *      data bank's plain Error), so the table's "line" column is
+ *      reproducible and not a comment.  A blocker that lands moves the
+ *      refusal: this pin goes red and asks for the table and the pin to be
+ *      updated — a tripwire, not a broken test.
  *   2. Every game that exports is measured with tools/measure-rom.js
  *      (Mednafen, headless) and its picture is compared with the browser's
  *      frames of the same toy: the tail of a `-qtrecord` capture must be
@@ -85,21 +85,18 @@ const ROM_BYTES = 40960;            /* 32 KiB image + one data bank */
  * DUSK RUN moved to the encoder's refusal by #184, the three games' sat
  * refusals moved on by #186, PLATFORMER now builds and moved to GAME_PINS
  * below, #197 carried note and the sfx instruction, #215's interpreter reads
- * the version-3 container, and the 2026-11-03 gallery rework moved TOWER to
- * GAME_PINS: it builds and its Mednafen picture is the browser's.  STARFALL
- * stops on the constant pool and NOVA TIDE on its first raster.  DUSK RUN
- * builds, loads, runs and draws since #222 and is pinned below; its displayed
- * frame is not the browser's yet (#227) — see its pin).
+ * the version-3 container, and the 2026-11-03 gallery rework moved TOWER and
+ * STARFALL to GAME_PINS: both build.  TOWER's Mednafen picture is the
+ * browser's; STARFALL's is not yet (#273: the raster backend arms the line
+ * chain one display frame per toy frame, and an interpreted raster frame is
+ * tens of display frames — #227 — see its pin).  NOVA TIDE still stops on its
+ * first raster.  DUSK RUN builds, loads, runs and draws since #222 and is
+ * pinned below; its displayed frame is not the browser's yet (#227)).
  * `where` is the source line the table names; null is what the validator's
  * own finding can say (it names no line for a frame-wide budget).  `message`
  * is a substring of the refusal the suite insists on, so a message that loses
  * its detail fails too. */
 const GAMES = [
-  {
-    name: "STARFALL", toy: "toys/demo-game/main.lua",
-    expect: { code: "ilbc-range", message: "more than 127 constants" },
-    where: "main.lua:168"
-  },
   {
     /* #186 carried sat and #197 carried note and sfx; NOVA TIDE's next
      * blocker is its first raster (the raster instruction has no bytecode
@@ -115,6 +112,39 @@ const GAMES = [
  * picture-cycle hashes, and the measure/capture wall time its boot needs —
  * see PLATFORMER's comment), added with its row in docs/ROM_SPEED.md. */
 const GAME_PINS = {
+  /* STARFALL was reworked in place for the gallery export (#273, 2026-11-03):
+   * the art block computes its VRAM addresses instead of listing 225 of them
+   * and the sprites are placed with sat(), so the bytecode is 6,285 B of the
+   * 8,160 B data bank and the constant pool is 111 of 127 — no capacity is
+   * over, and it builds a 40,960 B ROM.  What it does NOT have yet is the
+   * browser's picture on the console.  Its one mid-frame change is the
+   * status-bar split (BYR 0 above line 24, the frame's scroll below), and
+   * tools/ilvm/ilvm_runtime.c arms the RCR chain for ONE display frame per
+   * toy frame; an interpreted STARFALL frame is ~25 display frames, so the
+   * 12-frame capture tail lands in the compute window almost every time, when
+   * the screen carries the last palette and no split.  The rare armed display
+   * frame is one toy frame out of step: its background scroll is the next
+   * frame's, its sprites the previous one's (the SAT DMA is a VBlank behind
+   * the armed chain), and it misses a browser frame by ~450 bytes, all on
+   * background-star rows.  Both halves — a picture the browser recognises,
+   * and a capture that is not simply the last palette — are #227's to fix.
+   * Until then this pin is the DUSK RUN shape: the ROM sha, the counters, and
+   * the screen asserted not black and not yet a browser frame.  The measured
+   * run needs its own window: 600 frames of counters and a 12 s capture, the
+   * latter long enough that the movie holds the running game, not the boot. */
+  "STARFALL": {
+    toy: "toys/demo-game/main.lua",
+    rom: "e60712232fe3c7a73f35b97908bc3531dd111fa23ab6934718a9d373c6aec1f4",
+    frames: [],
+    unmatched: "the container runs and draws; no captured frame is the " +
+               "browser's picture yet — the raster backend arms one display " +
+               "frame per toy frame (#227), and the armed frame is one toy " +
+               "frame out of step",
+    measureFrames: 600,
+    captureMs: 12000,
+    captureTail: true,
+    browserFrames: 600
+  },
   /* TOWER was reworked in place for the gallery export (2026-11-03): the
    * bytecode is 7,862 B of the 8,160 B data bank and no interpreter capacity
    * is over, so it builds a 40,960 B ROM.  Its init draws the tower through
@@ -278,61 +308,13 @@ function exportToy(toyPath, frames) {
   }
 }
 
-/* Replays pce-ilbc.js's pass-1 constant scan: each function in order, each
- * instruction's `k` first and then its operands, deduped by key.  The
- * encoder refuses on the 128th; this returns the instruction that would
- * cross the ceiling, so the table can name a line the encoder does not. */
-function constantCeiling(program) {
-  const MAX_CONST = 127;
-  function kKey(k) {
-    if (!k) return null;
-    if (k.t === "int") return "i:" + (k.v | 0);
-    if (k.t === "bool") return "b:" + (k.v ? 1 : 0);
-    if (k.t === "nil") return "n:";
-    return "?" + k.t;
-  }
-  const seen = new Set();
-  function see(op, ins) {
-    if (!op || op.r != null || !op.k) return null;
-    const key = kKey(op.k);
-    if (seen.has(key)) return null;
-    if (seen.size >= MAX_CONST) return { line: ins.line, t: ins.t, k: op.k };
-    seen.add(key);
-    return null;
-  }
-  const operands = ["a", "b", "cond", "src", "addr", "word", "value"];
-  for (let f = 0; f < program.functions.length; f++) {
-    const code = program.functions[f].code || [];
-    for (let pc = 0; pc < code.length; pc++) {
-      const ins = code[pc];
-      let hit = see(ins.k ? { k: ins.k } : null, ins);
-      if (hit) return hit;
-      for (const field of operands) {
-        hit = see(ins[field], ins);
-        if (hit) return hit;
-      }
-      if (ins.args) for (const a of ins.args) {
-        hit = see(a, ins);
-        if (hit) return hit;
-      }
-    }
-  }
-  return null;
-}
-
 /* The source line the table names, re-derived from the IL:
- *   - STARFALL's 128th constant (the encoder names no line),
  *   - an ilbc-op refusal's "(function N, pc P)" instruction,
  *   - an ilbc-builtin refusal's first uncarried builtin (only rgb and note
  *     have a bytecode form; the message names no function or pc).
  * A game whose `where` is null (TOWER: the data bank's plain Error names no
  * line) skips this entirely. */
 function checkedWhere(game, program) {
-  if (game.name === "STARFALL") {
-    const hit = constantCeiling(program);
-    check(!!hit, "STARFALL: the constant scan finds the 128th constant");
-    return hit ? "main.lua:" + hit.line : null;
-  }
   if (game.expect.code === "ilbc-op") {
     const m = /function (\d+), pc (\d+)/.exec(game.expect.message);
     if (!m) return null;

@@ -23,9 +23,10 @@
  *      the playfield), N fires (rate-limited to one shot in eight frames, four
  *      slots), a shot that meets a drone raises the score, and a drone that
  *      meets a parked ship costs a life once and not again while inv runs.
- *      That life is the VDC's own collision flag: the ship is SAT slot 0 and
- *      `sr()` carries the CC bit (#119); clearing CR bit 0, its enable, in a
- *      copy of the source loses no life at all, which is the control.
+ *      That life is the ship's collision test over the drone array (#273;
+ *      the VDC's CC flag `sr()` it used before is carried by neither
+ *      cartridge route).  A copy of the source whose ship test can never
+ *      fire loses no life at all, which is the control.
  *      The status bar is a raster split: BYR 0 and the bar's backdrop above
  *      line 24, the frame's own scroll and the field's backdrop below it.
  *   5. THE EVIDENCE IS IN THE REPO.  The seven key frames and a six-cell strip
@@ -157,16 +158,28 @@ function checkBudgets(source) {
   if (!rep.ok || !rep.budgets) return;
   const b = rep.budgets;
   check(b.frameCycles > 0, "frame() has a cost");
-  check(b.ratio60 < 1, "frame() fits one 60 Hz video frame (" +
-        b.ratio60.toFixed(2) + "x, " + b.hz.toFixed(0) + " Hz)");
+  /* The split is the raster() CALLBACK since #273 (neither cartridge route
+   * carries the table form), so the validator prices 224 per-line calls
+   * separately in collectionCycles.  frame()'s own work is frameCycles, and
+   * it is that hook the 60 Hz video frame's 119,318 cycles bounds; the
+   * callback's 224 calls are the split's fixed cost.  The browser runs the
+   * whole frame in 1.7 ms (measured, both runtimes), well inside 16.7 ms;
+   * the console interpreter is the slow route and is not this test's. */
+  check(b.frameCycles < 119318, "frame() itself fits one 60 Hz video frame (" +
+        b.frameCycles + " cycles, " + (b.frameCycles / 119318).toFixed(2) +
+        "x; the raster callback adds " + b.rasterMean.toFixed(0) +
+        " cycles x " + b.frames[0].rasterCycles.length + " lines)");
   check(b.vram.words <= 32768, "VRAM " + b.vram.words + " words inside 32,768");
   eq("no sprite line overflows", b.spriteOverflowLines, []);
   check(b.rom.bytes > 0 && b.rom.bytes < b.rom.limit,
         "ROM estimate " + Math.round(b.rom.bytes) + " B inside the 1 MB HuCard");
   console.log("  validator: frame " + b.frameCycles + " cycles (" +
-              b.ratio60.toFixed(2) + "x60 Hz), VRAM " + b.vram.words +
-              " words, ROM ~" + Math.round(b.rom.bytes) + " B, " +
-              b.sprites.requested + " strips on the busiest line");
+              (b.frameCycles / 119318).toFixed(2) + "x a video frame) + " +
+              b.rasterMean.toFixed(0) + " x " +
+              b.frames[0].rasterCycles.length + " raster calls = " +
+              b.collectionCycles + " (" + b.ratio60.toFixed(2) + "x); VRAM " +
+              b.vram.words + " words, ROM ~" + Math.round(b.rom.bytes) +
+              " B, " + b.sprites.requested + " strips on the busiest line");
 }
 
 /* ---- 3 + 4: play, Lua and IL side by side ------------------------------ */
@@ -282,7 +295,7 @@ function checkPlay() {
   for (let i = 0; i < rec.length; i++) {
     const r = rec[i];
     if (r.barLine !== 0 || r.fieldLine !== 24) split = false;
-    if (r.baseByr !== 0 || r.baseCr !== 0xC3) split = false;
+    if (r.baseByr !== 0 || r.baseCr !== 0xC0) split = false;
     if (r.byr !== (i + 1) % 256) split = false;
     if (r.byr !== 0) sawScroll = true;
     if (JSON.stringify(r.barCram) === JSON.stringify(r.fieldCram)) split = false;
@@ -338,12 +351,17 @@ function checkCollision() {
   eq("exactly one life is lost in the 600-frame still run", drops, 1);
   eq("the still run ends on two hearts", lastLives, 2);
 
-  /* THE CONTROL (#119): the same still run with the CC enable cleared loses
-   * no life, so the loss above is the VDC's status flag and not arithmetic
-   * that would happen with or without sr(). */
-  const noCc = source.replace('reg("CR", 0xC3)', 'reg("CR", 0xC0)');
-  check(noCc !== source, "the control copy cleared CR bit 0 (the CC enable)");
-  const ctl = toys.create(noCc, { budgetMs: 250 });
+  /* THE CONTROL: the same still run with the ship's collision comparison
+   * made impossible (a reachable == 2 instead of == 1) loses no life, so the
+   * loss above is the collision test over the drone array and not some other
+   * arithmetic that drops a heart.  #273 replaced the control this test used
+   * before (clearing the VDC's CC enable, #119): the toy no longer reads
+   * sr(), which neither cartridge route carries. */
+  const noHit = source.replace("if hit(px, py, ex[j], ey[j]) == 1 then",
+                               "if hit(px, py, ex[j], ey[j]) == 2 then");
+  check(noHit !== source, "the control copy made the ship's collision test " +
+        "unreachable");
+  const ctl = toys.create(noHit, { budgetMs: 250 });
   ctl.load();
   let ctlLost = -1;
   for (let f = 0; f < FRAMES; f++) {
@@ -352,8 +370,9 @@ function checkCollision() {
     if (ctlLost < 0 && l < 3) ctlLost = f;
   }
   ctl.dispose();
-  check(ctlLost < 0, "with the CC enable cleared no life is lost in the same " +
-        "600 still frames" + (ctlLost < 0 ? "" : " (lost at frame " + ctlLost + ")"));
+  check(ctlLost < 0, "with the collision test unreachable no life is lost " +
+        "in the same 600 still frames" +
+        (ctlLost < 0 ? "" : " (lost at frame " + ctlLost + ")"));
   return { lost: lost };
 }
 

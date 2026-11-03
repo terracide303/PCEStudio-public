@@ -449,10 +449,12 @@ function checkWideArity() {
  * instruction, its array capacity, the program-wide field ids written into
  * it, whether the value escapes, and whether the site can run more than
  * once.  This pins the three games' measured inventories (docs/
- * TABLES-PLAN.md §1) and two controls: a frame-built table stored in a
- * global (escaping and re-executing), and the nested cram pair, which
- * escapes only with its outer.  NOVA is pinned at the cap rule's 349 cells;
- * #177 is the card that turns its register-key sites into 183. */
+ * TABLES-PLAN.md §1; STARFALL's row is the 2026-11-03 rework's, #273: two
+ * chunk-level art arrays and the six state arrays, no specs) and two
+ * controls: a frame-built table stored in a global (escaping and
+ * re-executing), and the nested cram pair, which escapes only with its
+ * outer.  NOVA is pinned at the cap rule's 349 cells; #177 is the card that
+ * turns its register-key sites into 183. */
 function layoutToy(file) {
   const source = fs.readFileSync(path.join(ROOT, file), "utf8");
   return ilbc.tableLayout(il.compile(source, { chunkName: path.basename(file) }));
@@ -460,55 +462,32 @@ function layoutToy(file) {
 
 function checkTableLayout() {
   const star = layoutToy("toys/demo-game/main.lua");
-  eq("STARFALL has 44 table sites", star.nslots, 44);
-  eq("STARFALL's tables need 172 cells", star.cells, 172);
-  eq("STARFALL's field cells are 126", star.fieldCells, 126);
-  eq("STARFALL's array cells are 46", star.arrayCells, 46);
+  eq("STARFALL has 8 table sites", star.nslots, 8);
+  eq("STARFALL's tables need 63 cells", star.cells, 63);
+  eq("STARFALL has no field cells", star.fieldCells, 0);
+  eq("STARFALL's array cells are 63", star.arrayCells, 63);
   check(star.sites.every(function (s, i) {
     return s.base === (i ? star.sites[i - 1].base + star.sites[i - 1].cells : 0);
   }), "STARFALL's slots are packed in site order");
   eq("STARFALL's sites fill the pool exactly",
      star.sites[star.sites.length - 1].base +
      star.sites[star.sites.length - 1].cells, star.cells);
-  eq("STARFALL's field ids are first-appearance order", star.fieldIds,
-     ["x", "y", "pattern", "palette", "byr", "cram"]);
+  eq("STARFALL has no field ids", star.fieldIds, []);
   eq("the register-key array cap is 16", star.arrayCap, 16);
-  eq("STARFALL's 7 escaping sites are its table globals",
+  /* #273: the art's two chunk tables (the sprite-palette array `SP` and the
+   * packed star array `STAR`) are read inside art_boot's loops and do not
+   * escape; the six game-state arrays are the escaping globals.  The old
+   * raster spec tables and the sprite spec tables are gone. */
+  eq("STARFALL's 6 escaping sites are its state arrays",
      star.sites.filter(function (s) { return s.escapes; })
        .map(function (s) { return s.globals[0]; }),
-     ["DIGIT", "bl", "bx", "by", "ex", "ey", "es"]);
-  eq("37 STARFALL spec sites do not escape",
-     star.sites.filter(function (s) {
-       return !s.escapes && s.globals.length === 0;
-     }).length, 37);
+     ["bl", "bx", "by", "ex", "ey", "es"]);
+  eq("the two art arrays do not escape",
+     star.sites.filter(function (s) { return !s.escapes; }).length, 2);
   check(star.sites.filter(function (s) { return s.escapes; })
         .every(function (s) { return !s.repeats; }),
         "the escaping globals are built once (chunk/init), so they cannot " +
         "re-execute");
-
-  /* The two raster specs at main.lua:498 and :646: an outer spec writing
-   * `byr` and `cram` (ids 4 and 5), a one-cell list wrapper, and the
-   * two-cell pair.  The pair escapes only if the outer does; neither does,
-   * because raster() copies the fields it needs. */
-  const outers = star.sites.filter(function (s) {
-    return s.fields.length === 2 && s.fields[0] === 4 && s.fields[1] === 5;
-  });
-  eq("STARFALL builds two raster outer specs", outers.length, 2);
-  eq("each raster outer reserves six field cells",
-     outers.map(function (s) { return s.nfields; }), [6, 6]);
-  for (const outer of outers) {
-    const nested = star.sites.filter(function (s) {
-      return s.line === outer.line && s.cap === 2;
-    });
-    eq("the raster at line " + outer.line + " has a two-cell nested pair",
-       nested.length, 1);
-    if (nested.length === 1) {
-      eq("the nested pair at line " + outer.line +
-         " escapes only with its outer", nested[0].escapes, outer.escapes);
-      check(!outer.escapes,
-            "the raster spec at line " + outer.line + " does not escape");
-    }
-  }
 
   const tower = layoutToy("toys/tower/main.lua");
   eq("TOWER has 6 table sites", tower.nslots, 6);
@@ -683,11 +662,13 @@ function checkTableCapacity() {
   eq("an unbounded register key stays at 16", unbounded.sites[0].cap, 16);
   eq("it is not loop-bounded either", unbounded.sites[0].loopKeyMax, null);
 
-  /* STARFALL's register-key writes are not loop-control writes, so #177
-   * must not move its totals (checkTableLayout pins them too). */
+  /* STARFALL's register-key writes are loop-control writes (#273's rework
+   * made every array operation one loop), so #177's loop-bound rule sizes
+   * them; the totals are the reworked toy's (checkTableLayout pins them
+   * too). */
   const star = layoutToy("toys/demo-game/main.lua");
-  eq("STARFALL's totals are unchanged at 172", star.cells, 172);
-  eq("STARFALL's array cells are unchanged at 46", star.arrayCells, 46);
+  eq("STARFALL's totals are the rework's 63", star.cells, 63);
+  eq("STARFALL's array cells are 63", star.arrayCells, 63);
 }
 
 /* ---- #172: the version 2 container and the four table ops -------------- *
@@ -768,18 +749,18 @@ function checkTableEncoding() {
                                      u16At(fieldToy.bytes, 22))),
      [1, 0, 0, 0, 1]);
 
-  /* STARFALL's table section against tableLayout(): 44 slots, 172 cells, in
-   * site order.  STARFALL still cannot encode (its sprite specs and its
-   * constant pool overflow the limits), so the section is built directly by
-   * the encoder's own builder — the bytes encode() writes. */
+  /* STARFALL's table section against tableLayout(): 8 slots, 63 cells, in
+   * site order.  Since #273 the toy encodes end to end, but the section is
+   * still built directly by the encoder's own builder so this pins the bytes
+   * independently of the container's other passes. */
   const starProg = il.compile(
     fs.readFileSync(path.join(ROOT, "toys/demo-game/main.lua"), "utf8"),
     { chunkName: "main.lua" });
   const starLayout = ilbc.tableLayout(starProg);
   const starSection = ilbc.buildTableSection(starProg, starLayout);
-  eq("STARFALL's section declares 44 slots", starSection.bytes[0], 44);
-  eq("STARFALL's section is 1 + 4 x 44 bytes",
-     starSection.bytes.length, 1 + 4 * 44);
+  eq("STARFALL's section declares 8 slots", starSection.bytes[0], 8);
+  eq("STARFALL's section is 1 + 4 x 8 bytes",
+     starSection.bytes.length, 1 + 4 * 8);
   let packed = true, cells = 0;
   for (let i = 0; i < starLayout.sites.length; i++) {
     const s = starLayout.sites[i], at = 1 + 4 * i;
@@ -792,7 +773,7 @@ function checkTableEncoding() {
   }
   check(packed, "STARFALL's slots carry tableLayout's base/cap/nfields in " +
         "site order");
-  eq("STARFALL's section covers its 172 cells", cells, 172);
+  eq("STARFALL's section covers its 63 cells", cells, 63);
   eq("the builder agrees with the layout", starSection.cells,
      starLayout.cells);
 

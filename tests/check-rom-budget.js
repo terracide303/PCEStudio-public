@@ -11,15 +11,17 @@
  *      check-ilvm reads its DATA_BANK), renderer/pce-ilbc.js's MAX_CONST,
  *      MAX_ARGS and TABLE_POOL_CELLS, and renderer/pce-rom.js's data bank
  *      (SONG_TABLE_OFF, the 8 KiB bank less the 32 B song trailer).
- *   2. A real toy's budget is arithmetic: for PLATFORMER, DUSK RUN and
- *      TOWER every row's `left` is limit - used, `percent` is used/limit
- *      rounded to 0.1, and `status` is ok / near past 80 / over past 100.
- *      PLATFORMER is all ok; DUSK RUN's near rows are the ones docs/ROM_SPEED
- *      records (data bank 91.5%, constants 89.8%, functions 100%, registers
- *      100%, globals 96.9%, upvalues 95%); TOWER, reworked in place for the
- *      gallery export, is near on the data bank (7,862 B of 8,160, 96.3%),
- *      constants and globals, and over on no capacity — its report has no
- *      finding and the interpreter's boot check accepts it.
+ *   2. A real toy's budget is arithmetic: for PLATFORMER, DUSK RUN, TOWER
+ *      and STARFALL every row's `left` is limit - used, `percent` is
+ *      used/limit rounded to 0.1, and `status` is ok / near past 80 / over
+ *      past 100.  PLATFORMER is all ok; DUSK RUN's near rows are the ones
+ *      docs/ROM_SPEED records (data bank 91.5%, constants 89.8%, functions
+ *      100%, registers 100%, globals 96.9%, upvalues 95%); TOWER, reworked in
+ *      place for the gallery export, is near on the data bank (7,862 B of
+ *      8,160, 96.3%), constants and globals, and over on no capacity — its
+ *      report has no finding and the interpreter's boot check accepts it.
+ *      STARFALL (#273) builds too: its data bank is 6,285 B (77.0%, ok) and
+ *      the constant pool is its one near row (111 of 127, 87.4%).
  *   3. The finding is in the report when a capacity is over.  TOWER no
  *      longer is; DUSK RUN's arithmetic above covers the over case, and this
  *      file's own guide/SKILL checks keep the refusal codes honest.
@@ -59,7 +61,8 @@ const MCP_DOC = path.join(ROOT, "docs", "MCP.md");
 const TOYS = {
   "PLATFORMER": path.join(ROOT, "toys", "platformer", "main.lua"),
   "DUSK RUN": path.join(ROOT, "toys", "dusk-run", "main.lua"),
-  "TOWER": path.join(ROOT, "toys", "tower", "main.lua")
+  "TOWER": path.join(ROOT, "toys", "tower", "main.lua"),
+  "STARFALL": path.join(ROOT, "toys", "demo-game", "main.lua")
 };
 
 let checks = 0;
@@ -244,6 +247,36 @@ function checkTower() {
   eq("TOWER: 6 arguments on the widest call", row(r, "arguments").used, 6);
 }
 
+function checkStarfall() {
+  const r = reportOf("STARFALL");
+  checkArithmetic("STARFALL", r);
+  const bank = row(r, "data-bank");
+  eq("STARFALL: the data bank is 6,285 B", bank.used, 6285);
+  eq("STARFALL: the data bank is ok, under 80%", bank.status, "ok");
+  eq("STARFALL: 1,875 B left in the 8,160 B usable bank", bank.left, 1875);
+  eq("STARFALL: 77.0% of the data bank", bank.percent, 77);
+  eq("STARFALL: rom_check has no finding", r.findings, []);
+  eq("STARFALL: rom_check is ok", r.ok, true);
+  /* The rework turned the refusal on the constant pool into the one row
+   * still past 80%; the 80% aspiration was not reachable without changing
+   * the art (the 37 plane words and 17 packed star words are the picture). */
+  const near = r.budget.rows.filter(function (x) {
+    return x.status === "near";
+  }).map(function (x) { return x.id; }).sort();
+  eq("STARFALL: the constant pool is the only near row", near,
+     ["constants"]);
+  eq("STARFALL: 111 constants against 127",
+     row(r, "constants").used, 111);
+  eq("STARFALL: the constants are near", row(r, "constants").status, "near");
+  eq("STARFALL: 17 functions against 41", row(r, "functions").used, 17);
+  eq("STARFALL: 21 registers against 41", row(r, "registers").used, 21);
+  eq("STARFALL: 35 boot upvalue cells against 72",
+     row(r, "upvalue-cells").used, 35);
+  eq("STARFALL: 24 globals against 32", row(r, "globals").used, 24);
+  eq("STARFALL: 4 arguments on the widest call", row(r, "arguments").used, 4);
+  eq("STARFALL: no over row", r.budget.over, 0);
+}
+
 /* ---- 3. the guide and the skill print the same numbers ----------------- */
 
 /* The guide's table, from the generated Markdown. */
@@ -397,6 +430,7 @@ async function checkDrawerAndTool() {
   checkPlatformer();
   checkDuskRun();
   checkTower();
+  checkStarfall();
   checkDocs();
   await checkDrawerAndTool();
 

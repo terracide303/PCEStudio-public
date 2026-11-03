@@ -30,10 +30,13 @@ Which toys export today, measured in Mednafen, is
 sky gradient, palette cycle), PLATFORMER at 30 Hz, and the sprite toy at 60 Hz.
 DUSK RUN builds and its state matches the browser's at frame 3, but its
 displayed picture is not the browser's yet — the best replay frame is 16 bytes
-off on row 16 (#227). STARFALL and NOVA TIDE are refused with a named
-finding and line; TOWER was reworked in place for the gallery export and now
-builds (7,879 B of bytecode, no capacity over), and its Mednafen picture is
-the browser's. `note()` and `sfx()` play on the console, measured in
+off on row 16 (#227). NOVA TIDE is refused with a named finding and line;
+TOWER and STARFALL were reworked in place for the gallery export and now
+build (7,862 B and 6,285 B of bytecode, no capacity over). TOWER's Mednafen
+picture is the browser's; STARFALL's is not yet — the raster backend's
+one-armed-frame latency (#227) is the same one that keeps DUSK RUN's picture
+unmatched, and the test pins it as not black and not yet a browser frame.
+`note()` and `sfx()` play on the console, measured in
 Mednafen, and `release()` is carried as well; a song's data is not in the ROM
 yet (#199).
 

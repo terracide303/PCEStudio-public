@@ -389,6 +389,34 @@ function patternWords(pic, index, base) {
   return words;
 }
 
+/* A VCE word as the palette call the toy wrote it from: rgb() is carried by
+ * both cartridge routes (#273), and its operands are 3-bit channel numbers,
+ * so the eighteen 9-bit palette words stop being eighteen constants. */
+function rgbCall(word) {
+  const c = ed.colourChannels(word);
+  return "rgb(" + c.r + ", " + c.g + ", " + c.b + ")";
+}
+
+/* The sprite pattern's words, plane by plane: the VDC lays a pattern out as
+ * four 16-word planes (k=0..3, row 0..15), so the running cell address in
+ * art_boot advances 16 between planes and 64 between patterns. */
+function planeWords(pic, index) {
+  const pat = pic.spritePatterns[index];
+  const out = [];
+  for (let k = 0; k < 4; k++) {
+    const plane = [];
+    for (let row = 0; row < pat.height; row++) {
+      let word = 0;
+      for (let xin = 0; xin < pat.width; xin++)
+        if (pat.pixels[row * pat.width + xin] & (1 << k))
+          word |= 1 << (15 - xin);
+      plane.push(word);
+    }
+    out.push(plane);
+  }
+  return out;
+}
+
 function luaBlock(pic) {
   const layout = ed.patternLayout(pic);
   const lines = [];
@@ -403,92 +431,119 @@ function luaBlock(pic) {
   push("-- " + tileTotal + " tiles from $" + ed.FIRST_CHAR.toString(16) +
        ", " + pic.spritePatterns.length + " sprite patterns, " +
        pic.sprites.length + " SAT slots.");
+  push("--");
+  push("-- The words are the panels' own; only their ADDRESSES are computed,");
+  push("-- so the interpreter's 127-constant pool holds the art and not a table");
+  push("-- of the 225 VRAM addresses it used to take.");
 
-  /* Named constants the game reads. */
-  const pat = {};
-  for (let i = 0; i < pic.spritePatterns.length; i++) pat[i] = layout.codes[i];
+  /* The two bar colours the game's raster split writes (cheap as rgb()). */
   push("");
-  push("C_BAR = " + BG.backdrop + "        -- the status bar's backdrop (VCE word)");
-  push("C_FIELD = " + C_FIELD + "      -- the playfield's");
-  const digitCodes = [];
-  for (let d = 0; d < 10; d++) digitCodes.push(layout.codes[d]);
-  push("DIGIT = {" + digitCodes.join(", ") + "}   -- the ten digit pattern codes (SPRITES panel)");
-  push("SHIP = " + pat[10] + "   ENEMY = " + pat[11] +
-       "   BULLET = " + pat[12] + "   HEART = " + pat[13]);
-  const player = SPRITES.find((s) => s.slot === "player");
-  push("START_PX = " + player.x + "   START_PY = " + player.y);
-  let e = 0;
-  for (const s of SPRITES)
-    if (s.slot.startsWith("enemy"))
-      push("E" + (e++) + "X0 = " + s.x + "   E" + (e - 1) + "Y0 = " + s.y);
+  push("local C_BAR = " + rgbCall(BG.backdrop) +
+       "     -- the status bar's backdrop (VCE word)");
+  push("local C_FIELD = " + rgbCall(C_FIELD) +
+       "   -- the playfield's");
+
+  /* The sprite palettes, four rows of four, as one array the loop reads. */
+  push("");
+  push("-- the sprite palettes (CRAM $100): four rows of four, unused entries 0");
+  const sp = [];
+  for (let p = 0; p < SPRITE_PALETTES.length; p++) {
+    for (let k = 1; k <= 4; k++) {
+      const w = SPRITE_PALETTES[p][k];
+      sp.push(w == null ? "0" : rgbCall(w));
+    }
+  }
+  push("local SP = {");
+  for (let i = 0; i < sp.length; i += 4)
+    push("  " + sp.slice(i, i + 4).join(", ") + (i + 4 < sp.length ? "," : ""));
+  push("}");
+
+  /* The starfield: two stars a word, column 5 bits, row 5, tile 2. */
+  const tileIndex = {};
+  Object.keys(TILES).forEach((name, i) => { tileIndex[name] = i; });
+  const starVals = STARS.map(([col, row, name]) =>
+    col | (row << 5) | (tileIndex[name] << 10));
+  const starWords = [];
+  for (let i = 0; i < starVals.length; i += 2)
+    starWords.push((starVals[i] | ((starVals[i + 1] || 0) << 12)) >>> 0);
+  push("");
+  push("-- the stars, two to a word: column (5 bits), row (5), tile (2)");
+  push("local STAR = {");
+  for (let i = 0; i < starWords.length; i += 4)
+    push("  " + starWords.slice(i, i + 4).join(", ") +
+         (i + 4 < starWords.length ? "," : ""));
+  push("}");
 
   /* The VRAM and CRAM writes. */
   push("");
-  push("function art_boot()");
-  push("  -- the VCE: the backdrop and the background palette 0");
-  push("  pal(0, " + BG.backdrop + ")");
-  for (let p = 1; p < 16; p++)
-    push("  pal(" + (p * 16) + ", " + BG.backdrop + ")   -- palette " + p +
-         "'s colour 0 is the backdrop");
+  push("local function art_boot()");
+  push("  -- the background palette: colour 0 of every row, then the five shades");
+  push("  for p = 0, 15 do pal(p * 16, C_BAR) end");
   for (const key of Object.keys(BG)) {
     if (key === "backdrop") continue;
-    push("  pal(" + Number(key) + ", " + BG[key] + ")");
+    push("  pal(" + Number(key) + ", " + rgbCall(BG[key]) + ")");
   }
-  push("  -- the VCE: the sprite palettes at CRAM $100");
-  for (let p = 0; p < SPRITE_PALETTES.length; p++)
-    for (const key of Object.keys(SPRITE_PALETTES[p]))
-      push("  pal(" + (256 + p * 16 + Number(key)) + ", " +
-           SPRITE_PALETTES[p][key] + ")");
+  push("  -- the sprite palettes at CRAM $100: a + k is the row's entry k");
+  push("  for p = 0, 3 do");
+  push("    local a = 256 + p * 16");
+  push("    for k = 1, 4 do pal(a + k, SP[p * 4 + k]) end");
+  push("  end");
 
   push("  -- the tiles: character $nn at word char*16, planes 0/1 then 2/3");
+  push("  local a = " + (ed.FIRST_CHAR * 16));
+  let prevTile = ed.FIRST_CHAR * 16;
   for (let char = ed.FIRST_CHAR; char < pic.nextChar; char++) {
     if (!pic.tiles[char]) continue;
     const words = tileWords(pic, char);
+    const nz = [];
+    for (let y = 0; y < 16; y++) if (words[y]) nz.push([y, words[y]]);
+    if (!nz.length) continue;
+    const base = char * 16;
+    if (base !== prevTile) push("  a = a + " + (base - prevTile));
+    prevTile = base;
     push("  -- tile $" + char.toString(16));
-    for (let y = 0; y < 16; y++)
-      if (words[y]) push("  vram[" + (char * 16 + y) + "] = " + hex16(words[y]));
+    for (const [y, word] of nz) push("  vram[a + " + y + "] = " + hex16(word));
   }
 
-  push("  -- the BAT at word 0: runs of one cell, so the map stays short");
-  for (let row = 0; row < 32; row++) {
-    const cells = [];
-    for (let col = 0; col < 32; col++) {
-      const char = pic.map[row * 32 + col];
-      const pal = pic.tiles[char].palette;
-      cells.push((char & 0xFFF) | ((pal & 0xF) << 12));
-    }
-    let col = 0;
-    while (col < 32) {
-      let end = col;
-      while (end + 1 < 32 && cells[end + 1] === cells[col]) end++;
-      if (end > col)
-        push("  for c = " + col + ", " + end + " do vram[" + (row * 32) +
-             " + c] = " + hex16(cells[col]) + " end");
-      else
-        push("  vram[" + (row * 32 + col) + "] = " + hex16(cells[col]));
-      col = end + 1;
-    }
-  }
+  push("  -- the BAT at word 0: blank everywhere, dust in four rows, the stars on top");
+  push("  for r = 0, 31 do");
+  push("    local b = r * 32");
+  push("    for c = 0, 31 do vram[b + c] = 0x0040 end");
+  push("  end");
+  push("  for r = 10, 13 do");
+  push("    local b = r * 32");
+  push("    for c = 0, 31 do vram[b + c] = 0x0044 end");
+  push("  end");
+  push("  for i = 1, " + (starWords.length * 2) + " do");
+  push("    local s = STAR[(i + 1) // 2]");
+  push("    if i % 2 == 0 then s = s >> 12 end");
+  push("    vram[((s >> 5) & 31) * 32 + (s & 31)] = 0x0040 + ((s >> 10) & 3)");
+  push("  end");
 
-  push("  -- the sprite patterns at their packed cells");
+  /* The pattern cells are consecutive; a is base + 64 after each pattern. */
+  for (let i = 1; i < layout.codes.length; i++)
+    if (layout.codes[i] !== layout.codes[i - 1] + 1)
+      throw new Error("demo-game-assets: sprite pattern cells are not " +
+                      "consecutive (" + layout.codes.join(",") + ")");
+  push("  -- the sprite patterns at their packed cells: 16 rows a plane");
+  push("  a = " + (layout.codes[0] * 64));
   for (let i = 0; i < pic.spritePatterns.length; i++) {
     push("  -- pattern " + i + " (cell " + layout.codes[i] + ")");
-    for (const w of patternWords(pic, i, layout.codes[i]))
-      if (w.word) push("  vram[" + w.addr + "] = " + hex16(w.word));
-  }
-
-  push("end");
-
-  push("");
-  push("-- The SAT the SPRITES panel shows: every slot's start position.");
-  push("function art_sat()");
-  for (let i = 0; i < pic.sprites.length; i++) {
-    const s = pic.sprites[i];
-    push("  sprite(" + i + ", {x = " + s.x + ", y = " + (s.y + 64) +
-         ", pattern = " + layout.codes[s.pattern] + ", palette = " +
-         s.palette + "})");
+    const planes = planeWords(pic, i);
+    for (let k = 0; k < 4; k++) {
+      for (let row = 0; row < 16; row++)
+        if (planes[k][row])
+          push("  vram[a + " + row + "] = " + hex16(planes[k][row]));
+      push("  a = a + 16");
+    }
   }
   push("end");
+
+  /* No art_sat(): every one of the seventeen slots is placed by the game's
+   * own draw functions in frame(0), before the first picture is rendered, so
+   * a second copy of the panel's start SAT would be 68 words of code that
+   * never reaches the screen (#273).  sprites.json still holds the panel's
+   * picture for the editor. */
   push(CLOSE + " — do not edit above this line");
   return lines.join("\n") + "\n";
 }

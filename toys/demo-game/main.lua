@@ -9,9 +9,10 @@
 -- THE GAME: six drones fall through a scrolling starfield.  Move with the
 -- D-pad, fire with I.  A hit scores; a collision costs a life.  The top 24
 -- lines are a status bar: the RCR line interrupt keeps them still (BYR 0) and
--- a shade darker while the playfield below scrolls (BYR = scroll), which is
--- the raster table's own demonstration.  Score and lives are sprites, because
--- the BAT scrolls under them.
+-- a shade darker while the playfield below scrolls (BYR = scroll).  The
+-- split is the raster(line) callback both cartridge routes carry; the
+-- raster(line, spec) table form is refused by both.  Score and lives are
+-- sprites, because the BAT scrolls under them.
 --
 -- HOW THE ART GOT HERE: tiles.json / palettes.json / sprites.json in this
 -- folder are the picture the SCREEN, SPRITES and PALETTES panels edit.  A toy
@@ -24,15 +25,17 @@
 -- and the block is rewritten; the hand-written game below it is untouched.
 -- The generator refuses to run if the markers are gone.
 --
--- THE SHIP'S COLLISION IS THE VDC'S.  The ship is SAT slot 0 and loses a life
--- when sr() reports the CC flag (sprite #0 overlapped another sprite last
--- frame, card #119) — one read, no box arithmetic.  Bullets against drones
--- stay arithmetic: the VDC reports only sprite #0, and #0 is the ship.
+-- THE SHIP'S COLLISION IS ARITHMETIC.  It used to be the VDC's CC flag
+-- (sr(), card #119), but neither cartridge route carries sr(), so the ship now
+-- uses the same 12-pixel box the bullets use against the drone array.  A
+-- 600-frame still run loses its one life at the same frame (365) as before;
+-- the old flag read the frame last drawn, this reads the frame just moved.
 --
 -- WHAT IT COULD NOT USE: toy sound.  sfx() with no music() is master-muted
 -- (#113), so the game's sound writes PSG events that fall silent — the README
--- lists it.  The entity lists and the HUD digits are int arrays, read back
--- with a table index (#118).
+-- lists it.  The entity lists are int arrays read with a table index (#118);
+-- the art block above computes its VRAM addresses and packs the stars so the
+-- 127-constant pool holds the picture, not a list of addresses.
 --
 -- Everything between the markers is generated: do not edit it by hand.
 
@@ -41,385 +44,329 @@
 -- toy's own VRAM and CRAM.  There is no asset importer yet (#117);
 -- block is the bridge.  Edit the panels, then run the tool.
 -- 5 tiles from $40, 14 sprite patterns, 17 SAT slots.
+--
+-- The words are the panels' own; only their ADDRESSES are computed,
+-- so the interpreter's 127-constant pool holds the art and not a table
+-- of the 225 VRAM addresses it used to take.
 
-C_BAR = 1        -- the status bar's backdrop (VCE word)
-C_FIELD = 3      -- the playfield's
-DIGIT = {18, 19, 20, 21, 22, 23, 24, 25, 26, 27}   -- the ten digit pattern codes (SPRITES panel)
-SHIP = 28   ENEMY = 29   BULLET = 30   HEART = 31
-START_PX = 120   START_PY = 160
-E0X0 = 32   E0Y0 = 40
-E1X0 = 96   E1Y0 = 48
-E2X0 = 160   E2Y0 = 40
-E3X0 = 208   E3Y0 = 56
-E4X0 = 64   E4Y0 = 72
-E5X0 = 144   E5Y0 = 88
+local C_BAR = rgb(0, 0, 1)     -- the status bar's backdrop (VCE word)
+local C_FIELD = rgb(0, 0, 3)   -- the playfield's
 
-function art_boot()
-  -- the VCE: the backdrop and the background palette 0
-  pal(0, 1)
-  pal(16, 1)   -- palette 1's colour 0 is the backdrop
-  pal(32, 1)   -- palette 2's colour 0 is the backdrop
-  pal(48, 1)   -- palette 3's colour 0 is the backdrop
-  pal(64, 1)   -- palette 4's colour 0 is the backdrop
-  pal(80, 1)   -- palette 5's colour 0 is the backdrop
-  pal(96, 1)   -- palette 6's colour 0 is the backdrop
-  pal(112, 1)   -- palette 7's colour 0 is the backdrop
-  pal(128, 1)   -- palette 8's colour 0 is the backdrop
-  pal(144, 1)   -- palette 9's colour 0 is the backdrop
-  pal(160, 1)   -- palette 10's colour 0 is the backdrop
-  pal(176, 1)   -- palette 11's colour 0 is the backdrop
-  pal(192, 1)   -- palette 12's colour 0 is the backdrop
-  pal(208, 1)   -- palette 13's colour 0 is the backdrop
-  pal(224, 1)   -- palette 14's colour 0 is the backdrop
-  pal(240, 1)   -- palette 15's colour 0 is the backdrop
-  pal(1, 3)
-  pal(2, 221)
-  pal(3, 367)
-  pal(4, 511)
-  pal(5, 77)
-  -- the VCE: the sprite palettes at CRAM $100
-  pal(257, 487)
-  pal(258, 342)
-  pal(259, 511)
-  pal(260, 140)
-  pal(273, 509)
-  pal(274, 314)
-  pal(275, 219)
-  pal(289, 186)
-  pal(290, 108)
-  pal(291, 379)
-  pal(292, 33)
-  pal(305, 507)
-  pal(306, 511)
-  pal(307, 296)
+-- the sprite palettes (CRAM $100): four rows of four, unused entries 0
+local SP = {
+  rgb(4, 7, 7), rgb(2, 5, 6), rgb(7, 7, 7), rgb(1, 2, 4),
+  rgb(7, 7, 5), rgb(7, 4, 2), rgb(3, 3, 3), 0,
+  rgb(7, 2, 2), rgb(5, 1, 4), rgb(7, 5, 3), rgb(4, 0, 1),
+  rgb(7, 7, 3), rgb(7, 7, 7), rgb(5, 4, 0), 0
+}
+
+-- the stars, two to a word: column (5 bits), row (5), tile (2)
+local STAR = {
+  4265987, 4496442, 13113470, 9270446,
+  13747430, 5585195, 5896546, 6098344,
+  6310393, 10870316, 11097703, 15529632,
+  11577083, 16013110, 7990130, 8227757,
+  4066
+}
+
+local function art_boot()
+  -- the background palette: colour 0 of every row, then the five shades
+  for p = 0, 15 do pal(p * 16, C_BAR) end
+  pal(1, rgb(0, 0, 3))
+  pal(2, rgb(3, 3, 5))
+  pal(3, rgb(5, 5, 7))
+  pal(4, rgb(7, 7, 7))
+  pal(5, rgb(1, 1, 5))
+  -- the sprite palettes at CRAM $100: a + k is the row's entry k
+  for p = 0, 3 do
+    local a = 256 + p * 16
+    for k = 1, 4 do pal(a + k, SP[p * 4 + k]) end
+  end
   -- the tiles: character $nn at word char*16, planes 0/1 then 2/3
-  -- tile $40
+  local a = 1024
+  a = a + 16
   -- tile $41
-  vram[1043] = 0x1010
+  vram[a + 3] = 0x1010
+  a = a + 16
   -- tile $42
-  vram[1058] = 0x0808
-  vram[1059] = 0x1818
+  vram[a + 2] = 0x0808
+  vram[a + 3] = 0x1818
+  a = a + 16
   -- tile $43
-  vram[1081] = 0x0008
-  vram[1082] = 0x001C
-  vram[1083] = 0x003E
-  vram[1084] = 0x001C
-  vram[1085] = 0x0008
+  vram[a + 9] = 0x0008
+  vram[a + 10] = 0x001C
+  vram[a + 11] = 0x003E
+  vram[a + 12] = 0x001C
+  vram[a + 13] = 0x0008
+  a = a + 16
   -- tile $44
-  vram[1088] = 0x0080
-  vram[1089] = 0x0002
-  vram[1090] = 0x0020
-  vram[1092] = 0x0004
-  vram[1094] = 0x0040
-  vram[1095] = 0x0010
-  -- the BAT at word 0: runs of one cell, so the map stays short
-  for c = 0, 2 do vram[0 + c] = 0x0040 end
-  vram[3] = 0x0042
-  for c = 4, 16 do vram[0 + c] = 0x0040 end
-  vram[17] = 0x0041
-  for c = 18, 31 do vram[0 + c] = 0x0040 end
-  for c = 0, 25 do vram[32 + c] = 0x0040 end
-  vram[58] = 0x0043
-  for c = 27, 31 do vram[32 + c] = 0x0040 end
-  for c = 0, 8 do vram[64 + c] = 0x0040 end
-  vram[73] = 0x0041
-  for c = 10, 31 do vram[64 + c] = 0x0040 end
-  for c = 0, 29 do vram[96 + c] = 0x0040 end
-  vram[126] = 0x0042
-  vram[127] = 0x0040
-  vram[128] = 0x0040
-  vram[129] = 0x0043
-  for c = 2, 31 do vram[128 + c] = 0x0040 end
-  for c = 0, 13 do vram[160 + c] = 0x0040 end
-  vram[174] = 0x0041
-  for c = 15, 31 do vram[160 + c] = 0x0040 end
-  for c = 0, 22 do vram[192 + c] = 0x0040 end
-  vram[215] = 0x0042
-  for c = 24, 31 do vram[192 + c] = 0x0040 end
-  for c = 0, 5 do vram[224 + c] = 0x0040 end
-  vram[230] = 0x0041
-  for c = 7, 31 do vram[224 + c] = 0x0040 end
-  for c = 0, 27 do vram[256 + c] = 0x0040 end
-  vram[284] = 0x0043
-  for c = 29, 31 do vram[256 + c] = 0x0040 end
-  for c = 0, 10 do vram[288 + c] = 0x0040 end
-  vram[299] = 0x0042
-  for c = 12, 31 do vram[288 + c] = 0x0040 end
-  for c = 0, 18 do vram[320 + c] = 0x0044 end
-  vram[339] = 0x0041
-  for c = 20, 31 do vram[320 + c] = 0x0044 end
-  for c = 0, 1 do vram[352 + c] = 0x0044 end
-  vram[354] = 0x0042
-  for c = 3, 31 do vram[352 + c] = 0x0044 end
-  for c = 0, 30 do vram[384 + c] = 0x0044 end
-  vram[415] = 0x0041
-  for c = 0, 7 do vram[416 + c] = 0x0044 end
-  vram[424] = 0x0043
-  for c = 9, 31 do vram[416 + c] = 0x0044 end
-  for c = 0, 15 do vram[448 + c] = 0x0040 end
-  vram[464] = 0x0041
-  for c = 17, 31 do vram[448 + c] = 0x0040 end
-  for c = 0, 24 do vram[480 + c] = 0x0040 end
-  vram[505] = 0x0042
-  for c = 26, 31 do vram[480 + c] = 0x0040 end
-  for c = 0, 3 do vram[512 + c] = 0x0040 end
-  vram[516] = 0x0041
-  for c = 5, 31 do vram[512 + c] = 0x0040 end
-  for c = 0, 11 do vram[544 + c] = 0x0040 end
-  vram[556] = 0x0043
-  for c = 13, 31 do vram[544 + c] = 0x0040 end
-  for c = 0, 28 do vram[576 + c] = 0x0040 end
-  vram[605] = 0x0042
-  for c = 30, 31 do vram[576 + c] = 0x0040 end
-  for c = 0, 6 do vram[608 + c] = 0x0040 end
-  vram[615] = 0x0041
-  for c = 8, 31 do vram[608 + c] = 0x0040 end
-  for c = 0, 20 do vram[640 + c] = 0x0040 end
-  vram[661] = 0x0042
-  for c = 22, 31 do vram[640 + c] = 0x0040 end
-  vram[672] = 0x0041
-  for c = 1, 31 do vram[672 + c] = 0x0040 end
-  for c = 0, 14 do vram[704 + c] = 0x0040 end
-  vram[719] = 0x0043
-  for c = 16, 31 do vram[704 + c] = 0x0040 end
-  for c = 0, 26 do vram[736 + c] = 0x0040 end
-  vram[763] = 0x0041
-  for c = 28, 31 do vram[736 + c] = 0x0040 end
-  for c = 0, 9 do vram[768 + c] = 0x0040 end
-  vram[778] = 0x0042
-  for c = 11, 31 do vram[768 + c] = 0x0040 end
-  for c = 0, 21 do vram[800 + c] = 0x0040 end
-  vram[822] = 0x0041
-  for c = 23, 31 do vram[800 + c] = 0x0040 end
-  for c = 0, 4 do vram[832 + c] = 0x0040 end
-  vram[837] = 0x0043
-  for c = 6, 31 do vram[832 + c] = 0x0040 end
-  for c = 0, 17 do vram[864 + c] = 0x0040 end
-  vram[882] = 0x0042
-  for c = 19, 31 do vram[864 + c] = 0x0040 end
-  for c = 0, 29 do vram[896 + c] = 0x0040 end
-  vram[926] = 0x0041
-  vram[927] = 0x0040
-  for c = 0, 12 do vram[928 + c] = 0x0040 end
-  vram[941] = 0x0042
-  for c = 14, 31 do vram[928 + c] = 0x0040 end
-  for c = 0, 23 do vram[960 + c] = 0x0040 end
-  vram[984] = 0x0041
-  for c = 25, 31 do vram[960 + c] = 0x0040 end
-  for c = 0, 1 do vram[992 + c] = 0x0040 end
-  vram[994] = 0x0043
-  for c = 3, 31 do vram[992 + c] = 0x0040 end
-  -- the sprite patterns at their packed cells
+  vram[a + 0] = 0x0080
+  vram[a + 1] = 0x0002
+  vram[a + 2] = 0x0020
+  vram[a + 4] = 0x0004
+  vram[a + 6] = 0x0040
+  vram[a + 7] = 0x0010
+  -- the BAT at word 0: blank everywhere, dust in four rows, the stars on top
+  for r = 0, 31 do
+    local b = r * 32
+    for c = 0, 31 do vram[b + c] = 0x0040 end
+  end
+  for r = 10, 13 do
+    local b = r * 32
+    for c = 0, 31 do vram[b + c] = 0x0044 end
+  end
+  for i = 1, 34 do
+    local s = STAR[(i + 1) // 2]
+    if i % 2 == 0 then s = s >> 12 end
+    vram[((s >> 5) & 31) * 32 + (s & 31)] = 0x0040 + ((s >> 10) & 3)
+  end
+  -- the sprite patterns at their packed cells: 16 rows a plane
+  a = 1152
   -- pattern 0 (cell 18)
-  vram[1155] = 0x07E0
-  vram[1156] = 0x07E0
-  vram[1157] = 0x0660
-  vram[1158] = 0x0660
-  vram[1159] = 0x0660
-  vram[1160] = 0x0660
-  vram[1161] = 0x0660
-  vram[1162] = 0x0660
-  vram[1163] = 0x07E0
-  vram[1164] = 0x07E0
+  vram[a + 3] = 0x07E0
+  vram[a + 4] = 0x07E0
+  vram[a + 5] = 0x0660
+  vram[a + 6] = 0x0660
+  vram[a + 7] = 0x0660
+  vram[a + 8] = 0x0660
+  vram[a + 9] = 0x0660
+  vram[a + 10] = 0x0660
+  vram[a + 11] = 0x07E0
+  vram[a + 12] = 0x07E0
+  a = a + 16
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 1 (cell 19)
-  vram[1219] = 0x0180
-  vram[1220] = 0x0180
-  vram[1221] = 0x0780
-  vram[1222] = 0x0780
-  vram[1223] = 0x0180
-  vram[1224] = 0x0180
-  vram[1225] = 0x0180
-  vram[1226] = 0x0180
-  vram[1227] = 0x07E0
-  vram[1228] = 0x07E0
+  vram[a + 3] = 0x0180
+  vram[a + 4] = 0x0180
+  vram[a + 5] = 0x0780
+  vram[a + 6] = 0x0780
+  vram[a + 7] = 0x0180
+  vram[a + 8] = 0x0180
+  vram[a + 9] = 0x0180
+  vram[a + 10] = 0x0180
+  vram[a + 11] = 0x07E0
+  vram[a + 12] = 0x07E0
+  a = a + 16
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 2 (cell 20)
-  vram[1283] = 0x07E0
-  vram[1284] = 0x07E0
-  vram[1285] = 0x0060
-  vram[1286] = 0x0060
-  vram[1287] = 0x07E0
-  vram[1288] = 0x07E0
-  vram[1289] = 0x0600
-  vram[1290] = 0x0600
-  vram[1291] = 0x07E0
-  vram[1292] = 0x07E0
+  vram[a + 3] = 0x07E0
+  vram[a + 4] = 0x07E0
+  vram[a + 5] = 0x0060
+  vram[a + 6] = 0x0060
+  vram[a + 7] = 0x07E0
+  vram[a + 8] = 0x07E0
+  vram[a + 9] = 0x0600
+  vram[a + 10] = 0x0600
+  vram[a + 11] = 0x07E0
+  vram[a + 12] = 0x07E0
+  a = a + 16
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 3 (cell 21)
-  vram[1347] = 0x07E0
-  vram[1348] = 0x07E0
-  vram[1349] = 0x0060
-  vram[1350] = 0x0060
-  vram[1351] = 0x07E0
-  vram[1352] = 0x07E0
-  vram[1353] = 0x0060
-  vram[1354] = 0x0060
-  vram[1355] = 0x07E0
-  vram[1356] = 0x07E0
+  vram[a + 3] = 0x07E0
+  vram[a + 4] = 0x07E0
+  vram[a + 5] = 0x0060
+  vram[a + 6] = 0x0060
+  vram[a + 7] = 0x07E0
+  vram[a + 8] = 0x07E0
+  vram[a + 9] = 0x0060
+  vram[a + 10] = 0x0060
+  vram[a + 11] = 0x07E0
+  vram[a + 12] = 0x07E0
+  a = a + 16
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 4 (cell 22)
-  vram[1411] = 0x0660
-  vram[1412] = 0x0660
-  vram[1413] = 0x0660
-  vram[1414] = 0x0660
-  vram[1415] = 0x07E0
-  vram[1416] = 0x07E0
-  vram[1417] = 0x0060
-  vram[1418] = 0x0060
-  vram[1419] = 0x0060
-  vram[1420] = 0x0060
+  vram[a + 3] = 0x0660
+  vram[a + 4] = 0x0660
+  vram[a + 5] = 0x0660
+  vram[a + 6] = 0x0660
+  vram[a + 7] = 0x07E0
+  vram[a + 8] = 0x07E0
+  vram[a + 9] = 0x0060
+  vram[a + 10] = 0x0060
+  vram[a + 11] = 0x0060
+  vram[a + 12] = 0x0060
+  a = a + 16
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 5 (cell 23)
-  vram[1475] = 0x07E0
-  vram[1476] = 0x07E0
-  vram[1477] = 0x0600
-  vram[1478] = 0x0600
-  vram[1479] = 0x07E0
-  vram[1480] = 0x07E0
-  vram[1481] = 0x0060
-  vram[1482] = 0x0060
-  vram[1483] = 0x07E0
-  vram[1484] = 0x07E0
+  vram[a + 3] = 0x07E0
+  vram[a + 4] = 0x07E0
+  vram[a + 5] = 0x0600
+  vram[a + 6] = 0x0600
+  vram[a + 7] = 0x07E0
+  vram[a + 8] = 0x07E0
+  vram[a + 9] = 0x0060
+  vram[a + 10] = 0x0060
+  vram[a + 11] = 0x07E0
+  vram[a + 12] = 0x07E0
+  a = a + 16
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 6 (cell 24)
-  vram[1539] = 0x07E0
-  vram[1540] = 0x07E0
-  vram[1541] = 0x0600
-  vram[1542] = 0x0600
-  vram[1543] = 0x07E0
-  vram[1544] = 0x07E0
-  vram[1545] = 0x0660
-  vram[1546] = 0x0660
-  vram[1547] = 0x07E0
-  vram[1548] = 0x07E0
+  vram[a + 3] = 0x07E0
+  vram[a + 4] = 0x07E0
+  vram[a + 5] = 0x0600
+  vram[a + 6] = 0x0600
+  vram[a + 7] = 0x07E0
+  vram[a + 8] = 0x07E0
+  vram[a + 9] = 0x0660
+  vram[a + 10] = 0x0660
+  vram[a + 11] = 0x07E0
+  vram[a + 12] = 0x07E0
+  a = a + 16
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 7 (cell 25)
-  vram[1603] = 0x07E0
-  vram[1604] = 0x07E0
-  vram[1605] = 0x0060
-  vram[1606] = 0x0060
-  vram[1607] = 0x0060
-  vram[1608] = 0x0060
-  vram[1609] = 0x0060
-  vram[1610] = 0x0060
-  vram[1611] = 0x0060
-  vram[1612] = 0x0060
+  vram[a + 3] = 0x07E0
+  vram[a + 4] = 0x07E0
+  vram[a + 5] = 0x0060
+  vram[a + 6] = 0x0060
+  vram[a + 7] = 0x0060
+  vram[a + 8] = 0x0060
+  vram[a + 9] = 0x0060
+  vram[a + 10] = 0x0060
+  vram[a + 11] = 0x0060
+  vram[a + 12] = 0x0060
+  a = a + 16
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 8 (cell 26)
-  vram[1667] = 0x07E0
-  vram[1668] = 0x07E0
-  vram[1669] = 0x0660
-  vram[1670] = 0x0660
-  vram[1671] = 0x07E0
-  vram[1672] = 0x07E0
-  vram[1673] = 0x0660
-  vram[1674] = 0x0660
-  vram[1675] = 0x07E0
-  vram[1676] = 0x07E0
+  vram[a + 3] = 0x07E0
+  vram[a + 4] = 0x07E0
+  vram[a + 5] = 0x0660
+  vram[a + 6] = 0x0660
+  vram[a + 7] = 0x07E0
+  vram[a + 8] = 0x07E0
+  vram[a + 9] = 0x0660
+  vram[a + 10] = 0x0660
+  vram[a + 11] = 0x07E0
+  vram[a + 12] = 0x07E0
+  a = a + 16
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 9 (cell 27)
-  vram[1731] = 0x07E0
-  vram[1732] = 0x07E0
-  vram[1733] = 0x0660
-  vram[1734] = 0x0660
-  vram[1735] = 0x07E0
-  vram[1736] = 0x07E0
-  vram[1737] = 0x0060
-  vram[1738] = 0x0060
-  vram[1739] = 0x07E0
-  vram[1740] = 0x07E0
+  vram[a + 3] = 0x07E0
+  vram[a + 4] = 0x07E0
+  vram[a + 5] = 0x0660
+  vram[a + 6] = 0x0660
+  vram[a + 7] = 0x07E0
+  vram[a + 8] = 0x07E0
+  vram[a + 9] = 0x0060
+  vram[a + 10] = 0x0060
+  vram[a + 11] = 0x07E0
+  vram[a + 12] = 0x07E0
+  a = a + 16
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 10 (cell 28)
-  vram[1793] = 0x0180
-  vram[1794] = 0x0240
-  vram[1795] = 0x0240
-  vram[1796] = 0x05A0
-  vram[1797] = 0x05A0
-  vram[1798] = 0x0BD0
-  vram[1799] = 0x0BD0
-  vram[1800] = 0x17E8
-  vram[1801] = 0x17E8
-  vram[1802] = 0x2E74
-  vram[1803] = 0x2C34
-  vram[1804] = 0x3C3C
-  vram[1805] = 0x1428
-  vram[1806] = 0x0240
-  vram[1810] = 0x0180
-  vram[1811] = 0x0180
-  vram[1812] = 0x03C0
-  vram[1813] = 0x03C0
-  vram[1814] = 0x07E0
-  vram[1815] = 0x07E0
-  vram[1816] = 0x0FF0
-  vram[1817] = 0x0FF0
-  vram[1818] = 0x1E78
-  vram[1819] = 0x1C38
-  vram[1820] = 0x0C30
-  vram[1834] = 0x0180
-  vram[1835] = 0x03C0
-  vram[1836] = 0x03C0
-  vram[1837] = 0x03C0
+  vram[a + 1] = 0x0180
+  vram[a + 2] = 0x0240
+  vram[a + 3] = 0x0240
+  vram[a + 4] = 0x05A0
+  vram[a + 5] = 0x05A0
+  vram[a + 6] = 0x0BD0
+  vram[a + 7] = 0x0BD0
+  vram[a + 8] = 0x17E8
+  vram[a + 9] = 0x17E8
+  vram[a + 10] = 0x2E74
+  vram[a + 11] = 0x2C34
+  vram[a + 12] = 0x3C3C
+  vram[a + 13] = 0x1428
+  vram[a + 14] = 0x0240
+  a = a + 16
+  vram[a + 2] = 0x0180
+  vram[a + 3] = 0x0180
+  vram[a + 4] = 0x03C0
+  vram[a + 5] = 0x03C0
+  vram[a + 6] = 0x07E0
+  vram[a + 7] = 0x07E0
+  vram[a + 8] = 0x0FF0
+  vram[a + 9] = 0x0FF0
+  vram[a + 10] = 0x1E78
+  vram[a + 11] = 0x1C38
+  vram[a + 12] = 0x0C30
+  a = a + 16
+  vram[a + 10] = 0x0180
+  vram[a + 11] = 0x03C0
+  vram[a + 12] = 0x03C0
+  vram[a + 13] = 0x03C0
+  a = a + 16
+  a = a + 16
   -- pattern 11 (cell 29)
-  vram[1858] = 0x0FE0
-  vram[1859] = 0x1010
-  vram[1860] = 0x2788
-  vram[1861] = 0x4FC4
-  vram[1862] = 0x5FF4
-  vram[1863] = 0x5FF4
-  vram[1864] = 0x5FF4
-  vram[1865] = 0x5FF4
-  vram[1866] = 0x4FC4
-  vram[1867] = 0x2788
-  vram[1868] = 0x1010
-  vram[1869] = 0x0FE0
-  vram[1875] = 0x0FE0
-  vram[1876] = 0x1FF0
-  vram[1877] = 0x3FF8
-  vram[1878] = 0x3CF8
-  vram[1879] = 0x3878
-  vram[1880] = 0x3878
-  vram[1881] = 0x3CF8
-  vram[1882] = 0x3FF8
-  vram[1883] = 0x1FF0
-  vram[1884] = 0x0FE0
+  vram[a + 2] = 0x0FE0
+  vram[a + 3] = 0x1010
+  vram[a + 4] = 0x2788
+  vram[a + 5] = 0x4FC4
+  vram[a + 6] = 0x5FF4
+  vram[a + 7] = 0x5FF4
+  vram[a + 8] = 0x5FF4
+  vram[a + 9] = 0x5FF4
+  vram[a + 10] = 0x4FC4
+  vram[a + 11] = 0x2788
+  vram[a + 12] = 0x1010
+  vram[a + 13] = 0x0FE0
+  a = a + 16
+  vram[a + 3] = 0x0FE0
+  vram[a + 4] = 0x1FF0
+  vram[a + 5] = 0x3FF8
+  vram[a + 6] = 0x3CF8
+  vram[a + 7] = 0x3878
+  vram[a + 8] = 0x3878
+  vram[a + 9] = 0x3CF8
+  vram[a + 10] = 0x3FF8
+  vram[a + 11] = 0x1FF0
+  vram[a + 12] = 0x0FE0
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 12 (cell 30)
-  vram[1924] = 0x0180
-  vram[1925] = 0x0080
-  vram[1926] = 0x0080
-  vram[1927] = 0x0080
-  vram[1928] = 0x0080
-  vram[1929] = 0x0080
-  vram[1930] = 0x0180
-  vram[1941] = 0x0100
-  vram[1942] = 0x0100
-  vram[1943] = 0x0100
-  vram[1944] = 0x0100
-  vram[1945] = 0x0100
+  vram[a + 4] = 0x0180
+  vram[a + 5] = 0x0080
+  vram[a + 6] = 0x0080
+  vram[a + 7] = 0x0080
+  vram[a + 8] = 0x0080
+  vram[a + 9] = 0x0080
+  vram[a + 10] = 0x0180
+  a = a + 16
+  vram[a + 5] = 0x0100
+  vram[a + 6] = 0x0100
+  vram[a + 7] = 0x0100
+  vram[a + 8] = 0x0100
+  vram[a + 9] = 0x0100
+  a = a + 16
+  a = a + 16
+  a = a + 16
   -- pattern 13 (cell 31)
-  vram[1989] = 0x0CC0
-  vram[1990] = 0x13A0
-  vram[1991] = 0x1020
-  vram[1992] = 0x1020
-  vram[1993] = 0x0840
-  vram[1994] = 0x0480
-  vram[1995] = 0x0300
-  vram[2006] = 0x0CC0
-  vram[2007] = 0x0FC0
-  vram[2008] = 0x0FC0
-  vram[2009] = 0x0780
-  vram[2010] = 0x0300
-end
-
--- The SAT the SPRITES panel shows: every slot's start position.
-function art_sat()
-  sprite(0, {x = 120, y = 224, pattern = 28, palette = 0})
-  sprite(1, {x = 196, y = 68, pattern = 18, palette = 1})
-  sprite(2, {x = 210, y = 68, pattern = 18, palette = 1})
-  sprite(3, {x = 224, y = 68, pattern = 18, palette = 1})
-  sprite(4, {x = 8, y = 68, pattern = 31, palette = 1})
-  sprite(5, {x = 24, y = 68, pattern = 31, palette = 1})
-  sprite(6, {x = 40, y = 68, pattern = 31, palette = 1})
-  sprite(7, {x = 32, y = 104, pattern = 29, palette = 2})
-  sprite(8, {x = 96, y = 112, pattern = 29, palette = 2})
-  sprite(9, {x = 160, y = 104, pattern = 29, palette = 2})
-  sprite(10, {x = 208, y = 120, pattern = 29, palette = 2})
-  sprite(11, {x = 64, y = 136, pattern = 29, palette = 2})
-  sprite(12, {x = 144, y = 152, pattern = 29, palette = 2})
-  sprite(13, {x = 0, y = 304, pattern = 30, palette = 3})
-  sprite(14, {x = 0, y = 304, pattern = 30, palette = 3})
-  sprite(15, {x = 0, y = 304, pattern = 30, palette = 3})
-  sprite(16, {x = 0, y = 304, pattern = 30, palette = 3})
+  vram[a + 5] = 0x0CC0
+  vram[a + 6] = 0x13A0
+  vram[a + 7] = 0x1020
+  vram[a + 8] = 0x1020
+  vram[a + 9] = 0x0840
+  vram[a + 10] = 0x0480
+  vram[a + 11] = 0x0300
+  a = a + 16
+  vram[a + 6] = 0x0CC0
+  vram[a + 7] = 0x0FC0
+  vram[a + 8] = 0x0FC0
+  vram[a + 9] = 0x0780
+  vram[a + 10] = 0x0300
+  a = a + 16
+  a = a + 16
+  a = a + 16
 end
 -- <<< PCEStudio demo art — do not edit above this line
 
@@ -429,17 +376,19 @@ end
 -- and all of these are int; see docs/IL.md §5.)
 --
 -- Sprite slots (the SAT):
---   0     player (the VDC's CC flag is sprite #0 against every other sprite)
---   1..3  score digits, hundreds/tens/ones   4..6  lives
---   7..12 enemies                            13..16 bullets
+--   0     player   1..3  score digits (hundreds/tens/ones)   4..6  lives
+--   7..12 enemies  13..16 bullets
 --
--- The pattern numbers (SHIP, ENEMY, BULLET, HEART, DIGIT table), the starting
--- positions (START_PX, E0X0..) and the two bar colours come from the
--- generated block above, so the picture the panels show and the game's first
--- frame are one source.
+-- The 2026-11-03 rework made the toy exportable.  The
+-- art block above computes its VRAM addresses instead of listing 225 of them,
+-- the sprites are placed with the four sat() words sprite() itself writes (the
+-- C route cannot pin a dynamic spec), the status-bar split is the raster()
+-- callback both cartridge routes carry, and the ship's collision is the same
+-- box the bullets use instead of the VDC's sr() flag, which neither route
+-- encodes.  The rules, the art and the feel are the browser's.
 
 -- A free bullet leaves from the ship's nose: the first of the four slots.
-function fire()
+local function fire()
   for i = 1, 4 do
     if bl[i] == 0 then
       bl[i] = 1
@@ -453,23 +402,25 @@ end
 -- The spawn x for an enemy that left the screen.  A tiny LCG whose product
 -- stays inside 32 bits, so Lua and the IL's wrapping int agree by
 -- construction: 250 * 37 + 101 < 2^31.
-function rnd()
+local function rnd()
   rng = (rng * 37 + 101) % 251
   return rng
 end
 
--- A 16x16 sprite's box against another: the cell's own coordinates.  Used for
--- a bullet against a drone, which the VDC cannot report (its CC flag is sprite
--- #0 against the others, and #0 is the ship).  The ship's own collision is the
--- hardware's: see touch_player.
-function hit(ax, ay, bx, by)
-  if abs(ax - bx) < 12 then
-    if abs(ay - by) < 12 then return 1 end
+-- A 16x16 sprite's box against another: the cell's own coordinates.  abs()
+-- is not carried by either cartridge route, so the distance is folded here.
+local function hit(ax, ay, exx, eyy)
+  local dx = ax - exx
+  if dx < 0 then dx = 0 - dx end
+  if dx < 12 then
+    local dy = ay - eyy
+    if dy < 0 then dy = 0 - dy end
+    if dy < 12 then return 1 end
   end
   return 0
 end
 
-function lose_life()
+local function lose_life()
   lives = lives - 1
   inv = 90
   sfx(2, 220, 20, 16)
@@ -479,46 +430,8 @@ function lose_life()
   end
 end
 
-function init()
-  -- the panels' picture: palettes, tiles, the BAT and the sprite patterns
-  art_boot()
-  -- the SAT as the SPRITES panel shows it: the start state of every slot
-  art_sat()
-
-  -- BB (background) and SB (sprites) on.  The toy host starts at BB only
-  -- (docs/TOYS.md §2, card #120), so a toy that forgets this draws a SAT
-  -- nobody can see.  Bits 0 and 1 are the CC and OC interrupt enables: the
-  -- VDC sets the status bit sr() reads only while its enable is on, so the
-  -- ship's collision is invisible without them (card #119).
-  reg("CR", 0xC3)
-
-  -- The status bar: line 0 freezes the scroll and darkens the backdrop; line
-  -- 24 (set every frame) releases the scroll to `scroll` and restores the
-  -- backdrop.  The bar is 24 lines, three tile rows.
-  raster(0, {byr = 0, cram = {{0, C_BAR}}})
-
-  px = START_PX
-  py = START_PY
-  lives = 3
-  score = 0
-  inv = 90
-  cooldown = 0
-  scroll = 0
-  rng = 3
-
-  -- four bullets (live, x, y) and six drones (x, y, speed), as arrays.  A
-  -- constructor with only integer values gives the IL the array's element
-  -- type; every later read and write is then an int.
-  bl = {0, 0, 0, 0}
-  bx = {0, 0, 0, 0}
-  by = {0, 0, 0, 0}
-  ex = {E0X0, E1X0, E2X0, E3X0, E4X0, E5X0}
-  ey = {E0Y0, E1Y0, E2Y0, E3Y0, E4Y0, E5Y0}
-  es = {1, 2, 1, 2, 1, 1}
-end
-
 -- Bullets: up four pixels a frame, gone above the bar.
-function move_bullets()
+local function move_bullets()
   for i = 1, 4 do
     if bl[i] == 1 then
       by[i] = by[i] - 4
@@ -529,7 +442,7 @@ end
 
 -- Enemies: down at their own speed, and a hit or a wrap sends them back to
 -- the top at a new x.  One loop over the six drones.
-function move_enemies()
+local function move_enemies()
   for i = 1, 6 do
     ey[i] = ey[i] + es[i]
     if ey[i] > 232 then
@@ -542,7 +455,7 @@ end
 -- Every live bullet against every drone: the first drone it meets is hit,
 -- then the next bullet.  The break is the old if/elseif chain's "first hit
 -- only", and the rnd() call order is the same.
-function collide()
+local function collide()
   for i = 1, 4 do
     if bl[i] == 1 then
       for j = 1, 6 do
@@ -559,91 +472,126 @@ function collide()
   end
 end
 
-function touch_player()
+-- The ship's collision: the VDC's CC flag (sprite #0 against another sprite)
+-- is not on either cartridge route, so the drone array and the same
+-- box the bullets use decide it.  The old flag read the frame last drawn;
+-- this reads the positions the frame just moved, which is the same rule with
+-- the latency gone.
+local function touch_player()
   if inv > 0 then
     inv = inv - 1
   else
-    -- the VDC's own collision flag: sprite #0 (the ship) overlapped another
-    -- sprite during the frame last drawn.  frame() reads the previous
-    -- frame's display, as the CPU reads SR in VBlank, so a hit costs one
-    -- frame of latency.  CR bit 0 (CC enable) is set in init().
-    if sr() & 0x01 ~= 0 then
-      lose_life()
+    for j = 1, 6 do
+      if hit(px, py, ex[j], ey[j]) == 1 then
+        lose_life()
+        return
+      end
     end
   end
 end
 
--- One digit's pattern for a score digit: DIGIT is the ten-entry table the
--- generated block emits from the SPRITES panel's own pattern codes (card
--- #118: a table a toy builds is read back now, so no VRAM detour and no
--- ten-way if).
-function digit_pattern(d)
-  return DIGIT[d + 1]
-end
-
 -- The HUD.  Score on the right, lives on the left; both are sprites, so the
--- scrolling BAT below cannot carry them.
-function draw_hud()
+-- scrolling BAT below cannot carry them.  Pattern 18 is digit 0, 19 digit 1,
+-- and so on; sat word 2 is the pattern number twice.
+local function draw_hud()
   local d1 = (score // 100) % 10
   local d2 = (score // 10) % 10
   local d3 = score % 10
-  sprite(1, {x = 196, y = 68, pattern = digit_pattern(d1), palette = 1})
-  sprite(2, {x = 210, y = 68, pattern = digit_pattern(d2), palette = 1})
-  sprite(3, {x = 224, y = 68, pattern = digit_pattern(d3), palette = 1})
+  sat(1, 0, 68)  sat(1, 1, 196)  sat(1, 2, (18 + d1) << 1)  sat(1, 3, 1)
+  sat(2, 0, 68)  sat(2, 1, 210)  sat(2, 2, (18 + d2) << 1)  sat(2, 3, 1)
+  sat(3, 0, 68)  sat(3, 1, 224)  sat(3, 2, (18 + d3) << 1)  sat(3, 3, 1)
   if lives >= 1 then
-    sprite(4, {x = 8, y = 68, pattern = HEART, palette = 1})
+    sat(4, 0, 68)  sat(4, 1, 8)  sat(4, 2, 62)  sat(4, 3, 1)
   else
-    sprite(4, {y = 0})
+    sat(4, 0, 0)
   end
   if lives >= 2 then
-    sprite(5, {x = 24, y = 68, pattern = HEART, palette = 1})
+    sat(5, 0, 68)  sat(5, 1, 24)  sat(5, 2, 62)  sat(5, 3, 1)
   else
-    sprite(5, {y = 0})
+    sat(5, 0, 0)
   end
   if lives >= 3 then
-    sprite(6, {x = 40, y = 68, pattern = HEART, palette = 1})
+    sat(6, 0, 68)  sat(6, 1, 40)  sat(6, 2, 62)  sat(6, 3, 1)
   else
-    sprite(6, {y = 0})
+    sat(6, 0, 0)
   end
 end
 
-function draw_ship()
+local function draw_ship()
   -- a hit flashes the ship off for two frames out of four while inv runs down
   local flash = 0
   if inv > 0 then
     if (inv // 4) % 2 == 0 then flash = 1 end
   end
   if flash == 1 then
-    sprite(0, {y = 0})
+    sat(0, 0, 0)
   else
-    sprite(0, {x = px, y = py + 64, pattern = SHIP, palette = 0})
+    sat(0, 0, py + 64)
+    sat(0, 1, px)
+    sat(0, 2, 56)
+    sat(0, 3, 0)
   end
 end
 
-function draw_bullets()
+local function draw_bullets()
   for i = 1, 4 do
     if bl[i] == 1 then
-      sprite(12 + i, {x = bx[i], y = by[i] + 64, pattern = BULLET, palette = 3})
+      sat(12 + i, 0, by[i] + 64)
+      sat(12 + i, 1, bx[i])
+      sat(12 + i, 2, 60)
+      sat(12 + i, 3, 3)
     else
-      sprite(12 + i, {y = 0})
+      sat(12 + i, 0, 0)
     end
   end
 end
 
-function draw_enemies()
+local function draw_enemies()
   for i = 1, 6 do
-    sprite(6 + i, {x = ex[i], y = ey[i] + 64, pattern = ENEMY, palette = 2})
+    sat(6 + i, 0, ey[i] + 64)
+    sat(6 + i, 1, ex[i])
+    sat(6 + i, 2, 58)
+    sat(6 + i, 3, 2)
   end
+end
+
+function init()
+  -- the panels' picture: palettes, tiles, the BAT and the sprite patterns.
+  -- The SAT is not seeded here: every slot is placed by frame(0)'s own draw
+  -- calls before the first picture renders.
+  art_boot()
+
+  -- BB (background) and SB (sprites) on.  The toy host starts at BB only
+  -- (docs/TOYS.md §2, card #120), so a toy that forgets this draws a SAT
+  -- nobody can see.  The CC/OC interrupt enables went with sr().
+  reg("CR", 0xC0)
+
+  px = 120
+  py = 160
+  lives = 3
+  score = 0
+  inv = 90
+  cooldown = 0
+  scroll = 0
+  rng = 3
+
+  -- four bullets (live, x, y) and six drones (x, y, speed), as arrays.  A
+  -- constructor with only integer values gives the IL the array's element
+  -- type; every later read and write is then an int.
+  bl = {0, 0, 0, 0}
+  bx = {0, 0, 0, 0}
+  by = {0, 0, 0, 0}
+  ex = {32, 96, 160, 208, 64, 144}
+  ey = {40, 48, 40, 56, 72, 88}
+  es = {1, 2, 1, 2, 1, 1}
 end
 
 function frame(t, f)
   -- the starfield: one pixel a frame, wrapping at the 32-row BAT's 256 lines
   scroll = (scroll + 1) % 256
+  -- the split starts from the bar: the base every line is drawn over is 0,
+  -- the same frame() write the raster table toy made before the rework
   reg("BYR", 0)
-
-  -- The RCR split, from the raster table: line 24 releases the scroll and the
-  -- playfield's backdrop.  Re-registered every frame because the offset moves.
-  raster(24, {byr = scroll, cram = {{0, C_FIELD}}})
 
   -- pad[1]: the studio's IJKL/NM/OP keys, and the scripted pad in the test
   if pad[1].left then px = px - 2 end
@@ -673,4 +621,18 @@ function frame(t, f)
   draw_ship()
   draw_bullets()
   draw_enemies()
+end
+
+-- The RCR split, in the callback form both cartridge routes carry.
+-- Line 0 freezes the scroll and paints the bar's backdrop; line 24 releases
+-- the scroll to this frame's own offset and paints the playfield's.  The
+-- raster(line, spec) table form the toy used before is refused by both.
+function raster(line)
+  if line == 0 then
+    reg("BYR", 0)
+    pal(0, C_BAR)
+  elseif line == 24 then
+    reg("BYR", scroll)
+    pal(0, C_FIELD)
+  end
 end
