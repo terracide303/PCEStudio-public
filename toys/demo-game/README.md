@@ -91,13 +91,17 @@ is a 40,960 B ROM, sha256 `e60712232fe3c7a7…`.
 
 **The console picture is not the browser's yet.**  The ROM runs and draws, but
 `tools/ilvm/ilvm_runtime.c` arms the RCR chain for **one display frame per toy
-frame** (#227), and an interpreted STARFALL frame is about 25 display frames.
+frame** (#227), and an interpreted STARFALL frame is about 22 display frames.
 A 12-frame capture tail therefore lands in the compute window almost every
-time, when the screen carries the last palette and no split.  A 48-frame tail
-carries two armed display frames; the closer of them is one toy frame out of
-step (its background scroll is the next frame's, its sprites the previous
-one's — the SAT DMA is a VBlank behind the armed chain) and misses a browser
-frame by ~450 bytes, all on background-star rows.
+time, when the screen carries the last palette and no split.  Measured over
+every frame of a 12 s movie (710 frames, 2026-11-03): 28 armed replays,
+exactly 22 display frames apart, in phase — armed frame 99+22n replays toy
+frame n.  The bar rows (0-23) match the browser's in every one; 8 of the 28
+differ by 16 bytes (row 24, columns 0-15, the blue channel — the split line's
+palette write landing after those pixels were fetched), the rest by 372-632
+bytes scattered over the moving picture rows below the split, growing as the
+game speeds up.  The armed replay is the browser's picture modulo #227's two
+halves (one replay per toy frame; the 16-pixel write latency).
 `tests/check-export-games.js` pins the ROM sha and asserts the screen is not
 black and not yet a browser frame, the same shape as DUSK RUN's pin.  The fix
 is the raster backend's (#227), not this toy's; the browser game is unchanged.

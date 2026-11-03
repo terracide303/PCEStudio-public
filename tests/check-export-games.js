@@ -120,15 +120,19 @@ const GAME_PINS = {
    * browser's picture on the console.  Its one mid-frame change is the
    * status-bar split (BYR 0 above line 24, the frame's scroll below), and
    * tools/ilvm/ilvm_runtime.c arms the RCR chain for ONE display frame per
-   * toy frame; an interpreted STARFALL frame is ~25 display frames, so the
+   * toy frame; an interpreted STARFALL frame is ~22 display frames, so the
    * 12-frame capture tail lands in the compute window almost every time, when
-   * the screen carries the last palette and no split.  The rare armed display
-   * frame is one toy frame out of step: its background scroll is the next
-   * frame's, its sprites the previous one's (the SAT DMA is a VBlank behind
-   * the armed chain), and it misses a browser frame by ~450 bytes, all on
-   * background-star rows.  Both halves — a picture the browser recognises,
-   * and a capture that is not simply the last palette — are #227's to fix.
-   * Until then this pin is the DUSK RUN shape: the ROM sha, the counters, and
+   * the screen carries the last palette and no split.  Measured over every
+   * frame of a 12 s movie (2026-11-03): 28 armed replays, exactly 22 display
+   * frames apart, in phase — armed frame 99+22n replays toy frame n.  The
+   * bar rows (0-23) match the browser's in every one; 8 of the 28 differ by
+   * 16 bytes (row 24, columns 0-15, the blue channel — the split line's
+   * palette write landing after those pixels were fetched, #227's latency)
+   * and the rest by 372-632 bytes scattered over the moving picture rows
+   * below the split, growing as the game speeds up.  The armed replay is the
+   * browser's picture modulo #227's two halves (one replay per toy frame;
+   * the 16-pixel write latency), so no look change on the game.  Until #227
+   * lands this pin is the DUSK RUN shape: the ROM sha, the counters, and
    * the screen asserted not black and not yet a browser frame.  The measured
    * run needs its own window: 600 frames of counters and a 12 s capture, the
    * latter long enough that the movie holds the running game, not the boot. */
@@ -138,8 +142,8 @@ const GAME_PINS = {
     frames: [],
     unmatched: "the container runs and draws; no captured frame is the " +
                "browser's picture yet — the raster backend arms one display " +
-               "frame per toy frame (#227), and the armed frame is one toy " +
-               "frame out of step",
+               "frame per toy frame (#227), and the 12-frame capture tail " +
+               "lands between armed replays",
     measureFrames: 600,
     captureMs: 12000,
     captureTail: true,
