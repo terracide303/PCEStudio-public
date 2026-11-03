@@ -11,7 +11,7 @@ ROM. Make a game by hand, or let an AI such as Claude make it with you.
 · **Claude Code manual:** <https://pcestudio.terracides.com/renderer/claude-code.html>
 · **Release notes:** <https://pcestudio.terracides.com/renderer/release-notes.html> · **Roadmap:** <https://pcestudio.terracides.com/renderer/roadmap.html>
 · **Credits:** <https://pcestudio.terracides.com/renderer/credits.html>
-· **Support the project:** <https://ko-fi.com/terracide>
+· **Support me:** <https://ko-fi.com/terracide>
 · **Report a bug or an idea:** [Issues](https://github.com/terracide303/PCEStudio-public/issues/new/choose)
 
 ---
