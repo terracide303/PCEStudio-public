@@ -5,9 +5,10 @@ decides the shape before any code is written.
 
 Every number below is either **measured** on this tree (the command or the
 file is named), a **projection** (arithmetic from measurements, labelled), or
-**reasoning** from the 6502/NMOS cycle counts (labelled). The two places where
-this note disagrees with the card's own wording are called out where they
-occur (§2.1 on 384 KiB, §6 on which toys the bank actually unlocks).
+**reasoning** from the 6502/NMOS cycle counts (labelled). The places where
+this note qualifies the card's own wording are called out where they occur
+(§2.1 on 384 KiB, §2.2 on where the size budget lives, §6 on which toys the
+bank actually unlocks).
 
 ## The answer first
 
@@ -447,7 +448,8 @@ the system, and the measurement says DUSK RUN would lose most of its frame.
   `codeOff`/`codeEnd` and jump targets are **offsets within that bank**.
 - Bank 0 (physical 4) is the **tables bank**: header, function table, upvalue
   descriptors, constants, global names, table section, and the song trailer
-  at `$1FE0`. Usable 8,160 B; a tables section over it is refused by name.
+  at `$1FE0`. Usable 8,160 B; a tables section over it is refused by name
+  (`toy-tables-bank-full`).
 - Banks 1..N (physical 5..) are **code banks**, functions packed whole; each
   ends with the 32-byte trailer strip so the sound glue is untouched. Usable
   8,160 B per bank. A function larger than the remaining room is
