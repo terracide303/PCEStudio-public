@@ -40,7 +40,9 @@
      Serve the repo root and open renderer/studio.html:
          python3 -m http.server 8000
      Query params:
-       ?demo=<palette|raster|sprite>  load that example
+       ?demo=<palette|raster|sprite|trick-…>  load that example (the
+                                      trick-… ids are the Hardware tricks
+                                      toys tricks.html opens)
        ?toy=<gallery id>              open one of the gallery's examples
                                       (#29) the Browse page lists (#80)
        ?frame=N                       seek to frame N and pause (a screenshot)
@@ -1138,6 +1140,8 @@
               title="The toy author's reference (#61)">Docs</button>
       <a class="btn" id="btn-resources" href="resources.html"
          title="Resources: the compilers, emulators, trackers and documents PCEStudio is built with">Resources</a>
+      <a class="btn" id="btn-tricks" href="tricks.html"
+         title="Hardware tricks: the raster bar, palette cycling, line-scroll parallax, fades and the sprite budget, each with a toy to open here">Tricks</a>
       <button type="button" class="btn" id="btn-save">Save file</button>
       <button type="button" class="btn" id="btn-project" aria-haspopup="dialog"
               title="Project — save or open a .pcestudio: the game, Claude's notes, the original art and named versions (#162)">Project…</button>
@@ -1919,6 +1923,9 @@
     <span class="docs-bar-note">generated from the runtime's own tables (#61)</span>
     <a class="btn" id="docs-standalone" href="docs.html" target="_blank"
        rel="noopener">Open standalone</a>
+    <a class="btn" id="docs-tricks" href="tricks.html" target="_blank"
+       rel="noopener"
+       title="Hardware tricks: what the VDC and VCE can do, with a toy for each and its datasheet page">Hardware tricks</a>
     <button type="button" class="btn btn-icon" id="docs-close"
             aria-label="Close docs">×</button>
   </div>
@@ -2122,6 +2129,10 @@
      toys/*.lua by tools/gallery.js; ?toy=<id> opens one here, and Open…
      lists them. -->
 <script src="gallery-toys.js"></script>
+<!-- #243: the Hardware tricks toys, generated from toys/ by
+     tools/trick-toys.js.  They are teaching toys reached from tricks.html
+     with ?demo=trick-…, not Browse entries. -->
+<script src="trick-toys.js"></script>
 <!-- #102: every panel is its own module. Each file registers one panel — its
      tab, its Panels-menu entry, its Guide chapter and its draw — through
      register(studio) in init(); this page only loads them and draws the
@@ -2284,6 +2295,20 @@ const GALLERY = (((typeof PCEStudio !== "undefined" && PCEStudio.galleryData) ||
   songs: t.songs,
   badge: t.badge,
   gallery: true
+}));
+
+/* #243 — the Hardware tricks toys, carried by renderer/trick-toys.js (generated
+ * from toys/ by tools/trick-toys.js).  They are teaching toys, not Browse
+ * entries, and tricks.html opens one with ?demo=trick-…  findExample() looks
+ * here after the three test examples and before the gallery. */
+const TRICKS = (((typeof PCEStudio !== "undefined" && PCEStudio.trickData) ||
+                 {}).toys || []).map((t) => ({
+  id: t.id,
+  name: t.name,
+  title: t.title,
+  source: t.source,
+  blurb: t.blurb,
+  trick: true
 }));
 
 /* ---------------------------------------------------------------------
@@ -3595,6 +3620,7 @@ function togglePop(id) {
 /* ---- the toy's files -------------------------------------------------- */
 function findExample(id) {
   return EXAMPLES.find((e) => e.id === id) ||
+         TRICKS.find((e) => e.id === id) ||
          GALLERY.find((e) => e.id === id) || null;
 }
 

@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCEStudio Hardware tricks</title>
+<meta name="description" content="What the PC Engine's VDC and VCE can do per line: raster bars, palette cycling, line-scroll parallax, fades and the sprite budget, each with a toy that opens in the studio and every claim on a datasheet page or a measurement.">
+<link rel="stylesheet" href="pce-gallery.css">
+<style>
+  /* the hardware tricks page: pce-gallery.css's tokens and site header, one
+     card per trick so a toy and its citations never hide in a paragraph. */
+  .tg { max-width: 860px; margin: 0 auto; padding: 32px 16px 80px; color: var(--text2);
+        font: 15px/1.65 var(--sans); }
+  .tg h1 { font: 700 30px/1.2 var(--display); color: var(--text); margin: 6px 0 10px; }
+  .tg h2 { font: 600 21px/1.3 var(--sans); color: var(--text); margin: 0 0 6px; }
+  .tg h3 { font: 600 15px/1.3 var(--sans); color: var(--text); margin: 18px 0 6px; }
+  .tg p, .tg li { max-width: 72ch; }
+  .tg a { color: var(--accent); }
+  .tg code, .tg kbd { font: 13px var(--mono); background: var(--code); border: 1px solid var(--line2);
+                      border-radius: 4px; padding: 1px 5px; color: var(--text); }
+  .tg .kicker { font: 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .tg .lede { font-size: 17px; color: var(--text); }
+  .tg .note { background: var(--pane); border: 1px solid var(--line); border-radius: 8px;
+              padding: 12px 16px; margin: 18px 0; font-size: 14px; }
+  .tg .trick { background: var(--pane); border: 1px solid var(--line); border-radius: 10px;
+               padding: 18px 20px; margin: 18px 0; }
+  .tg .trick .trick-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  .tg .trick .num { font: 700 12px var(--mono); color: var(--accent); }
+  .tg .toybox { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+                background: var(--code); border: 1px solid var(--line2); border-radius: 8px;
+                padding: 10px 12px; margin: 12px 0; }
+  .tg .toybox .what { font-size: 13px; color: var(--muted); }
+  .tg .btn { display: inline-block; font: 600 13px/1 var(--sans); color: #1b130c;
+             background: var(--accent); border: 0; border-radius: 6px; padding: 9px 13px;
+             text-decoration: none; }
+  .tg .btn:hover { filter: brightness(1.08); }
+  .tg .btn.secondary { color: var(--text2); background: transparent;
+                       border: 1px solid var(--line); }
+  .tg .claims { margin: 8px 0 0; padding-left: 20px; }
+  .tg .claims li { margin: 6px 0; }
+  .tg .claims cite { font-style: normal; font: 12px var(--mono); color: var(--muted);
+                     white-space: nowrap; }
+  .tg .claim[data-source^="unchecked"] { border-left: 3px dashed var(--line); padding-left: 10px;
+                                         margin-left: -13px; list-style: none; }
+  .tg .tag { display: inline-block; font: 11px/1 var(--mono); letter-spacing: .04em;
+             text-transform: uppercase; border: 1px solid var(--line); border-radius: 999px;
+             padding: 3px 8px; margin-left: 6px; color: var(--muted); vertical-align: 2px; }
+  .tg .tag.unchecked { color: var(--muted); border-style: dashed; }
+  .tg .tag.measured { color: #7ad7a0; border-color: #35604a; }
+  .tg .tag.manual { color: var(--accent); border-color: #6b4526; }
+  .tg .tag.notyet { color: #e2a85c; border-color: #6b4526; border-style: solid; }
+  .tg table.words { border-collapse: collapse; margin: 8px 0 4px; font: 12px var(--mono); }
+  .tg table.words th, .tg table.words td { border: 1px solid var(--line2); padding: 4px 7px;
+                                           text-align: left; }
+  .tg table.words th { color: var(--text); font-weight: 600; }
+  .tg table.words td.rep { color: var(--muted); }
+  .tg .notmodelled { border-left: 4px solid #e2a85c; }
+  .tg .sources { font-size: 13px; color: var(--muted); }
+  @media (max-width: 560px) { .tg h1 { font-size: 24px; } .tg .trick { padding: 14px; } }
+</style>
+</head>
+<body>
+<header class="site-head">
+  <a class="brand" href="browse.html" title="PCEStudio home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">PCE<span class="brand-dot">·</span>studio</span>
+  </a>
+  <nav class="site-nav" aria-label="Site">
+    <a href="studio.html">Studio</a>
+    <a href="browse.html">Browse</a>
+    <a href="docs.html">Docs</a>
+    <a href="resources.html">Resources</a>
+    <a href="tricks.html" class="is-on" aria-current="page">Tricks</a>
+    <a href="testers.html">Beta testers</a>
+    <a href="release-notes.html">Release notes</a>
+    <a href="roadmap.html">Roadmap</a>
+    <a href="claude-code.html">Claude Code</a>
+    <a href="credits.html">Credits</a>
+    <a href="https://github.com/terracide303/PCEStudio-public" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<main class="tg">
+  <span class="kicker">Hardware tricks</span>
+  <h1>What the PC Engine can do in the middle of a frame</h1>
+  <p class="lede">Five tricks that make a small picture do more than its tile count suggests,
+  each with a short toy you can open in the studio. Every claim is labelled: a datasheet page,
+  a measurement in this repository, or <b>reported, unchecked</b> when it came from the HuCC chat
+  thread and nobody here has confirmed it.</p>
+
+  <p class="note"><b>How to read the labels.</b> <span class="tag manual">datasheet</span>
+  cites a page of the Hudson manuals transcribed in <code>docs/MANUALS.md</code> (H6-… HuC6260 VCE,
+  H7-… HuC6270 VDC). <span class="tag measured">measured</span> is a result produced by
+  <code>tests/check-tricks.js</code> in this repository, by running the toy through the studio's
+  own runtime and validator. <span class="tag unchecked">reported, unchecked</span> is what it says:
+  it is in <code>docs/REFERENCES.md</code> §7, it may well be true, and we have not verified it — do
+  not build on it without checking.</p>
+
+  <section class="trick" id="raster">
+    <div class="trick-head"><span class="num">01</span><h2>Raster bar and a per-line palette change</h2></div>
+    <p>The VDC's only per-line interrupt is RCR. Its internal line counter is set to 64 before
+    the display starts, so display line <i>L</i> matches <code>RCR = L + $40</code>. A colour
+    written in the horizontal blank before that line is on screen for the line; a colour written
+    while the line is being displayed makes the VCE repeat the last pixel and smear (pcetech §6,
+    “Palette flicker”, recorded in <code>docs/MANUALS.md</code> §15.3 item 10). That blank is
+    the budget — about 123 CPU cycles in the measurement the validator is calibrated on.</p>
+    <div class="toybox">
+      <a class="btn" href="studio.html?demo=trick-raster">Open the raster bar in the studio →</a>
+      <a class="btn secondary" href="../toys/tricks/raster-bar.lua">Read the toy</a>
+      <span class="what">one flat tile; 224 palette writes a frame; the bar moves down 2 lines a frame</span>
+    </div>
+    <h3>What is claimed, and where it comes from</h3>
+    <ul class="claims">
+      <li class="claim" data-source="manual:H7-7">RCR (R06) raises the line interrupt when the
+        internal line counter equals it, and the counter starts at 64 at the top of the sweep, so
+        the handler for display line <i>L</i> waits for <code>L + $40</code>. <cite>HuC6270 manual p. H7-7; Tech Notes pp. 8–9</cite></li>
+      <li class="claim" data-source="manual:H7-7">A BXR write shows from the next scanning line, and
+        a BYR write made during display shows from the next line — the one-line delay the handler
+        has to allow for. <cite>HuC6270 manual p. H7-7</cite></li>
+      <li class="claim" data-source="manual:H6-3">A colour entry is written through CTA/CTW: CTA low,
+        CTA high, CTW low, CTW high, and the high data write increments the address. <cite>HuC6260 manual pp. H6-3, H6-5</cite></li>
+      <li class="claim" data-source="measured:tests/check-tricks.js">At frame 60 the toy's raster
+        table has <b>224 entries, one palette write per display line</b>. Line 0 is
+        <code>$056</code>, line 223 is <code>$123</code>, and the 12 lines 152–163 are
+        <code>$1FB</code> — the moving bar made by the same one write choosing another colour.
+        <span class="tag measured">measured</span> <cite>tests/check-tricks.js</cite></li>
+      <li class="claim" data-source="measured:tests/check-tricks.js">The validator accepts it:
+        <b>1,173 cycles</b> in <code>frame()</code>, <b>1,721</b> mean per <code>raster()</code>
+        call, <b>65</b> cycles in the blank (under the ~123 the model allows —
+        part C's measured horizontal blank, <code>docs/IL.md</code> §10.2). It warns that the
+        collection is 3.24 display frames (18.5 Hz on this route), not an error.
+        <span class="tag measured">measured</span> <cite>tests/check-tricks.js</cite></li>
+    </ul>
+  </section>
+
+  <section class="trick" id="palette">
+    <div class="trick-head"><span class="num">02</span><h2>Palette cycling — the Skweek-style effect</h2></div>
+    <p>The palette is not part of the picture; it is a 512-word table the CPU can rewrite at any
+    time. A tilemap pixel names a colour <i>number</i>, and the VCE looks the number up. Rotate the
+    colours among a run of entries and the picture animates without one tile or map cell changing.</p>
+    <div class="toybox">
+      <a class="btn" href="studio.html?demo=trick-palette">Open palette cycling in the studio →</a>
+      <a class="btn secondary" href="../toys/palette-cycle.lua">Read the toy</a>
+      <span class="what">water and fire; six shades each re-dealt every frame</span>
+    </div>
+    <h3>What is claimed, and where it comes from</h3>
+    <ul class="claims">
+      <li class="claim" data-source="manual:H6-1">The VCE has 512 addresses of 9 bits, split into
+        two 256-address areas — background palettes then sprite palettes — each 16 blocks of 16
+        colours. <cite>HuC6260 manual pp. H6-1, H6-4, H6-5</cite></li>
+      <li class="claim" data-source="manual:H6-3">CTA/CTW write one 9-bit entry at a time and the
+        address auto-increments after the high-byte data write, so a run of palette entries is a
+        short CPU loop. <cite>HuC6260 manual pp. H6-3, H6-4</cite></li>
+      <li class="claim" data-source="measured:tests/check-tricks.js">Between frames 0 and 1 the
+        toy's <b>VRAM changes 0 bytes, the SAT changes 0 bytes, and 12 palette entries change</b>
+        (the six water colours and the six fire colours); <b>61,824 of 65,536 pixels</b> change.
+        The animation is the palette, and nothing else. <span class="tag measured">measured</span>
+        <cite>tests/check-tricks.js</cite></li>
+      <li class="claim" data-source="unchecked:docs/REFERENCES.md §7">Skweek's level transitions
+        are brute-force palette swapping and colour cycling, not a raster bar on colour 0; the
+        advice for studying any ROM is to watch tile and palette animation in an emulator.
+        <span class="tag unchecked">reported, unchecked</span> <cite>HuCC chat, docs/REFERENCES.md §7</cite></li>
+    </ul>
+  </section>
+
+  <section class="trick" id="parallax">
+    <div class="trick-head"><span class="num">03</span><h2>Parallax by line scroll</h2></div>
+    <p>The background scroll registers are plain registers, not a DMA engine. A write to BXR
+    shows from the next scanning line, so one write at a band boundary gives that band its own
+    horizontal offset until the next write. Four writes make four speeds; the RCR handler is the
+    thing that makes them land on the right lines.</p>
+    <div class="toybox">
+      <a class="btn" href="studio.html?demo=trick-parallax">Open the parallax toy in the studio →</a>
+      <a class="btn secondary" href="../toys/parallax.lua">Read the toy</a>
+      <span class="what">four 56-line bands; BXR written on lines 0, 56, 112 and 168</span>
+    </div>
+    <h3>What is claimed, and where it comes from</h3>
+    <ul class="claims">
+      <li class="claim" data-source="manual:H7-7">BXR is 10 bits and a write shows from the next
+        scanning line; BYR is 9 bits and a write made during display shows from the next line
+        (<code>BYR+1</code>). <cite>HuC6270 manual p. H7-7</cite></li>
+      <li class="claim" data-source="manual:H7-13">The VDC scrolls the background vertically line
+        by line through BYR and horizontally dot by dot through BXR. <cite>HuC6270 manual p. H7-13</cite></li>
+      <li class="claim" data-source="measured:tests/check-tricks.js">At frame 60 the toy's raster
+        table has four entries, at lines <b>0, 56, 112 and 168</b>, with BXR
+        <b>7, 30, 60 and 120</b>. Its four marker bars stand at screen x <b>36, 13, 239 and 179</b> — four different
+        positions measured from the picture, not from the toy's variables.
+        <span class="tag measured">measured</span> <cite>tests/check-tricks.js</cite></li>
+      <li class="claim" data-source="measured:tests/check-tricks.js">The validator accepts it:
+        <b>1,203 cycles</b> in <code>frame()</code>, <b>1,399</b> mean per <code>raster()</code>
+        call, 2.64 display frames (22.8 Hz) for the collection, and 64 cycles in the blank.
+        <span class="tag measured">measured</span> <cite>tests/check-tricks.js</cite></li>
+    </ul>
+  </section>
+
+  <section class="trick" id="fades">
+    <div class="trick-head"><span class="num">04</span><h2>Fades: 7 steps, or 14 half-steps</h2></div>
+    <p>The VCE has no brightness register. Its control register documents only the dot-clock bits,
+    and the measured bits are blur and black-and-white — there is no dimmer. A fade is a palette
+    rewrite: every frame the CPU steps each entry toward the target. The colour word is three bits
+    per channel, so the arithmetic has only eight levels to land on — and that is why a
+    half-step can look odd.</p>
+    <div class="toybox">
+      <a class="btn" href="studio.html?demo=trick-fade">Open the fade toy in the studio →</a>
+      <a class="btn secondary" href="../toys/tricks/fade.lua">Read the toy</a>
+      <span class="what">top half: 7-step white→black; bottom half: 14-half-step red→blue</span>
+    </div>
+    <h3>What the intermediate colours are, measured</h3>
+    <p>The toy uses the studio's own fade arithmetic — <code>renderer/pce-layers.js</code>
+    <code>mixChannel</code>: <code>floor((from·steps + (to−from)·k) / steps)</code> on each
+    3-bit channel. These are the words it actually writes (<code>GGRRRBBB</code>):</p>
+    <div class="claim" data-source="measured:tests/check-tricks.js">
+      <table class="words">
+        <tr><th>step k</th><th>7 steps, white→black</th><th>14 half-steps, white→black</th><th>14 half-steps, red→blue</th></tr>
+        <tr><td>0</td><td>$1FF</td><td>$1FF</td><td>$038</td></tr>
+        <tr><td>1</td><td>$1B6</td><td>$1B6</td><td>$030</td></tr>
+        <tr><td>2</td><td>$16D</td><td class="rep">$1B6 (held)</td><td>$031</td></tr>
+        <tr><td>3</td><td>$124</td><td>$16D</td><td>$029</td></tr>
+        <tr><td>4</td><td>$0DB</td><td class="rep">$16D (held)</td><td>$02A</td></tr>
+        <tr><td>5</td><td>$092</td><td>$124</td><td>$022</td></tr>
+        <tr><td>6</td><td>$049</td><td class="rep">$124 (held)</td><td>$023</td></tr>
+        <tr><td>7</td><td>$000</td><td>$0DB</td><td>$01B</td></tr>
+        <tr><td>8</td><td class="rep">—</td><td class="rep">$0DB (held)</td><td>$01C</td></tr>
+        <tr><td>9</td><td class="rep">—</td><td>$092</td><td>$014</td></tr>
+        <tr><td>10</td><td class="rep">—</td><td class="rep">$092 (held)</td><td>$015</td></tr>
+        <tr><td>11</td><td class="rep">—</td><td>$049</td><td>$00D</td></tr>
+        <tr><td>12</td><td class="rep">—</td><td class="rep">$049 (held)</td><td>$00E</td></tr>
+        <tr><td>13</td><td class="rep">—</td><td>$000</td><td>$006</td></tr>
+        <tr><td>14</td><td class="rep">—</td><td class="rep">$000 (held)</td><td>$007</td></tr>
+      </table>
+      <span class="tag measured">measured</span> <cite>tests/check-tricks.js, frame by frame from CRAM</cite>
+    </div>
+    <p><b>Why.</b> A 7-step fade moves every channel by exactly one level per step, so white to
+    black walks <code>7,6,5,4,3,2,1,0</code> — every level it can use. A 14-half-step asks for half
+    a level at a time; when all three channels move together the floor lands on the previous level
+    and the same word is written twice (the “held” rows). Between two different colours the two
+    channels move in opposite directions, so the half-steps do fit new words between the 7-step
+    ones — the purples <code>$030, $031, $029 …</code> that are in neither endpoint. That is the
+    “odd colours on the way”: not a hardware blend, but palette words the CPU invented because
+    the VCE cannot mix.</p>
+    <h3>What is claimed, and where it comes from</h3>
+    <ul class="claims">
+      <li class="claim" data-source="manual:H6-3">The VCE control register (<code>$0400</code>)
+        documents the dot-clock division only (DCC bits 1–0); there is no brightness or dimming
+        field. The measured note adds blur (D2) and monochrome (D7), neither of which dims a
+        pixel. <cite>HuC6260 manual p. H6-3; pcetech §6, docs/MANUALS.md §15</cite></li>
+      <li class="claim" data-source="manual:H6-4">A colour word is <code>GGRRRBBB</code>, three
+        bits per channel. <cite>HuC6260 manual Fig. 2-2-1 p. H6-4; Tech Notes p. 2</cite></li>
+      <li class="claim" data-source="measured:tests/check-tricks.js">The toy's measured words are
+        the table above: <b>8 frames</b> for the 7-step fade, <b>15</b> for the 14-half-step
+        crossfade. The validator accepts it at 4,809 cycles a frame.
+        <span class="tag measured">measured</span> <cite>tests/check-tricks.js</cite></li>
+      <li class="claim" data-source="unchecked:docs/REFERENCES.md §7"><code>fade_to_*</code> uses 7
+        steps; <code>cross_fade_to</code> can use 14 half-steps (slower, with odd colours on the
+        way), and fades are quick on purpose because they stop gameplay.
+        <span class="tag unchecked">reported, unchecked</span> <cite>HuCC chat, docs/REFERENCES.md §7</cite></li>
+    </ul>
+  </section>
+
+  <section class="trick" id="sprites">
+    <div class="trick-head"><span class="num">05</span><h2>Sprite limits per line, and how to live with them</h2></div>
+    <p>The VDC collects sprites for a line into a 16-entry buffer. The manual says 16 sprites;
+    what the hardware actually counts is 16-pixel strips, so a 32-pixel-wide CGX sprite spends two.
+    A 17th strip on a line is not drawn — the higher-priority 16 are — and the status register's OR
+    bit reports the attempt. The fix is to count strips, not objects.</p>
+    <div class="toybox">
+      <a class="btn" href="studio.html?demo=trick-sprites">Open the sprite budget toy in the studio →</a>
+      <a class="btn secondary" href="../toys/tricks/sprite-limit.lua">Read the toy</a>
+      <span class="what">16 sprites on line 48; 8 CGX sprites on line 144; both exactly 16 strips</span>
+    </div>
+    <h3>What is claimed, and where it comes from</h3>
+    <ul class="claims">
+      <li class="claim" data-source="manual:H7-19">At most 16 sprites on one line; 17 or more
+        draws the higher-priority 16 and drops the rest. The SAT holds 64 entries and priority
+        follows the SAT address. <cite>HuC6270 manual pp. H7-19, H7-20</cite></li>
+      <li class="claim" data-source="manual:H7-4">The status register's OR bit reports an attempt
+        at a 17th sprite on a line. <cite>HuC6270 manual p. H7-4</cite></li>
+      <li class="claim" data-source="measured:tests/check-tricks.js">The studio's validator
+        measures line 48 as <b>16 sprites, 16 strips, 0 dropped</b>, and line 144 as <b>8 sprites, 16 strips, 0 dropped</b> — the eight CGX sprites cost two strips each. OR is false.
+        <span class="tag measured">measured</span> <cite>tests/check-tricks.js</cite></li>
+      <li class="claim" data-source="measured:tests/check-tricks.js">A control toy with one more
+        sprite on a line is refused with <code>validate-sprite-line</code>: “more than 16 16-px
+        strips on a line”. The budget is enforced before an export, not discovered on hardware.
+        <span class="tag measured">measured</span> <cite>tests/check-tricks.js</cite></li>
+      <li class="claim" data-source="manual:H7-9,H7-19">How to live with it: keep a line to 16
+        strips; make a wide static thing out of background tiles, which have their own 32×32-cell
+        map and cost no sprite budget; split a moving wide thing across rows, so each row is
+        inside its own 16. <cite>HuC6270 manual pp. H7-9, H7-19</cite></li>
+    </ul>
+  </section>
+
+  <section class="trick notmodelled" id="shadow">
+    <div class="trick-head"><span class="num">06</span><h2>Shadow and highlight: not modelled, and not PC Engine</h2>
+      <span class="tag notyet">not modelled yet</span></div>
+    <p><b>This one has no toy on purpose.</b> The studio does not model shadow/highlight, and the
+    PC Engine does not have it: there is no register bit to model. The HuC6270 hands the HuC6260
+    nine bits of video data and the VCE turns them into one of 512 absolute colours; there is no
+    third state and no brightness signal. The note in the HuCC chat describes the Sega Mega
+    Drive/Genesis VDP's S/H feature (enable bit 3 of the mode register at <code>$8Cxx</code>;
+    sprite palette 3, colour 14 = highlight, 15 = shadow), which is a different console. The
+    studio's colour path is a plain CRAM lookup, so colour 14 and colour 15 are ordinary colours
+    here.</p>
+    <div class="toybox">
+      <a class="btn secondary" href="docs.html">The generated toy reference</a>
+      <span class="what">the #241 finding, with every register page and file/line, is
+        <code>docs/SHADOW-HIGHLIGHT.md</code> in the repository</span>
+    </div>
+    <h3>What is claimed, and where it comes from</h3>
+    <ul class="claims">
+      <li class="claim" data-source="manual:H7-1,H7-6,H7-8,H7-14,H7-20,H6-3,H6-5">No PCE register
+        has a shadow/highlight field: VDC CR (H7-6/H7-7), MWR (H7-8/H7-9), the BAT word (H7-14),
+        SAT word 3 (H7-20/H7-21), the 9-bit video data (H7-1), VCE CR (H6-3) and the colour table
+        (H6-5) are fully named and have no such bit. <cite>docs/MANUALS.md; docs/SHADOW-HIGHLIGHT.md §1</cite></li>
+      <li class="claim" data-source="measured:docs/SHADOW-HIGHLIGHT.md">The studio's colour path
+        is a plain CRAM lookup with no post-processing pass: <code>renderer/pce-bg.js</code>
+        <code>:406–407, :429</code>, <code>renderer/pce-sprites.js</code>
+        <code>:224–225, :481–497</code>. A search for shadow/highlight/brighten/darken/colour-math
+        in those modules finds nothing. <span class="tag measured">measured</span>
+        <cite>docs/SHADOW-HIGHLIGHT.md §2</cite></li>
+      <li class="claim" data-source="unchecked:docs/SHADOW-HIGHLIGHT.md §3">The chat note's shape —
+        sprites, or whole 8×8 background blocks and then only shadow — is the Mega Drive VDP's
+        S/H; Toy Story's intro stills and possibly Ecco use it.
+        <span class="tag unchecked">reported, unchecked</span> <cite>HuCC chat, docs/REFERENCES.md §7; community VDP references in docs/SHADOW-HIGHLIGHT.md §3</cite></li>
+    </ul>
+  </section>
+
+  <p class="sources">The snippets are too small to copy a whole game, and none of these toys uses
+  pack art: every tile and sprite is drawn by the toy's own <code>puttile</code>/<code>putsprite</code>
+  code. The toys live in <code>toys/</code> and the measurements are re-run by
+  <code>node tests/check-tricks.js</code>.</p>
+</main>
+</body>
+</html>

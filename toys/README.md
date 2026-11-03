@@ -13,6 +13,9 @@ through `renderer/pce-il.js` too — the console path (#31).
 | `road.lua` | a pseudo-3D road: BYR picks a perspective row, BXR bends it, the palette shades it and moves the stripes | BXR + BYR + palette on every line | — |
 | `status-bar.lua` | an RCR split: lines 0–23 hold still, everything below scrolls | BXR + BYR on lines 0 and 24 | blink palette 1 colour 3 |
 | `palette-cycle.lua` | water and fire by rotating two palette runs | — | palette 0 colours 1–6, palette 1 colours 1–6 |
+| `tricks/raster-bar.lua` | a raster bar and a per-line palette change on one flat tile (#243) | palette 1 on every line | — |
+| `tricks/fade.lua` | a 7-step fade to black and a 14-half-step crossfade, with the words measured (#243) | — | two palette writes a frame |
+| `tricks/sprite-limit.lua` | 16 16-px sprites on one line and 8 32-px CGX sprites on another: the 16-strip budget (#243) | — | 24 SAT entries |
 | `platformer/main.lua` | a one-screen platformer: run, jump, land on the ledges above the pit (#147) | — | 1 SAT entry |
 | `tower/main.lua` | an original climber: ladders, rolling boulders, hearts, a hammer, a gem per round (#147) | — | 18 SAT entries |
 | `dusk-run/main.lua` | an endless sunset runner over five line-scroll bands, with rocks, birds and hearts (#151) | BXR on 5 lines | backdrop palette on ~152 sky lines, up to 10 SAT entries |
@@ -30,6 +33,16 @@ Every file opens with a comment naming the trick and each block says why it
 is there.  A tile is written by `puttile`, which packs colour numbers into the
 VDC's two bitplanes — that helper is repeated in each file so a toy can be
 read (and copied) on its own.
+
+## `tricks/` — the Hardware tricks toys (card #243)
+
+`raster-bar.lua`, `fade.lua` and `sprite-limit.lua` are the teaching toys the
+Hardware tricks page (`renderer/tricks.html`) opens in the studio with
+`?demo=trick-…`; the page also reuses `palette-cycle.lua` and `parallax.lua`
+from the table above.  `tools/trick-toys.js` carries them to the studio
+(`renderer/trick-toys.js`, generated), and `tests/check-tricks.js` runs every
+one through both runtimes and the validator and pins the numbers the page
+prints.  They are not Browse entries.
 
 Run them all (120 frames each through the Lua runtime and the IL, budgets,
 effect checks, and the frame-60 PNGs):
