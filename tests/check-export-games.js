@@ -33,9 +33,10 @@
  *      or 5.5 s capture tail is pinned with its own measure frame count and
  *      capture length (GAME_PINS) — PLATFORMER is that game since #186.
  *      A game that exports and runs but whose displayed frame is not the
- *      browser's yet (DUSK RUN, #222/#227) is pinned as its ROM sha plus
- *      `unmatched`: the capture must be not black AND not a browser frame,
- *      so either half going stale fails and asks for a re-pin.
+ *      browser's yet (STARFALL, after #227 left its status bar's two edge
+ *      columns different) is pinned as its ROM sha plus `unmatched`: the
+ *      capture must be not black AND not a browser frame, so either half
+ *      going stale fails and asks for a re-pin.
  *      Two controls prove the capture-and-compare instrument works on a
  *      toy that exports: tools/toys/palette.lua (its ROM sha and its
  *      eight-frame picture cycle are pinned) and, for #183,
@@ -85,13 +86,12 @@ const ROM_BYTES = 40960;            /* 32 KiB image + one data bank */
  * DUSK RUN moved to the encoder's refusal by #184, the three games' sat
  * refusals moved on by #186, PLATFORMER now builds and moved to GAME_PINS
  * below, #197 carried note and the sfx instruction, #215's interpreter reads
- * the version-3 container, and the 2026-11-03 gallery rework moved TOWER and
- * STARFALL to GAME_PINS: both build.  TOWER's Mednafen picture is the
- * browser's; STARFALL's is not yet (#273: the raster backend arms the line
- * chain one display frame per toy frame, and an interpreted raster frame is
- * tens of display frames — #227 — see its pin).  NOVA TIDE still stops on its
- * first raster.  DUSK RUN builds, loads, runs and draws since #222 and is
- * pinned below; its displayed frame is not the browser's yet (#227)).
+ * the version-3 container, the 2026-11-03 gallery rework moved TOWER and
+ * STARFALL to GAME_PINS: both build, and #227 made DUSK RUN's displayed
+ * picture the browser's.  TOWER's Mednafen picture is the browser's;
+ * STARFALL's closest browser frame is 48 bytes off in the status bar's first
+ * tile row, so its pin stays the not-black/not-yet shape.  NOVA TIDE still
+ * stops on its first raster.
  * `where` is the source line the table names; null is what the validator's
  * own finding can say (it names no line for a frame-wide budget).  `message`
  * is a substring of the refusal the suite insists on, so a message that loses
@@ -117,29 +117,27 @@ const GAME_PINS = {
    * and the sprites are placed with sat(), so the bytecode is 6,285 B of the
    * 8,160 B data bank and the constant pool is 111 of 127 — no capacity is
    * over, and it builds a 40,960 B ROM.  What it does NOT have yet is the
-   * browser's picture on the console.  Its one mid-frame change is the
-   * status-bar split (BYR 0 above line 24, the frame's scroll below), and
-   * tools/ilvm/ilvm_runtime.c arms the RCR chain for ONE display frame per
-   * toy frame; an interpreted STARFALL frame is ~25 display frames, so the
-   * 12-frame capture tail lands in the compute window almost every time, when
-   * the screen carries the last palette and no split.  The rare armed display
-   * frame is one toy frame out of step: its background scroll is the next
-   * frame's, its sprites the previous one's (the SAT DMA is a VBlank behind
-   * the armed chain), and it misses a browser frame by ~450 bytes, all on
-   * background-star rows.  Both halves — a picture the browser recognises,
-   * and a capture that is not simply the last palette — are #227's to fix.
-   * Until then this pin is the DUSK RUN shape: the ROM sha, the counters, and
-   * the screen asserted not black and not yet a browser frame.  The measured
-   * run needs its own window: 600 frames of counters and a 12 s capture, the
+   * browser's picture on the console.  #227 fixed the two causes this pin
+   * used to name: the chain is re-armed on every display frame (so the tail
+   * is a real frame, not the collection's static screen) and each line's
+   * entry is preloaded and written inside the blank (so row 16's first
+   * pixels are this line's colour).  The capture's closest browser frame is
+   * now 48 bytes off, all in the status bar's first tile row — two one-pixel
+   * columns at the screen edges (x=1 and x=249, rows 0-7) — against ~450
+   * bytes on the star rows before; why those columns differ is not proven.
+   * So this pin stays the DUSK RUN shape: the ROM sha, the counters, and the
+   * screen asserted not black and not yet a browser frame.  The measured run
+   * needs its own window: 600 frames of counters and a 12 s capture, the
    * latter long enough that the movie holds the running game, not the boot. */
   "STARFALL": {
     toy: "toys/demo-game/main.lua",
-    rom: "e60712232fe3c7a73f35b97908bc3531dd111fa23ab6934718a9d373c6aec1f4",
+    rom: "a9f5140e1143f47a5c0ced8aafe6429f90ac137c5bd28efd8d6d6cdd40757471",
     frames: [],
     unmatched: "the container runs and draws; no captured frame is the " +
-               "browser's picture yet — the raster backend arms one display " +
-               "frame per toy frame (#227), and the armed frame is one toy " +
-               "frame out of step",
+               "browser's picture yet — the closest is 48 bytes off, in the " +
+               "status bar's first tile row (two one-pixel edge columns); " +
+               "#227's replay and row-16 lag are fixed, the cause of these " +
+               "columns is not proven",
     measureFrames: 600,
     captureMs: 12000,
     captureTail: true,
@@ -160,7 +158,7 @@ const GAME_PINS = {
    * cycle, is the stable half of the pin. */
   "TOWER": {
     toy: "toys/tower/main.lua",
-    rom: "727baf12d96dcdee0344bb77b1ac11924694dec0dc8ae67aeabe906dcaebdf60",
+    rom: "048948fe18f9d43254520cf7738bc6c1fc792437cc0ad401bfb58ff0493d2428",
     framesAny: true,
     measureFrames: 1800,
     captureMs: 40000,
@@ -180,33 +178,31 @@ const GAME_PINS = {
    * with any interpreter change (#187's opcode moved all three). */
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
-    rom: "0401fad836db3d76e641d8a7f98c9d6dbed393988110297e31e35573f736b7aa",
+    rom: "109efcb8fbb7d9ce517c2cf6761098b6d9ce9aeb1633829fe61f6a4799b358da",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
   },
   /* #222: DUSK RUN's container now loads and runs: MAX_REGS 41 carries the
    * frame hook's 41 registers, MAX_FUNCS 41 its 41 functions, and the upvalue
-   * pool carries function 39's 19 upvalues.  **It draws, and it is not yet
-   * the browser's picture.**  The interpreter's VRAM/CRAM/SAT are byte-equal
-   * to the browser's at frame 3 (a Mednafen save state, `-DILVM_HOST` parity
-   * in check-ilvm), but the raster backend shows a collected frame on one
-   * display frame per toy frame: DUSK's build step takes ~37 display frames
-   * (docs/ROM_SPEED.md's 0.26 Hz build projection), so a short capture's
-   * tail is a stale screen, and the best replay frame found in a 20 s movie
-   * differs by 16 bytes on one scanline (row 16, the raster write's line
-   * latency).  Until that is pinned, the pin records the ROM sha and asserts
-   * the game is NOT black and NOT yet a browser frame; a capture that does
-   * match fails here and asks for its hash.  Card #227 carries the raster
-   * picture.  It also needs its own capture window: the boot that draws the
-   * base takes ~7 s on the dummy SDL driver. */
+   * pool carries function 39's 19 upvalues.  #227 made the displayed picture
+   * the browser's: the RCR chain is re-armed on every display frame (before,
+   * only one frame per ~37 — DUSK's build step — replayed the table and a
+   * capture's tail was the static screen), and the line entry is written from
+   * a zero-page preload inside the blank (before, its last store was ~28 CPU
+   * cycles late and the first 16 pixels of row 16 kept the old colour).
+   * The pin is the ROM sha plus the browser-frame hashes: DUSK's first toy
+   * frames are one static early picture, so browser frames 1-6 share hash
+   * 3584516448 and frame 0 is 2819597916; both are pinned.  It needs its own
+   * capture window: the boot that draws the base takes ~7 s on the dummy SDL
+   * driver, so the measure runs 600 frames and the capture 12 s. */
   "DUSK RUN": {
     toy: "toys/dusk-run/main.lua",
-    rom: "5c01dc368ccb390eaa312a5961910ba17c9b05f09460d46db89f727a12f8de94",
-    frames: [],
-    unmatched: "the container runs and draws; no captured frame is the browser's picture yet (raster scanline latency, #227)",
+    rom: "cabf674e632725d6e39b24fde6da34a436b61fd113cf4a665bcbb4dbdfff860a",
+    frames: [2819597916, 3584516448],
     measureFrames: 600,
-    captureMs: 12000
+    captureMs: 12000,
+    captureTail: true
   },
   /* #191: tools/toys/sprite.lua, the sprite op on the exported route.  It
    * is not one of the card's five games, so `kind: "toy"` keeps it out of
@@ -219,7 +215,7 @@ const GAME_PINS = {
   "SPRITE": {
     kind: "toy",
     toy: "tools/toys/sprite.lua",
-    rom: "2ecb5ff558319cbf5ab69b57b29a6d72fefa64fef97f3245b2aa85108bd3bb6c",
+    rom: "4f212ee9128f76d548ae92c4b9ea20c095e91282fde885317edeeda1cfdceb78",
     frames: [1994475180]
   }
 };
@@ -228,7 +224,7 @@ const GAME_PINS = {
  * toy builds to one ROM and its picture repeats every eight frames. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "00ca70ab813f5a94a4cf5e71be4152269d63808bd9658ab49ac8d38b4eb0620e",
+  rom: "b12ec9c961006cff5de33c81d6e66dbe6dc123673a5fc6fb2b063b75764d13b6",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -241,7 +237,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "233f9c33b6a762be60a4b37218803a46e2f188bbcdd578628b89ee9d1cf8b6e4",
+  rom: "ea4f014915bb597556e67f171a332e254e703c8127409b6439da4c91718e9077",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -258,7 +254,7 @@ const WIDE = {
  * hashes are the whole cycle. */
 const NOT = {
   toy: "tools/toys/not.lua",
-  rom: "a291110656c07e49ce9f2773a395af18e418be7c6960485973d5f5846246349a",
+  rom: "fe9672f4ee2b93a7bb8c9cbc52ec0e92bd9b3b6ddb774822d11fd15d2a3a23ab",
   frames: [2266090996, 2632876444, 887268600, 1464026320]
 };
 

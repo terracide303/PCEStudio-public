@@ -244,15 +244,11 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
       <code>sat</code> instruction is carried; re-measured 2026-11-01, it runs at 30 Hz) and the sprite toy
       (<code>sprite()</code> is carried for a spec whose slot and fields are constants; it runs at 60 Hz).
       DUSK RUN also builds a 40,960-byte ROM and loads, runs and draws (41 registers, 41
-      functions, a pooled 19-upvalue closure; its state is byte-equal to the browser's at frame 3). Its
-      displayed frame is not the browser's yet: the raster backend shows one replay frame per GUI frame,
-      and the best replay frame is 16 bytes off on row 16 (one scanline's first 16 pixels lag the write). STARFALL, TOWER and NOVA TIDE
-      stop on named findings, and the page's Export and the MCP's <code>export_pce</code> stop at different
-      ones: the page first runs the C route (STARFALL's <code>abs</code> at <code>main.lua:466</code>,
-      TOWER's <code>not</code> at <code>:329</code>, NOVA TIDE's and DUSK RUN's <code>unm</code> at
-      <code>:29</code> and <code>:62</code>); the MCP reaches the bytecode route (STARFALL's 127-constant
-      pool at <code>:168</code>, TOWER's 8,524-byte bytecode against the 8 KiB data bank, NOVA TIDE's
-      <code>raster</code> at <code>:530</code>). <code>docs/ROM_SPEED.md</code> records every code, Lua line
+      functions, a pooled 19-upvalue closure; its state is byte-equal to the browser's at frame 3), and
+      its displayed picture is the browser's too. TOWER and STARFALL were reworked in place and now
+      build; TOWER's picture is the browser's, while STARFALL's closest browser frame is 48 bytes off in
+      the status bar's first tile row, so it is still listed as not yet the browser's. NOVA TIDE still
+      stops on its <code>raster</code> table. <code>docs/ROM_SPEED.md</code> records every code, Lua line
       and refusing <code>file:line</code>. All five run in the browser.</td>
       <td class="status soon">next big job</td></tr>
     <tr><td>Real hardware</td><td>Exports are checked in an emulator only.</td><td class="status no">untested</td></tr>

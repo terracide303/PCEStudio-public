@@ -87,20 +87,19 @@ The bytecode is **6,285 B of the 8,160 B data bank** (77.0%), with **111 of
 Every other interpreter capacity is comfortable: 17 functions, 21 registers,
 10 upvalues, 35 boot upvalue cells, 24 globals, 16 boot closures, 8 table
 slots, 63 table cells, 4 arguments; `rom_check` has no finding.  The export
-is a 40,960 B ROM, sha256 `e60712232fe3c7a7…`.
+is a 40,960 B ROM, sha256 `a9f5140e1143f47a…`.
 
-**The console picture is not the browser's yet.**  The ROM runs and draws, but
-`tools/ilvm/ilvm_runtime.c` arms the RCR chain for **one display frame per toy
-frame** (#227), and an interpreted STARFALL frame is about 25 display frames.
-A 12-frame capture tail therefore lands in the compute window almost every
-time, when the screen carries the last palette and no split.  A 48-frame tail
-carries two armed display frames; the closer of them is one toy frame out of
-step (its background scroll is the next frame's, its sprites the previous
-one's — the SAT DMA is a VBlank behind the armed chain) and misses a browser
-frame by ~450 bytes, all on background-star rows.
+**The console picture is close but not the browser's yet.**  The ROM runs and
+draws.  #227 fixed the raster backend's one-replay-frame-per-toy-frame latency
+(the line chain is re-armed on every display frame, so a capture's tail is a
+real frame of the last complete toy frame) and the row-16 colour lag (each
+line's entry is written from a zero-page preload inside the blank).  The
+closest browser frame is now **48 bytes off**, all in the status bar's first
+tile row — two one-pixel columns at the screen edges — against ~450 bytes on
+the background-star rows before.  Why those two columns differ is not proven.
 `tests/check-export-games.js` pins the ROM sha and asserts the screen is not
-black and not yet a browser frame, the same shape as DUSK RUN's pin.  The fix
-is the raster backend's (#227), not this toy's; the browser game is unchanged.
+black and not yet a browser frame, so the pin cannot claim a picture the ROM
+does not have.  The browser game is unchanged.
 
 The original `main.lua` and README are kept outside the repository at
 `/Volumes/External/pcestudio-toys/originals/starfall/`; git history also
@@ -158,7 +157,7 @@ The rework's own evidence, beyond that suite:
   budget numbers above are it.  `tests/check-rom-budget.js` pins every row
   and `tests/check-tables.js` the table inventory (8 sites, 63 cells).
 - **It exports.**  `tests/check-export-games.js` builds the 40,960 B ROM
-  (sha256 `e60712232fe3c7a7…`), measures it in Mednafen (29 updates in 600
+  (sha256 `a9f5140e1143f47a…`), measures it in Mednafen (23 updates in 600
   frames, too slow — the interpreter) and pins the picture as **not black
   and not yet the browser's**, with the reason.
 

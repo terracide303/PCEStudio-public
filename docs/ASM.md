@@ -43,21 +43,23 @@ with `rts` and never jumps out of itself**, and **a stated zero-page budget**.
 ### 2.1 ROM banks
 
 `LLVM_MOS=/Volumes/External/pce-tools/llvm-mos PCEAS4=pceas4
-tools/ilvm/build.sh` was run in this worktree on 2026-11-02. It printed:
+tools/ilvm/build.sh` was run in this worktree on 2026-11-04. It printed:
 
 ```
-built renderer/ilvm.bin: 32768 bytes, sha256 46ccefb656d18ca9
+built renderer/ilvm.bin: 32768 bytes, sha256 d68a1b5f567d824b
 zero page   interpreter $2020-$2080 (96 B) | engine $2080-$20DE (94 B) | 34 B free
 BaseRAM     interpreter heap starts $373E | engine $373E-$3B95 (1111 B) | stack headroom 1131 B (margin 787)
 ```
 
 The sha matches the committed `renderer/ilvm.bin` and `tools/gen/ilvm.json`
-(`46ccefb656d18ca9…`), so the table is the shipped image, not a rebuild
-variant.
+(`d68a1b5f567d824b…`), so the table is the shipped image, not a rebuild
+variant.  (#227 moved it from `46ccefb656d18ca9…`: the raster chain now
+re-arms every VBlank and writes from a zero-page preload; the HuTrack banks
+at bytes 16,384–32,767 compare byte for byte with the old image.)
 
 | physical bank | CPU window | content | used | free | where the number comes from |
 |---|---|---|---|---|---|
-| 0–1 | `$C000–$FFFF` | crt0, vectors, runtime, interpreter | **16,384 B** | see below | `tools/ilvm/build.sh:131` asserts the image is exactly 16,384 B; `tools/gen/ilvm.json` `section_sizes`: `.text` 16,208 + `.rodata` 96 + `.early_start` 70 + `.vector` 10 = 16,384 |
+| 0–1 | `$C000–$FFFF` | crt0, vectors, runtime, interpreter | **16,384 B** | see below | `tools/ilvm/build.sh:131` asserts the image is exactly 16,384 B; `tools/gen/ilvm.json` `section_sizes`: `.text` 16,225 + `.rodata` 96 + `.early_start` 53 + `.vector` 10 = 16,384 |
 | 2 | `$A000–$BFFF` (MPR5) | HuTrack engine code | **7,876 B** (`$A000–$BEC4`) | **316 B** | `tools/ilvm/build-engine.sh:500` print (this run) |
 | 3 | `$8000–$9FFF` (MPR4) | 2,868 B pitch tables + 1,024 B note table + 516 B sound glue | **4,612 B** (`$8000–$9204`) | **3,580 B** | `tools/ilvm/build-engine.sh:503–508` print (this run) |
 | 4 | `$4000–$5FFF` (MPR2) | the toy's ILBC container, then assets; **last 32 B = the song trailer** | toy-specific | **8,160 − data** (see 2.2) | `renderer/pce-rom.js:149–154, 610–648`; `tools/ilvm/ilvm.c:56` |

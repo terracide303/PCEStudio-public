@@ -28,14 +28,15 @@ build is `renderer/pce-il.js` → `renderer/pce-ilbc.js` →
 Which toys export today, measured in Mednafen, is
 [`ROM_SPEED.md`](ROM_SPEED.md): the simple example toys (parallax, status bar,
 sky gradient, palette cycle), PLATFORMER at 30 Hz, and the sprite toy at 60 Hz.
-DUSK RUN builds and its state matches the browser's at frame 3, but its
-displayed picture is not the browser's yet — the best replay frame is 16 bytes
-off on row 16 (#227). NOVA TIDE is refused with a named finding and line;
-TOWER and STARFALL were reworked in place for the gallery export and now
-build (7,862 B and 6,285 B of bytecode, no capacity over). TOWER's Mednafen
-picture is the browser's; STARFALL's is not yet — the raster backend's
-one-armed-frame latency (#227) is the same one that keeps DUSK RUN's picture
-unmatched, and the test pins it as not black and not yet a browser frame.
+DUSK RUN builds, its state matches the browser's at frame 3, and its
+displayed picture is the browser's too (the raster chain is re-armed on every
+display frame, and the line entry is written from a zero-page preload inside
+the blank). NOVA TIDE is refused with a named finding and line; TOWER and
+STARFALL were reworked in place for the gallery export and now build (7,862 B
+and 6,285 B of bytecode, no capacity over). TOWER's Mednafen picture is the
+browser's; STARFALL's closest browser frame is 48 bytes off in the status
+bar's first tile row, so the test pins it as not black and not yet a browser
+frame.
 `note()` and `sfx()` play on the console, measured in
 Mednafen, and `release()` is carried as well; a song's data is not in the ROM
 yet (#199).

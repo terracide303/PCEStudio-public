@@ -17,8 +17,11 @@ was skipped) — and both fixes are in the committed image. #113 (R1, the PSG's
 main amplitude) is fixed in the same image: `sfx()` now writes R1 = `$FF`
 unconditionally before its reserve, on the studio host and in the console
 glue, so a toy with no `music()` is heard. §11 measured both toys' WAVs on
-the committed image (`renderer/ilvm.bin` `46ccefb656d18ca9…`): note.lua
-plays 261/330/392/523 Hz and sfx.lua 559/131 Hz, non-silent. TOWER
+the image before #227's raster change (`renderer/ilvm.bin`
+`46ccefb656d18ca9…`); #227 changed only `tools/ilvm/ilvm_runtime.c`, and the
+committed image's HuTrack banks (`d68a1b5f567d824b…`, bytes 16,384–32,767)
+compare byte for byte with that one: note.lua plays 261/330/392/523 Hz and
+sfx.lua 559/131 Hz, non-silent. TOWER
 still stops earlier, at the 8 KiB data bank (8,524 B of bytecode), and
 DUSK RUN exports but does not play on the committed image (its container
 needs more registers/functions/upvalues than the interpreter has — §10).

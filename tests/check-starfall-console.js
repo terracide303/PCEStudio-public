@@ -47,7 +47,8 @@
  *
  *   - This suite builds no .pce and runs no emulator.  The export and the
  *     Mednafen run are tests/check-export-games.js's (it lists STARFALL as
- *     built; its picture is not the browser's yet, #227).
+ *     built; its closest browser frame is 48 bytes off in the status bar's
+ *     first tile row, #273's remaining picture question).
  *   - The page's `exportAnalysis()` was not executed here: this machine has
  *     no chrome-headless-shell (#114), so the real-page run in the write-up
  *     is not re-verified.  The panel function it reads was executed, and the
@@ -377,8 +378,8 @@ function main() {
   console.log("\nNOTE  this suite builds no .pce and runs no emulator: " +
               "tests/check-export-games.js builds the 40,960 B ROM, lists " +
               "STARFALL as built, and pins its Mednafen picture as not yet " +
-              "the browser's (#227: the raster backend's one-armed-frame " +
-              "latency).");
+              "the browser's (48 bytes in the status bar's first tile row; " +
+              "#227 fixed the raster backend's replay and row-16 lag).");
   console.log("NOTE  the page's exportAnalysis() was not executed here (no " +
               "chrome-headless-shell on this machine, #114). The CONSOLE " +
               "panel's own analyse() was, over the same three modules; the " +

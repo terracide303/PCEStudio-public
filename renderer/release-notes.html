@@ -128,9 +128,10 @@
   <h3>Export of the example games</h3>
   <ul>
     <li><b>DUSK RUN</b>: the interpreter can now load its program (it used to refuse it, leaving a black screen).
-      Its VRAM, colours and sprites are byte-equal to the browser's at frame 3; its displayed picture is still off by
-      16 bytes on row 16 (one scanline's first 16 pixels lag the write).
-      <span class="status soon">built; its picture is not the browser's yet</span></li>
+      Its VRAM, colours and sprites are byte-equal to the browser's at frame 3, and its displayed picture
+      now matches the browser's as well: the line chain is re-armed on every display frame and each line's
+      write lands inside the blank.
+      <span class="status done">built; its picture is the browser's</span></li>
     <li><b>TOWER</b> still does not export: its bytecode (8,524 bytes) is larger than the 8 KiB data bank.</li>
     <li>The test and build tools now find their programs after the work drive was renamed.</li>
   </ul>
@@ -186,7 +187,8 @@
   <ul>
     <li>No ROM has run on a real PC Engine or a flash cart yet.</li>
     <li>STARFALL does not export (constant pool and sprite specs); NOVA TIDE stops on its <code>raster</code> table; TOWER on its data size.</li>
-    <li>DUSK RUN exports and its state matches the browser's, but its displayed picture is 16 bytes off on row 16.</li>
+    <li>DUSK RUN exports and both its state and its displayed picture match the browser's. STARFALL
+      exports and draws; its closest browser frame is 48 bytes off in the status bar's first tile row.</li>
     <li>Notes and effects play in exported ROMs. Music data in ROMs, and a tracker, are in progress.</li>
     <li>Planned, not built: the Lua-to-console compiler, the assembly chain, and opening an existing ROM in the studio.</li>
     <li>Export error reports and a developer export (source out) are planned.</li>

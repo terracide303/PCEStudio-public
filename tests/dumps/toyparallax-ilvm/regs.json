@@ -1,11 +1,11 @@
 {
- "BG_XOffset": 104,
+ "BG_XOffset": 40,
  "BG_YMoo": 236,
  "BG_YOffset": 236,
- "BXR": 66,
+ "BXR": 2,
  "BYR": 0,
  "CR": 140,
- "DCR": 16,
+ "DCR": 0,
  "DESR": 0,
  "HDE_cache": 4,
  "HDR": 1055,
@@ -15,7 +15,7 @@
  "HSW_cache": 2,
  "LENR": 0,
  "MWR": 0,
- "RCR": 287,
+ "RCR": 0,
  "RCRCount": 237,
  "SAT": 0,
  "SATB": 32512,
@@ -39,7 +39,7 @@
  "color_table": 1,
  "color_table_bytes": 1024,
  "ctaddress": 52,
- "pixel_offset": 2018,
+ "pixel_offset": 2016,
  "scanline": 254,
  "status": 0
 }

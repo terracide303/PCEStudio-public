@@ -4,9 +4,11 @@
 > reworked in place: `rom_check` now answers `ok:true` (6,285 B of bytecode
 > in the 8,160 B data bank, 111 of 127 constants, no finding), the export
 > builds a 40,960 B ROM, and `tests/check-export-games.js` lists it as built.
-> The console picture is the one limitation left — the raster backend's
-> one-armed-display-frame latency (#227); the browser game is unchanged and
-> pixel-identical to the original over 600 frames.  The measurements below
+> #227 fixed the raster backend's one-armed-display-frame latency and the
+> row-16 colour lag; the closest browser frame is now 48 bytes off in the
+> status bar's first tile row, so the picture is still the one limitation
+> left. The browser game is unchanged and pixel-identical to the original
+> over 600 frames.  The measurements below
 > are the 2026-10-29/11-01 record of why it did not export then, kept as
 > history; the current row is docs/ROM_SPEED.md.
 

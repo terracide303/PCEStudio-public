@@ -1388,11 +1388,21 @@ stale and the base was applied **mid-display** — measured as a palette change
 at captured row 177. Re-reading the counter before each wait fixed it; the
 captured run afterwards has no torn frames.
 
-The toy's own `raster()` path is unchanged from #31 part C: the interpreter's
-224 calls fill the line table, the hand-written RCR handler replays it, and
-one toy frame is a collection plus a displayed frame. The interpreter makes
-each call slower, so the rate drops (measured below), but the picture is the
-browser's.
+The toy's own `raster()` path is #31 part C's table and handler, with the
+#227 changes in `tools/ilvm/ilvm_runtime.c` (the compiled runtime,
+`tools/toyc/toy_runtime.c`, keeps §10.2's two-phase schedule). The
+interpreter's 224 calls still fill the line table with the chain disarmed
+(the collection would otherwise mix two toy frames' entries), but the chain
+now runs for the **whole** toy frame: after a collection is applied, the
+VBlank handler re-arms it on every display frame and re-applies line 0, so a
+toy frame that takes tens of display frames — an interpreted `frame()` can —
+shows its last complete picture on each of them instead of holding the last
+line's registers. The handler also writes each line's entry from a
+zero-page preload filled one scanline early (`prestep`), which puts its last
+colour store inside the blank; the old in-blank table indexing completed
+~28 CPU cycles late and the first 16 pixels of the row kept the previous
+colour (the DUSK RUN row-16 difference). The rate is still the interpreter's:
+the collection is the toy's own cost and the display is static for it.
 
 ### 14.4 The browser glue
 

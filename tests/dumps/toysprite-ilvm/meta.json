@@ -14,39 +14,39 @@
   "sha256": "bf52541242428cdc195d1a1d8f4e86a83509b1417b8df9e66c14ad3c965a6ad9"
  },
  "capture": {
-  "frames": 160,
-  "last_frame": "frame0292.png",
+  "frames": 710,
+  "last_frame": "frame0709.png",
   "measure": {
    "collect_sum_ticks_7bit": 0,
    "collections": 0,
-   "count": 280,
+   "count": 697,
    "cycles_per_collection": null,
-   "cycles_per_frame": 45520.45714285714,
+   "cycles_per_frame": 57292.57962697274,
    "cycles_per_raster_call": null,
    "flags": 0,
-   "max_ticks": 45,
-   "mean_ticks": 44.45357142857143,
-   "mean_update_lines": 100.52857142857142,
-   "min_ticks": 44,
+   "max_ticks": 56,
+   "mean_ticks": 55.94978479196557,
+   "mean_update_lines": 126.5480631276901,
+   "min_ticks": 55,
    "overruns": 0,
    "raster_calls": 0,
    "raster_max_ticks": 0,
    "raster_sum_ticks": 0,
-   "sum_ticks": 12447,
-   "updates": 280,
-   "worst_update_lines": 101
+   "sum_ticks": 38997,
+   "updates": 697,
+   "worst_update_lines": 128
   },
   "slend": 234,
   "slstart": 3
  },
  "ilvm": {
   "bytes": 32768,
-  "sha256": "90d4a655214c8f92b79cd48a25de6d206e3cbce0448dcb5cf6e3911cf9262007"
+  "sha256": "d68a1b5f567d824ba276eb5df8d45b79836fb0dc29c5af417e9abba4b28cfb09"
  },
  "name": "toysprite-ilvm",
  "rom": "tools/gen/toysprite-ilvm.pce",
  "rom_bytes": 40960,
- "rom_sha256": "2ecb5ff558319cbf5ab69b57b29a6d72fefa64fef97f3245b2aa85108bd3bb6c",
+ "rom_sha256": "4f212ee9128f76d548ae92c4b9ea20c095e91282fde885317edeeda1cfdceb78",
  "source": "tools/toys/sprite.lua",
  "source_sha256": "dab969868d3d11f4e60602ea51bd0a66b8d3883581db53a0036ae265f90efc2a"
 }

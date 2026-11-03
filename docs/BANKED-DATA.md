@@ -565,8 +565,10 @@ with the right expectation.
 - **Speed.** Banking adds cost; it never removes any. The games are already
   slow: PLATFORMER measures 30 Hz where the static model prices it at 0.74
   frames an update (`docs/ROM_SPEED.md`), and DUSK RUN 18.3 Hz.
-- **The raster display's 16-byte row-16 lag** (#227) and the other console
-  gaps are untouched.
+- **The raster display's one-replay-frame-per-toy-frame latency and its
+  16-pixel row-16 lag were #227 and are fixed** (the chain now re-arms every
+  display frame and writes from a zero-page preload); STARFALL's remaining
+  48-byte bar-row difference and the other console gaps are untouched.
 
 ---
 
