@@ -556,6 +556,141 @@
     return sourceLib.pngPixels(info, raw);
   }
 
+  /* ---- sprite_ascii's picture form (#204) -------------------------------- *
+   * ASCII art: one character per pixel, '.' transparent, a short legend of
+   * colours.  The rows are a sheet of cells; each cell is one frame's size
+   * (one of the importer's sprite sizes) and becomes one sprite pattern +
+   * SAT entry through the SAME importer source_add runs (importImage,
+   * kind sprites).  The loop that turns palette indices into RGBA is the
+   * one gridImage runs, so an ASCII sprite and the equivalent pixel grid
+   * land on the same bytes. */
+  function asciiImage(args) {
+    const legend = args.legend;
+    if (!legend || typeof legend !== "object" || Array.isArray(legend)) {
+      refuse("ascii-legend", "legend maps one character to one colour: " +
+             "{char: [r, g, b]}, with '.' transparent");
+    }
+    const rows = args.rows;
+    if (!Array.isArray(rows) || !rows.length ||
+        rows.some(function (r) { return typeof r !== "string"; })) {
+      refuse("ascii-rows", "rows must be a list of strings, one string per " +
+             "row of the art");
+    }
+    const cell = args.cell;
+    if (!Array.isArray(cell) || cell.length !== 2 ||
+        !isInt(cell[0]) || !isInt(cell[1])) {
+      refuse("ascii-cell", "cell must be [width, height], one frame's size");
+    }
+    let sizeOk = false;
+    for (const s of sourceLib.SPRITE_SIZES) {
+      if (s[0] === cell[0] && s[1] === cell[1]) sizeOk = true;
+    }
+    if (!sizeOk) {
+      refuse("ascii-cell", "cell " + cell[0] + "x" + cell[1] + " is not a " +
+             "sprite size; they are 16x16, 32x16, 16x32, 32x32, 16x64 and " +
+             "32x64");
+    }
+    /* the legend, in its own order: '.' is transparent and may not be a
+     * colour; a character mapped to '.' is transparent too */
+    const palette = [];
+    const chars = {};
+    for (const key of Object.keys(legend)) {
+      if (typeof key !== "string" || key.length !== 1) {
+        refuse("ascii-legend", "each legend key is one character, got " +
+               JSON.stringify(key));
+      }
+      const value = legend[key];
+      if (key === ".") continue;            /* '.' is always transparent */
+      if (value === ".") continue;          /* so is a character mapped to it */
+      if (!Array.isArray(value) || value.length !== 3 ||
+          value.some(function (v) { return !isInt(v) || v < 0 || v > 255; })) {
+        refuse("ascii-legend", "legend[" + JSON.stringify(key) + "] must be " +
+               "[r, g, b] with 0..255 each, or '.' for transparent");
+      }
+      chars[key] = palette.length;
+      palette.push([value[0], value[1], value[2]]);
+    }
+    if (!palette.length) {
+      refuse("ascii-legend", "the legend has no colours (it maps every " +
+             "character to '.')");
+    }
+
+    const width = rows[0].length;
+    if (!width) refuse("ascii-rows", "the first row is empty");
+    if (width % cell[0] !== 0) {
+      refuse("ascii-rows", "each row's length (" + width + ") must be a " +
+             "multiple of the cell width (" + cell[0] + ")");
+    }
+    if (width > 2048) {
+      refuse("ascii-rows", "the sheet is " + width + " characters wide; the " +
+             "cap is 2048");
+    }
+    for (let r = 0; r < rows.length; r++) {
+      if (rows[r].length !== width) {
+        refuse("ascii-rows", "row " + (r + 1) + " has " + rows[r].length +
+               " characters; every row must have " + width);
+      }
+    }
+    if (rows.length % cell[1] !== 0) {
+      refuse("ascii-rows", "the number of rows (" + rows.length + ") must " +
+             "be a multiple of the cell height (" + cell[1] + ")");
+    }
+    if (rows.length > 2048) {
+      refuse("ascii-rows", "the sheet is " + rows.length + " rows tall; the " +
+             "cap is 2048");
+    }
+    const cols = width / cell[0];
+    const cellRows = rows.length / cell[1];
+    const cells = cols * cellRows;
+    const frames = args.frames == null ? cells
+      : intIn(args.frames, "frames", 1, cells, "ascii-frames");
+
+    /* one character per pixel -> RGBA; an unknown character is refused with
+     * the legend's own characters named */
+    const rgba = new Uint8Array(width * rows.length * 4);
+    for (let y = 0; y < rows.length; y++) {
+      const line = rows[y];
+      for (let x = 0; x < width; x++) {
+        const ch = line[x];
+        const idx = chars[ch];
+        if (idx === undefined) {
+          if (ch === ".") continue;         /* transparent */
+          refuse("ascii-rows", "row " + (y + 1) + " has " +
+                 JSON.stringify(ch) + " which is not in the legend; its " +
+                 "characters are " + Object.keys(chars).join(" "));
+        }
+        const o = (y * width + x) * 4;
+        rgba[o] = palette[idx][0];
+        rgba[o + 1] = palette[idx][1];
+        rgba[o + 2] = palette[idx][2];
+        rgba[o + 3] = 255;
+      }
+    }
+
+    /* fewer frames than cells: the chosen cells, read left to right and top
+     * to bottom, laid out in one row — the importer cuts one pattern per
+     * cell either way, so the patterns are the same cells' */
+    let out = rgba, outW = width, outH = rows.length;
+    if (frames < cells) {
+      outW = frames * cell[0];
+      outH = cell[1];
+      out = new Uint8Array(outW * outH * 4);
+      for (let f = 0; f < frames; f++) {
+        const cy = Math.floor(f / cols), cx = f % cols;
+        for (let y = 0; y < cell[1]; y++) {
+          for (let x = 0; x < cell[0]; x++) {
+            const from = ((cy * cell[1] + y) * width + cx * cell[0] + x) * 4;
+            const to = (y * outW + f * cell[0] + x) * 4;
+            out[to] = rgba[from]; out[to + 1] = rgba[from + 1];
+            out[to + 2] = rgba[from + 2]; out[to + 3] = rgba[from + 3];
+          }
+        }
+      }
+    }
+    return { width: outW, height: outH, rgba: out, cells: cells,
+             frames: frames, cell: cell };
+  }
+
   function padRow16(row) {
     const out = new Array(16);
     for (let e = 0; e < 16; e++) out[e] = row && row[e] !== undefined ? row[e] : 0;
@@ -867,6 +1002,152 @@
     }
   }
 
+  /* ---- sfx_preset (#204): ready-made sound effects ----------------------- *
+   * Each preset is a note run over a volume envelope.  The notes are the
+   * engine's own note numbers (pce-seq.js noteIndex — the same table
+   * note()/noteName read) and the envelope is one of the studio's 15
+   * built-in instruments (renderer/pce-assets.js INSTRUMENTS, the ASSETS
+   * panel's): the generated Lua steps that instrument's volume data per
+   * frame, the way the song player does, through the toy's own sfx() — so
+   * nothing here is a second sound model.  A preset is deterministic: one
+   * {name, pitch, length} maps to one Lua text. */
+  const SFX_PRESETS = {
+    jump:      { about: "a quick rising hop", inst: "pluck",
+                 notes: [48, 52, 55], frames: [5, 5, 10] },
+    hit:       { about: "a low thump", inst: "piano",
+                 notes: [24], frames: [12] },
+    coin:      { about: "the classic two-note ring", inst: "bell",
+                 notes: [59, 64], frames: [6, 20] },
+    explosion: { about: "a long falling rumble", inst: "crash",
+                 notes: [36, 31, 24, 12], frames: [8, 8, 10, 14] },
+    shoot:     { about: "a bright zip", inst: "piano",
+                 notes: [60, 72], frames: [4, 4] },
+    powerup:   { about: "a rising hold", inst: "organ",
+                 notes: [48, 52, 55, 60, 64], frames: [4, 4, 4, 4, 12] },
+    laser:     { about: "a falling sweep", inst: "lead",
+                 notes: [72, 69, 67, 64, 60, 57, 55, 52, 48],
+                 frames: [2, 2, 2, 2, 2, 2, 2, 2, 2] },
+    blip:      { about: "one short square", inst: null,
+                 notes: [72], frames: [4] },
+    death:     { about: "a sad slide down", inst: "bell",
+                 notes: [64, 60, 55, 48, 43, 36], frames: [6, 6, 6, 6, 6, 6] },
+    menu:      { about: "a soft two-note confirm", inst: "flute",
+                 notes: [60, 64], frames: [5, 8] }
+  };
+  const SFX_PRESET_NAMES = Object.keys(SFX_PRESETS);
+
+  /* The built-in instrument the preset's envelope is: its name, and its
+   * envelope read out of pce-assets.js (the studio's own). */
+  function presetInstrument(inst) {
+    if (inst == null) return null;
+    const asset = assets.byId(inst);
+    if (!asset) {
+      refuse("sfx-name", "the preset's envelope instrument " + inst +
+             " is not one of the studio's built-ins");
+    }
+    return asset;
+  }
+
+  /* The instrument's volume at effect frame f: the envelope data stepped per
+   * frame, holding the last value when the loop is the envelope's end (the
+   * same rule pce-seq.js instrumentFromAsset spells as loop 0xff). */
+  function envelopeAt(asset, f) {
+    const env = asset.envelope || { size: 1, loop: 1, data: [31] };
+    const data = env.data || [31];
+    const size = env.size == null ? data.length : env.size;
+    const loop = env.loop;
+    if (f < size) return data[f] | 0;
+    if (loop == null || loop >= size) return (data[size - 1] || 0) | 0;
+    return data[loop + ((f - size) % (size - loop))] | 0;
+  }
+
+  /* One preset, resolved: the note run (MIDI numbers, what the generated
+   * Lua feeds note()), the per-frame volume, the total length.  pitch moves
+   * every note in engine-note steps (semitones), clamped to the engine's
+   * 0..83; length scales the whole effect to that many frames. */
+  function resolvePreset(name, pitch, length) {
+    if (typeof name !== "string" || SFX_PRESETS[name] == null) {
+      refuse("sfx-name", "name must be one of " + SFX_PRESET_NAMES.join(", ") +
+             " (got " + JSON.stringify(name) + ")");
+    }
+    const preset = SFX_PRESETS[name];
+    const p = pitch == null ? 0
+      : intIn(pitch, "pitch", -83, 83, "sfx-pitch");
+    const natural = preset.frames.reduce(function (a, b) { return a + b; }, 0);
+    const total = length == null ? natural
+      : intIn(length, "length", 1, toyhost.SFX_FRAMES_MAX, "sfx-length");
+    const frames = preset.frames.map(function (f) {
+      return Math.max(1, Math.round(f * total / natural));
+    });
+    const midi = preset.notes.map(function (n) {
+      return Math.max(0, Math.min(seqLib.NOTE_MAX, n + p)) + 24;
+    });
+    const asset = presetInstrument(preset.inst);
+    const vols = [];
+    let at = 0;
+    for (let s = 0; s < frames.length; s++) {
+      for (let f = 0; f < frames[s]; f++) {
+        vols.push(asset == null ? 31 : envelopeAt(asset, at + f));
+      }
+      at += frames[s];
+    }
+    return { preset: preset, name: name, pitch: p, total: at, midi: midi,
+             frames: frames, vols: vols, asset: asset };
+  }
+
+  /* The preset as runs of (same note, same volume), so the generated Lua is
+   * one sfx() call per run instead of one per frame. */
+  function presetRuns(resolved) {
+    const runs = [];
+    let at = 0;
+    for (let s = 0; s < resolved.frames.length; s++) {
+      for (let f = 0; f < resolved.frames[s]; f++, at++) {
+        const run = runs[runs.length - 1];
+        if (run && run.midi === resolved.midi[s] &&
+            run.vol === resolved.vols[at]) run.frames++;
+        else runs.push({ midi: resolved.midi[s], vol: resolved.vols[at],
+                         frames: 1 });
+      }
+    }
+    return runs;
+  }
+
+  /* The ready Lua: one named function sfx_<name>(ch, f) with one sfx() call
+   * per run at its start frame — f is the caller's "frames since the effect
+   * started", so the toy plays it with sfx_<name>(0, i).  A preset that is
+   * one run is a plain sfx() call instead.  Integer-only, so it lowers on
+   * the bytecode route (the C route refuses sfx() itself, rom_check says). */
+  function presetLua(resolved) {
+    const runs = presetRuns(resolved);
+    const name = resolved.name;
+    const total = runs.reduce(function (a, r) { return a + r.frames; }, 0);
+    const head = "-- " + name + ": " + resolved.preset.about +
+      (resolved.asset
+        ? " (" + resolved.asset.name + ", one of the studio's 15 built-in " +
+          "instruments)"
+        : "") + ". f = frames since the effect started.\n";
+    if (runs.length === 1) {
+      const r = runs[0];
+      return {
+        total: total,
+        lua: head + "-- the whole preset, one call:\n" +
+             "sfx(ch, note(" + r.midi + "), " + r.vol + ", " + r.frames + ")",
+        call: "sfx(0, note(" + r.midi + "), " + r.vol + ", " + r.frames + ")",
+        fn: false
+      };
+    }
+    let body = "function sfx_" + name + "(ch, f)\n";
+    let at = 0;
+    for (const r of runs) {
+      body += "  if f == " + at + " then sfx(ch, note(" + r.midi + "), " +
+              r.vol + ", " + r.frames + ") end\n";
+      at += r.frames;
+    }
+    body += "end\n";
+    return { total: total, lua: head + body,
+             call: "sfx_" + name + "(0, i)", fn: true };
+  }
+
   /* A problem's source line: pce-validate.js sets `line` when it can place one,
    * and its messages sometimes open with "line N:" (its static value-range
    * findings do).  Every finding is labelled with the file either way. */
@@ -1162,6 +1443,55 @@
       }
     },
     {
+      name: "sprite_ascii",
+      description: "Draw console sprites as ASCII art (#204): one character " +
+        "per pixel, '.' transparent, a short legend of colours, cut into " +
+        "cells of one frame's size. Each cell becomes one sprite — its own " +
+        "pattern code and SAT slot — through the same importer source_add " +
+        "runs (renderer/pce-source.js importImage, kind sprites), merged " +
+        "into the toy's asset files before toy_run. The reply names every " +
+        "frame (name-0, name-1, …) with its pattern code, SAT slot and " +
+        "palette row, plus the budget, so the toy uses them at once " +
+        "(sat(i, 0, y) / sat(i, 1, x)). Clears the run.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string",
+                  description: "the sprites' name; the frames are named " +
+                    "name-0, name-1, …" },
+          rows: {
+            type: "array",
+            description: "the art, one string per row of the sheet: one " +
+              "character per pixel, '.' transparent, every row the same " +
+              "length (a multiple of the cell width) and the row count a " +
+              "multiple of the cell height",
+            items: { type: "string" }
+          },
+          legend: {
+            type: "object",
+            description: "one character -> [r, g, b] (0..255), or '.' for " +
+              "transparent; the character '.' is always transparent",
+            additionalProperties: {
+              type: ["array", "string"],
+              items: { type: "integer", minimum: 0, maximum: 255 }
+            }
+          },
+          cell: {
+            type: "array",
+            description: "one frame's size [width, height]: 16x16, 32x16, " +
+              "16x32, 32x32, 16x64 or 32x64; the sheet is cells laid out " +
+              "left to right, top to bottom",
+            items: { type: "integer" }
+          },
+          frames: { type: "integer", minimum: 1,
+                    description: "how many cells to keep (default: all of " +
+                      "them)" }
+        },
+        required: ["name", "rows", "legend", "cell"],
+        additionalProperties: false
+      }
+    },
+    {
       name: "song_write",
       description: "Compose the toy's song (#161) with the SEQUENCER's built-in " +
         "instruments and write it as song.json, the file music(index) plays and " +
@@ -1205,6 +1535,65 @@
           swing: { type: "integer" },
           key: { type: "integer" }
         },
+        additionalProperties: false
+      }
+    },
+    {
+      name: "sfx_preset",
+      description: "A ready-made sound effect (#204): ten presets (jump, " +
+        "hit, coin, explosion, shoot, powerup, laser, blip, death, menu), " +
+        "each a note run over one of the studio's 15 built-in PSG " +
+        "instruments' own envelopes, returned as ready Lua the toy plays " +
+        "with its own sfx() — a single sfx() call for one-step presets, or " +
+        "a small function sfx_<name>(ch, f) whose f is the frames since " +
+        "the effect started. pitch moves the notes in semitones, length " +
+        "sets the whole effect's frames. Deterministic: one {name, pitch, " +
+        "length} is one Lua text. The reply lists the 15 built-ins for " +
+        "song_write/tune_write. Nothing is written: put the Lua in main.lua " +
+        "with toy_write.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", enum: SFX_PRESET_NAMES,
+                  description: "the preset: " + SFX_PRESET_NAMES.join(", ") },
+          pitch: { type: "integer", minimum: -83, maximum: 83, default: 0,
+                   description: "move every note by this many semitones " +
+                     "(the engine note 0..83 is clamped)" },
+          length: { type: "integer", minimum: 1,
+                    maximum: toyhost.SFX_FRAMES_MAX,
+                    description: "the whole effect's frames (1..600; " +
+                      "default: the preset's own length; each step scales)" }
+        },
+        required: ["name"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "tune_write",
+      description: "Compose the toy's song (#204) from note names in text — " +
+        "a thin wrapper on song_write: melody \"C4 E4 G4 | …\" becomes the " +
+        "step list (each note 2 steps, '.' a rest of the same length, '|' " +
+        "a bar mark that changes nothing), bass the same on the bass " +
+        "instrument at 4 steps a note, over song_write's grid and the " +
+        "SEQUENCER's built-in instruments, written as song.json the way " +
+        "song_write writes it, so music(0) plays it. Clears the run.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "the song's name" },
+          style: { type: "string", enum: ["lead", "bell", "strings", "bass",
+                                          "kick", "snare"], default: "lead",
+                   description: "the melody's instrument (the song's " +
+                     "built-ins); the bass is always the bass instrument" },
+          melody: { type: "string",
+                    description: "the melody: note names separated by " +
+                      "spaces (C4, D#4, Db4, …), '.' a rest, '|' a bar mark" },
+          bass: { type: "string",
+                  description: "the bass line, the same note-name text" },
+          tempo: { type: "integer",
+                   description: "BPM (pce-seq.js's range, default 150)" }
+        },
+        required: ["melody"],
         additionalProperties: false
       }
     },
@@ -2363,22 +2752,228 @@
       }
     }
 
-    function toolSongWrite(args) {
+    /* ---- sprite_ascii (#204): source_add's path, from ASCII art -------- *
+     * The picture is the asciiImage above; from there on it is exactly the
+     * source_add pipeline — importImage (kind sprites, size = cell),
+     * mergeFiles, pictureBudget, withNamedSource — so an ASCII sprite and
+     * the equivalent grid land on the same patterns and palette rows.  The
+     * reply adds what the toy needs at once: one named frame per cell with
+     * the pattern code, SAT slot and palette row the MERGE really made
+     * (read back out of the merged sprites.json, not computed twice). */
+    function toolSpriteAscii(args) {
       requireToy();
-      const byNotes = args.notes != null;
-      const bySong = args.song != null;
-      if (byNotes === bySong) {
-        refuse("song-input", "pass one: notes (a step list) or song (the " +
-               "SEQUENCER's document)");
+      const name = typeof args.name === "string" && args.name.trim()
+        ? String(args.name) : null;
+      if (!name) {
+        refuse("ascii-name", "name is the sprites' name; the frames are " +
+               "name-0, name-1, …");
       }
-      let song, compiled;
       try {
-        song = byNotes ? songFromNotes(args) : songFromDocument(args);
-        compiled = seqLib.compile(song);       /* the player's module, or its code */
+        const img = asciiImage(args);
+        const result = sourceLib.importImage(img, {
+          kind: "sprites", name: name, size: img.cell.slice()
+        });
+        /* the counts the toy held BEFORE the add: the merge appends past
+         * them (the same firsts sourceEntryOf reports) */
+        const beforeSprites = fileDoc(session.files, "sprites.json") || {};
+        const satBase = Array.isArray(beforeSprites.sprites)
+          ? beforeSprites.sprites.length : 0;
+        const patternsBase = Array.isArray(beforeSprites.patterns)
+          ? beforeSprites.patterns.length : 0;
+        const merged = mergeFiles(result, session.files);
+        const budget = pictureBudget(merged);
+        session.files = withNamedSource(merged, session.files, result);
+        resetRun();
+        /* the merged sprites.json is the merge's truth: appended patterns
+         * are reindexed past the old ones and palette rows remapped onto
+         * free rows, so the frame's numbers are read back, not computed */
+        const doc = fileDoc(merged, "sprites.json") || { sprites: [] };
+        const frames = [];
+        for (let i = 0; i < result.sprites.length && i < img.frames; i++) {
+          const sp = (doc.sprites || [])[satBase + i];
+          frames.push({
+            frame: i,
+            name: name + "-" + i,
+            pattern: sp && sp.pattern != null ? sp.pattern : patternsBase + i,
+            sat: satBase + i,
+            palette: sp && sp.palette != null ? sp.palette : 0,
+            size: [result.size[0], result.size[1]]
+          });
+        }
+        const warnings = result.warnings.slice();
+        if (budget.sprites >= toyhost.SAT_ENTRIES)
+          warnings.push("the toy now places all " + toyhost.SAT_ENTRIES +
+                        " sprites the SAT holds");
+        if (img.frames < img.cells)
+          warnings.push(img.cells - img.frames + " cell(s) past frames were " +
+                        "not imported");
+        return {
+          ok: true,
+          kind: "sprites",
+          name: name,
+          cell: img.cell.slice(),
+          size: { width: result.width, height: result.height },
+          frames: frames,
+          stats: {
+            tiles: result.stats.tiles,
+            max_tiles: result.stats.maxTiles,
+            palettes: result.stats.palettes,
+            max_palettes: result.stats.maxPalettes,
+            colours: result.stats.colours,
+            max_tile_colours: result.stats.maxTileColours,
+            dither: result.stats.dither
+          },
+          files: session.files.map(function (f) { return f.name; }),
+          budget: {
+            tiles: budget.tiles,
+            patterns: budget.patterns,
+            sprites: budget.sprites,
+            vram_words: budget.vram.used,
+            vram_total: budget.vram.total,
+            vram: budget.vram,
+            cram_entries: toyhost.CRAM_ENTRIES,
+            sat_entries: toyhost.SAT_ENTRIES
+          },
+          warnings: warnings,
+          note: "each cell became one sprite through the same importer " +
+                "source_add runs (renderer/pce-source.js importImage, kind " +
+                "sprites) and was merged into the toy's asset files; the " +
+                "frame's sat is the SAT slot, pattern the pattern code and " +
+                "palette the sprite palette row the merge really made — " +
+                "place frame i with sat(i, 0, y) / sat(i, 1, x). The " +
+                "previous run was cleared — call toy_run to see them"
+        };
       } catch (e) {
         if (e instanceof Refusal) throw e;
         refuse(errorCode(e), errorMessage(e));
       }
+    }
+
+    /* ---- sfx_preset (#204): the preset as ready Lua --------------------- *
+     * Nothing is written: the reply is the Lua the toy plays, so the agent
+     * pastes it into main.lua with toy_write — the same way it uses every
+     * other toy call.  The preset's own data and the 15 built-ins' names
+     * come from this module's tables and pce-assets.js, never typed twice. */
+    function toolSfxPreset(args) {
+      requireToy();
+      const resolved = resolvePreset(args.name, args.pitch, args.length);
+      const code = presetLua(resolved);
+      const names = resolved.preset.notes.map(function (n) {
+        return seqLib.noteName(Math.max(0, Math.min(seqLib.NOTE_MAX,
+                                                  n + resolved.pitch)), 0);
+      });
+      const usage = code.fn
+        ? "in frame(t, f), with i the frames since the effect started " +
+          "(e.g. f % " + code.total + " when it loops):  sfx_" +
+          resolved.name + "(0, i)"
+        : "play it with the call below on the channel you choose";
+      return {
+        ok: true,
+        name: resolved.name,
+        about: resolved.preset.about,
+        instrument: resolved.asset ? resolved.asset.name : null,
+        channel: 0,
+        notes: names,
+        midi: resolved.midi.slice(),
+        pitch: resolved.pitch,
+        length_frames: code.total,
+        runs: presetRuns(resolved).map(function (r) {
+          return { midi: r.midi, volume: r.vol, frames: r.frames };
+        }),
+        lua: code.lua,
+        call: code.call,
+        usage: usage,
+        instruments: assets.INSTRUMENTS.map(function (i) {
+          return { name: i.name, kind: i.kind, channel: i.channel };
+        }),
+        note: "the preset's volume envelope is the studio's own " +
+          (resolved.asset
+            ? resolved.asset.name + " instrument"
+            : "constant level") +
+          " (renderer/pce-assets.js, one of the 15 built-ins), stepped per " +
+          "frame the way the song player steps it, through the toy's own " +
+          "sfx() and note() — no new sound data. Paste the lua into " +
+          "main.lua with toy_write; the bytecode route carries it (the C " +
+          "route refuses sfx(), rom_check says). Deterministic: the same " +
+          "{name, pitch, length} is the same lua every call"
+      };
+    }
+
+    /* ---- tune_write (#204): note names in text, song_write's path ------ */
+
+    /* "C4 E4 G4 | …" -> the step list songFromNotes takes.  Each token is
+     * one note of `steps` steps ('.' a rest of the same length, '|' a bar
+     * mark that changes nothing); the note names are the same ones
+     * seqLib.noteIndex parses. */
+    function tuneTrack(text, where) {
+      if (typeof text !== "string" || !text.trim()) {
+        refuse("tune-track", where + " must be a string of note names: " +
+               "\"C4 E4 G4 | …\" ('.' a rest, '|' a bar mark)");
+      }
+      const tokens = text.split(/\s+/).filter(function (t) {
+        return t !== "" && t !== "|";
+      });
+      const notes = [];
+      for (let k = 0; k < tokens.length; k++) {
+        const token = tokens[k];
+        if (token === ".") continue;              /* a rest: the slot stays empty */
+        const note = seqLib.noteIndex(token);
+        if (!isInt(note) || note < seqLib.NOTE_MIN || note > seqLib.NOTE_MAX) {
+          refuse("tune-note", where + " token " + (k + 1) + " " +
+                 JSON.stringify(token) + " is not a note name (C4, D#4, " +
+                 "Db4, …)");
+        }
+        notes.push({ step: k, note: note });
+      }
+      return notes;
+    }
+
+    function toolTuneWrite(args) {
+      requireToy();
+      if (typeof args.melody !== "string" || !args.melody.trim()) {
+        refuse("tune-melody", "melody is a string of note names: " +
+               "\"C4 E4 G4 | …\"");
+      }
+      const songArgs = { name: args.name, tempo: args.tempo };
+      songArgs.notes = [];
+      const style = args.style == null ? "lead" : args.style;
+      const melody = tuneTrack(args.melody, "melody");
+      for (const n of melody) {
+        songArgs.notes.push({ channel: 0, step: n.step * 2, note: n.note,
+                              length: 2, instrument: style });
+      }
+      if (args.bass != null) {
+        const bass = tuneTrack(args.bass, "bass");
+        for (const n of bass) {
+          songArgs.notes.push({ channel: 1, step: n.step * 4, note: n.note,
+                                length: 4, instrument: "bass" });
+        }
+      }
+      let song;
+      try {
+        song = songFromNotes(songArgs);
+        seqLib.compile(song);
+      } catch (e) {
+        if (e instanceof Refusal) throw e;
+        refuse(errorCode(e), errorMessage(e));
+      }
+      return composeSong(song, {
+        tool: "tune_write",
+        style: style,
+        melody_notes: melody.length,
+        bass_notes: args.bass != null ? tuneTrack(args.bass, "bass").length : 0,
+        note: "tune_write is a thin wrapper on song_write: the note names " +
+              "became song_write's step list (melody 2 steps a note on the " +
+              style + " instrument, the bass 4 steps a note on the bass " +
+              "instrument) and the song was written by song_write's own " +
+              "path as song.json — music(0) plays it"
+      });
+    }
+
+    /* The write-and-reply half of song_write, shared with tune_write
+     * (#204): a compiled song becomes song.json, the run clears, and the
+     * reply is the same shape either composer gives. */
+    function composeSong(song, extra) {
       const text = seqLib.toJSON(song);
       const byName = {};
       for (const f of session.files) byName[f.name] = f.source;
@@ -2398,7 +2993,7 @@
         if (songs[i].songName === song.name) { index = i; break; }
       const warnings = placed ? [] : ["the song has no notes: music(" + index +
                                       ") plays silence"];
-      return {
+      return Object.assign({
         ok: true,
         file: "song.json",
         name: song.name,
@@ -2420,7 +3015,26 @@
         note: "written as song.json (the SEQUENCER's own document) and compiled " +
               "by renderer/pce-seq.js for pce-song.js: music(" + index + ") " +
               "plays it; toy_run's sound report says what each channel did"
-      };
+      }, extra || {});
+    }
+
+    function toolSongWrite(args) {
+      requireToy();
+      const byNotes = args.notes != null;
+      const bySong = args.song != null;
+      if (byNotes === bySong) {
+        refuse("song-input", "pass one: notes (a step list) or song (the " +
+               "SEQUENCER's document)");
+      }
+      let song;
+      try {
+        song = byNotes ? songFromNotes(args) : songFromDocument(args);
+        seqLib.compile(song);       /* the player's module, or its code */
+      } catch (e) {
+        if (e instanceof Refusal) throw e;
+        refuse(errorCode(e), errorMessage(e));
+      }
+      return composeSong(song);
     }
 
     async function toolFramePng(args) {
@@ -2656,7 +3270,10 @@
       asm_build: toolAsmBuild,
       toy_run: toolToyRun,
       source_add: toolSourceAdd,
+      sprite_ascii: toolSpriteAscii,
       song_write: toolSongWrite,
+      sfx_preset: toolSfxPreset,
+      tune_write: toolTuneWrite,
       frame_png: toolFramePng,
       registers_get: toolRegistersGet,
       register_set: toolRegisterSet,

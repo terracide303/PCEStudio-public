@@ -604,6 +604,137 @@ notes says so). Refusals: `song-input` (both forms or neither),
 on a channel without the noise generator), `seq-json`. A refused song leaves
 the toy and the loaded song alone.
 
+### `sprite_ascii(name, rows, legend, cell, frames?)`
+
+Draws console sprites as ASCII art (#204): one character per pixel, `.`
+transparent, a short legend of colours, cut into cells of one frame's size.
+Each cell becomes one sprite — its own pattern code and SAT slot — through
+the same importer `source_add` runs (`renderer/pce-source.js` importImage,
+kind sprites), merged into the toy's asset files with the same merge rules
+(patterns reindexed past the old ones, SAT entries appended after the old
+sprites, palette rows on free rows) and named in `sources.json` the same
+way. Call it before `toy_run`; `toy_run` imports the merged files before
+`init()`.
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `name` | string | the sprites' name; the frames are named `name-0`, `name-1`, … |
+| `rows` | array of strings | the art, one string per row of the sheet; every row the same length (a multiple of the cell width) and the row count a multiple of the cell height |
+| `legend` | object | one character → `[r,g,b]` (0..255), or `"."` for transparent; `.` is always transparent |
+| `cell` | `[width, height]` | one frame's size: 16×16, 32×16, 16×32, 32×32, 16×64 or 32×64; the sheet is cells laid out left to right, top to bottom |
+| `frames` | integer ≥ 1 | how many cells to keep (default: all of them) |
+
+Example call (a 16×16 red box with a white centre):
+
+```json
+{"name":"sprite_ascii","arguments":{"name":"box","cell":[16,16],
+ "legend":{"r":[255,0,0],"w":[255,255,255]},
+ "rows":["rrrrrrrrrrrrrrrr","rrrrrrrrrrrrrrrr","rrrrrrrrrrrrrrrr",
+         "rrrrrrrrrrrrrrrr","rrrrwwwwwwwwrrrr","rrrrwwwwwwwwrrrr",
+         "rrrrwwwwwwwwrrrr","rrrrwwwwwwwwrrrr","rrrrwwwwwwwwrrrr",
+         "rrrrwwwwwwwwrrrr","rrrrwwwwwwwwrrrr","rrrrwwwwwwwwrrrr",
+         "rrrrrrrrrrrrrrrr","rrrrrrrrrrrrrrrr","rrrrrrrrrrrrrrrr",
+         "rrrrrrrrrrrrrrrr"]}}
+```
+
+Example reply (abridged):
+
+```json
+{"ok":true,"name":"box","cell":[16,16],
+ "frames":[{"frame":0,"name":"box-0","pattern":0,"sat":0,"palette":0,
+            "size":[16,16]}],
+ "stats":{"tiles":1,"max_tiles":1536,"palettes":1,"max_palettes":16,
+  "colours":2,"max_tile_colours":16,"dither":"none"},
+ "budget":{"tiles":1,"patterns":1,"sprites":1,"vram_words":1360,
+  "vram_total":32768,"vram":{"bat":1024,"tiles":16,"patterns":64,
+  "sat":256,"used":1360,"total":32768},"cram_entries":512,"sat_entries":64},
+ "files":["main.lua","palettes.json","sprites.json","sources.json"],
+ "warnings":[],
+ "note":"imported with the Add Source importer (renderer/pce-source.js, #123) and merged into the toy's asset files; the panels' own readers accepted the merged set; the previous run was cleared — call toy_run to see the picture"}
+```
+
+`frames` names every frame with the pattern code, SAT slot and palette row
+it landed on — the numbers Lua passes straight to `sat(i, 0, y)` /
+`sat(i, 1, x)` — plus the merged set's budget. A multi-cell sheet with
+`frames` N keeps the first N cells only (read left to right, top to
+bottom). Refusals: `ascii-name`, `ascii-legend`, `ascii-rows`, `ascii-cell`,
+`ascii-frames`, then the importer's own (`source-size`, `source-tiles`,
+`source-empty`, `source-palettes`, `source-sat`, `asset-json`); a refused
+picture changes nothing.
+
+### `sfx_preset(name, pitch?, length?)`
+
+A ready-made sound effect (#204): ten presets (`jump`, `hit`, `coin`,
+`explosion`, `shoot`, `powerup`, `laser`, `blip`, `death`, `menu`), each a
+note run stepped over one of the studio's 15 built-in PSG instruments' own
+volume envelopes (`renderer/pce-assets.js` INSTRUMENTS — the same envelope
+data the song player steps). The reply's `lua` is ready to paste into
+`main.lua` with `toy_write`: one `sfx()` call for a one-step preset, or a
+small `function sfx_<name>(ch, f)` whose `f` is the frames since the effect
+started. Nothing is written to the toy.
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `name` | string | the preset, one of `jump, hit, coin, explosion, shoot, powerup, laser, blip, death, menu` |
+| `pitch` | integer −83..83, default 0 | move every note by this many semitones (the engine note 0..83 is clamped) |
+| `length` | integer 1..600 | the whole effect's frames (default: the preset's own length; each step scales) |
+
+Example call:
+
+```json
+{"name":"sfx_preset","arguments":{"name":"blip"}}
+```
+
+Example reply (abridged):
+
+```json
+{"ok":true,"name":"blip","about":"one short square","instrument":null,
+ "channel":0,"notes":["C6"],"midi":[96],"pitch":0,"length_frames":4,
+ "runs":[{"midi":96,"volume":31,"frames":4}],
+ "lua":"-- blip: one short square. f = frames since the effect started.\n-- the whole preset, one call:\nsfx(ch, note(96), 31, 4)",
+ "call":"sfx(0, note(96), 31, 4)",
+ "usage":"play it with the call below on the channel you choose",
+ "instruments":[{"name":"piano","kind":"wave","channel":0}, … the 15 built-ins],
+ "note":"…"}
+```
+
+Deterministic: the same `{name, pitch, length}` is the same `lua` every
+call. `instruments` lists the 15 built-ins `song_write` and `tune_write`
+take. The generated Lua is integer-only (`note(NUMBER)`, no strings), so
+the bytecode ROM route carries it; the C route refuses `sfx()` as
+`rom_check` reports. Refusals: `sfx-name` (not a preset), `sfx-pitch`,
+`sfx-length`, `toy-missing` (no toy yet).
+
+### `tune_write(name, style?, melody, bass?, tempo)`
+
+Composes the toy's song (#204) from note names in text — a thin wrapper on
+`song_write`: `melody` `"C4 E4 G4 | …"` becomes the step list (each note 2
+steps, `.` a rest of the same length, `|` a bar mark that changes nothing),
+`bass` the same on the bass instrument at 4 steps a note, over
+`song_write`'s grid and the SEQUENCER's built-in instruments, written as
+`song.json` by `song_write`'s own path, so `music(0)` plays it.
+
+| argument | type | meaning |
+| --- | --- | --- |
+| `name` | string | the song's name |
+| `style` | `lead` \| `bell` \| `strings` \| `bass` \| `kick` \| `snare`, default `lead` | the melody's instrument; the bass is always the bass instrument |
+| `melody` | string | the melody: note names separated by spaces (`C4`, `D#4`, `Db4`, …), `.` a rest, `|` a bar mark |
+| `bass` | string | the bass line, the same note-name text |
+| `tempo` | integer | BPM (pce-seq.js's range, default 150) |
+
+```json
+{"name":"tune_write","arguments":{"name":"jingle",
+ "melody":"C4 E4 G4 | E4 G4 C5","bass":"C3 . G2 .","tempo":150}}
+```
+
+The reply is `song_write`'s (`file`, `name`, `tempo`, `steps`, `patterns`,
+`order`, `notes_placed`, `instruments`, `music_index`, the `song` document
+written, `warnings`) plus `style`, `melody_notes` and `bass_notes` (the
+note counts that landed) and the wrapper's `note`. Refusals: `tune-melody`
+(no melody text), `tune-note` (a token is not a note name or `.`), then
+`song_write`'s own (`seq-*`, `seq-json`); a refused tune leaves the toy and
+the loaded song alone.
+
 ### `frame_png(frame)`
 
 Renders one frame of the current run as a 256×224 RGB PNG through
@@ -939,7 +1070,7 @@ The server says the PCE's open gaps the way ppu.toys' skill lists the SNES's
 `node tests/check-mcp.js` starts `tools/mcp/server.js`, speaks MCP over
 stdio, and asserts 342 checks:
 
-- `initialize`, `ping`, and `tools/list` with all seventeen tools and their
+- `initialize`, `ping`, and `tools/list` with all twenty tools and their
   schemas;
 - #29's parallax toy written, 60 frames run, and the PNG at frame 60 equal
   to `tests/dumps/examples/parallax.png` (check-examples' frame 60) pixel

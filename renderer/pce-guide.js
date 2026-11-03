@@ -329,8 +329,23 @@ function guide() {
                        "toy's tiles, sprites, a tilesheet or a palette, or a " +
                        ".mid into its song.json, before toy_run; returns the " +
                        "VRAM/CRAM budget"],
+        ["sprite_ascii", "draw sprites as ASCII art — one character per " +
+                         "pixel, '.' transparent, a short legend of colours, " +
+                         "each cell one frame — through source_add's importer; " +
+                         "the reply names every frame (name-0, name-1, …) " +
+                         "with its pattern, SAT slot and palette row"],
         ["song_write", "compose the toy's song.json from a step list with the " +
                        "SEQUENCER's built-in instruments; music(0) plays it"],
+        ["sfx_preset", "a ready-made sound effect: ten presets (jump, hit, " +
+                       "coin, …) over the studio's 15 built-in PSG " +
+                       "instruments' own envelopes, returned as ready Lua — " +
+                       "one sfx() call or a small sfx_<name>(ch, f) " +
+                       "function; nothing is written, paste the lua in with " +
+                       "toy_write"],
+        ["tune_write", "compose the toy's song.json from note names in text — " +
+                       "melody \"C4 E4 G4 | …\", bass the same, '.' a rest, " +
+                       "'|' a bar mark — a thin wrapper on song_write; " +
+                       "music(0) plays it"],
         ["frame_png", "the picture at a frame, as a PNG you can look at"],
         ["validate", "check it against the hardware's limits, with file:line " +
                      "findings"],
@@ -371,6 +386,27 @@ function guide() {
         "says what started on each channel. A toy " +
         "that runs without errors does not mean it looks right: look at the " +
         "frame."),
+      p("**The quick art-and-sound recipe.** Draw each sprite as ASCII art " +
+        "instead of converting a picture, and take each effect and tune off " +
+        "the shelf:"),
+      code("text",
+        "sprite_ascii {name:\"hero\", cell:[16,16],\n" +
+        "  legend:{r:[255,0,0], s:[255,200,120]}, rows:[...]}\n" +
+        "  -> one frame per cell, named hero-0, hero-1, ... each with its\n" +
+        "     pattern, sat and palette — the numbers sat(i, 0, y) / sat(i, 1, x) take\n" +
+        "sfx_preset {name:\"jump\"}\n" +
+        "  -> ready lua: sfx(0, note(96), 31, 4), or a small sfx_jump(ch, f);\n" +
+        "     paste it into main.lua with toy_write (the bytecode route carries\n" +
+        "     it; the C route refuses sfx(), rom_check says)\n" +
+        "tune_write {name:\"tune\", melody:\"C4 E4 G4 | E4 G4 C5\",\n" +
+        "  bass:\"C3 . G2 .\", tempo:150}\n" +
+        "  -> song.json, the way song_write writes it; music(0) plays it"),
+      p("The three are the studio's own machinery: sprite_ascii runs the " +
+        "source_add importer and merge (an ASCII sprite and the same pixel " +
+        "grid land byte-identical), sfx_preset's envelopes are the 15 " +
+        "built-in instruments' own data, and tune_write is a thin wrapper on " +
+        "song_write. The replies' numbers are the ones the toy uses, so " +
+        "nothing is guessed or converted twice."),
       p("**Finish with toy_save.** It writes one .pce.json holding every file " +
         "— main.lua, the art source_add made, the named sources and the songs " +
         "— in the studio's own Save format, inside the folder the server runs " +

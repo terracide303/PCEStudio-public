@@ -416,6 +416,52 @@ check: `writes` (zero is silence), `music` (index, name, notes started), and
 Teaches: a song is `song.json` and `music(0)` plays it, `sfx` still takes a
 channel from the song, and the sound report is the ear you do not have here.
 
+## Quick art and sound
+
+Recipes 4, 6 and 7 are the long way: a PNG or pixel grid for art, a step
+list for the song, `sfx()` calls for effects. Three tools take the
+shortcut, all through the studio's own machinery:
+
+**`sprite_ascii` — sprites as ASCII art.** One character per pixel, `.`
+transparent, a short legend of colours; each cell of the sheet is one
+frame, and the reply names every frame with the numbers the toy uses — no
+conversion step to get wrong:
+
+```json
+{ "name": "hero", "cell": [16, 16],
+  "legend": { "r": [255, 0, 0], "s": [255, 200, 120] },
+  "rows": ["rrrr", "rssr", "rssr", "rrrr"] }
+```
+
+Each reply frame is `hero-0`, `hero-1`, … with its `pattern`, `sat` and
+`palette` — the slot `sat(i, 0, y)` / `sat(i, 1, x)` place. It runs the
+same importer and merge as `source_add`, so the same pixels drawn as a
+grid land byte-identical; the budget in the reply is the room left.
+
+**`sfx_preset` — effects off the shelf.** Ten presets (`jump`, `hit`,
+`coin`, `explosion`, `shoot`, `powerup`, `laser`, `blip`, `death`, `menu`)
+over the studio's 15 built-in instruments' own envelopes, returned as
+ready Lua: `sfx(0, note(96), 31, 4)` for a one-step preset, or a small
+`sfx_<name>(ch, f)` function whose `f` is the frames since the effect
+started. Paste the `lua` into `main.lua` with `toy_write`; nothing is
+written to the toy. The same `{name, pitch, length}` is the same lua every
+call.
+
+**`tune_write` — the song as note names.** `melody` `"C4 E4 G4 | …"` (each
+note 2 steps, `.` a rest, `|` a bar mark that changes nothing), `bass` the
+same at 4 steps a note on the bass instrument, written as `song.json` by
+`song_write`'s own path — `music(0)` plays it.
+
+```json
+{ "name": "jingle", "melody": "C4 E4 G4 | E4 G4 C5",
+  "bass": "C3 . G2 .", "tempo": 150 }
+```
+
+Order: `sprite_ascii` and `tune_write` before `toy_run` (art and songs are
+files it imports), `sfx_preset` before `toy_write` (its lua goes in
+`main.lua`). The bytecode ROM route carries the preset's lua; the C route
+refuses `sfx()` as `rom_check` reports.
+
 ## Before you export
 
 - `validate` returns `ok` with **no findings**. A `validate-slow-frame` warning
