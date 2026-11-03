@@ -588,11 +588,12 @@ function usedChannels(song) {
     check(!list.error, "tools/list answers without a JSON-RPC error");
     const tools = list.result.tools || [];
     const names = tools.map((t) => t.name).sort();
-    eq("tools/list lists exactly the server's seventeen tools", names, [
+    eq("tools/list lists exactly the server's twenty tools", names, [
       "asm_build", "docs", "export_pce", "file_read", "file_write",
       "frame_png", "project_open", "project_save",
-      "register_set", "registers_get", "rom_check", "song_write",
-      "source_add", "toy_run", "toy_save", "toy_write", "validate"
+      "register_set", "registers_get", "rom_check", "sfx_preset",
+      "song_write", "source_add", "sprite_ascii", "toy_run", "toy_save",
+      "toy_write", "tune_write", "validate"
     ]);
     for (const t of tools) {
       const schema = t.inputSchema;

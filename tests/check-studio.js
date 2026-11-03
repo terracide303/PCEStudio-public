@@ -7837,14 +7837,15 @@ function checkGallery(page) {  const S = page.sandbox.PCEStudio;
   /* #128 added OAK WOODS, #125 CITY and #147 PLATFORMER and TOWER — four
    * demos besides the sky gradient (#29) and STARFALL; #151 added DUSK RUN
    * and took the other four #29 effects out of Browse (their toys stay in
-   * toys/); #159 removed CAVE.  Browse and the studio read the same
-   * generated list. */
-  check(data.length === 8,
+   * toys/); #159 removed CAVE; #262 added PAD TEST.  Browse and the studio
+   * read the same generated list. */
+  check(data.length === 9,
         "the gallery carries the sky gradient, STARFALL, OAK WOODS, CITY, " +
-        "PLATFORMER, TOWER, DUSK RUN and NOVA TIDE (got " + data.length + ")");
+        "PLATFORMER, TOWER, DUSK RUN, NOVA TIDE and PAD TEST (got " +
+        data.length + ")");
   eq("the gallery's ids, in the toys' order", data.map((t) => t.id),
      ["sky-gradient", "starfall", "oak-woods", "city", "platformer",
-      "tower", "dusk-run", "nova-tide"]);
+      "tower", "dusk-run", "nova-tide", "padtest"]);
   /* #125: the committed gallery carries CITY's art-free toy — the playable
    * file with the pack's picture is demo-art/city/main.lua and only the
    * deploy reads it (tools/gallery.js --with-demo-art). */
@@ -8037,7 +8038,7 @@ function checkGallery(page) {  const S = page.sandbox.PCEStudio;
   eq("browse.html builds a card per toy in the toys' order",
      cards.map((c) => c.id),
      ["sky-gradient", "starfall", "oak-woods", "city", "platformer",
-      "tower", "dusk-run", "nova-tide"]);
+      "tower", "dusk-run", "nova-tide", "padtest"]);
   /* #125: the committed CITY card runs the art-free toy, so it draws no
    * picture here; the deployed gallery carries the playable file and does.
    * Every other card must have ink. */
@@ -8285,7 +8286,7 @@ function checkGallery(page) {  const S = page.sandbox.PCEStudio;
   B.setQuery("");
   B.setSort("az");
   eq("A–Z sorts by title", B.visible(),
-     ["city", "dusk-run", "nova-tide", "oak-woods", "platformer",
+     ["city", "dusk-run", "nova-tide", "oak-woods", "padtest", "platformer",
       "sky-gradient", "starfall", "tower"]);
   B.setSort("written");
 

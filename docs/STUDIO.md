@@ -1029,6 +1029,9 @@ controller. It is the browser's **Gamepad API** — USB or Bluetooth, Chrome and
 * The headless MCP/test driver is untouched: it still calls the runtime's `setPad` with a scripted pad and never loads
   this input route. `tests/check-gamepad.js` feeds synthetic Gamepad-API states into the page's own poller and asserts
   every bit; see §11.2.
+* **The pad witness toy** is **PAD TEST** in Browse (`toys/padtest/main.lua`): each pad's eight buttons are labeled
+  cells that light while held, beside the keyboard's IJKL/NM/OP — and the same file exports, so the picture is the
+  same one an emulator or a console draws from `joy_scan()` (`docs/PADS.md`, `tests/check-pad-buttons.js`).
 
 ---
 

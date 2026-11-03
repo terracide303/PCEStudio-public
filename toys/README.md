@@ -19,15 +19,16 @@ through `renderer/pce-il.js` too — the console path (#31).
 | `platformer/main.lua` | a one-screen platformer: run, jump, land on the ledges above the pit (#147) | — | 1 SAT entry |
 | `tower/main.lua` | an original climber: ladders, rolling boulders, hearts, a hammer, a gem per round (#147) | — | 18 SAT entries |
 | `dusk-run/main.lua` | an endless sunset runner over five line-scroll bands, with rocks, birds and hearts (#151) | BXR on 5 lines | backdrop palette on ~152 sky lines, up to 10 SAT entries |
+| `padtest/main.lua` | two pads' eight buttons live: a held button lights its cell, and `vram[0x3F01]`/`[0x3F02]` carry each pad's ever-held mask | — | the lit cell's 9 BAT words, only while it changes |
 
 `platformer/` and `tower/` are #147's two playable demos, written with Claude
 for the maintainer on 2026-10-29 and copied unchanged.  `dusk-run/` is #151's
 endless runner, written the same way on the same day and also copied
 unchanged.  Their picture is drawn in the toy itself with
 `puttile`/`putsprite`, so there is no pack art and nothing to download
-beside them.  All three are browser-only for now: the studio runs them, but
-the console export cannot carry a `pad[1]` read (PLATFORMER, DUSK RUN) or a
-Lua table (TOWER, DUSK RUN) yet — each README says which.
+beside them.  The studio runs all three; the console export carries
+PLATFORMER (its `pad[1]` reads included, #186) and DUSK RUN (#222) while
+TOWER stops at the data bank — each README says which.
 
 Every file opens with a comment naming the trick and each block says why it
 is there.  A tile is written by `puttile`, which packs colour numbers into the
@@ -64,3 +65,10 @@ Pack - CITY* whose converted art is **not** in this repository — the maintaine
 [`city/README.md`](city/README.md) for the licence, the credit, the converter
 and the evidence; `node tests/check-city.js` skips with a clear line when the
 art is not on the machine.
+
+`padtest/` is the pad witness: the same file runs in the browser (the
+Gamepad API and the keyboard merge into pad 1, a second controller is pad 2),
+in the IL, and in the exported ROM, where the console runtime's `joy_scan()`
+fills the pads.  [`docs/PADS.md`](../docs/PADS.md) tells that story and
+`tests/check-pad-buttons.js` pins it, alongside the ROM sha and picture pin
+in `tests/check-export-games.js`.

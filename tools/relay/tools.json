@@ -325,6 +325,60 @@
     }
   },
   {
+    "name": "sprite_ascii",
+    "description": "Draw console sprites as ASCII art (#204): one character per pixel, '.' transparent, a short legend of colours, cut into cells of one frame's size. Each cell becomes one sprite — its own pattern code and SAT slot — through the same importer source_add runs (renderer/pce-source.js importImage, kind sprites), merged into the toy's asset files before toy_run. The reply names every frame (name-0, name-1, …) with its pattern code, SAT slot and palette row, plus the budget, so the toy uses them at once (sat(i, 0, y) / sat(i, 1, x)). Clears the run.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "the sprites' name; the frames are named name-0, name-1, …"
+        },
+        "rows": {
+          "type": "array",
+          "description": "the art, one string per row of the sheet: one character per pixel, '.' transparent, every row the same length (a multiple of the cell width) and the row count a multiple of the cell height",
+          "items": {
+            "type": "string"
+          }
+        },
+        "legend": {
+          "type": "object",
+          "description": "one character -> [r, g, b] (0..255), or '.' for transparent; the character '.' is always transparent",
+          "additionalProperties": {
+            "type": [
+              "array",
+              "string"
+            ],
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
+          }
+        },
+        "cell": {
+          "type": "array",
+          "description": "one frame's size [width, height]: 16x16, 32x16, 16x32, 32x32, 16x64 or 32x64; the sheet is cells laid out left to right, top to bottom",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "frames": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "how many cells to keep (default: all of them)"
+        }
+      },
+      "required": [
+        "name",
+        "rows",
+        "legend",
+        "cell"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "song_write",
     "description": "Compose the toy's song (#161) with the SEQUENCER's built-in instruments and write it as song.json, the file music(index) plays and the studio's SEQUENCER edits. Two forms: notes (a step list [{channel, step, note, length, instrument}], note a name like \"C4\" or the engine note 0..83, instrument a built-in name or index) over a grid of `steps` columns; or song, the SEQUENCER's own document. The song is compiled by renderer/pce-seq.js before anything changes, so a refused song leaves the toy alone. Clears the run.",
     "inputSchema": {
@@ -395,6 +449,90 @@
           "type": "integer"
         }
       },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "sfx_preset",
+    "description": "A ready-made sound effect (#204): ten presets (jump, hit, coin, explosion, shoot, powerup, laser, blip, death, menu), each a note run over one of the studio's 15 built-in PSG instruments' own envelopes, returned as ready Lua the toy plays with its own sfx() — a single sfx() call for one-step presets, or a small function sfx_<name>(ch, f) whose f is the frames since the effect started. pitch moves the notes in semitones, length sets the whole effect's frames. Deterministic: one {name, pitch, length} is one Lua text. The reply lists the 15 built-ins for song_write/tune_write. Nothing is written: put the Lua in main.lua with toy_write.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": [
+            "jump",
+            "hit",
+            "coin",
+            "explosion",
+            "shoot",
+            "powerup",
+            "laser",
+            "blip",
+            "death",
+            "menu"
+          ],
+          "description": "the preset: jump, hit, coin, explosion, shoot, powerup, laser, blip, death, menu"
+        },
+        "pitch": {
+          "type": "integer",
+          "minimum": -83,
+          "maximum": 83,
+          "default": 0,
+          "description": "move every note by this many semitones (the engine note 0..83 is clamped)"
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600,
+          "description": "the whole effect's frames (1..600; default: the preset's own length; each step scales)"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "tune_write",
+    "description": "Compose the toy's song (#204) from note names in text — a thin wrapper on song_write: melody \"C4 E4 G4 | …\" becomes the step list (each note 2 steps, '.' a rest of the same length, '|' a bar mark that changes nothing), bass the same on the bass instrument at 4 steps a note, over song_write's grid and the SEQUENCER's built-in instruments, written as song.json the way song_write writes it, so music(0) plays it. Clears the run.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "the song's name"
+        },
+        "style": {
+          "type": "string",
+          "enum": [
+            "lead",
+            "bell",
+            "strings",
+            "bass",
+            "kick",
+            "snare"
+          ],
+          "default": "lead",
+          "description": "the melody's instrument (the song's built-ins); the bass is always the bass instrument"
+        },
+        "melody": {
+          "type": "string",
+          "description": "the melody: note names separated by spaces (C4, D#4, Db4, …), '.' a rest, '|' a bar mark"
+        },
+        "bass": {
+          "type": "string",
+          "description": "the bass line, the same note-name text"
+        },
+        "tempo": {
+          "type": "integer",
+          "description": "BPM (pce-seq.js's range, default 150)"
+        }
+      },
+      "required": [
+        "melody"
+      ],
       "additionalProperties": false
     }
   },
