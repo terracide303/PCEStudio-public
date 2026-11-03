@@ -412,6 +412,110 @@ publishes the studio, not `vendor/huc`).
 
 ---
 
+## Publishing without vendor/huc
+
+Card #152 part 2, run 2026-11-03. A **separate copy only**: this repository's
+history and `origin` are untouched, nothing was pushed, and no GitHub
+repository was created by this run. Making anything public is the maintainer's
+action. (The public repository already exists — the maintainer made
+`github.com/terracide303/PCEStudio-public` live the evening the card was
+filed, 2026-10-29, [`DECISIONS.md`](DECISIONS.md) — so the commands at the
+end are the refresh that exists today, plus the from-scratch route the card
+asked for.)
+
+### What was run
+
+The copy is `/Volumes/External/agent-tmp/pcestudio-public`, a fresh full
+clone of `https://github.com/terracide303/PCEStudio.git` at `main` =
+`0b100d8` (2026-11-03 16:19:08), filtered in place:
+
+```sh
+git clone https://github.com/terracide303/PCEStudio.git \
+  /Volumes/External/agent-tmp/pcestudio-public
+cd /Volumes/External/agent-tmp/pcestudio-public
+printf '17cb9166996d0a4270bc24b1d4f2ea74d8f6c3e6\n' > strip-blobs.txt
+git filter-repo --force --path vendor/huc --invert-paths \
+  --strip-blobs-with-ids strip-blobs.txt
+```
+
+- `--path vendor/huc --invert-paths` removes the vendored HuC tree from every
+  commit on every ref (F1).
+- `strip-blobs.txt` holds F5.1's leaked blob `17cb916…` — `c9449fb`'s
+  `renderer/gallery-toys.js`, generated with `--with-demo-art` (721,380 B).
+  `filter-repo` drops the stripped blob's file-change, so the rewritten
+  `c9449fb` carries its parent's art-free version of the file, and the
+  leaked blob is physically gone from the object database.
+- **Author and committer emails are unchanged**, as the card says (F2 was not
+  decided when it was filed). the maintainer decided F2 the same evening
+  ([`DECISIONS.md`](DECISIONS.md), 2026-10-29), so the live public repo
+  additionally maps `99736355+terracide303@users.noreply.github.com` to the GitHub no-reply address;
+  that mailmap is not part of this copy.
+- The filter removes `origin`, so the copy is not connected to either
+  repository. Only `main` is ever published (the refresh script clones
+  `--single-branch main`); the other branches exist here because the card's
+  checks run over `--all`.
+
+### What was verified in the copy
+
+| Check | Result |
+|---|---|
+| `git log --all -- vendor/huc` | **0 commits** |
+| `git rev-list --objects --all \| grep vendor/huc` | **0 paths** |
+| vendor/huc blobs | of the 1,266 distinct blob ids in the tip's `vendor/huc`, only 2 survive in the copy's object database, and neither is vendor/huc-only content: the HuC `LICENSE` (byte-identical to the kept `vendor/pceas/LICENSE`) and `e69de29` (git's empty blob). |
+| leaked art blob `17cb916…` | **absent** from the object database |
+| pack data | 177 chunks of 220 B, one every 4 KiB across the whole leaked blob: 118 are leak-unique (they occur in no other blob anywhere in the private repository — the art region, offsets 139,264–696,320), and **0 of the 118 occur in any blob of the public copy**. |
+| every `renderer/gallery-toys.js` version since `cea7029` | only `c9449fb` carried generated art (721,380 B; every other version is 134,693–241,187 B of sources). The two larger exceptions are art-free: `b7247db` (460,376 B) embeds CITY's `toys/city/main.lua` source and `0c46723` (460,097 B) NOVA TIDE's — both committed under the ART RULE (the toy's Lua may be committed; the art may not), and both are clear of pack data per the chunk scan. |
+| tip tree | `git ls-tree -r` of the copy's tip (`00b8547`) equals the private `0b100d8` minus `vendor/huc`: 4,876 entries each, `diff` empty. |
+| refs and emails | `main`'s first-parent chain is 609 = 609 commits; side branches `design-122` (388), `guide-clone-link` (511), `wip-200` (834), `wip-215` (806), `wip-220` (809) all match the clone's refs exactly — `filter-repo` pruned nothing. Every commit in the copy has its original's author/committer email (0 mismatches); the only message differences are `filter-repo`'s default hash translation inside commit messages that quote a commit hash. Commits in this private checkout but not in the copy are only: pushes that landed after the clone snapshot, the shared stash stack, and the private-only local branch `card200` — none of which a clone carries. |
+| `sh tests/all.sh` | copy 67 PASS / 3 SKIP / 2 FAIL; private `0b100d8` 65 PASS / 3 SKIP / 4 FAIL — the two extra private FAILs are machine-load artifacts, not the filter (below). |
+
+#### The suite numbers behind that row
+
+Both full runs used the same machine and environment
+(`LLVM_MOS=/Volumes/External/pce-tools/llvm-mos`,
+`VIDEO_DRIVER=sdl`, `MEDNAFEN=/opt/homebrew/bin/mednafen`):
+
+| run | verdict |
+|---|---|
+| copy at `00b8547` | 67 PASS, 3 SKIP, 2 FAIL |
+| private at `0b100d8` | 65 PASS, 3 SKIP, 4 FAIL |
+
+The runs agree on everything that is not machine noise: the same three
+SKIPs (check-ares — no screen on this machine; check-gamepad and
+check-pad-keys — no real controller) and the same two FAILs, both
+machine-local and already tracked on the board, not an effect of the
+filter: check-browser (#114's headless-Chrome story) and check-il-console
+(the rebuilt raster ROM's sha, Appendix B). The private run's two extra
+FAILs are timing-sensitive Mednafen captures that ran while other seats'
+suites shared the machine. Re-run alone on the quiet machine
+(2026-11-03), both PASS in both clones: check-export-games (67 checks)
+and check-platformer (32 checks, 0 failed) in each. The filter therefore
+changes no suite's verdict; a suite that passes in one clone passes in
+the other.
+
+### Publishing (the maintainer's action)
+
+The repository exists; the refresh is one command (same filter, plus the F2
+mailmap; it refuses to push if any check fails):
+
+```sh
+/Volumes/External/agent-tmp/publish-public.sh
+```
+
+From scratch — if the public repo is ever recreated — two commands, from the
+verified copy above:
+
+```sh
+gh repo create PCEStudio-public --public \
+  --source /Volumes/External/agent-tmp/pcestudio-public
+git -C /Volumes/External/agent-tmp/pcestudio-public push origin main
+```
+
+(this copy leaves emails as they are; apply F2's mailmap at publish time if
+that is wanted).
+
+---
+
 ## Appendix A — the 106 commits authored `99736355+terracide303@users.noreply.github.com`
 
 As of `09d56b0`. The commit that adds this file will make it 107, and every
@@ -558,7 +662,9 @@ grep -iE '^(toys|tools|renderer)/.*\.(png|jpe?g|gif|webp|bmp|pcx)$' "$TMPDIR/pat
 grep -iE 'oak|cave|city|trapmoor|mine' "$TMPDIR/paths.txt"                                # expect only the toys' .lua/.md/.json
 
 # F5.1 — art that is not a file: every gallery-toys.js blob's size and art blocks
-# (c9449fb stands out: 721380 bytes and 3 art blocks; every other commit: ~240k, 0)
+# (c9449fb stands out: 721380 bytes and 3 art blocks; every other commit: ~240k, 0.
+# Since then b7247db is 460376 B and 0c46723 460097 B — CITY/NOVA TIDE toy sources
+# committed in toys/, no art blocks; see 'Publishing without vendor/huc'.)
 for c in $(git rev-list --branches --remotes --tags -- renderer/gallery-toys.js); do
   b=$(git rev-parse "$c:renderer/gallery-toys.js")
   printf '%s %s blobs=%s\n' "$(git rev-parse --short $c)" "$(git cat-file -s "$b")" \

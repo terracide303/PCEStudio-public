@@ -137,9 +137,9 @@ The HuC route needs the C compiler, not just the assembler. HuC is **not
 vendored** — its licence is mixed and unsettled
 ([`PUBLIC-CHECK.md`](PUBLIC-CHECK.md) F1) — so `tools/build-huc.sh`
 downloads it itself: on first use it clones `pce-devel/huc` at the pinned
-commit `54f5c73606c1e7142e8095c727cab2767e2b3cb3` (the revision the vendored
-record pins) into an external tools folder and builds it there, **never
-inside the repo**:
+commit `54f5c73606c1e7142e8095c727cab2767e2b3cb3` (the revision pinned in the
+private repo's `vendor/huc/VENDORED.md`) into an external tools folder and
+builds it there, **never inside the repo**:
 
 ```sh
 tools/build-huc.sh --toolchain
