@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PCEStudio Resources</title>
+<meta name="description" content="The tools, documents and people PCEStudio learns from: what each is for, how it connects to the studio, and what its licence says.">
+<link rel="stylesheet" href="pce-gallery.css">
+<style>
+  /* the resources page: pce-gallery.css's tokens and site header, with one
+     card per tool so a licence line never hides inside a paragraph */
+  .tg { max-width: 820px; margin: 0 auto; padding: 32px 16px 80px; color: var(--text2);
+        font: 15px/1.65 var(--sans); }
+  .tg h1 { font: 700 30px/1.2 var(--display); color: var(--text); margin: 6px 0 10px; }
+  .tg h2 { font: 600 19px/1.3 var(--sans); color: var(--text); margin: 40px 0 12px;
+           padding-top: 18px; border-top: 1px solid var(--line2); }
+  .tg h3 { font: 600 16px/1.3 var(--sans); color: var(--text); margin: 0 0 6px; }
+  .tg h3 a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--line); }
+  .tg h3 a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .tg p, .tg li { max-width: 70ch; }
+  .tg a { color: var(--accent); }
+  .tg code, .tg kbd { font: 13px var(--mono); background: var(--code); border: 1px solid var(--line2);
+                      border-radius: 4px; padding: 1px 5px; color: var(--text); }
+  .tg .kicker { font: 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+  .tg .lede { font-size: 17px; color: var(--text); }
+  .tg .note { background: var(--pane); border: 1px solid var(--line); border-radius: 8px;
+              padding: 12px 16px; margin: 18px 0; font-size: 14px; }
+  .tg .res { background: var(--pane); border: 1px solid var(--line); border-radius: 8px;
+             padding: 14px 18px; margin: 12px 0; }
+  .tg .res p { margin: 6px 0; }
+  .tg .res .lic { font: 12px/1.5 var(--mono); color: var(--muted); border-top: 1px solid var(--line2);
+                  margin-top: 10px; padding-top: 8px; }
+  .tg .res .lic b { color: var(--text2); font-weight: 600; }
+  .tg .tag { display: inline-block; font: 11px/1 var(--mono); letter-spacing: .04em;
+             text-transform: uppercase; border: 1px solid var(--line); border-radius: 999px;
+             padding: 3px 8px; margin-left: 6px; color: var(--muted); vertical-align: 2px; }
+  .tg .tag.today { color: #7ad7a0; border-color: #35604a; }
+  .tg .tag.planned { color: var(--accent); border-color: #6b4526; }
+  .tg .tag.unchecked { color: var(--muted); border-style: dashed; }
+  .tg .who { font-size: 14px; }
+  .tg .links a { font: 13px var(--mono); }
+  @media (max-width: 560px) { .tg h1 { font-size: 24px; } }
+</style>
+</head>
+<body>
+<header class="site-head">
+  <a class="brand" href="browse.html" title="PCEStudio home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">PCE<span class="brand-dot">·</span>studio</span>
+  </a>
+  <nav class="site-nav" aria-label="Site">
+    <a href="studio.html">Studio</a>
+    <a href="browse.html">Browse</a>
+    <a href="docs.html">Docs</a>
+    <a href="resources.html" class="is-on" aria-current="page">Resources</a>
+    <a href="testers.html">Beta testers</a>
+    <a href="release-notes.html">Release notes</a>
+    <a href="roadmap.html">Roadmap</a>
+    <a href="claude-code.html">Claude Code</a>
+    <a href="credits.html">Credits</a>
+    <a href="https://github.com/terracide303/PCEStudio-public" rel="noopener">GitHub</a>
+  </nav>
+</header>
+
+<main class="tg">
+  <span class="kicker">Elsewhere</span>
+  <h1>Resources</h1>
+  <p class="lede">The compilers, emulators, disassemblers, trackers and documents PCEStudio learns
+  from and builds with. Each entry says what the thing is for, whether the studio uses it today or
+  plans to, and what its licence says.</p>
+  <p class="note">We link to these projects and learn from them; we do not copy from a source whose
+  licence is not stated. A licence line of <b>not stated</b> means exactly that: we found no licence
+  for it in <code>docs/REFERENCES.md</code>, so nothing of it goes into the repository.
+  <b>unchecked</b> means the entry came from a quick web search and has not been confirmed.</p>
+
+  <h2>Code</h2>
+
+  <div class="res" id="huc" data-licence="an aggregate LICENSE that says much of it has no stated terms">
+    <h3><a href="https://github.com/pce-devel/huc">HuC / HuCC</a></h3>
+    <p>The C compiler kit for the PC Engine: HuCC is the current compiler, and the kit keeps the
+    older HuC for projects already written for it.</p>
+    <p><span class="tag planned">Planned</span> The studio has no HuCC route yet. A plain project
+    folder in the layout HuCC and PCEAS users recognise, with a starter kit beside it, is the plan.</p>
+    <p class="lic"><b>Licence:</b> an aggregate LICENSE that says much of it has no stated terms</p>
+  </div>
+
+  <div class="res" id="pceas" data-licence="The legal status of much of the kit cannot be stated exactly; the MagicKit assembler's source says &quot;This program is freeware. You are free to distribute, use and modify it as you wish.&quot;; Ulrich Hecht's 2014 changes are Simplified BSD">
+    <h3><a href="https://github.com/pce-devel/huc">PCEAS</a></h3>
+    <p>The PC Engine assembler inside that kit: it turns HuC6280 assembly into the banks a HuCard
+    ROM runs from.</p>
+    <p><span class="tag today">Today</span> The 32 KiB interpreter image in every exported ROM and
+    the HuTrack sound engine are built with PCEAS. Its licence text is kept beside our copy.</p>
+    <p class="lic"><b>Licence:</b> The legal status of much of the kit cannot be stated exactly; the
+    MagicKit assembler's source says &quot;This program is freeware. You are free to distribute, use
+    and modify it as you wish.&quot;; Ulrich Hecht's 2014 changes are Simplified BSD</p>
+  </div>
+
+  <div class="res" id="llvm-mos" data-licence="not stated" data-unchecked="1">
+    <h3><a href="https://github.com/llvm-mos/llvm-mos">llvm-mos</a>
+      <span class="tag unchecked" title="Came from a quick web search and has not been confirmed">unchecked</span></h3>
+    <p>A family of LLVM-based compilers for 6502-family chips, with a PC Engine target.</p>
+    <p><span class="tag today">Today</span> It builds the interpreter image inside every exported ROM
+    and the output of the C route. The build scripts look for an installed copy; it is not in this
+    repository.</p>
+    <p class="lic"><b>Licence:</b> not stated</p>
+  </div>
+
+  <h2>Emulators and debuggers</h2>
+
+  <div class="res" id="mednafen" data-licence="not stated">
+    <h3><a href="https://mednafen.github.io">Mednafen</a></h3>
+    <p>A multi-system emulator with a PC Engine core, and the reference we compare our ROMs against.</p>
+    <p><span class="tag today">Today</span> Exported ROM captures are checked against it, and the
+    studio's sound chip model is derived from its PSG core.</p>
+    <p class="lic"><b>Licence:</b> not stated</p>
+  </div>
+
+  <div class="res" id="mednafenPceDev" data-licence="Mednafen's own">
+    <h3><a href="https://github.com/pce-devel/mednafenPceDev">mednafenPceDev</a></h3>
+    <p>A community build of Mednafen with PC Engine accuracy fixes: scanline rendering, overscan and
+    display resolution.</p>
+    <p><span class="tag planned">Planned</span> It is the better reference emulator for the CPU trace
+    and frame comparisons the CPU work needs.</p>
+    <p class="lic"><b>Licence:</b> Mednafen's own</p>
+  </div>
+
+  <div class="res" id="mesen" data-licence="not stated" data-unchecked="1">
+    <h3><a href="https://www.mesen.ca/">Mesen 2</a> and
+      <a href="https://github.com/nesdev-org/MesenCE">MesenCE</a>
+      <span class="tag unchecked" title="Came from a quick web search and has not been confirmed">unchecked</span></h3>
+    <p>A multi-system emulator with a debugger that also covers the PC Engine. MesenCE is the
+    community continuation after the original Mesen 2 repository was reported archived.</p>
+    <p><span class="tag planned">Planned</span> A second-emulator sprite check, and a way to study how
+    a ROM animates its tiles and palettes.</p>
+    <p class="lic"><b>Licence:</b> not stated</p>
+  </div>
+
+  <h2>Disassembly</h2>
+
+  <div class="res" id="etripator" data-licence="GPL-3 (LICENCE.txt)">
+    <h3><a href="https://github.com/pce-devel/Etripator">Etripator</a></h3>
+    <p>A PC Engine disassembler: it extracts code, graphics and interrupt vectors, and can read label
+    and comment files and CD images.</p>
+    <p><span class="tag planned">Planned</span> It guides the studio's ROM viewer and disassembler.</p>
+    <p class="lic"><b>Licence:</b> GPL-3 (LICENCE.txt)</p>
+  </div>
+
+  <h2>Sound</h2>
+
+  <div class="res" id="hutrack" data-licence="MIT, copyright Turboxray">
+    <h3><a href="https://github.com/Turboxray/HuTrack">HuTrack</a></h3>
+    <p>A HuC6280 sound engine and DefleMask converter, written by turboxray.</p>
+    <p><span class="tag today">Today</span> The exported ROMs play through it. A vendored copy lives
+    under <code>vendor/hutrack</code> with its notice.</p>
+    <p class="lic"><b>Licence:</b> MIT, copyright Turboxray</p>
+  </div>
+
+  <div class="res" id="furnace" data-licence="not stated" data-unchecked="1">
+    <h3><a href="https://github.com/tildearrow/furnace">Furnace</a>
+      <span class="tag unchecked" title="Came from a quick web search and has not been confirmed">unchecked</span></h3>
+    <p>A multi-system tracker; its design and its instrument handling inform the studio's tracker
+    plan.</p>
+    <p><span class="tag today">Today</span> The studio reads DefleMask modules, the kind of song these
+    trackers write; a fuller tracker is planned.</p>
+    <p class="lic"><b>Licence:</b> not stated</p>
+  </div>
+
+  <div class="res" id="deflemask" data-licence="not stated" data-unchecked="1">
+    <h3><a href="https://www.deflemask.com/">DefleMask</a>
+      <span class="tag unchecked" title="Came from a quick web search and has not been confirmed">unchecked</span></h3>
+    <p>A multi-system tracker with HuC6280 support; its <code>.dmf</code> modules are what HuTrack's
+    converter reads.</p>
+    <p><span class="tag today">Today</span> A <code>.dmf</code> song is converted for an exported ROM,
+    and the studio's own DMF reader reads the same format.</p>
+    <p class="lic"><b>Licence:</b> not stated</p>
+  </div>
+
+  <div class="res" id="huzak" data-licence="not stated" data-unchecked="1">
+    <h3><a href="https://battleofthebits.com/lyceum/View/hes%20(format)/">Huzak</a>
+      <span class="tag unchecked" title="Came from a quick web search and has not been confirmed">unchecked</span></h3>
+    <p>A converter in development that turns a DefleMask <code>.dmf</code> module into a
+    <code>.pce</code> ROM with its own driver.</p>
+    <p><span class="tag planned">Planned</span> It is read for the tracker survey. It is not publicly
+    available.</p>
+    <p class="lic"><b>Licence:</b> not stated</p>
+  </div>
+
+  <h2>Documentation</h2>
+
+  <div class="res" id="hucc-docs" data-licence="Licence of the documents is still not stated">
+    <h3><a href="https://newsdee.com/hucc/">The HuCC documentation</a></h3>
+    <p>The community handbook for HuC and HuCC: getting started, the compiler's internals, the
+    function reference, and pages on graphics, sound, input, memory and the System Card.</p>
+    <p class="who"><b>Who wrote it.</b> Flame (aeriform) wrote the gitbook and its getting-started
+    chapters. MrJ rewrote the function reference, Kaminari corrected and reorganised it, and Newsdee
+    wrote <a href="https://newsdee.com/hucc/">newsdee.com/hucc</a> and the
+    <a href="https://github.com/Newsdee/huc/wiki">wiki</a>. Elmer maintains HuC and HuCC and merges
+    documentation changes.</p>
+    <p><span class="tag planned">Planned</span> It is the reference for comparing our toy API with
+    HuCC's and for the starter kit. The rewritten function reference is
+    <a href="https://github.com/Ryusennin/huc/blob/doc-changes/doc/hucc/hucc-function-reference.md">in
+    the doc-changes branch</a>.</p>
+    <p class="lic"><b>Licence:</b> Licence of the documents is still not stated</p>
+  </div>
+
+  <h2>Art and maps</h2>
+
+  <div class="res" id="aseprite" data-licence="not stated" data-unchecked="1">
+    <h3><a href="https://www.aseprite.org/">Aseprite</a>
+      <span class="tag unchecked" title="Came from a quick web search and has not been confirmed">unchecked</span></h3>
+    <p>A pixel-art and animation editor.</p>
+    <p><span class="tag planned">Planned</span> It is one of the usual pixel-art tools in this scene
+    and a likely source of the images a project imports; no path is specific to it yet.</p>
+    <p class="lic"><b>Licence:</b> not stated</p>
+  </div>
+
+  <div class="res" id="tiled" data-licence="not stated" data-unchecked="1">
+    <h3><a href="https://www.mapeditor.org/">Tiled</a>
+      <span class="tag unchecked" title="Came from a quick web search and has not been confirmed">unchecked</span></h3>
+    <p>A tile-map editor.</p>
+    <p><span class="tag planned">Planned</span> A map editor in HuCC's metatile format with Tiled
+    import is one of the openings the project is considering.</p>
+    <p class="lic"><b>Licence:</b> not stated</p>
+  </div>
+
+  <p class="linknote">The full notes behind these entries, including what we checked and when, are in
+  the repository's <code>docs/REFERENCES.md</code>. Who we thank for code, art and ideas is on the
+  <a href="credits.html">credits page</a>.</p>
+</main>
+</body>
+</html>
