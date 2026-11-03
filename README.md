@@ -38,6 +38,9 @@ palettes, sprite table, registers, scanlines, sound.
 - **Add art and sound**: drop a PNG, a WAV or a MIDI file on **Add Source** and it becomes tiles, sprites, a
   tilesheet, a palette, a sample or a song, fitted to what the console can do. Assets are listed by name with previews.
 - **Check** a toy against the console's limits (sprites per line, VRAM, frame time) with the validator.
+- **Play with a real controller**: a USB or Bluetooth gamepad in Chrome or Safari drives the Run view and a toy's own
+  page, with a **CONTROLS** drawer that shows each connected pad, the buttons down now, and lets you remap a button.
+  The keyboard keeps working beside it, and a second pad is player 2.
 - **Export a `.pce`** from the page, with nothing to install, for an emulator or a flash cart. Which games
   export today is in [Export to a ROM](#export-to-a-rom).
 - **Make toys with an AI**: a guide file for chat assistants, and an MCP server for Claude Code that can write, run,

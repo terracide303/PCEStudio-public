@@ -72,6 +72,12 @@ node tests/check-pad-keys.js    # #124: page-level KeyboardEvents on the focused
                                 # studio (Lua and IL); unfocused keys move nothing;
                                 # the ring and the hint are present.  SKIPs when
                                 # tests/browser.js finds no headless shell
+node tests/check-gamepad.js     # #262: synthetic Gamepad-API states through the
+                                # page's own poller and play loop on toy.html and
+                                # the studio: every PCE bit alone, the left stick
+                                # and its dead zone, two pads, keyboard beside a
+                                # pad, remap-by-pressing and the saved table read
+                                # back on a reload.  SKIPs without a headless shell
 ```
 
 `check-breaker-78.js` also needs `pceas` (through `make -C tools`) and

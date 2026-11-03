@@ -58,6 +58,25 @@ is `timer(period, fn)`, `timerstop()` and `timerirqs()`; `renderer/pce-toys.js`
 and `renderer/pce-il.js` call `fn` once per interrupt at the frame boundary,
 so the Lua and the IL runtimes report the same counts.
 
+### A real controller (#262)
+
+The browser pages have a second input beside the keyboard: `renderer/pce-gamepad.js`
+reads the **Gamepad API** (`navigator.getGamepads()`, USB or Bluetooth, Chrome
+and Safari) and turns the Standard Gamepad's buttons and left stick into the
+same `pad[1]`/`pad[2]` objects the keyboard fills. The first connected pad is
+player 1 and the second player 2; the studio and `renderer/toy.html` poll it
+before every frame, so a pad frame takes the same `setPad` route as a key
+frame. The mapping — A → I, B → II, Back → Select, Start → Run, the d-pad and
+left stick → the four directions, X → III, Y → IV — is remapped in the studio's
+CONTROLS drawer and saved in the browser (`pcestudio.gamepad.v1`).
+`tests/check-gamepad.js` drives synthetic Gamepad-API states through the same
+path and checks every bit.
+
+**III/IV are browser-only.** The toy API's pad is the 2-button pad's eight
+fields (`docs/TOYS.md`), and the console runtime scans the 2-button protocol
+above; a 6-button pad is still GAP 10 below. So the browser carries X/Y as
+III/IV on the pad object, but no toy or cartridge route can read them yet.
+
 ## The console runtime
 
 `tools/toyc/toy_runtime.c`, under `TOY_INPUT_BUILD` (set by

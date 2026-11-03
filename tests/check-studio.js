@@ -5201,7 +5201,7 @@ function psgEventCount(events) {
  * dock and the menu from what registered. */
 const PANEL_MODULES = ["screen", "vram", "palettes", "sprites", "audio",
                        "sequencer", "layers", "scanlines", "registers",
-                       "console", "markers", "agent", "assets"];
+                       "console", "markers", "agent", "assets", "controls"];
 const CHIP_PANELS = ["screen", "vram", "palettes", "sprites", "audio",
                      "sequencer", "layers", "scanlines", "registers",
                      "console"];
@@ -5210,7 +5210,7 @@ function checkPanelModules(page) {
   const S = page.sandbox.PCEStudio;
   const studio = S.studio;
 
-  eq("#102: the thirteen panel modules registered, chip panels first",
+  eq("#102: the fourteen panel modules registered, chip panels first",
      studio.panels.modules().join(","), PANEL_MODULES.join(","));
   for (const id of PANEL_MODULES) {
     check(page.loaded.indexOf("studio-panel-" + id + ".js") >= 0,
@@ -5228,7 +5228,7 @@ function checkPanelModules(page) {
         typeof studio.panels.refresh === "function" &&
         typeof studio.panels.dirty === "function",
         "#102: studio.panels is the registry and the chip list");
-  eq("#102: the registry holds all thirteen panels",
+  eq("#102: the registry holds all fourteen panels",
      studio.panels.list().length, PANEL_MODULES.length);
   check(studio.panels.get("vram").group === "chip" &&
         studio.panels.get("markers").group === "workspace",

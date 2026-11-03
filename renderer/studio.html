@@ -81,6 +81,7 @@
 <link rel="stylesheet" href="studio-panel-audio.css">
 <!-- #94: the SEQUENCER panel's own styles, beside its module -->
 <link rel="stylesheet" href="studio-panel-sequencer.css">
+<link rel="stylesheet" href="studio-panel-controls.css">
 <style>
   :root {
     /* ppu.toys' design tokens, adapted (source URL in the credit block). */
@@ -1867,6 +1868,8 @@
            title="Drag to resize · double-click or Home resets"></div>
       <div class="bottom-tabs">
         <button type="button" class="btab is-on" id="tab-markers">MARKERS</button>
+        <button type="button" class="btab" id="tab-controls"
+                title="Connected controllers and the pad mapping (#262)">CONTROLS</button>
         <button type="button" class="btab" id="tab-agent">AGENT</button>
         <button type="button" class="btab" id="tab-rom"
                 title="What the exported ROM can and cannot run (#193)">ROM CHECK</button>
@@ -1876,6 +1879,10 @@
           <button type="button" class="btn" id="btn-addmarker">Add marker at frame 0</button>
           <div class="marker-list" id="marker-list"></div>
         </div>
+        <!-- #262: the CONTROLS drawer is studio-panel-controls.js's.  It lists
+             each connected controller, draws which pad buttons are down now,
+             and remaps an action by pressing a button on the pad. -->
+        <div class="panel" id="bottom-controls" hidden></div>
         <div class="panel" id="bottom-rom" hidden></div>
         <!-- #167: the AGENT drawer is studio-panel-agent.js's.  It draws the
              Connect state, the one command to run and the FEED of Claude's
@@ -2182,6 +2189,9 @@
 <!-- #87: the generated pceglobals.lua document, built from the register,
      pad and helper tables above (the ppuglobals.lua tab ppu.toys has). -->
 <script src="pce-globals.js"></script>
+<!-- #262: the browser's Gamepad API as a second source for pad 1 and 2;
+     studio-panel-controls.js draws it and the remap table. -->
+<script src="pce-gamepad.js"></script>
 <!-- #80: the example toys (#29 and the demos) as the Browse page and the
      toy pages read them.  renderer/gallery-toys.js is generated from
      toys/*.lua by tools/gallery.js; ?toy=<id> opens one here, and Open…
@@ -2209,6 +2219,7 @@
 <script src="studio-panel-markers.js"></script>
 <script src="studio-panel-agent.js"></script>
 <script src="studio-panel-assets.js"></script>
+<script src="studio-panel-controls.js"></script>
 <script>
 "use strict";
 /* -------------------------------------------------------------------------
@@ -2691,6 +2702,13 @@ let fpsStarted = 0;
 let lengthFrames = 300;
 let heldPad = {};
 let padLog = [];              /* frame -> pad object, so a seek replays it */
+let padLog2 = [];             /* frame -> pad 2 object (the second gamepad) */
+/* #262: the browser's Gamepad API.  One poller is shared by this page's
+ * frames and by the CONTROLS drawer's redraw, so a remap begun in the panel
+ * is completed by whichever reads the pad next.  A browser without the API
+ * (the stub DOM in tests/check-studio.js, an old page) leaves it null and
+ * every route below guards. */
+const gamepad = (PCEStudio.gamepad) ? PCEStudio.gamepad.shared() : null;
 let followAt = null;
 let panelState = null;
 let panelDirty = true;
@@ -3077,6 +3095,9 @@ function rebuild() {
 function runFrame(f) {
   padLog[f] = padLog[f] || {};
   runtime.setPad(1, padLog[f]);
+  /* #262: pad 2 is the second controller; it was never set before, so an
+   * empty object is the same state the runtime already had. */
+  runtime.setPad(2, padLog2[f] || {});
   const frame = runtime.frame(f);
   /* #78: a hidden layer is cleared in CR the way a register write would be,
    * then the picture is drawn (masked, if View only is on). */
@@ -3111,7 +3132,12 @@ function seek(target) {
  * `runFrames()`, not this). */
 function stepForward() {
   if (!runtime) rebuild();
-  padLog[currentFrame + 1] = Object.assign({}, heldPad);
+  /* #262: read the controllers before the frame, so the frame the person
+   * sees with a pad in their hands is the frame the pad says.  Player 1 is
+   * the keyboard plus the first pad, player 2 the second pad. */
+  const gp = gamepad ? gamepad.poll().players : [{}, {}];
+  padLog[currentFrame + 1] = Object.assign({}, heldPad, gp[0]);
+  padLog2[currentFrame + 1] = Object.assign({}, gp[1]);
   const frame = runFrame(currentFrame + 1);
   updateClock(frame);
   if (currentFrame % 6 === 0) refreshPanels();
@@ -3390,7 +3416,7 @@ function selectCodeTab(which) {
 }
 
 function selectBottomTab(which) {
-  const ids = ["markers", "agent", "rom"];
+  const ids = ["markers", "controls", "agent", "rom"];
   for (const id of ids) {
     const tab = $("tab-" + id), panel = $("bottom-" + id);
     if (tab) {
@@ -6759,8 +6785,10 @@ function bind() {
   });
   $("length").addEventListener("change", () => setLength($("length").value));
 
-  /* markers / agent drawers; the MARKERS module binds its own Add button */
+  /* markers / controls / agent drawers; the MARKERS module binds its own Add
+   * button, the CONTROLS module redraws itself */
   $("tab-markers").addEventListener("click", () => selectBottomTab("markers"));
+  $("tab-controls").addEventListener("click", () => selectBottomTab("controls"));
   $("tab-agent").addEventListener("click", () => selectBottomTab("agent"));
   $("tab-rom").addEventListener("click", () => selectBottomTab("rom"));
   $("btn-connect-claude").addEventListener("click", () => selectBottomTab("agent"));
@@ -6939,6 +6967,122 @@ function runPadTest() {
   document.title = (out.error ? "FAIL" : "PADTEST");
 }
 
+/* #262's evidence route in the studio: a synthetic Gamepad API provider
+ * feeds the page's own poller and the play loop's own stepForward, and each
+ * bit is read back from runtime.pad — the object the toy's pad[n] reads.
+ * tests/check-gamepad.js launches this page and asserts the numbers; the page
+ * only reports.  No keyboard or mouse event leaves the page. */
+function runGamepadTest() {
+  pause();
+  seek(0);
+  const q = (typeof URLSearchParams === "function")
+    ? new URLSearchParams(location.search)
+    : { get: () => null };
+  const out = { mode: current.mode };
+  const G = PCEStudio.gamepad;
+  const names = ["up", "down", "left", "right", "i", "ii", "select", "run",
+                 "iii", "iv"];
+  const fake = (buttons, axes, name) => ({
+    id: name || "synthetic pad", index: 0, connected: true,
+    mapping: "standard", timestamp: 0,
+    buttons: Array.from({ length: 17 }, (_, i) => ({
+      pressed: !!(buttons && buttons[i]), value: buttons && buttons[i] ? 1 : 0
+    })),
+    axes: axes || [0, 0, 0, 0]
+  });
+  let fakes = [];
+  try {
+    if (!gamepad) throw new Error("renderer/pce-gamepad.js did not load");
+    if (q.get("padmode") === "il" && current.mode !== "il") setMode("il");
+    out.mode = current.mode;
+    gamepad.setProvider(() => fakes);
+    out.loadedI = JSON.stringify(gamepad.mapping().i);
+    gamepad.resetMapping();   /* the bit checks below want the standard layout */
+    const only = (bits, action) => {
+      const got = Object.keys(bits).sort();
+      return got.length === 1 && got[0] === action;
+    };
+    out.bits = {};
+    const BUTTON = { up: 12, down: 13, left: 14, right: 15,
+                     i: 0, ii: 1, select: 8, run: 9, iii: 2, iv: 3 };
+    for (const a of names) {
+      fakes = [fake({ [BUTTON[a]]: true })];
+      stepForward();
+      const p = (runtime.pad && runtime.pad[1]) || {};
+      out.bits[a] = !!p[a];
+      out["alone_" + a] = only(p, a);
+    }
+    const stick = (axes, action) => {
+      fakes = [fake({}, axes)];
+      stepForward();
+      return only((runtime.pad && runtime.pad[1]) || {}, action);
+    };
+    out.stickUp = stick([0, -1], "up");
+    out.stickDown = stick([0, 1], "down");
+    out.stickLeft = stick([-1, 0], "left");
+    out.stickRight = stick([1, 0], "right");
+    fakes = [fake({}, [0.4, -0.4])];
+    stepForward();
+    out.stickDead = Object.keys((runtime.pad && runtime.pad[1]) || {}).length === 0;
+    /* two pads are two players */
+    fakes = [fake({ 12: true }, null, "pad one"),
+             fake({ 13: true }, null, "pad two")];
+    stepForward();
+    const two = runtime.pad || {};
+    out.twoPads = !!(two[1] && two[1].up && two[2] && two[2].down &&
+                     !two[1].down && !two[2].up);
+    /* keyboard and controller at once on pad 1 */
+    fakes = [fake({ 12: true })];
+    const canvas = $("out");
+    canvas.focus();
+    canvas.dispatchEvent(new KeyboardEvent("keydown",
+      { code: "KeyL", key: "l", bubbles: true, cancelable: true }));
+    stepForward();
+    const both = (runtime.pad && runtime.pad[1]) || {};
+    out.keyboardAndPad = !!(both.up && both.right);
+    canvas.dispatchEvent(new KeyboardEvent("keyup",
+      { code: "KeyL", key: "l", bubbles: true, cancelable: true }));
+    /* remap by pressing: begin on I, press X (button 2) */
+    fakes = [fake({})];
+    gamepad.begin("i");
+    fakes = [fake({ 2: true })];
+    gamepad.poll();
+    const cap = gamepad.captured();
+    out.remapped = !!(cap && cap.action === "i" && cap.source.button === 2);
+    out.mappingSaved = (() => {
+      try { return typeof localStorage !== "undefined" &&
+        /"button":2/.test(localStorage.getItem(G.STORE_KEY) || ""); }
+      catch (e) { return false; }
+    })();
+    stepForward();
+    out.remapReachesToy = !!(((runtime.pad || {})[1] || {}).i);
+    gamepad.loadMapping();
+    out.mappingReloaded = JSON.stringify(gamepad.mapping().i) === '[{"button":2}]';
+    if (q.get("gamepadsave")) {
+      out.savedI = JSON.stringify(gamepad.mapping().i);
+    } else {
+      gamepad.resetMapping();
+      out.mappingReset = JSON.stringify(gamepad.mapping().i) === '[{"button":0}]';
+    }
+    /* the Controls drawer exists and lists the pad it was given */
+    fakes = [fake({ 14: true }, null, "pad one")];
+    gamepad.poll();
+    selectBottomTab("controls");
+    const ctl = panelById("controls");
+    if (ctl && ctl.api && ctl.api.tick) ctl.api.tick();
+    const host = $("bottom-controls");
+    out.controlsOpen = !!(host && !host.hidden);
+    out.controlsText = host ? String(host.textContent || "") : "";
+    fakes = [];
+  } catch (e) {
+    out.error = (e && e.code ? e.code + ": " : "") + ((e && e.message) || e);
+  }
+  const el = $("selftest");
+  el.hidden = false;
+  el.textContent = JSON.stringify(out);
+  document.title = out.error ? "FAIL" : "GAMEPADTEST";
+}
+
 function init() {
   loadSettings();
   /* #102: every panel module registers itself first, then the dock, the
@@ -6976,11 +7120,11 @@ function init() {
     const seqPanel = panelById("sequencer");
     if (seqPanel && seqPanel.api && seqPanel.api.view) seqPanel.api.view(viewParam);
   }
-  /* ?bottom=agent|markers opens a drawer without synthetic input, the way
-   * ?tab=assets opens the ASSETS list (#84's screenshots). */
+  /* ?bottom=agent|markers|controls opens a drawer without synthetic input,
+   * the way ?tab=assets opens the ASSETS list (#84's screenshots). */
   const bottomParam = qs.get("bottom");
   if (bottomParam === "agent" || bottomParam === "markers" ||
-      bottomParam === "rom")
+      bottomParam === "controls" || bottomParam === "rom")
     selectBottomTab(bottomParam);
 
   const startExample = EXAMPLES[0];
@@ -7130,6 +7274,7 @@ function init() {
 
   }
   if (qs.get("padtest")) runPadTest();
+  if (qs.get("gamepadtest")) runGamepadTest();
   updateResolution();
 }
 
@@ -7532,6 +7677,14 @@ const studio = {
   editorKind: () => editor ? "codemirror" : "textarea",
   isPlaying: () => playing,
   pad: () => Object.assign({}, heldPad),
+  /* #262: what the browser's controllers are, as the page read them last,
+   * and the two-pad object the last frame ran with. */
+  gamepad: () => (gamepad ? { pads: gamepad.pads(),
+                              players: gamepad.players().map((p) =>
+                                Object.assign({}, p)),
+                              mapping: gamepad.mapping() } : null),
+  runtimePads: () => (runtime && runtime.pad)
+    ? Object.assign({}, runtime.pad) : null,
   /* #78 — the output column. `output()` is the frame on the canvas after the
    * layer mask, so the evidence compares what is shown, not the toy alone. */
   output: () => (presented ? { frame: presented.frame,
