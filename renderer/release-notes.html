@@ -64,6 +64,33 @@
   <b>tested</b> and how. Anything not listed under "works" is not finished. What comes next, and why, is on the <a href="roadmap.html">roadmap</a>. The honest list of gaps is in the
   <a href="testers.html#not-yet">beta guide</a>.</p>
 
+  <h2 id="b5">Build 5 · Tuesday 3 November</h2>
+  <h3>Controllers</h3>
+  <ul>
+    <li>A real gamepad now works in the studio and on the toy page. The standard layout maps to the PC Engine pad: A and B are I and II, Back and Start are Select and Run, the d-pad and left stick are the four directions, and X and Y are the extra buttons of a 6-button pad. A second pad plays as player 2. A new CONTROLS drawer lists each pad, lights the buttons as you press them, and lets you remap a button by pressing the new one. The keyboard keeps working beside it.
+      <span class="status soon">built and checked in the host harness; try it with your own pad and tell us what you see</span></li>
+    <li>Exported ROMs already read the real pad port (the same reading a console does); a pad-test program and a check in a second emulator are still to come.</li>
+  </ul>
+  <h3>Assembly</h3>
+  <ul>
+    <li>A project can now be an assembly project: write <code>.s</code> files in the studio and the browser assembles them with PCEAS.</li>
+    <li>Our own hardware include file (<code>pce.inc</code>) and a HuCard builder make a ROM from a program, with a first example program.
+      <span class="status soon">checked in an emulator only; not yet on a real console, and Lua calling assembly is not built</span></li>
+  </ul>
+  <h3>ROM limits and Claude</h3>
+  <ul>
+    <li>The ROM check now reports a budget: the data bank, constants, functions, registers and every other limit the interpreter refuses, each with what is used, what is left and a percent. It shows in the studio's ROM CHECK drawer and in the MCP tool.</li>
+    <li>The guide Claude reads now carries rules so it does not build a game that cannot export: check the budget before and after every change, undo a change that turns it red, stop adding at 80 percent and say so, and offer a smaller version instead of building something that will not fit.
+      <span class="status ok">tested: the numbers in the guide are checked against the code</span></li>
+  </ul>
+  <h3>Pages, fixes and support</h3>
+  <ul>
+    <li>A new Hardware tricks page with five runnable studio toys, and a Resources page.</li>
+    <li>CITY's parallax bands now loop instead of stopping.</li>
+    <li>A yellow "Support me" link sits in the site ribbon and the studio's top bar.</li>
+    <li>Notes on how this studio fits with Geargrafx and the other tools developers already use were added to the roadmap.</li>
+  </ul>
+
   <h2 id="b4">Build 4 · Monday night, 2 to 3 November</h2>
   <h3>Sound</h3>
   <ul>
