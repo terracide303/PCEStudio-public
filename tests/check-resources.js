@@ -12,10 +12,12 @@
  *      Huzak, the HuCC docs, Aseprite and Tiled.
  *   2. Each entry carries a licence line, and the visible line is exactly the
  *      entry's data-licence value (so the page and the test cannot drift).
- *   3. The licence lines match docs/REFERENCES.md: an entry whose licence is
- *      stated splits on "; " and every clause must appear in REFERENCES.md;
- *      an entry with no licence says "not stated". The documented HuCC docs
- *      licence and mednafenPceDev's "Mednafen's own" are checked the same way.
+ *   3. The licence lines match docs/REFERENCES.md in both directions: the
+ *      page's line must equal the status transcribed from REFERENCES.md
+ *      (EXPECTED_LICENCE), so an entry cannot downgrade a stated licence to
+ *      "not stated"; and every clause of a stated licence must appear in
+ *      REFERENCES.md. The documented HuCC docs licence and mednafenPceDev's
+ *      "Mednafen's own" are checked the same way.
  *   4. The entries REFERENCES §4 marks as coming from an unverified search
  *      (llvm-mos's PC Engine target, Mesen/MesenCE, Furnace, DefleMask,
  *      Huzak, Aseprite, Tiled) carry the page's "unchecked" tag, and no other
@@ -60,6 +62,31 @@ const TOOLS = ["HuC / HuCC", "PCEAS", "llvm-mos", "Mednafen",
  * general-knowledge entries Furnace, DefleMask, Aseprite and Tiled. */
 const UNCHECKED = ["llvm-mos", "mesen", "furnace", "deflemask", "huzak",
                    "aseprite", "tiled"];
+/* The licence status each entry must show, transcribed from
+ * docs/REFERENCES.md. Writing it down (rather than only proving that a stated
+ * clause appears there) is what catches the other direction: an entry that
+ * says "not stated" where REFERENCES states a licence. The references below
+ * are §1 (HuTrack), §2 (the table row), §3 (the HuCC docs), §4 (no licence
+ * stated for the unverified items) and §5 (PCEAS). */
+const EXPECTED_LICENCE = {
+  "huc": "an aggregate LICENSE that says much of it has no stated terms",
+  "pceas": "The legal status of much of the kit cannot be stated exactly; " +
+           "the MagicKit assembler's source says \"This program is freeware. " +
+           "You are free to distribute, use and modify it as you wish.\"; " +
+           "Ulrich Hecht's 2014 changes are Simplified BSD",
+  "llvm-mos": "not stated",
+  "mednafen": "not stated",
+  "mednafenPceDev": "Mednafen's own",
+  "mesen": "not stated",
+  "etripator": "GPL-3 (LICENCE.txt)",
+  "hutrack": "MIT, copyright Turboxray",
+  "furnace": "not stated",
+  "deflemask": "not stated",
+  "huzak": "not stated",
+  "hucc-docs": "Licence of the documents is still not stated",
+  "aseprite": "not stated",
+  "tiled": "not stated"
+};
 
 let checks = 0;
 const failures = [];
@@ -153,14 +180,25 @@ function checkStructure(html, entries) {
 
 function checkLicences(entries) {
   const refs = norm(fs.readFileSync(REFS, "utf8"));
+  const ids = entries.map((e) => e.id).sort();
+  check(JSON.stringify(ids) === JSON.stringify(Object.keys(EXPECTED_LICENCE).sort()),
+        "every entry has a licence transcribed from docs/REFERENCES.md (got " +
+        JSON.stringify(ids) + ")");
   for (const e of entries) {
     if (!e.licence) { failures.push(e.id + " has no licence value"); checks++; continue; }
-    if (e.licence === "not stated") {
+    const expected = EXPECTED_LICENCE[e.id];
+    check(expected !== undefined,
+          e.id + " has a transcribed licence to compare with");
+    if (expected === undefined) continue;
+    check(e.licence === norm(expected),
+          e.id + "'s licence equals docs/REFERENCES.md's status (" +
+          JSON.stringify(e.licence) + " vs " + JSON.stringify(norm(expected)) + ")");
+    if (norm(expected) === "not stated") {
       check(e.visibleLicence === "not stated",
             e.id + " plainly says not stated");
       continue;
     }
-    const clauses = e.licence.split(/;\s*/).filter(Boolean);
+    const clauses = expected.split(/;\s*/).filter(Boolean);
     for (const clause of clauses) {
       check(refs.includes(norm(clause)),
             e.id + "'s licence clause is stated in docs/REFERENCES.md: " +
