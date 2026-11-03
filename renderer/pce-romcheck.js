@@ -172,7 +172,7 @@
   function measure(program) {
     var functions = program.functions || [];
     var maxRegs = 0, maxUps = 0, maxArgs = 0, boot = 0;
-    var sprites = 0, rasterTables = 0;
+    var sprites = 0, rasterTables = 0, usesTables = false;
     var f, pc, i;
     for (f = 0; f < functions.length; f++) {
       var fn = functions[f];
@@ -187,6 +187,8 @@
             (f === 0 || f === (program.hooks && program.hooks.init))) boot++;
         if (ins.t === "sprite") sprites++;
         if (ins.t === "raster") rasterTables++;
+        if (ins.t === "table" || ins.t === "setlist" || ins.t === "tget" ||
+            ins.t === "tset") usesTables = true;
       }
     }
     /* The boot closures' upvalue cells: the functions the chunk and init()
@@ -221,15 +223,15 @@
       "upvalue-cells": bootCells,
       "globals": (program.globals || []).length,
       "closures": boot,
-      "table-slots": layout ? layout.nslots : 0,
-      "table-cells": layout ? layout.cells : 0,
+      "table-slots": layout ? layout.nslots : (usesTables ? null : 0),
+      "table-cells": layout ? layout.cells : (usesTables ? null : 0),
       "arguments": maxArgs,
       features: { sprites: sprites, rasterTables: rasterTables },
       exact: {
         "data-bank": size != null,
         "constants": encoded != null,
-        "table-slots": layout != null,
-        "table-cells": layout != null
+        "table-slots": layout != null || !usesTables,
+        "table-cells": layout != null || !usesTables
       }
     };
   }
