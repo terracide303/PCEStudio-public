@@ -227,7 +227,7 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 
 | toy | exports? | picture matches? | overruns | worst update | verdict | validator's static estimate |
 |-----|----------|------------------|----------|--------------|---------|-----------------------------|
-| **STARFALL** `toys/demo-game` | **no** — `ilbc-range: more than 127 constants` (`renderer/pce-ilbc.js:462`, `MAX_CONST = 127`); the 128th is the int 544 first seen at `main.lua:168` (the encoder's message names no line). Open card **#148**. `sprite()` is carried for 21 of its 31 specs since #188–#190; the other ten are **#211**, and the pool refuses first. | — | — | — | — | 305,913 cycles · 2.56 frames · **23.4 Hz** |
+| **STARFALL** `toys/demo-game` | **yes** — 40,960 B, sha256 `e60712232fe3c7a7…`; reworked in place for the gallery export (#273, 2026-11-03): 6,285 B of bytecode in the 8,160 B data bank (77.0%), 111 constants of 127 (87.4%, the one near row), 17 functions, 21 registers, 35 boot upvalue cells, 24 globals, 4 arguments, no row over. The game is the same: the art block computes its VRAM addresses (225 literals became loops), the palettes are `rgb()` calls, the sprites are four `sat()` words instead of a spec table, the split is the `raster(line)` callback (the table form is refused), and the ship's collision is the drone array's box instead of `sr()`/`abs()`, which neither route carries. A scripted 600-frame old-vs-new run and the 600-frame still run are pixel-identical, the still run losing its one life at the same frame 365. **The console picture is not the browser's yet:** the raster backend arms one display frame per toy frame (#227) and an interpreted STARFALL frame is ~25 display frames, so a capture tail is almost always the compute window's stale screen; the rare armed frame is one toy frame out of step (background next frame, sprites previous) and misses a browser frame by ~450 bytes, all on star rows. `tests/check-export-games.js` pins the ROM sha and asserts not black / not a browser frame yet, as DUSK RUN does. | **no — draws, not the browser's picture (#227)** | **29** | **5,715** lines | **too slow** (29 updates in 600 frames) | 7,246,417 cycles · 60.73 frames · **0.99 Hz** (route-1 raster projection) |
 | **TOWER** `toys/tower` | **yes** — 40,960 B, sha256 `727baf12d96dcde…`; reworked in place for the gallery export (2026-11-03): 7,862 B of bytecode in the 8,160 B data bank, 27 functions, 32 registers, 47 boot upvalue cells, 6 arguments, and no row over its interpreter capacity. The art is still drawn by the toy; the rework merges the thirteen art callbacks into four generators, writes the background map as floor/ladder runs (blank cells stay at the runtime's zero, the same blank tile) and computes only the two sprite planes this art uses. The first 12 frames are one picture (the gem starts bobbing at 12), so the capture's tail is diff 0 against the browser's early frame. | **diff 0** — the captured tail is the browser's early picture | **57** | **2,900** lines | **too slow** (57 updates in 1,800 frames: the ~20 s one-time build, then ~5 updates a second) | 485,384 cycles · 4.07 frames · **14.7 Hz** (the model, not the console; the interpreted build and frames are much slower) |
 | **NOVA TIDE** `toys/nova-tide` | **no** — `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`; refused by `renderer/pce-ilbc.js:335` because `raster` has no entry in its OPS table). #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind (#136). | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
 | **DUSK RUN** `toys/dusk-run` | **yes** — 40,960 B, sha256 `5c01dc368ccb390e…`, **and it runs but its picture is not the browser's yet.** #222 raised `MAX_REGS` 41 / `MAX_FUNCS` 41 / `MAX_UPS` 20 (upvalue pool) / `MAX_CLOS` 48 (boot/transient split), so the container loads and executes; a Mednafen save state at 20 s is VRAM/CRAM/SAT **diff 0 against browser frame 3**, and the host harness matches for 900 frames. The runtime's base-VRAM buffer (32 words a frame) was dropping DUSK's 64/68/208-word build frames; it now writes an over-buffer word through instead ([`ROM-SOUND.md`](ROM-SOUND.md) §10). What is left is the raster backend: one replay display frame per toy frame, and the best replay frame in a 20 s movie is **16 bytes off** on row 16 (scanline latency) — **#227**. `tests/check-export-games.js` pins the ROM sha and asserts the screen is not black and not yet a browser frame. #184's validator note still applies: the 8-frame probe measured the BUILD (frame 7 = build step 7, 675,190 cycles), and the 300-frame performance is 390,744 cycles (18.3 Hz), so the validator accepts the toy. | **no — draws, not the browser's picture** (16 bytes, row 16; #227) | **2** | **1568** lines | **too slow** (2 updates in 600 frames, the ~7 s boot) | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
@@ -252,14 +252,15 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   measure reads 0 updates mid-boot; and the interpreter's display-on keeps
   the toy's CR, so the sprites' SB bit survives `toy_display_on` (`docs/IL.md`
   §14, the compiled runtime's `toy_cr` shadow).
-- **Two games still stop on their own next gap, and TOWER now builds.** STARFALL
-  stops on the 127-constant pool and the 10 `sprite` specs the walker cannot
-  pin, NOVA TIDE on `raster(line, spec)`. TOWER was reworked in place for the
-  gallery export (2026-11-03): its bytecode is 7,862 B with no capacity over,
-  it builds a 40,960 B ROM, and its Mednafen picture is the browser's. Its
-  one-time build draws the tower in about 20 s of wall and a frame then takes
-  about 11 video frames (~5 updates a second) — the interpreter's speed, not
-  a game rule. DUSK RUN's
+- **One game still stops on its own next gap, and TOWER and STARFALL now
+  build.** NOVA TIDE stops on `raster(line, spec)`. TOWER and STARFALL were
+  reworked in place for the gallery export (2026-11-03). TOWER's bytecode is
+  7,862 B with no capacity over and its Mednafen picture is the browser's;
+  its one-time build draws the tower in about 20 s of wall and a frame then
+  takes about 11 video frames (~5 updates a second) — the interpreter's
+  speed, not a game rule. STARFALL's bytecode is 6,285 B with only the
+  constant pool past 80%; it builds and draws, but its picture is the one
+  raster-latency case above and is pinned as not yet the browser's. DUSK RUN's
   container fits the interpreter's arrays (#222: 41 registers, 41
   functions, a 19-upvalue closure, 27 boot closures), and its VM state is
   byte-equal to the browser's; the runtime's dropped build-frame writes are
@@ -296,17 +297,17 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   only a built ROM can, and PLATFORMER's is the first: 30 Hz where the
   model's route-1 pricing said 81.2 Hz, the interpreter's per-operation
   cost the model does not price.
-- **The studio page refuses earlier than the MCP for two of the five (four
-  before the 2026-11-03 TOWER rework).**
-  Its Export runs `renderer/pce-cgen.js` first: STARFALL stops on
-  `cgen-op` for the `abs` builtin (`main.lua:466`; #190 carried the
-  sprites cgen can resolve, so its old `sprite` finding at `main.lua:406`
-  moved), NOVA TIDE and DUSK RUN on `cgen-op` `unm` (`main.lua:29` and
-  `:62`), and PLATFORMER and TOWER reach the encoder — they are the two
-  games the page's Export and the MCP's `export_pce` agree on (TOWER's
-  rework removed its logical `not`, so the C route carries it too). So the
-  page's one-line finding for STARFALL, NOVA TIDE and DUSK RUN is a
-  C-emitter or validator finding, not the bytecode refusal in the table.
+- **The studio page refuses earlier than the MCP for two of the five (five
+  before the 2026-11-03 gallery rework).**
+  Its Export runs `renderer/pce-cgen.js` first: NOVA TIDE and DUSK RUN stop
+  on `cgen-op` `unm` (`main.lua:29` and `:62`), and PLATFORMER, TOWER and
+  STARFALL reach the encoder — they are the three games the page's Export and
+  the MCP's `export_pce` agree on. STARFALL's rework removed `abs` and `sr()`
+  (neither route carries them), replaced the `sprite()` specs the C walker
+  could not pin with `sat()` words, and moved the status-bar split to the
+  `raster(line)` callback both routes carry; TOWER's rework removed its
+  logical `not`. So the page's one-line finding for NOVA TIDE and DUSK RUN is
+  a C-emitter or validator finding, not the bytecode refusal in the table.
 - **Carrying the first refusals would not finish the job.** #178's
   projections put STARFALL at 9,186 B, TOWER at 8,379 B and NOVA TIDE at
   9,287 B — all over the interpreter's 8,192-byte data bank (#138), before
@@ -314,7 +315,9 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   other than `rgb` #137) are counted. STARFALL's figure is #178's 8,969 plus
   #188's `sprite` at its real 7 B (31 × 7 = 217 B); the instruction is
   carried, the 10 specs the walker cannot pin are not. DUSK RUN (7,385 B)
-  fits, PLATFORMER (2,351 B) fits and now builds.
+  fits, PLATFORMER (2,351 B) fits and now builds. The 2026-11-03 reworks
+  brought the other two under the bank: TOWER to 7,862 B and STARFALL to
+  6,285 B (a computed art block, `sat()` words and the callback split).
 
 ### The cards this measurement added
 
@@ -374,17 +377,13 @@ its Lua line. The same code is the studio's ROM CHECK drawer and the MCP tool
 `rom_check`; the tables below are that tool's output on the five games at
 this commit. **Re-run by #207 on 2026-11-01** (the MCP server over stdio, and
 `renderer/pce-romcheck.js` directly): every row below is unchanged — same
-codes, same lines, PLATFORMER still the only `ok:true`. `line` is the Lua line in `main.lua`; a repeated construct lists
-every line it occurs on.
+codes, same lines. The 2026-11-03 gallery rework moved TOWER and STARFALL
+to `ok:true`; their old refusal rows are git history. `line` is the Lua line
+in `main.lua`; a repeated construct lists every line it occurs on.
 
 | toy | route | code | lines | blocker |
 |-----|-------|------|-------|---------|
-| **STARFALL** | C compiler | `cgen-op` | 590, 591, 592, 594, 599, 604, 619, 626, 628, 635 | `sprite(i, spec)` whose spec the encoder's walker cannot pin (a field that is not a constant, or a loop re-running the spec) |
-| | C compiler | `cgen-op` | 498, 646 | `raster(line, spec)` (the table form, not the hook) |
-| | C compiler | `cgen-op` | 466, 467, 570 | builtins `abs` and `sr` (only `rgb` and `note` lower) |
-| | bytecode | `ilbc-range` | 168 | more than 127 constants (the 128th is first seen here) |
-| | bytecode | `ilbc-builtin` | 466, 570 | builtins `abs`, `sr` |
-| | bytecode | `ilbc-op` | 498, 646 | `raster(line, spec)` |
+| **STARFALL** | — | — | — | **none: `rom_check` answers `ok:true`** (reworked in place, #273: the `sprite()` specs became `sat()` words, `abs`/`sr()` became array arithmetic, the `raster(line, spec)` table became the `raster(line)` hook, and the art block's 225 literal addresses became loops) |
 | **TOWER** | — | — | — | **none: `rom_check` answers `ok:true`** |
 | **NOVA TIDE** | C compiler | `cgen-op` | 29 | unary minus (`unm`) |
 | | C compiler | `cgen-op` | 530, 531, 532, 533, 534 | `raster(line, spec)` |
@@ -395,15 +394,15 @@ every line it occurs on.
 
 ### What the table says, plainly
 
-- **PLATFORMER and TOWER are carried by both routes.** That agrees
-  with #180's measurement: PLATFORMER's export builds and runs at 30 Hz, and
-  TOWER's reworked bytecode builds and matches the browser's picture. STARFALL
-  and NOVA TIDE stop on constructs no route carries yet: `raster(line, spec)`
-  (both routes), and `unm` and the builtins other than `rgb`/`note` (the C
-  route). Both routes carry `sprite(i, spec)` for a constant spec (#188 on
-  the bytecode, #190 in C); STARFALL's ten refused sprites are the specs its
-  walker cannot pin to constants, not the instruction. STARFALL additionally
-  exhausts the 127-constant pool; DUSK RUN's bytecode passes
+- **PLATFORMER, TOWER and STARFALL are carried by both routes.** That agrees
+  with #180's measurement: PLATFORMER's export builds and runs at 30 Hz,
+  TOWER's reworked bytecode builds and matches the browser's picture, and
+  STARFALL's rework (#273) removed every construct no route carried — the
+  ten unpinnable `sprite()` specs, `abs`, `sr()` and the `raster(line, spec)`
+  table — so it builds and draws, though its console picture is the raster
+  latency above, not the browser's yet. NOVA TIDE stops on constructs no
+  route carries yet: `raster(line, spec)` (both routes), and `unm` and the
+  builtins other than `rgb`/`note` (the C route). DUSK RUN's bytecode passes
   and its container fits the bank — what stops it on the console is the
   interpreter's RAM capacity at load (#222), which no front-end check
   reports.

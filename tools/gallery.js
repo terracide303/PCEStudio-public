@@ -61,7 +61,8 @@ const TOYS_META = [
     tags: ["playable", "sprites", "music", "raster"],
     blurb: "A game, not an effect: six drones fall through a scrolling " +
       "starfield while the top 24 lines hold still under the raster split. " +
-      "IJKL flies the ship, N fires, M is the second button.",
+      "IJKL flies the ship, N fires, M is the second button. It also exports " +
+      "as a HuCard ROM.",
     effect: "a playable game",
     files: [
       { name: "main.lua", kind: "lua" },

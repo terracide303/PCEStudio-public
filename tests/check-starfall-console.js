@@ -1,59 +1,53 @@
 #!/usr/bin/env node
 /*
- * tests/check-starfall-console.js — card #131's evidence, as a PASS/FAIL
- * check rather than a table a person has to read.
+ * tests/check-starfall-console.js — card #131's evidence, re-based on the
+ * 2026-11-03 gallery rework (#273) as a PASS/FAIL check rather than a table
+ * a person has to read.
  *
  * What this pins (all of it measured on this tree, none of it typed from the
  * write-up):
  *
- *   1. THE PAGE'S OWN CONSOLE PANEL REFUSES STARFALL.  renderer/
+ *   1. THE PAGE'S OWN CONSOLE PANEL ACCEPTS STARFALL.  renderer/
  *      studio-panel-console.js's `analyse()` — the code the CONSOLE tab and
  *      the Export button's `exportAnalysis()` read — is loaded in a vm with a
  *      fake studio whose toy source is toys/demo-game/main.lua.  It reports
- *      banner "bad", errors 1, warnings 0 and exactly one finding: cgen-op at
- *      line 466, the `builtin abs` the score uses (#176 carried the four
- *      table kinds and the table-typed globals, #190 carried the sprites
- *      cgen can resolve, so the finding moved off the `sprite` at line 406).
- *      The same panel on toys/parallax.lua reports 0 errors (the control), so
- *      "refused" is not a panel that cannot pass.
- *   2. THE VALIDATOR DOES NOT REFUSE IT.  pce-validate.js returns ok with 0
- *      problems, 8 frames of 9,530–9,637 cycles, 6 sprites / 6 strips with 4
- *      on the busiest line, 2,010 VRAM words, 100 blank cycles, a ~30,480 B
- *      ROM.  A green check-demo-game says nothing about the console.
- *   3. THE FULL REFUSAL INVENTORY, by kind, for both backends: 15 of 1,919
- *      instructions (0.78%) over the kinds the write-up names, with the
- *      first main.lua line of each and the two route-1-only pad kinds.
- *      (#174 carried the four table kinds on route 1; #176 carried them in
- *      cgen; #190 carried 21 of sprite's 31 in cgen, so sprite's row is now
- *      10 instructions on each backend rather than a whole kind; #197
- *      carried sfx and the note builtin, so its row is gone.)
- *   4. THE NEXT BLOCKER AFTER #190.  #176 widened cgen's global-type
- *      allow-list to fn/vram/int/bool/padset/table (pce-cgen.js validate()),
- *      so the #143 gate is closed: STARFALL has 0 getglobal/setglobal outside
- *      the list.  #190 carried the sprites cgen can resolve, so the first
- *      cgen refusal left is the `builtin abs` at function 5 pc 1,
- *      main.lua:466.  A mutation probe (parallax's g_f retyped str)
- *      proves that refusal is live code, not a source reading.
+ *      banner "ok", errors 0, warnings 1 and exactly one finding: the
+ *      slow-frame warning at line 588 (the 224 raster() callbacks cost
+ *      279,353 cycles, 2.34 of a 60 Hz frame, in the validator's console
+ *      model).  The same panel on toys/parallax.lua reports the same shape
+ *      (the control), so "accepted" is not a panel that cannot see a
+ *      warning.
+ *   2. THE VALIDATOR'S BUDGETS.  pce-validate.js returns ok with one warning
+ *      and 8 frames of 9,730–9,889 cycles: 9,730 cycles of frame() plus
+ *      224 raster callbacks at 1,203.7 mean; 6 sprites / 6 strips with 4 on
+ *      the busiest line, 2,010 VRAM words, 100 blank cycles, a ~27,253 B ROM.
+ *   3. THE FULL REFUSAL INVENTORY, by kind, for both backends.  Since #273
+ *      STARFALL has none: 0 of 1,428 instructions are refused by either
+ *      backend.  The instrument is not blind — the same analysis on NOVA
+ *      TIDE still reports the `raster` kind (5 instruction sites on each
+ *      backend) and the C route's one `unm`, so a refusal reintroduced into
+ *      STARFALL would appear here.
+ *   4. NO cgen OPERAND REFUSAL.  #176 widened cgen's global-type allow-list
+ *      to fn/vram/int/bool/padset/table, and #273 removed the `abs`/`sr`
+ *      builtins and the unpinnable sprite specs, so cgenExtra's
+ *      getglobal/setglobal count, its operand checks and its next refusal are
+ *      all empty.  A mutation probe (parallax's g_f retyped str) proves the
+ *      cgen-global refusal is live code, not a source reading.
  *   5. THE 8 KiB DATA BANK (#138).  The size model reproduces the two
- *      committed containers to ≤3 B (the table section is counted since
- *      route 1 carries it); STARFALL projects 9,231/9,246/9,276 B at 3/4/6 B
- *      per still-refused instruction, all over 8,192, and 9,186 B with the
- *      carried ops (the four table ops and #188's sprite, 31 × 7 B) at their
- *      real sizes and the rest at 0 B (#178 corrected the model's v2 header
- *      and table-section sizing; #188 gave sprite its opcode size).  The
- *      limit itself is
- *      exercised behaviourally: a valid container of exactly 8,192 B builds,
- *      8,193 B is refused with toy-data-bank-full.
+ *      committed containers to ≤3 B; STARFALL's exact projection is 6,050 B
+ *      and 6,212/6,266/6,374 B at 3/4/6 B per still-refused instruction —
+ *      all under 8,192 B, where it used to be over at 9,186 B.  The limit
+ *      itself is exercised behaviourally: a valid container of exactly
+ *      8,192 B builds, 8,193 B is refused with toy-data-bank-full.
  *   6. THE WRITE-UP'S CITATIONS.  Every file:line the report names still
  *      holds its stated code (a merge moved one before, #131/a223320), so the
  *      next merge that moves one fails here instead of quietly aging the doc.
  *
  * What it does NOT prove, printed as NOTE lines when it runs:
  *
- *   - No .pce was built for STARFALL and no emulator ran, because the export
- *     refuses.  There is no 20-frame browser/Mednafen diff and no TMA-timer
- *     cycle count; those stay conditional on the sprite specs, the remaining
- *     kinds and the 8 KiB bank.
+ *   - This suite builds no .pce and runs no emulator.  The export and the
+ *     Mednafen run are tests/check-export-games.js's (it lists STARFALL as
+ *     built; its picture is not the browser's yet, #227).
  *   - The page's `exportAnalysis()` was not executed here: this machine has
  *     no chrome-headless-shell (#114), so the real-page run in the write-up
  *     is not re-verified.  The panel function it reads was executed, and the
@@ -62,20 +56,20 @@
  *     modelled here.  A refusal raised only deeper in cgen's lowering
  *     (cgen-target, cgen-hook, the closure rules) would not be counted.
  *   - Rule 2: this seat wrote the instrument, the reading and this check.  A
- *     cold break by a different seat is still owed before #131 closes.
+ *     cold break by a different seat is still owed.
  *
  * Rule 1 — the check has been run against breaks (scratch copies under
  * $TMPDIR, each mutation applied to one file, the unmodified check re-run):
- *   M1 pce-cgen.js's allow-list loses `table`  -> the panel finding reverts to
- *      cgen-global at line 47 (this check) and the table toy's determinism
+ *   M1 pce-cgen.js's allow-list loses `table`  -> the table toy's determinism
  *      pin fails (check-il-console)
  *   M2 pce-cgen.js lowers a field tget as an int key -> the table toy's emitC
  *      throws (check-il-console)
  *   M3 pce-cgen.js drops the escapes-and-repeats check -> the held-table
  *      refusal toy is accepted (check-il-console)
- *   M4 starfall-console.js sizes tget 5 B as 4 B -> the capacity projections
- *      move to 9,089/9,135/9,227 (this check)
- * The results are in the #176 commit message.
+ *   M4 starfall-console.js sizes tget 5 B as 4 B -> STARFALL's capacity
+ *      projections drop by its tget count (42 B; this check)
+ * The first three are in the #176 commit message; M4 is re-derived here on
+ * the reworked toy.
  *
  *   node tests/check-starfall-console.js
  */
@@ -88,6 +82,7 @@ const vm = require("vm");
 const ROOT = path.join(__dirname, "..");
 const STARFALL = "toys/demo-game/main.lua";
 const CONTROL = "toys/parallax.lua";
+const REFUSER = "toys/nova-tide/main.lua";
 
 const il = require(path.join(ROOT, "renderer/pce-il.js"));
 const validate = require(path.join(ROOT, "renderer/pce-validate.js"));
@@ -158,30 +153,31 @@ function checkPanel() {
   const S = panelState(read(STARFALL), "STARFALL");
   if (!S) return;
 
-  eq("STARFALL banner is bad", S.banner.state, "bad");
-  ok("STARFALL banner says 1 problem", /1 problem/.test(S.banner.text),
-     S.banner.text);
-  eq("STARFALL errors", S.errors, 1);
-  eq("STARFALL warnings", S.warnings, 0);
+  eq("STARFALL banner is ok", S.banner.state, "ok");
+  eq("STARFALL banner says it can run on the PC Engine", S.banner.text,
+     "Can run on the PC Engine");
+  eq("STARFALL errors", S.errors, 0);
+  eq("STARFALL warnings", S.warnings, 1);
   eq("STARFALL findings", S.findings.length, 1);
   const f = S.findings[0] || {};
-  eq("the one finding's severity", f.severity, "error");
-  eq("the one finding's code", f.code, "cgen-op");
-  eq("the one finding's line", f.line, 466);
-  ok("the finding names the `builtin` instruction",
-     /instruction `builtin`/.test(String(f.message)), String(f.message));
-  ok("the finding says rgb and note are the only builtins it lowers",
-     /part A lowers rgb and note only/.test(String(f.message)));
+  eq("the one finding's severity", f.severity, "warn");
+  eq("the one finding is the slow-frame warning", f.code,
+     "validate-slow-frame");
+  eq("the one finding's line", f.line, 588);
+  ok("the finding names the raster callback's cost",
+     /279353 cycles/.test(String(f.message)) &&
+     /2\.34 of a 60 Hz frame/.test(String(f.message)), String(f.message));
 
-  eq("panel stats.frameCycles", S.stats.frameCycles, 9530);
+  eq("panel stats.frameCycles", S.stats.frameCycles, 9730);
+  eq("panel stats.collectionCycles", S.stats.collectionCycles, 279353);
   eq("panel stats.route1.collectionCycles", S.stats.route1.collectionCycles,
-     305913);
-  near("panel stats.route1.ratio60", S.stats.route1.ratio60, 2.564, 0.001);
-  near("panel stats.route1.hz", S.stats.route1.hz, 23.4, 0.05);
+     7246417);
+  near("panel stats.route1.ratio60", S.stats.route1.ratio60, 60.732, 0.001);
+  near("panel stats.route1.hz", S.stats.route1.hz, 0.988, 0.001);
   eq("panel stats.route1.meets60", S.stats.route1.meets60, false);
-  eq("panel stats.route1.factor", S.stats.route1.factor, 32.10);
-  eq("panel stats.route1.shape", S.stats.route1.shape, "no raster");
-  eq("panel stats.romBytes", S.stats.romBytes, 30480);
+  eq("panel stats.route1.factor", S.stats.route1.factor, 25.94);
+  eq("panel stats.route1.shape", S.stats.route1.shape, "raster");
+  eq("panel stats.romBytes", S.stats.romBytes, 27253);
   eq("panel stats.romBanks", S.stats.romBanks, 4);
 
   /* the control: a toy that is known to export */
@@ -203,102 +199,53 @@ function checkBudgets() {
   ok("STARFALL's IL compiles", r.compile.ok, r.compile.message);
   ok("the validator accepts STARFALL", r.report && r.report.ok === true,
      r.report && r.report.code);
-  eq("the validator's problem count", r.report.problems.length, 0);
+  eq("the validator's one problem is the slow-frame warning",
+     r.report.problems.map(function (x) { return x.code; }),
+     ["validate-slow-frame"]);
 
   const b = r.report.budgets;
   eq("8 budget frames", b.frames.map(function (x) { return x.frameCycles; }),
-     [9530, 9530, 9637, 9637, 9637, 9637, 9530, 9530]);
-  eq("frame() cost (last frame)", b.frameCycles, 9530);
-  eq("collection cost", b.collectionCycles, 9530);
-  eq("route 1 collection cost", b.route1.collectionCycles, 305913);
+     [9730, 9730, 9889, 9889, 9889, 9889, 9730, 9730]);
+  eq("frame() cost (last frame)", b.frameCycles, 9730);
+  /* the 224 raster() callbacks are the collection, priced apart from frame() */
+  eq("collection cost", b.collectionCycles, 279353);
+  near("mean raster call", b.rasterMean, 1203.7, 0.1);
+  eq("route 1 collection cost", b.route1.collectionCycles, 7246417);
   eq("sprites requested / strips", [b.sprites.sprites, b.sprites.strips],
      [6, 6]);
   eq("busiest sprite line", b.sprites.line, 4);
   eq("VRAM words", b.vram.maxWord, 2010);
   eq("blank cycles", b.blank.cycles, 100);
-  eq("ROM estimate", [b.rom.bytes, b.rom.banks], [30480, 4]);
+  eq("ROM estimate", [b.rom.bytes, b.rom.banks], [27253, 4]);
 }
 
 /* ---- 3. the refusal inventory ------------------------------------------ */
-const INVENTORY = [
-  /* kind, count, route-1 count, cgen count, first main.lua line.
-   * #174 carried the four table kinds on route 1 and #176 carried them in
-   * cgen, so their rows are gone from both backends.  #185 carried
-   * padref/padget on route 1 (cgen already lowered them), so their rows
-   * are gone too.  #133/#190 carried sprite on BOTH backends, but only
-   * where the walker can pin the spec to constants: the rows' counts are
-   * the 10 sprites whose spec the walker cannot resolve (the score's
-   * digit_pattern calls, one runtime x, and three loop re-running spec
-   * windows — both backends consume tableLayout's own sprite records), and
-   * 21 sprites now lower in cgen as they already did on route 1.  #197
-   * carried sfx (and the note builtin) on both backends, so its row is
-   * gone too. */
-  ["sprite", 31, 10, 10, 590],
-  ["raster", 2, 2, 2, 498],
-  ["builtin abs", 2, 2, 2, 466],
-  ["builtin sr", 1, 1, 1, 570]
-];
-
 function checkInventory() {
   console.log("\n== 3. every kind a backend cannot carry ==");
   const r = tool.analyse(STARFALL);
   const inv = r.inventory;
-  eq("IL functions", inv.functions, 18);
-  eq("IL instructions", inv.total, 1919);
-  eq("refused instructions", inv.refusedCount, 15);
-  near("refused percentage", 100 * inv.refusedCount / inv.total, 0.78, 0.05);
+  eq("IL functions", inv.functions, 17);
+  eq("IL instructions", inv.total, 1428);
+  eq("refused instructions", inv.refusedCount, 0);
+  eq("refused rows", inv.rows, []);
+  eq("refused percentage", 100 * inv.refusedCount / inv.total, 0);
 
-  for (const [kind, n, ilbcN, cgenN, first] of INVENTORY) {
-    const rows = inv.rows.filter(function (x) { return x.kind === kind; });
-    const gotIlbc = rows.filter(function (x) {
-      return x.backend === "route 1 (ilbc)";
-    }).reduce(function (a, x) { return a + x.n; }, 0);
-    const gotCgen = rows.filter(function (x) {
-      return x.backend === "C backend (cgen)";
-    }).reduce(function (a, x) { return a + x.n; }, 0);
-    /* The kind's instruction count comes from the IL, not from a backend's
-     * refusals: #190 means a carried kind can still refuse some sites. */
-    let inProgram = 0;
-    for (const fn of r.program.functions) {
-      for (const ins of fn.code) {
-        if (kind.indexOf("builtin ") === 0
-            ? (ins.t === "builtin" && kind.slice(8) === ins.name)
-            : ins.t === kind) inProgram++;
-      }
-    }
-    const lines = rows.reduce(function (a, x) { return a.concat(x.lines); }, []);
-    const firstLine = lines.length ? Math.min.apply(null, lines) : null;
-    ok(kind + ": " + n + " instructions (ilbc " + ilbcN + ", cgen " + cgenN +
-       ", first main.lua:" + first + ")",
-       inProgram === n && gotIlbc === ilbcN && gotCgen === cgenN &&
-       firstLine === first,
-       "got " + inProgram + " instructions, ilbc " + gotIlbc + ", cgen " +
-       gotCgen + ", first " + firstLine);
-  }
-
-  const kinds = INVENTORY.length;
-  /* "Refused by both backends" means every instruction of the kind:
-   * #190 put sprite in both kind tables (cgen lowers every spec the walker
-   * resolves), so the kind is no longer refused — only the 10 specs neither
-   * backend can pin still refuse, one per backend (the rows above). */
-  const both = INVENTORY.filter(function (x) {
-    return x[2] === x[1] && x[3] === x[1];
-  }).length;
-  const route1Only = INVENTORY.filter(function (x) {
-    return x[2] && !x[3];
-  }).map(function (x) { return x[0]; });
-  const partlyRefused = INVENTORY.filter(function (x) {
-    return x[2] < x[1] || x[3] < x[1];
-  }).map(function (x) { return x[0]; });
-  eq("kinds in the table", kinds, 4);
-  eq("kinds refused by both backends", both, 3);
-  eq("kinds one backend still refuses in part", partlyRefused, ["sprite"]);
-  eq("route-1-only kinds", route1Only, []);
+  /* The instrument is not blind: NOVA TIDE's first raster and the C route's
+   * one unary minus are still refusals, and the analysis still names them. */
+  const no = tool.analyse(REFUSER).inventory;
+  eq("NOVA TIDE: refused instructions", no.refusedCount, 6);
+  eq("NOVA TIDE: the refused rows",
+     no.rows.map(function (x) {
+       return [x.kind, x.backend, x.n, x.lines];
+     }),
+     [["raster", "route 1 (ilbc)", 5, [530, 531, 532, 533, 534]],
+      ["raster", "C backend (cgen)", 5, [530, 531, 532, 533, 534]],
+      ["unm", "C backend (cgen)", 1, [29]]]);
 }
 
-/* ---- 4. the next blocker after #176 ------------------------------------ */
+/* ---- 4. refusals that name an operand ---------------------------------- */
 function checkGlobals() {
-  console.log("\n== 4. refusals that name an operand: closed by #176 ==");
+  console.log("\n== 4. refusals that name an operand: none for STARFALL ==");
   const r = tool.analyse(STARFALL);
   const ex = r.cgenExtra;
   eq("getglobal/setglobal outside cgen's allow-list", ex.n, 0);
@@ -306,9 +253,7 @@ function checkGlobals() {
   eq("of those, setglobal", ex.set, 0);
   eq("the typed globals they name", ex.names, {});
   eq("the first one", ex.first, null);
-  eq("the next cgen refusal, in traversal order", ex.nextRefusal,
-     { code: "cgen-op", fn: 5, fnName: "fn@465", pc: 1, line: 466,
-       kind: "builtin", name: "abs", type: "builtin" });
+  eq("the next cgen refusal, in traversal order", ex.nextRefusal, null);
   eq("other operand checks that would fire", ex.otherChecks,
      { fixed: 0, cond: 0, arity: 0, closure: 0 });
 
@@ -350,9 +295,11 @@ function checkCapacity() {
      cap.controls[0].modelled], [578, 578]);
   eq("parallax: committed vs modelled", [cap.controls[1].committed,
      cap.controls[1].modelled], [1115, 1112]);
+  eq("the exact projection", [cap.exact.bytes, cap.exact.over, cap.exact.by],
+     [6050, false, 2142]);
   eq("projection at 3/4/6 B per uncarried instruction",
      cap.projections.map(function (p) { return [p.assumed, p.bytes, p.over]; }),
-     [[3, 9231, true], [4, 9246, true], [6, 9276, true]]);
+     [[3, 6212, false], [4, 6266, false], [6, 6374, false]]);
 
   /* the limit itself, behaviourally: 8 KiB exactly builds, 8 KiB + 1 refuses */
   const bank0 = fs.readFileSync(path.join(ROOT, "renderer/ilvm.bin"));
@@ -406,8 +353,8 @@ function checkCitations() {
     ok(rel + ":" + n + " holds `" + text + "`", line.indexOf(text) >= 0,
        "line " + n + " is: " + line.trim().slice(0, 120));
   }
-  /* the early return must precede the encoder in exportAnalysis, or "the
-   * page never reaches pce-ilbc.js" is false */
+  /* the early return must precede the encoder in exportAnalysis, or the
+   * page's Export path is not what the panel reports */
   const html = read("renderer/studio.html");
   const fnAt = html.indexOf("function exportAnalysis()");
   const ret = html.indexOf("if (errors) return", fnAt);
@@ -427,11 +374,11 @@ function main() {
   checkCapacity();
   checkCitations();
 
-  console.log("\nNOTE  nothing was built for STARFALL and no emulator ran: the " +
-              "export refuses, so there is no Mednafen run, no 20-frame " +
-              "browser diff and no TMA-timer cycles. Those stay conditional " +
-              "on the sfx/raster/builtin kinds, the 10 unresolvable sprite " +
-              "specs and the 8 KiB bank.");
+  console.log("\nNOTE  this suite builds no .pce and runs no emulator: " +
+              "tests/check-export-games.js builds the 40,960 B ROM, lists " +
+              "STARFALL as built, and pins its Mednafen picture as not yet " +
+              "the browser's (#227: the raster backend's one-armed-frame " +
+              "latency).");
   console.log("NOTE  the page's exportAnalysis() was not executed here (no " +
               "chrome-headless-shell on this machine, #114). The CONSOLE " +
               "panel's own analyse() was, over the same three modules; the " +

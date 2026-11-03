@@ -11,6 +11,13 @@ it splits the work into eight ~S cards (#171–#178) that a cheap model can
 finish one at a time. #132 stays open as the umbrella and closes when its
 children do.
 
+> **2026-11-03: STARFALL's table row is historical.**  The toy was reworked
+> in place for the gallery export (#273): its art is now two chunk-level
+> arrays (a 16-cell sprite-palette array and a 17-word packed star array)
+> plus the six state arrays — 8 sites, 63 cells, no field cells, no specs —
+> and it encodes (6,285 B, 111 constants).  The STARFALL numbers below
+> describe the pre-rework toy that this plan was written against.
+
 **Where the numbers came from.** Everything in §1 is *measured on this tree*
 by compiling each toy with `renderer/pce-il.js` and walking the resulting IL,
 and by running each toy's first frame through the IL host with `il.create(...,

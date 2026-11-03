@@ -5,18 +5,20 @@
  *
  * tools/starfall-console.js now prints a table report for any toy.  This
  * check runs its analyse() (the data behind the report, not the text) on
- * STARFALL, TOWER and NOVA TIDE and pins what docs/TABLES-PLAN.md measured:
+ * STARFALL, TOWER and NOVA TIDE and pins what docs/TABLES-PLAN.md measured
+ * (STARFALL's row is the 2026-11-03 rework's, #273: the art's tables are a
+ * palette array and a packed star array, and every sprite spec is gone):
  *
  *   toy      sites  cells  array  field  array-shape  record  nested  first frame
- *   STARFALL    44    172     46    126           11      33       4          128
+ *   STARFALL     8     63     63      0            8       0       0           48
  *   TOWER        6     33     33      0            6       0       0           24
  *   NOVA        27    183    178      5           22       5       0           68
  *
  * and the projected version 2 container with the four table ops at their
  * real sizes and every other uncarried kind at 0 B:
  *
- *   STARFALL 8,969 B, TOWER 8,379 B, NOVA 9,287 B — all over the 8,192 B
- *   data bank (by 777 / 187 / 1,095 B).
+ *   STARFALL 6,050 B and TOWER 7,720 B fit the 8,192 B data bank; NOVA
+ *   9,287 B is over it by 1,095 B.
  *
  * It also runs the CLI on each toy and requires exit 0; TOWER's validator
  * returns blank: null, so its report must print a NOTE about the missing
@@ -30,12 +32,13 @@
  * a different seat and model is still owed.  Mutations to try (each should
  * turn this check red):
  *   M1 starfall-console.js: size the container header at 24 B again ->
- *      STARFALL's exact projection becomes 8,965 B, not 8,969.
+ *      STARFALL's exact projection becomes 6,046 B, not 6,050.
  *   M2 starfall-console.js: model 5 B per table slot again -> the exact
- *      projection moves by nslots (44/6/27 B) and the v2 control is 7 B out.
- *   M3 pce-ilbc.js: drop the `nested` mark -> STARFALL's nested count is 0.
- *   M4 starfall-console.js: count init()'s ops in the first frame -> 234
- *      table ops for STARFALL instead of 128.
+ *      projection moves by nslots (8/6/27 B) and the v2 control is 7 B out.
+ *   M3 starfall-console.js: treat a chunk-level table as re-executing ->
+ *      STARFALL's re-executing count is 8, not 0.
+ *   M4 starfall-console.js: count init()'s ops in the first frame ->
+ *      STARFALL's 48 first-frame table ops grow by its six array sites.
  *   M5 starfall-console.js: remove the blank-budget guard -> the TOWER CLI
  *      run exits non-zero.
  *
@@ -72,12 +75,12 @@ function eq(name, got, want) {
  * real opcode size in the model — #133's sprite did (31 x 7 B). */
 const TOYS = [
   { rel: "toys/demo-game/main.lua", name: "STARFALL",
-    sites: 44, cells: 172, arrayCells: 46, fieldCells: 126,
-    shapes: { array: 11, record: 33, mixed: 0, empty: 0, nested: 4 },
-    escaping: 7, reexecuting: 34,
-    ops: { table: 20, setlist: 2, tget: 45, tset: 61, total: 128, il: 450 },
-    exact: 9186, over: true, by: 994,
-    at3: 9231, at4: 9246, at6: 9276 },
+    sites: 8, cells: 63, arrayCells: 63, fieldCells: 0,
+    shapes: { array: 8, record: 0, mixed: 0, empty: 0, nested: 0 },
+    escaping: 6, reexecuting: 0,
+    ops: { table: 0, setlist: 0, tget: 42, tset: 6, total: 48, il: 1636 },
+    exact: 6050, over: false, by: 2142,
+    at3: 6212, at4: 6266, at6: 6374 },
   { rel: "toys/tower/main.lua", name: "TOWER",
     sites: 6, cells: 33, arrayCells: 33, fieldCells: 0,
     shapes: { array: 6, record: 0, mixed: 0, empty: 0, nested: 0 },
@@ -185,8 +188,10 @@ function main() {
               "after load(), so the chunk and init() are excluded); that is " +
               "the same instrument docs/TABLES-PLAN.md used.");
   console.log("NOTE  the projections are a model of pce-ilbc.js's container " +
-              "layout, not a built container: no game encodes past its " +
-              "build-time refusals yet (#133-#138).");
+              "layout, not a built container; the model is pinned against " +
+              "the two committed version 2 controls above, and the games " +
+              "that now encode are checked by their own containers in " +
+              "check-export-games and check-rom-budget.");
 
   console.log("\n" + checks + " checks, " + failures.length + " failed");
   if (failures.length) {

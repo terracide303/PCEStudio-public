@@ -1,5 +1,15 @@
 # STARFALL on the PC Engine (card #131)
 
+> **2026-11-03: superseded by the gallery rework (#273).**  The toy was
+> reworked in place: `rom_check` now answers `ok:true` (6,285 B of bytecode
+> in the 8,160 B data bank, 111 of 127 constants, no finding), the export
+> builds a 40,960 B ROM, and `tests/check-export-games.js` lists it as built.
+> The console picture is the one limitation left — the raster backend's
+> one-armed-display-frame latency (#227); the browser game is unchanged and
+> pixel-identical to the original over 600 frames.  The measurements below
+> are the 2026-10-29/11-01 record of why it did not export then, kept as
+> history; the current row is docs/ROM_SPEED.md.
+
 **The question** (the maintainer, 2026-10-29): STARFALL is a Lua game in the studio —
 is it PC Engine code, and does it run in an emulator?
 
