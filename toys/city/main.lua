@@ -65,7 +65,11 @@
 -- frames 3,4,5,6,7,8,9,10 in that order and run.aseprite holds the same eight
 -- at 100 ms each — so the run is those eight at the gif's own pace, one pose
 -- every six 60 Hz frames (100 ms), six pixels of ground a pose, so the feet
--- do not slide — and nothing else.  The run plays only while ground is
+-- do not slide — and nothing else.  #206: the eight patterns are cut at each
+-- frame's own place in the sheet's 72-px cell, not centred on its ink, so the
+-- run no longer wobbles: the author holds the gun muzzle and the head still
+-- while the legs and feet move (the raw cut swung the head 5 px a cycle).
+-- The run plays only while ground is
 -- covered (#158); the pad at rest shows frame 1 (the wide planted stand),
 -- the idle; the leap reuses run frame 7's stride; and the crouched aim
 -- (frame 35) shows only WHILE the fire key is held, so the gun comes down

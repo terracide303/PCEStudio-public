@@ -167,7 +167,15 @@ function crop(img, box) {
 
 /* Every frame's box, from the sheet's empty columns: a pack sheet separates
  * frames with transparent columns.  Returns boxes in left-to-right order, so
- * frame 1 is boxes[0]. */
+ * frame 1 is boxes[0].
+ *
+ * Each box also carries its place on the sheet's fixed cell grid (#206).  The
+ * sheet is one strip of 72-px cells — 2889 = 9 + 40*72, and Full.gif's own
+ * frames align on those cells pixel for pixel — and the author draws every
+ * pose at the SAME place in its cell: the run's gun muzzle lands on cell
+ * x +52 in all eight poses and the head does not move while the feet do.  A
+ * box only records the ink, so it forgets that placement; spriteSheet() reads
+ * cellX to put it back. */
 function frameBoxes(img) {
   const op = (x, y) => pixel(img, x, y)[3] > 0;
   const runs = [];
@@ -179,7 +187,7 @@ function frameBoxes(img) {
     else if (start >= 0) { runs.push([start, x - 1]); start = -1; }
   }
   if (start >= 0) runs.push([start, img.width - 1]);
-  return runs.map(([x0, x1]) => {
+  const boxes = runs.map(([x0, x1]) => {
     let top = img.height, bottom = -1;
     for (let y = 0; y < img.height; y++) {
       let any = false;
@@ -188,11 +196,33 @@ function frameBoxes(img) {
     }
     return { x: x0, y: top, w: x1 - x0 + 1, h: bottom - top + 1 };
   });
+  const pitch = Math.round(img.width / boxes.length);
+  const margin = img.width - pitch * boxes.length;
+  boxes.forEach((b, i) => {
+    b.cellX = margin + pitch * i;
+    b.cellW = pitch;
+    if (margin < 0 || b.x < b.cellX || b.x + b.w > b.cellX + pitch)
+      refuse("frame-cell", "frame " + (i + 1) + " (" + b.x + ".." +
+             (b.x + b.w - 1) + ") is not inside its " + pitch +
+             "-px sheet cell at " + b.cellX);
+  });
+  return boxes;
 }
 
-/* The frames as one sprite sheet: each 64x64 cell holds one frame, centred
- * and standing on the cell's bottom row.  importSprites slices it at
- * 32x64 and gets two patterns a frame — left half, right half. */
+/* The frames as one sprite sheet: each 64x64 cell holds one frame, at its OWN
+ * place in the author's 72-px cell.  importSprites slices it at 32x64 and
+ * gets two patterns a frame — left half, right half.
+ *
+ * #206 (the maintainer, playing it: "the animation of the character is not running
+ * correctly ... keep it like it is just fix the character"): the old cut
+ * centred each frame by its own ink box and stood it on the cell's bottom
+ * row.  The run poses have different box widths (31..40 px) and one lifted
+ * foot, so that slid the whole soldier sideways 5 px and down 3 px from pose
+ * to pose — the head swung x 28..33 instead of the sheet's steady x 30, which
+ * is the wobble he saw.  The author keeps the cell fixed instead (the gun
+ * muzzle lands on cell x +52 in every run pose, and the airborne pose keeps
+ * its feet lifted), so the cut crops the 72-px cell by its 4-px sides into
+ * the 64-px pair and copies each frame at its cell x/y.  Nothing is centred. */
 function spriteSheet(sheet, boxes, picks) {
   const cell = 64, rows = 1, cols = picks.length;
   const rgba = new Uint8Array(cols * cell * cell * 4);
@@ -201,13 +231,17 @@ function spriteSheet(sheet, boxes, picks) {
     const b = boxes[frameNo - 1];
     if (!b) refuse("frame-missing", "the sheet has no frame " + frameNo +
                    " (it has " + boxes.length + ")");
-    if (b.w > cell || b.h > cell)
-      refuse("frame-size", "frame " + frameNo + " is " + b.w + "x" + b.h +
-             ", larger than the " + cell + "x" + cell + " cell");
-    const ox = i * cell + Math.floor((cell - b.w) / 2);
-    /* Feet on the cell's bottom row: every frame shares one ground line, so
-     * the toy draws all of them at one y. */
-    const oy = cell - b.h;
+    if (b.cellW < cell)
+      refuse("frame-cell", "the sheet's " + b.cellW + "-px cells are narrower " +
+             "than the " + cell + "-px sprite pair");
+    const cropX = Math.floor((b.cellW - cell) / 2);
+    const ox = i * cell + (b.x - b.cellX - cropX);
+    /* The cell is 72 rows and the sprite 64; its 8 blank bottom rows drop. */
+    const oy = b.y;
+    if (ox < i * cell || ox + b.w > i * cell + cell || oy < 0 || oy + b.h > cell)
+      refuse("frame-cell", "frame " + frameNo + " (" + b.w + "x" + b.h +
+             ") does not fit its " + cell + "x" + cell + " cell at " +
+             (b.x - b.cellX) + "," + b.y);
     for (let y = 0; y < b.h; y++) for (let x = 0; x < b.w; x++) {
       const p = pixel(sheet, b.x + x, b.y + y);
       if (!p || p[3] < 128) continue;
@@ -572,7 +606,9 @@ function manifest(r) {
       " window at " + CROP.x + "," + CROP.y + " is the background.\n" +
     "* `Legacy Action Pack - CHARACTER/Sheets/Full-Sheet.png` — frames " +
       r.picks.join(", ") + ", two 32x64 sprite patterns each (left and right half). " +
-      "The run cycle is the author's own: Full.gif plays frames 3..10 in that " +
+      "Each frame is cut at its place in the sheet's 72-px cell, not centred on " +
+      "its own ink, so the run's body and gun stay put while the legs move " +
+      "(#206). The run cycle is the author's own: Full.gif plays frames 3..10 in that " +
       "order and run.aseprite holds the same eight at 100 ms, so the toy runs " +
       "them at one every six frames; frame 1 is the idle stand and 35 the aim " +
       "(shown only while the fire key is held).\n\n" +
