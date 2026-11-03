@@ -34,7 +34,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-files=$( { find renderer -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' -o -name '*.bin' -o -name '*.json' -o -name '*.png' -o -name '*.md' \);
+files=$( { find renderer -type f \( -name '*.html' -o -name '*.js' -o -name '*.css' -o -name '*.bin' -o -name '*.json' -o -name '*.png' -o -name '*.md' -o -name '*.inc' \);
            find toys -type f;
            find vendor/codemirror vendor/fengari vendor/ppu-toys -type f;
            echo LICENSE; } | grep -v '/\.' | sort )
@@ -94,7 +94,7 @@ cat > "$web_stage/.htaccess" <<'HTACCESS'
 # visitor who had loaded the site once kept an old gallery and old scripts.
 # Images and fonts are deliberately not matched: they keep their cache.
 <IfModule mod_headers.c>
-  <FilesMatch "\.(html|js|json|md|css)$">
+  <FilesMatch "\.(html|js|json|md|css|inc)$">
     Header set Cache-Control "no-cache"
   </FilesMatch>
 </IfModule>

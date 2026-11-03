@@ -1,0 +1,27 @@
+{
+  "name": "asm-first",
+  "card": 231,
+  "source": "examples/asm-first/main.asm",
+  "build": "node tools/build-card.js examples/asm-first tools/gen/asm-first.pce",
+  "rom": {
+    "size": 8192,
+    "sha256": "630ba535a9103e882dfaa75067436ecc855d684afc5f2cf7e06958cf977d200d",
+    "banks": 1
+  },
+  "capture": {
+    "slstart": 3,
+    "slend": 234,
+    "width": 256,
+    "height": 232,
+    "rows": "VDW line 0 at row 0"
+  },
+  "expected": {
+    "description": "256x232; every pixel colour $000 = $007 RGB(0,0,252), except x 32..39, y 32..39 = colour 1 = $1F8 RGB(252,252,0)",
+    "backdrop": "$007",
+    "block": "$1F8",
+    "x0": 32,
+    "y0": 32,
+    "x1": 40,
+    "y1": 40
+  }
+}
