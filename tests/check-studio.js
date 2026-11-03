@@ -8403,7 +8403,7 @@ const ASM_BROKEN = ASM_GOOD.replace("\tlda #VALUE", "\tlda #$GG");
 
 function asmExtra() {
   const wasmFile = path.join(__dirname, "..", "vendor", "pceas", "pceas.wasm");
-  return {
+  const extra = {
     WebAssembly: WebAssembly,
     TextDecoder: TextDecoder,
     TextEncoder: TextEncoder,
@@ -8421,6 +8421,7 @@ function asmExtra() {
       });
     }
   };
+  return extra;
 }
 
 function asmProjectBytes() {
