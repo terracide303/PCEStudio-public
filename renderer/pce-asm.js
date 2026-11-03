@@ -391,8 +391,11 @@
    * The first field is bank:address; continuation lines (no source line
    * number) carry it too.  `bytes` counts emitted bytes, `from`/`to` are the
    * address span they cover (to exclusive), so a gap inside a bank shows as
-   * bytes < to - from rather than disappearing.  Bank numbers follow .bank /
-   * physical bank order as PCEAS prints them.
+   * bytes < to - from rather than disappearing.  `first` is the address of
+   * the first byte-emitting line in listing order (the #231 builder uses it
+   * to catch a source that ran past $FFFF and wrapped: `from` has become the
+   * low wrapped address by then).  Bank numbers follow .bank / physical bank
+   * order as PCEAS prints them.
    */
   function bankSizes(listing) {
     var byBank = {}, order = [];
@@ -425,7 +428,8 @@
       if (!count) continue;
       var b = byBank[bank];
       if (!b) {
-        b = byBank[bank] = { bank: bank, bytes: 0, from: addr, to: addr };
+        b = byBank[bank] = { bank: bank, bytes: 0, from: addr, to: addr,
+                             first: addr };
         order.push(bank);
       }
       b.bytes += count;
@@ -435,7 +439,8 @@
     order.sort(function (a, b) { return a - b; });
     return order.map(function (n) {
       var b = byBank[n];
-      return { bank: b.bank, bytes: b.bytes, from: b.from, to: b.to };
+      return { bank: b.bank, bytes: b.bytes, from: b.from, to: b.to,
+               first: b.first };
     });
   }
 

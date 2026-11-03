@@ -9,6 +9,11 @@
   Mednafen. That is the rest of this page.
 - **the toy ROM** — `buildToyRom()`, the studio's **Export…** and the MCP's
   `export_pce` (see below).
+- **the assembly project's HuCard** — since #231 an assembly project's
+  Export… assembles with `renderer/pce-asm.js` and builds the `.pce` with
+  `renderer/pce-card.js`, not this module. That path is
+  [`ASM.md`](ASM.md) §11; it shares this page's rules (a whole number of
+  8 KiB banks, `0xff` gaps and padding, the 128-bank / 1 MB card limit).
 
 ## The toy ROM
 

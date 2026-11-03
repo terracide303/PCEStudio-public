@@ -1,6 +1,12 @@
 # Assembly next to a Lua toy (#225)
 
-**Status: design note. No code.** This is card 2 of the assembly chain
+**Status: design note, and the first build has landed.** The plan in §§1–9 is
+#225's, written before any of it existed; #231 has since added the parts that
+do not need the CPU core — the hardware include file, the HuCard builder and
+the first program. Section 11 is the first program. The calling convention
+(§§4–5) is still #236's work.
+
+This is card 2 of the assembly chain
 (`#224` PCEAS in the browser, `#230` assembly projects, `#231` the HuCard
 builder, `#232`–`#235` the HuC6280 core, `#236` CALLASM, `#237` docs). It
 answers what `#236` has to build and what it costs, with the numbers this
@@ -424,7 +430,7 @@ wc -c < "$TMPDIR/asmprobe/base.pce"        # 16384
 ### 7.1 A Lua-only toy: nothing changes
 
 The studio's export is `PCEStudio.rom.buildToyRom({ bank0, bytecode })`
-(`renderer/studio.html:4402`) over the ILBC container. A toy with no `asm`
+(`renderer/studio.html:4794`) over the ILBC container. A toy with no `asm`
 call:
 
 - has no CALLASM instruction, so the encoder emits no version 4 and the
@@ -582,3 +588,204 @@ node -e 'const a=require("./renderer/pce-asm.js");const r=a.assemble(require("fs
 # see the four commands and their outputs described in the table; the
 # baseline is the one printed there.
 ```
+
+---
+
+## 11. First program (card #231)
+
+The smallest complete thing: an assembly project that sets two colours, draws
+one tile, and loops. It builds to a HuCard `.pce` with no compiler and no
+install, runs in Mednafen, and is the example the rest of the assembly docs
+start from.
+
+### 11.1 What ships
+
+| file | what it is |
+|---|---|
+| `renderer/asm/pce.inc` | our own names for the VDC, VCE, PSG, timer, IRQ, joypad and MPR registers and their bits. Values from `docs/MANUALS.md`; no text from HuC. |
+| `renderer/pce-card.js` | the HuCard builder: checks and pads an assembled `-raw` image, and returns the `.pce` bytes. |
+| `tools/build-card.js` | the command-line build: project folder in, `.pce` out. |
+| `examples/asm-first/main.asm` | the example. Original, written for this repo. |
+| `tools/capture-card.sh` | runs the example in Mednafen and writes `tests/dumps/asm-first/`. |
+| `tests/check-card.js` | the evidence: the include's names, the builder's refusals, the capture against the stated picture, and the saved state. |
+
+### 11.2 The project
+
+An assembly project is a folder with `main.asm` (or `main.s`; PCEAS picks the
+first source) and any `.inc` files beside it. `pce.inc` does not have to be
+copied in: `tools/build-card.js` supplies `renderer/asm/pce.inc` under the
+name `pce.inc`, and the studio's assembler fetches the same file. A project
+file called `pce.inc` wins if you want to change a constant.
+
+`examples/asm-first/main.asm`:
+
+```asm
+        .include "pce.inc"
+
+COLOUR_BACKDROP = $007       ; GGRRRBBB: green 0, red 0, blue 7
+COLOUR_BLOCK    = $1F8       ; green 7, red 7, blue 0
+TILE_BLANK      = $40
+TILE_BLOCK      = $41
+MAP_CELL        = 4 * 32 + 4
+
+        .code
+        .bank 0
+        .org $e000
+
+reset:
+        sei
+        csh
+        cld
+        ldx #$ff
+        txs
+        lda #$ff
+        tam0                       ; the device page at $0000-$1fff
+        lda #BANK_WORK_RAM
+        tam1                       ; work RAM at $2000-$3fff
+
+        ; two VCE colours: colour 0 is the backdrop, colour 1 the tile
+        stz VCE_CTA_LO
+        stz VCE_CTA_HI
+        lda #(COLOUR_BACKDROP & $ff)
+        sta VCE_CTW_LO
+        lda #(COLOUR_BACKDROP >> 8)
+        sta VCE_CTW_HI
+        lda #(COLOUR_BLOCK & $ff)
+        sta VCE_CTW_LO
+        lda #(COLOUR_BLOCK >> 8)
+        sta VCE_CTW_HI
+        lda #(VCE_CR_CLOCK_4 | VCE_CR_D2)
+        sta VCE_CR
+
+        ; ... the 256x240 VDC window, tile $40 blank, tile $41 solid,
+        ; ... a 32x32 tile map with cell (4,4) set to $41
+
+        st0 #VDC_CR
+        st1 #VDC_CR_BB             ; background on
+        st2 #$00
+
+forever:
+        bra forever
+
+irq2:
+irq1:
+timer:
+nmi:
+        rti
+
+        .org $fff6
+        .dw irq2, irq1, timer, nmi, reset
+```
+
+The full file has the register writes and the two tile-copy loops; the point
+of the shape is the bottom: every program is the same skeleton:
+
+1. **Reset at `$E000`** in `.bank 0`, because MPR7 is 0 after reset and the
+   reset vector is physical bank 0's last two bytes.
+2. **Map I/O and RAM** with `tam0 = $FF`, `tam1 = $F8` (H8-9, H8-24).
+3. **Fill VRAM through the VDC data ports** (`VDC_MAWR`, then
+   `VDC_DATA_LO`, `VDC_DATA_HI`) and the VCE colour table (`VCE_CTA`,
+   `VCE_CTW`).
+4. **Turn the display on** with `VDC_CR` and never return: the hardware has
+   no operating system to return to.
+5. **Vectors at the end of the bank**, `.org $FFF6`: IRQ2, IRQ1, timer, NMI,
+   reset — five words, reset last (H8-12/13). This is what the layout means
+   by "vectors at the end of the last bank": the bank mapped at `$E000` is
+   the last 8 KiB of the CPU's logical space, and PCEAS's physical bank 0 is
+   the one that lands there.
+
+### 11.3 Build it
+
+```sh
+node tools/build-card.js examples/asm-first "$TMPDIR/asm-first.pce"
+```
+
+The output on this machine (2026-11-03):
+
+```
+entry main.asm
+assembly 8192 B, 1 bank(s)
+bank 0: 216 B used, 7976 B free
+vectors bank 0 reset $E000
+rom /…/asm-first.pce
+size 8192 B (1 banks)
+sha256 630ba535a9103e882dfaa75067436ecc855d684afc5f2cf7e06958cf977d200d
+```
+
+Run it in Mednafen:
+
+```sh
+mednafen -force_module pce "$TMPDIR/asm-first.pce"
+```
+
+The picture is stated by the program's own header (and repeated in
+`tests/dumps/asm-first/meta.json`):
+
+| region | colour | RGB |
+|---|---|---|
+| everything | `$000` = `$007` (GGRRRBBB) | `(0, 0, 252)` — blue |
+| x 32..39, y 32..39 | colour 1 = `$1F8` | `(252, 252, 0)` — yellow |
+
+`tools/capture-card.sh` records exactly that frame. `node tests/check-card.js`
+builds the same ROM, requires the capture's sha256 to be this build's, and
+diffs the capture against the stated picture: **0 of 178,176 bytes differ**.
+`tests/check.js` also renders the saved VRAM/CRAM through the browser's
+background model and reports `asm-first: OK (256x232, diff 0)`, the 103rd
+scene.
+
+### 11.4 The HuCard rules the builder enforces
+
+`renderer/pce-card.js` takes the bytes PCEAS wrote (`pceas -raw`) and the
+per-bank sizes `renderer/pce-asm.js` reads from the listing:
+
+- **8 KiB banks, whole.** A HuCard image is a whole number of banks; gaps and
+  the last bank are `$FF` (the erased-ROM byte, `docs/ROM_LAYOUT.md`).
+- **At most 128 banks (1 MB).** That is the card's decode (`$00`–`$7F`;
+  `docs/MANUALS.md` §15.1 GAP 4). More gives `card-too-big` with the byte and
+  bank sizes.
+- **Vectors in the boot bank.** If `$FFFE/$FFFF` are both `$FF` the CPU would
+  read address `$FFFF`, so the build refuses with `card-vectors`.
+- **Bank overflow is named.** PCEAS 3.23 silently wraps a bank that grows past
+  `$FFFF` into the next physical bank. A source with 8,300 bytes at
+  `.org $E000` assembles "successfully" into 8,193 bytes in bank 0 and 107 in
+  bank 1; the builder refuses it:
+
+  ```
+  pce-card: card-bank-overflow: bank 0 holds 8300 B in an 8192 B bank
+  (108 B over); 107 B ran into bank 1
+  ```
+
+  The thrown error also carries `bank`, `used`, `capacity`, `over`, `spill`
+  and `spillBank`, so the studio and a tool can show the numbers without
+  parsing the message. A source that starts near the top and wraps to the
+  bottom of the same bank gets the same code, with the room left after its
+  first address: 20 bytes at `.org $FFF6` gives
+
+  ```
+  pce-card: card-bank-overflow: bank 0 holds 20 B from $FFF6 and runs
+  10 B past $FFFF (10 B fit after that address)
+  ```
+- **Optional 384 KiB padding.** The card's 384 KiB rule: `pad384: true` (or
+  `--pad384`) fills an image smaller than 384 KiB up to 393,216 B (48 banks)
+  with `$FF`; a larger image is left alone. The example grows from 8,192 B to
+  393,216 B and still builds. The repo records no source for why that size is
+  wanted, so it is an option, not the default.
+
+### 11.5 The studio
+
+With an assembly project open, **Export…** assembles the entry (the page
+already assembles on every edit) and downloads the `.pce` built by
+`renderer/pce-card.js`; the toast says the size and bank count. No dialog and
+no compiler. `tests/check-studio.js` holds the page's bytes against the same
+Node build by sha256.
+
+### 11.6 What is not here yet
+
+`#232`–`#235` (the HuC6280 core, interrupts/bus and the Run panel) are what
+make an assembly project *run in the studio*; Export is console-only until
+then. `#236` is the CALLASM path from a Lua toy into a bank-5 routine and
+still uses the convention in §§4–5. `#237` turns this example into the starter
+kit's three projects and the developer guide. The include file is v1: it names
+the registers and bits this hardware documentation states, and marks the two
+fields the manuals leave open (`VCE_CR_D2`, the /2 clock's second code) as not
+proven rather than guessing.
