@@ -173,6 +173,22 @@ const TOYS_META = [
       { name: "sprites.json", kind: "sprites" },
       { name: "sources.json", kind: "sources" }
     ]
+  },
+  /* A pad witness for people and for ROMs: the same file runs in the
+   * browser (gamepad + keyboard), in the IL, and in the exported ROM,
+   * where the console's joy_scan() fills the pads (docs/PADS.md).  The
+   * eight labeled cells light while their button is held, and vram[0x3F01]
+   * / vram[0x3F02] carry each pad's ever-held mask for scripted runs. */
+  {
+    id: "padtest",
+    file: "padtest/main.lua",
+    title: "PAD TEST",
+    tags: ["input"],
+    blurb: "Every button of both pads, live: eight labeled cells per pad " +
+      "light while the button is held — the d-pad, I, II, Select and Run, " +
+      "on a controller, on the keyboard (IJKL / N M / O P), or on an " +
+      "exported ROM in an emulator or on a console.",
+    effect: "two pads' buttons, live"
   }
 ];
 

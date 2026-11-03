@@ -78,6 +78,14 @@ node tests/check-gamepad.js     # #262: synthetic Gamepad-API states through the
                                 # and its dead zone, two pads, keyboard beside a
                                 # pad, remap-by-pressing and the saved table read
                                 # back on a reload.  SKIPs without a headless shell
+node tests/check-pad-buttons.js # #262: the padtest toy in both runtimes — every
+                                # button alone lights exactly its cell and the
+                                # ever-held masks reach $FF/$FF — the exported
+                                # ROM's sha256 pinned, and, when
+                                # tools/capture-pad-buttons.sh has run, the
+                                # console's movie replay asserted byte-equal to
+                                # the browser's.  SKIPs the console half and the
+                                # Geargrafx person-run with their commands
 ```
 
 `check-breaker-78.js` also needs `pceas` (through `make -C tools`) and

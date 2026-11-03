@@ -72,6 +72,11 @@ CONTROLS drawer and saved in the browser (`pcestudio.gamepad.v1`).
 `tests/check-gamepad.js` drives synthetic Gamepad-API states through the same
 path and checks every bit.
 
+The pad witness for all of this is the **padtest toy**
+(`toys/padtest/main.lua`): each pad's eight buttons are labeled cells that
+light while held, in the browser, in the IL, and in the exported ROM — the
+Evidence section below runs its ROM through a scripted movie.
+
 **III/IV are browser-only.** The toy API's pad is the 2-button pad's eight
 fields (`docs/TOYS.md`), and the console runtime scans the 2-button protocol
 above; a 6-button pad is still GAP 10 below. So the browser carries X/Y as
@@ -129,6 +134,31 @@ interrupt every 18 ticks of 6,991.3 Hz = 388.4 Hz.
 The console's figure is 0.23 % over the 60 Hz arithmetic — the difference is
 its 59.83 Hz video rate — and the browser's is 0.01 % under it. The two runs
 disagree by 0.23 %, all of it the frame rate, not the timer.
+
+**The buttons (both pads, every bit).** `tools/mkmovie.js --buttons` writes
+the same movie format for the padtest toy: 18 holds — pad 1's eight buttons
+one at a time, pad 2's eight, then all eight of each pad — positioned
+relative to the base state's frame, so any machine speed sees every bit.
+`tools/capture-pad-buttons.sh` runs the **exported** ROM (the studio's
+validate → IL → ROM route, the bytes a person downloads) under the
+instrumented Mednafen with that movie, then compares the console's final
+VRAM/CRAM/SAT byte for byte with the browser IL run fed the same buttons
+through `setPad`.  The ever-held masks in `vram[$3F01]`/`[$3F02]` must read
+`$FF`/`$FF` — the ROM proof that every bit of both pads reaches the console
+through `joy_scan()`, and the byte-equal picture is the proof the two routes
+drew the same thing.  Its output is `tests/dumps/pads/buttons-evidence.json`
+and `padtest-rom.bin`; `tests/check-pad-buttons.js` pins the ROM's sha256
+and asserts the JSON when present, SKIPping with the capture command
+otherwise — a skip is not a pass.
+
+The card's other emulator is Geargrafx: not scriptable here, so the
+person-run is the same ROM in Geargrafx, pressing every button and watching
+every cell light — the toy exists for exactly that, and the check's SKIP
+line names it until a human has done it.  As of 2026-11-03 this machine had
+no instrumented Mednafen (no source tree for
+`tools/build-mednafen-instrument.sh`) and no Geargrafx, so both halves are
+the person-run remainder; the browser-side checks (both runtimes, every bit,
+the pinned ROM) pass on every machine.
 
 ### The instrument
 
