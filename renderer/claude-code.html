@@ -182,6 +182,19 @@ Copy-Item -Recurse plugin\skills\creating-pce-toys `
     <tr><td><code>source_add</code></td><td>Turns a picture into console art: a base64 PNG or a pixel grid with its
       palette, as <code>bg</code>, <code>sprites</code>, <code>tilesheet</code> or <code>palette</code>. Reports the
       tiles, palettes and VRAM it used.</td></tr>
+    <tr><td><code>sprite_ascii</code></td><td>Draws sprites as ASCII art — one character per pixel, <code>.</code>
+      transparent, a short legend of colours, each cell of the sheet one frame — through the same importer
+      <code>source_add</code> runs, and names every frame (<code>name-0</code>, <code>name-1</code>, …) with its
+      pattern, SAT slot and palette row, the numbers the toy uses (section 8).</td></tr>
+    <tr><td><code>sfx_preset</code></td><td>A ready-made sound effect: ten presets (jump, hit, coin, explosion, shoot,
+      powerup, laser, blip, death, menu) over the studio's 15 built-in PSG instruments' own envelopes, returned as
+      ready Lua — one <code>sfx()</code> call or a small <code>sfx_&lt;name&gt;(ch, f)</code> function to paste into
+      <code>main.lua</code> (section 9).</td></tr>
+    <tr><td><code>tune_write</code></td><td>Composes the toy's song from note names in text — melody
+      <code>"C4 E4 G4 | …"</code>, bass the same — a thin wrapper on <code>song_write</code>; writes
+      <code>song.json</code> and <code>music(0)</code> plays it (section 9).</td></tr>
+    <tr><td><code>song_write</code></td><td>Composes the toy's <code>song.json</code> from a step list with the
+      SEQUENCER's built-in instruments; <code>music(0)</code> plays it (section 9).</td></tr>
     <tr><td><code>toy_run</code></td><td>Runs up to 600 frames (10 s), optionally with a pad script, and returns the
       registers, memory digests, the log and the sound activity.</td></tr>
     <tr><td><code>frame_png</code></td><td>One frame (0–599) as a 256×224 PNG that Claude can see.</td></tr>
@@ -273,6 +286,11 @@ function frame(t, f) end</code></pre>
     <li>Only use art you're allowed to use. If you give Claude a bought pack, check its licence before you share the
     game.</li>
   </ul>
+  <p><b>The quick way: <code>sprite_ascii</code>.</b> One character per pixel, <code>.</code> transparent, a short
+  legend of colours — ask Claude to draw the sprite as text instead of a pixel list. Each cell of the sheet becomes
+  one sprite through the same importer, and the reply names every frame with its pattern, SAT slot and palette row,
+  so the toy uses the numbers at once (<code>sat(i, 0, y)</code> / <code>sat(i, 1, x)</code>). The same pixels drawn
+  as a grid land byte-identical: the shortcut is the same importer and merge, not a second one.</p>
 
   <h2 id="sound">9. Sound and music</h2>
   <ul>
@@ -288,6 +306,14 @@ function frame(t, f) end</code></pre>
     <li>Claude can't hear. <code>toy_run</code> reports the PSG writes and what started on each channel, so ask it
     to check the sound is active, then listen yourself in the studio.</li>
   </ul>
+  <p><b>The quick way: <code>sfx_preset</code> and <code>tune_write</code>.</b> Ask for an effect by name —
+  <code>sfx_preset {name: "jump"}</code> — and paste the reply's <code>lua</code> into <code>main.lua</code>: one
+  <code>sfx()</code> call for a short preset, or a small <code>sfx_&lt;name&gt;(ch, f)</code> function whose
+  <code>f</code> is the frames since the effect started. The presets' envelopes are the studio's own 15 built-in
+  instruments', stepped the way the song player steps them — no new sound data. For the music, ask for the tune in
+  note names — <code>tune_write {name: "jingle", melody: "C4 E4 G4 | E4 G4 C5", bass: "C3 . G2 ."}</code> — a thin
+  wrapper on <code>song_write</code>, so <code>song.json</code> is the same file and <code>music(0)</code> plays it.
+  The same <code>{name, pitch, length}</code> is the same effect every time.</p>
 
   <h2 id="studio">10. From Claude Code to the studio</h2>
   <ul>
