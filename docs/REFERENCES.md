@@ -173,7 +173,13 @@ Paraphrased, not quoted. Names are the chat's public handles.
   automatically from `.sym`, `.lbl` or `.noi` next to the ROM), save states with rewind, and an **MCP server**
   (stdio or HTTP) so Claude Code and similar tools can drive debugging. From a community comment (unchecked
   detail): it also has VDC, sprite and tile viewers, a PSG inspector, and loads PCEAS, wla-dx and vasm symbols.
-  It does not list trace logging, profiling or source-level debugging.
+  It does not list source-level debugging. (The first version of this line said it does not list trace logging or
+  profiling either; that was read from the README alone and is corrected by #253 below.)
+- **Our research (#253):** [`docs/GEARGRAFX.md`](GEARGRAFX.md) quotes the current README and MCP_README — the full
+  MCP tool catalog, transport, headless and command-line flags, the `.sym`/`.lbl`/`.noi` loader, save states, the
+  trace logger and the profiler — and ranks where we plug in. It corrects the line above: `MCP_README.md`
+  documents `set_trace_log`/`get_trace_log` and `set_profiler`/`get_profiler_data`, so Geargrafx does list trace
+  logging and profiling; only source-level debugging is absent.
 - **The comment's advice, summarised** (a community member after seeing PCEStudio): "AI plus chip viewers" alone does
   not set us apart; the opening is (1) HuCC projects built and debugged in the browser, (2) source-level debugging
   and a profiler (per-scanline and per-frame CPU cost), (3) a live bank and ROM-space map, (4) a map editor in
