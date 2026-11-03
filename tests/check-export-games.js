@@ -123,8 +123,10 @@ const GAME_PINS = {
    * entry is preloaded and written inside the blank (so row 16's first
    * pixels are this line's colour).  The capture's closest browser frame is
    * now 48 bytes off, all in the status bar's first tile row — two one-pixel
-   * columns at the screen edges (x=1 and x=249, rows 0-7) — against ~450
-   * bytes on the star rows before; why those columns differ is not proven.
+   * columns at the screen edges (x=1 and x=249, rows 0-7).  Before #227 the
+   * same capture showed the armed replay 16 bytes off on row 24 (the split
+   * line's palette write) and 372-632 bytes on the moving picture rows
+   * (measured 2026-11-03); why the two edge columns differ is not proven.
    * So this pin stays the DUSK RUN shape: the ROM sha, the counters, and the
    * screen asserted not black and not yet a browser frame.  The measured run
    * needs its own window: 600 frames of counters and a 12 s capture, the

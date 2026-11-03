@@ -95,8 +95,11 @@ draws.  #227 fixed the raster backend's one-replay-frame-per-toy-frame latency
 real frame of the last complete toy frame) and the row-16 colour lag (each
 line's entry is written from a zero-page preload inside the blank).  The
 closest browser frame is now **48 bytes off**, all in the status bar's first
-tile row — two one-pixel columns at the screen edges — against ~450 bytes on
-the background-star rows before.  Why those two columns differ is not proven.
+tile row — two one-pixel columns at the screen edges.  Before #227 the same
+capture showed the armed replay 16 bytes off on row 24 (the split line's
+palette write) and 372-632 bytes on the moving picture rows, measured over a
+710-frame 12 s movie on 2026-11-03.  Why the two edge columns differ now is
+not proven.
 `tests/check-export-games.js` pins the ROM sha and asserts the screen is not
 black and not yet a browser frame, so the pin cannot claim a picture the ROM
 does not have.  The browser game is unchanged.
