@@ -33,7 +33,6 @@
  * Refusals carry a `code`:
  *   project-format   no project.json, or its format is not pcestudio/1
  *   project-json     project.json is not JSON / not an object
- *   project-main     the archive has no main.lua
  *   project-name     a file name that is a path or unsafe
  *   project-code     a save that would leave out main.lua (a toy) or every
  *                    .s/.asm source (an assembly project)

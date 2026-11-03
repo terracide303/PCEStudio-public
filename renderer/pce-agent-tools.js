@@ -103,9 +103,6 @@
    * include; a session with assembly files and no main.lua is an assembly
    * project (the same rule renderer/pce-project.js's kindOf uses). */
   function isAsmSource(name) { return /\.(s|asm)$/i.test(String(name || "")); }
-  function isAsmFile(name) {
-    return isAsmSource(name) || /\.inc$/i.test(String(name || ""));
-  }
   function kindOfFiles(files) {
     let lua = false, asm = false;
     for (const f of files || []) {
