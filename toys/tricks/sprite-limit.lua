@@ -98,15 +98,25 @@ end
 
 function frame(t, f)
   -- Row 1 slides one pixel a frame and wraps every 16: 16 strips, always.
+  -- sat() writes the four SAT words directly, so this is one op per word
+  -- and the C route can lower it too (a sprite(i, {spec}) table inside a
+  -- loop is a build window the C emitter refuses).
   local off1 = f % 16
   for i = 0, 15 do
-    sprite(i, { x = 32 + i * 16 + off1, y = ROW1_Y,
-                pattern = TOP_PATTERN + i, palette = 0 })
+    local x = 32 + i * 16 + off1
+    sat(i, 0, ROW1_Y)
+    sat(i, 1, x)
+    sat(i, 2, (TOP_PATTERN + i) * 2)
+    sat(i, 3, 0)                       -- palette 0, SPBG 0, no CGX
   end
   -- Row 2 slides two pixels a frame and wraps every 32: 8 x 2 = 16 strips.
+  -- SAT word 3 bit 8 is CGX (H7-22), bit 7 SPBG, bits 3-0 the palette.
   local off2 = (f * 2) % 32
   for i = 0, 7 do
-    sprite(16 + i, { x = 32 + i * 32 + off2, y = ROW2_Y,
-                     pattern = CGX_PATTERN + 2 * i, palette = 0, cgx = true })
+    local x = 32 + i * 32 + off2
+    sat(16 + i, 0, ROW2_Y)
+    sat(16 + i, 1, x)
+    sat(16 + i, 2, (CGX_PATTERN + 2 * i) * 2)
+    sat(16 + i, 3, 0x100)              -- CGX on, palette 0
   end
 end

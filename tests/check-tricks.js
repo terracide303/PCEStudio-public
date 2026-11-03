@@ -163,6 +163,14 @@ for (const c of claims.slice()) {
   if (kind === "manual") {
     check(/H[6-8]-\d+/.test(c.text),
           "manual claim names a datasheet page: " + c.text.slice(0, 50));
+    /* The manuals' last pages (docs/MANUALS.md §2-§8): a citation past the
+     * end of the chapter is a typo, not a page. */
+    const MAX_PAGE = { 6: 6, 7: 25, 8: 24 };
+    for (const pageNo of c.text.matchAll(/H([6-8])-(\d+)/g)) {
+      const chip = Number(pageNo[1]), n = Number(pageNo[2]);
+      check(n >= 1 && n <= MAX_PAGE[chip],
+            "manual claim cites an existing page H" + chip + "-" + n);
+    }
   } else if (kind === "measured") {
     check(/measured/i.test(c.text) &&
           /(tests\/check-tricks\.js|docs\/SHADOW-HIGHLIGHT\.md)/.test(c.text),
@@ -405,6 +413,7 @@ function runPage(search) {
 
 /* ---- 5. each toy runs in the studio page ------------------------------- */
 
+const pageFrames = {};
 for (const t of TRICKS.toys) {
   let pageBoot = null, err = null;
   try { pageBoot = runPage("?demo=" + t.id + "&paused=1"); }
@@ -432,6 +441,7 @@ for (const t of TRICKS.toys) {
   if (luaFrames && ilFrames) {
     eq(t.id + ": 30 Lua frames came back", luaFrames.length, 30);
     eq(t.id + ": 30 IL frames came back", ilFrames.length, 30);
+    pageFrames[t.id] = { lua: luaFrames[29].state, il: ilFrames[29].state };
     const a = luaFrames[29].state, b = ilFrames[29].state;
     eq(t.id + ": the page's Lua and IL agree on VRAM at frame 29",
        diffCount(a.vram, b.vram), 0);
@@ -477,6 +487,22 @@ for (const t of TRICKS.toys) {
   check(!!frames, t.id + ": 61 frames run without an error in both runtimes" +
         (err ? " (" + (err.code || "") + ": " + err.message + ")" : ""));
   runs[t.id] = frames;
+}
+
+/* The page's frame 29 against the standalone frame 29: the same toy ran,
+ * not the studio's default example wearing this toy's file name. */
+for (const t of TRICKS.toys) {
+  if (!pageFrames[t.id] || !runs[t.id]) continue;
+  const pageState = pageFrames[t.id].lua;
+  const own = runs[t.id][29].state;
+  eq(t.id + ": the page ran this toy (VRAM at frame 29)",
+     diffCount(pageState.vram, own.vram), 0);
+  eq(t.id + ": the page ran this toy (CRAM at frame 29)",
+     diffCount(pageState.cram, own.cram), 0);
+  eq(t.id + ": the page ran this toy (SAT at frame 29)",
+     diffCount(pageState.sat, own.sat), 0);
+  eq(t.id + ": the page ran this toy (registers at frame 29)",
+     pageState.regs, own.regs);
 }
 
 const reports = {};
@@ -624,6 +650,25 @@ if (runs["trick-fade"]) {
   check(HALF_RED_BLUE[1] !== HALF_RED_BLUE[0] &&
         HALF_RED_BLUE[2] !== HALF_RED_BLUE[1],
         "fade: a crossfade between different colours does make new words");
+  /* The page's table is the measurement too: a typo in a cell is a false
+   * claim, so parse the table and hold every cell to the arrays above. */
+  const tableMatch = page.match(/<table class="words">([\s\S]*?)<\/table>/);
+  check(!!tableMatch, "fade: the page prints the word table");
+  if (tableMatch) {
+    const rows = [...tableMatch[1].matchAll(
+      /<tr><td>(\d+)<\/td><td[^>]*>([^<]*)<\/td><td[^>]*>([^<]*)<\/td><td[^>]*>([^<]*)<\/td><\/tr>/g)];
+    eq("fade: the word table has one row per step 0..14", rows.length, 15);
+    for (const row of rows) {
+      const k = Number(row[1]);
+      const cell = (s) => {
+        const m = s.match(/\$([0-9A-F]{3})/);
+        return m ? parseInt(m[1], 16) : null;
+      };
+      eq("fade: the page's step " + k + " row",
+         [cell(row[2]), cell(row[3]), cell(row[4])],
+         [k <= 7 ? FADE7[k] : null, HALF_WHITE[k], HALF_RED_BLUE[k]]);
+    }
+  }
   const rep = reports["trick-fade"];
   if (rep) eq("fade: frame() cycles", rep.budgets.frameCycles, 4809);
 }
@@ -653,7 +698,7 @@ if (runs["trick-sprites"]) {
     eq("sprites: the validator's worst strips", rep.budgets.sprites.strips, 16);
     eq("sprites: the validator's worst request", rep.budgets.sprites.requested, 16);
     eq("sprites: the validator dropped nothing", rep.budgets.sprites.dropped, 0);
-    eq("sprites: frame() cycles", rep.budgets.frameCycles, 9917);
+    eq("sprites: frame() cycles", rep.budgets.frameCycles, 12885);
   }
 }
 

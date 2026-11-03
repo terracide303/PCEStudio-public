@@ -130,7 +130,7 @@ Two first-hit aborts sit between the page and the truth:
    table-typed globals, so the first was then the `sprite` at `main.lua:406`
    (since #188–#190 carried sprite, it is now the `builtin abs` at
    `main.lua:466`).
-2. That error sets `errors > 0`, and `renderer/studio.html:4337` returns
+2. That error sets `errors > 0`, and `renderer/studio.html:4363` returns
    before the encoder is ever called — so the page never reports what
    `pce-ilbc.js` (route 1, the backend the Export actually uses) would say.
    Asked directly, `pce-ilbc.js` refuses with `ilbc-op: instruction table

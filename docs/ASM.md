@@ -424,7 +424,7 @@ wc -c < "$TMPDIR/asmprobe/base.pce"        # 16384
 ### 7.1 A Lua-only toy: nothing changes
 
 The studio's export is `PCEStudio.rom.buildToyRom({ bank0, bytecode })`
-(`renderer/studio.html:4374`) over the ILBC container. A toy with no `asm`
+(`renderer/studio.html:4402`) over the ILBC container. A toy with no `asm`
 call:
 
 - has no CALLASM instruction, so the encoder emits no version 4 and the

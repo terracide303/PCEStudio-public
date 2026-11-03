@@ -208,7 +208,9 @@
     <h3>What the intermediate colours are, measured</h3>
     <p>The toy uses the studio's own fade arithmetic — <code>renderer/pce-layers.js</code>
     <code>mixChannel</code>: <code>floor((from·steps + (to−from)·k) / steps)</code> on each
-    3-bit channel. These are the words it actually writes (<code>GGRRRBBB</code>):</p>
+    3-bit channel. The first and third columns are the words it actually writes
+    (<code>GGRRRBBB</code>); the middle column is the same 14-step arithmetic applied to
+    white→black, to show what a half-step does when all three channels move together.</p>
     <div class="claim" data-source="measured:tests/check-tricks.js">
       <table class="words">
         <tr><th>step k</th><th>7 steps, white→black</th><th>14 half-steps, white→black</th><th>14 half-steps, red→blue</th></tr>
@@ -324,10 +326,9 @@
     </ul>
   </section>
 
-  <p class="sources">The snippets are too small to copy a whole game, and none of these toys uses
-  pack art: every tile and sprite is drawn by the toy's own <code>puttile</code>/<code>putsprite</code>
-  code. The toys live in <code>toys/</code> and the measurements are re-run by
-  <code>node tests/check-tricks.js</code>.</p>
+  <p class="sources">None of these toys uses pack art: every tile and sprite is drawn by the
+  toy's own <code>puttile</code>/<code>putsprite</code> code. The toys live in <code>toys/</code>
+  and the measurements are re-run by <code>node tests/check-tricks.js</code>.</p>
 </main>
 </body>
 </html>
