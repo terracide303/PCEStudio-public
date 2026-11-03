@@ -41,7 +41,6 @@
 const fs = require("fs");
 const path = require("path");
 
-const il = require("../renderer/pce-il.js");
 const ilbc = require("../renderer/pce-ilbc.js");
 const rom = require("../renderer/pce-rom.js");
 const romcheck = require("../renderer/pce-romcheck.js");
@@ -87,9 +86,6 @@ function cDefine(name) {
   const src = fs.readFileSync(ILVM_C, "utf8");
   const m = new RegExp("#define\\s+" + name + "\\s+(\\d+)").exec(src);
   return m ? Number(m[1]) : null;
-}
-function compile(source) {
-  return il.compile(source, { chunkName: "@main.lua" });
 }
 function reportOf(name) {
   return romcheck.check(fs.readFileSync(TOYS[name], "utf8"));
