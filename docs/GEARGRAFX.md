@@ -463,9 +463,10 @@ make
 
 **Windows**
 
-> "Install Microsoft Visual Studio Community 2026 or later." ... "Open the
-> Geargrafx Visual Studio solution `platforms/windows/Geargrafx.sln` and
-> build." — README.md
+> "Install Microsoft Visual Studio Community 2026 or later." — README.md
+
+> "Open the Geargrafx Visual Studio solution `platforms/windows/Geargrafx.sln`
+> and build." — README.md
 
 **Libretro core**
 
@@ -562,7 +563,8 @@ name and bank/address, which is exactly what a `.sym` supplies.
 ## 6. What it does NOT have
 
 **The card's premise is partly wrong, and REFERENCES.md §8 repeats it.**
-Card #253 and `docs/REFERENCES.md` §8 say Geargrafx "does not list trace
+Card #253 asks what Geargrafx does not have and names trace log, profiler and
+source-level debug; `docs/REFERENCES.md` §8 says "It does not list trace
 logging, profiling or source-level debugging." As of the 2026-11-02 checkout,
 the trace logger and the profiler **are documented** in `MCP_README.md`
 (quoted in §5), with `set_trace_log`/`get_trace_log` and
