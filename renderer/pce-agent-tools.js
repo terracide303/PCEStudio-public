@@ -15,6 +15,10 @@
  *   deflate(bytes)          the PNG writer's zlib step (sync or a Promise)
  *   inflate(bytes)          the PNG reader's zlib step (sync or a Promise)
  *   readBank0()             the committed renderer/ilvm.bin bytes (#100)
+ *   readAsmInc()            the text of renderer/asm/pce.inc (#231), the
+ *                           include file asm_build answers for free: the
+ *                           Node adapter reads it beside the server, a
+ *                           browser adapter fetches it beside the page.
  *   savePath(path)          -> {path, name}: toy_save's path rules — resolve
  *                           the path against the working folder, add the
  *                           studio's .pce.json extension when the name has
@@ -1045,11 +1049,15 @@
         "renderer/pce-asm.js — PCEAS 3.23 in WebAssembly, the same assembler " +
         "the studio runs as an assembly project is typed. The entry is " +
         "main.asm, then main.s, then the first .s/.asm (or pass entry); every " +
-        "other file is an include, so .inc files resolve by name. On success " +
-        "it returns the image's byte count, its sha256, bytes per bank (from " +
-        "the listing), the listing and the symbol table; on a syntax error it " +
-        "returns the errors with their file and line and no bytes. No ROM is " +
-        "built here: the HuCard builder is a later card.",
+        "other file is an include, so .inc files resolve by name. " +
+        ".include \"pce.inc\" resolves to the studio's own hardware include " +
+        "(renderer/asm/pce.inc, #231) without a copy in the project; a " +
+        "project file of the same name wins. On success it returns the " +
+        "image's byte count, its sha256, bytes per bank (from the listing), " +
+        "the listing and the symbol table; on a syntax error it returns the " +
+        "errors with their file and line and no bytes. No ROM is built here: " +
+        "the studio's HuCard builder (renderer/pce-card.js, #231) turns the " +
+        "image into the .pce the Export button downloads.",
       inputSchema: {
         type: "object",
         properties: {
@@ -1866,6 +1874,14 @@
       }
       const includes = {};
       for (const f of session.files) if (f.name !== entry) includes[f.name] = f.source;
+      /* #231: pce.inc is built in; a project file of the same name wins
+       * (the wrapper writes built-ins before `includes`). */
+      const builtinIncludes = {};
+      if (typeof host.readAsmInc === "function") {
+        try {
+          builtinIncludes["pce.inc"] = await host.readAsmInc();
+        } catch (e) { /* no pce.inc: the project's own copy still resolves */ }
+      }
       try {
         await asmLib.ready(host.asmWasmUrl ? { wasmUrl: host.asmWasmUrl } : undefined);
       } catch (e) {
@@ -1873,7 +1889,8 @@
       }
       let r;
       try {
-        r = asmLib.assemble(file.source, { filename: entry, includes: includes });
+        r = asmLib.assemble(file.source, { filename: entry, includes: includes,
+                                           builtinIncludes: builtinIncludes });
       } catch (e) {
         refuse("asm-error", errorMessage(e));
       }

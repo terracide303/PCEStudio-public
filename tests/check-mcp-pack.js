@@ -351,10 +351,13 @@ function listZip(zip) {
 
     /* #230: asm_build assembles from the unpacked pack — the vendored PCEAS
      * (.js and .wasm) travelled, so the download's assembler is not a
-     * missing-file refusal. */
+     * missing-file refusal.  #231: the source includes pce.inc, which the
+     * server reads beside itself (renderer/asm/pce.inc) — it must travel
+     * too or the include is a refusal. */
     const asmWrite = await client.call("file_write", {
       name: "main.asm",
-      source: "\t.code\n\t.bank 0\n\t.org $E000\nstart:\n\tlda #$01\n\trts\n"
+      source: "\t.include \"pce.inc\"\n\t.code\n\t.bank 0\n" +
+        "\t.org $E000\nstart:\n\tlda #MPR_IO\n\trts\n"
     });
     check(!asmWrite.isError && asmWrite.body && asmWrite.body.ok,
           "file_write adds an assembly source to the unpacked server");
@@ -365,6 +368,8 @@ function listZip(zip) {
     check(asmBuilt.body && asmBuilt.body.bytes > 0 &&
           /start/.test(asmBuilt.body.sym || ""),
           "the unpacked assembler returns the image and its symbols");
+    check(asmBuilt.body && /MPR_IO/.test(asmBuilt.body.sym || ""),
+          "the unpacked server's built-in pce.inc travelled with the pack");
   } catch (e) {
     check(false, "the unpacked server ran a toy end to end: " + e.message);
   } finally {

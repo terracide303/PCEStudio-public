@@ -71,6 +71,12 @@
 #                                   # (consecutive rotation phases; 3 is also
 #                                   # mednafen.png) plus flicker.json, the
 #                                   # rotation rule.
+#   tools/capture.sh asm-first      # #231: the first assembly program —
+#                                   # examples/asm-first/main.asm, built with
+#                                   # the studio's own pipeline (pce-asm.js +
+#                                   # its built-in pce.inc + pce-card.js) by
+#                                   # tests/check-asm-card.js --write, which
+#                                   # writes tools/gen/asm-first.pce.
 #
 # Scenes 4-9, 8b, 8c are #39's (docs/REVIEW.md finding 1: each is NOT
 # periodic in the dimension a renderer break would cut — see genroms.py).
@@ -122,6 +128,8 @@ elif [ "$SCENE" = window ]; then
   MODE=window
 elif [ "$SCENE" = flicker ]; then
   MODE=flicker
+elif [ "$SCENE" = asm-first ]; then
+  MODE=asm-first
 else
   MODE="${2:-scene}"
 fi
@@ -146,11 +154,15 @@ case "$MODE" in
   effect) NAME="effect1" ;;
   window) NAME="wwindow" ;;
   flicker) NAME="flicker" ;;
-  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, wide, vwide, wedit, painted, spainted, effect, window or flicker" >&2; exit 2 ;;
+  asm-first) NAME="asm-first" ;;
+  *) echo "mode must be scene, viewer, browser, bsprite, us, sprite, vsprite, raster, vraster, dma, wide, vwide, wedit, painted, spainted, effect, window, flicker or asm-first" >&2; exit 2 ;;
 esac
 DUMPDIR="tests/dumps/${NAME}"
 TOOLS="$(pwd)/tools"
-SCRATCH="/Volumes/External II/scratch"
+# The .mov scratch: the workshop machine keeps a big scratch disk here, but
+# this Mac's "External II" is not always mounted, so PCE_SCRATCH overrides
+# (a scratch dir under $TMPDIR is fine: the movie is deleted per run).
+SCRATCH="${PCE_SCRATCH:-/Volumes/External II/scratch}"
 MCSDIR="$HOME/.mednafen/mcs"
 # Log scratch under $TMPDIR (never a hard-coded /tmp: the system disk on some
 # machines is nearly full).
@@ -187,6 +199,13 @@ elif [ "$MODE" = wedit ]; then
   # #70: the editor's wide picture (336 or 512 dots), exported by #9's
   # builder with config version 2 and the wide-window block
   node tests/check-editor.js --write "wide${SCENE}"
+elif [ "$MODE" = asm-first ]; then
+  # #231: the first assembly program, through the studio's own pipeline —
+  # pce-asm.js assembles examples/asm-first/main.asm with its built-in
+  # pce.inc and pce-card.js writes the card to tools/gen/asm-first.pce.
+  # The expected picture the test compares the capture to is a function of
+  # the program's own constants (NOTES.md states it).
+  node tests/check-asm-card.js --write
 else
   make -C tools "gen/$NAME.pce"
 fi

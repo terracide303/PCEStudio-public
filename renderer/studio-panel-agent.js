@@ -424,6 +424,21 @@
               return r.arrayBuffer();
             }).then(function (b) { return new Uint8Array(b); });
           },
+          /* asm_build's built-in include (#231), beside the page */
+          readAsmInc: function () {
+            if (typeof root.fetch !== "function") {
+              return Promise.reject(new Error("this browser has no fetch, so " +
+                                              "renderer/asm/pce.inc cannot be " +
+                                              "read"));
+            }
+            return root.fetch("asm/pce.inc").then(function (r) {
+              if (!r.ok) throw new Error("cannot fetch asm/pce.inc (" +
+                                         r.status + ")");
+              return r.arrayBuffer();
+            }).then(function (b) {
+              return new TextDecoder().decode(new Uint8Array(b));
+            });
+          },
           /* toy_save's path rules: a browser has no folder to stay inside,
            * so the download's file name is the whole path. */
           savePath: function (p) {

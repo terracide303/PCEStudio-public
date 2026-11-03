@@ -8398,15 +8398,34 @@ const ASM_GOOD = [
 ].join("\n");
 const ASM_LIB = "VALUE = $12\n";
 const ASM_BROKEN = ASM_GOOD.replace("\tlda #VALUE", "\tlda #$GG");
+/* #231: a bank whose run crosses its 8 KB block's top — PCEAS drops the
+ * excess silently (measured), so the assembler says ok and the HuCard
+ * builder is what refuses it, with the sizes in the error. */
+const ASM_OVERFLOW = [
+  "\t.org $1FF0",
+  "start:",
+  "\trts",
+  "\t.db 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20",
+  "\t.org $FFF6",
+  "\t.dw start, start, start, start, start",
+  ""
+].join("\n");
 
 function asmExtra() {
   const wasmFile = path.join(__dirname, "..", "vendor", "pceas", "pceas.wasm");
-  return {
+  /* every Blob the page makes is recorded (a real Blob, so the page's
+   * downloadBytes really runs) — #231's Export check reads the .pce back
+   * out of the last one */
+  const madeBlobs = [];
+  class RecordingBlob extends Blob {
+    constructor(parts, opts) { super(parts, opts); madeBlobs.push(parts); }
+  }
+  const extra = {
     WebAssembly: WebAssembly,
     TextDecoder: TextDecoder,
     TextEncoder: TextEncoder,
     URL: URL,
-    Blob: Blob,
+    Blob: RecordingBlob,
     fetch: (url) => {
       const file = path.resolve(RENDERER, String(url));
       return Promise.resolve({
@@ -8419,6 +8438,8 @@ function asmExtra() {
       });
     }
   };
+  extra.madeBlobs = madeBlobs;
+  return extra;
 }
 
 function asmProjectBytes() {
@@ -8543,10 +8564,72 @@ async function checkAssemblyProject() {
   eq("#230: save -> open returns the same bytes (sha256)",
      shaOf(again.bytes), shaOf(direct.bytes));
 
-  /* 6. no ROM yet: Export says so instead of opening the toy dialog */
-  clickOne(page, "btn-export");
-  check(/No ROM yet/.test(page.dom.get("toast").textContent),
-        "#230: Export says there is no ROM for an assembly project yet");
+  /* 6. Export: the HuCard builder writes the .pce and the page downloads
+   * it — the file is the card renderer/pce-card.js builds, byte for byte.
+   * (The stub's anchors have no click(), so watch the anchor downloadBytes
+   * creates and give it one, as the Ctrl+S check does.) */
+  const exportExtra = asmExtra();
+  const page3 = runPage("?paused=1", makeStorage(), exportExtra);
+  const studio3 = page3.sandbox.PCEStudio.studio;
+  const reopened3 = studio3.project.openBytes(asmProjectBytes(),
+                                              { apply: true, force: true });
+  check(reopened3 && reopened3.ok, "#231: the Export page opens the project");
+  await studio3.asmBuild();
+  check(/card: 393728 B \(48 banks, padded\)/.test(
+          page3.dom.get("asm-banks").textContent),
+        "#231: the readout previews the card the Export will write");
+  const exportDownloads = [];
+  const exportDoc = page3.dom.document;
+  const exportMakeAnchor = exportDoc.createElement;
+  exportDoc.createElement = function (tag) {
+    const el = exportMakeAnchor.call(exportDoc, tag);
+    if (String(tag).toLowerCase() === "a") {
+      el.click = function () {
+        exportDownloads.push({ download: el.download, href: el.href });
+      };
+    }
+    return el;
+  };
+  exportExtra.madeBlobs.length = 0;
+  try {
+    clickOne(page3, "btn-export");
+    await new Promise((r) => setTimeout(r, 0));
+  } finally {
+    exportDoc.createElement = exportMakeAnchor;
+  }
+  eq("#231: Export starts exactly one download", exportDownloads.length, 1);
+  check(exportDownloads.length === 1 && exportDownloads[0].download === "main.pce",
+        "#231: the download is named after the entry, main.pce");
+  check(/^Downloaded main\.pce \(393728 B, 48 banks\)\.$/.test(
+          page3.dom.get("toast").textContent),
+        "#231: Export says it downloaded the card (got " +
+        JSON.stringify(page3.dom.get("toast").textContent) + ")");
+  const downloaded = exportExtra.madeBlobs[0] || [];
+  const expectedCard = (require("../renderer/pce-card.js")).build(
+    direct.bytes, { layout: asmFormat.bankRegions(direct.listing), pad: true });
+  eq("#231: the downloaded .pce is the HuCard builder's card, byte for byte",
+     shaOf(new Uint8Array(downloaded[0])), shaOf(expectedCard));
+
+  /* 7. an overflow: the assembler says ok (PCEAS dropped the excess
+   * silently — measured), the readout names the builder's refusal with the
+   * sizes, and Export refuses the card instead of downloading it */
+  studio3.selectFile("main.asm");
+  studio3.setEditorText(ASM_OVERFLOW);
+  const overflowed = await studio3.asmBuild();
+  check(overflowed && overflowed.ok,
+        "#231: the overflowing project still assembles (PCEAS drops)");
+  check(/card: bank-overflow — bank 0 holds 21 B/.test(
+          page3.dom.get("asm-banks").textContent),
+        "#231: the readout names the bank-overflow with its sizes");
+  exportExtra.madeBlobs.length = 0;
+  clickOne(page3, "btn-export");
+  await new Promise((r) => setTimeout(r, 0));
+  check(/^Export refused: bank-overflow — bank 0 holds 21 B/.test(
+          page3.dom.get("toast").textContent),
+        "#231: Export refuses the overflow by name (got " +
+        JSON.stringify(page3.dom.get("toast").textContent) + ")");
+  eq("#231: the refused Export downloads nothing",
+     exportExtra.madeBlobs.length, 0);
 }
 
 async function main() {

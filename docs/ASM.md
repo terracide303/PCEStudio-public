@@ -4,7 +4,8 @@
 (`#224` PCEAS in the browser, `#230` assembly projects, `#231` the HuCard
 builder, `#232`–`#235` the HuC6280 core, `#236` CALLASM, `#237` docs). It
 answers what `#236` has to build and what it costs, with the numbers this
-machine produces today.
+machine produces today. Section 11 records `#231`'s shipped first program,
+which exercises the chain's assembler half.
 
 The maintainer's decision on the card is followed here: this note **chooses**
 one calling convention and one ROM layout. Open questions are only the ones
@@ -582,3 +583,36 @@ node -e 'const a=require("./renderer/pce-asm.js");const r=a.assemble(require("fs
 # see the four commands and their outputs described in the table; the
 # baseline is the one printed there.
 ```
+
+---
+
+## 11. The first program (asm-first, #231)
+
+The assembly chain's first end-to-end program is **`examples/asm-first/`**
+— `main.asm` plus `NOTES.md`, committed together as the project file
+`asm-first.pcestudio` (Open it in the studio and Export). It is our own
+code, written against `renderer/asm/pce.inc`, our own hardware include
+(VDC, VCE, PSG, timer, IRQ, joypad, MPR names and bit values, each cited
+to the manual page in the file — nothing copied from HuC).
+
+What the program does and how it builds:
+
+| step | where |
+|---|---|
+| set a 4-colour palette, write two 8×8 tiles, tile a checkerboard, loop | `main.asm` |
+| the stated expected picture — every pixel named as a function of the constants | `NOTES.md` |
+| assemble: the studio fetches the vendored PCEAS and `.include "pce.inc"` resolves to the built-in copy — a project file of the same name wins | `renderer/pce-asm.js` (its `builtinIncludes` option) |
+| build the card: a 512-byte header whose byte 0 is the bank count, the banks in `.bank` order, `$FF`-padded to 48 banks (384 KB); a bank whose regions cross its 8 KB window is refused by a named `bank-overflow` error that states the sizes | `renderer/pce-card.js` |
+| download: the studio's Export button assembles, builds, and saves `<entry>.pce`; a refusal toasts the named error | `studio.html` `exportAsmCard()` |
+| prove: the expected pixels (generated from the same constants) must equal the Mednafen capture, diff 0 | `tests/check-asm-card.js`, `tests/dumps/asm-first/mednafen.png` (made with `tools/capture.sh asm-first`) |
+
+Reproducing the picture:
+
+```sh
+tools/capture.sh asm-first          # builds tools/gen/asm-first.pce and captures it
+node tests/check-asm-card.js        # the expected pixels vs the dump (SKIPs without one)
+```
+
+The HuC6280 core that runs this program under the studio's own eyes is
+`#232`–`#235`; until it lands, the proof is Mednafen (the capture route
+the Lua toys already use).
