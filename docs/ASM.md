@@ -59,7 +59,7 @@ at bytes 16,384–32,767 compare byte for byte with the old image.)
 
 | physical bank | CPU window | content | used | free | where the number comes from |
 |---|---|---|---|---|---|
-| 0–1 | `$C000–$FFFF` | crt0, vectors, runtime, interpreter | **16,384 B** | see below | `tools/ilvm/build.sh:131` asserts the image is exactly 16,384 B; `tools/gen/ilvm.json` `section_sizes`: `.text` 16,225 + `.rodata` 96 + `.early_start` 53 + `.vector` 10 = 16,384 |
+| 0–1 | `$C000–$FFFF` | crt0, vectors, runtime, interpreter | **16,384 B** | see below | `tools/ilvm/build.sh:131` asserts the image is exactly 16,384 B; `tools/gen/ilvm.json` `section_sizes` after #281: `.text` 16,238 + `.rodata` 98 + `.early_start` 38 + `.vector` 10 = 16,384; #281's 14 B came out of ICF shrinking `.early_start` 54 → 38 B, so the layout is full |
 | 2 | `$A000–$BFFF` (MPR5) | HuTrack engine code | **7,876 B** (`$A000–$BEC4`) | **316 B** | `tools/ilvm/build-engine.sh:500` print (this run) |
 | 3 | `$8000–$9FFF` (MPR4) | 2,868 B pitch tables + 1,024 B note table + 680 B sound glue and COPYV shim (`#281`) | **4,784 B** (`$8000–$92A8`) | **3,408 B** | `tools/ilvm/build-engine.sh` print (`#281` run) |
 | 4 | `$4000–$5FFF` (MPR2) | the toy's ILBC container, then assets; **last 32 B = the song trailer** | toy-specific | **8,160 − data** (see 2.2) | `renderer/pce-rom.js:149–154, 610–648`; `tools/ilvm/ilvm.c:56` |
