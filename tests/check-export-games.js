@@ -198,8 +198,8 @@ const GAMES = [
     name: "STARFALL", toy: "toys/demo-game/main.lua", galleryId: "starfall",
     expect: { code: "toy-data-bank-full",
               message: "pce-rom: toy-data-bank-full: the bytecode (6285 B) " +
-                "and assets (68702 B) need 74987 bytes; the interpreter " +
-                "reads one 8 KiB data bank" },
+                "and assets (68702 B) need 74987 bytes; a data bank holds " +
+                "8,160 usable (its last 32 bytes are the song trailer)" },
     where: null
   }
 ];
