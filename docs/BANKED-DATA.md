@@ -640,13 +640,14 @@ Every number below is measured on this tree; the commands are named.
   `16bf4249d2732bdd…`, and the host harness runs it byte-identically to the
   browser (vram/cram/sat diff 0, registers equal; a PROG read of the upvalue
   descriptor would change CRAM). In
-  Mednafen (default video driver, `tools/mcs-extract.py --ram`) the save
-  state's **VRAM, CRAM and SAT are byte-identical to the browser's after 30
-  frames** (diff 0/0/0; `vram[1000] = 1580` is `big()`'s return value through
-  the cross-bank call, and `vram[1001]`/`vram[1002]` are the writes after the
-  return, so the bank restore is exercised), and **30 of the last 30
-  recorded frames are pixel-identical (diff 0) to the browser's render of
-  frame 0** (`renderer/pce-toys.js`; the toy is static).
+  Mednafen (SDL video driver, `tools/mcs-extract.py --ram`) the save state's
+  **VRAM, CRAM and SAT are byte-identical to the browser's after 30 frames**
+  (diff 0/0/0; `vram[1000] = 1580` is `big()`'s return value through the
+  cross-bank call, `vram[1001]`/`vram[1002]` are the writes after the return,
+  so the bank restore is exercised, and `cram[2] = 165` is the `seed`
+  upvalue read through the tables bank), and **30 consecutive captured
+  frames are pixel-identical (diff 0) to the browser's render of frame 0**
+  (`renderer/pce-toys.js`; the toy is static).
 - **Still open.** #286 is fixed in the same tree: the v4 encoder emits jump
   targets bank-relative and `tests/check-banked-data.js`'s v4 (2) lines pass
   (this card's witness has no jumps, so it is unaffected). #282: re-pin every
