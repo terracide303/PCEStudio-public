@@ -685,7 +685,12 @@ number below is measured on this tree; the commands are named.
   restores the caller's I flag. Interrupts are off for the copy: the raster
   chain's IRQ handler writes the same VDC register port. So COPYV is an
   asset load, not a frame-path op — `docs/IL.md` §14.1 records the
-  immediate-write contract #218 must respect.
+  immediate-write contract #218 must respect. **Trap, found in this card
+  after the host half passed:** PCEAS's `tam #n`/`tma #n` select **MPRn**,
+  not the TAM bit mask — `tam #2` is the `$4000–$5FFF` window (`$04`) and
+  `tam #4` is the tables page (`$10`). The first shim used `#4`, which
+  mapped the asset bank over MPR4 while the pointer read MPR2; nothing on
+  the host could see it, which is why the console capture matters.
 - **The fixed image paid 14 B and has nothing left.** `exec` grew
   10,526 → 10,540 B and the image still links at exactly 16,384 B, but
   `.text` 16,238 + `.rodata` 98 + `.early_start` 38 ends at `$FFF6`, where

@@ -622,7 +622,7 @@ PsgTraceLog:
 CopyvShim:
     php                          ; save the caller's I flag
     sei
-    tma #4                       ; the code bank MPR2 holds now
+    tma #2                       ; the code bank MPR2 ($4000-$5FFF) holds now
     sta copyv_saved
 
     st0 #$00                     ; VDC register 0 (MAWR): the VRAM address
@@ -657,10 +657,10 @@ CopyvShim:
     bcc .pcok
     inc <COPYV_PC+1
 .pcok:
-    lda copyv_bank               ; map the source bank: physical 4 + bank
-    clc
-    adc #4
-    tam #4
+    lda copyv_bank               ; map the source bank: physical 4 + bank.
+    clc                          ; PCEAS's `tam #n` selects MPRn, so #2 is
+    adc #4                       ; MPR2 ($04), the window the pointer reads;
+    tam #2                       ; `tam #4` would be MPR4 (the tables page).
     st0 #$02                     ; VDC register 2 (VWR): streamed words
 
 .loop:
@@ -699,7 +699,7 @@ CopyvShim:
     jmp .loop
 .done:
     lda copyv_saved              ; restore the code bank MPR2 held
-    tam #4
+    tam #2
     plp
     rts
 .nextbank:
@@ -707,7 +707,7 @@ CopyvShim:
     lda copyv_bank
     clc
     adc #4
-    tam #4
+    tam #2
     lda #$40
     sta <COPYV_PTR+1
     rts
