@@ -372,7 +372,71 @@ Card close condition is the workshop seat's to judge; routed, not closed.
 - [ ] #283 ASSEMBLY GAME ENGINE 1/2: DESIGN, a fast HuC6280 engine that Lua calls (no code yet) ~M. The maintainer (2026-11-04): a game engine with all the speed tricks so games do not reinvent them; an assembly engine used from Lua. Write docs/ENGINE.md: (1) STUDY FIRST: survey HuC's bundled library and the open-source homebrew with source, plus measured traces of how commercial games spend their cycles (register-write logs and cycles per routine from Geargrafx and Mednafen on the maintainer's own dumps); keep notes in our own words, and commit no disassembly, no copied code or data, no art. (2) Profile the five reworked gallery games: which loops cost the most. (3) The first functions: a sprite list with movement and animation, a tilemap with scrolling, box collision; sound and the pad are in the ROM already. (4) The Lua API and the calling convention; the fixed RAM state; which ROM banks it lives in (needs the banked-data work); how big it may be. (5) Every function exists twice, assembly in the ROM and JavaScript in the studio, with a test that shows identical results: say how that is built and checked. (6) A guide for Claude: use the engine, do not rewrite it. (7) Order of building, as cards with a closing check each. Closes on: the document exists, every claim measured or marked unmeasured, the sequence cards are proposed. Research only, no repo changes beyond docs. QUEUE: auto — docs/BANKED-DATA.md and the maintainer's go on 2026-11-04 @design !8
   - 2026-11-04 @design: 2026-11-04 the maintainer: study these games first for the engine: Soldier Blade (Final Soldier), Air Zonk, Magical Chase, Street Fighter II' Champion Edition (the 20 Mbit HuCard with its bank-switching mapper; feeds the banked-data cards), and Castlevania: Rondo of Blood (CD-ROM, last: needs the System Card and a disc image, and CD is outside our scope). Order for the study step: Soldier Blade (sprite counts, no slowdown), Air Zonk (parallax with many sprites), Magical Chase (multi-plane scroll), then SF2 CE (mapper), then Rondo of Blood. The maintainer's own dumps only; measured traces and notes in our own words in docs/ENGINE.md; no disassembly, no copied code, data or art in the repo. The claims in his screenshot (a web summary) are unverified: measure each ourselves.
   - 2026-11-04 @design: 2026-11-04 the maintainer: add to the study list (same rules: his own dumps, measured traces and notes in our own words, nothing copied into the repo; every claim measured, none taken from memory): Blazing Lazers (Gunhed), R-Type, Bonk's Adventure, Devil's Crush, Ninja Spirit, Dragon Spirit, Parasol Stars, Gate of Thunder, Lords of Thunder / Winds of Thunder, Ginga Fukei Densetsu: Sapphire, Strider, and the Arcade CD Neo Geo ports (Art of Fighting, Fatal Fury 2, Fatal Fury Special, World Heroes 2). By medium: HuCard (Soldier Blade, Air Zonk, Magical Chase, SF2 CE, Blazing Lazers, R-Type, Bonk's Adventure, Devil's Crush, Ninja Spirit, Dragon Spirit, Parasol Stars) are the first batch: they need no CD. CD-ROM (Gate of Thunder, Lords/Winds of Thunder, Sapphire, Strider, Rondo of Blood) need the System Card and a disc image. Arcade Card (the four Neo Geo ports) need the Arcade Card's extra RAM emulated: check what Geargrafx supports before planning them. CD and Arcade Card titles are studied for technique only (large sprites, streaming); CD-ROM and Arcade Card support are not planned for the studio. Also read: pce-devel homebrew with published source (check each licence), Furnace's PCE sound model. Start with three: Soldier Blade, Bonk's Adventure, SF2 CE; write the questions first (sprites updated per frame, how the screen is split, how banks are switched).
-- [c] #284 EXPORT TEST MUST USE THE STUDIO'S REAL INPUT: the toy's art files too ~S. The maintainer (2026-11-04) clicked Export on STARFALL and got toy-data-bank-full (assets 68,702 B) although tests/check-export-games.js and docs/ROM_SPEED.md said STARFALL exports. The test builds main.lua alone. Make it build every gallery game exactly as the studio's Export button does (its project's art, palettes and sprites included), so a refusal in the studio is a refusal in the test; re-state the games table in docs/ROM_SPEED.md; check NOVA TIDE (it also carries art files) and the three games with none. Closes on: the test fails for STARFALL with the studio's exact refusal text, and the table, the release notes and the roadmap say what the studio says. QUEUE: auto — the maintainer's screenshot of STARFALL's Export refusal, 2026-11-04 @design !10
+- [x] #284 EXPORT TEST MUST USE THE STUDIO'S REAL INPUT: the toy's art files too ~S. The maintainer (2026-11-04) clicked Export on STARFALL and got toy-data-bank-full (assets 68,702 B) although tests/check-export-games.js and docs/ROM_SPEED.md said STARFALL exports. The test builds main.lua alone. Make it build every gallery game exactly as the studio's Export button does (its project's art, palettes and sprites included), so a refusal in the studio is a refusal in the test; re-state the games table in docs/ROM_SPEED.md; check NOVA TIDE (it also carries art files) and the three games with none. Closes on: the test fails for STARFALL with the studio's exact refusal text, and the table, the release notes and the roadmap say what the studio says. QUEUE: auto — #284 done by the 2026-11-04 design seat: the export test now builds every
+gallery game exactly as the studio's Export button does, and the docs say
+what the studio says.
+
+WHAT CHANGED
+- tests/check-export-games.js re-routed: the five games go through the
+  studio's Export order — il.compile("@main.lua") -> validateProgram
+  (8 frames) -> cgen.emitC (any error finding refuses, exactly as the
+  dialog blocks) -> ilbc.encode -> buildToyRom with the toy's asset tail
+  (the page's exportAssetTail over the gallery's file set: tiles,
+  palettes, sprites and any other non-default file). No compiler is
+  called; the file set is renderer/gallery-toys.js's, the data the page
+  loads. A refusal in the dialog is a refusal in the test, asserted with
+  the exact text.
+- docs/ROM_SPEED.md's games table re-stated to the dialog's verdicts;
+  renderer/release-notes.html and renderer/roadmap.html now say what the
+  studio says (no board cards named on public pages).
+- tests/check-starfall-console.js's NOTEs follow the new verdict.
+
+THE STUDIO'S VERDICTS, AS THE TEST NOW PINS THEM
+- STARFALL is refused in the test with the studio's exact refusal text:
+  "pce-rom: toy-data-bank-full: the bytecode (6285 B) and assets
+  (68702 B) need 74987 bytes; a data bank holds 8,160 usable (its last
+  32 bytes are the song trailer)" — the maintainer's 2026-11-04 click's
+  numbers, asserted whole (#279 landed the same day and reworded the
+  last sentence; the pin follows). Its art is the three art files the
+  gallery gives the studio.
+- NOVA TIDE (it also carries art files): refused cgen-op "function
+  fn@28, IL line 29, instruction `unm`: not lowered by this backend
+  (…)" — main.lua:29 re-derived from the IL; its asset tail is
+  192,089 B (the suite computes it), so carrying raster would still not
+  export it. Its bytecode-route refusal (ilbc-op raster, main.lua:530)
+  stays tripwired.
+- DUSK RUN (no art files): refused cgen-op "function fn@59, IL line 62,
+  instruction `unm`: …" — main.lua:62. TOWER and PLATFORMER (also no
+  art files): the C emitter accepts them, the asset tail is empty, and
+  the studio builds both — the ROMs are byte-identical to the old
+  no-asset route, so their pinned shas and Mednafen pictures hold.
+
+EVIDENCE KEPT, LABELED
+- A game the studio refuses whose interpreter ROM is still measured is
+  pinned `bytecodeOnly` (built by the MCP's route, no C emitter, no
+  assets): STARFALL's ROM sha a9f5140e… with its unmatched picture pin
+  (48 bytes off, cause not proven), DUSK RUN's sha cabf674e… with its
+  diff-0 picture. The suite says so, never "exports".
+- The controls stay on the bytecode route (the MCP's export_pce), as
+  before.
+
+PROOF
+- check-export-games.js: PASS 94 checks with Mednafen (full run: the
+  three studio refusals with exact text and IL-derived lines, both
+  studio builds diff 0 against the browser, the bytecodeOnly pins and
+  the four controls' picture cycles).
+- check-starfall-console.js PASS 86, check-romcheck.js PASS 104.
+- Fresh clone of the pushed commit ce81bd5 under $TMPDIR,
+  tests/all.sh: 69 suite(s) PASS, 4 SKIP (check-ares, check-gamepad,
+  check-pad-buttons, check-pad-keys — no screen on this machine),
+  2 FAIL, both the known pre-existing reds on this machine (recorded on
+  the #227 card's own fresh-clone run): check-browser (no Chrome; the
+  card allows) and check-il-console (the llvm-mos toolchain drift —
+  rebuilt raster ROM sha 9fed9826… vs committed cdf6dfae…; it rebuilds
+  tools/toyc/toy_runtime.c, untouched by this card). Every suite this
+  card touched PASSes in the clone: check-export-games 94,
+  check-starfall-console, check-romcheck, check-no-card-numbers,
+  check-docs. @design !10
 
 DONE (all in aca3f39). The capacities, one at a time, with the boot check and the host harness as the instrument: MAX_REGS 32->41 (the frame hook's 41 registers; fn0 has 39), MAX_FUNCS 32->41 (the container has 41), MAX_UPS 6->20 with the upvalue cells in ONE POOL (72 permanent cells allocated while toy_boot runs -- DUSK uses 70 -- plus a 24-cell ring for later callbacks), MAX_CLOS 16->48 (the 27 boot closures stay valid for the run; later closures take a ring above them), MAX_SLOTS 32->16 (the largest table is tables.lua's 7). A per-closure array cannot hold 19 upvalues x 48 slots, so the closure is 2 B (fid, upbase) and `ups[]` holds the cells; constants are read from the container through `koff` (2 B each) instead of decoded into 512 B of kvals, which is what pays for the raise. Budget: heap start $373E, engine $373E-$3B95, stack headroom 1131 B (build.sh asserts 787), zero page unchanged (34 B free). The 16 KiB fixed bank had ~34 B spare; ICF plus -mllvm -inline-threshold=50 recover the ~320 B the code added, and build.sh + stack-canary.sh compile with the same flags (asserted 16,384 B).
 
