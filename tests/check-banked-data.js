@@ -1,0 +1,422 @@
+#!/usr/bin/env node
+/*
+ * tests/check-banked-data.js — #279's evidence: container version 4 and the
+ * banked toy builder (docs/BANKED-DATA.md §5.2).
+ *
+ *   node tests/check-banked-data.js
+ *
+ * WHAT IS CHECKED
+ *
+ *   1. The rule that keeps every existing ROM byte-identical: the encoder
+ *      writes version 4 only when the tables and code together do not fit one
+ *      data bank's 8,160 usable bytes.  Seven committed toys' container shas
+ *      are pinned here at their pre-#279 values (captured from HEAD), and the
+ *      v1-v3 builder output is compared with a hand-laid data bank (image,
+ *      container, 0xFF padding, the zeroed song trailer at 8,160) — so a
+ *      changed padding byte or trailer position fails.
+ *   2. A v4 container's shape: whole 8 KiB banks, the tables bank first, the
+ *      bank count in header bytes 26-27, every function entry's reserved byte
+ *      (offset 9) naming its code bank and its codeOff/codeEnd bank-relative
+ *      and below 8,160, and a zeroed 32-byte trailer in every bank.  TOWER's
+ *      pre-rework source (the 8,524 B program docs/BANKED-DATA.md measured,
+ *      copied outside the repo by #272) is the witness: 2 banks, 16,384 B of
+ *      container, a 49,152 B ROM.  That file is not in the repo, so the check
+ *      SKIPs when it is absent (the art rule's pattern); a synthetic two-code-
+ *      bank fixture always runs.
+ *   3. The refusals are named: a function larger than a code bank
+ *      (toy-function-too-big, naming the id and byte count), a jump at the
+ *      usable edge (toy-bank-edge), tables over a bank (toy-tables-bank-full),
+ *      a v1-v3 container over 8,160 B (toy-data-bank-full — finding F1's
+ *      8,160/8,192 fix, with 8,160 accepted), and a malformed v4 bank count.
+ *   4. The browser path (both files with `self`, no module) builds the same
+ *      v4 bytes Node does.
+ *
+ * NOT PROVEN HERE: no interpreter reads v4 yet (#280 maps MPR3 to the tables
+ * bank and MPR2 per call), so nothing in this suite boots a banked ROM or
+ * compares it with the browser's picture.  Rule 2 is owed: a different seat
+ * and model must break this suite in its own ways (the fit threshold, the
+ * packing order, the bank byte, the edge guard, the builder's bank count)
+ * before the card closes.
+ */
+"use strict";
+
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const vm = require("vm");
+
+const il = require("../renderer/pce-il.js");
+const ilbc = require("../renderer/pce-ilbc.js");
+const romLib = require("../renderer/pce-rom.js");
+
+const ROOT = path.join(__dirname, "..");
+const ILVM = path.join(ROOT, "renderer", "ilvm.bin");
+const BANK = 8192;
+const USABLE = 8160;                 /* 0x1FE0, pce-rom.js's SONG_TABLE_OFF */
+const ORIGINAL_TOWER = process.env.PCESTUDIO_ORIGINAL_TOWER ||
+  "/Volumes/External/pcestudio-toys/originals/tower/main.lua";
+
+let checks = 0, failed = 0;
+const skipped = [];
+
+function eq(what, got, want) {
+  checks++;
+  if (got !== want) {
+    failed++;
+    console.log("FAIL  " + what + ": got " + JSON.stringify(got) +
+                ", want " + JSON.stringify(want));
+  }
+}
+function check(ok, what) {
+  checks++;
+  if (!ok) { failed++; console.log("FAIL  " + what); }
+}
+function sha(b) {
+  return crypto.createHash("sha256").update(Buffer.from(b)).digest("hex");
+}
+function refuseCode(fn) {
+  try { fn(); } catch (e) { return (e && e.code) || (e && e.name) || "error"; }
+  return null;
+}
+function refuseMessage(fn) {
+  try { fn(); } catch (e) { return (e && e.message) || ""; }
+  return "";
+}
+function encodeToy(file) {
+  return ilbc.encode(il.compile(fs.readFileSync(path.join(ROOT, file), "utf8"),
+                                { chunkName: path.basename(file) }));
+}
+function u16(b, at) { return b[at] | (b[at + 1] << 8); }
+function fnEntry(bytes, i) {
+  const at = u16(bytes, 12) + i * 10;
+  return { codeOff: u16(bytes, at), codeEnd: u16(bytes, at + 2),
+           upOff: u16(bytes, at + 4), nregs: bytes[at + 6],
+           nparams: bytes[at + 7], nups: bytes[at + 8], bank: bytes[at + 9] };
+}
+/* A hand-built IL program, the shape renderer/pce-il.js produces: one
+ * `frame` hook, one global slot for it, and whatever instructions the test
+ * needs.  No Lua front end is involved. */
+function program(code, globals, hookFid) {
+  return {
+    lang: "pce-il", version: 1,
+    globals: globals || [{ name: "frame" }],
+    hooks: { frame: hookFid == null ? 0 : hookFid },
+    functions: code.map(function (c, i) {
+      return { name: i === 0 ? "frame" : "f" + i, params: [], registers: 1,
+               upvalues: [], code: c };
+    })
+  };
+}
+function consts(n) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push({ t: "const", dst: { r: 0 }, k: { t: "int", v: 0 }, line: 1 });
+  }
+  return out;
+}
+
+/* ---- 1. every single-bank toy keeps its bytes -------------------------- */
+
+/* Captured from HEAD (708cf30) before the change: version, container length,
+ * sha256.  These are the "a single-bank toy's container bytes are unchanged"
+ * and "a v1-3 container's bytes are unchanged" pins. */
+const UNCHANGED = [
+  ["tools/toys/palette.lua", 1, 578,
+   "3eca0d1d4fe0b1b79aae57d82bc784e608f2b9165c6291a5322230336f5efa93"],
+  ["toys/palette-cycle.lua", 1, 862,
+   "0bf7f46e2fdd4eb78c3201670560d35f0dff1a5e2a49eaf5253b14e68273e8c2"],
+  ["toys/parallax.lua", 1, 1115,
+   "7ab5404025a7cf796b97e9c215becb4359e0872d371d32c0f3a3129c18466efb"],
+  ["toys/status-bar.lua", 1, 1369,
+   "da128302c6233e0cdc23087036df829a86c157b42750288318bd092b9454134c"],
+  ["toys/platformer/main.lua", 1, 2410,
+   "1c4d0f4fd66344a6078ece8ce12d952f628ed2b74dfbb753e31c3e3d23388199"],
+  /* v3: the table section and/or the sound ops */
+  ["toys/dusk-run/main.lua", 3, 7470,
+   "136b1e4b4eb79cf692f4198d60fe67a44194488a06adca0970ca51544dbbf5e9"],
+  ["toys/demo-game/main.lua", 3, 6285,
+   "05f1d7a347a7706b7932a6f48c2a6c8df5fdfefecd736d70900f143c26b04f6e"],
+  ["toys/tower/main.lua", 3, 7862,
+   "d92451db1fbc952bbf02d3d04a67e4e64de976c49a6ddc5be52541971d092290"]
+];
+
+function checkUnchanged() {
+  for (const [file, ver, size, pin] of UNCHANGED) {
+    let enc;
+    try {
+      enc = encodeToy(file);
+    } catch (e) {
+      checks++; failed++;
+      console.log("FAIL  " + file + " does not encode: " + (e.code || e));
+      continue;
+    }
+    eq(file + " stays container version " + ver, enc.version, ver);
+    eq(file + " container is still " + size + " B", enc.bytes.length, size);
+    eq(file + " container sha is HEAD's", sha(enc.bytes), pin);
+    eq(file + " is not banked", enc.banked, false);
+  }
+
+  const bank0 = fs.readFileSync(ILVM);
+  for (const [file, ver, size] of UNCHANGED) {
+    const enc = encodeToy(file);
+    if (enc.bytes.length > USABLE) continue;
+    const rom = romLib.buildToyRom({ bank0: bank0, bytecode: enc.bytes });
+    const want = new Uint8Array(40960);
+    want.fill(0xFF);
+    want.set(bank0, 0);
+    want.set(enc.bytes, 32768);
+    want[32768 + USABLE] = 0;               /* the song trailer */
+    eq(file + " builds the same five-bank ROM bytes (v" + ver + ")",
+       sha(rom), sha(want));
+  }
+
+  /* The whole-dump ROM shas (the strongest end-to-end statement: the encoder
+   * and builder together still make the committed ROMs). */
+  for (const [file, dump] of [["tools/toys/palette.lua", "toypalette-ilvm"],
+                              ["toys/parallax.lua", "toyparallax-ilvm"],
+                              ["toys/status-bar.lua", "toystatusbar-ilvm"]]) {
+    const meta = JSON.parse(fs.readFileSync(
+      path.join(ROOT, "tests", "dumps", dump, "meta.json"), "utf8"));
+    const rom = romLib.buildToyRom({ bank0: bank0,
+                                     bytecode: encodeToy(file).bytes });
+    eq(file + "'s ROM is the committed " + dump + " ROM",
+       sha(rom), meta.rom_sha256);
+  }
+}
+
+/* ---- 2. the v4 shape --------------------------------------------------- */
+
+function checkContainer(bytes, wantBanks, label) {
+  eq(label + ": container magic", String.fromCharCode.apply(
+    null, Array.from(bytes.slice(0, 4))), "ILBC");
+  eq(label + ": container version", bytes[4], 4);
+  eq(label + ": container is whole banks", bytes.length % BANK, 0);
+  eq(label + ": header names " + wantBanks + " code bank(s)",
+     u16(bytes, 26), wantBanks);
+  eq(label + ": container is " + (1 + wantBanks) + " banks",
+     bytes.length, (1 + wantBanks) * BANK);
+  eq(label + ": header codeOff is 0 (entries carry the bounds)",
+     u16(bytes, 22), 0);
+  eq(label + ": header codeEnd is 0", u16(bytes, 24), 0);
+
+  const nfunc = bytes[9];
+  const seen = new Set();
+  for (let i = 0; i < nfunc; i++) {
+    const f = fnEntry(bytes, i);
+    seen.add(f.bank);
+    check(f.bank >= 1 && f.bank <= wantBanks,
+          label + ": function " + i + "'s bank byte is 1.." + wantBanks +
+          " (got " + f.bank + ")");
+    check(f.codeOff <= f.codeEnd && f.codeEnd <= USABLE,
+          label + ": function " + i + " is whole inside its bank (" +
+          f.codeOff + ".." + f.codeEnd + ", usable " + USABLE + ")");
+  }
+  check(seen.size === wantBanks,
+        label + ": every code bank holds at least one function (" +
+        Array.from(seen).sort() + ")");
+
+  for (let b = 0; b <= wantBanks; b++) {
+    eq(label + ": bank " + b + " carries the zeroed song trailer",
+       bytes[b * BANK + USABLE], 0);
+  }
+
+  const rom = romLib.buildToyRom({
+    bank0: fs.readFileSync(ILVM), bytecode: bytes });
+  eq(label + ": ROM bytes", rom.length, 32768 + (1 + wantBanks) * BANK);
+}
+
+function checkVanillaFixture() {
+  /* Two functions that cannot share one bank: 4,998 B each. */
+  const enc = ilbc.encode(program([consts(1666), consts(1666)],
+                                  [{ name: "frame" }, { name: "f1" }]));
+  eq("a two-function fixture is version 4", enc.version, 4);
+  eq("it has two code banks", enc.codeBanks, 2);
+  checkContainer(enc.bytes, 2, "two-code-bank fixture");
+  eq("function 0 is in bank 1", fnEntry(enc.bytes, 0).bank, 1);
+  eq("function 1 is in bank 2", fnEntry(enc.bytes, 1).bank, 2);
+  eq("function 0 starts bank 1 at 0", fnEntry(enc.bytes, 0).codeOff, 0);
+  eq("function 1 starts bank 2 at 0", fnEntry(enc.bytes, 1).codeOff, 0);
+
+  /* Packing: a full-ish first function pushes the rest to bank 2, and the
+   * small functions then share that bank in order. */
+  const enc2 = ilbc.encode(program([consts(2666), consts(100), consts(100),
+                                    consts(100)],
+                                   [{ name: "frame" }, { name: "f1" },
+                                    { name: "f2" }, { name: "f3" }]));
+  eq("the fixture needs two code banks", enc2.codeBanks, 2);
+  eq("function 0 fills bank 1 at 0", fnEntry(enc2.bytes, 0).codeOff, 0);
+  eq("function 0 stays in bank 1", fnEntry(enc2.bytes, 0).bank, 1);
+  eq("function 1 starts bank 2 at 0", fnEntry(enc2.bytes, 1).codeOff, 0);
+  eq("function 1 is in bank 2", fnEntry(enc2.bytes, 1).bank, 2);
+  eq("function 2 follows at 300", fnEntry(enc2.bytes, 2).codeOff, 300);
+  eq("function 3 follows at 600", fnEntry(enc2.bytes, 3).codeOff, 600);
+  eq("functions 2 and 3 stay in bank 2", fnEntry(enc2.bytes, 3).bank, 2);
+
+  /* Determinism: the container is a pure function of the program. */
+  const again = ilbc.encode(program([consts(1666), consts(1666)],
+                                    [{ name: "frame" }, { name: "f1" }]));
+  eq("the v4 container is deterministic", sha(again.bytes), sha(enc.bytes));
+
+  /* The browser path: `self`, no module, the exact branch the studio runs. */
+  const sandbox = { self: {}, console: console };
+  sandbox.self.window = sandbox.self;
+  vm.createContext(sandbox);
+  for (const f of ["renderer/pce-ilbc.js", "renderer/pce-rom.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, f), "utf8"), sandbox,
+                    { filename: f });
+  }
+  const browser = sandbox.self.PCEStudio.ilbc.encode(
+    program([consts(1666), consts(1666)], [{ name: "frame" }, { name: "f1" }]));
+  eq("the browser context encodes the same v4 bytes",
+     sha(browser.bytes), sha(enc.bytes));
+  const browserRom = sandbox.self.PCEStudio.rom.buildToyRom({
+    bank0: new Uint8Array(fs.readFileSync(ILVM)),
+    bytecode: new Uint8Array(browser.bytes) });
+  const nodeRom = romLib.buildToyRom({
+    bank0: fs.readFileSync(ILVM), bytecode: enc.bytes });
+  eq("the browser context builds the same banked ROM",
+     sha(browserRom), sha(nodeRom));
+}
+
+function checkOriginalTower() {
+  if (!fs.existsSync(ORIGINAL_TOWER)) {
+    const why = "the pre-#272 TOWER is not at " + ORIGINAL_TOWER +
+                " (set PCESTUDIO_ORIGINAL_TOWER)";
+    skipped.push(why);
+    console.log("SKIP  TOWER's 2-bank container: " + why);
+    return;
+  }
+  const enc = ilbc.encode(il.compile(fs.readFileSync(ORIGINAL_TOWER, "utf8"),
+                                     { chunkName: "tower.lua" }));
+  eq("the pre-rework TOWER does not fit one bank, so it is version 4",
+     enc.version, 4);
+  eq("TOWER's container is 2 banks (16,384 B)", enc.bytes.length, 2 * BANK);
+  eq("TOWER has one code bank", enc.codeBanks, 1);
+  eq("TOWER's code totals 7,206 B", enc.codeBytes, 7206);
+  checkContainer(enc.bytes, 1, "TOWER");
+  const rom = romLib.buildToyRom({
+    bank0: fs.readFileSync(ILVM), bytecode: enc.bytes });
+  eq("TOWER builds a 49,152 B ROM", rom.length, 49152);
+  check(Buffer.from(rom.slice(0, 32768))
+        .equals(fs.readFileSync(ILVM)),
+        "TOWER's ROM opens with the 32 KiB interpreter image");
+  check(Buffer.from(rom.slice(32768, 49152)).equals(Buffer.from(enc.bytes)),
+        "TOWER's two data banks are the container, in order");
+  eq("TOWER's physical bank 4 trailer is zero", rom[32768 + USABLE], 0);
+  eq("TOWER's physical bank 5 trailer is zero", rom[32768 + BANK + USABLE], 0);
+}
+
+/* ---- 3. the named refusals --------------------------------------------- */
+
+function checkRefusals() {
+  const bank0 = fs.readFileSync(ILVM);
+
+  /* A function bigger than a code bank. */
+  eq("a 9,000 B function is toy-function-too-big",
+     refuseCode(function () { ilbc.encode(program([consts(3000)])); }),
+     "toy-function-too-big");
+  const tooBig = refuseMessage(function () {
+    ilbc.encode(program([consts(3000)]));
+  });
+  check(/function 0 \(`frame`\) is 9000 B/.test(tooBig),
+        "toy-function-too-big names the function id and byte count (" +
+        tooBig + ")");
+
+  /* A jump at the bank edge: a function that fills the usable 8,160 bytes
+   * exactly and jumps one past its last instruction, i.e. into the trailer. */
+  const edge = consts(2719);
+  edge.push({ t: "jmp", target: 2720, line: 1 });
+  eq("a jump to a full bank's edge is toy-bank-edge",
+     refuseCode(function () { ilbc.encode(program([edge])); }),
+     "toy-bank-edge");
+  check(/jumps to pc 2720, bank offset 8160/.test(
+    refuseMessage(function () { ilbc.encode(program([edge])); })),
+    "toy-bank-edge names the pc and the bank offset");
+
+  /* Tables over a bank: 255 max-length global names. */
+  const globals = [{ name: "frame" }];
+  for (let i = 1; i < 255; i++) {
+    globals.push({ name: ("g" + i).padEnd(40, "x") });
+  }
+  eq("tables over 8,160 B are toy-tables-bank-full",
+     refuseCode(function () {
+       ilbc.encode(program([[{ t: "ret", src: null, line: 1 }]], globals));
+     }), "toy-tables-bank-full");
+
+  /* Finding F1: the builder refuses a v1-v3 container in 8,161..8,192, the
+   * range the old 8,192-byte check let through, and accepts exactly 8,160. */
+  function fakeContainer(len) {
+    const b = new Uint8Array(len);
+    b.set([0x49, 0x4C, 0x42, 0x43], 0);
+    b[4] = 1;
+    return b;
+  }
+  eq("a v1-3 container of exactly 8,160 B is accepted",
+     refuseCode(function () {
+       romLib.buildToyRom({ bank0: bank0, bytecode: fakeContainer(USABLE) });
+     }), null);
+  eq("a v1-3 container of 8,161 B is toy-data-bank-full",
+     refuseCode(function () {
+       romLib.buildToyRom({ bank0: bank0, bytecode: fakeContainer(USABLE + 1) });
+     }), "toy-data-bank-full");
+  const f1 = refuseMessage(function () {
+    romLib.buildToyRom({ bank0: bank0, bytecode: fakeContainer(8192) });
+  });
+  check(/8,160 usable/.test(f1) && /song trailer/.test(f1),
+        "toy-data-bank-full states the real 8,160 B usable size (" + f1 + ")");
+
+  /* The builder checks a v4 container's own bank count. */
+  const enc = ilbc.encode(program([consts(1666), consts(1666)],
+                                  [{ name: "frame" }, { name: "f1" }]));
+  const badLen = new Uint8Array(enc.bytes.length - BANK);
+  badLen.set(enc.bytes.slice(0, badLen.length));
+  check(refuseCode(function () {
+    romLib.buildToyRom({ bank0: bank0, bytecode: badLen });
+  }) != null, "a v4 container one bank short of its header count is refused");
+  const badCount = Uint8Array.from(enc.bytes);
+  badCount[26] = 5;
+  check(refuseCode(function () {
+    romLib.buildToyRom({ bank0: bank0, bytecode: badCount });
+  }) != null, "a v4 container whose count does not match its length is " +
+       "refused");
+  check(refuseCode(function () {
+    const zero = new Uint8Array(BANK);
+    zero.set([0x49, 0x4C, 0x42, 0x43], 0);
+    zero[4] = 4;
+    romLib.buildToyRom({ bank0: bank0, bytecode: zero });
+  }) != null, "a v4 container with no code bank is refused");
+
+  /* An asset tail after a banked container occupies whole banks after it. */
+  const assets = new Uint8Array(9000);
+  assets.fill(7);
+  const withAssets = romLib.buildToyRom({
+    bank0: bank0, bytecode: enc.bytes, assets: assets });
+  eq("a 3-bank container plus 9,000 B of assets is five data banks",
+     withAssets.length, 32768 + 5 * BANK);
+  eq("the asset tail starts on the bank after the container",
+     withAssets[32768 + enc.bytes.length], 7);
+}
+
+/* ---- run ---------------------------------------------------------------- */
+
+console.log("check-banked-data: #279 container v4 and the banked builder");
+checkUnchanged();
+checkVanillaFixture();
+checkOriginalTower();
+checkRefusals();
+
+if (skipped.length) {
+  console.log("note  " + checks + " checks, " + failed + " failed, " +
+              skipped.length + " skipped");
+} else {
+  console.log("note  " + checks + " checks, " + failed + " failed");
+}
+if (failed) {
+  console.log("FAIL  check-banked-data: " + failed + " of " + checks +
+              " checks failed");
+  process.exit(1);
+}
+if (skipped.length) {
+  console.log("SKIP  check-banked-data: " + skipped.join("; "));
+}
+console.log("PASS  " + checks + " checks");

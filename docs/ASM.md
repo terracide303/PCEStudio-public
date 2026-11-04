@@ -216,8 +216,17 @@ local word = asm("set_palette", 1, 0x1FF)
 Container **version 4** when the program has an `asm` instruction (the
 version byte at offset 4; `docs/IL.md` §14.1 lists 1–3 today). The new
 opcode sits in the unused `0x23` slot (the ops table in
-`renderer/pce-ilbc.js:205–213` ends at `0x22`; `0x17` stays reserved for
+`renderer/pce-ilbc.js`'s `OPS` ends at `0x22`; `0x17` stays reserved for
 `vget`, `docs/IL.md:1200`).
+
+> **2026-11-04 (#279):** version 4 is now the *banked* container
+> (`docs/BANKED-DATA.md` §5.2, `docs/IL.md` §14.1): a tables bank and N code
+> banks, only emitted when a toy does not fit one data bank. `callasm` is not
+> built, so nothing emits it today. When the assembly-routine card is built,
+> CALLASM either folds into that v4 layout (an `asm` instruction in a code
+> bank, the routine still at physical 5 per §4.1) or takes version 5; the
+> rest of this section's bytecode shape is unaffected. Do not write a second
+> format on byte 4 = 4 without changing this note.
 
 | op | instruction | bytes after the opcode |
 |---|---|---|

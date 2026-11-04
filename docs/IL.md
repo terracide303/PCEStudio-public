@@ -1109,9 +1109,12 @@ toy.lua --(pce-il.js)--> IL --(pce-ilbc.js)--> bytecode --(pce-rom.js)--> .pce
 
 ### 14.1 The container
 
-`renderer/pce-ilbc.js` encodes a `pce-il` version 1 program into one container
-that fits in a single 8 KiB data bank. All offsets are byte offsets from the
-start of the container. Little-endian. The container is **version 1** unless
+`renderer/pce-ilbc.js` encodes a `pce-il` version 1 program into a container
+that fits in a single 8 KiB data bank; a program that does not fit becomes the
+banked container **version 4** (`docs/BANKED-DATA.md` §5.2). All offsets are
+byte offsets from the start of the container, except a version 4 code offset,
+which is an offset inside its function's code bank. Little-endian. The
+container is **version 1** unless
 the program has a table instruction; then it is **version 2**, with a 28-byte
 header and a table section (#172). A table-free toy's bytes are unchanged.
 Since #197 the container is **version 3** when the program has a sound
@@ -1125,7 +1128,7 @@ and 3 since #215: the sound ops call the HuTrack engine bank and
 | offset | size | field |
 |---|---|---|
 | 0 | 4 | `"ILBC"` |
-| 4 | 1 | version (1; 2 when the program has a table instruction; 3 when it has a sound instruction or `note` — #197) |
+| 4 | 1 | version (1; 2 when the program has a table instruction; 3 when it has a sound instruction or `note` — #197; 4 when it is banked — #279) |
 | 5 | 1 | flags — bit 0: the toy has a `raster()` callback |
 | 6 | 1 | `init` slot (0xFF = none) |
 | 7 | 1 | `frame` slot |
@@ -1137,10 +1140,26 @@ and 3 since #215: the sound ops call the HuTrack engine bank and
 | 14 | 2 | upvalue descriptor table offset |
 | 16 | 2 | constant table offset |
 | 18 | 2 | global name table offset |
-| 20 | 2 | **v1:** first instruction · **v2:** table section offset |
-| 22 | 2 | **v1:** one past the last instruction · **v2:** first instruction |
-| 24 | 2 | **v2 only:** one past the last instruction |
-| 26 | 2 | **v2 only:** reserved (0) |
+| 20 | 2 | **v1:** first instruction · **v2/v3:** table section offset · **v4:** table section offset |
+| 22 | 2 | **v1:** one past the last instruction · **v2/v3:** first instruction · **v4:** 0 |
+| 24 | 2 | **v2/v3 only:** one past the last instruction · **v4:** 0 |
+| 26 | 2 | **v2/v3:** reserved (0) · **v4:** code-bank count N |
+
+**Version 4** (#279) is the banked layout, written only when the tables and
+code together exceed a data bank's 8,160 usable bytes. It is one tables bank
+and N code banks, each a whole 8,192 bytes and each ending in the same 32-byte
+zeroed song trailer (at 8,160). Bank 0 (physical 4) holds the header, function
+table, upvalue descriptors, constants, global names and table section; banks
+1..N (physical 5..) hold code. A function is packed wholly inside one bank, so
+`codeOff`/`codeEnd` and every jump target are offsets **inside that bank**, and
+the function entry's reserved byte (offset 9) is the bank number (1..N; 0 in
+versions 1-3, whose code shares physical bank 4). The tables over 8,160 B are
+refused `toy-tables-bank-full`; a function over 8,160 B is
+`toy-function-too-big` (naming its id and byte count); a jump to a bank's
+usable edge is `toy-bank-edge`. `buildToyRom` accepts version 4 and appends
+the 1+N banks; the interpreter that maps MPR3 to the tables bank and MPR2 per
+call is card #280. Every toy that fits one bank keeps its v1-v3 bytes
+unchanged.
 
 The **v2 table section** (at the offset in header byte 20, between the global
 names and the code) is `nslots u8`, then one entry per table site in program
@@ -1162,7 +1181,10 @@ saved VRAM, CRAM and SAT are byte-equal to the browser's frame 416.
 
 A **function entry** (10 bytes, one per function id in order) is
 `codeOff u16, codeEnd u16, upOff u16, nregs u8, nparams u8, nups u8, reserved
-u8`. Each **upvalue descriptor** is `kind u8, index u8`: 0 captures the
+u8`. In a version 4 container the reserved byte is the function's code bank
+(1..N, #279) and `codeOff`/`codeEnd` are offsets inside that bank; in versions
+1-3 it is 0 and the offsets are container offsets. Each **upvalue descriptor**
+is `kind u8, index u8`: 0 captures the
 parent register, 1 the parent's upvalue, 2 is `_ENV` (a name, never a value).
 A **constant** is `type u8` (0 int, 1 bool, 2 string, 3 nil) then four
 little-endian bytes for an int, one for a bool, `length u8 + bytes` for a
@@ -1171,7 +1193,8 @@ the global's index, so no name is compared at run time.
 
 An **operand byte** is `0x00..0x7F` a register, `0x80..0xFE` constant
 `byte & 0x7F` (at most 127 constants), `0xFF` none. Jump targets are absolute
-container offsets, patched after the layout is known.
+container offsets in versions 1-3 and offsets inside the function's code bank
+in version 4, patched after the layout is known.
 
 | op | instruction | bytes after the opcode |
 |---|---|---|

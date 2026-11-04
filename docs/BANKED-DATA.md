@@ -517,6 +517,53 @@ the system, and the measurement says DUSK RUN would lose most of its frame.
   9,186 B (`docs/ROM_SPEED.md` §"The cards this measurement added"), which is
   two banks. NOVA TIDE (projected 9,287 B) is the same, after #136's `raster`.
 
+### 5.6 As built (#279, 2026-11-04)
+
+Card #279 built §5.2 in `renderer/pce-ilbc.js` and `renderer/pce-rom.js`:
+
+- **When v4 is written.** The encoder lays out the v1-v3 container exactly as
+  before and only if the tables and code together exceed the data bank's
+  8,160 usable bytes does it re-lay them as a tables bank plus N code banks.
+  Every committed single-bank toy's container is byte-identical (seven shas
+  pinned in `tests/check-banked-data.js`), and every v1-v3 ROM the builder
+  makes is byte-identical (the song trailer still at 8,160, the padding still
+  0xFF).
+- **The v4 header** is the 28-byte shape. Bytes 26-27 are N, the code-bank
+  count; header `codeOff`/`codeEnd` are 0 because the function entries carry
+  the bounds. Function entries are bank-relative, and entry byte 9 is the
+  code bank (1..N; 0 in v1-v3). Every bank is 8,192 B with a zeroed 32-byte
+  trailer at 8,160, so the sound glue reads the same strip whichever bank
+  MPR2 holds when the first sound op runs.
+- **TOWER's witness moved.** #272 reworked TOWER in place; the committed toy
+  now encodes at 7,862 B (version 3, one bank, 40,960 B ROM), so it no longer
+  exercises v4. The pre-rework TOWER that this note measured (8,524 B, 44
+  functions, code 7,206 B, tables 1,318 B) still encodes as version 4 at
+  16,384 B of container and a 49,152 B ROM; the test reads it from
+  `PCESTUDIO_ORIGINAL_TOWER` (default
+  `/Volumes/External/pcestudio-toys/originals/tower/main.lua`) and SKIPs when
+  the file is absent, because the original is deliberately outside the repo.
+- **The refusals are named:** `toy-function-too-big` (function id and byte
+  count; a function is never split across banks), `toy-bank-edge` (a jump one
+  past a function that ends at the 8,160 edge, or any target at/past it;
+  whole-function packing makes the in-bank case unreachable but the guard is
+  kept), `toy-tables-bank-full` (tables over 8,160 B) and `toy-rom-full` (more
+  than 123 code banks). Finding F1 is fixed in the builder: a v1-v3 container
+  is refused at **8,160** usable bytes, not 8,192 (`toy-data-bank-full` now
+  names the trailer).
+- **The assets tail** after a v4 container starts on the next whole bank and
+  occupies whole banks; the container banks' trailers are written first, so
+  assets never overwrite one.
+- **Still open:** no interpreter reads v4. #280 maps MPR3 to the tables bank
+  and MPR2 per call; until it lands, a banked container builds but boots to
+  the interpreter's version-4 fault screen. Rule 2 is owed for
+  `tests/check-banked-data.js` (a different seat and model).
+- **Version-number collision with `docs/ASM.md`.** That note reserved
+  container version 4 for CALLASM (#225/#236), which is not built. #279 takes
+  version 4 for the banked container; when the assembly-routine card is
+  built, CALLASM either folds into the v4 layout (a code bank holds `asm`
+  instructions too) or takes version 5. `renderer/pce-ilbc.js` does not emit
+  `callasm` today, so nothing existing is affected.
+
 ---
 
 ## 6. Which gallery toys it unlocks (measured)

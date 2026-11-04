@@ -43,6 +43,19 @@
  *   with no table instruction stays version 1, byte for byte; a version 3
  *   sound toy with no tables carries an empty one-byte section.
  *
+ *   Version 4 (#279, docs/BANKED-DATA.md §5.2) is the banked container, used
+ *   only when the tables and code do not fit one data bank's 8,160 usable
+ *   bytes.  It is the 28-byte header followed by N whole 8 KiB banks:
+ *     bank 0 (physical 4)  the header, function table, upvalue descriptors,
+ *                          constants, global names and table section; its
+ *                          last 32 bytes are the zeroed song trailer
+ *     bank 1..N (physical 5..)  code; whole functions only, each bank's last
+ *                          32 bytes the same trailer
+ *   Byte 26-27 is N, the code-bank count.  Header bytes 20-25 are
+ *   tabTabOff, 0, 0 and every function entry's codeOff/codeEnd is an offset
+ *   inside that function's bank; entry byte 9 is the bank number (0 in
+ *   versions 1-3, whose code shares physical bank 4).
+ *
  *   function entry (10 bytes), one per function id in order:
  *     u16 codeOff, u16 codeEnd, u16 upOff, u8 nregs, u8 nparams,
  *     u8 nups, u8 reserved
@@ -62,7 +75,8 @@
  *     0x00..0x7F  register r
  *     0x80..0xFE  constant k (index = byte & 0x7F, at most 127 constants)
  *     0xFF        none
- *     Jump targets are absolute byte offsets in the container.
+ *     Jump targets are absolute byte offsets in the container (v1-v3), or
+ *     byte offsets inside the function's code bank (v4).
  *
  * Opcodes (one per IL instruction where possible):
  *   01 const  dst:reg k:u8
@@ -185,6 +199,16 @@
   var VERSION_SOUND = 3;      /* a version 2 layout that may carry the sound
                                * ops; the committed interpreter reads it
                                * since #215 (docs/ROM-SOUND.md) */
+  /* #279: a program that does not fit one data bank gets a tables bank and
+   * one or more code banks (docs/BANKED-DATA.md §5.2).  Only then is the
+   * container version 4; every toy that fits keeps the bytes it had. */
+  var VERSION_BANKED = 4;
+  var BANK_BYTES = 0x2000;     /* a physical bank is 8 KiB */
+  var CODE_USABLE = 0x1FE0;    /* 8,160 B: the last 32 bytes of every data
+                                * bank are the song trailer (pce-rom.js's
+                                * SONG_TABLE_OFF) */
+  var MAX_CODE_BANKS = 123;    /* physical banks 5..127: a HuCard decodes 128
+                                * and the 32 KiB image uses banks 0..3 */
   var MAGIC = "ILBC";
   var HEADER = 24;
   var HEADER_TABLES = 28;
@@ -539,48 +563,121 @@
       globalTableSize += 1 + globals[g].name.length;
     }
 
-    var funcTabOff = wide ? HEADER_TABLES : HEADER;
-    var upTabOff = funcTabOff + functions.length * FUNC_ENTRY;
-    var constTabOff = upTabOff + upCount * 2;
-    var globalTabOff = constTabOff + constTableSize;
-    var tabTabOff = globalTabOff + globalTableSize;
-    var codeOff = tabTabOff + (section ? section.bytes.length : 0);
+    /* The tables half of the container: header, function table, upvalue
+     * descriptors, constants, global names and the table section.  A v1/v2/v3
+     * container has an absolute code range in its header; a v4's header does
+     * not, so it always carries the 28-byte shape (#279). */
+    function tablesLayout(headerBytes) {
+      var funcTab = headerBytes;
+      var upTab = funcTab + functions.length * FUNC_ENTRY;
+      var constTab = upTab + upCount * 2;
+      var globalTab = constTab + constTableSize;
+      var tabTab = globalTab + globalTableSize;
+      var tablesEnd = tabTab + (section ? section.bytes.length : 0);
+      return { funcTabOff: funcTab, upTabOff: upTab, constTabOff: constTab,
+               globalTabOff: globalTab, tabTabOff: tabTab,
+               tablesBytes: tablesEnd };
+    }
 
-    /* Absolute code offsets, then instruction targets. */
-    var fnCodeOff = [];
-    var at2 = codeOff;
+    var codeTotal = 0;
+    for (f = 0; f < functions.length; f++) codeTotal += fnSizes[f];
+
+    var L = tablesLayout(wide ? HEADER_TABLES : HEADER);
+    var banked = L.tablesBytes + codeTotal > CODE_USABLE;
+    if (banked && !wide) L = tablesLayout(HEADER_TABLES);
+    var funcTabOff = L.funcTabOff;
+    var upTabOff = L.upTabOff;
+    var constTabOff = L.constTabOff;
+    var globalTabOff = L.globalTabOff;
+    var tabTabOff = L.tabTabOff;
+
+    /* v4: bank 0 (physical 4) is the tables bank; code banks are packed with
+     * whole functions.  A function never straddles a bank, so its codeOff,
+     * codeEnd and every jump target are offsets inside one bank and the
+     * function entry's reserved byte (offset 9) names that bank. */
+    var fnBank = [], fnCodeOff = [], codeBankCount = 0;
+    if (banked) {
+      if (L.tablesBytes > CODE_USABLE) {
+        refuse("toy-tables-bank-full", "the tables (header, function table, " +
+               "upvalue descriptors, constants, global names and the table " +
+               "section) need " + L.tablesBytes + " B; a tables bank holds " +
+               CODE_USABLE + " usable (its last 32 B are the song trailer)");
+      }
+      var atBank = 0;
+      for (f = 0; f < functions.length; f++) {
+        var fsize = fnSizes[f];
+        if (fsize > CODE_USABLE) {
+          refuse("toy-function-too-big", "function " + f + " (`" +
+                 (functions[f].name || "?") + "`) is " + fsize + " B; a code " +
+                 "bank holds " + CODE_USABLE + " usable (the last 32 B are " +
+                 "the song trailer)");
+        }
+        if (codeBankCount === 0 || atBank >= CODE_USABLE ||
+            atBank + fsize > CODE_USABLE) {
+          codeBankCount++;
+          atBank = 0;
+        }
+        fnBank.push(codeBankCount);
+        fnCodeOff.push(atBank);
+        atBank += fsize;
+        /* The packing rule makes this unreachable; the guard keeps a future
+         * packing change from silently writing code into the trailer. */
+        if (atBank > CODE_USABLE) {
+          refuse("toy-bank-edge", "function " + f + " would end at bank " +
+                 "offset " + atBank + ", past a code bank's " + CODE_USABLE +
+                 "-byte window");
+        }
+      }
+      if (codeBankCount > MAX_CODE_BANKS) {
+        refuse("toy-rom-full", "the code needs " + codeBankCount + " 8 KiB " +
+               "banks; a HuCard decodes 128 and the 32 KiB image uses 4, so " +
+               "at most " + MAX_CODE_BANKS + " code banks");
+      }
+    }
+
+    /* Absolute code offsets (v1-v3), or bank-relative offsets (v4). */
+    var fnCodeAt = [];
+    var at2 = banked ? 0 : L.tablesBytes;
     for (f = 0; f < functions.length; f++) {
-      fnCodeOff.push(at2);
-      at2 += fnSizes[f];
+      fnCodeAt.push(banked ? fnCodeOff[f] : at2);
+      if (!banked) at2 += fnSizes[f];
     }
     var codeEnd = at2;
+
+    var version = banked ? VERSION_BANKED
+                : (usesSound ? VERSION_SOUND
+                             : (usesTables ? VERSION_TABLES : VERSION));
 
     var buf = new Buf();
     buf.bytes([MAGIC.charCodeAt(0), MAGIC.charCodeAt(1),
                MAGIC.charCodeAt(2), MAGIC.charCodeAt(3)]);
-    buf.u8(usesSound ? VERSION_SOUND : (usesTables ? VERSION_TABLES : VERSION));
+    buf.u8(version);
     buf.u8(program.hooks && program.hooks.raster != null ? 1 : 0);
     buf.u8(initSlot); buf.u8(frameSlot); buf.u8(rasterSlot);
     buf.u8(functions.length); buf.u8(globals.length); buf.u8(constKeys.length);
     buf.u16(funcTabOff); buf.u16(upTabOff); buf.u16(constTabOff);
     buf.u16(globalTabOff);
-    if (wide) {
-      buf.u16(tabTabOff); buf.u16(codeOff); buf.u16(codeEnd); buf.u16(0);
+    if (banked) {
+      /* v4: codeOff/codeEnd are 0 (the function entries carry the bounds,
+       * bank-relative) and the reserved pair is the code-bank count. */
+      buf.u16(tabTabOff); buf.u16(0); buf.u16(0); buf.u16(codeBankCount);
+    } else if (wide) {
+      buf.u16(tabTabOff); buf.u16(L.tablesBytes); buf.u16(codeEnd); buf.u16(0);
     } else {
-      buf.u16(codeOff); buf.u16(codeEnd);
+      buf.u16(L.tablesBytes); buf.u16(codeEnd);
     }
 
     /* Function table + upvalue descriptors. */
     var upAt = upTabOff;
     for (f = 0; f < functions.length; f++) {
       var fnu = functions[f];
-      buf.u16(fnCodeOff[f]);
-      buf.u16(fnCodeOff[f] + fnSizes[f]);
+      buf.u16(fnCodeAt[f]);
+      buf.u16(fnCodeAt[f] + fnSizes[f]);
       buf.u16(upAt);
       buf.u8(fnu.registers);
       buf.u8(fnu.params.length);
       buf.u8(fnu.upvalues.length);
-      buf.u8(0);
+      buf.u8(banked ? fnBank[f] : 0);
       upAt += fnu.upvalues.length * 2;
     }
     for (f = 0; f < functions.length; f++) {
@@ -631,14 +728,56 @@
     }
 
     /* Code. */
-    if (buf.a.length !== codeOff) {
-      refuse("ilbc-program", "internal: codeOff " + codeOff + " but the " +
-             "tables end at " + buf.a.length);
+    if (buf.a.length !== L.tablesBytes) {
+      refuse("ilbc-program", "internal: the tables end at " + L.tablesBytes +
+             " but the buffer is " + buf.a.length);
+    }
+    if (banked) {
+      /* One 8 KiB bank per piece: bank 0 is the tables, banks 1..N the code.
+       * Every bank is filled with 0xFF and its last 32 bytes carry a zeroed
+       * song trailer, the strip the sound glue reads whichever bank MPR2
+       * holds (docs/BANKED-DATA.md §5.2). */
+      var out = new Uint8Array(BANK_BYTES * (1 + codeBankCount));
+      out.fill(0xFF);
+      out.set(Uint8Array.from(buf.a), 0);
+      for (f = 0; f < functions.length; f++) {
+        var fbuf = new Buf();
+        encodeFunction(fbuf, functions[f], f, fnOffsets[f], 0,
+                       constIndex, globalIds, siteIdOf[f], fieldIds,
+                       layout ? layout.sprites[f] : null, true, fnSizes[f]);
+        var bankAt = fnBank[f] * BANK_BYTES + fnCodeOff[f];
+        if (bankAt + fbuf.a.length > (fnBank[f] + 1) * BANK_BYTES ||
+            fnCodeOff[f] + fbuf.a.length > CODE_USABLE) {
+          refuse("toy-bank-edge", "function " + f + " encodes to " +
+                 fbuf.a.length + " B at bank offset " + fnCodeOff[f] +
+                 ", past a code bank's " + CODE_USABLE + "-byte window");
+        }
+        out.set(Uint8Array.from(fbuf.a), bankAt);
+      }
+      for (var b = 0; b <= codeBankCount; b++) {
+        out[b * BANK_BYTES + CODE_USABLE] = 0;
+      }
+      return {
+        bytes: out,
+        magic: MAGIC,
+        version: version,
+        functions: functions.length,
+        globals: globals.length,
+        constants: constKeys.length,
+        codeBytes: codeTotal,
+        banked: true,
+        codeBanks: codeBankCount,
+        hooks: { init: initSlot, frame: frameSlot, raster: rasterSlot },
+        tables: usesTables
+          ? { nslots: layout.nslots, cells: layout.cells }
+          : { nslots: 0, cells: 0 },
+        size: out.length
+      };
     }
     for (f = 0; f < functions.length; f++) {
-      encodeFunction(buf, functions[f], f, fnOffsets[f], fnCodeOff[f],
+      encodeFunction(buf, functions[f], f, fnOffsets[f], fnCodeAt[f],
                      constIndex, globalIds, siteIdOf[f], fieldIds,
-                     layout ? layout.sprites[f] : null);
+                     layout ? layout.sprites[f] : null, false, fnSizes[f]);
     }
     if (buf.a.length !== codeEnd) {
       refuse("ilbc-program", "internal: codeEnd " + codeEnd + " but the " +
@@ -648,11 +787,13 @@
     return {
       bytes: Uint8Array.from(buf.a),
       magic: MAGIC,
-      version: usesSound ? VERSION_SOUND : (usesTables ? VERSION_TABLES : VERSION),
+      version: version,
       functions: functions.length,
       globals: globals.length,
       constants: constKeys.length,
-      codeBytes: codeEnd - codeOff,
+      codeBytes: codeEnd - L.tablesBytes,
+      banked: false,
+      codeBanks: 0,
       hooks: { init: initSlot, frame: frameSlot, raster: rasterSlot },
       tables: usesTables
         ? { nslots: layout.nslots, cells: layout.cells }
@@ -662,7 +803,8 @@
   }
 
   function encodeFunction(buf, fn, fid, offsets, codeOff, constIndex,
-                          globalIds, siteIds, fieldIds, sprites) {
+                          globalIds, siteIds, fieldIds, sprites,
+                          banked, fnBytes) {
     function reg(r) {
       if (r == null || r < 0 || r >= MAX_REGS) {
         refuse("ilbc-range", "register " + r + " in function " + fid);
@@ -677,10 +819,25 @@
     }
     function target(pc, line) {
       if (pc == null || pc < 0 || pc >= offsets.length) {
+        /* #279: in a v4 container a jump one past a function that ends at the
+         * bank's usable edge points into the trailer strip — the bank-edge
+         * case the format refuses rather than reads. */
+        if (banked && pc === offsets.length && fnBytes >= CODE_USABLE) {
+          refuse("toy-bank-edge", "function " + fid + " jumps to pc " + pc +
+                 ", bank offset " + (codeOff + fnBytes) + "; a code bank " +
+                 "ends at " + CODE_USABLE + " (its last 32 B are the song " +
+                 "trailer)", line);
+        }
         refuse("ilbc-jump", "function " + fid + " jumps to pc " + pc +
                " (only " + offsets.length + " instructions)", line);
       }
-      return codeOff + offsets[pc];
+      var t = codeOff + offsets[pc];
+      if (banked && t >= CODE_USABLE) {
+        refuse("toy-bank-edge", "function " + fid + " jumps to bank offset " +
+               t + ", at or past a code bank's " + CODE_USABLE + "-byte " +
+               "window", line);
+      }
+      return t;
     }
     /* A table value is a register; a key is either an operand byte (array
      * part, kind 0) or a field id (kind 1).  A string key never becomes a
