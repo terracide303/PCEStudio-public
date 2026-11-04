@@ -55,16 +55,28 @@
  * build maps nothing but boots the same container, so it shares the value. */
 #define DATA_BANK 4
 
+/* #280: since container version 4 the toy's data is a tables bank plus N
+ * code banks (docs/BANKED-DATA.md §5.2).  Container bank 0 is the tables
+ * bank at physical 4; code bank b is physical 4+b.  MPR3 ($6000-$7FFF) is
+ * permanently mapped to the tables bank so konst() and closure's upvalue
+ * descriptors can read it while MPR2 holds a code bank.  A version 1-3
+ * container is still one bank: its entries' bank byte is 0, so every map
+ * below is physical 4 and nothing moves. */
 #ifdef ILVM_HOST
 /* The host build runs the same interpreter over the same bytecode without a
  * console, so a bytecode or VM bug is found before Mednafen.  tools/ilvm/
  * hostvm.c provides ilvm_program and the toy_* writers; the on-console
- * path below is what the committed ilvm.bin is built from. */
+ * path below is what the committed ilvm.bin is built from.  The host models
+ * MPR2 by moving `prog` through the container, whose bank 0 is the tables
+ * bank; TABLES stays at the container's start, as MPR3 does on the console. */
 extern const uint8_t *ilvm_program;
-#define PROG (ilvm_program)
+static const uint8_t *prog;
+#define PROG (prog)
+#define TABLES (ilvm_program)
 #else
 #include <pce.h>
 #define PROG ((const uint8_t *)0x4000)
+#define TABLES ((const uint8_t *)0x6000)
 #endif
 
 #define MAX_REGS 41            /* #222: the toys need 21; the games more —
@@ -172,6 +184,12 @@ int ilvm_table_cell_count(void) { return MAX_TABLE_CELLS; }
 
 static uint8_t nfunc, nglobal, nconst;
 static uint16_t constTabOff;
+/* #280: the function table's offset in the tables bank (read once at boot)
+ * and the container bank MPR2 currently holds (0 = the tables bank, the
+ * only bank a v1-3 container has).  The bank byte is read from the tables
+ * bank at every exec() entry, so no per-function bank array costs BaseRAM. */
+static uint16_t funcTabOff;
+static uint8_t code_cur;
 static uint8_t init_slot, frame_slot, raster_slot;
 static uint8_t clos_next;       /* the ring's next slot, after boot */
 static uint8_t boot_end;        /* the first slot the ring may reuse */
@@ -180,12 +198,28 @@ static uint8_t trans_next;      /* the transient ring's next cell */
 static uint8_t in_boot;         /* 1 until toy_boot()'s exec() calls end */
 static uint8_t fault;
 
+/* Map container bank `b` into MPR2: physical DATA_BANK+b.  b is 0 for the
+ * tables bank (every v1-3 call) and 1..N for a v4 code bank.  The host
+ * moves its whole-container pointer instead of bank-switching. */
 #ifdef ILVM_HOST
-static void map_data_bank(uint8_t bank) { (void)bank; }
-#else
-static void map_data_bank(uint8_t bank) {
-  __asm__ volatile ("tam #$04" : : "a" (bank));
+static void map_data_bank(uint8_t b) {
+  prog = ilvm_program + ((uint16_t)b << 13);
 }
+#else
+static void map_data_bank(uint8_t b) {
+  __asm__ volatile ("tam #$04" : : "a" ((uint8_t)(DATA_BANK + b)));
+}
+#endif
+
+/* #280: MPR3 holds the tables bank for the whole run.  Every container
+ * bank's header/tables live at its start, and bank 0 is physical 4, so this
+ * is the same byte stream a v1-3 container reads through MPR2. */
+#ifndef ILVM_HOST
+static void map_tables_bank(void) {
+  __asm__ volatile ("tam #$08" : : "a" ((uint8_t)DATA_BANK));
+}
+#else
+static void map_tables_bank(void) { }
 #endif
 
 /* The engine banks (card #215): page 5 = physical bank 2 (engine code),
@@ -239,11 +273,14 @@ __attribute__((noinline)) static uint16_t rw(uint16_t off) {
   return (uint16_t)((uint16_t)rb(off) | ((uint16_t)rb((uint16_t)(off + 1)) << 8));
 }
 
+/* #280: a constant's value lives in the tables bank (MPR3), not in the code
+ * bank MPR2 holds while exec() runs.  In a v1-3 container the two windows
+ * are the same physical bank, so this reads the same bytes it always did. */
 __attribute__((noinline)) static int32_t ri32(uint16_t off) {
-  return (int32_t)((uint32_t)rb(off) |
-                   ((uint32_t)rb((uint16_t)(off + 1)) << 8) |
-                   ((uint32_t)rb((uint16_t)(off + 2)) << 16) |
-                   ((uint32_t)rb((uint16_t)(off + 3)) << 24));
+  return (int32_t)((uint32_t)TABLES[off] |
+                   ((uint32_t)TABLES[(uint16_t)(off + 1)] << 8) |
+                   ((uint32_t)TABLES[(uint16_t)(off + 2)] << 16) |
+                   ((uint32_t)TABLES[(uint16_t)(off + 3)] << 24));
 }
 
 /* ---- the / // % builtins, without the backend's 643-byte __divmodsi4 ----
@@ -324,9 +361,9 @@ __attribute__((noinline)) static int32_t konst(uint8_t i) {
   uint16_t off;
   uint8_t t;
   off = koff[i];
-  t = rb(off);
+  t = TABLES[off];                 /* #280: through the tables bank */
   if (t == 0) return ri32((uint16_t)(off + 1));
-  if (t == 1) return rb((uint16_t)(off + 1));
+  if (t == 1) return TABLES[(uint16_t)(off + 1)];
   return 0;
 }
 
@@ -363,7 +400,7 @@ static int32_t exec(uint8_t fid, uint8_t clh,
   int32_t r[MAX_REGS];
   const struct fninfo *fn;
   uint16_t pc, tgt, base;
-  uint8_t op, d, g, u, k, i, n, aa, bb, s, kind;
+  uint8_t op, d, g, u, k, i, n, aa, bb, s, kind, b;
   int32_t av, bv, v;
 
 #ifdef TOY_STACK_PROBE
@@ -378,6 +415,13 @@ static int32_t exec(uint8_t fid, uint8_t clh,
   if (fault || fid >= nfunc) { fault = 1; return 0; }
   fn = &fns[fid];
   if (fn->nregs > MAX_REGS) { fault = 1; return 0; }
+
+  /* #280: map the function's code bank.  The bank byte is the entry's
+   * reserved byte 9, read from the tables bank at funcTabOff + fid*10 + 9
+   * (docs/BANKED-DATA.md §5.6); a v1-3 entry carries 0, so this is the
+   * tables bank itself and nothing remaps. */
+  b = TABLES[(uint16_t)(funcTabOff + (uint16_t)fid * 10 + 9)];
+  if (b != code_cur) { code_cur = b; map_data_bank(b); }
 
   for (i = 0; i < fn->nregs; i++) r[i] = 0;
   if (fn->nparams > 0) r[0] = a0;
@@ -437,8 +481,9 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       clos[u].fid = k;
       clos[u].upbase = base;
       for (i = 0; i < tf->nups; i++) {
-        uint8_t kind = rb((uint16_t)(tf->upOff + i * 2));
-        uint8_t idx = rb((uint16_t)(tf->upOff + i * 2 + 1));
+        /* #280: the upvalue descriptors live in the tables bank. */
+        uint8_t kind = TABLES[(uint16_t)(tf->upOff + i * 2)];
+        uint8_t idx = TABLES[(uint16_t)(tf->upOff + i * 2 + 1)];
         if (kind == 0) ups[base + i] = r[idx];
         else if (kind == 1) ups[base + i] = ups[(uint16_t)clos[clh].upbase + idx];
         else ups[base + i] = 0;    /* _ENV: a name, never a value */
@@ -467,6 +512,9 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       }
       if (clos[u].fid >= nfunc) { fault = 1; return 0; }
       v = exec(clos[u].fid, u, args[0], args[1], args[2], args[3]);
+      /* #280: the callee mapped its own code bank; map this function's back
+       * before the next rb(pc).  A v1-3 call leaves both at bank 0. */
+      if (b != code_cur) { code_cur = b; map_data_bank(b); }
       if (d != 0xFF) r[d] = v;
       break;
     }
@@ -725,10 +773,11 @@ static int32_t exec(uint8_t fid, uint8_t clh,
 /* ---- the runtime's three entry points --------------------------------- */
 
 void toy_boot(void) {
-  uint16_t funcTabOff, off, tabOff;
+  uint16_t off, tabOff;
   uint8_t i, ver;
 
   fault = 0;
+  code_cur = 0;                /* #280: MPR2 starts on the tables bank */
   clos_next = 1;
   boot_end = MAX_CLOS;
   perm_next = 0;
@@ -739,14 +788,15 @@ void toy_boot(void) {
   map_sound_banks();           /* the glue's reset/tick jsr page 4 */
   ilvm_sound_reset();
 
-  map_data_bank(DATA_BANK);
+  map_data_bank(0);            /* MPR2: the container's bank 0 */
+  map_tables_bank();           /* MPR3: the same bank, for konst/closure */
   if (rw(0) != 0x4C49 || rw(2) != 0x4342) {   /* "IL" "BC" */
     fault = 1;
     toy_display_on();
     return;
   }
   ver = rb(4);
-  if (ver != 1 && ver != 2 && ver != 3) {
+  if (ver < 1 || ver > 4) {    /* #280: 4 is the banked container */
     fault = 1;
     toy_display_on();
     return;

@@ -37,11 +37,13 @@
  *      124-bank toy-rom-full refusal, and the builder's per-bank trailer
  *      re-zero.  Each check's name carries its break number, v4 (1)..(9).
  *
- * NOT PROVEN HERE: no interpreter reads v4 yet (#280 maps MPR3 to the tables
- * bank and MPR2 per call), so nothing in this suite boots a banked ROM or
- * compares it with the browser's picture.  Rule 2 applies to these nine
- * checks too: a different seat and model must re-break them (and the check
- * catch every break) before #285 — and with it #279 — closes.
+ * NOT PROVEN HERE: this suite does not boot a banked ROM.  Since #280 the
+ * interpreter does read v4 (boot maps MPR3 to the tables bank and MPR2 per
+ * call); its boot and picture evidence is in docs/BANKED-DATA.md §5.7
+ * (host-vs-browser parity and a Mednafen save-state diff), not in this file.
+ * Rule 2 applies to these nine checks too: a different seat and model must
+ * re-break them (and the check catch every break) before #285 — and with it
+ * #279 — closes.
  *
  * FOUND WHILE WRITING THEM (2026-11-04, @test): the banked encode path calls
  * encodeFunction with codeOff 0 (renderer/pce-ilbc.js, the out.set loop), so
@@ -575,14 +577,18 @@ function checkRule2Breaks() {
   /* Break (3): pinned v4 shas.  The seven v1-v3 pins above cover unbanked
    * toys; before #285 no v4 sha was pinned, so a fill byte or layout change
    * (0x00 instead of 0xFF, a shifted payload) could pass.  Captured
-   * 2026-11-04 from the intact encoder. */
+   * 2026-11-04 from the intact encoder.  Re-pinned for #280: a banked
+   * container now always carries the table section, so the two table-free
+   * fixtures moved by that one byte (the table fixture is unchanged).  The
+   * jump fixture's bytes move again when #286 fixes its bank-relative
+   * targets. */
   for (const [what, bytes, pin] of [
     ["the two-code-bank fixture's container",
      vanilla.bytes,
-     "21f6a86542fdd53cc963e5a82d8e634c689c7ebc1adc1c3a001a32d921df3e1b"],
+     "f5d7c050b42b500347f78d24dbb4b7258b2a9df2cfd8926b5e1090b26448ad8e"],
     ["the jump fixture's container",
      jumpy.bytes,
-     "c53c89029daffcc037a05794e2ec31a99534f6bfa753001eb2bb615b5cfad641"],
+     "6fd5f897d908bd2d047a9d45693cdc36e3893c4cb1c11f5db04713a677450a97"],
     ["the table fixture's container",
      tableEnc.bytes,
      "1a52e77572415d32abdc01f628570825c1807aeebba21d640b3a10af470e4ebe"]]) {
@@ -649,18 +655,23 @@ function checkRule2Breaks() {
   eq("v4 (7) a 124-code-bank program is toy-rom-full",
      refuseCode(function () { ilbc.encode(romFull); }), "toy-rom-full");
 
-  /* Break (8): tables of exactly 8,160 B (28-byte v4 header + 8,117 B of
-   * global names) fill the tables bank but are not over it — the broken
-   * `>=` refuses them. */
+  /* Break (8): tables of exactly 8,160 B fill the tables bank but are not
+   * over it — the broken `>=` refuses them.  Since #280 a banked container
+   * always carries the table section, so the 8,160 B includes its one byte:
+   * 28 B of header + 16 B of upvalue descriptors + 8,115 B of global names
+   * + the empty section's 1 byte.  The code must be over 5 B so the v1
+   * layout (24-byte header, no section) does not fit either: 8,155 B of
+   * tables + 8 B of code = 8,163 > 8,160, while the v4 tables are exactly
+   * 8,160. */
   const g8 = [{ name: "frame" }];
   for (let i = 1; i <= 196; i++) g8.push({ name: ("g" + i).padEnd(40, "x") });
-  g8.push({ name: "g197".padEnd(74, "x") });
+  g8.push({ name: "g197".padEnd(73, "x") });
   const fullCode = refuseCode(function () {
-    return ilbc.encode(program([[C, RET]], g8));
+    return ilbc.encode(program([[C, C, RET]], g8));
   });
   eq("v4 (8) tables of exactly 8,160 B encode (no refusal)", fullCode, null);
   if (fullCode === null) {
-    const fullTables = ilbc.encode(program([[C, RET]], g8));
+    const fullTables = ilbc.encode(program([[C, C, RET]], g8));
     eq("v4 (8) their version is 4", fullTables.version, 4);
     eq("v4 (8) their container is 2 banks", fullTables.bytes.length, 2 * BANK);
   }
