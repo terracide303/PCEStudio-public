@@ -29,9 +29,9 @@ with `rts` and never jumps out of itself**, and **a stated zero-page budget**.
 |---|---|
 | where a toy's assembly routines live | physical **bank 5**, mapped at **MPR3 ($6000–$7FFF)** only during a call. One 8 KiB bank per toy. |
 | how Lua calls one | `asm("name", a, b, c, d)` in the source; the **build** resolves `name` to a bank/address from the assembler's `.sym`; the bytecode carries the address, never the name. |
-| the bytecode op | a new **CALLASM op `0x23`**, container **version 4**, operands `dst, n, bank, addrLo, addrHi, args[n]` (`n` ≤ 4). |
+| the bytecode op | a new **CALLASM op `0x24`**, container **version 4**, operands `dst, n, bank, addrLo, addrHi, args[n]` (`n` ≤ 4). (`0x23` was this note's slot; #281's COPYV took it on 2026-11-04, so CALLASM moves up one.) |
 | where the op's body runs | a small shim in **bank 3's measured 3,580 B of free space** (the `SndGlue` pattern, #220), called by fixed address. The fixed 16 KiB image pays only the switch case and a `jsr`. |
-| arguments and return | four int32 arguments at **`$20E0–$20EF`**; an int32 return at **`$20F0–$20F3`**; a 4-byte RAM trampoline the shim writes at **`$20F4–$20F7`**. |
+| arguments and return | four int32 arguments at **`$20E0–$20EF`**; an int32 return at **`$20F0–$20F3`**; a 4-byte RAM trampoline the shim writes at **`$20F4–$20F7`**. **Stale since 2026-11-04:** #227's raster IRQ preload owns `$20E0–$20F0` and #281's COPYV owns `$20DE–$20DF`/`$20F1–$20F2`; see §4.3's note and re-plan in #236. |
 | what a routine may call | the hardware ports directly (VDC, VCE, PSG, timer, pad). The HuTrack entry points are measured and listed, but **v1 does not call the sound engine**. |
 | a Lua-only toy | **nothing changes**: no bank 5, no version 4, byte-identical ROM. |
 | the studio preview | it has **no CPU model**; options in section 7, and the chosen interim behaviour. |
@@ -61,7 +61,7 @@ at bytes 16,384–32,767 compare byte for byte with the old image.)
 |---|---|---|---|---|---|
 | 0–1 | `$C000–$FFFF` | crt0, vectors, runtime, interpreter | **16,384 B** | see below | `tools/ilvm/build.sh:131` asserts the image is exactly 16,384 B; `tools/gen/ilvm.json` `section_sizes`: `.text` 16,225 + `.rodata` 96 + `.early_start` 53 + `.vector` 10 = 16,384 |
 | 2 | `$A000–$BFFF` (MPR5) | HuTrack engine code | **7,876 B** (`$A000–$BEC4`) | **316 B** | `tools/ilvm/build-engine.sh:500` print (this run) |
-| 3 | `$8000–$9FFF` (MPR4) | 2,868 B pitch tables + 1,024 B note table + 516 B sound glue | **4,612 B** (`$8000–$9204`) | **3,580 B** | `tools/ilvm/build-engine.sh:503–508` print (this run) |
+| 3 | `$8000–$9FFF` (MPR4) | 2,868 B pitch tables + 1,024 B note table + 680 B sound glue and COPYV shim (`#281`) | **4,784 B** (`$8000–$92A8`) | **3,408 B** | `tools/ilvm/build-engine.sh` print (`#281` run) |
 | 4 | `$4000–$5FFF` (MPR2) | the toy's ILBC container, then assets; **last 32 B = the song trailer** | toy-specific | **8,160 − data** (see 2.2) | `renderer/pce-rom.js:149–154, 610–648`; `tools/ilvm/ilvm.c:56` |
 | **5 (this note)** | **`$6000–$7FFF` (MPR3)** | **the toy's assembly routines** | routine bytes | **8,192 − routine bytes** | new in this note; MPR3 is untouched by the interpreter (`tools/ilvm/ilvm.c:187` maps only MPR2; `:199–200` map MPR4/5) |
 
@@ -115,7 +115,15 @@ routine's capacity independent of the toy.
 | llvm-mos imaginary registers `__rc0–31` | 32 | `$2000–$201F` | `docs/ROM-SOUND.md:248`; `$2000/$2001` is the soft-stack pointer (`tools/ilvm/ilvm.c:222–225`) |
 | the interpreter (`-mlto-zp=96`) | 96 | `$2020–$207F` | `build.sh` output above; `docs/ROM-SOUND.md:249`; `tools/gen/ilvm.json:31–38` |
 | HuTrack engine state (`_hk`) | 94 | `$2080–$20DD` | `docs/ROM-SOUND.md:250`; `build-engine.sh` print |
-| **free** | **34** | **`$20DE–$20FF`** | `build.sh` output "34 B free"; `tools/gen/ilvm.json:35` |
+| COPYV's shim (`#281`) | 2 | `$20DE–$20DF` | container `pc` in/out, `tools/ilvm/ilvm.c`'s `COPYV_PC`; asserted by `build.sh` |
+| raster IRQ preload (`#227`) | 17 | `$20E0–$20F0` | `tools/ilvm/ilvm_runtime.c`'s `IRQ_OP`…`IRQ_VBPASS`; entered by hardware, so nothing else may touch it |
+| COPYV's shim (`#281`) | 2 | `$20F1–$20F2` | the source pointer for `[zp],y`, `CopyvShim` in `tools/ilvm/hutrack_engine.asm` |
+| **free** | **13** | **`$20F3–$20FF`** | arithmetic |
+
+`build.sh` prints "34 B free" because it measures only the engine's own zero
+page ($2080–$20DE). The raster IRQ block ($20E0–$20F0, #227) and COPYV's
+pointer ($20F1–$20F2, #281) are claimed outside that measurement, so the
+real free run is the 13 bytes above.
 
 ### 2.4 BaseRAM (`$2200–$3FFF`, 7,680 B) and the two stacks
 
@@ -215,9 +223,9 @@ local word = asm("set_palette", 1, 0x1FF)
 
 Container **version 4** when the program has an `asm` instruction (the
 version byte at offset 4; `docs/IL.md` §14.1 lists 1–3 today). The new
-opcode sits in the unused `0x23` slot (the ops table in
+opcode sits in the unused `0x24` slot (the ops table in
 `renderer/pce-ilbc.js`'s `OPS` ends at `0x22`; `0x17` stays reserved for
-`vget`, `docs/IL.md:1200`).
+`vget`, `docs/IL.md:1200`; **`0x23` is COPYV, #281**).
 
 > **2026-11-04 (#279):** version 4 is now the *banked* container
 > (`docs/BANKED-DATA.md` §5.2, `docs/IL.md` §14.1): a tables bank and N code
@@ -230,7 +238,7 @@ opcode sits in the unused `0x23` slot (the ops table in
 
 | op | instruction | bytes after the opcode |
 |---|---|---|
-| `23` | `callasm` | `dst:r n:u8 bank:u8 addrLo:u8 addrHi:u8 args[n]:op` |
+| `24` | `callasm` | `dst:r n:u8 bank:u8 addrLo:u8 addrHi:u8 args[n]:op` |
 
 `bank` is 5 in v1 (the byte is carried so a later version can name more
 than one routine bank without changing the shape). `addr` is the label's
@@ -251,10 +259,11 @@ No `asm` → the same five-bank ROM, byte for byte (section 7.1).
 
 The fixed bank has ~35 B of slack (§2.1), and the probes in §6 show that
 operand decoding inside `exec()` does not fit. So the CALLASM case is kept
-as small as a call, and the body lives in bank 3's measured 3,580 B free
-space, reached by a fixed address exactly like the sound glue
-(`tools/ilvm/ilvm_sound.c:200–213`; `SndGlue` is 516 B in bank 3 per
-`build-engine.sh:508`). Its fixed address comes from the bank-3 staging
+as small as a call, and the body lives in bank 3's measured 3,408 B free
+space (`#281` used 164 B of the former 3,580 B for COPYV's shim), reached
+by a fixed address exactly like the sound glue
+(`tools/ilvm/ilvm_sound.c:200–213`; the bank-3 glue extent is 680 B,
+including `CopyvShim`). Its fixed address comes from the bank-3 staging
 assembly's `.sym` into the generated header, resolved by the same two-pass
 build #215 already uses for the engine's RAM base (`tools/ilvm/build.sh:55–90`).
 
@@ -262,6 +271,15 @@ build #215 already uses for the engine's RAM base (`tools/ilvm/build.sh:55–90`
 CALLASM sets two fixed cells and `jsr`s the shim: the container `pc` and a
 pointer to the register array `r`. It then reloads `pc`. It does not decode
 `dst`, `n`, the bank or the address.
+
+> **2026-11-04 — the cell table below is stale; re-plan it in #236.** It was
+> written before #227 and #281. `$20DE–$20DF` now belongs to COPYV's shim
+> (`tools/ilvm/ilvm.c`'s `COPYV_PC`), `$20E0–$20F0` is the raster IRQ's
+> preload (`ilvm_runtime.c`'s `IRQ_*`), and `$20F1–$20F2` is COPYV's source
+> pointer; only `$20F3–$20FF` (13 B) is free, which is not the seven-cell
+> split this table assumes. #236 must either fit the arguments and return in
+> those 13 B, take the real free space from `docs/ASM.md` §2.3's updated
+> table, or move the block to BaseRAM.
 
 | fixed zero-page cell | use |
 |---|---|
@@ -296,8 +314,8 @@ own use of `jsr`/`rts` inside bank 5.
 The shim is hand-written assembly in the bank-3 staging source because the
 interpreter's C image is exactly 16 KiB and has no second link (the same
 reason the sound glue is PCEAS assembly, `docs/ROM-SOUND.md` §7). Its size
-is not yet measured; bank 3 has 3,580 B free and the glue precedent is
-516 B.
+is not yet measured; bank 3 has 3,408 B free and the glue precedent is
+680 B (the sound glue plus `#281`'s COPYV shim).
 
 ---
 

@@ -235,6 +235,10 @@
     table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B,
     padref: 0x1C, padget: 0x1D, sat: 0x1E, sprite: 0x1F,
     music: 0x20, sfx: 0x21, release: 0x22
+    /* 0x23 is copyv (#281): the interpreter has the op
+     * (docs/IL.md §14.1) but the IL has no instruction for it yet — #218
+     * emits it for constant vram[] runs.  CALLASM takes 0x24
+     * (docs/ASM.md §4.2), not this slot. */
   };
   var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
   var SOUND_OPS = { music: 1, sfx: 1, release: 1 };

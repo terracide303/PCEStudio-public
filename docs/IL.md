@@ -1235,12 +1235,42 @@ in version 4, patched after the layout is known.
 | 20 | `music` | `song:op` — a song id (#197, carried for the #194 engine) |
 | 21 | `sfx` | `ch:op freq:op volume:op frames:op` — a PSG channel 0..5, the 12-bit F, the AL volume 0..31, and how many frames before the engine gives the channel back (#197) |
 | 22 | `release` | `ch:op` — give the channel back early; a no-op on a channel no sfx owns, as on the host (#197) |
+| 23 | `copyv` | `vram:u16 bank:u8 off:u16 count:u16` — copy `count` words from data bank `bank` at bank-relative byte `off` to VRAM from `vram` upward; the source streams into bank+1, bank+2, ... at each 8,192-byte boundary (#281) |
 
 For `tget`/`tset`, `kind` 0 means the key byte is an **operand** (a register,
 or a constant int index encoded `0x80|k`); `kind` 1 means the key byte is a
 **field id**. A string key becomes a field id and never enters the value
 constant pool, so `MAX_CONST = 127` is unaffected. A `table` value in a
 register is its slot id. `table` is 3 bytes, `setlist` 4+n, `tget`/`tset` 5.
+
+A **`copyv`** (#281) streams static asset data to VRAM. Its operands are
+**immediates, not pool constants** — a picture's blob must not spend the
+127-constant pool #218 relieves. `vram` is the first VRAM word address;
+`bank` is a container bank number (0 is the tables/data bank, physical 4);
+`off` is 13 bits, a byte offset from the start of that bank; `count` is a
+word count. The source is one contiguous stream: after 8,192 bytes it
+continues at offset 0 of bank+1, then bank+2, and so on, so a blob may span
+whole banks (a v4 container's asset tail, `docs/BANKED-DATA.md` §5.2). The
+interpreter maps the source bank into MPR2 **once**, streams the words
+through the VDC data port with MAWR set once (the viewer's `copy_words`
+shape, `tools/viewer.asm`), remaps only at a bank boundary, and maps the
+function's code bank back before the next opcode. The console body is a
+bank-3 shim (`CopyvShim` in `tools/ilvm/hutrack_engine.asm`, called by fixed
+address); the fixed 16 KiB image pays one store, one `jsr` and one load
+because it has no room for the loop. The host harness runs a C body with
+the same semantics.
+
+Two constraints the encoder (#218) must respect, because `copyv` writes
+**immediately** rather than through `vset`'s MODE_BASE deferral: an
+interrupt-off window covers the copy (the raster chain's IRQ handler uses
+the same VDC register port), and a copy from a no-raster toy's `frame()`
+would land during the display instead of at the next VBlank. The intended
+site is an asset load in `init()`/boot straight-line code before
+display-on; a run that is deferred today must stay as `vset` ops. The
+encoder does not emit `copyv` yet; the op's evidence is the host harness
+(`tests/check-ilvm-copyv.js`: 300 words in a v1 container and two copies in
+a v4 one, the second crossing a bank), and the console capture is owed once
+#218 emits a blob.
 
 A **`padget`'s field byte** is the runtime's `TOY_PAD_*` bit
 (`tools/toyc/toy_runtime.h`, pcetech §4's order): ii 0, i 1, select 2,

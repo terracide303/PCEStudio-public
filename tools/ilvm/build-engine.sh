@@ -300,6 +300,15 @@ if symbols["SndGlueStart"]["bank"] != TABLES_BANK:
 if glue_start != 0x9000 or not (0x9000 < glue_end <= 0xA000):
     raise SystemExit("sound-op glue extent %04X-%04X is not inside "
                      "$9000-$9FFF" % (glue_start, glue_end))
+# #281: the COPYV shim shares the glue's bank-3 extent, so a fixed image
+# with a COPYV op can jsr it by address (ilvm.c's HUTRACK_COPYV).
+copyv_addr = need("CopyvShim")
+if symbols["CopyvShim"]["bank"] != TABLES_BANK:
+    raise SystemExit("CopyvShim is in bank %r, expected %d" %
+                     (symbols["CopyvShim"]["bank"], TABLES_BANK))
+if not (glue_start <= copyv_addr < glue_end):
+    raise SystemExit("CopyvShim $%04X is not inside the glue extent "
+                     "$%04X-$%04X" % (copyv_addr, glue_start, glue_end))
 
 code = raw[CODE_BANK * BANK_BYTES:(CODE_BANK + 1) * BANK_BYTES]
 tables = raw[TABLES_BANK * BANK_BYTES:(TABLES_BANK + 1) * BANK_BYTES]
@@ -397,6 +406,7 @@ INTERFACE = [
     ("SndGlueMusic", "HUTRACK_SND_MUSIC", "music(): init, queue, play"),
     ("SndGlueTick", "HUTRACK_SND_TICK", "per-toy-frame timers and engine tick"),
     ("snd_args_frames", "HUTRACK_SND_FRAMES", "sfx()'s frames argument cell"),
+    ("CopyvShim", "HUTRACK_COPYV", "COPYV (#281): map and stream a data bank to VRAM"),
 ]
 interface = []
 for symbol, define, what in INTERFACE:
