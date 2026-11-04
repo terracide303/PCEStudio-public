@@ -618,7 +618,8 @@ Every number below is measured on this tree; the commands are named.
   screen. The encoder now writes the empty one-byte section for every banked
   container. This moves the two table-free v4 container shas pinned in
   `tests/check-banked-data.js` (the table-bearing fixture's sha is unchanged);
-  the pins and #285's rule-2 re-break are owed with #286's encoder fix.
+  the pins are re-pinned in the same tree; #285's rule-2 re-break is still
+  owed.
 - **v1-v3 behaviour is byte-identical.** `tests/check-ilvm.js`'s host parity
   (palette, parallax, arity's wide calls, the tables and sprite toys) passes
   against the browser IL run with the new image; only the pinned ROM shas and
@@ -626,7 +627,7 @@ Every number below is measured on this tree; the commands are named.
 - **A 2-code-bank toy boots and draws in Mednafen.** The witness is a
   generated Lua toy (frame/init in bank 1, a 7,913 B `big()` in bank 2 called
   from `init`, writes after the call, and a static BAT/tile/palette picture;
-  no jumps, because #286's v4 jump targets are still function-relative). It
+  no jumps, so #286's v4 jump-target fix does not change this container). It
   encodes as version 4, container 24,576 B (tables + 2 code banks), ROM
   57,344 B, sha256 `f1635d218e628de4…`, and the host harness runs it
   byte-identically to the browser (vram/cram/sat diff 0, registers equal). In
@@ -637,11 +638,11 @@ Every number below is measured on this tree; the commands are named.
   return, so the bank restore is exercised), and **30 of the last 30
   recorded frames are pixel-identical (diff 0) to the browser's render of
   frame 0** (`renderer/pce-toys.js`; the toy is static).
-- **Still open.** #286: the v4 encoder emits jump targets function-relative,
-  so a banked toy whose non-first function jumps still faults on the console;
-  this card's witness avoids jumps by construction. #282: re-pin every ROM
-  after the old/new Mednafen diff. Rule 2 is owed for any v4 boot check added
-  to the suite.
+- **Still open.** #286 is fixed in the same tree: the v4 encoder emits jump
+  targets bank-relative and `tests/check-banked-data.js`'s v4 (2) lines pass
+  (this card's witness has no jumps, so it is unaffected). #282: re-pin every
+  ROM after the old/new Mednafen diff. Rule 2 is owed for any v4 boot check
+  added to the suite.
 
 ---
 
