@@ -528,12 +528,21 @@ Card #279 built §5.2 in `renderer/pce-ilbc.js` and `renderer/pce-rom.js`:
   pinned in `tests/check-banked-data.js`), and every v1-v3 ROM the builder
   makes is byte-identical (the song trailer still at 8,160, the padding still
   0xFF).
+- **The function entry** is 10 bytes even in v4: bytes 0-1 `codeOff`, 2-3
+  `codeEnd` (both inside the function's bank), 4-5 `upOff` (the upvalue
+  descriptor offset in the tables bank), 6-8 `nregs/nparams/nups`, and byte 9
+  the code bank (1..N; 0 in v1-v3). **The reader must take the bank from
+  `TABLES[funcTabOff + fid*10 + 9]`.** This note's §3.2 sketch said the bank
+  could be read at `upOff + 5` ("entry+9 == upOff+5"); that identity does not
+  hold for the built layout — `upOff` is the descriptor-table offset, not the
+  entry's, and on TOWER's container `upOff+5` is 473 while the bank byte is at
+  37. This is a reading of the built bytes, not a measurement of an
+  interpreter change.
 - **The v4 header** is the 28-byte shape. Bytes 26-27 are N, the code-bank
   count; header `codeOff`/`codeEnd` are 0 because the function entries carry
-  the bounds. Function entries are bank-relative, and entry byte 9 is the
-  code bank (1..N; 0 in v1-v3). Every bank is 8,192 B with a zeroed 32-byte
-  trailer at 8,160, so the sound glue reads the same strip whichever bank
-  MPR2 holds when the first sound op runs.
+  the bounds. Every bank is 8,192 B with a zeroed 32-byte trailer at 8,160,
+  so the sound glue reads the same strip whichever bank MPR2 holds when the
+  first sound op runs.
 - **TOWER's witness moved.** #272 reworked TOWER in place; the committed toy
   now encodes at 7,862 B (version 3, one bank, 40,960 B ROM), so it no longer
   exercises v4. The pre-rework TOWER that this note measured (8,524 B, 44
