@@ -36,9 +36,12 @@
  *   5. THE 8 KiB DATA BANK (#138).  The size model reproduces the two
  *      committed containers to ≤3 B; STARFALL's exact projection is 6,050 B
  *      and 6,212/6,266/6,374 B at 3/4/6 B per still-refused instruction —
- *      all under 8,192 B, where it used to be over at 9,186 B.  The limit
+ *      all under 8,160 B (the usable size; the last 32 B are the song
+ *      trailer), where it used to be over at 9,186 B.  The limit
  *      itself is exercised behaviourally: a valid container of exactly
- *      8,192 B builds, 8,193 B is refused with toy-data-bank-full.
+ *      8,160 B builds, 8,161 B is refused with toy-data-bank-full (#279
+ *      fixed finding F1: the old 8,192 check let 8,161-8,192 through onto
+ *      the trailer).
  *   6. THE WRITE-UP'S CITATIONS.  Every file:line the report names still
  *      holds its stated code (a merge moved one before, #131/a223320), so the
  *      next merge that moves one fails here instead of quietly aging the doc.
@@ -304,7 +307,9 @@ function checkCapacity() {
      cap.projections.map(function (p) { return [p.assumed, p.bytes, p.over]; }),
      [[3, 6212, false], [4, 6266, false], [6, 6374, false]]);
 
-  /* the limit itself, behaviourally: 8 KiB exactly builds, 8 KiB + 1 refuses */
+  /* the limit itself, behaviourally: 8,160 usable bytes exactly builds, one
+   * more refuses (#279 and finding F1: 8,160 is the data bank less its
+   * 32-byte song trailer) */
   const bank0 = fs.readFileSync(path.join(ROOT, "renderer/ilvm.bin"));
   function container(n) {
     const b = new Uint8Array(n);
@@ -312,21 +317,21 @@ function checkCapacity() {
     return b;
   }
   const at = romLib.buildToyRom({ bank0: bank0,
-    bytecode: container(romLib.BANK) });
-  eq("a container of exactly 8,192 B builds",
+    bytecode: container(romLib.SONG_TABLE_OFF) });
+  eq("a container of exactly 8,160 B builds",
      [at.length, bank0.length + romLib.BANK],
      [bank0.length + 8192, bank0.length + 8192]);
   let over = null;
   try {
     romLib.buildToyRom({ bank0: bank0,
-      bytecode: container(romLib.BANK + 1) });
+      bytecode: container(romLib.SONG_TABLE_OFF + 1) });
   } catch (e) { over = e; }
-  ok("a container of 8,193 B is refused", !!over,
+  ok("a container of 8,161 B is refused", !!over,
      over ? "accepted" : "no refusal");
   eq("with code toy-data-bank-full", over && over.code,
      "toy-data-bank-full");
-  ok("and the message names the 8 KiB bank",
-     over && /one 8 KiB data bank/.test(String(over.message)),
+  ok("and the message names the 8,160 usable bytes",
+     over && /8,160 usable/.test(String(over.message)),
      over && over.message);
 }
 
@@ -340,12 +345,12 @@ const CITATIONS = [
   ["renderer/pce-cgen.js", 616, "case \"padref\""],
   ["renderer/pce-cgen.js", 636, "builtin `"],
   ["renderer/pce-cgen.js", 697, "refuse(\"cgen-op\""],
-  ["renderer/pce-ilbc.js", 205, "var OPS = {"],
-  ["renderer/pce-ilbc.js", 221, "var BUILTIN = {"],
-  ["renderer/pce-ilbc.js", 338, "refuse(\"ilbc-op\""],
-  ["renderer/pce-ilbc.js", 363, "refuse(\"ilbc-builtin\""],
-  ["renderer/pce-ilbc.js", 415, "hookSlot(\"raster\""],
-  ["renderer/pce-rom.js", 631, "if (dataLen > BANK)"],
+  ["renderer/pce-ilbc.js", 229, "var OPS = {"],
+  ["renderer/pce-ilbc.js", 245, "var BUILTIN = {"],
+  ["renderer/pce-ilbc.js", 362, "refuse(\"ilbc-op\""],
+  ["renderer/pce-ilbc.js", 387, "refuse(\"ilbc-builtin\""],
+  ["renderer/pce-ilbc.js", 439, "hookSlot(\"raster\""],
+  ["renderer/pce-rom.js", 641, "if (dataLen > SONG_TABLE_OFF)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];
 

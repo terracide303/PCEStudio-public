@@ -600,10 +600,11 @@
    * The browser's export for route 1: no compiler, no PCEAS, no llvm-mos.
    * `toy.bank0` is renderer/ilvm.bin (the committed 32 KiB image, loaded by
    * the page the same way viewer-bank0.bin is); `toy.bytecode` is the
-   * container renderer/pce-ilbc.js encodes from the IL.  The result is the
-   * interpreter image, its two HuTrack engine banks, then one data bank
-   * (physical bank 4) holding the bytecode and, after it, any assets the
-   * caller ships for a future loader.
+   * container renderer/pce-ilbc.js encodes from the IL.  A version 1-3
+   * toy is the interpreter image, its two HuTrack engine banks, then one
+   * data bank (physical bank 4) holding the bytecode and, after it, any
+   * assets the caller ships for a future loader.  A version 4 toy (#279) is
+   * the same image then a tables bank and N code banks, appended whole.
    *
    * The output is a pure function of its inputs, so the Node test and the
    * studio page produce the same bytes. */
@@ -624,14 +625,24 @@
      * interpreter image reads it since #175.  Version 1 stays byte-identical
      * (a table-free toy is unaffected).  #197's version 3 carries the sound
      * ops; the #215 interpreter reads it (tools/ilvm/ilvm.c accepts 3 and
-     * dispatches music/sfx/release to the engine). */
-    need(bytecode[4] === 1 || bytecode[4] === 2 || bytecode[4] === 3,
-         "bytecode version must be 1, 2 or 3");
+     * dispatches music/sfx/release to the engine).  #279's version 4 is the
+     * banked container: a tables bank and N code banks, each a whole 8 KiB
+     * bank (docs/BANKED-DATA.md §5.2; the interpreter that maps the code
+     * banks is card #280). */
+    var version = bytecode[4];
+    need(version === 1 || version === 2 || version === 3 || version === 4,
+         "bytecode version must be 1, 2, 3 or 4");
+    if (version === 4) {
+      return buildBankedToyRom(bank0, bytecode, assets);
+    }
     var dataLen = bytecode.length + (assets ? assets.length : 0);
-    if (dataLen > BANK) {
+    /* Finding F1 (docs/ASM.md §9): the usable data is 8,160 B, not 8,192 —
+     * the song trailer owns the bank's last 32 bytes (SONG_TABLE_OFF). */
+    if (dataLen > SONG_TABLE_OFF) {
       refuse("toy-data-bank-full", "the bytecode (" + bytecode.length +
              " B) and assets (" + (assets ? assets.length : 0) + " B) need " +
-             dataLen + " bytes; the interpreter reads one 8 KiB data bank");
+             dataLen + " bytes; a data bank holds 8,160 usable (its last 32 " +
+             "bytes are the song trailer)");
     }
 
     var rom = new Uint8Array(ILVM_BYTES + BANK);
@@ -645,6 +656,40 @@
      * writes the converter half), so buildToyRom pins n = 0 — a byte the
      * console reads and the test proves. */
     rom[ILVM_BYTES + SONG_TABLE_OFF] = 0;
+    return rom;
+  }
+
+  /* #279: a version 4 container is already laid out as whole 8 KiB banks —
+   * bank 0 is the tables bank (physical 4), banks 1..N are the code banks
+   * (physical 5..).  The builder checks the self-describing bank count,
+   * appends the banks verbatim, writes the same 32-byte song trailer into
+   * every container bank (the sound glue reads it whichever bank MPR2
+   * holds), and puts any asset tail in the banks that follow. */
+  function buildBankedToyRom(bank0, bytecode, assets) {
+    need(bytecode.length >= 2 * BANK && bytecode.length % BANK === 0,
+         "a version 4 container is whole 8 KiB banks (a tables bank and N " +
+         "code banks); got " + bytecode.length + " bytes");
+    var codeBanks = (bytecode[26] | (bytecode[27] << 8));
+    need(codeBanks >= 1,
+         "a version 4 container must have at least one code bank");
+    need(bytecode.length === (1 + codeBanks) * BANK,
+         "a version 4 container says " + codeBanks + " code banks but is " +
+         bytecode.length + " bytes, not " + (1 + codeBanks) + " x 8,192");
+    var assetBanks = assets ? Math.ceil(assets.length / BANK) : 0;
+    var dataBanks = 1 + codeBanks + assetBanks;
+    if (ILVM_BYTES / BANK + dataBanks > MAX_ROM_BANKS) {
+      refuse("toy-rom-full", "the container and its assets need " + dataBanks +
+             " data banks; the 32 KiB image uses " + (ILVM_BYTES / BANK) +
+             " of a HuCard's " + MAX_ROM_BANKS);
+    }
+    var rom = new Uint8Array(ILVM_BYTES + dataBanks * BANK);
+    rom.fill(0xFF);
+    rom.set(bank0, 0);
+    rom.set(bytecode, ILVM_BYTES);
+    if (assets) rom.set(assets, ILVM_BYTES + bytecode.length);
+    for (var b = 0; b <= codeBanks; b++) {
+      rom[ILVM_BYTES + b * BANK + SONG_TABLE_OFF] = 0;
+    }
     return rom;
   }
 
