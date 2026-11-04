@@ -1157,9 +1157,12 @@ versions 1-3, whose code shares physical bank 4). The tables over 8,160 B are
 refused `toy-tables-bank-full`; a function over 8,160 B is
 `toy-function-too-big` (naming its id and byte count); a jump to a bank's
 usable edge is `toy-bank-edge`. `buildToyRom` accepts version 4 and appends
-the 1+N banks; the interpreter that maps MPR3 to the tables bank and MPR2 per
-call is card #280. Every toy that fits one bank keeps its v1-v3 bytes
-unchanged.
+the 1+N banks. Since #280 the interpreter maps MPR3 to the tables bank at
+boot, maps MPR2 to the function's code bank per call, and reads constants
+and upvalue descriptors through MPR3. A v4 container always carries the
+table section (the empty one-byte section when the program has no tables),
+because the interpreter reads `nslots` at `tabTabOff` for every version ≥ 2.
+Every toy that fits one bank keeps its v1-v3 bytes unchanged.
 
 The **v2 table section** (at the offset in header byte 20, between the global
 names and the code) is `nslots u8`, then one entry per table site in program

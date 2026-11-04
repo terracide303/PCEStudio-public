@@ -584,7 +584,15 @@
 
     var L = tablesLayout(wide ? HEADER_TABLES : HEADER);
     var banked = L.tablesBytes + codeTotal > CODE_USABLE;
-    if (banked && !wide) L = tablesLayout(HEADER_TABLES);
+    if (banked && !wide) {
+      /* #280: a v4 container always carries the table section, even the
+       * empty one-byte section, because the interpreter reads `nslots` at
+       * tabTabOff for every version >= 2.  A table-free, sound-free program
+       * that banks had left the byte as the bank's 0xFF fill, which boot
+       * read as 255 slots and faulted before anything ran. */
+      if (!section) section = { bytes: [0] };
+      L = tablesLayout(HEADER_TABLES);
+    }
     var funcTabOff = L.funcTabOff;
     var upTabOff = L.upTabOff;
     var constTabOff = L.constTabOff;

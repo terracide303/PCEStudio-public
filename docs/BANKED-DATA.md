@@ -570,9 +570,7 @@ Card #279 built §5.2 in `renderer/pce-ilbc.js` and `renderer/pce-rom.js`:
 - **The assets tail** after a v4 container starts on the next whole bank and
   occupies whole banks; the container banks' trailers are written first, so
   assets never overwrite one.
-- **Still open:** no interpreter reads v4. #280 maps MPR3 to the tables bank
-  and MPR2 per call; until it lands, a banked container builds but boots to
-  the interpreter's version-4 fault screen. Rule 2 is owed for
+- **The interpreter reads v4 since #280** (§5.7). Rule 2 is still owed for
   `tests/check-banked-data.js` (a different seat and model).
 - **Version-number collision with `docs/ASM.md`.** That note reserved
   container version 4 for CALLASM (#225/#236), which is not built. #279 takes
@@ -580,6 +578,70 @@ Card #279 built §5.2 in `renderer/pce-ilbc.js` and `renderer/pce-rom.js`:
   built, CALLASM either folds into the v4 layout (a code bank holds `asm`
   instructions too) or takes version 5. `renderer/pce-ilbc.js` does not emit
   `callasm` today, so nothing existing is affected.
+
+### 5.7 As built (#280, 2026-11-04)
+
+Card #280 made `tools/ilvm/ilvm.c` read v4 on the host and on the console.
+Every number below is measured on this tree; the commands are named.
+
+- **What changed in the interpreter.** At boot it maps container bank 0 (the
+  tables bank, physical 4) into **MPR2** as before and, new, into **MPR3**
+  (`TAM #$08`) for the whole run. `exec()` reads the function's bank byte from
+  the tables bank at `TABLES[funcTabOff + fid*10 + 9]` on every entry and maps
+  physical `4 + b` into MPR2 when it differs from the bank already there; the
+  call opcode maps the caller's bank back after the callee returns. `konst`,
+  its 32-bit reader `ri32`, and the closure upvalue descriptors read through
+  `TABLES` (MPR3) instead of `PROG` (MPR2). A v1-v3 entry's bank byte is 0, so
+  every map is the same physical bank 4 and nothing moves. Constants and
+  upvalue descriptors are the only container bytes read while a code bank is
+  mapped; the opcode loop, `rb`, `rw` and jump handling are untouched.
+- **The link probe: it fits, and no bank-3 helper was needed.** The baseline
+  image's `.text` was 16,225 B and `.rodata` 96 B, ending at `$FFC1` — **18 B**
+  before `.early_start`'s pinned `$FFD3`, not the 35 B the design note
+  inherited (the note's figure predates #227/#222 code growth). After the
+  change `.text` is 16,224 B + 96 B `.rodata`, ending at `$FFC0`: **19 B**
+  free. The version check became a two-compare range (`ver < 1 || ver > 4`),
+  which paid for the new code; `exec` itself shrank from 10,554 to 10,526 B.
+  `tools/ilvm/build.sh` (LLVM_MOS=/Volumes/External/pce-tools/llvm-mos)
+  asserts the 16,384 B image and wrote the numbers to `tools/gen/ilvm.json`.
+- **The BaseRAM cost is 4 B, not a per-function array.** `funcTabOff` (2 B)
+  and `code_cur` (1 B) plus padding moved the interpreter heap start from
+  `$373E` to `$3742`; the engine `.bss` moved with it (`$3742-$3B99`) and the
+  stack headroom fell from 1,131 to **1,127 B** (the 787 B structural margin
+  and the 1,083 B measured canary both still hold). No bank is stored per
+  function: the byte is read from the tables bank each call.
+- **A v4 defect found by the first boot (fixed).** `renderer/pce-ilbc.js` wrote
+  the table section only when the program had a table or sound instruction.
+  A table-free, sound-free program that banked therefore left the byte at
+  `tabTabOff` as the bank's `0xFF` fill; the interpreter reads `nslots` there
+  for every version ≥ 2, saw 255 slots, and faulted before `init()` — a blank
+  screen. The encoder now writes the empty one-byte section for every banked
+  container. This moves the two table-free v4 container shas pinned in
+  `tests/check-banked-data.js` (the table-bearing fixture's sha is unchanged);
+  the pins and #285's rule-2 re-break are owed with #286's encoder fix.
+- **v1-v3 behaviour is byte-identical.** `tests/check-ilvm.js`'s host parity
+  (palette, parallax, arity's wide calls, the tables and sprite toys) passes
+  against the browser IL run with the new image; only the pinned ROM shas and
+  the freshly built ROM comparisons move, which is #282's re-pin.
+- **A 2-code-bank toy boots and draws in Mednafen.** The witness is a
+  generated Lua toy (frame/init in bank 1, a 7,913 B `big()` in bank 2 called
+  from `init`, writes after the call, and a static BAT/tile/palette picture;
+  no jumps, because #286's v4 jump targets are still function-relative). It
+  encodes as version 4, container 24,576 B (tables + 2 code banks), ROM
+  57,344 B, sha256 `f1635d218e628de4…`, and the host harness runs it
+  byte-identically to the browser (vram/cram/sat diff 0, registers equal). In
+  Mednafen (default video driver, `tools/mcs-extract.py --ram`) the save
+  state's **VRAM, CRAM and SAT are byte-identical to the browser's after 30
+  frames** (diff 0/0/0; `vram[1000] = 1580` is `big()`'s return value through
+  the cross-bank call, and `vram[1001]`/`vram[1002]` are the writes after the
+  return, so the bank restore is exercised), and **30 of the last 30
+  recorded frames are pixel-identical (diff 0) to the browser's render of
+  frame 0** (`renderer/pce-toys.js`; the toy is static).
+- **Still open.** #286: the v4 encoder emits jump targets function-relative,
+  so a banked toy whose non-first function jumps still faults on the console;
+  this card's witness avoids jumps by construction. #282: re-pin every ROM
+  after the old/new Mednafen diff. Rule 2 is owed for any v4 boot check added
+  to the suite.
 
 ---
 
