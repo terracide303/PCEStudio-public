@@ -30,13 +30,33 @@
  *      8,160/8,192 fix, with 8,160 accepted), and a malformed v4 bank count.
  *   4. The browser path (both files with `self`, no module) builds the same
  *      v4 bytes Node does.
+ *   5. The nine cold breaks #285's rule-2 pass found (2026-11-04, a different
+ *      seat and model): the code payload's place and stream, every jump
+ *      target's bank-relative range and boundary, pinned v4 container shas,
+ *      the header's tabTabOff, the fit/packing/tables exact-8,160 edges, the
+ *      124-bank toy-rom-full refusal, and the builder's per-bank trailer
+ *      re-zero.  Each check's name carries its break number, v4 (1)..(9).
  *
  * NOT PROVEN HERE: no interpreter reads v4 yet (#280 maps MPR3 to the tables
  * bank and MPR2 per call), so nothing in this suite boots a banked ROM or
- * compares it with the browser's picture.  Rule 2 is owed: a different seat
- * and model must break this suite in its own ways (the fit threshold, the
- * packing order, the bank byte, the edge guard, the builder's bank count)
- * before the card closes.
+ * compares it with the browser's picture.  Rule 2 applies to these nine
+ * checks too: a different seat and model must re-break them (and the check
+ * catch every break) before #285 — and with it #279 — closes.
+ *
+ * FOUND WHILE WRITING THEM (2026-11-04, @test): the banked encode path calls
+ * encodeFunction with codeOff 0 (renderer/pce-ilbc.js, the out.set loop), so
+ * a function whose codeOff is nonzero emits every jump target as its
+ * function-relative offset, not the bank-relative offset the format promises
+ * (pce-ilbc.js's own v4 comment, docs/BANKED-DATA.md §5.2/§5.6,
+ * docs/IL.md §14.1: "codeOff/codeEnd and every jump target are offsets
+ * inside that bank").  TOWER's functions in banks past the first trip the
+ * v4 (2) checks: e.g. function 43's jmp at bank offset 7,159 targets 312
+ * instead of 7,193 (codeOff 6,881 + 312) — and the interpreter's untouched
+ * jump handling (tools/ilvm/ilvm.c: pc = rw(pc)) with its per-instruction
+ * range check would fault on it.  Until the encoder adds fnCodeOff[f] to
+ * each target (and to target()'s edge guard), the CONTROL of this file is
+ * red on exactly those v4 (2) lines — reported as a new card, not fixed
+ * here: a test seat fixes nothing it is testing.
  */
 "use strict";
 
@@ -412,6 +432,270 @@ function checkRefusals() {
      withAssets[32768 + enc.bytes.length], 7);
 }
 
+/* ---- 4. the nine #285 cold breaks, now checked -------------------------- */
+
+/* The v4 instruction stream, decoded.  Sizes include the opcode byte and
+ * come from renderer/pce-ilbc.js's container header comment; the
+ * variable-length ops (call, builtin, setlist) read their count from the
+ * stream.  An opcode the walker cannot size FAILS the suite — a decoder gap
+ * must never read as a pass. */
+const OPC = { const: 0x01, move: 0x02, getglobal: 0x03, setglobal: 0x04,
+              getupval: 0x05, setupval: 0x06, closure: 0x07, call: 0x08,
+              ret: 0x09, jmp: 0x0A, br: 0x0B, forprep: 0x0C, fornext: 0x0D,
+              arith: 0x0E, unm: 0x0F, bnot: 0x10, not: 0x11, cmp: 0x12,
+              builtin: 0x13, pal: 0x14, reg: 0x15, vset: 0x16, vget: 0x17,
+              table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B,
+              padref: 0x1C, padget: 0x1D, sat: 0x1E, sprite: 0x1F,
+              music: 0x20, sfx: 0x21, release: 0x22 };
+const OP_BYTE = {};
+for (const name of Object.keys(OPC)) OP_BYTE[OPC[name]] = name;
+
+function ilSize(ins) {                /* the instruction's encoded length */
+  switch (ins.t) {
+  case "call": return 4 + (ins.args || []).length;
+  case "builtin": return 4 + (ins.args || []).length;
+  case "setlist": return 4 + (ins.values || []).length;
+  case "br": case "arith": case "cmp": case "tget": case "tset": case "sfx":
+    return 5;
+  case "fornext": case "padget": case "sat": return 4;
+  case "jmp": return 3;
+  case "forprep": case "ret": case "music": case "release": return 2;
+  case "sprite": return 7;
+  default: return 3; /* const move getglobal setglobal getupval setupval
+                        closure unm bnot not pal reg vset vget table padref */
+  }
+}
+function byteSize(op, bytes, at) {    /* the emitted instruction's length */
+  /* call/builtin/setlist: opcode, two operand bytes, then the count byte. */
+  if (op === OPC.call || op === OPC.builtin || op === OPC.setlist) {
+    return 4 + bytes[at + 3];
+  }
+  switch (op) {
+  case OPC.br: case OPC.arith: case OPC.cmp: case OPC.tget: case OPC.tset:
+  case OPC.sfx: return 5;
+  case OPC.fornext: case OPC.padget: case OPC.sat: return 4;
+  case OPC.jmp: return 3;
+  case OPC.forprep: case OPC.ret: case OPC.music: case OPC.release: return 2;
+  case OPC.sprite: return 7;
+  default:
+    return OP_BYTE[op] != null ? 3 : 0;
+  }
+}
+function expectedOffsets(code) {
+  const offs = [0];
+  for (const ins of code) offs.push(offs[offs.length - 1] + ilSize(ins));
+  return offs;
+}
+
+/* Breaks (1) and (2): walk function fid's emitted bank stream from
+ * bank*8,192 + codeOff and require it to be its IL code, instruction for
+ * instruction — a payload written one byte off its entry fails at the first
+ * opcode — and every jump operand (jmp/br/fornext's u16) to be
+ * bank-relative, below 8,160 and exactly the target pc's boundary. */
+function checkStream(enc, fid, want, name) {
+  const f = fnEntry(enc.bytes, fid);
+  const start = f.bank * BANK + f.codeOff;
+  const end = f.bank * BANK + f.codeEnd;
+  if (want.length) {
+    eq("v4 (1) " + name + ": function " + fid + "'s code starts at its " +
+       "entry's codeOff (" + OP_BYTE[OPC[want[0].t]] + ")",
+       enc.bytes[start], OPC[want[0].t]);
+  }
+  const offs = expectedOffsets(want);
+  const boundaries = new Set(offs.map(o => f.codeOff + o));
+  const gotOps = [];
+  let at = start, i = 0;
+  while (at < end) {
+    if (i >= want.length) {
+      check(false, "v4 (1) " + name + ": function " + fid + " has more " +
+            "emitted code than IL instructions");
+      return;
+    }
+    const op = enc.bytes[at];
+    const size = byteSize(op, enc.bytes, at);
+    if (!size) {
+      check(false, "v4 (1) " + name + ": function " + fid + " emitted opcode " +
+            "0x" + op.toString(16) + " at bank offset " +
+            (at - f.bank * BANK) + " — extend the decoder's byteSize");
+      return;
+    }
+    gotOps.push(op);
+    if (op === OPC.jmp || op === OPC.br || op === OPC.fornext) {
+      const atT = at + (op === OPC.br ? 3 : op === OPC.fornext ? 2 : 1);
+      const t = u16(enc.bytes, atT);
+      const what = "v4 (2) " + name + ": function " + fid + "'s " +
+                   OP_BYTE[op] + " at bank offset " + (at - f.bank * BANK);
+      check(t < USABLE, what + " target " + t + " is below " + USABLE);
+      check(boundaries.has(t), what + " target " + t +
+            " is an instruction boundary");
+      eq(what + " target is pc " + want[i].target + "'s bank offset",
+         t, f.codeOff + offs[want[i].target]);
+    }
+    at += size;
+    i++;
+  }
+  check(i === want.length && at === end,
+        "v4 (1) " + name + ": function " + fid + "'s whole code stream " +
+        "decodes (" + i + " instructions, " + (end - start) + " B)");
+  const wantOps = want.map(ins => OPC[ins.t]);
+  check(gotOps.length === wantOps.length &&
+        gotOps.every((o, n) => o === wantOps[n]),
+        "v4 (1) " + name + ": function " + fid + "'s opcode stream is its IL");
+}
+
+function checkRule2Breaks() {
+  const bank0 = fs.readFileSync(ILVM);
+  const C = { t: "const", dst: { r: 0 }, k: { t: "int", v: 0 }, line: 1 };
+  const RET = { t: "ret", src: null, line: 1 };
+  const jmp = t => ({ t: "jmp", target: t, line: 1 });
+  const br = t => ({ t: "br", cond: { r: 0 }, when: false, target: t,
+                     line: 1 });
+  const fn = t => ({ t: "fornext", base: 0, target: t, line: 1 });
+
+  const vanillaCode = [consts(1666), consts(1666)];
+  const vanilla = ilbc.encode(program(vanillaCode,
+                                      [{ name: "frame" }, { name: "f1" }]));
+  const jumpyCode = [[jmp(2), C, C, br(6), C, C, fn(1)].concat(consts(1658)),
+                     [C, jmp(2), C, br(4), C, C, fn(2)].concat(consts(1657))];
+  const jumpy = ilbc.encode(program(jumpyCode,
+                                    [{ name: "frame" }, { name: "f1" }]));
+
+  /* A table-bearing v4 fixture: the real Lua front end (so the table section
+   * is the encoder's own), padded to 8,130 B so tables+code exceed one bank. */
+  const tableSrc = "frame = function(t, f) local u = {} u.x = 1 " +
+                   "local y = u.x + 1 return y end";
+  const tableProg = il.compile(tableSrc, { chunkName: "banked-table.lua" });
+  const pad = [];
+  for (let p = 0; p < 2700; p++) pad.push(C);
+  tableProg.functions[1].code = pad.concat(tableProg.functions[1].code);
+  const tableEnc = ilbc.encode(tableProg);
+  eq("the table fixture is version 4", tableEnc.version, 4);
+  check(tableEnc.tables.nslots > 0, "the table fixture has a table section");
+
+  /* Break (3): pinned v4 shas.  The seven v1-v3 pins above cover unbanked
+   * toys; before #285 no v4 sha was pinned, so a fill byte or layout change
+   * (0x00 instead of 0xFF, a shifted payload) could pass.  Captured
+   * 2026-11-04 from the intact encoder. */
+  for (const [what, bytes, pin] of [
+    ["the two-code-bank fixture's container",
+     vanilla.bytes,
+     "21f6a86542fdd53cc963e5a82d8e634c689c7ebc1adc1c3a001a32d921df3e1b"],
+    ["the jump fixture's container",
+     jumpy.bytes,
+     "c53c89029daffcc037a05794e2ec31a99534f6bfa753001eb2bb615b5cfad641"],
+    ["the table fixture's container",
+     tableEnc.bytes,
+     "1a52e77572415d32abdc01f628570825c1807aeebba21d640b3a10af470e4ebe"]]) {
+    eq("v4 (3) " + what + " sha is pinned", sha(bytes), pin);
+  }
+
+  /* Breaks (1) and (2): the code streams and every jump target. */
+  checkStream(vanilla, 0, vanillaCode[0], "the two-code-bank fixture");
+  checkStream(vanilla, 1, vanillaCode[1], "the two-code-bank fixture");
+  checkStream(jumpy, 0, jumpyCode[0], "the jump fixture");
+  checkStream(jumpy, 1, jumpyCode[1], "the jump fixture");
+  checkStream(tableEnc, 1, tableProg.functions[1].code, "the table fixture");
+
+  /* Break (4): the v4 header's tabTabOff lands on the table section, whose
+   * first byte is its u8 nslots. */
+  const tabTabOff = u16(tableEnc.bytes, 20);
+  eq("v4 (4) the header tabTabOff points at the table section's u8 nslots",
+     tableEnc.bytes[tabTabOff], tableEnc.tables.nslots);
+  const section = ilbc.buildTableSection(tableProg).bytes;
+  check(Buffer.from(tableEnc.bytes.slice(tabTabOff,
+                                         tabTabOff + section.length))
+        .equals(Buffer.from(section)),
+        "v4 (4) the table section at tabTabOff is buildTableSection's bytes");
+
+  /* Break (5): the fit threshold.  Tables (8,156 B with the 24-byte v1-v3
+   * header) plus 4 B of code is exactly 8,160 B — it fits, so it stays a
+   * v1-v3 container and builds.  The broken `>=` banks it. */
+  const g5 = [{ name: "frame" }];
+  for (let i = 1; i <= 196; i++) g5.push({ name: ("g" + i).padEnd(40, "x") });
+  g5.push({ name: "g197".padEnd(79, "x") });
+  const fitsCode = refuseCode(function () {
+    return ilbc.encode(program([[RET, RET]], g5));
+  });
+  eq("v4 (5) a toy whose tables+code is exactly 8,160 B stays a v1-3 " +
+     "container (no refusal)", fitsCode, null);
+  if (fitsCode === null) {
+    const fits = ilbc.encode(program([[RET, RET]], g5));
+    eq("v4 (5) its version is 1", fits.version, 1);
+    eq("v4 (5) it is not banked", fits.banked, false);
+    eq("v4 (5) its container is 8,160 B", fits.bytes.length, USABLE);
+    eq("v4 (5) it still builds",
+       refuseCode(function () {
+         romLib.buildToyRom({ bank0: bank0, bytecode: fits.bytes });
+       }), null);
+  }
+
+  /* Break (6): the packing rule.  Function 0 is 8,156 B, function 1 is 4 B —
+  * it exactly fills the bank, so it must start at 8,156 with no gap, in the
+  * same bank.  The broken `>=` pushes it to a second bank. */
+  const gapFree = ilbc.encode(program(
+    [consts(2718).concat([RET]), [RET, RET]],
+    [{ name: "frame" }, { name: "f1" }]));
+  eq("v4 (6) a second function that exactly fills the bank starts at the " +
+     "prior codeEnd", fnEntry(gapFree.bytes, 1).codeOff,
+     fnEntry(gapFree.bytes, 0).codeEnd);
+  eq("v4 (6) it stays in the same code bank",
+     fnEntry(gapFree.bytes, 1).bank, fnEntry(gapFree.bytes, 0).bank);
+  eq("v4 (6) the fixture still needs one code bank", gapFree.codeBanks, 1);
+
+  /* Break (7): the toy-rom-full guard.  124 functions of exactly 8,160 B
+   * need 124 code banks; a HuCard holds 123 after the 32 KiB image. */
+  const romFull = program(
+    Array.from({ length: 124 }, function () { return consts(2720); }));
+  eq("v4 (7) a 124-code-bank program is toy-rom-full",
+     refuseCode(function () { ilbc.encode(romFull); }), "toy-rom-full");
+
+  /* Break (8): tables of exactly 8,160 B (28-byte v4 header + 8,117 B of
+   * global names) fill the tables bank but are not over it — the broken
+   * `>=` refuses them. */
+  const g8 = [{ name: "frame" }];
+  for (let i = 1; i <= 196; i++) g8.push({ name: ("g" + i).padEnd(40, "x") });
+  g8.push({ name: "g197".padEnd(74, "x") });
+  const fullCode = refuseCode(function () {
+    return ilbc.encode(program([[C, RET]], g8));
+  });
+  eq("v4 (8) tables of exactly 8,160 B encode (no refusal)", fullCode, null);
+  if (fullCode === null) {
+    const fullTables = ilbc.encode(program([[C, RET]], g8));
+    eq("v4 (8) their version is 4", fullTables.version, 4);
+    eq("v4 (8) their container is 2 banks", fullTables.bytes.length, 2 * BANK);
+  }
+
+  /* Break (9): the builder re-zeros every container bank's song trailer, so
+   * a v4 container handed in with dirty trailers builds the same ROM as a
+   * clean one. */
+  const dirty = Uint8Array.from(vanilla.bytes);
+  dirty[USABLE] = 0x5A;
+  dirty[BANK + USABLE] = 0x5A;
+  dirty[2 * BANK + USABLE] = 0x5A;
+  const romDirty = romLib.buildToyRom({ bank0: bank0, bytecode: dirty });
+  eq("v4 (9) the ROM re-zeros the tables bank's trailer",
+     romDirty[32768 + USABLE], 0);
+  eq("v4 (9) the ROM re-zeros code bank 1's trailer",
+     romDirty[32768 + BANK + USABLE], 0);
+  eq("v4 (9) the ROM re-zeros code bank 2's trailer",
+     romDirty[32768 + 2 * BANK + USABLE], 0);
+  eq("v4 (9) a dirty-trailer container builds the same ROM",
+     sha(romDirty),
+     sha(romLib.buildToyRom({ bank0: bank0, bytecode: vanilla.bytes })));
+
+  /* TOWER's pinned v4 sha and its whole stream, when the witness is there. */
+  if (fs.existsSync(ORIGINAL_TOWER)) {
+    const towerProg = il.compile(fs.readFileSync(ORIGINAL_TOWER, "utf8"),
+                                 { chunkName: "tower.lua" });
+    const tower = ilbc.encode(towerProg);
+    eq("v4 (3) TOWER's v4 container sha is pinned", sha(tower.bytes),
+       "d543435a7929a85b88a7f2f282b802f197a03262b8cae0f99928e3d10880fc46");
+    for (let fid = 0; fid < towerProg.functions.length; fid++) {
+      checkStream(tower, fid, towerProg.functions[fid].code, "TOWER");
+    }
+  }
+}
+
 /* ---- run ---------------------------------------------------------------- */
 
 console.log("check-banked-data: #279 container v4 and the banked builder");
@@ -419,6 +703,7 @@ checkUnchanged();
 checkVanillaFixture();
 checkOriginalTower();
 checkRefusals();
+checkRule2Breaks();
 
 if (skipped.length) {
   console.log("note  " + checks + " checks, " + failed + " failed, " +
