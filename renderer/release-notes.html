@@ -73,9 +73,9 @@
     <li>STARFALL's code was reworked in place the same way: 77 percent of the data bank, 111 of 127 constants. In the browser it is pixel for pixel the same as before.
       <span class="status no">the studio's Export still refuses it: its art files add 68,702 bytes, and the ROM has one 8 KiB data bank; the bigger-games work has to land first</span>
       <span class="status soon">with its art left out, the closest console frame is 48 bytes off the browser's, and the game is too slow: a frame costs 2.34 video frames, about 25 Hz</span></li>
-    <li>The ROM now replays screen-split effects on every display frame, and writes each line's colours inside the blank, so a slow game no longer shows a stale screen. DUSK RUN's displayed picture now matches the browser's.
+    <li>The ROM now replays screen-split effects on every display frame, and writes each line's colours inside the blank, so a slow game no longer shows a stale screen. DUSK RUN's displayed picture now matches the browser's, in a test-only build — the studio's Export refuses DUSK RUN at the C compiler (its unary minus).
       <span class="status ok">tested: Mednafen captures compared with browser frames, difference zero</span>
-      <span class="status soon">DUSK RUN is still too slow; NOVA TIDE cannot export yet</span></li>
+      <span class="status soon">DUSK RUN and NOVA TIDE cannot export from the studio: the C compiler refuses both (unary minus); each is still too slow</span></li>
   </ul>
   <h3>Controllers</h3>
   <ul>
@@ -215,8 +215,8 @@
   <h2 id="open">Still not working</h2>
   <ul>
     <li>No ROM has run on a real PC Engine or a flash cart yet.</li>
-    <li>NOVA TIDE does not export: its screen-split effect has no form the ROM can run yet. TOWER and DUSK RUN export (they have no art files), but both are too slow on the console: every update overruns the frame. PLATFORMER runs at 30 Hz, not 60.</li>
-    <li>STARFALL does not export from the studio: its art files need 68,702 bytes and the ROM has one 8 KiB data bank. Our test builds it with the art left out, and then it is too slow and 48 bytes off the browser's frame.</li>
+    <li>NOVA TIDE does not export: the studio's Export refuses it at the C compiler (its unary minus), and its screen-split effect has no form the ROM can run yet. DUSK RUN's Export is refused too (unary minus); a test-only build of it without that gate runs — its picture now matches the browser's — but it is too slow: every update overruns the frame. TOWER exports (it has no art files) and is too slow the same way. PLATFORMER runs at 30 Hz, not 60.</li>
+    <li>STARFALL does not export from the studio: its art files need 68,702 bytes and the ROM has one 8 KiB data bank. The export test now runs the studio's exact path, so it refuses STARFALL with the dialog's own words; a test-only build with the art left out runs, too slow, and its closest frame is 48 bytes off the browser's.</li>
     <li>A game bigger than one 8 KiB data bank cannot export yet.</li>
     <li>Notes and effects play in exported ROMs. Music data in ROMs, and a tracker, are in progress.</li>
     <li>Planned, not built: the Lua-to-console compiler, Lua calling assembly, the assembly game engine, and opening an existing ROM in the studio.</li>
