@@ -691,6 +691,8 @@ number below is measured on this tree; the commands are named.
   `tam #4` is the tables page (`$10`). The first shim used `#4`, which
   mapped the asset bank over MPR4 while the pointer read MPR2; nothing on
   the host could see it, which is why the console capture matters.
+  `build-engine.sh` now refuses a shim that does not begin `php, sei,
+  tma #$04` (08 78 43 04), so the encoding cannot slip again.
 - **The fixed image paid 14 B and has nothing left.** `exec` grew
   10,526 → 10,540 B and the image still links at exactly 16,384 B, but
   `.text` 16,238 + `.rodata` 98 + `.early_start` 38 ends at `$FFF6`, where

@@ -316,6 +316,18 @@ code_bytes = code_end - code_start
 tables_bytes = tab_end - tab_start
 note_bytes = note_end - note_start
 
+# #281: CopyvShim must begin `php, sei, tma #$04` — the MPR2 window the source
+# pointer reads ($4000-$5FFF).  PCEAS's `tma #n` names MPRn, not the TAM bit
+# mask, so a `tma #4` assembles to $10 (the tables page) and the copy would
+# read the code bank through MPR2 while the asset bank sat over MPR4.  The
+# host half cannot see that (it has one flat container pointer), so the
+# encoding is pinned here: 08 php, 78 sei, 43 tma, 04 MPR2.
+copyv_off = copyv_addr - tab_start
+if tables[copyv_off:copyv_off + 4] != bytes([0x08, 0x78, 0x43, 0x04]):
+    raise SystemExit("CopyvShim does not start php/sei/tma #$04 (the MPR2 "
+                     "window); got %s" %
+                     tables[copyv_off:copyv_off + 4].hex(" "))
+
 # The whole bank is written, but only the extents are real; padding is $FF so
 # a later reader can tell used bytes from unused ones.  The tables bank has
 # three extents (pitch tables at $8000, the note table at $8C00, the sound-op
