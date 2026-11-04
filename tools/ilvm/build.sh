@@ -311,6 +311,13 @@ if eng_zp["start"] != engine_zp_base:
 if eng_zp["end"] > 0x2100:
     errors.append("engine zero page ends at $%04X, past the zero page" %
                   eng_zp["end"])
+# #281: ilvm.c reserves $20DE-$20DF for COPYV's container pc (the raster IRQ
+# preload owns $20E0-$20F0 and the COPYV shim's pointer is at $20F1).  The
+# engine's zero page must not grow into them; the bind of the two sides is a
+# fixed address, so a silent overlap is the failure mode to refuse.
+if eng_zp["end"] > 0x20DE:
+    errors.append("engine zero page ends at $%04X, past the COPYV cells at "
+                  "$20DE (tools/ilvm/ilvm.c's COPYV_PC)" % eng_zp["end"])
 if eng_bss["start"] < heap:
     errors.append("engine .bss starts at $%04X, below the interpreter's heap "
                   "start $%04X" % (eng_bss["start"], heap))

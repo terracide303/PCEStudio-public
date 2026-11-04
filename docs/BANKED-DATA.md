@@ -493,7 +493,7 @@ the system, and the measurement says DUSK RUN would lose most of its frame.
 3. **BANKED DATA 4/4: COPYV with a banked offset** (#217 restated) (~M). The
    op's data operand is a bank + offset from day one; the interpreter maps
    once per copy and streams. *Closes on:* #217's 300-word copy plus a
-   Mednafen capture once #218 emits a blob.
+   Mednafen capture once #218 emits a blob. **Built as §5.8 (#281).**
 4. **Re-pin after the interpreter moves** (~S). Old/new Mednafen diffs for
    every pinned ROM, then the six shas, the picture cycles and the docs
    (`ROM_SPEED.md`, `ROM_LAYOUT.md`, `IL.md`, `ASM.md`). The #221 precedent is
@@ -661,10 +661,66 @@ Every number below is measured on this tree; the commands are named.
   assumes), or the glue must map bank 0 first — otherwise a banked toy is
   silently silent.
 
+### 5.8 As built (#281, 2026-11-04)
+
+Card #281 built §5.4's third item: **COPYV with a banked offset**. Every
+number below is measured on this tree; the commands are named.
+
+- **The op.** Opcode `0x23`, 8 bytes: `vram u16, bank u8, off u16, count u16`
+  (`docs/IL.md` §14.1). The operands are immediates, not pool constants, so
+  an asset blob spends none of the 127-constant pool. `off` is 13 bits,
+  bank-relative from the start of `bank`; the source continues into bank+1,
+  bank+2, ... at each 8,192-byte boundary. The encoder emits no `copyv` yet
+  (#218's half); the test's containers are hand-laid, which is #217's own
+  evidence shape.
+- **The interpreter, two halves.** The host build (`-DILVM_HOST`) runs a C
+  body in `tools/ilvm/ilvm.c`. The console body is `CopyvShim` in bank 3 —
+  `$91E4` in this build, beside the sound glue, called by fixed address
+  (`HUTRACK_COPYV` in the generated `tools/gen/hutrack-symbols.h`) — because
+  the fixed 16 KiB image cannot hold the loop. The shim saves MPR2's
+  physical bank (`tma #4`), reads the seven operand bytes through MPR2, maps
+  physical `4 + bank`, sets MAWR once and streams the words through the VDC
+  data port (the viewer's `copy_words` shape, `tools/viewer.asm:501-556`),
+  remaps at each `$6000` crossing, maps the function's code bank back and
+  restores the caller's I flag. Interrupts are off for the copy: the raster
+  chain's IRQ handler writes the same VDC register port. So COPYV is an
+  asset load, not a frame-path op — `docs/IL.md` §14.1 records the
+  immediate-write contract #218 must respect.
+- **The fixed image paid 14 B and has nothing left.** `exec` grew
+  10,526 → 10,540 B and the image still links at exactly 16,384 B, but
+  `.text` 16,238 + `.rodata` 98 + `.early_start` 38 ends at `$FFF6`, where
+  `.vector` begins. The 14 B came out of ICF shrinking `.early_start` from
+  54 to 38 B; §2.2's "19 B free" was already spent by #280. A second op case
+  in the fixed image must probe the link first and is unlikely to fit
+  without moving code to bank 3.
+- **RAM.** The shim's four bytes of state (`count`, `bank`, the saved bank)
+  are in the engine's `.bss`: 1,111 → 1,115 B, stack headroom 1,127 →
+  **1,123 B** (the 787 B margin still holds). Its two zero-page cells are
+  `COPYV_PC $20DE-$20DF` (the container `pc` in/out) and the source pointer
+  `$20F1-$20F2`; `docs/ASM.md` §2.3 now records those, the #227 raster IRQ
+  block at `$20E0-$20F0`, and the 13 B that are actually free.
+- **Evidence (`tests/check-ilvm-copyv.js`, 24 checks).** A hand-laid version
+  1 container copies 300 words from bank 0 offset `0x200` to VRAM `0x1000`;
+  the host harness's `vram.bin` holds them word for word, and a `vset` after
+  the copy lands. A version 4 container (tables bank, one code bank, two
+  asset banks appended after it) copies 300 words from asset bank 2 offset
+  `0x100`, then another 300 from bank 2 offset `0x1F00` that crosses into
+  bank 3 after 128 words; both runs are word for word, and the `vset`/`ret`
+  after them prove MPR2 was mapped back to the code bank. `buildToyRom`
+  lays those container+asset bytes exactly as the harness runs them. Two
+  scratch mutations — the bank operand ignored, and the boundary carry one
+  byte wrong — each turn the run red.
+- **Not proven here.** The console shim's Mednafen capture is the one §3.3
+  asks for; it waits on #218 emitting an asset blob (the card's own closing
+  line). Rule 2 (a different seat and model breaks the test) is owed.
+- **Known reds.** `tests/check-ilvm.js` and `tests/check-banked-data.js`
+  keep #280's pre-existing ROM-sha failures (five dump pins, three builder
+  pins); the re-pin is #282. `check-ilvm`'s rebuild now matches the new
+  committed `renderer/ilvm.bin`.
+
 ---
 
 ## 6. Which gallery toys it unlocks (measured)
-
 This is the part that should temper the priority. The three toys the card
 names, measured on this tree (the same `tools/ilvm/emit.js` route the MCP's
 `export_pce` uses):

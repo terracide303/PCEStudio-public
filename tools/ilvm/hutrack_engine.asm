@@ -36,6 +36,15 @@
 ENGINE_ZP_BASE  = @@ENGINE_ZP_BASE@@
 ENGINE_BSS_BASE = @@ENGINE_BSS_BASE@@
 
+; #281: the two zero-page cells the COPYV op uses (docs/ASM.md §2.3).
+; COPYV_PC is the container pc the fixed image hands the shim below and reads
+; back; it is the first free pair after the engine's zero page.  The raster
+; IRQ preload owns $20E0-$20F0 (ilvm_runtime.c's IRQ_*), so the shim's
+; source pointer is the pair after it.  ilvm.c defines the same addresses;
+; build.sh asserts the engine's zero page end stays at or below COPYV_PC.
+COPYV_PC  = $20DE
+COPYV_PTR = $20F1
+
 ; #200's trace build: build-engine.sh replaces this line with
 ; `PSG_TRACE = 1` when PSG_TRACE=1, and with nothing otherwise.  The shipped
 ; image is assembled with the token commented out, so none of the trace code
@@ -101,6 +110,11 @@ snd_tick:        .ds 1
 snd_active:      .ds 1
 snd_tmp:         .ds 1
 snd_args_frames: .ds 2
+; #281: COPYV's copy state (CopyvShim below).  The source pointer is in zero
+; page at COPYV_PTR because the byte reads are [zp],y.
+copyv_cnt:       .ds 2
+copyv_bank:      .ds 1
+copyv_saved:     .ds 1
 SndGlueBss.end:
 
     .include "HuTrack/HuTrack_vars.inc"
@@ -583,6 +597,120 @@ PsgTraceLog:
     plp
     rts
 .endif
+
+; ---- CopyvShim: the COPYV op's body (#281, docs/IL.md §14.1,
+; docs/BANKED-DATA.md §3.3/§5.8).
+;
+; The fixed image's case 0x23 writes the container pc to COPYV_PC and jsr's
+; here.  This reads the seven operand bytes through MPR2 (the code bank),
+; maps the source bank (physical 4 + bank) into MPR2, streams the words into
+; the VDC data port, and maps the caller's code bank back before the fixed
+; image reads its next opcode.  The shape is the viewer's copy_words
+; (tools/viewer.asm's copy_words: the same MPR2 window, the same
+; remap-at-$6000 rule), which is the proven working example for this.
+;
+; Operands, from COPYV_PC: vramLo, vramHi, bank, offLo, offHi, cntLo, cntHi.
+; `off` is bank-relative and 13 bits; the stream continues into bank+1,
+; bank+2, ... at each $2000 boundary, so a blob can span whole banks.
+;
+; Interrupts are held off for the copy: the raster chain's IRQ handler
+; (ilvm_runtime.c) writes VDC registers through this same $0000/$0002 port
+; pair and would move MAWR mid-copy.  A COPYV is an asset load (init/boot,
+; display off); a copy from a game's frame() would hold the chain off for
+; its length, so the encoder must not emit one there (#218).  The caller's
+; I flag is restored with plp, so a copy from an IRQ-off context stays off.
+CopyvShim:
+    php                          ; save the caller's I flag
+    sei
+    tma #4                       ; the code bank MPR2 holds now
+    sta copyv_saved
+
+    st0 #$00                     ; VDC register 0 (MAWR): the VRAM address
+    ldy #0
+    lda [<COPYV_PC],y
+    sta $0002
+    iny
+    lda [<COPYV_PC],y
+    sta $0003
+    iny
+    lda [<COPYV_PC],y            ; data bank (container-relative)
+    sta copyv_bank
+    iny
+    lda [<COPYV_PC],y            ; source offset low
+    sta <COPYV_PTR
+    iny
+    lda [<COPYV_PC],y            ; source offset high: 13 bits, bank-relative
+    and #$1F
+    ora #$40
+    sta <COPYV_PTR+1
+    iny
+    lda [<COPYV_PC],y            ; word count low
+    sta copyv_cnt
+    iny
+    lda [<COPYV_PC],y            ; word count high
+    sta copyv_cnt+1
+
+    lda <COPYV_PC                ; advance the container pc past the operands
+    clc
+    adc #7
+    sta <COPYV_PC
+    bcc .pcok
+    inc <COPYV_PC+1
+.pcok:
+    lda copyv_bank               ; map the source bank: physical 4 + bank
+    clc
+    adc #4
+    tam #4
+    st0 #$02                     ; VDC register 2 (VWR): streamed words
+
+.loop:
+    lda copyv_cnt
+    ora copyv_cnt+1
+    beq .done
+    lda <COPYV_PTR+1             ; crossing $5FFF: map the next bank
+    cmp #$60
+    bne .readlo
+    jsr .nextbank
+.readlo:
+    ldy #0
+    lda [<COPYV_PTR],y
+    sta $0002
+    inc <COPYV_PTR
+    bne .hi
+    inc <COPYV_PTR+1
+.hi:
+    lda <COPYV_PTR+1
+    cmp #$60
+    bne .readhi
+    jsr .nextbank
+.readhi:
+    ldy #0
+    lda [<COPYV_PTR],y
+    sta $0003
+    inc <COPYV_PTR
+    bne .count
+    inc <COPYV_PTR+1
+.count:
+    lda copyv_cnt
+    bne .declo
+    dec copyv_cnt+1
+.declo:
+    dec copyv_cnt
+    jmp .loop
+.done:
+    lda copyv_saved              ; restore the code bank MPR2 held
+    tam #4
+    plp
+    rts
+.nextbank:
+    inc copyv_bank
+    lda copyv_bank
+    clc
+    adc #4
+    tam #4
+    lda #$40
+    sta <COPYV_PTR+1
+    rts
 
 SndGlueWave:
     .db 31,31,31,31,31,31,31,31,31,31,31,31,31,31,31,31

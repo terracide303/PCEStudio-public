@@ -75,8 +75,22 @@ static const uint8_t *prog;
 #define TABLES (ilvm_program)
 #else
 #include <pce.h>
+/* #281: COPYV's body lives in bank 3 (HUTRACK_COPYV), beside the sound-op
+ * glue, because the fixed 16 KiB image has no room for a copy loop
+ * (docs/BANKED-DATA.md §5.8). */
+#include "hutrack-symbols.h"
 #define PROG ((const uint8_t *)0x4000)
 #define TABLES ((const uint8_t *)0x6000)
+/* #281: the container pc the fixed image hands the bank-3 COPYV shim and
+ * reads back.  $20DE-$20DF is the first free zero-page pair after the
+ * engine; the raster IRQ preload owns $20E0-$20F0 and the shim's source
+ * pointer sits at $20F1-$20F2 (docs/ASM.md §2.3).  The shim's asm defines
+ * the same two addresses, COPYV_PC and COPYV_PTR, in
+ * tools/ilvm/hutrack_engine.asm; build.sh asserts the engine's zero page
+ * never grows to $20DE. */
+#define COPYV_PC ((volatile uint16_t *)0x20DEu)
+#define COPYV_CALL() \
+  __asm__ volatile ("jsr %0" : : "i" (HUTRACK_COPYV) : "a", "x", "y", "memory")
 #endif
 
 #define MAX_REGS 41            /* #222: the toys need 21; the games more —
@@ -759,6 +773,56 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       ilvm_release((uint8_t)av);
 #else
       ilvm_release(&av);           /* console: pointer form */
+#endif
+      break;
+    case 0x23:
+      /* copyv (#281, docs/IL.md §14.1): `vram:u16 bank:u8 off:u16 count:u16`
+       * copies `count` words from the data stream starting at byte `off` of
+       * container bank `bank` to VRAM from `vram` upward.  `off` is
+       * bank-relative (13 bits); the copy streams into bank+1, bank+2, ...
+       * at each 8,192-byte boundary, skipping nothing, so a blob may span
+       * whole banks (the v4 asset tail, docs/BANKED-DATA.md §5.2/§5.3).
+       * The mapping is done once for the first bank and again only at a
+       * boundary; the caller's code bank is mapped back before the next
+       * opcode (on the console the bank-3 shim does both).
+       *
+       * The host half below is the console shim's specification and its
+       * host-side witness; on the console the whole case is the one jsr. */
+#ifdef ILVM_HOST
+      {
+        uint16_t va, off, so, cnt, n2, w;
+        uint8_t sb, cb;
+        va = rw(pc); pc = (uint16_t)(pc + 2);
+        sb = rb(pc++);
+        off = rw(pc); pc = (uint16_t)(pc + 2);
+        so = (uint16_t)(off & 0x1FFF);
+        sb = (uint8_t)(sb + (off >> 13));
+        cnt = rw(pc); pc = (uint16_t)(pc + 2);
+        cb = code_cur;
+        if (sb != code_cur) { code_cur = sb; map_data_bank(sb); }
+        for (n2 = 0; n2 < cnt; n2++) {
+          /* The boundary is checked between the two bytes of a word, as the
+           * shim does: a word may straddle it. */
+          w = rb(so++);
+          if (so >= 0x2000) {
+            so = (uint16_t)(so - 0x2000); sb++;
+            code_cur = sb; map_data_bank(sb);
+          }
+          w |= (uint16_t)((uint16_t)rb(so++) << 8);
+          if (so >= 0x2000) {
+            so = (uint16_t)(so - 0x2000); sb++;
+            code_cur = sb; map_data_bank(sb);
+          }
+          toy_vram_set((int32_t)(uint16_t)(va + n2), (int32_t)w);
+        }
+        if (cb != code_cur) { code_cur = cb; map_data_bank(cb); }
+      }
+#else
+      /* Bank 3's CopyvShim reads and advances the operands itself: the fixed
+       * image pays one store, one jsr and one load (docs/ASM.md §6). */
+      *COPYV_PC = pc;
+      COPYV_CALL();
+      pc = *COPYV_PC;
 #endif
       break;
     default:

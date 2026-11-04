@@ -24,14 +24,15 @@
  *      extracted banks are 8,192 B each; code ends at $BEC4 (7,876 B used,
  *      316 free in bank 2) and bank 3 holds three extents — the pitch tables
  *      to $8B34 (2,868 B), note(midi)'s 512-word table at $8C00-$9000
- *      (#215) and the sound-op glue at $9000-$9204 (516 B, #220/#239/#113),
- *      3,580 B free — the numbers docs/ROM-SOUND.md §2 measured.  Bytes outside the
+ *      (#215) and the sound-op glue at $9000-$92A8 (680 B, #220/#239/#113,
+ *      plus #281's COPYV shim), 3,408 B free — the numbers
+ *      docs/ROM-SOUND.md §2 measured.  Bytes outside the
  *      extents are $FF, and the extracted banks equal the raw image's banks
  *      2 and 3 byte for byte.
  *   3. The symbol header.  Every entry point docs/ROM-SOUND.md §7 names has
  *      a fixed address in bank 2 (page 5) or bank 3 (page 4), the RAM
- *      interface symbols sit at the §5 addresses ($2080, $2200, and the
- *      glue's snd_args_frames at the engine bss end), and
+ *      interface symbols sit at the §5 addresses ($2080, $2200, and
+ *      snd_args_frames in the glue's bss), and
  *      tools/gen/hutrack-symbols.h carries the same numbers as
  *      hutrack-image.json.
  *
@@ -65,9 +66,10 @@ const TABLES_BYTES = 2868;
 const NOTE_TABLE_START = 0x8c00;       /* #215: note(midi)'s 512 words */
 const NOTE_TABLE_BYTES = 1024;
 const GLUE_START = 0x9000;             /* #220: the sound-op glue */
-const GLUE_END = 0x9204;          /* #239: +11 B for the cold-song guard;
-                                   * #113: +5 B for `sta $801` (R1) */
-const GLUE_BYTES = 516;
+const GLUE_END = 0x92a8;          /* #239: +11 B for the cold-song guard;
+                                   * #113: +5 B for `sta $801` (R1);
+                                   * #281: CopyvShim (+164 B) */
+const GLUE_BYTES = 680;
 
 /* The three call sites the staged copy narrows, and the files they live in.
  * The line numbers are the vendored ones; the patch asserts the content. */
@@ -88,15 +90,18 @@ const INTERFACE = [
   "HuTrack.returnVec", "_hk.R1", "_hk.EAX0",
   "SndGlueMap", "SndGlueReset", "SndGlueNote", "SndGlueSfx",
   "SndGlueRelease", "SndGlueMusic", "SndGlueTick",
-  "HuTrack.NoteTable", "snd_args_frames",
+  "HuTrack.NoteTable", "snd_args_frames", "CopyvShim",
 ];
 /* #239: the glue .bss is the FIRST block of the engine .bss now, so
- * the HuTrack vars start 49 B in (the placeholder base is $2200). */
-const RAM = { "HuTrack.returnVec": 0x2231, "_hk.R1": 0x2080,
+ * the HuTrack vars start 53 B in (the placeholder base is $2200).  #281
+ * added COPYV's four state bytes to the glue's bss, so the vars start 4 B
+ * later than #239's 49. */
+const RAM = { "HuTrack.returnVec": 0x2235, "_hk.R1": 0x2080,
               "_hk.EAX0": 0x2086, "snd_args_frames": 0x222f };
 const TABLES_IFACE = new Set([
   "SndGlueMap", "SndGlueReset", "SndGlueNote", "SndGlueSfx",
   "SndGlueRelease", "SndGlueMusic", "SndGlueTick", "HuTrack.NoteTable",
+  "CopyvShim",
 ]);
 
 let failures = 0;
@@ -382,6 +387,7 @@ function checkImage(out) {
       SndGlueMusic: "HUTRACK_SND_MUSIC",
       SndGlueTick: "HUTRACK_SND_TICK",
       snd_args_frames: "HUTRACK_SND_FRAMES",
+      CopyvShim: "HUTRACK_COPYV",
     }[name];
     const m = new RegExp(`^#define\\s+${define}\\s+(0x[0-9A-Fa-f]+)`, "m")
       .exec(header);
@@ -393,8 +399,8 @@ function checkImage(out) {
   if (failures === 0)
     console.log(`image: code $A000-$BEC4 (${CODE_BYTES} B, 316 free), ` +
                 `pitch tables $8000-$8B34 (${TABLES_BYTES} B), ` +
-                `note table $8C00-$9000, glue $9000-$9204 (${GLUE_BYTES} B), ` +
-                `3,580 free, ${INTERFACE.length} symbols`);
+                `note table $8C00-$9000, glue $9000-$92A8 (${GLUE_BYTES} B), ` +
+                `3,408 free, ${INTERFACE.length} symbols`);
 }
 
 /* ---- run ---- */
