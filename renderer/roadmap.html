@@ -73,13 +73,14 @@
     <span class="status soon">in progress</span> is being built now.
     <span class="status no">planned</span> is decided but not started.</div>
   <h2>1. Games that really export</h2>
-  <p>A studio is only as good as what you can play outside it. Today PLATFORMER and the simple example toys export
-  and run in an emulator; DUSK RUN builds and draws, but its displayed picture is not the browser's yet, and
-  nothing has run on a real console.</p>
+  <p>A studio is only as good as what you can play outside it. Today PLATFORMER, TOWER and the simple example toys export
+  and run in an emulator. STARFALL exports, but its picture on the console is a few pixels off the browser's. DUSK RUN
+  builds, but it is too slow and its picture is not the browser's yet. NOVA TIDE cannot export yet. Nothing has run on a real console.</p>
   <table>
     <tr><th>Feature</th><th>Why we want it</th><th>State</th></tr>
     <tr><td>The five example games export</td><td>They are the test of every limit in the exporter. Each refusal teaches us what is missing.</td><td class="status soon">in progress</td></tr>
-    <tr><td>Bigger games (bank switching, the larger mapper)</td><td>The interpreter ROM has one 8 KiB data bank. Real games are larger.</td><td class="status no">planned</td></tr>
+    <tr><td>Bigger games (bank switching, the larger mapper)</td><td>The interpreter ROM has one 8 KiB data bank. Real games are larger. The design is written; building it is next.</td><td class="status soon">in progress</td></tr>
+    <tr><td>Controllers: a real pad in the studio and in exported ROMs</td><td>You play and test with a pad. The studio and the toy page read it, and an exported ROM reads the console's pad port. The ROM side is proven in an emulator with scripted button presses only, not with a real pad yet.</td><td class="status soon">in progress</td></tr>
     <tr><td>A compiler from Lua to console code</td><td>Instead of an interpreter in the ROM, the studio would translate a game once into HuC6280 machine code. That is how games reach 60 Hz and fit in real cartridges, and it is what ppu.toys does for the SNES. Planned, not built.</td><td class="status no">planned</td></tr>
     <tr><td>Faster output</td><td>PLATFORMER runs at 30 Hz through the interpreter; small toys reach 60 Hz. A direct code generator would reach 60 Hz for real games.</td><td class="status no">planned</td></tr>
     <tr><td>Save data (backup RAM)</td><td>Many games need to remember progress.</td><td class="status no">planned</td></tr>
@@ -118,6 +119,7 @@
     <tr><td>Send a build to a flash cart</td><td>Research first: what a browser can do with a Turbo EverDrive or a programmable HuCard.</td><td class="status no">planned</td></tr>
     <tr><td>Run panel and debugger</td><td>Step, registers, memory, disassembly and breakpoints. Opening any .pce falls out of it.</td><td class="status no">planned</td></tr>
     <tr><td>Lua toys that call assembly routines</td><td>Fast inner loops in assembly, the rest in Lua.</td><td class="status no">planned</td></tr>
+    <tr><td>A built-in assembly game engine</td><td>The speed tricks (sprite lists, scrolling maps, collisions) written once in assembly and called from Lua, so every game does not rebuild them. Design first.</td><td class="status no">planned</td></tr>
     <tr><td>Work with Geargrafx (research first)</td><td>Symbol files it loads by itself, and possibly Claude building here and running and breaking there through its MCP server. Not started: the card only reads what it offers.</td><td class="status no">planned</td></tr>
     <tr><td>Take the project out as source</td><td>A plain folder with the assembly, assets and a build script, so nobody is locked in.</td><td class="status no">planned</td></tr>
   </table>
