@@ -585,8 +585,9 @@ Every number below is measured on this tree; the commands are named.
   its 32-bit reader `ri32`, and the closure upvalue descriptors read through
   `TABLES` (MPR3) instead of `PROG` (MPR2). A v1-v3 entry's bank byte is 0, so
   every map is the same physical bank 4 and nothing moves. Constants and
-  upvalue descriptors are the only container bytes read while a code bank is
-  mapped; the opcode loop, `rb`, `rw` and jump handling are untouched.
+  upvalue descriptors are the only container bytes read through MPR3 while a
+  code bank is mapped; bytecode operands keep reading through MPR2, and the
+  opcode loop, `rb`, `rw` and jump handling are untouched.
 - **The link probe: it fits, and no bank-3 helper was needed.** The baseline
   image's `.text` was 16,225 B and `.rodata` 96 B, ending at `$FFC1` — **18 B**
   before `.early_start`'s pinned `$FFD3`, not the 35 B the design note
@@ -608,20 +609,29 @@ Every number below is measured on this tree; the commands are named.
   `tabTabOff` as the bank's `0xFF` fill; the interpreter reads `nslots` there
   for every version ≥ 2, saw 255 slots, and faulted before `init()` — a blank
   screen. The encoder now writes the empty one-byte section for every banked
-  container. This moves the two table-free v4 container shas pinned in
-  `tests/check-banked-data.js` (the table-bearing fixture's sha is unchanged);
-  the pins and #285's rule-2 re-break are owed with #286's encoder fix.
+  container. This moved the two table-free v4 container shas pinned in
+  `tests/check-banked-data.js` (the table-bearing fixture's sha is unchanged),
+  so both pins were re-captured here; #285's rule-2 re-break is still owed
+  with #286's encoder fix, which moves the jump fixture again.
 - **v1-v3 behaviour is byte-identical.** `tests/check-ilvm.js`'s host parity
-  (palette, parallax, arity's wide calls, the tables and sprite toys) passes
-  against the browser IL run with the new image; only the pinned ROM shas and
-  the freshly built ROM comparisons move, which is #282's re-pin.
-- **A 2-code-bank toy boots and draws in Mednafen.** The witness is a
-  generated Lua toy (frame/init in bank 1, a 7,913 B `big()` in bank 2 called
-  from `init`, writes after the call, and a static BAT/tile/palette picture;
-  no jumps, because #286's v4 jump targets are still function-relative). It
-  encodes as version 4, container 24,576 B (tables + 2 code banks), ROM
-  57,344 B, sha256 `f1635d218e628de4…`, and the host harness runs it
-  byte-identically to the browser (vram/cram/sat diff 0, registers equal). In
+  (parallax, arity's wide calls, the tables, sprite and not toys) passes
+  against the browser IL run with the new image, and a direct hostvm run of
+  the **v3** dusk-run container (tables + sound, 7,470 B) gives vram/cram/sat
+  diff 0 and equal registers. A v4 container with a table section
+  (nslots = 1) also runs byte-identically, its pool cell set. Only the pinned
+  ROM shas and the freshly built ROM comparisons move, which is #282's
+  re-pin.
+- **A 2-code-bank toy boots and draws in Mednafen.** The witness
+  (`tools/ilvm/banked-witness.js`) is a generated Lua toy: frame/init in bank
+  1, a ~7.9 KB straight-line `big()` in bank 2 called from `init`, writes
+  after the call, a static BAT/tile/palette picture, and a captured local
+  (`seed`) so init's closure reads an upvalue descriptor from the tables bank
+  while MPR2 holds a code bank. No jumps, because #286's v4 jump targets are
+  still function-relative. It encodes as version 4, container 24,576 B
+  (tables + 2 code banks, code 8,682 B), ROM 57,344 B, sha256
+  `16bf4249d2732bdd…`, and the host harness runs it byte-identically to the
+  browser (vram/cram/sat diff 0, registers equal; a PROG read of the upvalue
+  descriptor would change CRAM). In
   Mednafen (default video driver, `tools/mcs-extract.py --ram`) the save
   state's **VRAM, CRAM and SAT are byte-identical to the browser's after 30
   frames** (diff 0/0/0; `vram[1000] = 1580` is `big()`'s return value through
@@ -633,7 +643,13 @@ Every number below is measured on this tree; the commands are named.
   so a banked toy whose non-first function jumps still faults on the console;
   this card's witness avoids jumps by construction. #282: re-pin every ROM
   after the old/new Mednafen diff. Rule 2 is owed for any v4 boot check added
-  to the suite.
+  to the suite. **The sound glue's trailer read is now bank-dependent:** before
+  #280 MPR2 always held the data bank, so `SndGlueMap`'s read of `$5FE0` was
+  the tables bank; now a sound op inside code reads the code bank's trailer.
+  That is safe today only because `buildToyRom` writes n = 0 into every
+  container bank. When #199 ships songs it must write the same song list into
+  **every** bank's 32-byte trailer (the "same strip" §3.2 assumes), or the
+  glue must map bank 0 first — otherwise a banked toy is silently silent.
 
 ---
 

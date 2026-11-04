@@ -17,8 +17,10 @@
  *
  * With the committed interpreter (renderer/ilvm.bin, sha f661ab16…) this is
  * version 4, 24,576 B (tables + 2 code banks), a 57,344 B ROM with sha
- * f1635d218e628de4…, and its static picture matches the browser frame for
- * frame (the capture method is tools/capture-ilvm.sh's).
+ * 16bf4249d2732bdd…, and its static picture matches the browser frame for
+ * frame (the capture method is tools/capture-ilvm.sh's).  `seed` is a
+ * captured local, so init's closure reads an upvalue descriptor from the
+ * tables bank — a PROG read there would change CRAM.
  */
 "use strict";
 
@@ -33,15 +35,22 @@ if (!out) {
 }
 
 const lines = [];
-/* A visible picture: two tiles, two BAT rows, two palettes. */
+/* A captured local: creating init's and frame's closures reads their upvalue
+ * descriptors from the tables bank while MPR2 holds the chunk's code bank,
+ * and init reads the cell (palette 2) — a PROG read instead of TABLES would
+ * put code bytes in the kind/index and change CRAM. */
+lines.push("local seed = 0x0A5");
+/* A visible picture: one tile, three BAT rows, three palettes. */
 lines.push("function init()");
 for (let i = 0; i < 16; i++) lines.push("  vram[" + (0x40 * 16 + i) + "] = 0xFFFF");
 for (let i = 0; i < 32; i++) lines.push("  vram[" + i + "] = 0x0040");
 for (let i = 0; i < 32; i++) lines.push("  vram[" + (32 + i) + "] = 0x1040");
+for (let i = 0; i < 32; i++) lines.push("  vram[" + (64 + i) + "] = 0x2040");
 lines.push("  pal(0, 0x1FF)");
 lines.push("  pal(1, 0x0E3)");
 lines.push("  pal(16, 0x03F)");
 lines.push("  pal(17, 0x1C0)");
+lines.push("  pal(2, seed)");
 lines.push("  big()");
 /* Writes after the cross-bank call: if MPR2 is not restored to init's bank
  * the next instruction fetch reads big()'s bank at init's pc. */
