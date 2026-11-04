@@ -348,8 +348,8 @@ if (!buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c"))) {
         "the boundary carry is checked after both bytes of a word");
   const mutant2 = source.split(carryNeedle).join(
     "so = (uint16_t)(so - 0x1FFF); sb++;");
-  [["ignored bank operand", mutant1, vram4, 0x1000],
-   ["one-byte boundary carry", mutant2, vram4, 0x2000]].forEach(function (m) {
+  [["ignored bank operand", mutant1, 0x1000],
+   ["one-byte boundary carry", mutant2, 0x2000]].forEach(function (m) {
     const name = m[0];
     const src = path.join(tmp, "ilvm-" + m[0].replace(/\W+/g, "-") + ".c");
     fs.writeFileSync(src, m[1]);
@@ -364,7 +364,7 @@ if (!buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c"))) {
     if (!mv) return;
     let differs = false;
     for (let i = 0; i < 300; i++) {
-      if (mv[m[3] + i] !== (m[3] === 0x1000 ? v4.wordsA[i] : v4.wordsB[i])) {
+      if (mv[m[2] + i] !== (m[2] === 0x1000 ? v4.wordsA[i] : v4.wordsB[i])) {
         differs = true;
       }
     }
