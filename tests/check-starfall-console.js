@@ -346,10 +346,10 @@ const CITATIONS = [
   ["renderer/pce-cgen.js", 636, "builtin `"],
   ["renderer/pce-cgen.js", 697, "refuse(\"cgen-op\""],
   ["renderer/pce-ilbc.js", 229, "var OPS = {"],
-  ["renderer/pce-ilbc.js", 245, "var BUILTIN = {"],
-  ["renderer/pce-ilbc.js", 362, "refuse(\"ilbc-op\""],
-  ["renderer/pce-ilbc.js", 387, "refuse(\"ilbc-builtin\""],
-  ["renderer/pce-ilbc.js", 439, "hookSlot(\"raster\""],
+  ["renderer/pce-ilbc.js", 249, "var BUILTIN = {"],
+  ["renderer/pce-ilbc.js", 366, "refuse(\"ilbc-op\""],
+  ["renderer/pce-ilbc.js", 391, "refuse(\"ilbc-builtin\""],
+  ["renderer/pce-ilbc.js", 443, "hookSlot(\"raster\""],
   ["renderer/pce-rom.js", 641, "if (dataLen > SONG_TABLE_OFF)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];
