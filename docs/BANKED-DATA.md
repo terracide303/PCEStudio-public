@@ -678,7 +678,7 @@ number below is measured on this tree; the commands are named.
   `$91E4` in this build, beside the sound glue, called by fixed address
   (`HUTRACK_COPYV` in the generated `tools/gen/hutrack-symbols.h`) — because
   the fixed 16 KiB image cannot hold the loop. The shim saves MPR2's
-  physical bank (`tma #4`), reads the seven operand bytes through MPR2, maps
+  physical bank (`tma #2`), reads the seven operand bytes through MPR2, maps
   physical `4 + bank`, sets MAWR once and streams the words through the VDC
   data port (the viewer's `copy_words` shape, `tools/viewer.asm:501-556`),
   remaps at each `$6000` crossing, maps the function's code bank back and
