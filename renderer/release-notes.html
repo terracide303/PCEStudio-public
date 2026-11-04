@@ -64,6 +64,33 @@
   <b>tested</b> and how. Anything not listed under "works" is not finished. What comes next, and why, is on the <a href="roadmap.html">roadmap</a>. The honest list of gaps is in the
   <a href="testers.html#not-yet">beta guide</a>.</p>
 
+  <h2 id="b6">Build 6 · Wednesday 4 November</h2>
+  <h3>Exporting the example games</h3>
+  <ul>
+    <li>TOWER was reworked in place so it fits the ROM's limits, and it now exports. The game looks and plays as before.
+      <span class="status ok">tested: it builds, and the data-bank budget is under the limit</span></li>
+    <li>STARFALL was reworked in place the same way and exports: 77 percent of the data bank, 111 of 127 constants. In the browser it is pixel for pixel the same as before.
+      <span class="status soon">on the console, its closest frame is 48 bytes off the browser's, two one-pixel columns at the screen edges; the cause is not known yet</span></li>
+    <li>The ROM now replays screen-split effects on every display frame, and writes each line's colours inside the blank, so a slow game no longer shows a stale screen. DUSK RUN's displayed picture now matches the browser's.
+      <span class="status ok">tested: Mednafen captures compared with browser frames, difference zero</span>
+      <span class="status soon">DUSK RUN is still too slow; NOVA TIDE cannot export yet</span></li>
+  </ul>
+  <h3>Controllers</h3>
+  <ul>
+    <li>A pad-test toy shows every button and both pads live. A ROM version of it was checked in Mednafen with scripted button presses, including the reading sequence the console uses.
+      <span class="status soon">not yet tried with a real pad on a console</span></li>
+  </ul>
+  <h3>Working with Claude</h3>
+  <ul>
+    <li>The first helpers so Claude does not rewrite converters: pixel grids to sprites, sound effect presets and writing a tune.
+      <span class="status ok">tested: a check runs each helper</span></li>
+  </ul>
+  <h3>Plans written</h3>
+  <ul>
+    <li>A design for games bigger than one 8 KiB data bank is written and measured, and the first build steps are queued. Nothing of it runs yet.</li>
+    <li>The roadmap has new rows for controllers, bigger games and a built-in assembly game engine.</li>
+  </ul>
+
   <h2 id="b5">Build 5 · Tuesday 3 November</h2>
   <h3>Controllers</h3>
   <ul>
@@ -186,11 +213,11 @@
   <h2 id="open">Still not working</h2>
   <ul>
     <li>No ROM has run on a real PC Engine or a flash cart yet.</li>
-    <li>STARFALL does not export (constant pool and sprite specs); NOVA TIDE stops on its <code>raster</code> table; TOWER on its data size.</li>
-    <li>DUSK RUN exports and both its state and its displayed picture match the browser's. STARFALL
-      exports and draws; its closest browser frame is 48 bytes off in the status bar's first tile row.</li>
+    <li>NOVA TIDE does not export: its screen-split effect has no form the ROM can run yet. DUSK RUN exports and its picture matches, but it is too slow. PLATFORMER runs at 30 Hz, not 60.</li>
+    <li>STARFALL exports and draws; its closest browser frame is 48 bytes off in the status bar's first tile row.</li>
+    <li>A game bigger than one 8 KiB data bank cannot export yet.</li>
     <li>Notes and effects play in exported ROMs. Music data in ROMs, and a tracker, are in progress.</li>
-    <li>Planned, not built: the Lua-to-console compiler, the assembly chain, and opening an existing ROM in the studio.</li>
+    <li>Planned, not built: the Lua-to-console compiler, Lua calling assembly, the assembly game engine, and opening an existing ROM in the studio.</li>
     <li>Export error reports and a developer export (source out) are planned.</li>
   </ul>
   <p>Found something wrong? <a href="https://github.com/terracide303/PCEStudio-public/issues/new/choose">Report it</a>.</p>
