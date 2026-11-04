@@ -66,7 +66,7 @@ const ROM_DUMP = path.join(ROOT, "tests", "dumps", "pads",
 /* The exported ROM's pinned bytes (2 below): the sha moves with any
  * interpreter or bytecode change, like every GAME_PINS entry. */
 const ROM_PIN = {
-  sha: "70aac628f3756f968a93394d9a3baf513b5b09faf90de94219e5457c489d7c35",
+  sha: "dedbfd636f6735fa636c1d7ed746103dc4cd2faeb381c0b50545f891a31b9ff7",
   bytes: 40960,
   bytecodeBytes: 2063
 };

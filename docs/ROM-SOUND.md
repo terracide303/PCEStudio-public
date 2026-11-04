@@ -651,17 +651,21 @@ write 64 (sprites), 68 (landscape) and 208 (the font step) VRAM words.
 of dropping it, which keeps the final VRAM exact; that display frame may
 tear, and the next replay frame is the toy's picture.
 
-**What is still not the browser's picture.** The raster backend arms the
-RCR chain once per toy frame, so only **one display frame** per toy frame
-is a replay; DUSK's build step takes ~37 display frames (the 0.26 Hz build
-projection in ROM_SPEED.md), so a short capture's tail is a stale screen.
-The best replay frame in a 20 s movie is **16 bytes off** — row 16,
-columns 0–15, one colour channel — the raster write's scanline latency
-(`apply_entry0`/RCR ordering). `tests/check-export-games.js` pins DUSK's
-ROM sha and asserts the screen is **not black and not yet a browser frame**;
-card **#227** carries the raster picture. TOWER is different: it stops
-earlier, at `toy-data-bank-full` (8,524 B of bytecode against the 8 KiB
-bank), which is a refusal with a message and no ROM.
+**The picture is the browser's now (#227).** The raster backend used to arm
+the RCR chain once per toy frame, so only **one display frame** per toy frame
+replayed the table; DUSK's build step takes ~37 display frames (the 0.26 Hz
+build projection in ROM_SPEED.md), so a short capture's tail was the last
+line's registers. The chain is now re-armed on every display frame while a
+toy frame runs, and each line's entry is preloaded into zero page one
+scanline early, so its colour write lands inside the blank (it used to
+complete ~28 CPU cycles late, leaving row 16's first 16 pixels the old
+colour). Measured: DUSK RUN's 12 s capture is diff 0 against browser frame 1
+(frames 1–6 are one static early picture), and its save state's CRAM and SAT
+are diff 0 against browser frames 0–11. `tests/check-export-games.js` pins
+DUSK's ROM sha and those browser-frame hashes. TOWER stops earlier, at
+`toy-data-bank-full` (8,524 B of bytecode against the 8 KiB bank), which is a
+refusal with a message and no ROM (it was reworked in place later, see
+ROM_SPEED.md).
 
 **#200 re-pinned again**, for the second image change (2026-11-02):
 `renderer/ilvm.bin` is sha256 `dad10ffd05661956…`, 32,768 B, and the ROM
@@ -954,8 +958,8 @@ entry, not gated on a new ownership (the #239 defense):
 | **#215** | done | the interpreter ops for note/sfx/release/music call the engine; the per-toy-frame tick; version 3 accepted | `tests/check-rom-sound.js` PASS; version 1 and 2 containers still run; `check-ilvm` green |
 | **#220** | done | the sound ops fit the 32 KiB image (the note table and the cold glue moved to the engine's tables bank) | `build.sh` exits 0, `ilvm.bin` stays 32 KiB, `check-hutrack-image` green |
 | **#221** | done | land #220's image and re-pin what it changed | every re-pinned ROM sha has an old/new Mednafen diff (§10); `check-ilvm` and `check-export-games` green; DUSK RUN's black verdict and TOWER's refusal documented |
-| **#222** | open (umbrella) | the interpreter's capacities: DUSK RUN's container needs 41 registers, 41 functions and 19 upvalues (MAX_REGS 32, MAX_FUNCS 32, MAX_UPS 6) | **done**: MAX_REGS 41 / MAX_FUNCS 41 / MAX_UPS 20 with the pool; the container loads, runs and its state is diff 0 against browser frame 3; build.sh asserts (headroom 1,131 B) and the canary measures 1,083 B. **Left**: the displayed picture (16 bytes on row 16) is #227 |
-| **#227** | open | the raster backend shows one replay frame per toy frame and one scanline's first 16 pixels lag the write | DUSK RUN's Mednafen picture diff 0 against a browser frame, pinned in check-export-games |
+| **#222** | open (umbrella) | the interpreter's capacities: DUSK RUN's container needs 41 registers, 41 functions and 19 upvalues (MAX_REGS 32, MAX_FUNCS 32, MAX_UPS 6) | **done**: MAX_REGS 41 / MAX_FUNCS 41 / MAX_UPS 20 with the pool; the container loads, runs and its state is diff 0 against browser frame 3; build.sh asserts (headroom 1,131 B) and the canary measures 1,083 B. **Left**: the displayed picture was #227, now fixed (diff 0, below) |
+| **#227** | done (2026-11-04) | the raster backend showed one replay frame per toy frame and one scanline's first 16 pixels lagged the write | the chain is re-armed at every VBlank while a toy frame runs (the last complete picture is on every display frame) and each line's entry is written from a zero-page preload inside the blank. DUSK RUN's 12 s capture is diff 0 against browser frame 1, its hashes are pinned in `check-export-games`, its 20 s save state's CRAM and SAT are diff 0 against browser frames 0–11, and the other raster captures (parallax, status-bar) still pass `check-ilvm`. `renderer/ilvm.bin` d68a1b5f567d824b, 32,768 B, HuTrack banks unchanged |
 | **#216** | done (§11) | a note toy and an sfx toy run in Mednafen, recorded and measured | both ROMs run; the register/audio differences were listed: F masked (#238), R1 missing (#113), dirty glue `.bss` (#239); #113 and #238's F are now in the image and the WAVs are audible (§11); the command is §11 |
 | **#198** | done | the umbrella: everything #212–#216 links | a note toy and an sfx toy run and play in Mednafen since #113; `check-ilvm`, `check-export-games` green |
 | **#199** | open | the SEQUENCER song and the 15 built-ins as HuTrack data; the noise effect `11` | a numeric comparison with the studio's writes (`check-hutrack-seq.js` PASS); a toy's `music(index)` plays in Mednafen (#216) |
