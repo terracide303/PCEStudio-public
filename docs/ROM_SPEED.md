@@ -255,7 +255,7 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 | **TOWER** `toys/tower` | **yes** — 40,960 B, sha256 `048948fe18f9d432…`; built by the studio's Export since #284 (it has no art files, so the asset tail is empty and the C emitter accepts the toy — the ROM is the bytecode route's bytes). Reworked in place for the gallery export (2026-11-03): 7,862 B of bytecode in the 8,160 B data bank, 27 functions, 32 registers, 47 boot upvalue cells, 6 arguments, and no row over its interpreter capacity. The art is still drawn by the toy; the rework merges the thirteen art callbacks into four generators, writes the background map as floor/ladder runs (blank cells stay at the runtime's zero, the same blank tile) and computes only the two sprite planes this art uses. The first 12 frames are one picture (the gem starts bobbing at 12), so the capture's tail is diff 0 against the browser's early frame. | **diff 0** — the captured tail is the browser's early picture | **58** | **2,900** lines | **too slow** (58 updates in 1,800 frames: the ~20 s one-time build, then ~5 updates a second) | 485,384 cycles · 4.07 frames · **14.7 Hz** (the model, not the console; the interpreted build and frames are much slower) |
 | **NOVA TIDE** `toys/nova-tide` | **no — the studio's Export refuses `cgen-op`: "function fn@28, IL line 29, instruction \`unm\`: not lowered by this backend (…)"** (`main.lua:29`; #284's exact text, asserted whole in the test). The MCP's route has no C emitter and gets further: `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`; refused by `renderer/pce-ilbc.js:335` because `raster` has no entry in its OPS table — #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind, #136). And past both refusals sits the data bank: the toy's art files are a **192,089 B** asset tail (the suite computes it), so carrying `raster` would still not export it. | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
 | **DUSK RUN** `toys/dusk-run` | **no — the studio's Export refuses `cgen-op`: "function fn@59, IL line 62, instruction \`unm\`: not lowered by this backend (…)"** (`main.lua:62`; #284's exact text, asserted whole in the test). DUSK RUN has no art files, so this refusal is the C emitter's alone. **`bytecodeOnly` (the MCP's route — the old table's "yes"):** 40,960 B, sha256 `cabf674e632725d6…`. #222 raised `MAX_REGS` 41 / `MAX_FUNCS` 41 / `MAX_UPS` 20 (upvalue pool) / `MAX_CLOS` 48 (boot/transient split), so the container loads and executes; a Mednafen save state at 20 s is VRAM/CRAM/SAT **diff 0 against browser frame 3**, and the host harness matches for 900 frames. The runtime's base-VRAM buffer (32 words a frame) was dropping DUSK's 64/68/208-word build frames; it now writes an over-buffer word through instead ([`ROM-SOUND.md`](ROM-SOUND.md) §10). **#227 fixed the raster display:** the line chain is re-armed at every VBlank while a toy frame runs, so the last complete picture is on screen on every display frame (before, one frame in ~37 — DUSK's build step — replayed it and a capture's tail was the static screen), and the line entry is preloaded into zero page one scanline early, which puts the per-line colour write inside the blank (before, its last store completed ~28 CPU cycles late and the first 16 pixels of row 16 kept the old colour). `tests/check-export-games.js` now pins the ROM sha and **the browser-frame hashes**: at the 12 s capture the picture is diff 0 against browser frames 1–6 (one static early picture, hash `3584516448`). #184's validator note still applies: the 8-frame probe measured the BUILD (frame 7 = build step 7, 675,190 cycles), and the 300-frame performance is 390,744 cycles (18.3 Hz), so the validator accepts the toy. | **diff 0** — the captured tail is the browser's early picture (frames 1–6, one hash) | **1** | **1386** lines | **too slow** (1 update in 600 frames, the ~7 s boot) | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
-| **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `109efcb8fbb7d9ce…`; built by the studio's Export since #284 (it has no art files, so the asset tail is empty and the C emitter accepts the toy — the ROM is the bytecode route's bytes). #186 carried `sat`, its old refusal; the five pad reads from #185 and the four `sat` calls at `main.lua:142` now encode | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | 267 | **448** lines | **30 Hz** | 88,115 cycles · 0.74 frames · **81.2 Hz** |
+| **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `c067d74ac688c1ac…`; built by the studio's Export since #284 (it has no art files, so the asset tail is empty and the C emitter accepts the toy — the ROM is the bytecode route's bytes). Reworked in place for 60 Hz (2026-11-04): 2,522 B of bytecode in the 8,160 B data bank (30.9%), 46 constants (36.2%), 11 functions, 30 registers (73.2%), 5 upvalues, 10 boot upvalue cells, 14 globals, 2 arguments — no row near or over, and the busiest is registers at 73.2%. The game is unchanged — same art, same level rule, same 1/16-pixel physics — but frame() runs 74 IL instructions instead of 110: division by a power of two is a shift (the interpreter's `idiv` is a soft routine costing about seven instructions' worth of time), the jump button is read once instead of three times, `cell()`'s "is there anything here" is inlined as the hero's feet span meeting a row's solid cells (the map drawing still calls `cell()`), each clamp moved inside the move that can leave the screen, and the SAT pattern word is written once in `init()` because it never changes. | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | **0** | **212** lines | **60 Hz** (537 updates in 900 frames, mean 209.5) | 73,445 cycles · 0.62 frames · **97.5 Hz** |
 | *control* `tools/toys/palette.lua` | **yes** — 40,960 B, sha256 `b12ec9c961006cff…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 53 | **1,366** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
 | *control #183* `tools/toys/arity.lua` | **yes** — 40,960 B, sha256 `ea4f014915bb5975…`, a 5-8 parameter toy | **diff 0** (16-frame cycle pinned) | 62 | **1,058** lines | **too slow** | — |
 | *control #187* `tools/toys/not.lua` | **yes** — 40,960 B, sha256 `fe9672f4ee2b93a7…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **160** lines | **60 Hz** | — |
@@ -263,19 +263,26 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 
 ### What this says, plainly
 
-- **PLATFORMER exports — the first game that does (#186).** Carrying `sat`
-  was its last route-1 gap: the interpreter writes the SATB words a compiled
-  toy writes, the ROM builds, and Mednafen's picture is the browser's (the
-  static no-input scene — the hero standing on the grass — is pinned).  Its
-  measured verdict is **30 Hz**: 308 updates in 900 frames, all overrunning,
-  worst 311 lines, which is the interpreter's ~4.6× the static model's
-  0.74 frames an update.  Two of #186's console details are in the row's
-  fine print: the one-time build (`init()` draws the whole map and the
-  sprite patterns through the interpreter) takes ~7 s, so the measure needs
-  900 frames and the capture 12 s to clear the boot — the default 300-frame
-  measure reads 0 updates mid-boot; and the interpreter's display-on keeps
-  the toy's CR, so the sprites' SB bit survives `toy_display_on` (`docs/IL.md`
-  §14, the compiled runtime's `toy_cr` shadow).
+- **PLATFORMER exports — the first game that does (#186) — and now holds
+  60 Hz.** Carrying `sat` was its last route-1 gap: the interpreter writes
+  the SATB words a compiled toy writes, the ROM builds, and Mednafen's
+  picture is the browser's (the static no-input scene — the hero standing on
+  the grass — is pinned).  It measured **30 Hz** until the 2026-11-04
+  rework (`main.lua` trims frame() from 110 IL instructions to 74; none of
+  the game, art or numbers moved): 537 updates in 900 frames, **0
+  overruns, worst 212 lines, mean 209.5**.  The interpreter's per-operation
+  cost is what made the old version miss: each instruction costs it ~2.8
+  scanlines, and one `//` on a constant costs ~19 lines more than a `>>`.
+  The rework's frame loses only the interpreter's work — a 600-frame
+  scripted and a 9,958-frame scripted old-vs-new run are pixel- and
+  state-identical, through both the Lua and the IL runtime.  Two of #186's
+  console details are in the row's fine print: the one-time build (`init()`
+  draws the whole map and the sprite patterns through the interpreter)
+  still takes ~7 s, so the measure needs 900 frames and the capture 12 s to
+  clear the boot — the default 300-frame measure reads 0 updates mid-boot;
+  and the interpreter's display-on keeps the toy's CR, so the sprites' SB
+  bit survives `toy_display_on` (`docs/IL.md` §14, the compiled runtime's
+  `toy_cr` shadow).
 - **The studio's Export button's verdicts are the table's now (#284), and
   two of them are refusals.** The dialog refuses **STARFALL**
   `toy-data-bank-full` — its 6,285 B bytecode plus its 68,702 B of art
@@ -331,9 +338,11 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 - **The static estimate is still an estimate.** It is the same
   `pce-validate.js` factor pair #169 measured to be 20 % low (no raster) and
   1.3–3.5× high (raster). It orders the games but cannot give a verdict;
-  only a built ROM can, and PLATFORMER's is the first: 30 Hz where the
+  only a built ROM can, and PLATFORMER's was the first: 30 Hz where the
   model's route-1 pricing said 81.2 Hz, the interpreter's per-operation
-  cost the model does not price.
+  cost the model does not price.  After the 2026-11-04 rework the ROM
+  reads 60 Hz and the model says 97.5 Hz — still the same direction, the
+  model pricing an instruction cheaper than the interpreter spends.
 - **The studio refuses earlier than the MCP on two of the five, and since
   #284 the table reports the studio.**  Its Export runs
   `renderer/pce-cgen.js` first: NOVA TIDE and DUSK RUN stop on `cgen-op`

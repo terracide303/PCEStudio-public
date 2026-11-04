@@ -27,7 +27,7 @@ build is `renderer/pce-il.js` → `renderer/pce-ilbc.js` →
 
 Which toys export today, measured in Mednafen, is
 [`ROM_SPEED.md`](ROM_SPEED.md): the simple example toys (parallax, status bar,
-sky gradient, palette cycle), PLATFORMER at 30 Hz, and the sprite toy at 60 Hz.
+sky gradient, palette cycle), PLATFORMER at 60 Hz, and the sprite toy at 60 Hz.
 DUSK RUN builds, its state matches the browser's at frame 3, and its
 displayed picture is the browser's too (the raster chain is re-armed on every
 display frame, and the line entry is written from a zero-page preload inside

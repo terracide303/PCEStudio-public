@@ -149,8 +149,8 @@ const UNCHANGED = [
    "7ab5404025a7cf796b97e9c215becb4359e0872d371d32c0f3a3129c18466efb"],
   ["toys/status-bar.lua", 1, 1369,
    "da128302c6233e0cdc23087036df829a86c157b42750288318bd092b9454134c"],
-  ["toys/platformer/main.lua", 1, 2410,
-   "1c4d0f4fd66344a6078ece8ce12d952f628ed2b74dfbb753e31c3e3d23388199"],
+  ["toys/platformer/main.lua", 1, 2522,
+   "337618a0eba40750b74d7c09d973f7a36c3a4e1f9b968fd198722e556c751de3"],
   /* v3: the table section and/or the sound ops */
   ["toys/dusk-run/main.lua", 3, 7470,
    "136b1e4b4eb79cf692f4198d60fe67a44194488a06adca0970ca51544dbbf5e9"],

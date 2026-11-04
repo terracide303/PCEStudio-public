@@ -193,9 +193,9 @@ function checkPlatformer() {
   eq("PLATFORMER: no near row", r.budget.near, 0);
   eq("PLATFORMER: no over row", r.budget.over, 0);
   eq("PLATFORMER: the findings are still empty", r.findings, []);
-  eq("PLATFORMER: data bank used is the container's 2,410 B",
-     row(r, "data-bank").used, 2410);
-  eq("PLATFORMER: 5,750 B left", row(r, "data-bank").left, 5750);
+  eq("PLATFORMER: data bank used is the container's 2,522 B",
+     row(r, "data-bank").used, 2522);
+  eq("PLATFORMER: 5,638 B left", row(r, "data-bank").left, 5638);
 }
 
 function checkDuskRun() {

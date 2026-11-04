@@ -121,7 +121,9 @@ const TOYS_META = [
     author: "PCEStudio examples",
     tags: ["playable", "sprites"],
     blurb: "One screen, one hero, a pit and three brick ledges. J and L run, " +
-      "N jumps (hold it higher); land on a ledge and climb back out of the pit.",
+      "N jumps (hold it higher); land on a ledge and climb back out of the pit. " +
+      "It also exports as a HuCard ROM, and its frame fits one 60 Hz video " +
+      "frame on the console.",
     effect: "a playable platformer"
   },
   {
