@@ -795,8 +795,10 @@ static int32_t exec(uint8_t fid, uint8_t clh,
         va = rw(pc); pc = (uint16_t)(pc + 2);
         sb = rb(pc++);
         off = rw(pc); pc = (uint16_t)(pc + 2);
+        /* `off` is 13 bits (docs/IL.md §14.1); the shim masks the top three
+         * with `and #$1F`, so the host must mask them too — the two halves
+         * must agree on a malformed container as well as a legal one. */
         so = (uint16_t)(off & 0x1FFF);
-        sb = (uint8_t)(sb + (off >> 13));
         cnt = rw(pc); pc = (uint16_t)(pc + 2);
         cb = code_cur;
         if (sb != code_cur) { code_cur = sb; map_data_bank(sb); }

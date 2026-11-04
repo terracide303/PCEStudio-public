@@ -334,10 +334,11 @@ if (!buildHostvm(hostvm, path.join(ROOT, "tools", "ilvm", "ilvm.c"))) {
   const source = fs.readFileSync(path.join(ROOT, "tools", "ilvm", "ilvm.c"),
                                  "utf8");
   /* (a) the bank operand is ignored: the copy reads bank 0. */
-  const bankNeedle = "sb = (uint8_t)(sb + (off >> 13));";
+  const bankNeedle = "        sb = rb(pc++);\n        off = rw(pc);";
   check(source.indexOf(bankNeedle) >= 0,
         "the control mutation's anchor (the bank operand) is in ilvm.c");
-  const mutant1 = source.replace(bankNeedle, "sb = 0;");
+  const mutant1 = source.replace(bankNeedle,
+                                 "        sb = rb(pc++); sb = 0;\n        off = rw(pc);");
   /* (b) the boundary carry is one byte wrong after the crossing.  The
    * carry appears twice — after the low byte and after the high byte, so a
    * word that straddles the boundary is handled — and both must move. */
