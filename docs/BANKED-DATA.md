@@ -720,10 +720,16 @@ number below is measured on this tree; the commands are named.
 - **Not proven here.** The console shim's Mednafen capture is the one §3.3
   asks for; it waits on #218 emitting an asset blob (the card's own closing
   line). Rule 2 (a different seat and model breaks the test) is owed.
-- **Known reds.** `tests/check-ilvm.js` and `tests/check-banked-data.js`
-  keep #280's pre-existing ROM-sha failures (five dump pins, three builder
-  pins); the re-pin is #282. `check-ilvm`'s rebuild now matches the new
-  committed `renderer/ilvm.bin`.
+- **Known reds.** A fresh clone of the #281 tree (`feedb35`) ran
+  `tests/all.sh`: **67 PASS, 3 SKIP, 6 FAIL**, and every FAIL is
+  pre-existing since #280 — none is COPYV's. Four are the ROM-sha pins the
+  interpreter move makes, which is #282's re-pin: `check-banked-data` (3),
+  `check-export-games` (13), `check-ilvm` (7) and `check-pad-buttons` (1).
+  Two are this machine's: `check-browser` (no Google Chrome) and
+  `check-il-console` (the llvm-mos raster rebuild sha `9fed9826`, not the
+  committed `cdf6dfae`). On a fresh clone of the final tree, `check-ilvm`'s
+  rebuild matches the committed `renderer/ilvm.bin` (`b39d4266`), and
+  `check-hutrack-image`, `check-docs` and `check-ilvm-copyv` pass.
 
 ---
 
