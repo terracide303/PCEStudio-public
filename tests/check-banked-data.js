@@ -322,6 +322,21 @@ function checkRefusals() {
         "toy-function-too-big names the function id and byte count (" +
         tooBig + ")");
 
+  /* The exact boundary: 8,160 B is one whole code bank and encodes; 8,161 B
+   * is one byte over and is refused.  (2,720 consts x 3 B = 8,160; 2,719
+   * consts and two rets = 8,161.) */
+  const full = ilbc.encode(program([consts(2720)]));
+  eq("a function of exactly 8,160 B encodes", full.version, 4);
+  eq("it is one code bank", full.codeBanks, 1);
+  eq("it occupies the whole bank", fnEntry(full.bytes, 0).codeEnd, 8160);
+  eq("its bank trailer starts after it", full.bytes[BANK + USABLE], 0);
+  const overEdge = consts(2719);
+  overEdge.push({ t: "ret", src: null, line: 1 });
+  overEdge.push({ t: "ret", src: null, line: 1 });
+  eq("a function of 8,161 B is toy-function-too-big",
+     refuseCode(function () { ilbc.encode(program([overEdge])); }),
+     "toy-function-too-big");
+
   /* A jump at the bank edge: a function that fills the usable 8,160 bytes
    * exactly and jumps one past its last instruction, i.e. into the trailer. */
   const edge = consts(2719);
