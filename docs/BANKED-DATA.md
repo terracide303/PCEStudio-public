@@ -551,6 +551,14 @@ Card #279 built §5.2 in `renderer/pce-ilbc.js` and `renderer/pce-rom.js`:
   `PCESTUDIO_ORIGINAL_TOWER` (default
   `/Volumes/External/pcestudio-toys/originals/tower/main.lua`) and SKIPs when
   the file is absent, because the original is deliberately outside the repo.
+- **v4 jump targets are bank-relative (#286).** The banked path now passes the
+  function's `fnCodeOff[f]` as `encodeFunction`'s `codeOff`, so `target()`
+  emits `codeOff + offsets[pc]` inside that function's code bank — the value
+  §5.2 and `docs/IL.md` §14.1 promise — and `target()`'s `toy-bank-edge` guard
+  reads the same bank-relative value. #285's v4 (2) checks caught the original
+  function-relative operands (TOWER function 43's jmp at bank offset 7,159
+  targeted 312, not 7,193); the control is green and TOWER's v4 (3) pin moved
+  with the corrected operands.
 - **The refusals are named:** `toy-function-too-big` (function id and byte
   count; a function is never split across banks), `toy-bank-edge` (a jump one
   past a function that ends at the 8,160 edge, or any target at/past it;
