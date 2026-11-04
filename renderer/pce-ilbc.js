@@ -750,7 +750,12 @@
       out.set(Uint8Array.from(buf.a), 0);
       for (f = 0; f < functions.length; f++) {
         var fbuf = new Buf();
-        encodeFunction(fbuf, functions[f], f, fnOffsets[f], 0,
+        /* codeOff is the function's bank-relative start (#286): a v4
+         * codeOff/codeEnd and every jump target are offsets inside the code
+         * bank, so target() must add fnCodeOff[f], not 0.  fbuf holds this
+         * function alone, so the consistency check below uses 0 as its
+         * buffer base. */
+        encodeFunction(fbuf, functions[f], f, fnOffsets[f], fnCodeOff[f],
                        constIndex, globalIds, siteIdOf[f], fieldIds,
                        layout ? layout.sprites[f] : null, true, fnSizes[f]);
         var bankAt = fnBank[f] * BANK_BYTES + fnCodeOff[f];
@@ -883,11 +888,16 @@
     }
 
     var code = fn.code;
+    /* Where this function's first instruction sits in `buf`: codeOff in an
+     * unbanked container (the buffer is the whole container), 0 in a v4
+     * container (the buffer holds the function alone; codeOff is its
+     * bank-relative start and only the emitted jump targets use it). */
+    var codeStart = banked ? 0 : codeOff;
     for (var pc = 0; pc < code.length; pc++) {
       var ins = code[pc];
-      if (buf.a.length !== codeOff + offsets[pc]) {
+      if (buf.a.length !== codeStart + offsets[pc]) {
         refuse("ilbc-program", "internal: function " + fid + " pc " + pc +
-               " at " + (codeOff + offsets[pc]) + ", buffer " + buf.a.length);
+               " at " + (codeStart + offsets[pc]) + ", buffer " + buf.a.length);
       }
       buf.u8(OPS[ins.t]);
       switch (ins.t) {

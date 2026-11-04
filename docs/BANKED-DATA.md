@@ -551,6 +551,14 @@ Card #279 built §5.2 in `renderer/pce-ilbc.js` and `renderer/pce-rom.js`:
   `PCESTUDIO_ORIGINAL_TOWER` (default
   `/Volumes/External/pcestudio-toys/originals/tower/main.lua`) and SKIPs when
   the file is absent, because the original is deliberately outside the repo.
+- **v4 jump targets are bank-relative (#286).** The banked path now passes the
+  function's `fnCodeOff[f]` as `encodeFunction`'s `codeOff`, so `target()`
+  emits `codeOff + offsets[pc]` inside that function's code bank — the value
+  §5.2 and `docs/IL.md` §14.1 promise — and `target()`'s `toy-bank-edge` guard
+  reads the same bank-relative value. #285's v4 (2) checks caught the original
+  function-relative operands (TOWER function 43's jmp at bank offset 7,159
+  targeted 312, not 7,193); the control is green and TOWER's v4 (3) pin moved
+  with the corrected operands.
 - **The refusals are named:** `toy-function-too-big` (function id and byte
   count; a function is never split across banks), `toy-bank-edge` (a jump one
   past a function that ends at the 8,160 edge, or any target at/past it;
@@ -610,9 +618,9 @@ Every number below is measured on this tree; the commands are named.
   for every version ≥ 2, saw 255 slots, and faulted before `init()` — a blank
   screen. The encoder now writes the empty one-byte section for every banked
   container. This moved the two table-free v4 container shas pinned in
-  `tests/check-banked-data.js` (the table-bearing fixture's sha is unchanged),
-  so both pins were re-captured here; #285's rule-2 re-break is still owed
-  with #286's encoder fix, which moves the jump fixture again.
+  `tests/check-banked-data.js` (the table-bearing fixture's sha is unchanged);
+  the pins were re-captured in the same tree. #285's rule-2 re-break is still
+  owed.
 - **v1-v3 behaviour is byte-identical.** `tests/check-ilvm.js`'s host parity
   (parallax, arity's wide calls, the tables, sprite and not toys) passes
   against the browser IL run with the new image, and a direct hostvm run of
@@ -626,8 +634,8 @@ Every number below is measured on this tree; the commands are named.
   1, a ~7.9 KB straight-line `big()` in bank 2 called from `init`, writes
   after the call, a static BAT/tile/palette picture, and a captured local
   (`seed`) so init's closure reads an upvalue descriptor from the tables bank
-  while MPR2 holds a code bank. No jumps, because #286's v4 jump targets are
-  still function-relative. It encodes as version 4, container 24,576 B
+  while MPR2 holds a code bank. No jumps, so #286's v4 jump-target fix does
+  not change this container. It encodes as version 4, container 24,576 B
   (tables + 2 code banks, code 8,682 B), ROM 57,344 B, sha256
   `16bf4249d2732bdd…`, and the host harness runs it byte-identically to the
   browser (vram/cram/sat diff 0, registers equal; a PROG read of the upvalue
@@ -639,17 +647,18 @@ Every number below is measured on this tree; the commands are named.
   return, so the bank restore is exercised), and **30 of the last 30
   recorded frames are pixel-identical (diff 0) to the browser's render of
   frame 0** (`renderer/pce-toys.js`; the toy is static).
-- **Still open.** #286: the v4 encoder emits jump targets function-relative,
-  so a banked toy whose non-first function jumps still faults on the console;
-  this card's witness avoids jumps by construction. #282: re-pin every ROM
-  after the old/new Mednafen diff. Rule 2 is owed for any v4 boot check added
-  to the suite. **The sound glue's trailer read is now bank-dependent:** before
-  #280 MPR2 always held the data bank, so `SndGlueMap`'s read of `$5FE0` was
-  the tables bank; now a sound op inside code reads the code bank's trailer.
-  That is safe today only because `buildToyRom` writes n = 0 into every
-  container bank. When #199 ships songs it must write the same song list into
-  **every** bank's 32-byte trailer (the "same strip" §3.2 assumes), or the
-  glue must map bank 0 first — otherwise a banked toy is silently silent.
+- **Still open.** #286 is fixed in the same tree: the v4 encoder emits jump
+  targets bank-relative and `tests/check-banked-data.js`'s v4 (2) lines pass
+  (this card's witness has no jumps, so it is unaffected). #282: re-pin every
+  ROM after the old/new Mednafen diff. Rule 2 is owed for any v4 boot check
+  added to the suite. **The sound glue's trailer read is now bank-dependent:**
+  before #280 MPR2 always held the data bank, so `SndGlueMap`'s read of
+  `$5FE0` was the tables bank; now a sound op inside code reads the code
+  bank's trailer. That is safe today only because `buildToyRom` writes n = 0
+  into every container bank. When #199 ships songs it must write the same
+  song list into **every** bank's 32-byte trailer (the "same strip" §3.2
+  assumes), or the glue must map bank 0 first — otherwise a banked toy is
+  silently silent.
 
 ---
 

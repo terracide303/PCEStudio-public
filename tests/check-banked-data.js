@@ -45,20 +45,20 @@
  * re-break them (and the check catch every break) before #285 — and with it
  * #279 — closes.
  *
- * FOUND WHILE WRITING THEM (2026-11-04, @test): the banked encode path calls
+ * FOUND WHILE WRITING THEM (2026-11-04, @test): the banked encode path called
  * encodeFunction with codeOff 0 (renderer/pce-ilbc.js, the out.set loop), so
- * a function whose codeOff is nonzero emits every jump target as its
+ * a function whose codeOff is nonzero emitted every jump target as its
  * function-relative offset, not the bank-relative offset the format promises
  * (pce-ilbc.js's own v4 comment, docs/BANKED-DATA.md §5.2/§5.6,
  * docs/IL.md §14.1: "codeOff/codeEnd and every jump target are offsets
- * inside that bank").  TOWER's functions in banks past the first trip the
+ * inside that bank").  TOWER's functions in banks past the first tripped the
  * v4 (2) checks: e.g. function 43's jmp at bank offset 7,159 targets 312
  * instead of 7,193 (codeOff 6,881 + 312) — and the interpreter's untouched
  * jump handling (tools/ilvm/ilvm.c: pc = rw(pc)) with its per-instruction
- * range check would fault on it.  Until the encoder adds fnCodeOff[f] to
- * each target (and to target()'s edge guard), the CONTROL of this file is
- * red on exactly those v4 (2) lines — reported as a new card, not fixed
- * here: a test seat fixes nothing it is testing.
+ * range check would fault on it.  Fixed by #286: the banked path passes
+ * fnCodeOff[f] as codeOff, so target() and its edge guard are bank-relative;
+ * TOWER's v4 (3) pin moved with the corrected operands.  #285's different-
+ * seat re-break is still owed.
  */
 "use strict";
 
@@ -694,13 +694,17 @@ function checkRule2Breaks() {
      sha(romDirty),
      sha(romLib.buildToyRom({ bank0: bank0, bytecode: vanilla.bytes })));
 
-  /* TOWER's pinned v4 sha and its whole stream, when the witness is there. */
+  /* TOWER's pinned v4 sha and its whole stream, when the witness is there.
+   * Re-pinned 2026-11-04 by #286: the encoder now adds each function's
+   * fnCodeOff to its jump targets, so every jump operand in a function that
+   * starts past a bank's first byte changed (the v4 (2) checks below say
+   * the new bytes are the bank-relative targets the format promises). */
   if (fs.existsSync(ORIGINAL_TOWER)) {
     const towerProg = il.compile(fs.readFileSync(ORIGINAL_TOWER, "utf8"),
                                  { chunkName: "tower.lua" });
     const tower = ilbc.encode(towerProg);
     eq("v4 (3) TOWER's v4 container sha is pinned", sha(tower.bytes),
-       "d543435a7929a85b88a7f2f282b802f197a03262b8cae0f99928e3d10880fc46");
+       "9ef67ed4246406beb5c37e28f2bc4aad17c2649512a7366759d0500b6b6666a0");
     for (let fid = 0; fid < towerProg.functions.length; fid++) {
       checkStream(tower, fid, towerProg.functions[fid].code, "TOWER");
     }
