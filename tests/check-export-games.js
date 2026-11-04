@@ -274,22 +274,23 @@ const GAME_PINS = {
     captureTail: true,
     browserFrames: 600
   },
-  /* #186: sat carried, so PLATFORMER builds (on the studio's route since
-   * #284 — no art files, the C emitter accepts it).  Its one-time build
-   * (init() draws the whole map and the sprite patterns through the
-   * interpreter) takes ~7 s of wall on the dummy SDL driver: the default
-   * 300-frame measure (≈7 s) lands inside the boot and reads 0 updates,
-   * and the default 5.5 s capture tail is still pre-scene.  The pin
-   * records the wall time that clears the boot: 900 measured frames (312
-   * updates, all overrunning, worst 311 lines — "30 Hz") and a 12 s
-   * capture.  The picture is the game's static no-input scene (the hero
-   * stands on the grass), so the pin holds that one hash. */
+  /* PLATFORMER builds on the studio's route (no art files, the C emitter
+   * accepts it).  Its one-time build (init() draws the whole map and the
+   * sprite patterns through the interpreter) takes ~7 s of wall on the
+   * dummy SDL driver: the default 300-frame measure (≈7 s) lands inside
+   * the boot and reads 0 updates, and the default 5.5 s capture tail is
+   * still pre-scene.  The pin records the wall time that clears the boot:
+   * 900 measured frames and a 12 s capture.  Since the 2026-11-04 rework
+   * frame() runs 74 IL instructions instead of 110 and the measure reads
+   * 0 overruns, worst 212 lines — "60 Hz" (before: every update overran,
+   * worst 448).  The picture is the game's static no-input scene (the
+   * hero stands on the grass), so the pin holds that one hash. */
   /* Every ROM embeds the committed renderer/ilvm.bin, so these shas move
    * with any interpreter change (#187's opcode moved all three). */
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
     galleryId: "platformer",
-    rom: "109efcb8fbb7d9ce517c2cf6761098b6d9ce9aeb1633829fe61f6a4799b358da",
+    rom: "c067d74ac688c1ac8aa27577ad6d7e70caa67a3541ee63629f355ec1d574c15c",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
