@@ -15,17 +15,17 @@
   "operand": 73,
   "toy_frame": 163
  },
- "image": "/Volumes/External/agent-tmp/romsound-trace-3ySpvq/ilvm-trace.bin",
+ "image": "renderer/ilvm.bin",
  "llvm_bytes": 16384,
- "llvm_sha256": "f2375035660c7af56c9e5cefefc0319d7b052ff54e4be21af119ac327cdce480",
+ "llvm_sha256": "201bc69403c7970b910012ca8ac8b0814b2d67678173c1cff28e417fea594757",
  "ram_budget": {
   "base_ram": {
-   "engine_bytes": 1422,
-   "engine_end": 15568,
+   "engine_bytes": 1115,
+   "engine_end": 15261,
    "engine_start": 14146,
    "interpreter_heap_start": 14146,
    "stack_base": 16384,
-   "stack_headroom": 816,
+   "stack_headroom": 1123,
    "stack_margin": 787
   },
   "zero_page": {
@@ -56,7 +56,7 @@
   ".zp.bss": 93,
   ".zp.data": 0
  },
- "sha256": "d615a8a8d406721db602c8cfcad676c8bcfcdd8450b0c1b85593710ccdd1ab04",
+ "sha256": "3287f4eb50d601fa078dfc72e7f97162ebc3126a2cf000faf6b4f168620f877c",
  "sizes": {
   "bss": 5537,
   "data": 0,
