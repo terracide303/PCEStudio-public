@@ -46,8 +46,10 @@
  * What it does NOT prove, printed as NOTE lines when it runs:
  *
  *   - This suite builds no .pce and runs no emulator.  The export and the
- *     Mednafen run are tests/check-export-games.js's (it lists STARFALL as
- *     built; its closest browser frame is 48 bytes off in the status bar's
+ *     Mednafen run are tests/check-export-games.js's (since #284 it refuses
+ *     STARFALL on the studio's Export route, toy-data-bank-full with the
+ *     dialog's exact text, and pins the bytecode-route ROM's picture: the
+ *     closest browser frame is 48 bytes off in the status bar's
  *     first tile row, #273's remaining picture question).
  *   - The page's `exportAnalysis()` was not executed here: this machine has
  *     no chrome-headless-shell (#114), so the real-page run in the write-up
@@ -376,10 +378,12 @@ function main() {
   checkCitations();
 
   console.log("\nNOTE  this suite builds no .pce and runs no emulator: " +
-              "tests/check-export-games.js builds the 40,960 B ROM, lists " +
-              "STARFALL as built, and pins its Mednafen picture as not yet " +
-              "the browser's (48 bytes in the status bar's first tile row; " +
-              "#227 fixed the raster backend's replay and row-16 lag).");
+              "tests/check-export-games.js refuses STARFALL on the studio's " +
+              "Export route (toy-data-bank-full with the dialog's exact " +
+              "text, since #284) and pins the bytecode-route ROM's Mednafen " +
+              "picture as not yet the browser's (48 bytes in the status " +
+              "bar's first tile row; #227 fixed the raster backend's " +
+              "replay and row-16 lag).");
   console.log("NOTE  the page's exportAnalysis() was not executed here (no " +
               "chrome-headless-shell on this machine, #114). The CONSOLE " +
               "panel's own analyse() was, over the same three modules; the " +
