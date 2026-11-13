@@ -101,9 +101,10 @@ community references above.
 - **#243 (the hardware-tricks page):** its shadow/highlight item must say "not a
   PC Engine feature — the note is the Mega Drive VDP's S/H" and link here. Its
   own card text already makes the demo conditional on #241; the answer is no.
-- **#252 (new):** a guard test for the finding — colour 14/15 render as ordinary
-  CRAM entries, and the SAT bits the manual names no function for change
-  nothing. An invented S/H path at palette 3 colours 14/15 must fail it.
+- **#252:** the guard test for the finding, `tests/check-shadow-highlight.js` (§7):
+  colour 14/15 render as ordinary CRAM entries, the SAT bits the manual names no
+  function for change nothing, and SPBG = 0 obeys the composition rule. An invented
+  S/H path at palette 3 colours 14/15 fails it (the suite runs that mutant itself).
 - **`REFERENCES.md` §7** now points at this file instead of leaving the open
   question "does the studio model shadow and highlight?".
 
@@ -130,3 +131,34 @@ community references above.
   the note with the Mega Drive is therefore a documented inference, not a
   quoted Hudson statement — the Hudson manuals simply have no such feature.
 - Toy Story/Ecco usage is unverified (see §3).
+
+## 7. The guard (#252): what `tests/check-shadow-highlight.js` holds
+
+The guard runs `renderer/pce-sprites.js` (which composes `renderer/pce-bg.js`) on
+one synthetic frame and checks three things. The expected RGB is computed in the
+test from the CRAM word (R = bits 3–5, G = 6–8, B = 0–2, each × 36), not taken
+from the module.
+
+| Check | What it holds | Code it guards | Manual page(s) |
+|---|---|---|---|
+| 1 | colour 14 and 15 are `CRAM[pal<<4\|c]` (background) and `CRAM[0x100\|pal<<4\|c]` (sprite) in every palette 0–15, with no brighten or darken | `pce-bg.js:429` (background index), `pce-sprites.js:225` (sprite index), `pce-sprites.js:491–493` (RGB straight from CRAM) | H6-4/H6-5 (colour table), H7-18 (background video data), H7-24 (sprite video data) |
+| 2 | flipping SAT word 3 bits 4–6, 9–10, 14 in all 64 entries leaves `renderIndices` byte-identical | `pce-sprites.js:151–159` reads only bits 0–3, 7, 8, 11, 12–13, 15 | H7-20 and H7-21 name no function for those bits |
+| 3 | SPBG = 0 over an opaque tile: the tile shows (colour number ≠ 0); over colour 0 the sprite shows; SPBG = 1 shows the sprite over the opaque tile | `pce-sprites.js:471–476` | H7-21 (SPBG), H7-18 (background pixel) |
+
+**The mutant control.** The suite copies `renderer/` to a scratch directory,
+adds a palette-3 S/H to `pce-sprites.js`'s `renderFrame` (colour 14 brightened by
+36 per channel, colour 15 halved, for palette 3 background and sprite pixels
+alike), and reruns the same three checks. They must fail on it; the suite exits
+non-zero if the mutant passes. Measured on this tree: all 6 checks hold on
+`renderer/`; on the mutant, check 1 fails (3,712 pixels wrong, 512 sprite and
+3,200 background). Checks 2 and 3 do not catch that mutant, and do not need to:
+they guard the other two ways an S/H path could sneak in (an unnamed SAT bit, a
+sprite that ignores SPBG).
+
+Run it with `node tests/check-shadow-highlight.js`. `tests/all.sh` runs every
+`tests/check*.js`, so the suite is in it without a list entry.
+
+**Limits.** The guard checks the model's own pixels, not Mednafen's. It proves
+the model has no S/H path. It does not prove the Hudson hardware lacks one; that
+rests on the manual pages in §1. The test was written by @design, the author of
+the finding, so a cold break by another seat is still owed.
