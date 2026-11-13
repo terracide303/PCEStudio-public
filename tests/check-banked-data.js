@@ -66,7 +66,8 @@
  * caught all nine with its named v4 (k) FAIL (that break's own named-group
  * counts 98/864/4/2/1/3/1/1/4; every run exit 1; breaks 1, 2 and 4 also move
  * the v4 (3) sha pins, which is expected because they change container
- * bytes).  The control is 1,237 checks / 0 failed with the pre-#280
+ * bytes).  Against the merged suite (1,639 checks, the seat 125559 pass's
+ * v4 (10)..(12) included) the control is 0 failed with the pre-#280
  * renderer/ilvm.bin; on HEAD's own blob its only reds are #282's three
  * single-bank ROM pins, none of them a v4 line.  NOT PROVEN by that pass:
  * the v4 (3) shas are captured from the encoder itself, so a byte already
