@@ -25,7 +25,7 @@ Only the picture and the music were judged, by eye and ear; no cycle measurement
 | TOWER | yes | **yes**, `ROM_KB=40`, with a silent `toy_sfx` | the native runtime has no sound engine yet, so this build is silent |
 | STARFALL | yes | **yes**, banked, with its art and the real sound engine (`tools/build-toyc-banked.sh toys/demo-game/main.lua name`) | the console's sprite list equals the browser's, word for word (`tools/native-sat-compare.js`), the art loads exactly (`tests/check-native-art.js`: 0 of 32,768 VRAM words and 0 of 512 colours differ from the importer's picture) and the compiled logic matches (`tools/host-c-compare.js`). The picture is still not diff 0: 127 rows differ, all in the starfield area (rows 7 to 102), which is what a one-line raster timing offset would do to one-pixel stars; a whole-row shift of the lower picture does not remove them (tested, shifts of -3 to +3 rows), so it is not a raster phase error; with the sprite list exactly equal the likeliest cause is a difference between the browser's renderer and the emulator's, as the interpreter route's STARFALL is already pinned "unmatched" for a related reason. Not proven; the hardware is the judge |
 | DUSK RUN | yes (since `unm`, `bnot`, `not`) | **yes**, banked (the function over a bank is split), runs: no stall, runtime flags 0 | **slow, and the cause is measured**: `frame()` costs 75,000 cycles (63% of a frame) but each of the 224 `raster(line)` calls a game frame costs about 7,500 cycles, 14 video frames of raster work per game frame (9 game frames in 400 video frames). The cost is the sky gradient's three 32-bit divisions by 151 and 76 (about 2,000 cycles each in software). A game-level fix is to compute the gradient without dividing each line; that is a change to the gallery game, the maintainer's call. Picture not diff 0 yet (not looked at again) |
-| NOVA TIDE | **no** | — | `raster(line, spec)`, the table form, is not lowered; it also needs its art |
+| NOVA TIDE | yes | **yes**, banked, with its art and sound (`OPT=-Oz tools/build-toyc-banked.sh toys/nova-tide/main.lua nova-tide`; `-Os` leaves the fixed page about 440 B too big) | `raster(line, spec)` lowers to `toy_raster_entry` (`TOY_RASTER_TABLE` runtime: frame() fills the line table, no per-line callback, no colour arrays). The compiled logic equals the browser's (`tools/host-c-compare.js`, 60 of 60 frames) and the sprite list equals it word for word (`tools/native-sat-compare.js`, toy frame 71). The picture is not diff 0: 65 rows differ (HUD rows 2-13 and sprite rows), the same pattern as STARFALL, so the likeliest cause is again a renderer-versus-emulator difference; not proven, the hardware is the judge. About 6 video frames per toy frame |
 
 "IL → C" means `emitC` returns C text; only a llvm-mos build counts as
 compiling. The silent `toy_sfx` is a one-line placeholder used for the
@@ -173,7 +173,7 @@ own cost per frame is not in these numbers.
 
 ## Next
 
-1. Lower `raster(line, spec)` (NOVA TIDE).
+1. ~~Lower `raster(line, spec)` (NOVA TIDE).~~ Done; see the table.
 2. Put the sound engine behind `toy_music`, `toy_sfx`, `toy_release` in the
    native runtime.
 3. DUSK RUN: the runtime's per-frame list of 32 palette writes is too short for its frame(); fix the runtime, then measure it.
