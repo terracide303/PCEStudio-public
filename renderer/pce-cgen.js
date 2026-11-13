@@ -269,6 +269,14 @@
                             fid: code[pc].fid });
       }
     }
+    /* Each closure's upvalues sit in one flat array, one run per site sized to
+     * its target function's own upvalue count (a slot per site sized for the
+     * largest function was 3 KiB of the console's 8 KiB for DUSK RUN). */
+    var closureBase = [], upsTotal = 0;
+    for (var cs = 0; cs < closureSites.length; cs++) {
+      closureBase.push(upsTotal);
+      upsTotal += Math.max(1, (functions[closureSites[cs].fid].upvalues || []).length);
+    }
 
     /* Tables (#176): one static slot per `table` instruction site in the
      * fixed pool, zeroed and reused each time the site runs — the same model
@@ -397,6 +405,8 @@
       maxUps: maxUps,
       maxParams: maxParams,
       closureAt: closureAt,
+      closureBase: closureBase,
+      upsTotal: Math.max(1, upsTotal),
       closureCount: closureSites.length,
       typeOf: typeOf,
       usesTimer: usesTimer,
@@ -989,19 +999,20 @@
         line("  " + d + " = " + operand(ins.src) + ";");
         break;
       case "getupval":
-        line("  " + d + " = cl->up[" + ins.idx + "];");
+        line("  " + d + " = il_ups[cl->ub + " + ins.idx + "];");
         break;
       case "closure": {
         var cid = a.closureAt[fid + ":" + pc];
         var target = a.functions[ins.fid];
         line("  il_closures[" + cid + "].fid = " + ins.fid + ";");
+        line("  il_closures[" + cid + "].ub = " + a.closureBase[cid] + ";");
         for (var u = 0; u < target.upvalues.length; u++) {
           var desc = target.upvalues[u];
           var v;
           if (desc.type === "env") v = "0";
           else if (desc.from === "reg") v = "r[" + desc.index + "]";
-          else v = "cl->up[" + desc.index + "]";
-          line("  il_closures[" + cid + "].up[" + u + "] = " + v + ";");
+          else v = "il_ups[cl->ub + " + desc.index + "]";
+          line("  il_ups[" + (a.closureBase[cid] + u) + "] = " + v + ";");
         }
         line("  " + d + " = " + cid + ";");
         break;
@@ -1307,10 +1318,11 @@
     }
     line("#define IL_NGLOBALS " + a.globalNames.length);
     line("#define IL_NUPS " + Math.max(1, a.maxUps));
+    line("#define IL_NUPCELLS " + a.upsTotal);
     line("");
     line("struct il_closure {");
     line(huc ? "  int fid;" : "  int16_t fid;");
-    line("  " + T + " up[IL_NUPS];");
+    line(huc ? "  int ub;" : "  uint16_t ub;");
     line("};");
     line("");
     /* These arrays must live in normal RAM (.data/.bss, $2200+), NOT in the
@@ -1326,7 +1338,10 @@
       /* HuC's data goes in ordinary BaseRAM; there are no sections to
        * choose and no LTO to defeat (docs/IL.md §11). */
       line("static struct il_closure il_closures[IL_NCLOSURES];");
+      line("static " + T + " il_ups[IL_NUPCELLS];");
     } else {
+      line("static " + T + " il_ups[IL_NUPCELLS]");
+      line("    __attribute__((section(\".bss\")));");
       line("static struct il_closure il_closures[IL_NCLOSURES]");
       line("    __attribute__((section(\".bss\")));");
     }
