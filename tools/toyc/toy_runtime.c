@@ -815,7 +815,14 @@ int main(void) {
     int32_t f;
     uint8_t v;
     toy_host_mode = MODE_DIRECT;
+#ifdef TOY_INPUT_BUILD
+    /* keep what the toy asked for: with sprites (SB, bit 6) CR is $C0.  Writing a plain
+     * $8C here switched every sprite off in the raster builds (found by looking at the
+     * picture: NOVA TIDE's sprite list was exact but no sprite was drawn). */
+    vdc_write(0x05, (uint16_t)(0x008C | toy_cr));   /* BB + VC + RC + the toy's bits */
+#else
     vdc_write(0x05, 0x008C);          /* BB + VC + RC */
+#endif
     pce_irq_enable(IRQ_VDC);
     pce_cpu_irq_enable();
     v = toy_vblank_count;

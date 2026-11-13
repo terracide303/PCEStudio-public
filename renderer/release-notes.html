@@ -67,9 +67,9 @@
   <h2 id="b8">Build 8 · Friday 13 November (evening)</h2>
   <h3>All five example games now compile to machine code (developer preview)</h3>
   <ul>
-    <li>NOVA TIDE, the game with scrolling bands of sky, hills, city and sea, now compiles and runs in the emulator. The compiled game logic is the same as the studio's, frame for frame, and its sprite list equals the studio's word for word. 65 rows of its picture still differ from the studio's (the score bar and the sprites), as with STARFALL; the cause is not found yet.
-      <span class="status ok">tested: 60 of 60 frames equal on the logic, 0 differing words in the sprite list, the ROM runs in an emulator</span>
-      <span class="status soon">picture not pixel for pixel; not yet run on a real console</span></li>
+    <li>NOVA TIDE, the game with scrolling bands of sky, hills, city and sea, now compiles and runs in the emulator. The compiled game logic is the same as the studio's, frame for frame, and its picture in the emulator is <b>identical to the studio's, pixel for pixel</b>. A bug found on the way: games with scrolling bands had every sprite switched off on the console (the list was right, the sprite layer was off). That is fixed, and STARFALL's picture went from 127 differing rows to one.
+      <span class="status ok">tested: 60 of 60 frames equal on the logic, the picture equals the studio's frame in an emulator, the sprite layer is on in both kinds of scrolling-band game</span>
+      <span class="status soon">STARFALL still has one row (the first split line) that differs; not yet run on a real console</span></li>
     <li>DUSK RUN's slowness is explained. For its first couple of minutes it draws its background piece by piece, and every piece needs many multiplications that the console does in software. Multiplication now costs what the smaller number needs instead of a fixed 2,000 cycles, and division by 2, 4, 8 and so on is a shift, so that start-up is about a fifth shorter (9,000 down to 7,000 video frames). After it a test copy of the game, with the sky gradient computed without division, runs at about 9 updates a second; the gallery game itself is slower.
       <span class="status ok">tested: the new multiply equals the studio's result on 29,952 products, including negative numbers; speed measured in an emulator over 21,000 frames</span>
       <span class="status soon">still slow at the start; drawing the background ahead of time would remove it</span></li>
