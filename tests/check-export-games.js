@@ -163,7 +163,7 @@ function studioFiles(id) {
 
 /* The card's five games and the outcome docs/ROM_SPEED.md records
  * (re-routed by #284, 2026-11-04): the studio's Export button runs the
- * CONSOLE tab's three stages first, so NOVA TIDE is refused by the C
+ * CONSOLE tab's three stages first, so NOVA TIDE was refused by the C
  * emitter (its `raster(0, { bxr = 0 })` call — the spec-table form has no
  * C form, while the hook form raster(line) is supported) before the
  * bytecode encoder — its studio refusal is `cgen-op`, not the bytecode
@@ -187,11 +187,12 @@ function studioFiles(id) {
 const GAMES = [
   {
     name: "NOVA TIDE", toy: "toys/nova-tide/main.lua", galleryId: "nova-tide",
-    expect: { code: "cgen-op",
-              message: "function fn@513, IL line 530, instruction `raster`: " +
-                "not lowered by this backend (init/frame/raster and the " +
-                "reg/pal/vset/sat/sprite/pad/table instructions, the " +
-                "timer and the sound surface only; no fixed point or print)" },
+    /* 2026-11-13: the C emitter now lowers raster(line, spec) (the native
+     * route runs NOVA TIDE), so the Export button's CONSOLE stages pass and
+     * the refusal comes one step later, from the bytecode encoder: the
+     * interpreter has no form for the table-form raster call. */
+    expect: { code: "ilbc-op",
+              message: "instruction raster (function 34, pc 53) has no bytecode form" },
     where: "main.lua:530",
     bytecode: { code: "ilbc-op",
                 message: "instruction raster (function 34, pc 53) has no bytecode form" },
