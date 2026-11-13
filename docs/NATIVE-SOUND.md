@@ -89,10 +89,25 @@ the engine's RAM placed after the program's by a second pass. The emitter adds
 `toy_sound_boot()` to the boot and `toy_sound_tick()` before each `frame()`;
 `tools/toyc/toy_sound.c` is the wrapper over the glue's fixed addresses.
 
-Proof: `tests/check-native-sound.js` compiles tools/toys/sfx.lua and note.lua with
-the engine's PSG write log, runs them in Mednafen and compares the log with the
-studio's own sound events for frames 0..23: write for write, 16 checks. Not done:
-songs (`music()` with a song bank; the songs and trailer come from
-`renderer/pce-hutrack.js`), the cost per frame of the tick, raster toys (the
-raster tables leave too little RAM beside the engine's 1.1 KB), and the studio's
-Export button, which still builds the interpreter ROM.
+Songs: `tools/native-songs.js` reads the toy folder's `song.json`/`songs.json`
+the way the studio does, converts each song with `pce-hutrack.js` and assembles
+them into the song bank (physical bank 4) at 16-byte offsets with the trailer the
+glue reads (up to 8 songs, 8,160 bytes). `tools/toyc/emit.js` hands the songs to
+the validator so `music(0)` is accepted. The interpreter ROM's builder still
+writes "no songs", so this is the first ROM route that carries one.
+
+Proof, `tests/check-native-sound.js` (18 checks, the ROMs run in Geargrafx through
+its MCP server, `tools/ggmcp.py`): sfx.lua and note.lua write exactly the studio's
+PSG stream over frames 0..23, write for write, from the engine's own write log;
+and a music fixture (`tests/native-music`, the sequencer's demo song, 521 bytes)
+is compared after every toy frame: the four tonal channels' frequency and on/off
+equal the studio's in all 59 frames compared, and the two noise channels' on/off
+too (a drum's pitch lands on the nearest legacy value, ROM-SOUND.md §6). The
+engine writes its own registers, which the write log does not carry, hence the
+state comparison.
+
+Not done: the per-frame cost of the tick; raster toys (the raster tables leave too
+little RAM beside the engine's 1.1 KB); the studio's Export button, which still
+builds the interpreter ROM; and the Oak Woods song, whose `song.json` is a DMF
+import that `pce-hutrack.js` cannot convert yet (a row field is missing; the
+sequencer's own songs convert).

@@ -10,6 +10,14 @@ a profiler.  docs/GEARGRAFX-MCP.md has the recipe and the gotchas.
     python3 -I tools/ggmcp.py ROM.pce                  list the tools
     python3 -I tools/ggmcp.py ROM.pce status [SECONDS] run SECONDS (default 3),
                                                         pause, print CPU + call stack
+    python3 -I tools/ggmcp.py ROM.pce psgtrace IMAGE.json [FRAMES]
+                                                        run FRAMES video frames (default 120) of a
+                                                        PSG_TRACE build and print its write log as
+                                                        JSON (image.json = the engine's hutrack-image.json)
+    python3 -I tools/ggmcp.py ROM.pce psgframes IMAGE.json [FRAMES]
+                                                        step FRAMES video frames one at a time and print,
+                                                        per toy frame (the trace build's counter), each PSG
+                                                        channel's [frequency, enabled, noise] as JSON
 
 As a library:
     sys.path.insert(0, "tools"); from ggmcp import GG
@@ -71,6 +79,15 @@ class GG:
         c = r.get("content")
         return "".join(x.get("text", "") for x in c) if c else json.dumps(r)
 
+    def ram(self, addr, n):
+        """n bytes of console RAM at CPU address addr ($2000-$3FFF)."""
+        t = self.tool("read_memory", {"area": 0, "offset": "%04X" % (addr - 0x2000), "size": n})
+        d = json.loads(t)
+        v = d.get("data") or d.get("bytes") or d.get("hex")
+        if isinstance(v, str):
+            return bytes.fromhex(v.replace(" ", ""))
+        return bytes(int(x, 16) if isinstance(x, str) else x for x in v)
+
     def close(self):
         self.p.kill()
 
@@ -80,7 +97,25 @@ if __name__ == "__main__":
         sys.exit(__doc__)
     g = GG(sys.argv[1])
     try:
-        if len(sys.argv) > 2 and sys.argv[2] == "status":
+        if len(sys.argv) > 3 and sys.argv[2] == "psgtrace":
+            tr = json.load(open(sys.argv[3]))["psg_trace"]
+            g.tool("debug_step_frame", {"frames": int(sys.argv[4]) if len(sys.argv) > 4 else 120, "mode": "sync"})
+            cap = tr["capacity"]
+            count = g.ram(tr["psg_trace_count"], 1)[0]
+            f, r, v = (g.ram(tr[k], cap) for k in ("psg_trace_f", "psg_trace_r", "psg_trace_v"))
+            print(json.dumps({"ok": g.ram(tr["psg_trace_ok"], 1)[0], "count": count,
+                              "events": [[f[i], r[i], v[i]] for i in range(count)],
+                              "tail": all(f[i] == 0xEE and r[i] == 0xEE and v[i] == 0xEE for i in range(count, cap))}))
+        elif len(sys.argv) > 3 and sys.argv[2] == "psgframes":
+            tr = json.load(open(sys.argv[3]))["psg_trace"]
+            out = {}
+            for _ in range(int(sys.argv[4]) if len(sys.argv) > 4 else 90):
+                g.tool("debug_step_frame", {"frames": 1, "mode": "sync"})
+                tf = int.from_bytes(g.ram(tr["psg_trace_frame"], 2), "little")
+                ch = json.loads(g.tool("get_psg_status"))["channels"]
+                out[tf] = [[c["frequency"], c["enabled"], c["noise"]] for c in ch]
+            print(json.dumps(out))
+        elif len(sys.argv) > 2 and sys.argv[2] == "status":
             g.tool("debug_continue")
             time.sleep(float(sys.argv[3]) if len(sys.argv) > 3 else 3)
             g.tool("debug_pause")

@@ -111,10 +111,12 @@ PY
   # the engine's RAM must leave room for the soft stack below $4000
   END=$(python3 -I -c "import json;d=json.load(open('$ENG/hutrack-image.json'));print(d['ram']['bss']['end'])")
   [ "$END" -le $((0x3E00)) ] || { echo "the engine's RAM ends at $END, over \$3E00 (no room for the stack)" >&2; exit 1; }
-  # bank 2 = engine code, 3 = pitch tables and glue, 4 = song bank (empty trailer: no songs)
-  python3 -I - "$G.pce" "$ENG/hutrack-code.bin" "$ENG/hutrack-tables.bin" <<'PY'
+  # bank 2 = engine code, 3 = pitch tables and glue, 4 = the song bank: the songs
+  # of the toy's folder (song.json, songs.json) and their trailer, or zeros
+  node tools/native-songs.js "$(dirname "$SRC")" "$G.songs.bin" | tail -1
+  python3 -I - "$G.pce" "$ENG/hutrack-code.bin" "$ENG/hutrack-tables.bin" "$G.songs.bin" <<'PY'
 import sys
-rom, code, tables = sys.argv[1:4]
+rom, code, tables, songs = sys.argv[1:5]
 d = bytearray(open(rom, "rb").read())
 need = 5 * 8192
 if len(d) < need: d += b"\xff" * (need - len(d))
@@ -124,7 +126,9 @@ for bank, blob in ((2, code), (3, tables)):
     assert set(d[bank*8192:(bank+1)*8192]) <= {0xff, 0x00}, "bank %d is not empty in the linked ROM" % bank
     d[bank*8192:(bank+1)*8192] = b
 assert set(d[4*8192:5*8192]) <= {0xff, 0x00}, "bank 4 is not empty in the linked ROM"
-d[4*8192:5*8192] = b"\x00" * 8192          # n = 0 songs at the trailer ($5FE0)
+sb = open(songs, "rb").read()
+assert len(sb) == 8192, songs
+d[4*8192:5*8192] = sb
 open(rom, "wb").write(d)
 PY
 fi
