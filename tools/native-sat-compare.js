@@ -26,7 +26,10 @@ const toys = require("../renderer/pce-toys.js"), toyhost = require("../renderer/
 const dir = path.dirname(path.resolve(toy));
 const files = toyhost.importer.FILES.filter((n) => fs.existsSync(path.join(dir, n)))
   .map((n) => ({ name: n, source: fs.readFileSync(path.join(dir, n), "utf8") }));
+const songFiles = ["song.json", "songs.json"].filter((n) => fs.existsSync(path.join(dir, n)))
+  .map((n) => ({ name: n, source: fs.readFileSync(path.join(dir, n), "utf8") }));
 const options = { budgetMs: 4000 }; if (files.length) options.files = files;
+if (songFiles.length) options.songs = require("../renderer/pce-seq.js").songsFromFiles(songFiles);
 const rt = toys.create(fs.readFileSync(toy, "utf8"), options); rt.load();
 let best = null;
 for (let f = 0; f <= nat.count + 2; f++) {

@@ -161,14 +161,17 @@ function sampleHash(pixels) {
  * default).  A game with a long one-time build may be captured hundreds of
  * toy frames in, so its pin asks for a wider window (TOWER: 600). */
 function browserFrames(toyPath, count) {
-  const source = fs.readFileSync(path.join(ROOT, toyPath), "utf8");
+  const source = fs.readFileSync(path.resolve(ROOT, toyPath), "utf8");
   /* the toy folder's art files, as the studio hands them to the runtime */
-  const dir = path.dirname(path.join(ROOT, toyPath));
+  const dir = path.dirname(path.resolve(ROOT, toyPath));
   const files = ["tiles.json", "palettes.json", "sprites.json"]
     .filter((n) => fs.existsSync(path.join(dir, n)))
     .map((n) => ({ name: n, source: fs.readFileSync(path.join(dir, n), "utf8") }));
+  const songFiles = ["song.json", "songs.json"].filter((n) => fs.existsSync(path.join(dir, n)))
+    .map((n) => ({ name: n, source: fs.readFileSync(path.join(dir, n), "utf8") }));
   const options = { budgetMs: 2000 };
   if (files.length) options.files = files;
+  if (songFiles.length) options.songs = require("./../renderer/pce-seq.js").songsFromFiles(songFiles);
   const browser = toys.create(source, options);
   browser.load();
   const frames = [];

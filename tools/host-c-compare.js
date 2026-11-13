@@ -54,8 +54,11 @@ if (picture) {
   fs.writeFileSync(initFile, Buffer.from(picture.vram.buffer, picture.vram.byteOffset, picture.vram.length));
   args.push(initFile);
 }
+const songFiles = ["song.json", "songs.json"].filter((n) => fs.existsSync(path.join(dir, n)))
+  .map((n) => ({ name: n, source: fs.readFileSync(path.join(dir, n), "utf8") }));
 const options = { budgetMs: 4000 };
 if (files.length) options.files = files;
+if (songFiles.length) options.songs = require("../renderer/pce-seq.js").songsFromFiles(songFiles);
 const rt = toys.create(fs.readFileSync(toyPath, "utf8"), options);
 rt.load();
 const want = [];
