@@ -188,7 +188,7 @@ const TOY_CAPTURES = new Set(["toypalette", "toyparallax",
                               "palette-huc", "parallax-huc",
                               "toypalette-ilvm", "toyparallax-ilvm",
                               "toystatusbar-ilvm", "toysprite-ilvm",
-                              "tableops-ilvm"]);
+                              "tableops-ilvm", "cave-style-ilvm"]);
 
 /* ---- the independent status oracle (raw bytes only) -------------------- */
 
