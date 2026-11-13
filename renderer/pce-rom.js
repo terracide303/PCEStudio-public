@@ -610,6 +610,25 @@
    *
    * The output is a pure function of its inputs, so the Node test and the
    * studio page produce the same bytes. */
+  /* The songs (docs/ROM-SOUND.md §6): toy.songs is a function of the song bank's physical number
+   * (pce-songbank.js build, wrapped by the caller) returning { bytes: one 8 KiB bank, entries:
+   * [[lo, hi, bank], ...] }.  The bank goes after the container and the asset banks, whole, so its
+   * number is known before the songs are assembled; the trailer the engine glue reads at the data
+   * bank's last 32 bytes lists the entries (count, then lo, hi, bank per song). */
+  function writeSongs(rom, toy, bankNumber, trailerBanks) {
+    var sb = toy.songs(bankNumber);
+    need(sb && sb.bytes && sb.bytes.length === BANK, "toy.songs must return one 8 KiB bank");
+    need(sb.entries.length <= 8, "at most 8 songs");
+    rom.set(sb.bytes, bankNumber * BANK);
+    trailerBanks.forEach(function (tb) {
+      var o = tb * BANK + SONG_TABLE_OFF;
+      rom[o] = sb.entries.length;
+      sb.entries.forEach(function (e, i) {
+        rom[o + 1 + 3 * i] = e[0]; rom[o + 2 + 3 * i] = e[1]; rom[o + 3 + 3 * i] = e[2];
+      });
+    });
+  }
+
   function buildToyRom(toy) {
     var bank0 = toy && toy.bank0;
     var bytecode = toy && toy.bytecode;
@@ -635,7 +654,7 @@
     need(version === 1 || version === 2 || version === 3 || version === 4,
          "bytecode version must be 1, 2, 3 or 4");
     if (version === 4) {
-      return buildBankedToyRom(bank0, bytecode, assets);
+      return buildBankedToyRom(bank0, bytecode, assets, toy);
     }
     /* Finding F1 (docs/ASM.md §9): the usable data is 8,160 B, not 8,192 —
      * the song trailer owns the bank's last 32 bytes (SONG_TABLE_OFF).
@@ -651,6 +670,8 @@
     }
     var assetBanks = assets ? Math.ceil(assets.length / BANK) : 0;
     var dataBanks = 1 + assetBanks;
+    var songBankNumber = toy.songs ? ILVM_BYTES / BANK + dataBanks : -1;
+    if (toy.songs) dataBanks += 1;
     if (ILVM_BYTES / BANK + dataBanks > MAX_ROM_BANKS) {
       refuse("toy-rom-full", "the bytecode and its assets need " + dataBanks +
              " data banks; the 32 KiB image uses " + (ILVM_BYTES / BANK) +
@@ -668,6 +689,7 @@
      * writes the converter half), so buildToyRom pins n = 0 — a byte the
      * console reads and the test proves. */
     rom[ILVM_BYTES + SONG_TABLE_OFF] = 0;
+    if (toy.songs) writeSongs(rom, toy, songBankNumber, [ILVM_BYTES / BANK]);
     return rom;
   }
 
@@ -677,7 +699,7 @@
    * appends the banks verbatim, writes the same 32-byte song trailer into
    * every container bank (the sound glue reads it whichever bank MPR2
    * holds), and puts any asset tail in the banks that follow. */
-  function buildBankedToyRom(bank0, bytecode, assets) {
+  function buildBankedToyRom(bank0, bytecode, assets, toy) {
     need(bytecode.length >= 2 * BANK && bytecode.length % BANK === 0,
          "a version 4 container is whole 8 KiB banks (a tables bank and N " +
          "code banks); got " + bytecode.length + " bytes");
@@ -689,6 +711,8 @@
          bytecode.length + " bytes, not " + (1 + codeBanks) + " x 8,192");
     var assetBanks = assets ? Math.ceil(assets.length / BANK) : 0;
     var dataBanks = 1 + codeBanks + assetBanks;
+    var songBankNumber = toy && toy.songs ? ILVM_BYTES / BANK + dataBanks : -1;
+    if (toy && toy.songs) dataBanks += 1;
     if (ILVM_BYTES / BANK + dataBanks > MAX_ROM_BANKS) {
       refuse("toy-rom-full", "the container and its assets need " + dataBanks +
              " data banks; the 32 KiB image uses " + (ILVM_BYTES / BANK) +
@@ -701,6 +725,11 @@
     if (assets) rom.set(assets, ILVM_BYTES + bytecode.length);
     for (var b = 0; b <= codeBanks; b++) {
       rom[ILVM_BYTES + b * BANK + SONG_TABLE_OFF] = 0;
+    }
+    if (toy && toy.songs) {
+      var tb = [];
+      for (var c = 0; c <= codeBanks; c++) tb.push(ILVM_BYTES / BANK + c);
+      writeSongs(rom, toy, songBankNumber, tb);
     }
     return rom;
   }

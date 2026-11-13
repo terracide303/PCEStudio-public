@@ -2118,6 +2118,10 @@
      ROM builder over the committed renderer/ilvm.bin.  Neither calls a
      compiler; pce-rom.js has no dependency of its own. -->
 <script src="pce-ilbc.js"></script>
+<!-- the toy's songs for Export: the HuTrack converter and the one 8 KiB song bank the engine glue reads
+     (pce-songbank.js over pce-hutrack.js, and pce-seq.js above for the compiled songs) -->
+<script src="pce-hutrack.js"></script>
+<script src="pce-songbank.js"></script>
 <script src="pce-rom.js"></script>
 <!-- #231: the assembly project's HuCard builder and the include file it
      supplies to every assembly project (renderer/asm/pce.inc). -->
@@ -4751,7 +4755,7 @@ function exportUtf8(text) {
 function exportAssetTail() {
   const tail = [];
   for (const f of files) {
-    if (f.name === "main.lua") continue;
+    if (f.name === "main.lua" || f.name === "song.json" || f.name === "songs.json") continue;   /* the songs travel as the song bank */
     const def = DEFAULT_ASSET_FILES.find((a) => a.name === f.name);
     if (def && f.source === def.source) continue;
     tail.push({ name: f.name, source: f.source });
@@ -4768,7 +4772,8 @@ function exportArtAssets(art) {
   const tail = [];
   for (const f of files) {
     if (f.name === "main.lua" || f.name === "tiles.json" ||
-        f.name === "palettes.json" || f.name === "sprites.json") continue;
+        f.name === "palettes.json" || f.name === "sprites.json" ||
+        f.name === "song.json" || f.name === "songs.json") continue;   /* the songs travel as the song bank */
     const def = DEFAULT_ASSET_FILES.find((a) => a.name === f.name);
     if (def && f.source === def.source) continue;
     tail.push({ name: f.name, source: f.source });
@@ -4833,10 +4838,28 @@ function exportAnalysis() {
         null));
     }
   }
+  /* The toy's songs (song.json, songs.json) go into the ROM as a song bank the engine plays for
+   * music(index): converted and assembled here so a song the converter cannot take is refused
+   * with its reason instead of silently dropped (a trial build at bank 7; the real bank number is
+   * only known when the layout is). */
+  let songs = null;
+  if (program && encoded && PCEStudio.seq && PCEStudio.songbank &&
+      files.some((f) => f.name === "song.json" || f.name === "songs.json")) {
+    try {
+      songs = PCEStudio.seq.songsFromFiles(files);
+      if (!songs.length) songs = null;
+      else PCEStudio.songbank.build(songs, 7);
+    } catch (e) {
+      songs = null;
+      findings.push(exportFinding("error", e && e.code || "song-error",
+        "the songs cannot go in the ROM: " + (e && e.message || String(e)), null));
+    }
+  }
   if (findings.filter((f) => f.severity !== "warn").length) {
     return { ok: false, source: source, findings: findings, route1: null };
   }
   return { ok: true, source: source, findings: findings, encoded: encoded,
+           songs: songs,
            art: art || null,
            route1: con && con.stats ? con.stats.route1 : null };
 }
@@ -4855,10 +4878,12 @@ function exportBuild(bank0, analysis) {
      * non-default files (carried, not loaded, on a whole bank too). */
     const bytes = PCEStudio.rom.buildToyRom({
       bank0: bank0, bytecode: A.encoded.bytes,
-      assets: A.art ? exportArtAssets(A.art) : exportAssetTail()
+      assets: A.art ? exportArtAssets(A.art) : exportAssetTail(),
+      songs: A.songs ? (bankNumber) => PCEStudio.songbank.build(A.songs, bankNumber) : undefined
     });
     return { ok: true, name: name, bytes: bytes,
              bytecodeBytes: A.encoded.bytes.length,
+             songs: A.songs ? A.songs.length : 0,
              art: A.art ? { blobBytes: A.art.stats.blobBytes,
                             tiles: A.art.stats.tiles,
                             patterns: A.art.stats.patterns,

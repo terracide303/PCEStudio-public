@@ -120,3 +120,15 @@ little RAM beside the engine's 1.1 KB); the studio's Export button, which still
 builds the interpreter ROM. The Oak Woods song converts too (its rows carry empty
 effect-slot lists, which `tools/native-songs.js` pads to the converter's filler);
 `tests/native-music-oak` plays it and equals the studio's model like the demo song.
+
+## Export carries the songs now (2026-11-13)
+
+The studio's Export (the interpreter ROM) used to pin "no songs" in the trailer, so an exported game was
+silent. `renderer/pce-songbank.js` now turns the toy's compiled songs (song.json, songs.json) into one 8 KiB
+song bank, and `buildToyRom` takes them as `songs` (a function of the bank's number): the bank goes whole
+after the data and art banks and the trailer the engine glue reads lists it. The studio page loads
+`pce-hutrack.js` and `pce-songbank.js`, refuses a song the converter cannot take (with its reason), and no
+longer carries the song files as a JSON tail. `tests/check-export-songs.js` (14 checks): layout, a refusal by
+code, the page's wiring, and the exported ROM played in Geargrafx: its notes are ones the studio's own player
+model writes. One song bank holds up to 8 songs and 8,160 bytes. The live site does not have this until it is
+deployed (needs the maintainer's go and the cPanel password). The MCP's `export_pce` is not changed.
