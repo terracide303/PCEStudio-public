@@ -762,6 +762,104 @@
       return out.join(", ");
     }
 
+    /* A function over SPLIT_OVER IL instructions is emitted as chunks of
+     * SPLIT_CHUNK instructions, each its own C function, and a small
+     * dispatcher with the same name (compiler step 1: a banked ROM links a
+     * function into one 8 KiB bank, and DUSK RUN's frame() alone is 10.9 KB).
+     * The registers r[] are a static array of the function (a pointer
+     * parameter made every access 2-3x the code on the 6502, measured), so a
+     * split function must not be re-entered: the dispatcher guards it with
+     * il_split_reentered, which stays 0 unless a split function ran inside
+     * itself (a recursive game function; none of the gallery's is).  A
+     * chunk is entered at an IL pc (its first, or a label another chunk jumps
+     * to) and returns the pc to continue at, or -1 after a `ret` (the value
+     * goes through *rv).  Every C temporary is block-scoped inside one IL
+     * instruction, so nothing but r[] crosses a chunk.  IL_CHUNK_CALL is the
+     * hook a banked build uses to map the chunk's bank around the call
+     * (tools/bank-toyc.py); by default it is the call itself. */
+    var SPLIT_OVER = (options && options.splitOver) || Infinity;   /* off unless asked: tools/build-toyc-banked.sh splits only what a bank cannot hold */
+    var SPLIT_CHUNK = (options && options.splitChunk) || 100;
+    var SPLIT_ONLY = (options && options.splitOnly) || null;   /* test aid: fids */
+    var chunkCtx = null;
+
+    function jumpTo(target) {
+      if (chunkCtx && (target < chunkCtx.lo || target >= chunkCtx.hi)) {
+        return "{ return " + target + "; }";
+      }
+      return "goto L" + target + ";";
+    }
+
+    function emitSplit(fn, fid, labels) {
+      var n = fn.code.length;
+      var bounds = [];
+      var lo, k, pc;
+      for (lo = 0; lo < n; lo += SPLIT_CHUNK) bounds.push([lo, Math.min(n, lo + SPLIT_CHUNK)]);
+      function chunkOf(p) {
+        for (var c = 0; c < bounds.length; c++) if (p >= bounds[c][0] && p < bounds[c][1]) return c;
+        return -1;
+      }
+      var entries = bounds.map(function (b) { var o = {}; o[b[0]] = true; return o; });
+      for (pc = 0; pc < n; pc++) {
+        var ij = fn.code[pc];
+        var tt = (ij.t === "jmp" || ij.t === "br" || ij.t === "fornext") ? ij.target : null;
+        if (tt != null && chunkOf(tt) !== chunkOf(pc)) entries[chunkOf(tt)][tt] = true;
+      }
+      /* .bss, not the zero page the compiler would pick: it zeroes the array
+       * with a memset through a pointer, and llvm-mos's pointer to a zero-page
+       * object is $00xx (the I/O page on this CPU), not $20xx (measured: the
+       * banked TOWER stalled after one frame). */
+      line("static " + T + " il_fn_" + fid + "_r[" + Math.max(1, fn.registers) + "]");
+      line("    __attribute__((section(\".bss\")));");
+      line("static uint8_t il_fn_" + fid + "_busy;");
+      for (k = 0; k < bounds.length; k++) {
+        var cname = "il_fn_" + fid + "_c" + k;
+        var proto = "static int16_t " + cname +
+          "(struct il_closure *cl, int16_t pc, int32_t *rv)";
+        line(proto + " __attribute__((noinline));");
+        line(proto + " {");
+        line("  " + T + " *const r = il_fn_" + fid + "_r;");
+        line("  (void)cl; (void)rv; (void)r;");
+        line("  switch (pc) {");
+        Object.keys(entries[k]).forEach(function (e) {
+          line("  case " + e + ": goto L" + e + ";");
+        });
+        line("  default: return -1;");
+        line("  }");
+        chunkCtx = { lo: bounds[k][0], hi: bounds[k][1] };
+        for (pc = bounds[k][0]; pc < bounds[k][1]; pc++) {
+          if (labels[pc] || entries[k][pc]) line("L" + pc + ": ;");
+          emitInstruction(fn, fid, fn.code[pc], pc);
+        }
+        chunkCtx = null;
+        if (k === bounds.length - 1) line("  *rv = 0; return -1;");
+        else line("  return " + bounds[k][1] + ";");
+        line("}");
+      }
+      line("static " + T + " il_fn_" + fid +
+           "(struct il_closure *cl, " + SIG + ") {");
+      line("  " + T + " *const r = il_fn_" + fid + "_r;");
+      line("  int32_t rv = 0; int16_t pc = 0; uint8_t i;");
+      line("  (void)cl; " + ARGS.map(function (nm) { return "(void)" + nm + ";"; }).join(" "));
+      line("  if (il_fn_" + fid + "_busy) { il_split_reentered = 1; return 0; }");
+      line("  il_fn_" + fid + "_busy = 1;");
+      line("  for (i = 0; i < " + Math.max(1, fn.registers) + "; i++) r[i] = 0;");
+      for (pc = 0; pc < fn.params.length; pc++) {
+        var psrc = pc < 4 ? "a" + pc : "il_xargs[" + (pc - 4) + "]";
+        line("  r[" + pc + "] = " + psrc + ";");
+      }
+      line("  while (pc >= 0) {");
+      for (k = 0; k < bounds.length; k++) {
+        var cn = "il_fn_" + fid + "_c" + k;
+        line("    " + (k ? "else " : "") + (k < bounds.length - 1
+             ? "if (pc < " + bounds[k][1] + ") " : "") +
+             "pc = IL_CHUNK_CALL(" + cn + ", " + cn + "(cl, pc, &rv));");
+      }
+      line("  }");
+      line("  il_fn_" + fid + "_busy = 0;");
+      line("  return rv;");
+      line("}");
+    }
+
     function emitFunction(fn, fid) {
       var labels = {};
       var pc;
@@ -770,6 +868,10 @@
         var t = (ins.t === "jmp" || ins.t === "br" || ins.t === "fornext")
                 ? ins.target : null;
         if (t != null) labels[t] = true;
+      }
+      if (!huc && fn.code.length > SPLIT_OVER && (!SPLIT_ONLY || SPLIT_ONLY.indexOf(fid) >= 0)) {
+        emitSplit(fn, fid, labels);
+        return;
       }
       line("static " + T + " il_fn_" + fid +
            "(struct il_closure *cl, " + SIG + ") {");
@@ -918,10 +1020,10 @@
       }
       case "br":
         line("  if (((" + operand(ins.cond) + " != 0) ? 1 : 0) == " +
-             (ins.when ? 1 : 0) + ") goto L" + ins.target + ";");
+             (ins.when ? 1 : 0) + ") " + jumpTo(ins.target));
         break;
       case "jmp":
-        line("  goto L" + ins.target + ";");
+        line("  " + jumpTo(ins.target));
         break;
       case "call": {
         /* #183: arguments 5..8 go through il_xargs, which the callee copies
@@ -973,6 +1075,10 @@
         line("  il_timer_cb = " + (ins.fn ? operand(ins.fn) : "-1") + ";");
         break;
       case "ret":
+        if (chunkCtx) {
+          line("  { *rv = " + (ins.src ? operand(ins.src) : "0") + "; return -1; }");
+          break;
+        }
         line("  return " + (ins.src ? operand(ins.src) : "0") + ";");
         break;
       case "forprep":
@@ -990,7 +1096,7 @@
                ") : (lim_" + pc + " <= idx_" + pc + ")) {");
           line("      r[" + ins.base + "] = idx_" + pc + ";");
           line("      r[" + (ins.base + 3) + "] = idx_" + pc + ";");
-          line("      goto L" + ins.target + ";");
+          line("      " + jumpTo(ins.target));
           line("    }");
           line("  }");
           break;
@@ -1003,7 +1109,7 @@
         line("    if ((st > 0) ? (idx <= lim) : (lim <= idx)) {");
         line("      r[" + ins.base + "] = idx;");
         line("      r[" + (ins.base + 3) + "] = idx;");
-        line("      goto L" + ins.target + ";");
+        line("      " + jumpTo(ins.target));
         line("    }");
         line("  }");
         break;
@@ -1101,6 +1207,12 @@
     }
     line("");
     line("#define IL_NCLOSURES " + Math.max(1, a.closureCount));
+    if (!huc && a.functions.some(function (f, fi) { return f.code.length > SPLIT_OVER && (!SPLIT_ONLY || SPLIT_ONLY.indexOf(fi) >= 0); })) {
+      line("#ifndef IL_CHUNK_CALL");
+      line("#define IL_CHUNK_CALL(sym, e) (e)");
+      line("#endif");
+      line("static volatile uint8_t il_split_reentered;");
+    }
     line("#define IL_NGLOBALS " + a.globalNames.length);
     line("#define IL_NUPS " + Math.max(1, a.maxUps));
     line("");

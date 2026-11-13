@@ -48,7 +48,10 @@ try {
                   ": " + (first ? first.message : "the toy failed"));
     process.exit(1);
   }
-  fs.writeFileSync(outPath, cgen.emitC(program, { target: target }));
+  fs.writeFileSync(outPath, cgen.emitC(program, { target: target,
+    splitOver: +process.env.PCE_SPLIT_OVER || undefined,
+    splitChunk: +process.env.PCE_SPLIT_CHUNK || undefined,
+    splitOnly: process.env.PCE_SPLIT_ONLY ? process.env.PCE_SPLIT_ONLY.split(",").map(Number) : undefined }));
 } catch (e) {
   const code = e && (e.code || e.name) || "error";
   console.error("emit failed: " + code + ": " + (e && e.message));

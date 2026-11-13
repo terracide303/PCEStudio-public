@@ -25,7 +25,22 @@ if [ "${SILENT_SFX:-0}" = "1" ]; then
   EXTRA="$EXTRA -include $G.silent.h"
 fi
 "$CC" -Os $EXTRA -fno-lto -c -Itools/toyc -o "$G.o" "$G.c"
-BANKS=$(python3 -I tools/bank-toyc.py "$G.c" "$G.o" "$G.banked.c" "$LLVM_MOS" | sed -n 's/^BANKS //p')
+set +e
+OUT=$(python3 -I tools/bank-toyc.py "$G.c" "$G.o" "$G.banked.c" "$LLVM_MOS")
+RC=$?
+set -e
+if [ $RC -eq 4 ]; then
+  # a function larger than one bank: emit it again with those functions split
+  # into chunks (pce-cgen.js), then pack once more
+  IDS="${OUT#SPLIT }"
+  echo "splitting functions $IDS"
+  PCE_SPLIT_ONLY="$IDS" PCE_SPLIT_OVER=1 node tools/toyc/emit.js "$SRC" "$G.c"
+  "$CC" -Os $EXTRA -fno-lto -c -Itools/toyc -o "$G.o" "$G.c"
+  OUT=$(python3 -I tools/bank-toyc.py "$G.c" "$G.o" "$G.banked.c" "$LLVM_MOS")
+elif [ $RC -ne 0 ]; then
+  echo "$OUT" >&2; exit $RC
+fi
+BANKS=$(echo "$OUT" | sed -n 's/^BANKS //p')
 DEFS=""
 for b in $(seq 1 "$BANKS"); do DEFS="$DEFS -Wl,--defsym=__rom_bank${b}_size=0x2000"; done
 "$CC" -Os $EXTRA $DEFS -Itools/toyc -o "$G.pce" tools/toyc/toy_runtime.c "$G.banked.c"
