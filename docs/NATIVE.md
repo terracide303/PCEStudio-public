@@ -9,6 +9,14 @@ bytecode and a small program on the console reads it step by step
 toy runs as machine code. The studio does not use it yet; `tools/build-toyc.sh`
 does.
 
+## Proven on hardware
+
+2026-11-13, the maintainer's report: the native PCEHero intro (Lua through the IL, C and llvm-mos, banked,
+with the art loaded at boot and the song played by the HuTrack engine) runs correctly on a real PC Engine
+and on the maintainer's FPGA core, after the VBlank fix below. Before the fix it jumped about once a second
+on hardware and in a web emulator (PicoEngine). This is the first game this route has run on hardware.
+Only the picture and the music were judged, by eye and ear; no cycle measurement was taken on hardware.
+
 ## What compiles today
 
 | Game | IL → C | llvm-mos builds it | Notes |
