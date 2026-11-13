@@ -1203,8 +1203,15 @@
         /* SAT entry i, word k: VRAM $7F00 + i*4 + k, the buffer the runtime's
          * DSR auto-repeat DMAs into SATB every VBlank (viewer.asm's layout,
          * docs/ROM_LAYOUT.md). */
-        line("  toy_sat(" + operand(ins.i) + ", " + operand(ins.k) + ", " +
-             operand(ins.v) + ");");
+        if (huc) {
+          line("  toy_sat(" + operand(ins.i) + ", " + operand(ins.k) + ", " +
+               operand(ins.v) + ");");
+        } else {
+          /* toy_sat's own range check, in line (it folds away for constant i and k), then the 16-bit write */
+          line("  if ((uint32_t)" + operand(ins.i) + " <= 63u && (uint32_t)" + operand(ins.k) + " <= 3u) " +
+               "toy_vram_set16((uint16_t)(0x7F00 + " + operand(ins.i) + " * 4 + " + operand(ins.k) + "), (uint16_t)" +
+               operand(ins.v) + ");");
+        }
         break;
       case "sprite": {
         /* #190: one SAT entry from the six values pce-ilbc.js resolved off
@@ -1212,6 +1219,18 @@
          * pattern, palette, attr.  validate() has refused any site the
          * walker could not pin, so the records here are all resolved. */
         var spr = a.sprites[fid][pc];
+        if (!huc) {
+          /* the four SAT words are constants: write them directly (toy_sprite's own composition, folded
+           * at compile time; toy_sat ignores a slot outside 0..63, so does this) */
+          if (spr.slot >= 0 && spr.slot <= 63) {
+            var at = spr.attr;
+            var w3 = (spr.palette | ((at & 1) << 7) | (((at >> 1) & 1) << 8) | (((at >> 2) & 1) << 11) |
+                      (((at >> 4) & 3) << 12) | (((at >> 3) & 1) << 15)) & 0xFFFF;
+            var sw = [spr.y & 0xFFFF, spr.x & 0xFFFF, (spr.pattern << 1) & 0xFFFF, w3];
+            line("  toy_vram_set4(" + (0x7F00 + spr.slot * 4) + ", " + sw.join(", ") + ");");
+          }
+          break;
+        }
         line("  toy_sprite(" + constLit({ t: "int", v: spr.slot }) + ", " +
              constLit({ t: "int", v: spr.x }) + ", " +
              constLit({ t: "int", v: spr.y }) + ", " +
@@ -1295,7 +1314,10 @@
         break;
       }
       case "vset":
-        line("  toy_vram_set(" + operand(ins.addr) + ", " + operand(ins.word) + ");");
+        /* 16-bit arguments on the llvm target: a VRAM address and a word are 16 bits to the VDC and
+         * four int32 argument bytes each cost cycles in every call (tools/study-idioms.py's study) */
+        if (huc) line("  toy_vram_set(" + operand(ins.addr) + ", " + operand(ins.word) + ");");
+        else line("  toy_vram_set16((uint16_t)" + operand(ins.addr) + ", (uint16_t)" + operand(ins.word) + ");");
         break;
       case "builtin":
         /* validate() admits only rgb and note */

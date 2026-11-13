@@ -180,3 +180,24 @@ own cost per frame is not in these numbers.
 4. Load art (tiles, sprites, palettes) in the native ROM, for STARFALL and NOVA TIDE.
 5. Decide whether the studio's Export button gets a native route (a browser-side
    HuC6280 backend) or stays on the interpreter.
+
+## Console I/O costs in the runtime (measured 2026-11-13, `tests/native-bench-io`, `tools/bench-frame.py`)
+
+What a toy frame costs, read from the runtime's timer cells (1 tick = 1,024 cycles), with the loop around each
+operation included:
+
+| operation | before | after | how |
+|---|---|---|---|
+| `vram[a] = w`, 256 in a loop | 47 cycles each | 47 | already inlined by LTO: 6 stores at 5 cycles |
+| `sat(i, k, v)`, 256 in a loop | 46 each | 46 | same |
+| `sprite(i, {...})` (constants) | 206 each | 135 each | the four SAT words are folded at compile time into one `toy_vram_set4`: one MAWR load and eight data stores instead of four of each |
+| boot, until the toy's `init` runs | 8 video frames | 5 | the 64 KiB VRAM clear is 1,024 `TIA` block moves from 64 zero bytes (6 cycles a byte) instead of a per-word store loop |
+
+Tried and dropped: caching the VDC's MAWR across writes (skip the address load when the next write is at the
+next address). In an inlined loop the compare costs about what the saved stores do, and one shape of it made
+llvm-mos drop a loop's exit test (the frame never returned, measured). Narrowing the I/O calls' arguments to
+16 bits changed nothing: link-time inlining already removes the call. The remaining cost of a console write
+is the six stores a word needs; a compile-time run of consecutive words (a sprite) is the case that saves.
+Calls to a *global* function (`function put()`) still go through `il_call` (about 600 cycles); a `local function`
+is a direct call.
+
