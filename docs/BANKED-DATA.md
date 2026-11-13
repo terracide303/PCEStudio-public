@@ -755,9 +755,16 @@ number below is measured on this tree; the commands are named.
   construction: the console's MAWR auto-increment wraps at 16 bits while
   its 32K-word VRAM ignores the register's top bit, so the host's 16-bit
   cast and the shim's register agree and neither changes the copied words.
-- **Not proven here.** The console shim's Mednafen capture is the one §3.3
-  asks for; it waits on #218 emitting an asset blob (the card's own closing
-  line). Rule 2 (a different seat and model breaks the test) ran on
+- **The console half was proven late, and was broken until then.** The shim's
+  console run is `tests/check-export-art-console.js` (2026-11-13): the
+  interpreter handed the shim its program counter as an offset into the
+  `$4000` code window and the shim read it as an absolute address, so every
+  exported art load wrote garbage and the exported PCEHero intro was black
+  (the host harness cannot see this). Fixed in `tools/ilvm/ilvm.c`
+  (`$4000 + pc`, and back); the exported ROM's VRAM now equals the importer's
+  image word for word, and the exported PCEHero intro's picture is diff 0
+  against the browser (frame 122). The earlier text here is history:
+  the shim's Mednafen capture was asked for as §3.3 and waited on #218's blob. Rule 2 (a different seat and model breaks the test) ran on
   2026-11-04: its three missed breaks are the malformed-`off`, three-bank
   and near-top copies above, and each re-applied alone turns the suite
   red.
@@ -794,16 +801,16 @@ program is identical and the only variable is the interpreter.
 
 | toy | old ROM sha256 | new ROM sha256 | frames old / new | distinct pictures old / new | shared | old-only / new-only | frame 0 / last |
 |---|---|---|---|---|---|---|---|
-| palette | `b12ec9c961006cff…` | `f605155a3c66bbb1…` | 354 / 357 | 9 / 9 | 9 | 0 / 0 | same; same picture at another index |
-| arity | `ea4f014915bb5975…` | `9c94805b4b017dc7…` | 355 / 353 | 16 / 16 | 16 | 0 / 0 | differs (OSD splash); same picture at another index |
-| not | `fe9672f4ee2b93a7…` | `385636cbd6c796f1…` | 354 / 326 | 5 / 5 | 5 | 0 / 0 | same; same picture at another index |
-| sprite | `4f212ee9128f76d5…` | `8904eabd3c067460…` | 353 / 354 | 2 / 2 | 2 | 0 / 0 | identical; identical |
-| parallax | `5f303972300305dc…` | `2a49ab9e4791721b…` | 352 / 357 | 1 / 1 | 1 | 0 / 0 | identical; identical |
-| status-bar | `ce08f5d066a7062f…` | `91b22ff910cad377…` | 356 / 354 | 1 / 1 | 1 | 0 / 0 | identical; identical |
-| platformer | `c067d74ac688c1ac…` | `ccc5f20a1405816a…` | 707 / 664 | 3 / 3 | 3 | 0 / 0 | identical; identical |
-| DUSK RUN | `cabf674e632725d6…` | `2a569de95c3a1bfb…` | 709 / 697 | 10 / 14 | 5 | 5 / 9 | identical; identical |
-| STARFALL | `a9f5140e1143f47a…` | `5984b3246858d286…` | 12 / 12 (tail) | 2 / 2 | 0 | 2 / 2 | differs; differs |
-| TOWER | `048948fe18f9d432…` | `1b1d151ae2fbdd35…` | 12 / 12 (tail) | 2 / 2 | 0 | 2 / 2 | differs; differs |
+| palette | `b12ec9c961006cff…` | `8d21e951b63f694b…` | 354 / 357 | 9 / 9 | 9 | 0 / 0 | same; same picture at another index |
+| arity | `ea4f014915bb5975…` | `2b2294e0598c082b…` | 355 / 353 | 16 / 16 | 16 | 0 / 0 | differs (OSD splash); same picture at another index |
+| not | `fe9672f4ee2b93a7…` | `b98a6ac8d5c17397…` | 354 / 326 | 5 / 5 | 5 | 0 / 0 | same; same picture at another index |
+| sprite | `4f212ee9128f76d5…` | `dec7c595be8fc537…` | 353 / 354 | 2 / 2 | 2 | 0 / 0 | identical; identical |
+| parallax | `5f303972300305dc…` | `90aba57b676f55d4…` | 352 / 357 | 1 / 1 | 1 | 0 / 0 | identical; identical |
+| status-bar | `ce08f5d066a7062f…` | `1d7e0f29cae64446…` | 356 / 354 | 1 / 1 | 1 | 0 / 0 | identical; identical |
+| platformer | `c067d74ac688c1ac…` | `8681b1c897365f2f…` | 707 / 664 | 3 / 3 | 3 | 0 / 0 | identical; identical |
+| DUSK RUN | `cabf674e632725d6…` | `b955f58d7f454d8a…` | 709 / 697 | 10 / 14 | 5 | 5 / 9 | identical; identical |
+| STARFALL | `a9f5140e1143f47a…` | `593232435c7b1420…` | 12 / 12 (tail) | 2 / 2 | 0 | 2 / 2 | differs; differs |
+| TOWER | `048948fe18f9d432…` | `c67d2f2ccdaea11c…` | 12 / 12 (tail) | 2 / 2 | 0 | 2 / 2 | differs; differs |
 | padtest | `dedbfd636f6735fa…` | `3d767aa5e282a66c…` | 357 / 353 | 204 / 196 | 43 | 161 / 153 | identical; identical |
 
 For the seven toys above DUSK RUN the picture is unchanged in the strong

@@ -224,7 +224,7 @@ function notBlack(framesDir, files) {
 (async()=>{
  const rom=process.argv[2],toy=process.argv[3],out=process.argv[4];
  fs.mkdirSync(out,{recursive:true});
- const cap=await captureFrames(rom,out,9000,true);
+ const cap=await captureFrames(rom,out,+process.env.CAPTURE_MS||9000,true);  /* CAPTURE_MS: a game with a long start-up needs longer */
  if(cap.error){console.log("ERR",cap.error);return;}
  const lit=notBlack(cap.frames,cap.files);
  const want=browserFrames(toy,+process.argv[5]||60);

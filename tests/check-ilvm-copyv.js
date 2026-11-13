@@ -61,9 +61,9 @@
  * tools/ilvm/hutrack_engine.asm (CopyvShim), because the fixed 16 KiB image
  * has no room for a copy loop; the host harness runs the C half in
  * tools/ilvm/ilvm.c.  This file proves the op's semantics and the C half.
- * The shim's console behaviour is NOT proven here: its evidence is the
- * Mednafen capture docs/BANKED-DATA.md §3.3 asks for, which waits on #218
- * emitting an asset blob (the card's own closing line).  Rule 2 ran for
+ * The shim's console behaviour is NOT proven here: tests/check-export-art-console.js
+ * runs it in an emulator (2026-11-13; it found that the interpreter handed the shim
+ * an offset instead of an address, which this host harness could not see).  Rule 2 ran for
  * this file (the 2026-11-04 cold break, a different seat and model): its
  * three misses are the fixtures C, D and E above.
  *
