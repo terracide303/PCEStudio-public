@@ -1280,8 +1280,15 @@ encoder does not emit `copyv` yet; the op's evidence is the host harness
 (`tests/check-ilvm-copyv.js`: 300 words in a v1 container and five copies in
 a v4 one — one bank, one crossing a bank, one with a malformed `off` whose
 top three bits both halves mask, one spanning three banks, and one near the
-top of VRAM), and the console capture is owed once
-#218 emits a blob.
+top of VRAM).  #218 emits it: `renderer/pce-ilbc.js`'s `constVramRuns` turns
+a straight-line run of at least eight constant `vram[]` writes in function 0
+or the init hook (no loop, no jump into the run, every register the run
+loads read nowhere else) into one `copyv` over a blob laid after the art blob
+in the data banks.  A blob past one 8 KiB bank is refused as
+`toy-const-bank-full`.  `tests/check-ilvm-construns.js` pins the 127-pool
+case (a 28-row BAT and 125 tiles as literal writes: 29 runs, 5,792 B blob)
+against the browser IL run on the host harness, diff 0.  The console capture
+is still owed.
 
 A **`padget`'s field byte** is the runtime's `TOY_PAD_*` bit
 (`tools/toyc/toy_runtime.h`, pcetech §4's order): ii 0, i 1, select 2,

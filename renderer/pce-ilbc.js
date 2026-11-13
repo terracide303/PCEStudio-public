@@ -301,6 +301,140 @@
     return null;
   }
 
+  /* #218: a shallow copy of an IL object (instructions and functions are
+   * re-pointed, never mutated: encode() must not change its input). */
+  function shallowCopy(o) {
+    var c = {};
+    for (var k in o) {
+      if (Object.prototype.hasOwnProperty.call(o, k)) c[k] = o[k];
+    }
+    return c;
+  }
+
+  /* #218: the runs a constant blob takes.  The IL loads each constant into a
+   * register (const), reads the vram global (getglobal) and writes with
+   * vset on registers, so a "constant write" is a vset whose address and
+   * word resolve to int constants through those registers.  A group of such
+   * vsets whose addresses rise by one, in function 0 or the init hook, is a
+   * run of CONST_RUN_MIN or more words.  The run's region (its const,
+   * getglobal and vset ops) is dropped and replaced by one copyv, but only
+   * when every register the region writes is read nowhere else in the
+   * function: dropping a load that a later instruction reads would change
+   * what that instruction sees.  No jump lands inside a region and no loop
+   * contains one.  Returns [{fid, start, end, vram, words}] in code order. */
+  var CONST_RUN_MIN = 8;
+  function constVramRuns(functions, hooks) {
+    var fids = [0];
+    if (hooks && hooks.init != null && hooks.init !== 0) fids.push(hooks.init);
+    var out = [];
+    for (var fi = 0; fi < fids.length; fi++) {
+      var f = fids[fi], code = (functions[f] && functions[f].code) || [];
+      var n = code.length, target = new Array(n + 1), inLoop = new Array(n);
+      var pc, i, ins, lp;
+      for (pc = 0; pc < n; pc++) {
+        ins = code[pc];
+        if ((ins.t === "jmp" || ins.t === "br" || ins.t === "fornext") &&
+            ins.target != null) {
+          target[ins.target] = true;
+          if (ins.target <= pc) {
+            for (lp = ins.target; lp <= pc; lp++) inLoop[lp] = true;
+          }
+        }
+      }
+      var json = code.map(function (x) { return JSON.stringify(x); });
+      var readsAll = Object.create(null);
+      function reads(r) {
+        if (readsAll[r] == null) {
+          var pat = new RegExp('"r":' + r + '[,}]'), c = 0;
+          for (var z = 0; z < json.length; z++) if (pat.test(json[z])) c++;
+          readsAll[r] = c;
+        }
+        return readsAll[r];
+      }
+      function readsIn(lo, hi, r) {
+        var pat = new RegExp('"r":' + r + '[,}]'), c = 0;
+        for (var z = lo; z < hi; z++) if (pat.test(json[z])) c++;
+        return c;
+      }
+      function intOf(op, regVal) {
+        if (!op) return null;
+        if (op.k && op.k.t === "int" && op.r == null) return op.k.v;
+        if (op.r != null && regVal[op.r] !== undefined) return regVal[op.r];
+        return null;
+      }
+      var cands = [];
+      pc = 0;
+      while (pc < n) {
+        if (inLoop[pc]) { pc++; continue; }
+        /* The span: const, getglobal(vram) and constant vset ops in a row. */
+        var regVal = Object.create(null), vs = [];
+        i = pc;
+        while (i < n && !inLoop[i] && (i === pc || !target[i])) {
+          ins = code[i];
+          if (ins.t === "getglobal" && ins.name === "vram") {
+            delete regVal[ins.dst];
+          } else if (ins.t === "const" && ins.k && ins.k.t === "int" &&
+                     ins.dst != null) {
+            regVal[ins.dst] = ins.k.v;
+          } else if (ins.t === "vset") {
+            var a = intOf(ins.addr, regVal), w = intOf(ins.word, regVal);
+            if (a == null || w == null || a < 0 || a > 0x7FFF ||
+                w < 0 || w > 0xFFFF) break;
+            vs.push({ i: i, a: a, w: w });
+          } else {
+            break;
+          }
+          i++;
+        }
+        var spanEnd = i;
+        /* Groups of vsets at consecutive addresses, in code order. */
+        var g0 = 0;
+        for (var v = 1; v <= vs.length; v++) {
+          if (v < vs.length && vs[v].a === vs[v - 1].a + 1) continue;
+          var gs = vs.slice(g0, v);
+          g0 = v;
+          if (gs.length < CONST_RUN_MIN) continue;
+          var lo = gs[0].i, hi = gs[gs.length - 1].i + 1;
+          var written = Object.create(null);
+          for (var q = lo; q < hi; q++) {
+            var wi = code[q];
+            if (wi.t === "const" || wi.t === "getglobal") written[wi.dst] = true;
+          }
+          cands.push({ lo: lo, hi: hi, gs: gs, written: Object.keys(written) });
+        }
+        pc = Math.max(spanEnd, pc + 1);
+      }
+      /* A register a region writes must be read only inside the regions:
+       * drop any region whose registers have a read elsewhere, until none
+       * does (a dropped region can leave its registers' reads outside). */
+      var keep = cands.slice(), changed = true;
+      while (changed) {
+        changed = false;
+        var mark = new Array(n);
+        for (var kc = 0; kc < keep.length; kc++) {
+          for (var mi = keep[kc].lo; mi < keep[kc].hi; mi++) mark[mi] = true;
+        }
+        var next = keep.filter(function (c) {
+          return c.written.every(function (r) {
+            var pat = new RegExp('"r":' + r + '[,}]');
+            var inU = 0, all = reads(r);
+            for (var z = 0; z < n; z++) {
+              if (mark[z] && pat.test(json[z])) inU++;
+            }
+            return inU === all;
+          });
+        });
+        if (next.length !== keep.length) { keep = next; changed = true; }
+      }
+      for (var kk = 0; kk < keep.length; kk++) {
+        out.push({ fid: f, start: keep[kk].lo, end: keep[kk].hi,
+                   vram: keep[kk].gs[0].a,
+                   words: keep[kk].gs.map(function (x) { return x.w; }) });
+      }
+    }
+    return out;
+  }
+
   function operandKey(op) {
     if (!op) return null;
     if (op.r != null) return null;
@@ -506,6 +640,77 @@
     var initSlot = hookSlot("init", program.hooks && program.hooks.init);
     var frameSlot = hookSlot("frame", program.hooks && program.hooks.frame);
     var rasterSlot = hookSlot("raster", program.hooks && program.hooks.raster);
+
+    /* #218: a straight-line run of constant vram[] writes in the boot chunk
+     * (function 0) or the init hook becomes one copyv over a blob in the
+     * data banks, not one vset per word.  Every distinct address and word
+     * constant of a vset spends the 127-entry pool; the blob's words spend
+     * nothing.  Only the boot path may do this: copyv writes immediately
+     * (no MODE_BASE deferral) and holds the raster IRQ off for its length,
+     * so a run inside frame() or a loop stays as vset (docs/IL.md §14.1).
+     * The blob is laid after the art blob (constBlob's offset), so the copy
+     * bank is patched with the art banks below. */
+    var constBlob = null, constCopies = [];
+    var constBase = art ? art.blob.length : 0;
+    var runs = constVramRuns(functions, program.hooks);
+    if (runs.length) {
+      var blobBytes = [];
+      var rewritten = functions.slice();
+      var byFid = {};
+      for (var ri = 0; ri < runs.length; ri++) {
+        (byFid[runs[ri].fid] = byFid[runs[ri].fid] || []).push(runs[ri]);
+      }
+      for (var rf in byFid) {
+        var rfid = +rf, src = functions[rfid], srcCode = src.code || [];
+        var out2 = [], map = new Array(srcCode.length + 1), rr = byFid[rf], rk = 0;
+        for (var rp = 0; rp < srcCode.length; ) {
+          map[rp] = out2.length;
+          if (rk < rr.length && rr[rk].start === rp) {
+            var run = rr[rk++];
+            var pos = constBase + blobBytes.length;
+            for (var wi = 0; wi < run.words.length; wi++) {
+              blobBytes.push(run.words[wi] & 0xFF, run.words[wi] >> 8);
+            }
+            var cop = { t: "copyv", vram: run.vram, bank: 0, off: 0,
+                        count: run.words.length, line: srcCode[rp].line,
+                        pos: pos };
+            constCopies.push(cop);
+            out2.push(cop);
+            for (var mp = rp + 1; mp < run.end; mp++) map[mp] = out2.length - 1;
+            rp = run.end;
+          } else {
+            out2.push(srcCode[rp]);
+            rp++;
+          }
+        }
+        map[srcCode.length] = out2.length;
+        /* Jump targets are pcs of the source code: re-point them at the
+         * same instruction's new index (no target lands inside a run). */
+        for (var oi = 0; oi < out2.length; oi++) {
+          var oin = out2[oi];
+          if ((oin.t === "jmp" || oin.t === "br" || oin.t === "fornext") &&
+              oin.target != null) {
+            oin = shallowCopy(oin);
+            oin.target = map[oin.target];
+            out2[oi] = oin;
+          }
+        }
+        var nfn = shallowCopy(src);
+        nfn.code = out2;
+        rewritten[rfid] = nfn;
+      }
+      if (blobBytes.length > BANK_BYTES) {
+        refuse("toy-const-bank-full", "the constant VRAM writes need " +
+               blobBytes.length + " B in the data banks; one 8 KiB bank " +
+               "holds " + BANK_BYTES + " B (" + runs.length + " runs)");
+      }
+      constBlob = Uint8Array.from(blobBytes);
+      functions = rewritten;
+      program = {
+        version: program.version, lang: program.lang, source: program.source,
+        hooks: program.hooks, globals: program.globals, functions: functions
+      };
+    }
 
     /* A program with a table instruction gets version 2 and a table section;
      * everything else keeps version 1, byte for byte.  A program with a
@@ -718,6 +923,13 @@
      * boundary for every version. */
     var artBank = banked ? 1 + codeBankCount : 1;
     for (ci = 0; ci < artCopies.length; ci++) artCopies[ci].bank = artBank;
+    /* #218: the constant blob streams from the same data banks, after the
+     * art blob; its bank and bank-relative offset follow from its position
+     * (a blob past 8 KiB starts in the next bank). */
+    for (ci = 0; ci < constCopies.length; ci++) {
+      constCopies[ci].bank = artBank + Math.floor(constCopies[ci].pos / BANK_BYTES);
+      constCopies[ci].off = constCopies[ci].pos % BANK_BYTES;
+    }
 
     /* Absolute code offsets (v1-v3), or bank-relative offsets (v4). */
     var fnCodeAt = [];
@@ -856,6 +1068,7 @@
         codeBytes: codeTotal,
         banked: true,
         codeBanks: codeBankCount,
+        constBlob: constBlob, constRuns: constCopies.length,
         hooks: { init: initSlot, frame: frameSlot, raster: rasterSlot },
         tables: usesTables
           ? { nslots: layout.nslots, cells: layout.cells }
@@ -883,6 +1096,7 @@
       codeBytes: codeEnd - L.tablesBytes,
       banked: false,
       codeBanks: 0,
+      constBlob: constBlob, constRuns: constCopies.length,
       hooks: { init: initSlot, frame: frameSlot, raster: rasterSlot },
       tables: usesTables
         ? { nslots: layout.nslots, cells: layout.cells }

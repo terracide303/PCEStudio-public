@@ -4768,7 +4768,7 @@ function exportAssetTail() {
  * data), plus, after it, the old JSON envelope of any non-default file the
  * plan does not cover (waves.json and friends) — carried, not loaded, on
  * the same art banks, so no non-default file is silently dropped. */
-function exportArtAssets(art) {
+function exportArtAssets(art, constBlob) {
   const tail = [];
   for (const f of files) {
     if (f.name === "main.lua" || f.name === "tiles.json" ||
@@ -4778,11 +4778,21 @@ function exportArtAssets(art) {
     if (def && f.source === def.source) continue;
     tail.push({ name: f.name, source: f.source });
   }
-  if (!tail.length) return art.blob;
+  /* #218: the encoder's constant-write blob (its copyv runs) follows the
+   * art blob, so the copies' offsets are the blob's own. */
+  const head = constBlob ? concatBytes([art.blob, constBlob]) : art.blob;
+  if (!tail.length) return head;
   const json = exportUtf8(JSON.stringify({ version: 1, files: tail }));
-  const out = new Uint8Array(art.blob.length + json.length);
-  out.set(art.blob, 0);
-  out.set(json, art.blob.length);
+  return concatBytes([head, json]);
+}
+
+/* #218: the bytes of several Uint8Arrays, one after another (null parts
+ * skipped). */
+function concatBytes(parts) {
+  const live = parts.filter((p) => p && p.length);
+  const out = new Uint8Array(live.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of live) { out.set(p, at); at += p.length; }
   return out;
 }
 
@@ -4878,7 +4888,10 @@ function exportBuild(bank0, analysis) {
      * non-default files (carried, not loaded, on a whole bank too). */
     const bytes = PCEStudio.rom.buildToyRom({
       bank0: bank0, bytecode: A.encoded.bytes,
-      assets: A.art ? exportArtAssets(A.art) : exportAssetTail(),
+      assets: A.art ? exportArtAssets(A.art, A.encoded.constBlob)
+                    : (A.encoded.constBlob
+                        ? concatBytes([A.encoded.constBlob, exportAssetTail()])
+                        : exportAssetTail()),
       songs: A.songs ? (bankNumber) => PCEStudio.songbank.build(A.songs, bankNumber) : undefined
     });
     return { ok: true, name: name, bytes: bytes,

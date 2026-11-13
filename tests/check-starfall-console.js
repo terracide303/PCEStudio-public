@@ -347,9 +347,9 @@ const CITATIONS = [
   ["renderer/pce-cgen.js", 716, "refuse(\"cgen-op\""],
   ["renderer/pce-ilbc.js", 229, "var OPS = {"],
   ["renderer/pce-ilbc.js", 250, "var BUILTIN = {"],
-  ["renderer/pce-ilbc.js", 368, "refuse(\"ilbc-op\""],
-  ["renderer/pce-ilbc.js", 409, "refuse(\"ilbc-builtin\""],
-  ["renderer/pce-ilbc.js", 508, "hookSlot(\"raster\""],
+  ["renderer/pce-ilbc.js", 502, "refuse(\"ilbc-op\""],
+  ["renderer/pce-ilbc.js", 543, "refuse(\"ilbc-builtin\""],
+  ["renderer/pce-ilbc.js", 642, "hookSlot(\"raster\""],
   ["renderer/pce-rom.js", 647, "if (bytecode.length > SONG_TABLE_OFF)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];
