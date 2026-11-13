@@ -32,6 +32,28 @@ toy.lua name` passes `__rom_bank0_size` and `__rom_bank0` to the linker. Left
 unset, the build is the 8 KiB one: the palette toy's ROM still has the committed
 sha256. Code past 48 KiB would need real bank switching; not built.
 
+## Banked code (the shape real games use)
+
+`tools/build-toyc-banked.sh toy.lua name` puts the toy's functions in switched
+8 KiB ROM banks (`tools/bank-toyc.py` packs them first-fit; the SDK links them
+at $C000, page 6). Every call goes through the one dispatcher, `il_call`, which
+stays in the fixed top page with the runtime and maps the callee's bank around
+the call. The fixed part of TOWER is 3.6 KB. See docs/BANKING-STUDY.md for why
+this is the layout to copy.
+
+| | cycles per frame | picture |
+|---|---|---|
+| TOWER, one fixed 40 KiB image | 82,969 | browser frame, diff 0 |
+| TOWER, 6 switched banks | 84,429 (+1.8%) | browser frame, diff 0 |
+
+So a bank switch on every call costs under 2% on TOWER. PLATFORMER (1 bank) and
+STARFALL (3 banks, still without art) build banked too. **DUSK RUN does not:**
+one of its functions is 10.9 KB, larger than a bank, so the C emitter would have
+to split big functions. This is a prototype tool over the generated C; folding
+it into `pce-cgen.js` and the studio's route is not done. The 8 KiB fixed page
+holds the runtime only for toys that do not use the raster build (that build's
+interrupt handlers and tables are bigger; not yet tried banked).
+
 ## Native against interpreter
 
 Measured in Mednafen 1.32.1 (windowless), no buttons pressed. A video frame is
@@ -54,7 +76,8 @@ own cost per frame is not in these numbers.
 1. Lower `raster(line, spec)` (NOVA TIDE).
 2. Put the sound engine behind `toy_music`, `toy_sfx`, `toy_release` in the
    native runtime.
-3. DUSK RUN: the runtime's per-frame list of 32 palette writes is too short for its frame(); fix the runtime, then measure it.
-4. Load art (tiles, sprites, palettes) in the native ROM, for STARFALL and NOVA TIDE.
-5. Decide whether the studio's Export button gets a native route (a browser-side
+3. Split functions larger than a bank (DUSK RUN's 10.9 KB one) in the emitter.
+4. DUSK RUN: the runtime's per-frame list of 32 palette writes is too short for its frame(); fix the runtime, then measure it.
+5. Load art (tiles, sprites, palettes) in the native ROM, for STARFALL and NOVA TIDE.
+6. Decide whether the studio's Export button gets a native route (a browser-side
    HuC6280 backend) or stays on the interpreter.
