@@ -1314,11 +1314,22 @@
     /* ---- integer helpers the lowering needs -------------------------- */
     if (uses.mod) {
       line("/* Lua's `%`: the result has the divisor's sign. */");
-      line("static " + T + " il_lua_mod(" + T + " x, " + T + " y) {");
-      /* HuC only initialises a local with a constant (measured: `int m =
-       * x % y;` fails to compile), so the dialect splits declaration and
-       * assignment. */
-      line(huc ? "  " + T + " m; m = x % y;" : "  " + T + " m = x % y;");
+      line("static " + (huc ? "" : "__attribute__((noinline)) ") + T
+           + " il_lua_mod(" + T + " x, " + T + " y) {");
+      if (huc) {
+        /* HuC only initialises a local with a constant (measured: `int m =
+         * x % y;` fails to compile), so the dialect splits declaration and
+         * assignment. */
+        line("  " + T + " m; m = x % y;");
+      } else {
+        /* No `%`, as in il_lua_idiv: an srem next to the division llvm-mos
+         * fuses into __divmodsi4(x, y, &rem), whose rem pointer is a zp
+         * static materialised with the $2000 bank dropped, so the remainder
+         * store lands in the VDC page and kills CR (#289).  x - q*y is the
+         * same trunc remainder. */
+        line("  " + T + " q = x / y;");
+        line("  " + T + " m = x - q * y;");
+      }
       line("  if (m != 0 && ((m < 0) != (y < 0))) m += y;");
       line("  return m;");
       line("}");
@@ -1326,13 +1337,20 @@
     }
     if (uses.idiv) {
       line("/* Lua's `//`: floor division. */");
-      line("static " + T + " il_lua_idiv(" + T + " x, " + T + " y) {");
+      line("static " + (huc ? "" : "__attribute__((noinline)) ") + T
+           + " il_lua_idiv(" + T + " x, " + T + " y) {");
       if (huc) {
         line("  " + T + " q; " + T + " r;");
         line("  q = x / y; r = x % y;");
       } else {
+        /* No `%`: llvm-mos fuses `x / y` with a `x % y` into one
+         * __divmodsi4(x, y, &rem) call whose remainder pointer is a
+         * zero-page static materialised with the $2000 bank dropped, so
+         * the remainder store lands in the VDC page ($00E5 aliases the
+         * data/select ports) and kills CR (#289).  x - q*y is the same
+         * trunc remainder, and the quotient call needs no pointer. */
         line("  " + T + " q = x / y;");
-        line("  " + T + " r = x % y;");
+        line("  " + T + " r = x - q * y;");
       }
       line("  if (r != 0 && ((r < 0) != (y < 0))) q--;");
       line("  return q;");

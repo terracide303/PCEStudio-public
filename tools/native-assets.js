@@ -62,13 +62,14 @@ lines.push("#include \"toy_assets.h\"");
 lines.push("");
 for (let b = 0; b < nbanks; b++) {
   const part = blob.slice(b * 8192, (b + 1) * 8192);
-  lines.push("const uint8_t toy_art_blob_" + b + "[" + part.length + "] __attribute__((section(\".rom_bank" + (first + b) + "\"), used)) = {");
+  lines.push("const uint8_t toy_art_blob_" + b + "[" + part.length + "] __attribute__((section(\".rom_bank" + (first + b) + "\"), used, retain)) = {");
   for (let i = 0; i < part.length; i += 24) lines.push("  " + part.slice(i, i + 24).join(",") + ",");
   lines.push("};");
 }
 lines.push("const uint8_t toy_art_first_bank = " + first + ";");
 lines.push("const uint16_t toy_art_nruns = " + table.length + ";");
-lines.push("const struct toy_art_run toy_art_runs[" + Math.max(1, table.length) + "] = {");
+/* .rodata, not the zero-page copy the compiler would pick for a small const table: that copy was all zeros at run time (measured) */
+lines.push("const struct toy_art_run toy_art_runs[" + Math.max(1, table.length) + "] __attribute__((section(\".rodata.toy_art_runs\"), used, retain)) = {");
 table.forEach((t) => lines.push("  { " + t.vram + ", " + t.off + ", " + t.count + " },"));
 if (!table.length) lines.push("  { 0, 0, 0 },");
 lines.push("};");

@@ -27,7 +27,7 @@ split={k.split("_")[0] for k in sizes if "_c" in k}
 for f in split: sizes.pop(f,None)
 # first-fit decreasing into 8 KiB banks; the sizes come from a non-LTO object, so
 # leave 1 KiB for the difference to the LTO link
-CAP=8192-1024
+CAP=8192-int(os.environ.get("BANK_SLACK","1024"))   # build-toyc-banked.sh retries with more slack if the link overflows
 banks=[]; assign={}
 for fid,sz in sorted(sizes.items(),key=lambda x:-x[1]):  # fid is the symbol suffix, e.g. 7 or 39_c1
     for b,used in enumerate(banks):

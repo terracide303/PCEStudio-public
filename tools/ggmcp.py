@@ -14,6 +14,13 @@ a profiler.  docs/GEARGRAFX-MCP.md has the recipe and the gotchas.
                                                         run FRAMES video frames (default 120) of a
                                                         PSG_TRACE build and print its write log as
                                                         JSON (image.json = the engine's hutrack-image.json)
+    python3 -I tools/ggmcp.py ROM.pce satdump [FRAMES]
+                                                        step FRAMES video frames (default 400) and print, as JSON, the
+                                                        runtime's toy-frame counter ($2104) and the sprite list in VRAM
+                                                        $7F00 (256 words) -- for tools/native-sat-compare.js
+    python3 -I tools/ggmcp.py ROM.pce vramdump OUT.bin [FRAMES]
+                                                        step FRAMES (default 60) and write the console's VRAM (64 KiB) then its
+                                                        colour table (1 KiB) to OUT.bin -- for tests/check-native-art.js
     python3 -I tools/ggmcp.py ROM.pce psgframes IMAGE.json [FRAMES]
                                                         step FRAMES video frames one at a time and print,
                                                         per toy frame (the trace build's counter), each PSG
@@ -106,6 +113,26 @@ if __name__ == "__main__":
             print(json.dumps({"ok": g.ram(tr["psg_trace_ok"], 1)[0], "count": count,
                               "events": [[f[i], r[i], v[i]] for i in range(count)],
                               "tail": all(f[i] == 0xEE and r[i] == 0xEE and v[i] == 0xEE for i in range(count, cap))}))
+        elif len(sys.argv) > 3 and sys.argv[2] == "vramdump":
+            g.tool("debug_step_frame", {"frames": int(sys.argv[4]) if len(sys.argv) > 4 else 60, "mode": "sync"})
+            areas = {a["name"]: a for a in json.loads(g.tool("list_memory_areas"))["areas"]}
+            def rd(name, size):
+                a = areas[name]; out = b""
+                while len(out) < size:
+                    n = min(4096, size - len(out))
+                    t = json.loads(g.tool("read_memory", {"area": a["id"], "offset": "%04X" % (len(out) // a["unit_size"]), "size": n}))
+                    out += bytes.fromhex(t["data"].replace(" ", ""))
+                return out
+            open(sys.argv[3], "wb").write(rd("VRAM", 65536) + rd("PALETTES", 1024))
+            print("wrote", sys.argv[3])
+        elif len(sys.argv) > 2 and sys.argv[2] == "satdump":
+            g.tool("debug_step_frame", {"frames": int(sys.argv[3]) if len(sys.argv) > 3 else 400, "mode": "sync"})
+            m = g.ram(0x2100, 16)
+            areas = {a["name"]: a for a in json.loads(g.tool("list_memory_areas"))["areas"]}
+            t = json.loads(g.tool("read_memory", {"area": areas["VRAM"]["id"], "offset": "7F00", "size": 512}))
+            b = bytes.fromhex(t["data"].replace(" ", ""))
+            print(json.dumps({"count": m[4] | (m[5] << 8), "flags": m[15],
+                              "sat": [b[i] | (b[i + 1] << 8) for i in range(0, 512, 2)]}))
         elif len(sys.argv) > 3 and sys.argv[2] == "psgframes":
             tr = json.load(open(sys.argv[3]))["psg_trace"]
             out = {}

@@ -31,10 +31,14 @@
  * frame EARLY, in the idle time of the previous display, and their writes
  * are recorded into a per-line table that a small hand-written IRQ handler
  * replays at each line.  Concretely, during display f the main loop runs
- * frame(f+1) (its register/colour/VRAM writes captured, not applied) and
+ * frame(f+1) (its register/colour writes captured, not applied) and
  * then raster(0..223) for f+1, overwriting table entry L only after line L
  * has been served; the VBlank after display f applies frame(f+1)'s base and
- * arms the chain.  The picture sequence is the browser's.
+ * arms the chain.  frame()'s VRAM writes apply directly as they run: the
+ * display is idle (nothing armed) while frame() executes, and one build
+ * frame writes more VRAM words (DUSK RUN's step 7: 208) than any capture
+ * list that fits in RAM, so there is no VRAM capture.  The picture
+ * sequence is the browser's.
  *
  * The TMA timer (huc6280.cpp TimerRead: timer_value, one decrement per 1024
  * CPU clocks) brackets frame() and each raster() call.  The sums (u32), the
@@ -57,7 +61,6 @@ extern void toy_raster(int32_t line) __attribute__((weak));
 #define RCR_BASE 0x40          /* RCR R06 = 0x40 + VDW line (#15) */
 #define RASTER_COLOURS 2       /* colour writes one line may carry */
 #define BASE_COLOURS 32        /* colour writes one frame() may carry */
-#define BASE_VRAM 32           /* VRAM writes one frame() may carry */
 
 #define MEAS ((volatile uint8_t *)0x2100)
 #define MEAS_SUM 0             /* u32 sum of per-frame tick deltas */
@@ -67,7 +70,7 @@ extern void toy_raster(int32_t line) __attribute__((weak));
 #define MEAS_RSUM 8            /* u32 sum of per-raster-call deltas */
 #define MEAS_RCOUNT 12         /* u16 raster calls measured */
 #define MEAS_RMAX 14           /* u8 largest per-call delta */
-#define MEAS_FLAGS 15          /* bit0/1: base colour/VRAM list overflow;
+#define MEAS_FLAGS 15          /* bit0: base colour list overflow;
                                 * bit2: a vset from a raster callback */
 #define MEAS_CSUM 16           /* u32 sum of whole-collection deltas */
 #define MEAS_CCOUNT 20         /* u16 collections measured */
@@ -119,11 +122,6 @@ volatile uint8_t toy_pend_pal_a_lo[BASE_COLOURS];
 volatile uint8_t toy_pend_pal_a_hi[BASE_COLOURS];
 volatile uint8_t toy_pend_pal_w_lo[BASE_COLOURS];
 volatile uint8_t toy_pend_pal_w_hi[BASE_COLOURS];
-volatile uint8_t toy_pend_nvram;
-volatile uint8_t toy_pend_vram_a_lo[BASE_VRAM];
-volatile uint8_t toy_pend_vram_a_hi[BASE_VRAM];
-volatile uint8_t toy_pend_vram_w_lo[BASE_VRAM];
-volatile uint8_t toy_pend_vram_w_hi[BASE_VRAM];
 #endif /* TOY_RASTER_BUILD */
 
 static void vdc_write(uint8_t reg, uint16_t value) {
@@ -344,19 +342,10 @@ void toy_vram_set(int32_t addr, int32_t word) {
     measure_flag(0x04);
     return;
   }
-  if (toy_host_mode == MODE_BASE) {
-    uint8_t n = toy_pend_nvram;
-    if (n < BASE_VRAM) {
-      toy_pend_vram_a_lo[n] = (uint8_t)a;
-      toy_pend_vram_a_hi[n] = (uint8_t)(a >> 8);
-      toy_pend_vram_w_lo[n] = (uint8_t)w;
-      toy_pend_vram_w_hi[n] = (uint8_t)(w >> 8);
-      toy_pend_nvram = (uint8_t)(n + 1);
-    } else {
-      measure_flag(0x01);
-    }
-    return;
-  }
+  /* MODE_BASE falls through: the display is idle while frame() runs
+   * (nothing armed), so its VRAM writes go straight to the VDC.  A capture
+   * list would cap the write volume, and a build frame's writes (DUSK RUN
+   * step 7: 208 words) would overflow any list that fits in RAM (#289). */
   /* Set MAWR, then select the VRAM data register (R02, VWR) before the word:
    * after a register write the VDC's select latch still holds that register,
    * so a data-port write without selecting R02 would land back in MAWR.
@@ -561,9 +550,10 @@ __asm__(
 "  rti\n"
 );
 
-/* Apply the next frame's base: the register, colour and VRAM writes that
+/* Apply the next frame's base: the register and colour writes that
  * frame() made while the previous frame was on screen.  Called in VBlank,
- * before the chain is armed. */
+ * before the chain is armed.  (frame()'s VRAM writes went straight to the
+ * VDC as they ran — see toy_vram_set.) */
 static void apply_base(void) {
   uint8_t i;
   if (toy_pend_op & 0x01) {
@@ -583,15 +573,8 @@ static void apply_base(void) {
     *IO_VCE_COLOR_DATA = (uint16_t)(((uint16_t)toy_pend_pal_w_hi[i] << 8) |
                                     toy_pend_pal_w_lo[i]);
   }
-  for (i = 0; i < toy_pend_nvram; i++) {
-    vdc_write(0x00, (uint16_t)(((uint16_t)toy_pend_vram_a_hi[i] << 8) |
-                               toy_pend_vram_a_lo[i]));
-    vdc_write(0x02, (uint16_t)(((uint16_t)toy_pend_vram_w_hi[i] << 8) |
-                               toy_pend_vram_w_lo[i]));
-  }
   toy_pend_op = 0;
   toy_pend_npal = 0;
-  toy_pend_nvram = 0;
 }
 
 /* Line 0's entry cannot come from the RCR chain: the VDC latches BYR for the
@@ -729,7 +712,6 @@ int main(void) {
 #endif
       toy_pend_op = 0;
       toy_pend_npal = 0;
-      toy_pend_nvram = 0;
       toy_host_mode = MODE_BASE;
       toy_measure_begin();
       toy_frame(f);

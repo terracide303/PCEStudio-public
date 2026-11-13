@@ -15,7 +15,7 @@ does.
 |---|---|---|---|
 | PLATFORMER | yes | **yes**, `ROM_KB=16` | its code is 8.5 KiB; the default ROM is 8 KiB |
 | TOWER | yes | **yes**, `ROM_KB=40`, with a silent `toy_sfx` | the native runtime has no sound engine yet, so this build is silent |
-| STARFALL | yes | **yes**, banked, with its art and the real sound engine (`tools/build-toyc-banked.sh toys/demo-game/main.lua name`: code in banks 1, 5, 6, art in bank 7) | the art loads at boot (`tools/native-assets.js`, `tools/toyc/toy_assets.c`: the studio importer's VRAM, colour and sprite words, 1,293 words in 22 runs) and is **exactly the browser's**: after 400 frames the console's VRAM outside the sprite list and all 512 colours equal the browser's, word for word. The picture is not diff 0 because the console's sprite list is missing the enemies and bullets (entries 8 to 16): in a raster build `frame()`'s VRAM writes went into a 32-word capture list and the rest were dropped. The compiled logic is right (`tools/host-c-compare.js`: 120 of 120 frames equal the browser's). The card #289 seat removed the capture list in its working copy; re-test when that lands |
+| STARFALL | yes | **yes**, banked, with its art and the real sound engine (`tools/build-toyc-banked.sh toys/demo-game/main.lua name`) | the console's sprite list equals the browser's, word for word (`tools/native-sat-compare.js`), the art loads exactly (`tests/check-native-art.js`: 0 of 32,768 VRAM words and 0 of 512 colours differ from the importer's picture) and the compiled logic matches (`tools/host-c-compare.js`). The picture is still not diff 0: 127 rows differ, all in the starfield area (rows 7 to 102), which is what a one-line raster timing offset would do to one-pixel stars; not yet shown to be the cause |
 | DUSK RUN | yes (since `unm`, `bnot`, `not`) | **yes**, `ROM_KB=48`, silent `toy_sfx` | builds since the table pool is sized to the toy's own cells (it was a fixed 768 B and overflowed RAM by 146 B); but it **stalls after the first frame** and the screen stays black: the runtime's raised flag says a frame() wrote more colours than its 32-entry list holds. Not measured |
 | NOVA TIDE | **no** | — | `raster(line, spec)`, the table form, is not lowered; it also needs its art |
 
@@ -92,6 +92,21 @@ avoids this by construction, and the engine must keep it that way:
 
 Not yet checked: the interpreter ROM's COPYV (it runs in `frame()`, which is the
 unarmed phase, so rule 1 covers it) against a trace.
+
+## Two bugs the console runtime and linker had (fixed 2026-11-13)
+
+- **A division next to a remainder corrupted the control register.** llvm-mos fuses `x / y` and
+  `x % y` into one library call that returns the remainder through a pointer to a zero-page
+  variable; that pointer is `$00xx` where the CPU's zero page is `$20xx`, so the store landed in the VDC
+  and clobbered CR. `pce-cgen.js` now computes `x - q*y` and calls the division alone (found by the
+  card #289 seat). The same family of bug: a `memset` through a pointer to a zero-page array
+  (found with Geargrafx's call stack, see the banked-split section above).
+- **`frame()`'s VRAM writes were dropped in raster builds.** They went into a 32-word capture list and
+  the rest were lost, which is why STARFALL had no enemies and DUSK RUN stalled. The display is idle
+  while `frame()` runs, so the writes now go straight to the VDC (also the #289 seat).
+- **The art blob was missing from the ROM** until `retain` was added (nothing referred to it by name,
+  so the linker dropped it), and the run table was a zero-page copy that was all zeros at run time.
+  `tests/check-native-art.js` found both.
 
 ## Is the compiler right? The host comparison
 

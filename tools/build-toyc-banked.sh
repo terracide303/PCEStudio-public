@@ -91,7 +91,15 @@ fi
 DEFS=""
 for b in $BANKS; do DEFS="$DEFS -Wl,--defsym=__rom_bank${b}_size=0x2000"; done
 link() { "$CC" -Os $EXTRA $DEFS -Itools/toyc -o "$G.pce" $SRCS; }
-link
+# the packer sizes functions from a non-LTO object, which can understate the linked size:
+# if a bank overflows, start again with more slack in each bank (1, 2, 3 and 4 KiB)
+if ! LINKLOG=$(link 2>&1); then
+  if echo "$LINKLOG" | grep -q "will not fit in region 'rom_bank" && [ "${BANK_SLACK:-1024}" -lt 4096 ]; then
+    NEXT=$(( ${BANK_SLACK:-1024} + 1024 )); echo "a bank overflowed; repacking with $NEXT bytes of slack" >&2
+    BANK_SLACK=$NEXT exec "$0" "$@"
+  fi
+  echo "$LINKLOG" >&2; exit 1
+fi
 if [ $SOUND -eq 1 ]; then
   measure() {   # prints "ZP_END HEAP_START" of the linked ELF
     python3 -I - "$LLVM_MOS" "$G.pce.elf" <<'PY'
