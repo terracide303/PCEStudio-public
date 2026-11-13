@@ -182,7 +182,7 @@ than stopping at the first hit. "Route 1" is `pce-ilbc.js` + `renderer/ilvm.bin`
 **246 of 1,919 instructions (12.8%)** are refused by at least one backend.
 Nine of the eleven kinds are refused by both; pad reads are a
 **route-1-only** gap (the C backend lowers `padref`/`padget` —
-`pce-cgen.js:686 and 695` — so the two backends disagree about what a toy can
+`pce-cgen.js:687 and 696` — so the two backends disagree about what a toy can
 do). (#174 and #176 carried the four table kinds on both backends, so as of
 2026-10-31 the count is **49 of 1,919 (2.6%)** over seven kinds. #185–#190
 then carried pads, `sat`, `not` and `sprite`, and #197 (2026-11-01) carried

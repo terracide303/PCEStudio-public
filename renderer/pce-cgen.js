@@ -533,7 +533,7 @@
   /* ---- validation: refuse outside part A, naming the construct --------- */
 
   function validate(program, a, huc, issues) {
-    var uses = { mod: false, idiv: false, shl: false, shr: false };
+    var uses = { mod: false, idiv: false, shl: false, shr: false, mul: false };
     var i, j;
     for (i = 0; i < a.functions.length; i++) {
       var fn = a.functions[i];
@@ -616,7 +616,8 @@
           else if (ins.op === "idiv") uses.idiv = true;
           else if (ins.op === "shl") uses.shl = true;
           else if (ins.op === "shr") uses.shr = true;
-          else if (["add", "sub", "mul", "band", "bor", "bxor"]
+          else if (ins.op === "mul") uses.mul = true;
+          else if (["add", "sub", "band", "bor", "bxor"]
                    .indexOf(ins.op) < 0) {
             refuse("cgen-op", where + ": arithmetic `" + ins.op + "`");
           }
@@ -1042,7 +1043,10 @@
           expr = "(" + T + ")((" + U + ")" + lhs + " - (" + U + ")" + rhs + ")";
           break;
         case "mul":
-          expr = "(" + T + ")((" + U + ")" + lhs + " * (" + U + ")" + rhs + ")";
+          /* the console's generic 32x32 multiply loops over all 32 bits (~2,000 cycles);
+           * il_lua_mul's cost follows the smaller operand's bit length */
+          expr = huc ? "(" + T + ")((" + U + ")" + lhs + " * (" + U + ")" + rhs + ")"
+                     : "il_lua_mul(" + lhs + ", " + rhs + ")";
           break;
         case "mod":
           /* x % 2^k is a mask (Lua's floor remainder is non-negative for a positive divisor, which is
@@ -1448,6 +1452,29 @@
       }
       line("  if (r != 0 && ((r < 0) != (y < 0))) q--;");
       line("  return q;");
+      line("}");
+      line("");
+    }
+    if (uses.mul && !huc) {
+      /* x*y modulo 2^32 (what the IL's wrapping int multiply is), by shift and add over the
+       * smaller operand's bits: DUSK RUN's pixel rules multiply small numbers by the thousand */
+      line("static " + T + " il_lua_mul(" + T + " a, " + T + " b) {");
+      line("  " + U + " x = a < 0 ? (" + U + ")0 - (" + U + ")a : (" + U + ")a;");
+      line("  " + U + " y = b < 0 ? (" + U + ")0 - (" + U + ")b : (" + U + ")b;");
+      line("  " + U + " r = 0;");
+      line("  uint16_t m;");
+      line("  uint8_t neg = (uint8_t)((a < 0) != (b < 0));");
+      line("  if (y > 0xFFFFu) {");
+      line("    if (x > 0xFFFFu) return (" + T + ")((" + U + ")a * (" + U + ")b);");
+      line("    r = x; x = y; y = r; r = 0;");
+      line("  }");
+      line("  m = (uint16_t)y;");
+      line("  while (m) {");
+      line("    if (m & 1) r += x;");
+      line("    x <<= 1;");
+      line("    m >>= 1;");
+      line("  }");
+      line("  return (" + T + ")(neg ? (" + U + ")0 - r : r);");
       line("}");
       line("");
     }
