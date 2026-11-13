@@ -41,9 +41,19 @@
  * interpreter does read v4 (boot maps MPR3 to the tables bank and MPR2 per
  * call); its boot and picture evidence is in docs/BANKED-DATA.md §5.7
  * (host-vs-browser parity and a Mednafen save-state diff), not in this file.
- * Rule 2 applies to these nine checks too: a different seat and model must
- * re-break them (and the check catch every break) before #285 — and with it
- * #279 — closes.
+ * RULE 2, SECOND PASS (2026-11-13, @test seat test-PCEStudio-1113-125629,
+ * deepseek-flash — a different session from the 2026-11-04 author): each of
+ * the nine breaks below was applied alone to renderer/pce-ilbc.js or
+ * renderer/pce-rom.js in a $TMPDIR copy of HEAD, and the unmodified suite
+ * caught all nine with its named v4 (k) FAIL (that break's own named-group
+ * counts 98/864/4/2/1/3/1/1/4; every run exit 1; breaks 1, 2 and 4 also move
+ * the v4 (3) sha pins, which is expected because they change container
+ * bytes).  The control is 1,237 checks / 0 failed with the pre-#280
+ * renderer/ilvm.bin; on HEAD's own blob its only reds are #282's three
+ * single-bank ROM pins, none of them a v4 line.  NOT PROVEN by that pass:
+ * the v4 (3) shas are captured from the encoder itself, so a byte already
+ * wrong when the pin was taken stays pinned — only (1), (2) and (4) read
+ * their bytes back independently; and no check here boots a v4 ROM (above).
  *
  * FOUND WHILE WRITING THEM (2026-11-04, @test): the banked encode path called
  * encodeFunction with codeOff 0 (renderer/pce-ilbc.js, the out.set loop), so
@@ -57,8 +67,8 @@
  * jump handling (tools/ilvm/ilvm.c: pc = rw(pc)) with its per-instruction
  * range check would fault on it.  Fixed by #286: the banked path passes
  * fnCodeOff[f] as codeOff, so target() and its edge guard are bank-relative;
- * TOWER's v4 (3) pin moved with the corrected operands.  #285's different-
- * seat re-break is still owed.
+ * TOWER's v4 (3) pin moved with the corrected operands.  The 2026-11-13
+ * re-break (above) caught every one of the nine; the check is not owed.
  */
 "use strict";
 
