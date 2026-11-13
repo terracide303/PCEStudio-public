@@ -573,7 +573,10 @@ Card #279 built §5.2 in `renderer/pce-ilbc.js` and `renderer/pce-rom.js`:
 - **The interpreter reads v4 since #280** (§5.7). Rule 2 for
   `tests/check-banked-data.js` ran 2026-11-13 (seat test-PCEStudio-1113-125559,
   deepseek-v4-pro — a different seat and model from the 2026-11-04 pass that
-  wrote the nine checks). The nine v4 (1)..(9) breaks were re-applied in new
+  wrote the nine checks; the same day, seat test-PCEStudio-1113-125629,
+  deepseek-flash, discharged the nine's owed re-break with its own pass, each
+  of the nine caught by its named FAIL — the two passes are independent). The
+  nine v4 (1)..(9) breaks were re-applied in new
   spellings (the entry's codeOff one off its payload, every jump target +1, the
   v4 fill byte 0xAA, the header's tabTabOff and bank count swapped, the fit
   threshold -1, the packing and tables edges `>=`, the encoder's toy-rom-full
