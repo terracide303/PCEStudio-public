@@ -75,8 +75,7 @@ def analyse(lines):
 def brief(a):
     work=1-a["spin_share"]
     return dict(cpu_cycles_per_frame=round(a["cycles"]/3), idle_spin=round(a["spin_share"],2),
-        irq_per_frame=sum(v for k,v in a["other"].items() if "IRQ" in k),  # WRONG beyond 4: other is truncated; count RTI instead
-        rti_per_frame=a["rti"],
+        interrupts_per_frame=a["rti"],   # one RTI per interrupt handled
         jsr=a["jsr"], tam_tma=sum(a["tam"].values())+a["tma"], tam_masks=a["tam"],
         block_xfers=a["block"], vdc_reg_selects=a["vdc_reg_selects"], vdc_data_by_reg=a["vdc_data_writes_by_reg"], vce_writes=a["vce_writes"], st1_st2=a["st1_st2"], banks_by_page=a["page_cycles"])
 if __name__=="__main__":
@@ -93,5 +92,5 @@ if __name__=="__main__":
     g.close()
     json.dump(rows,open(sys.argv[3],"w"))
     for b in rows:
-        print(name,"presses",b["after_run_presses"],"| cpu cycles/frame",b["cpu_cycles_per_frame"],"| idle",b["idle_spin"],"| irqs",b["irq_per_frame"],"| jsr",b["jsr"],"| tam/tma",b["tam_tma"],"| block",{k:v for k,v in b["block_xfers"].items() if v})
+        print(name,"presses",b["after_run_presses"],"| cpu cycles/frame",b["cpu_cycles_per_frame"],"| idle",b["idle_spin"],"| interrupts",b["interrupts_per_frame"],"| jsr",b["jsr"],"| tam/tma",b["tam_tma"],"| block",{k:v for k,v in b["block_xfers"].items() if v})
         print("    VDC register selects/frame",b["vdc_reg_selects"],"| data writes by reg",b["vdc_data_by_reg"],"| VCE writes",b["vce_writes"])
