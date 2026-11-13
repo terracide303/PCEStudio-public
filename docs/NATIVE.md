@@ -16,7 +16,7 @@ does.
 | PLATFORMER | yes | **yes**, `ROM_KB=16` | its code is 8.5 KiB; the default ROM is 8 KiB |
 | TOWER | yes | **yes**, `ROM_KB=40`, with a silent `toy_sfx` | the native runtime has no sound engine yet, so this build is silent |
 | STARFALL | yes | code links at `ROM_KB=24`, silent `toy_sfx` | no art: the native runtime has no way to load tiles or sprites, so it runs but draws nothing meaningful (not measured) |
-| DUSK RUN | yes (since `unm`, `bnot`, `not`) | **no** | code fits at 40 KiB, but the variables overflow the 8 KiB RAM by 146 bytes |
+| DUSK RUN | yes (since `unm`, `bnot`, `not`) | **yes**, `ROM_KB=48`, silent `toy_sfx` | builds since the table pool is sized to the toy's own cells (it was a fixed 768 B and overflowed RAM by 146 B); but it **stalls after the first frame** and the screen stays black: the runtime's raised flag says a frame() wrote more colours than its 32-entry list holds. Not measured |
 | NOVA TIDE | **no** | — | `raster(line, spec)`, the table form, is not lowered; it also needs its art |
 
 "IL → C" means `emitC` returns C text; only a llvm-mos build counts as
@@ -54,7 +54,7 @@ own cost per frame is not in these numbers.
 1. Lower `raster(line, spec)` (NOVA TIDE).
 2. Put the sound engine behind `toy_music`, `toy_sfx`, `toy_release` in the
    native runtime.
-3. DUSK RUN: get its variables under 8 KiB of RAM; then measure it.
+3. DUSK RUN: the runtime's per-frame list of 32 palette writes is too short for its frame(); fix the runtime, then measure it.
 4. Load art (tiles, sprites, palettes) in the native ROM, for STARFALL and NOVA TIDE.
 5. Decide whether the studio's Export button gets a native route (a browser-side
    HuC6280 backend) or stays on the interpreter.
