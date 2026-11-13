@@ -11,6 +11,30 @@ page index and must be checked before anyone relies on them. The cards that use 
   play. Vendored in `vendor/hutrack/` (see `vendor/hutrack/VENDORED.md`). Source: <https://github.com/Turboxray/HuTrack>.
 - **The interpreter-in-the-ROM idea**: the browser export's design is his; credited in the README and on the
   Credits page.
+- **`PCE_knowledge`** (<https://github.com/Turboxray/PCE_knowledge>, about 17 KB of notes written for AI agents,
+  **no licence stated**, so link-only: nothing is copied here; read 2026-11-13). Five files: hardware facts,
+  ROM-hacking methods, engine patterns of era developers, build and measurement notes, a CD placeholder. What it
+  gave us, in our words:
+  - The bank-mapping instruction takes a *bitmask* (`tam #$04` is MPR2), which is what our code and the engine glue
+    do. Boot has MPR7 on bank 0; a valid HuCard's reset vector is in the top page.
+  - Interrupt handlers in commercial games map the banks they need and restore them: do not assume pages 2 to 6
+    survive an interrupt. Our handlers are in the fixed page and touch no banked code, which is the safe shape.
+  - The VDC's address register and write pointer are global: an interrupt that writes the VDC in the middle of a
+    main-loop copy corrupts it. The two cures are masking interrupts around the copy or copying in chunks of at most
+    64 words and re-setting the address each chunk. A planning number for VRAM writes is about 30 CPU cycles per word.
+    Worth checking against our raster handler and the COPYV routine.
+  - BG tiles have no flip bits, sprites do: mirrored background art must exist as separate tiles. Raster split lines
+    land one line after the compare value.
+  - The 2.5 MB mapper (Street Fighter II) selects a 512 KB window by writing to $1FF0 to $1FF3 of bank 0.
+  - Engine patterns (a central table of asset slots whose records are bank, destination, source; a VRAM-to-VRAM copy
+    record; per-context lazy loading; animation frames decompressed on a schedule; fades pre-baked as palette
+    chains) are priors for the engine design card, to be verified against our own dumps.
+  - Method: verify a reimplemented format bit-exactly against live captures; build the whole variant matrix; use a
+    canary on code that must never run. Measurement ideas (frame-lag counter, cost per scanline) map onto
+    Geargrafx's trace and profiler tools (docs/GEARGRAFX-MCP.md).
+  - One figure to treat with care: it gives a scanline as about 113.75 CPU cycles at 7.16 MHz. A scanline is 455
+    cycles at 7.16 MHz (113.75 is the 1.79 MHz count), so a frame is about 119,000 cycles, which is what our
+    measurements use.
 - **`mesen_sprite_sheet.lua`**: a Lua script for Mesen 2 (PC Engine and SuperGrafx). It collects every distinct
   sprite that appears on screen into a sprite sheet PNG, in the colours it was displayed with, and writes a JSON
   file with one entry per line.
