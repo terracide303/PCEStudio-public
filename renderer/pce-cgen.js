@@ -851,7 +851,64 @@
      * (tools/bank-toyc.py); by default it is the call itself. */
     var SPLIT_OVER = (options && options.splitOver) || Infinity;   /* off unless asked: tools/build-toyc-banked.sh splits only what a bank cannot hold */
     var SPLIT_CHUNK = (options && options.splitChunk) || 100;
+    var NO_DIRECT = !!(options && options.noDirect);
     var SPLIT_ONLY = (options && options.splitOnly) || null;   /* test aid: fids */
+    /* Direct calls: a call whose callee is known when the program is compiled skips il_call (a
+     * closure lookup, a ~35-case switch and a bank map around every call: a third of TOWER's and
+     * STARFALL's time, measured with tools/pcprof.py).  Almost every call is `getupval` of a local
+     * function.  The closure a register holds at a point is the nearest earlier write to it in
+     * straight-line code; an upvalue is the value its parent's register held when the closure was
+     * created (this backend copies upvalues by value, and it refuses setupval, so nothing changes
+     * them later).  resolveReg()/resolveUp() follow that back to a `closure` instruction and return
+     * its static slot, or null, and the call stays an il_call. */
+    var jumpTargets = [];
+    a.functions.forEach(function (f, fi) {
+      var tg = {};
+      f.code.forEach(function (c) {
+        if ((c.t === "jmp" || c.t === "br" || c.t === "fornext") && c.target != null) tg[c.target] = true;
+      });
+      jumpTargets[fi] = tg;
+    });
+    var sitesOfFid = {};
+    Object.keys(a.closureAt).forEach(function (key) {
+      var parts = key.split(":"), sf = +parts[0], sp = +parts[1];
+      var tf = a.functions[sf].code[sp].fid;
+      (sitesOfFid[tf] = sitesOfFid[tf] || []).push({ fn: sf, pc: sp, cid: a.closureAt[key] });
+    });
+    function resolveReg(fi, pc, reg, depth) {
+      if (depth > 8 || reg == null) return null;
+      var code = a.functions[fi].code, tg = jumpTargets[fi];
+      for (var q = pc - 1; q >= 0; q--) {
+        var d = code[q];
+        if (d.dst === reg) {
+          if (d.t === "closure") return { fid: d.fid, cid: a.closureAt[fi + ":" + q] };
+          if (d.t === "move" && d.src && d.src.r != null) return resolveReg(fi, q, d.src.r, depth + 1);
+          if (d.t === "getupval") return resolveUp(fi, d.idx, depth + 1);
+          return null;
+        }
+        /* a write to the register we cannot see, or a join point: give up */
+        if (d.t === "forprep" || d.t === "fornext") return null;
+        if (tg[q]) return null;
+      }
+      return null;
+    }
+    function resolveUp(fi, u, depth) {
+      var desc = a.functions[fi].upvalues && a.functions[fi].upvalues[u];
+      var sites = sitesOfFid[fi];
+      if (!desc || !sites || sites.length !== 1 || depth > 8) return null;
+      if (desc.from === "reg") return resolveReg(sites[0].fn, sites[0].pc, desc.index, depth + 1);
+      if (desc.from === "upval") return resolveUp(sites[0].fn, desc.index, depth + 1);
+      return null;
+    }
+    function directCallee(fi, pc, ins) {
+      if (huc || NO_DIRECT) return null;
+      var c = ins.callee && ins.callee.r != null ? resolveReg(fi, pc, ins.callee.r, 0) : null;
+      if (!c) return null;
+      var target = a.functions[c.fid];
+      /* a function that is also the toy's hook or called with an unknown arity still takes the shared signature */
+      return target ? c : null;
+    }
+
     var chunkCtx = null;
 
     function jumpTo(target) {
@@ -1126,9 +1183,19 @@
             line("  il_xargs[" + xi + "] = " + argOf(ins, 4 + xi) + ";");
           }
         }
-        var call = "il_call(" + operand(ins.callee);
-        for (var ci = 0; ci < ARGS.length; ci++) call += ", " + argOf(ins, ci);
-        call += ")";
+        var call;
+        var dc = directCallee(fid, pc, ins);
+        if (dc) {
+          /* the caller's own symbol names its bank; a chunk has no single one (IL_BANK_NONE) */
+          var callerSym = chunkCtx ? "none" : "il_fn_" + fid;
+          call = "";
+          for (var ci2 = 0; ci2 < ARGS.length; ci2++) call += (ci2 ? ", " : "") + argOf(ins, ci2);
+          call = "IL_DIRECT(" + callerSym + ", " + dc.fid + ", " + dc.cid + ", " + call + ")";
+        } else {
+          call = "il_call(" + operand(ins.callee);
+          for (var ci = 0; ci < ARGS.length; ci++) call += ", " + argOf(ins, ci);
+          call += ")";
+        }
         line("  " + (d ? d + " = " : "(void)") + call + ";");
         break;
       }
@@ -1314,6 +1381,12 @@
     }
     line("");
     line("#define IL_NCLOSURES " + Math.max(1, a.closureCount));
+    if (!huc) {
+      /* a banked build (tools/bank-toyc.py) redefines this to map the callee's bank */
+      line("#ifndef IL_DIRECT");
+      line("#define IL_DIRECT(caller, callee, cid, ...) il_fn_##callee(&il_closures[cid], __VA_ARGS__)");
+      line("#endif");
+    }
     if (!huc && a.functions.some(function (f, fi) { return f.code.length > SPLIT_OVER && (!SPLIT_ONLY || SPLIT_ONLY.indexOf(fi) >= 0); })) {
       line("#ifndef IL_CHUNK_CALL");
       line("#define IL_CHUNK_CALL(sym, e) (e)");

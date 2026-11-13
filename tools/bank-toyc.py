@@ -50,13 +50,24 @@ def decl(m):
     return m.group(0).replace("__attribute__((noinline))","__attribute__((noinline, section(\".rom_bank%d\")))"%assign[k])
 text=re.sub(r"^static int(?:32|16)_t il_fn_(\d+(?:_c\d+)?)\((?:struct il_closure \*cl)[^;]*\) __attribute__\(\(noinline\)\);",decl,text,flags=re.M)
 # 2. il_call: every case maps its bank around the call
+nfn_all=max([int(x) for x in re.findall(r"^  case (\d+): return il_fn_\1\(",text,flags=re.M)]+[0])+1
 bank_table="\n".join("#define IL_BANK_il_fn_%s %d"%(k,b) for k,b in sorted(assign.items()))+"\n"
+bank_table+="".join("#define IL_BANK_il_fn_%d 0\n"%i for i in range(nfn_all) if str(i) not in assign)
+bank_table+="#define IL_BANK_none 255\n"
 helper='''
 /* bank prototype: switched code lives in .rom_bankN, mapped at page 6 ($C000). */
 static uint8_t il_bank = 0;
 static inline __attribute__((always_inline)) void il_map(uint8_t b) {
   __asm__ volatile("tam #$40" :: "a"(b) : "memory");
 }
+#undef IL_DIRECT
+/* A direct call (pce-cgen.js resolves the callee at compile time).  A callee in the fixed page
+ * (IL_BANK 0) or in the caller's own bank is called as it is.  Any other callee goes through il_call,
+ * which lives in the fixed page: a bank switch must not run from inside the banked code it swaps out
+ * (measured: direct cross-bank switches crashed TOWER), and a stub per callee costs the fixed page
+ * about 70 bytes each, which NOVA TIDE has not got.  A chunk caller (IL_BANK_none, 255) always
+ * takes il_call. */
+#define IL_DIRECT(caller, callee, cid, ...) ((IL_BANK_il_fn_##callee == 0 || IL_BANK_il_fn_##callee == IL_BANK_##caller) ? il_fn_##callee(&il_closures[cid], __VA_ARGS__) : il_call(cid, __VA_ARGS__))
 #undef IL_CHUNK_CALL
 #define IL_CHUNK_CALL(sym, e) ({ uint8_t o__ = il_bank; int16_t v__; il_bank = IL_BANK_##sym; il_map(IL_BANK_##sym); v__ = (e); il_bank = o__; il_map(o__); v__; })
 '''
