@@ -1,0 +1,52 @@
+{
+ "bytecode": {
+  "bytes": 405,
+  "code_bytes": 248,
+  "constants": 15,
+  "data_bank": 4,
+  "functions": 3,
+  "globals": 5,
+  "hooks": {
+   "frame": 1,
+   "init": 0,
+   "raster": 255
+  },
+  "sha256": "97f29190ae379485af3c0be908445ab794e7c8242ebd258fd5bbc85b6db09b3d"
+ },
+ "capture": {
+  "frames": 641,
+  "last_frame": "frame0640.png",
+  "measure": {
+   "collect_sum_ticks_7bit": 0,
+   "collections": 0,
+   "count": 927,
+   "cycles_per_collection": null,
+   "cycles_per_frame": 2244.625674217907,
+   "cycles_per_raster_call": null,
+   "flags": 0,
+   "max_ticks": 3,
+   "mean_ticks": 2.192017259978425,
+   "mean_update_lines": 6.009708737864078,
+   "min_ticks": 2,
+   "overruns": 0,
+   "raster_calls": 0,
+   "raster_max_ticks": 0,
+   "raster_sum_ticks": 0,
+   "sum_ticks": 2032,
+   "updates": 927,
+   "worst_update_lines": 7
+  },
+  "slend": 234,
+  "slstart": 3
+ },
+ "ilvm": {
+  "bytes": 32768,
+  "sha256": "b39d4266070eb4e4bae00ac312404e1e80f1c67c93a0705d632494491e9ddee4"
+ },
+ "name": "cave-style-ilvm",
+ "rom": "tools/gen/cave-style-ilvm.pce",
+ "rom_bytes": 40960,
+ "rom_sha256": "f5591cc42f33063f6cb5ed349abff7214539b4fd3239a0906281843cbb9187e7",
+ "source": "tests/cave-style/main.lua",
+ "source_sha256": "1c6aa1d4e4c4e507e4210d371b2faf6ee2bed2b5b026f63408e2dab2eb3a58fd"
+}
