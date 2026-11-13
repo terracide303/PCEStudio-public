@@ -43,17 +43,21 @@ with `rts` and never jumps out of itself**, and **a stated zero-page budget**.
 ### 2.1 ROM banks
 
 `LLVM_MOS=/Volumes/External/pce-tools/llvm-mos PCEAS4=pceas4
-tools/ilvm/build.sh` was run in this worktree on 2026-11-04. It printed:
+tools/ilvm/build.sh` was run in this worktree on 2026-11-13 (#282's re-pin).
+It printed:
 
 ```
-built renderer/ilvm.bin: 32768 bytes, sha256 d68a1b5f567d824b
+built renderer/ilvm.bin: 32768 bytes, sha256 b39d4266070eb4e4
 zero page   interpreter $2020-$2080 (96 B) | engine $2080-$20DE (94 B) | 34 B free
-BaseRAM     interpreter heap starts $373E | engine $373E-$3B95 (1111 B) | stack headroom 1131 B (margin 787)
+BaseRAM     interpreter heap starts $3742 | engine $3742-$3B9D (1115 B) | stack headroom 1123 B (margin 787)
 ```
 
 The sha matches the committed `renderer/ilvm.bin` and `tools/gen/ilvm.json`
-(`d68a1b5f567d824b…`), so the table is the shipped image, not a rebuild
-variant.  (#227 moved it from `46ccefb656d18ca9…`: the raster chain now
+(`b39d4266070eb4e4…`), so the table is the shipped image, not a rebuild
+variant.  #281 moved it from `d68a1b5f567d824b…`: #280 made the interpreter
+map a function's bank and #281 added COPYV with its shim; the engine `.bss`
+grew 1,111 → 1,115 B, so the interpreter heap and stack headroom moved with
+it.  (#227 moved it from `46ccefb656d18ca9…`: the raster chain now
 re-arms every VBlank and writes from a zero-page preload; the HuTrack banks
 at bytes 16,384–32,767 compare byte for byte with the old image.)
 
@@ -66,10 +70,13 @@ at bytes 16,384–32,767 compare byte for byte with the old image.)
 | **5 (this note)** | **`$6000–$7FFF` (MPR3)** | **the toy's assembly routines** | routine bytes | **8,192 − routine bytes** | new in this note; MPR3 is untouched by the interpreter (`tools/ilvm/ilvm.c:187` maps only MPR2; `:199–200` map MPR4/5) |
 
 The fixed 16 KiB image is full in the sense that matters to a new opcode.
-`build.sh:116` says the fixed bank **holds 16,339 B before `.early_start`**
-(link.ld pins that section at `$FFD3`), and `tools/gen/ilvm.json` says the
-code and read-only data are 16,208 + 96 = **16,304 B**. So there are **35 B**
-of slack, not zero — and section 6 shows what an opcode costs against it.
+`tools/gen/ilvm.json` (after #281) says the code and read-only data are
+16,238 + 98 = **16,336 B**, and this build's ELF (`tools/gen/ilvm.pce.elf`,
+`llvm-readelf -S`) places the four fixed sections with no gap between them:
+`.text` `$C000`–`$FF6E`, `.rodata` `$FF6E`–`$FFD0`, `.early_start`
+`$FFD0`–`$FFF6`, `.vector` `$FFF6`–`$10000`. So there is **no slack** left —
+#280/#281 spent what used to be 35 B — and section 6 shows what an opcode
+costs against it.
 
 A toy without assembly keeps the current five-bank ROM: **40,960 B**
 (`renderer/pce-rom.js:149` `ILVM_BYTES = 4 * BANK`, `:637` adds one data

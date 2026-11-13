@@ -25,9 +25,12 @@
  *
  * The MCP's export_pce stays the bytecode route (no C emitter, no assets).
  * The controls and the `kind: "toy"` pins run it, and a game the studio
- * refuses whose interpreter ROM is still measured (STARFALL, DUSK RUN) is
- * built by it and pinned as `bytecodeOnly` — the pin is that ROM's, and the
- * suite says so, never "exports".
+ * refuses whose interpreter ROM is still measured (STARFALL) is built by it
+ * and pinned as `bytecodeOnly` — the pin is that ROM's, and the suite says
+ * so, never "exports".  Since the 2026-11-13 cgen step (b8cefc2) lowered
+ * unm/bnot/not, DUSK RUN is no longer refused at the C emitter: the studio
+ * builds it now (it has no art files), so its pin moved to the studio's
+ * route — the same ROM bytes, still pinned.
  *
  * WHAT IS CHECKED
  *
@@ -157,15 +160,18 @@ function studioFiles(id) {
 
 /* The card's five games and the outcome docs/ROM_SPEED.md records
  * (re-routed by #284, 2026-11-04): the studio's Export button runs the
- * CONSOLE tab's three stages first, so NOVA TIDE and DUSK RUN are refused
- * by the C emitter (`unm` has no C form) before the bytecode encoder —
- * their studio refusal is `cgen-op`, not the bytecode route's refusal the
- * MCP's export_pce returns.  STARFALL reaches the encoder and is refused
- * `toy-data-bank-full`: its bytecode is 6,285 B and its asset tail (the
- * three art files) 68,702 B against one 8 KiB data bank — the maintainer's
- * 2026-11-04 screenshot.  The three games with no art files: TOWER and
- * PLATFORMER build, DUSK RUN is refused by the C emitter before any asset
- * is involved.
+ * CONSOLE tab's three stages first, so NOVA TIDE is refused by the C
+ * emitter (its `raster(0, { bxr = 0 })` call — the spec-table form has no
+ * C form, while the hook form raster(line) is supported) before the
+ * bytecode encoder — its studio refusal is `cgen-op`, not the bytecode
+ * route's refusal the MCP's export_pce returns.  STARFALL reaches the
+ * encoder and is refused `toy-data-bank-full`: its bytecode is 6,285 B
+ * and its asset tail (the three art files) 68,702 B against one 8 KiB
+ * data bank — the maintainer's 2026-11-04 screenshot.  Since the
+ * 2026-11-13 cgen step (b8cefc2) lowered `unm`/`bnot`/`not`, DUSK RUN's
+ * old `unm` refusal is gone: the studio builds it (see GAME_PINS).  The
+ * three games with no art files: TOWER and PLATFORMER built from the
+ * start, DUSK RUN joins them.
  * `expect.message` is the dialog's exact text, asserted whole, so a
  * refusal that loses or rewords its detail fails.  `where` is the source
  * line the table names, re-derived from the IL; null is what the refusal
@@ -176,23 +182,14 @@ const GAMES = [
   {
     name: "NOVA TIDE", toy: "toys/nova-tide/main.lua", galleryId: "nova-tide",
     expect: { code: "cgen-op",
-              message: "function fn@28, IL line 29, instruction `unm`: " +
+              message: "function fn@513, IL line 530, instruction `raster`: " +
                 "not lowered by this backend (init/frame/raster and the " +
                 "reg/pal/vset/sat/sprite/pad/table instructions, the " +
                 "timer and the sound surface only; no fixed point or print)" },
-    where: "main.lua:29",
+    where: "main.lua:530",
     bytecode: { code: "ilbc-op",
                 message: "instruction raster (function 34, pc 53) has no bytecode form" },
     bytecodeWhere: "main.lua:530"
-  },
-  {
-    name: "DUSK RUN", toy: "toys/dusk-run/main.lua", galleryId: "dusk-run",
-    expect: { code: "cgen-op",
-              message: "function fn@59, IL line 62, instruction `unm`: " +
-                "not lowered by this backend (init/frame/raster and the " +
-                "reg/pal/vset/sat/sprite/pad/table instructions, the " +
-                "timer and the sound surface only; no fixed point or print)" },
-    where: "main.lua:62"
   },
   {
     name: "STARFALL", toy: "toys/demo-game/main.lua", galleryId: "starfall",
@@ -209,10 +206,12 @@ const GAMES = [
  * see PLATFORMER's comment), added with its row in docs/ROM_SPEED.md.
  * TOWER and PLATFORMER build on the studio's route (no art files, the C
  * emitter accepts them) — their ROM is the same bytes the bytecode route
- * built before #284.  STARFALL and DUSK RUN are refused by the studio's
- * Export (GAMES above) but still build on the bytecode route, so they are
- * pinned `bytecodeOnly`: the pin's ROM and picture are that route's, and
- * the suite's verdict for them is the studio's refusal. */
+ * built before #284; DUSK RUN joined them on 2026-11-13, when the cgen
+ * step (b8cefc2) lowered unm/bnot/not and its `unm` refusal moved off.
+ * STARFALL is refused by the studio's Export (GAMES above) but still
+ * builds on the bytecode route, so it is pinned `bytecodeOnly`: the pin's
+ * ROM and picture are that route's, and the suite's verdict for it is the
+ * studio's refusal. */
 const GAME_PINS = {
   /* STARFALL's bytecode-route ROM (the studio refuses the export — see
    * GAMES): the art block computes its VRAM addresses instead of listing
@@ -224,27 +223,30 @@ const GAME_PINS = {
    * is re-armed on every display frame (so the tail is a real frame, not
    * the collection's static screen) and each line's entry is preloaded and
    * written inside the blank (so row 16's first pixels are this line's
-   * colour).  The capture's closest browser frame is now 48 bytes off, all
-   * in the status bar's first tile row — two one-pixel columns at the
-   * screen edges (x=1 and x=249, rows 0-7).  Before #227 the same capture
-   * showed the armed replay 16 bytes off on row 24 (the split line's
-   * palette write) and 372-632 bytes on the moving picture rows (measured
-   * 2026-11-03); why the two edge columns differ is not proven.  So this
-   * pin stays the DUSK RUN shape: the ROM sha, the counters, and the
-   * screen asserted not black and not yet a browser frame.  The measured
+   * colour).  On the #280/#281 image (re-measured 2026-11-13) the capture's
+   * closest browser frame is 24 bytes off — one one-pixel column, rows 0-7
+   * of the status bar's first tile row; the pre-#280 image measured 48
+   * bytes (two columns, x=1 and x=249) at a different sampled game frame,
+   * so the step is not attributable to the image.  Before #227 the same
+   * capture showed the armed replay 16 bytes off on row 24 (the split
+   * line's palette write) and 372-632 bytes on the moving picture rows
+   * (measured 2026-11-03); why the remaining column differs is not
+   * proven.  So this pin stays the DUSK RUN shape: the ROM sha, the
+   * counters, and the screen asserted not black and not yet a browser
+   * frame.  The measured
    * run needs its own window: 600 frames of counters and a 12 s capture,
    * the latter long enough that the movie holds the running game, not the
    * boot. */
   "STARFALL": {
     toy: "toys/demo-game/main.lua",
     bytecodeOnly: true,
-    rom: "a9f5140e1143f47a5c0ced8aafe6429f90ac137c5bd28efd8d6d6cdd40757471",
+    rom: "5984b3246858d28677bcee5b542079a9202d7e23fdc6a19da870af7025f38eb8",
     frames: [],
     unmatched: "the bytecode-route ROM runs and draws; no captured frame " +
-               "is the browser's picture yet — the closest is 48 bytes " +
-               "off, in the status bar's first tile row (two one-pixel " +
-               "edge columns); #227's replay and row-16 lag are fixed, " +
-               "the cause of these columns is not proven",
+               "is the browser's picture yet — the closest is 24 bytes " +
+               "off, in the status bar's first tile row (one one-pixel " +
+               "edge column); #227's replay and row-16 lag are fixed, " +
+               "the cause of that column is not proven",
     measureFrames: 600,
     captureMs: 12000,
     captureTail: true,
@@ -267,7 +269,7 @@ const GAME_PINS = {
   "TOWER": {
     toy: "toys/tower/main.lua",
     galleryId: "tower",
-    rom: "048948fe18f9d43254520cf7738bc6c1fc792437cc0ad401bfb58ff0493d2428",
+    rom: "1b1d151ae2fbdd35b771dfc4ebc21410ea53740adcec6f859aca6014d45175a9",
     framesAny: true,
     measureFrames: 1800,
     captureMs: 40000,
@@ -286,34 +288,40 @@ const GAME_PINS = {
    * worst 448).  The picture is the game's static no-input scene (the
    * hero stands on the grass), so the pin holds that one hash. */
   /* Every ROM embeds the committed renderer/ilvm.bin, so these shas move
-   * with any interpreter change (#187's opcode moved all three). */
+   * with any interpreter change (#187's opcode moved all three; #280/#281's
+   * banked container + COPYV moved every pin here — #282's re-pin, proven
+   * first by an old/new Mednafen diff, docs/BANKED-DATA.md §5.9). */
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
     galleryId: "platformer",
-    rom: "c067d74ac688c1ac8aa27577ad6d7e70caa67a3541ee63629f355ec1d574c15c",
+    rom: "ccc5f20a1405816a16f80612479a8653c2e567b0bfacaf687c635d3060b7c156",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
   },
-  /* DUSK RUN's bytecode-route ROM (the studio refuses the export — see
-   * GAMES): the container loads and runs: MAX_REGS 41 carries the frame
-   * hook's 41 registers, MAX_FUNCS 41 its 41 functions, and the upvalue
-   * pool carries function 39's 19 upvalues.  #227 made the displayed
-   * picture the browser's: the RCR chain is re-armed on every display
-   * frame (before, only one frame per ~37 — DUSK's build step — replayed
-   * the table and a capture's tail was the static screen), and the line
-   * entry is written from a zero-page preload inside the blank (before,
-   * its last store was ~28 CPU cycles late and the first 16 pixels of row
-   * 16 kept the old colour).  The pin is the ROM sha plus the
-   * browser-frame hashes: DUSK's first toy frames are one static early
-   * picture, so browser frames 1-6 share hash 3584516448 and frame 0 is
-   * 2819597916; both are pinned.  It needs its own capture window: the
-   * boot that draws the base takes ~7 s on the dummy SDL driver, so the
-   * measure runs 600 frames and the capture 12 s. */
+  /* DUSK RUN builds on the studio's route since the 2026-11-13 cgen step
+   * (b8cefc2) lowered unm/bnot/not: the studio used to refuse it at its
+   * first `unm` before the encoder, and now the C emitter accepts the toy.
+   * It has no art files, so the asset tail is empty and the ROM is the
+   * bytecode route's bytes — the same sha this pin held when the studio
+   * still refused the export.  The container loads and runs: MAX_REGS 41
+   * carries the frame hook's 41 registers, MAX_FUNCS 41 its 41 functions,
+   * and the upvalue pool carries function 39's 19 upvalues.  #227 made the
+   * displayed picture the browser's: the RCR chain is re-armed on every
+   * display frame (before, only one frame per ~37 — DUSK's build step —
+   * replayed the table and a capture's tail was the static screen), and
+   * the line entry is written from a zero-page preload inside the blank
+   * (before, its last store was ~28 CPU cycles late and the first 16
+   * pixels of row 16 kept the old colour).  The pin is the ROM sha plus
+   * the browser-frame hashes: DUSK's first toy frames are one static
+   * early picture, so browser frames 1-6 share hash 3584516448 and frame
+   * 0 is 2819597916; both are pinned.  It needs its own capture window:
+   * the boot that draws the base takes ~7 s on the dummy SDL driver, so
+   * the measure runs 600 frames and the capture 12 s. */
   "DUSK RUN": {
     toy: "toys/dusk-run/main.lua",
-    bytecodeOnly: true,
-    rom: "cabf674e632725d6e39b24fde6da34a436b61fd113cf4a665bcbb4dbdfff860a",
+    galleryId: "dusk-run",
+    rom: "2a569de95c3a1bfb07326f16c6eeb842f97b5806f46985dd9f79896698c0523a",
     frames: [2819597916, 3584516448],
     measureFrames: 600,
     captureMs: 12000,
@@ -330,7 +338,7 @@ const GAME_PINS = {
   "SPRITE": {
     kind: "toy",
     toy: "tools/toys/sprite.lua",
-    rom: "4f212ee9128f76d548ae92c4b9ea20c095e91282fde885317edeeda1cfdceb78",
+    rom: "8904eabd3c067460406e465c29521ddec127434df16037673177970542722b1e",
     frames: [1994475180]
   }
 };
@@ -341,7 +349,7 @@ const GAME_PINS = {
  * they were written for; the card's games run the studio's route above. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "b12ec9c961006cff5de33c81d6e66dbe6dc123673a5fc6fb2b063b75764d13b6",
+  rom: "f605155a3c66bbb12128072291a22f5d10dbb5b256acd5e351b4abdd0c073ac4",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -354,7 +362,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "ea4f014915bb597556e67f171a332e254e703c8127409b6439da4c91718e9077",
+  rom: "9c94805b4b017dc789e686282143cd887bd900d8bc92aee1459331695d98754a",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -373,7 +381,7 @@ const WIDE = {
  * the controls'.) */
 const NOT = {
   toy: "tools/toys/not.lua",
-  rom: "fe9672f4ee2b93a7bb8c9cbc52ec0e92bd9b3b6ddb774822d11fd15d2a3a23ab",
+  rom: "385636cbd6c796f177e421c5e83ea882774f34754390368339725ed434adb509",
   frames: [2266090996, 2632876444, 887268600, 1464026320]
 };
 

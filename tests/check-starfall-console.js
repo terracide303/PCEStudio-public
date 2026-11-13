@@ -25,7 +25,7 @@
  *      STARFALL has none: 0 of 1,428 instructions are refused by either
  *      backend.  The instrument is not blind — the same analysis on NOVA
  *      TIDE still reports the `raster` kind (5 instruction sites on each
- *      backend) and the C route's one `unm`, so a refusal reintroduced into
+ *      backend), so a refusal reintroduced into
  *      STARFALL would appear here.
  *   4. NO cgen OPERAND REFUSAL.  #176 widened cgen's global-type allow-list
  *      to fn/vram/int/bool/padset/table, and #273 removed the `abs`/`sr`
@@ -236,17 +236,17 @@ function checkInventory() {
   eq("refused rows", inv.rows, []);
   eq("refused percentage", 100 * inv.refusedCount / inv.total, 0);
 
-  /* The instrument is not blind: NOVA TIDE's first raster and the C route's
-   * one unary minus are still refusals, and the analysis still names them. */
+  /* The instrument is not blind: NOVA TIDE's five raster call sites are
+   * still refusals on both backends, and the analysis still names them
+   * (its unary minus site is gone — the 2026-11-13 cgen step lowered it). */
   const no = tool.analyse(REFUSER).inventory;
-  eq("NOVA TIDE: refused instructions", no.refusedCount, 6);
+  eq("NOVA TIDE: refused instructions", no.refusedCount, 5);
   eq("NOVA TIDE: the refused rows",
      no.rows.map(function (x) {
        return [x.kind, x.backend, x.n, x.lines];
      }),
      [["raster", "route 1 (ilbc)", 5, [530, 531, 532, 533, 534]],
-      ["raster", "C backend (cgen)", 5, [530, 531, 532, 533, 534]],
-      ["unm", "C backend (cgen)", 1, [29]]]);
+      ["raster", "C backend (cgen)", 5, [530, 531, 532, 533, 534]]]);
 }
 
 /* ---- 4. refusals that name an operand ---------------------------------- */
@@ -341,10 +341,10 @@ const CITATIONS = [
   ["renderer/studio-panel-console.js", 145, "emitC"],
   ["renderer/studio-panel-console.js", 148, "severity: \"error\""],
   ["renderer/pce-cgen.js", 536, "fn|vram|int|bool|padset|table"],
-  ["renderer/pce-cgen.js", 607, "case \"padget\""],
-  ["renderer/pce-cgen.js", 616, "case \"padref\""],
-  ["renderer/pce-cgen.js", 636, "builtin `"],
-  ["renderer/pce-cgen.js", 697, "refuse(\"cgen-op\""],
+  ["renderer/pce-cgen.js", 615, "case \"padget\""],
+  ["renderer/pce-cgen.js", 624, "case \"padref\""],
+  ["renderer/pce-cgen.js", 644, "builtin `"],
+  ["renderer/pce-cgen.js", 705, "refuse(\"cgen-op\""],
   ["renderer/pce-ilbc.js", 229, "var OPS = {"],
   ["renderer/pce-ilbc.js", 249, "var BUILTIN = {"],
   ["renderer/pce-ilbc.js", 366, "refuse(\"ilbc-op\""],
