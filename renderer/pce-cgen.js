@@ -961,6 +961,7 @@
           if (d.t === "closure") return { fid: d.fid, cid: a.closureAt[fi + ":" + q] };
           if (d.t === "move" && d.src && d.src.r != null) return resolveReg(fi, q, d.src.r, depth + 1);
           if (d.t === "getupval") return resolveUp(fi, d.idx, depth + 1);
+          if (d.t === "getglobal") return resolveGlobal(d.name, depth + 1);
           return null;
         }
         /* a write to the register we cannot see, or a join point: give up */
@@ -968,6 +969,22 @@
         if (tg[q]) return null;
       }
       return null;
+    }
+    /* A global function (`function put() ... end`) is assigned once in the main chunk.  If exactly one
+     * setglobal in the whole program writes the name, and the register it stores holds a closure at that
+     * point, the global is that closure for any call that runs after the main chunk has set it up. */
+    var globalSets = {};
+    a.functions.forEach(function (f, fi) {
+      f.code.forEach(function (c, pc) {
+        if (c.t === "setglobal") (globalSets[c.name] = globalSets[c.name] || []).push({ fn: fi, pc: pc, src: c.src });
+      });
+    });
+    function resolveGlobal(name, depth) {
+      var sets = globalSets[name];
+      if (!sets || sets.length !== 1 || depth > 8) return null;
+      var st = sets[0];
+      if (!st.src || st.src.r == null) return null;
+      return resolveReg(st.fn, st.pc, st.src.r, depth + 1);
     }
     function resolveUp(fi, u, depth) {
       var desc = a.functions[fi].upvalues && a.functions[fi].upvalues[u];
