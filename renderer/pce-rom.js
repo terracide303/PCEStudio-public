@@ -602,9 +602,11 @@
    * the page the same way viewer-bank0.bin is); `toy.bytecode` is the
    * container renderer/pce-ilbc.js encodes from the IL.  A version 1-3
    * toy is the interpreter image, its two HuTrack engine banks, then one
-   * data bank (physical bank 4) holding the bytecode and, after it, any
-   * assets the caller ships for a future loader.  A version 4 toy (#279) is
-   * the same image then a tables bank and N code banks, appended whole.
+   * data bank (physical bank 4) holding the bytecode, then whole banks of
+   * assets (#288: the art blob, docs/BANKED-DATA.md §5.10).  A version 4
+   * toy (#279) is the same image then a tables bank and N code banks,
+   * appended whole.  The assets always start on the bank after the
+   * container, whatever the version.
    *
    * The output is a pure function of its inputs, so the Node test and the
    * studio page produce the same bytes. */
@@ -635,21 +637,31 @@
     if (version === 4) {
       return buildBankedToyRom(bank0, bytecode, assets);
     }
-    var dataLen = bytecode.length + (assets ? assets.length : 0);
     /* Finding F1 (docs/ASM.md §9): the usable data is 8,160 B, not 8,192 —
-     * the song trailer owns the bank's last 32 bytes (SONG_TABLE_OFF). */
-    if (dataLen > SONG_TABLE_OFF) {
+     * the song trailer owns the bank's last 32 bytes (SONG_TABLE_OFF).
+     * Since #288 the assets do not share the bytecode's bank: the asset
+     * tail (the art blob, docs/BANKED-DATA.md §5.10) occupies whole banks
+     * after the container, the v4 rule (#279) for every version, so the
+     * copyv bank math is one rule and a toy's art no longer needs the
+     * bytecode to shrink (the maintainer's 2026-11-04 toy-data-bank-full). */
+    if (bytecode.length > SONG_TABLE_OFF) {
       refuse("toy-data-bank-full", "the bytecode (" + bytecode.length +
-             " B) and assets (" + (assets ? assets.length : 0) + " B) need " +
-             dataLen + " bytes; a data bank holds 8,160 usable (its last 32 " +
+             " B) does not fit a data bank: 8,160 usable (its last 32 " +
              "bytes are the song trailer)");
     }
+    var assetBanks = assets ? Math.ceil(assets.length / BANK) : 0;
+    var dataBanks = 1 + assetBanks;
+    if (ILVM_BYTES / BANK + dataBanks > MAX_ROM_BANKS) {
+      refuse("toy-rom-full", "the bytecode and its assets need " + dataBanks +
+             " data banks; the 32 KiB image uses " + (ILVM_BYTES / BANK) +
+             " of a HuCard's " + MAX_ROM_BANKS);
+    }
 
-    var rom = new Uint8Array(ILVM_BYTES + BANK);
+    var rom = new Uint8Array(ILVM_BYTES + dataBanks * BANK);
     rom.fill(0xFF);
     rom.set(bank0, 0);
     rom.set(bytecode, ILVM_BYTES);
-    if (assets) rom.set(assets, ILVM_BYTES + bytecode.length);
+    if (assets) rom.set(assets, ILVM_BYTES + BANK);
     /* The song trailer the interpreter's first sound op reads (card #215;
      * docs/ROM-SOUND.md §6): at the data bank's last 32 bytes, the song
      * count then up to 8 (offset, bank) entries.  No songs ship yet (#199

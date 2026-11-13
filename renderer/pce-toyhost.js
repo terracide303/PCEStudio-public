@@ -381,6 +381,73 @@
     };
   }
 
+  /* #288: the toy's art files as a banked-data plan (docs/BANKED-DATA.md
+   * §5.10): one blob whose bytes the bytecode encoder streams into VRAM
+   * with copyv prologue instructions before the toy runs — the ROM-side
+   * twin of applyAssets.  The blob is the picture's CRAM, BAT, SAT and
+   * tile/pattern words, in that order:
+   *   - CRAM first, carried, not loaded: no first-half op can write CRAM
+   *     from banked data yet, and every gallery toy's own code writes the
+   *     same CRAM (the #288 measurement: host diff 0), so the ROM shows
+   *     the art regardless;
+   *   - BAT and SAT at fixed offsets (1,024 and 3,072), so every plan's
+   *     copies start below copyv's 13-bit `off` ceiling (8,191);
+   *   - the tile/pattern span last, where a long span streams across bank
+   *     boundaries (copyv remaps at each 8,192-byte boundary, so one copy
+   *     covers any span).
+   * MWR is not carried: the IL's reg op has no MWR name and the
+   * interpreter's boot default is the picture's (0).  null when the toy
+   * has no art (or the picture models are missing). */
+  function artPlan(files) {
+    var w = null;
+    try {
+      w = readAssets(files);
+    } catch (e) {
+      /* The files are not a picture the importer accepts (a half-typed
+       * tiles.json, say): no plan — the studio exports them the old way,
+       * as a carried-not-loaded tail, exactly as before the art banks.
+       * The browser's import fails on the same files, so the toy draws
+       * without them there too. */
+      return null;
+    }
+    if (!w) return null;
+    var editor = editorModule();
+    var satByte = editor.SAT_ADDR * 2;
+    var vram = w.vram;
+    var lo = null, hi = null;
+    for (var i = 2048; i < satByte; i += 2) {
+      if (vram[i] || vram[i + 1]) {
+        if (lo == null) lo = i;
+        hi = i + 2;
+      }
+    }
+    var spanBytes = lo == null ? 0 : hi - lo;
+    var batOff = w.cram.length;        /* 1,024 */
+    var satOff = batOff + 2048;        /* 3,072 */
+    var spanOff = satOff + 512;        /* 3,584 */
+    var blob = new Uint8Array(spanOff + spanBytes);
+    blob.set(w.cram, 0);
+    blob.set(vram.subarray(0, 2048), batOff);
+    blob.set(w.sat, satOff);
+    if (lo != null) blob.set(vram.subarray(lo, hi), spanOff);
+    var copies = [
+      { vram: 0, blobOff: batOff, words: 1024 },
+      { vram: editor.SAT_ADDR, blobOff: satOff, words: IMPORT_SAT_WORDS }
+    ];
+    if (lo != null) {
+      copies.push({ vram: lo / 2, blobOff: spanOff, words: spanBytes / 2 });
+    }
+    return {
+      blob: blob,
+      copies: copies,
+      regs: { BXR: w.regs.BXR, BYR: w.regs.BYR, CR: w.regs.CR },
+      stats: { blobBytes: blob.length, cramBytes: w.cram.length,
+               batWords: 1024, satWords: IMPORT_SAT_WORDS,
+               spanBytes: spanBytes, spanWords: spanBytes / 2,
+               tiles: w.tiles, patterns: w.patterns, sprites: w.sprites }
+    };
+  }
+
   /* Copy one readAssets() into a host's live state, before the toy runs.
    * Returns a summary (the host keeps it as host.assets). */
   function applyAssets(host, files) {
@@ -1047,7 +1114,8 @@
       fileTexts: assetTexts,
       hasArt: hasArt,
       read: readAssets,
-      apply: applyAssets
+      apply: applyAssets,
+      plan: artPlan
     },
     ToyError: ToyError,
     WIDTH: WIDTH,

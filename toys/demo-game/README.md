@@ -86,21 +86,35 @@ The bytecode is **6,285 B of the 8,160 B data bank** (77.0%), with **111 of
 37 distinct sprite plane words and the 17 packed star words are the art.)
 Every other interpreter capacity is comfortable: 17 functions, 21 registers,
 10 upvalues, 35 boot upvalue cells, 24 globals, 16 boot closures, 8 table
-slots, 63 table cells, 4 arguments; `rom_check` has no finding.  The export
-is a 40,960 B ROM, sha256 `5984b3246858d286…`.
+slots, 63 table cells, 4 arguments; `rom_check` has no finding.
+
+**#288: the studio's Export now carries the art** (2026-11-13).  The toy's
+three art files go through the importer's picture path into one **5,520 B
+blob** — CRAM, BAT, SAT, then the tile/pattern span (5 tiles, 14 patterns,
+17 sprites) — placed on a whole bank after the container, and the encoder
+prepends a **33 B prologue** of copyv/reg ops that loads BAT, SAT and the
+span before the toy's first instruction (the CRAM bytes are carried, not
+loaded: the toy writes the same CRAM itself).  The container grows to
+6,318 B with 113 of 127 constants.  The studio's export is a **49,152 B
+ROM**, sha256 `2d9290d7f620cfea6c1f72ea542198225faecc59197317d34587adea1aa9fb13`;
+the bytecode route (the MCP's `export_pce`, no assets) still builds the
+40,960 B ROM, sha256 `5984b3246858d286…`, pinned as `bytecodeOnly`.  The
+design is [`docs/BANKED-DATA.md`](BANKED-DATA.md) §5.10.
 
 **The console picture is close but not the browser's yet.**  The ROM runs and
-draws.  #227 fixed the raster backend's one-replay-frame-per-toy-frame latency
-(the line chain is re-armed on every display frame, so a capture's tail is a
-real frame of the last complete toy frame) and the row-16 colour lag (each
-line's entry is written from a zero-page preload inside the blank).  The
-closest browser frame is now **24 bytes off** on the #280/#281 image (48 on
-the image before it, at a different sampled game frame), in the status
-bar's first tile row — one one-pixel column.  Before #227 the same
-capture showed the armed replay 16 bytes off on row 24 (the split line's
-palette write) and 372-632 bytes on the moving picture rows, measured over a
-710-frame 12 s movie on 2026-11-03.  Why that edge column differs is
-not proven.
+draws the game, and the host proof is exact — the art ROM's data half booted
+for two frames is word-for-word the browser's VRAM and CRAM — but the
+Mednafen capture has no frame diff 0 against the browser's, and the
+remaining difference is now named and measured in
+[`docs/BANKED-DATA.md`](BANKED-DATA.md) §5.10, in three classes: the
+**one-pixel column** (24 bytes, rows 0-7 of the bar's first tile row, at
+the closest browser frame — the pre-#288 gap; the prologue neither removed
+nor changed the class), the **moving-picture rows** (the suite's 12 s capture lands
+at browser frame 23, 419 bytes; the 372-632-byte class of the pre-#227
+measurement), and the **split line's line-24 release dropped on some
+display frames** — the field displays at the bar's scroll and backdrop,
+~50,000 bytes — measured on the bytecode-route ROM too, so it is the
+display machinery's, not the art path's.
 `tests/check-export-games.js` pins the ROM sha and asserts the screen is not
 black and not yet a browser frame, so the pin cannot claim a picture the ROM
 does not have.  The browser game is unchanged.
@@ -160,17 +174,19 @@ The rework's own evidence, beyond that suite:
 - **Same ROM cost.**  `rom_check` answers `ok:true` with no finding; the
   budget numbers above are it.  `tests/check-rom-budget.js` pins every row
   and `tests/check-tables.js` the table inventory (8 sites, 63 cells).
-- **It exports.**  `tests/check-export-games.js` builds the 40,960 B ROM
-  (sha256 `5984b3246858d286…`), measures it in Mednafen (25 updates in 600
-  frames, too slow — the interpreter) and pins the picture as **not black
-  and not yet the browser's**, with the reason.
+- **It exports.**  `tests/check-export-games.js` builds the **49,152 B
+  studio ROM** (sha256 `2d9290d7f620cfea6c1f72ea542198225faecc59197317d34587adea1aa9fb13`, art
+  included) and the bytecode-route ROM, measures the art ROM in Mednafen
+  (24 updates in 600 frames, too slow — the interpreter), and pins the
+  picture as **not black and not yet the browser's**, with the reason.
 
 ## What is not proven
 
-- **The console picture is not the browser's yet** — the raster backend's
-  one-armed-display-frame latency (#227).  The ROM draws the game; a capture
-  tail is usually the compute window's stale screen, and the rare armed frame
-  is one toy frame out of step.  This is the same open card as DUSK RUN's.
+- **The console picture is not the browser's yet** — the three named
+  differences in `docs/BANKED-DATA.md` §5.10 (the bar column, the moving
+  rows, the split line's dropped line-24 release).  The ROM draws the
+  game; the host proof is diff 0 and the capture is measured, not
+  matched.  This is the same open card as DUSK RUN's.
 - The game is **silent in the browser** until #113 lands (see above).  The
   test prints the PCM's RMS and names the card; it does not fail on it.
 - No real browser ran it here: the runtimes are the same modules the page

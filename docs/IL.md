@@ -1235,7 +1235,7 @@ in version 4, patched after the layout is known.
 | 20 | `music` | `song:op` — a song id (#197, carried for the #194 engine) |
 | 21 | `sfx` | `ch:op freq:op volume:op frames:op` — a PSG channel 0..5, the 12-bit F, the AL volume 0..31, and how many frames before the engine gives the channel back (#197) |
 | 22 | `release` | `ch:op` — give the channel back early; a no-op on a channel no sfx owns, as on the host (#197) |
-| 23 | `copyv` | `vram:u16 bank:u8 off:u16 count:u16` — copy `count` words from data bank `bank` at bank-relative byte `off` to VRAM from `vram` upward; the source streams into bank+1, bank+2, ... at each 8,192-byte boundary (#281) |
+| 23 | `copyv` | `vram:u16 bank:u8 off:u16 count:u16` — copy `count` words from data bank `bank` at bank-relative byte `off` to VRAM from `vram` upward; the source streams into bank+1, bank+2, ... at each 8,192-byte boundary (#281); the IL instruction exists since #288, when the encoder began emitting it for the art prologue (`docs/BANKED-DATA.md` §5.10) — a hand-made container could use the opcode before, the toy IL could not |
 
 For `tget`/`tset`, `kind` 0 means the key byte is an **operand** (a register,
 or a constant int index encoded `0x80|k`); `kind` 1 means the key byte is a

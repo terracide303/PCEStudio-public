@@ -210,12 +210,14 @@ tab's checks, then the encoder and the build with the toy's asset tail —
 so this table's *exports?* column is now the Export dialog's verdict, not
 the MCP's. What moved on 2026-11-13: the cgen step (b8cefc2) lowered
 `unm`/`bnot`/`not`, so the dialog's `unm` refusals are gone — NOVA TIDE's
-refusal moved to its `raster(0, …)` call and DUSK RUN builds. The dialog
-refuses **STARFALL** `toy-data-bank-full` (its
-6,285 B bytecode plus 68,702 B of art against one 8 KiB data bank — the
-maintainer's 2026-11-04 click), refuses **NOVA TIDE** `cgen-op` (its
-`raster(0, …)` call), and builds **TOWER**, **PLATFORMER** and **DUSK
-RUN**. **#148** (the
+refusal moved to its `raster(0, …)` call and DUSK RUN builds. Then **#288
+put the art into banks** (the encoder step and the copyv prologue,
+[`BANKED-DATA.md`](BANKED-DATA.md) §5.10): STARFALL's `toy-data-bank-full`
+refusal is gone — its 6,285 B bytecode and 68,702 B of art no longer share
+the one data bank — and its ROM carries the art on the bank after the
+container. The dialog refuses only **NOVA TIDE** `cgen-op` (its
+`raster(0, …)` call), and builds **STARFALL**, **TOWER**, **PLATFORMER**
+and **DUSK RUN**. **#148** (the
 127-constant pool) remains open; **#216** (a sound toy on a console) and
 **#200** (the Mednafen trace) are closed on [`ROM-SOUND.md`](ROM-SOUND.md)
 §11 and §8. The `TRACE=1` build is test-only — it refuses to write
@@ -259,9 +261,12 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
 
 | toy | exports? | picture matches? | overruns | worst update | verdict | validator's static estimate |
 |-----|----------|------------------|----------|--------------|---------|-----------------------------|
-| **STARFALL** `toys/demo-game` | **no — the studio's Export refuses `toy-data-bank-full`: "the bytecode (6285 B) and assets (68702 B) need 74987 bytes; a data bank holds 8,160 usable (its last 32 bytes are the song trailer)"** (the maintainer's 2026-11-04 click; #284's exact text, asserted whole in the test — the last sentence's wording is #279's, which landed the same day). The bytecode is the toy reworked in place for the gallery export (#273, 2026-11-03): 6,285 B in the 8,160 B data bank (77.0%), 111 constants of 127 (87.4%, the one near row), 17 functions, 21 registers, 35 boot upvalue cells, 24 globals, 4 arguments, no row over — the bytecode fits. The 68,702 B are the toy's three art files (tiles, palettes, sprites) as the gallery gives them to the studio, the Export's asset tail; the one 8 KiB data bank cannot hold the two together, and fixing that is the banked-data work (#279–#281), not a toy rework. The game is the same: the art block computes its VRAM addresses (225 literals became loops), the palettes are `rgb()` calls, the sprites are four `sat()` words instead of a spec table, the split is the `raster(line)` callback (the table form is refused), and the ship's collision is the drone array's box instead of `sr()`/`abs()`, which neither route carries. A scripted 600-frame old-vs-new run and the 600-frame still run are pixel-identical, the still run losing its one life at the same frame 365. **`bytecodeOnly` (the MCP's route, art left out — the old table's "yes"):** 40,960 B, sha256 `5984b3246858d286…`, built and measured so the interpreter ROM's state stays pinned. **The console picture is close but not the browser's:** #227's replay is fixed (the last complete picture is on every display frame, so the capture's tail is a real frame, not the collection's static screen), and the closest browser frame is now **24 bytes off** — one one-pixel column, rows 0-7 of the status bar's first tile row (re-measured 2026-11-13; the pre-#280 image measured 48 bytes, two columns, at a different sampled game frame), against the 2026-11-03 measurement of the armed replay (16 bytes on row 24, the split line's palette write, and 372-632 bytes on the moving picture rows) before #227. Why that column differs is not proven; the pin stays `unmatched`, so it cannot claim a picture it does not have. | **no — 24 bytes on the bar's first tile row** (bytecode route, art left out) | **25** | **6,899** lines | **too slow** (25 updates in 600 frames) | 7,246,417 cycles · 60.73 frames · **0.99 Hz** (route-1 raster projection) |
+| **STARFALL** `toys/demo-game` | **yes — #288 put the art into banks.** 49,152 B (image 32 KiB + container + one 8 KiB art bank), sha256 `2d9290d7f620cfea6c1f72ea542198225faecc59197317d34587adea1aa9fb13`, built by the studio's Export. The toy's three art files go through the importer's picture path into one **5,520 B blob** (CRAM, BAT, SAT, then the tile/pattern span — 5 tiles, 14 patterns, 17 sprites) on the bank after the container, and the encoder prepends a **33 B prologue** of copyv/reg ops that loads BAT, SAT and the span before the toy's first instruction (the CRAM bytes are carried, not loaded — the toy writes the same CRAM itself, the measured claim in [`BANKED-DATA.md`](BANKED-DATA.md) §5.10). The container grew 6,285 → 6,318 B, constants 111 → 113 of 127. The bytecode is the toy reworked in place for the gallery export (#273, 2026-11-03): 6,285 B in the 8,160 B data bank (77.0%), 17 functions, 21 registers, 35 boot upvalue cells, 24 globals, 4 arguments, no row over — the bytecode always fit; the refusal was the 68,702 B of art files needing the same bank, which #288's art banks removed (the maintainer's 2026-11-04 click). The game is the same: the art block computes its VRAM addresses (225 literals became loops), the palettes are `rgb()` calls, the sprites are four `sat()` words instead of a spec table, the split is the `raster(line)` callback (the table form is refused), and the ship's collision is the drone array's box instead of `sr()`/`abs()`, which neither route carries. A scripted 600-frame old-vs-new run and the 600-frame still run are pixel-identical, the still run losing its one life at the same frame 365. **`bytecodeOnly` (the MCP's route, art left out — the old table's "yes"):** 40,960 B, sha256 `5984b3246858d286…`, built and sha-pinned by the suite (the art ROM's measure and capture carry the interpreter's picture evidence; the two ROMs differ only by the prologue, measured pairwise in [`BANKED-DATA.md`](BANKED-DATA.md) §5.10). **The console picture is close but not the browser's:** #227's replay is fixed (the last complete picture is on every display frame, so the capture's tail is a real frame, not the collection's static screen), the prologue's load is display-neutral (the host proof is word-for-word diff 0 at two frames, [`BANKED-DATA.md`](BANKED-DATA.md) §5.10), and the capture shows the game drawing — but no captured frame is the browser's; the closest is browser frame 23, **419 bytes off** (the pre-#280 image measured 48 bytes, two columns, at a different sampled game frame; the bytecode-route image 24 bytes, one column, 2026-11-13). What those bytes are is named and measured in [`BANKED-DATA.md`](BANKED-DATA.md) §5.10; the pin stays `unmatched`, so it cannot claim a picture it does not have. | **no — 419 bytes at the closest browser frame (23)** | **24** | **6,896** lines | **too slow** (24 updates in 600 frames) | **279,353 cycles · 2.34 frames · 25.6 Hz** — the studio's `validate-slow-frame` warning (reported, not refused); the route-1 raster projection stands at 7,246,417 cycles · 60.73 frames · 0.99 Hz |
 | **TOWER** `toys/tower` | **yes** — 40,960 B, sha256 `1b1d151ae2fbdd35…`; built by the studio's Export since #284 (it has no art files, so the asset tail is empty and the C emitter accepts the toy — the ROM is the bytecode route's bytes). Reworked in place for the gallery export (2026-11-03): 7,862 B of bytecode in the 8,160 B data bank, 27 functions, 32 registers, 47 boot upvalue cells, 6 arguments, and no row over its interpreter capacity. The art is still drawn by the toy; the rework merges the thirteen art callbacks into four generators, writes the background map as floor/ladder runs (blank cells stay at the runtime's zero, the same blank tile) and computes only the two sprite planes this art uses. The first 12 frames are one picture (the gem starts bobbing at 12), so the capture's tail is diff 0 against the browser's early frame. | **diff 0** — the captured tail is the browser's early picture | **70** | **2,772** lines | **too slow** (70 updates in 1,800 frames: the ~20 s one-time build, then ~5 updates a second) | 485,384 cycles · 4.07 frames · **14.7 Hz** (the model, not the console; the interpreted build and frames are much slower) |
-| **NOVA TIDE** `toys/nova-tide` | **no — the studio's Export refuses `cgen-op`: "function fn@513, IL line 530, instruction \`raster\`: not lowered by this backend (…)"** (`main.lua:530`; #284's exact text, asserted whole in the test — the refusal was `unm` at `main.lua:29` until the 2026-11-13 cgen step lowered `unm`/`bnot`/`not`, which moved NOVA TIDE on to its `raster(0, { bxr = 0 })` call; the C backend carries the hook form `raster(line)` but not the two-argument spec call). The MCP's route has no C emitter and stops at the same instruction: `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`; refused by `renderer/pce-ilbc.js:335` because `raster` has no entry in its OPS table — #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind, #136). And past both refusals sits the data bank: the toy's art files are a **192,089 B** asset tail (the suite computes it), so carrying `raster` would still not export it. | — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
+| **NOVA TIDE** `toys/nova-tide` | **no — the studio's Export refuses `cgen-op`: "function fn@513, IL line 530, instruction \`raster\`: not lowered by this backend (…)"** (`main.lua:530`; #284's exact text, asserted whole in the test — the refusal was `unm` at `main.lua:29` until the 2026-11-13 cgen step lowered `unm`/`bnot`/`not`, which moved NOVA TIDE on to its `raster(0, { bxr = 0 })` call; the C backend carries the hook form `raster(line)` but not the two-argument spec call). The MCP's route has no C emitter and stops at the same instruction: `ilbc-op: instruction raster (function 34, pc 53) has no bytecode form` (`main.lua:530`; refused by `renderer/pce-ilbc.js:335` because `raster` has no entry in its OPS table — #186 carried `sat`, #197 carried `note` and `sfx`, its old refusals; `raster(line, spec)` is the next uncarried kind, #136). Since #288 its 192,089 B art tail
+would ride on 24 art banks instead of the data bank, so carrying
+`raster` is now the only refusal left between NOVA TIDE and an export.
+| — | — | — | — | 621,873 cycles · 5.21 frames · **11.5 Hz** |
 | **DUSK RUN** `toys/dusk-run` | **yes** — 40,960 B, sha256 `2a569de95c3a1bfb…`; built by the studio's Export since the 2026-11-13 cgen step lowered `unm`/`bnot`/`not` (before it, the dialog refused `cgen-op` at `main.lua:62`'s `unm`). DUSK RUN has no art files, so the asset tail is empty and the ROM is the bytecode route's bytes — the sha this pin held as `bytecodeOnly` (the old table's "yes"). #222 raised `MAX_REGS` 41 / `MAX_FUNCS` 41 / `MAX_UPS` 20 (upvalue pool) / `MAX_CLOS` 48 (boot/transient split), so the container loads and executes; a Mednafen save state at 20 s is VRAM/CRAM/SAT **diff 0 against browser frame 3**, and the host harness matches for 900 frames. The runtime's base-VRAM buffer (32 words a frame) was dropping DUSK's 64/68/208-word build frames; it now writes an over-buffer word through instead ([`ROM-SOUND.md`](ROM-SOUND.md) §10). **#227 fixed the raster display:** the line chain is re-armed at every VBlank while a toy frame runs, so the last complete picture is on screen on every display frame (before, one frame in ~37 — DUSK's build step — replayed it and a capture's tail was the static screen), and the line entry is preloaded into zero page one scanline early, which puts the per-line colour write inside the blank (before, its last store completed ~28 CPU cycles late and the first 16 pixels of row 16 kept the old colour). `tests/check-export-games.js` now pins the ROM sha and **the browser-frame hashes**: at the 12 s capture the picture is diff 0 against browser frames 1–6 (one static early picture, hash `3584516448`). #184's validator note still applies: the 8-frame probe measured the BUILD (frame 7 = build step 7, 675,190 cycles), and the 300-frame performance is 390,744 cycles (18.3 Hz), so the validator accepts the toy. | **diff 0** — the captured tail is the browser's early picture (frames 1–6, one hash) | **1** | **65,535** lines | **too slow** (1 update in 600 frames, the ~7 s boot) | 10,135,899 cycles · 84.95 frames · **0.71 Hz** (steady-state projection; the build frame projected 229.2 frames · 0.26 Hz) |
 | **PLATFORMER** `toys/platformer` | **yes** — 40,960 B, sha256 `ccc5f20a1405816a…`; built by the studio's Export since #284 (it has no art files, so the asset tail is empty and the C emitter accepts the toy — the ROM is the bytecode route's bytes). Reworked in place for 60 Hz (2026-11-04): 2,522 B of bytecode in the 8,160 B data bank (30.9%), 46 constants (36.2%), 11 functions, 30 registers (73.2%), 5 upvalues, 10 boot upvalue cells, 14 globals, 2 arguments — no row near or over, and the busiest is registers at 73.2%. The game is unchanged — same art, same level rule, same 1/16-pixel physics — but frame() runs 74 IL instructions instead of 110: division by a power of two is a shift (the interpreter's `idiv` is a soft routine costing about seven instructions' worth of time), the jump button is read once instead of three times, `cell()`'s "is there anything here" is inlined as the hero's feet span meeting a row's solid cells (the map drawing still calls `cell()`), each clamp moved inside the move that can leave the screen, and the SAT pattern word is written once in `init()` because it never changes. | **diff 0** — a captured frame is the browser's static no-input scene, hash pinned | **0** | **194** lines | **60 Hz** (573 updates in 900 frames) | 73,445 cycles · 0.62 frames · **97.5 Hz** |
 | *control* `tools/toys/palette.lua` | **yes** — 40,960 B, sha256 `f605155a3c66bbb1…` | **diff 0** (a captured frame is a browser frame; its 8-frame cycle is pinned) | 55 | **1,343** lines | **too slow** | 238,985 · 2.00 · 29.96 (#169's row) |
@@ -292,30 +297,35 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   bit survives `toy_display_on` (`docs/IL.md` §14, the compiled runtime's
   `toy_cr` shadow).
 - **The studio's Export button's verdicts are the table's now (#284), and
-  two of them are refusals.** The dialog refuses **STARFALL**
+  one of them is a refusal.** The dialog refuses **NOVA TIDE** `cgen-op`
+  (its `raster(0, …)` call, `main.lua:530` — until the 2026-11-13 cgen
+  step its refusal was `unm` at `main.lua:29`) and builds **STARFALL**,
+  **TOWER**, **PLATFORMER** and **DUSK RUN**.  STARFALL's refusal was
   `toy-data-bank-full` — its 6,285 B bytecode plus its 68,702 B of art
   (tiles, palettes, sprites) need 74,987 bytes, and the interpreter reads
-  one 8 KiB data bank.  The bytecode fits (the #273 rework); the art does
-  not, and the fix is the banked-data work #279–#281, not another toy
-  rework.  The dialog refuses **NOVA TIDE** `cgen-op`
-  (its `raster(0, …)` call, `main.lua:530` — until the 2026-11-13 cgen
-  step its refusal was `unm` at `main.lua:29`) and builds **TOWER**,
-  **PLATFORMER** and **DUSK RUN** — the games with no art files that the
-  C emitter accepts; all three ROMs are the bytecode route's bytes.
-  Before #284 the table's "yes"
+  one 8 KiB data bank — until **#288** moved the art into whole banks
+  after the container (the 5,520 B blob and the copyv prologue,
+  [`BANKED-DATA.md`](BANKED-DATA.md) §5.10); the bytecode itself always
+  fit (the #273 rework).  TOWER, PLATFORMER and DUSK RUN — the games
+  with no art files — keep the bytecode route's bytes.  Before #284 the
+  table's "yes"
   for STARFALL and DUSK RUN was the bytecode route's answer; DUSK RUN's is
-  the studio's answer again since 2026-11-13, and STARFALL's ROM is still
-  built and measured (labeled `bytecodeOnly`, art left out), so
-  the interpreter evidence is kept without claiming an export the studio
-  refuses.  TOWER's one-time build draws the tower in about 20 s of wall
+  the studio's answer again since 2026-11-13, and STARFALL's is now the
+  studio's answer too (art included); its bytecode-route ROM is still
+  built and sha-pinned (labeled `bytecodeOnly`, art left out), so
+  the interpreter evidence is kept on both routes.
+  TOWER's one-time build draws the tower in about 20 s of wall
   and a frame then takes about 11 video frames (~5 updates a second) —
-  the interpreter's speed, not a game rule.  STARFALL's bytecode-route
+  the interpreter's speed, not a game rule.  STARFALL's console
   picture: before #227 its armed replay was 16 bytes off on row 24 (the
   split line's palette write) and 372-632 bytes off on the moving picture
-  rows; after it the closest browser frame is 24 bytes off on the #280/#281
+  rows; after it the closest browser frame was 24 bytes off on the #280/#281
   image (48 before it, at a different sampled game frame; one one-pixel
-  column in the bar's first tile row, cause not proven), so it is still
-  pinned `unmatched`.  DUSK RUN's container fits the interpreter's arrays (#222:
+  column in the bar's first tile row, cause not proven), and the art ROM's
+  capture lands at a different game frame (browser frame 23) at **419
+  bytes** — named and measured in [`BANKED-DATA.md`](BANKED-DATA.md) §5.10 —
+  so it is still pinned `unmatched`.
+  DUSK RUN's container fits the interpreter's arrays (#222:
   41 registers, 41 functions, a 19-upvalue closure, 27 boot closures), its
   VM state is byte-equal to the browser's, the runtime's dropped
   build-frame writes are fixed, and #227 made its displayed picture the
@@ -365,7 +375,8 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   `unm`/`bnot`/`not`, it stopped one instruction earlier on `unm` at
   `main.lua:29`) before the encoder; the MCP's
   `export_pce` (no C emitter) gets NOVA TIDE as far as `ilbc-op` (`raster`
-  at `main.lua:530`) and builds STARFALL and DUSK RUN.  STARFALL's rework
+  at `main.lua:530`) and builds STARFALL's bytecode ROM (no art — the MCP
+  has no asset tail) and DUSK RUN.  STARFALL's rework
   removed `abs` and `sr()` (neither route carries them), replaced the
   `sprite()` specs the C walker could not pin with `sat()` words, and moved
   the status-bar split to the `raster(line)` callback both routes carry;
@@ -386,11 +397,13 @@ compared with `renderer/pce-toys.js`'s frame of the same toy — the
   6,285 B (a computed art block, `sat()` words and the callback split) —
   and #284's measurement shows the bank's other occupant: the toys' art.
   STARFALL's bytecode fits the 8,160 B bank; its 68,702 B asset tail does
-  not (74,987 B together), and NOVA TIDE's tail is 192,089 B.  So carrying
-  every refused kind still would not export the two art games — the
-  banked-data work (#279–#281) is the real path, and the gallery toys'
-  art must fit the cartridge's banks (the same question STARFALL's art
-  pack raised in #273, which parked on it).
+  not (74,987 B together), and NOVA TIDE's tail is 192,089 B.  The
+  banked-data work (#279–#281) landed that question as **#288**: the art
+  no longer shares the bytecode's bank at all — the studio's Export
+  carries each toy's art on whole banks after the container (STARFALL's
+  5,520 B blob; [`BANKED-DATA.md`](BANKED-DATA.md) §5.10), so carrying
+  the remaining refused kinds for NOVA TIDE would now export its art too
+  (its 192,089 B tail fits 24 banks).
 
 ### The cards this measurement added
 

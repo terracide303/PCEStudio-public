@@ -13,36 +13,40 @@
  *   pce-il.js compile ("@main.lua") -> pce-validate.js validateProgram
  *   (8 frames) -> pce-cgen.js emitC   [the CONSOLE tab's three stages]
  *   -- any error finding refuses, exactly as the Export dialog blocks --
- *   -> pce-ilbc.js -> pce-rom.js buildToyRom over renderer/ilvm.bin,
- *   with the toy's asset tail (its project's tiles/palettes/sprites and
- *   any other non-default files, the page's exportAssetTail envelope).
+ *   -> pce-ilbc.js -> pce-rom.js buildToyRom over renderer/ilvm.bin.
+ *   Since #288 a toy with art files exports them as the importer's
+ *   banked-data plan (pce-toyhost.js's artPlan): the encoder prepends the
+ *   plan's copyv/reg prologue and the build carries the blob on whole
+ *   banks after the container (docs/BANKED-DATA.md §5.10).  A toy without
+ *   art keeps the old optional JSON asset tail (the page's exportAssetTail
+ *   envelope of its non-default files).
  *
  * No compiler is called.  A refusal here is the refusal the Export dialog
  * shows, with its exact text, so a refusal in the studio is a refusal in
  * this test (the maintainer's 2026-11-04 finding: the old suite built
  * main.lua alone and said STARFALL exports while the studio refused it
- * `toy-data-bank-full`).
+ * `toy-data-bank-full` — that refusal is gone since #288, which banked
+ * the art).
  *
  * The MCP's export_pce stays the bytecode route (no C emitter, no assets).
- * The controls and the `kind: "toy"` pins run it, and a game the studio
- * refuses whose interpreter ROM is still measured (STARFALL) is built by it
- * and pinned as `bytecodeOnly` — the pin is that ROM's, and the suite says
- * so, never "exports".  Since the 2026-11-13 cgen step (b8cefc2) lowered
- * unm/bnot/not, DUSK RUN is no longer refused at the C emitter: the studio
- * builds it now (it has no art files), so its pin moved to the studio's
- * route — the same ROM bytes, still pinned.
+ * The controls and the `kind: "toy"` pins run it.  Since the 2026-11-13
+ * cgen step (b8cefc2) lowered unm/bnot/not, DUSK RUN is no longer refused
+ * at the C emitter: the studio builds it now (it has no art files), so its
+ * pin moved to the studio's route — the same ROM bytes, still pinned.
  *
  * WHAT IS CHECKED
  *
  *   1. Each of the five games (STARFALL, TOWER, NOVA TIDE, DUSK RUN,
  *      PLATFORMER) reaches the outcome docs/ROM_SPEED.md's table records:
- *      a refusal with the studio's exact code and message, or a built
- *      40,960-byte ROM with its pinned sha.  The source line the table
- *      names is checked against the IL (the refused instruction's own
- *      line, derived from the message's function and line), so the table's
- *      "line" column is reproducible and not a comment.  A blocker that
- *      lands moves the refusal: this pin goes red and asks for the table
- *      and the pin to be updated — a tripwire, not a broken test.
+ *      a refusal with the studio's exact code and message, or a built ROM
+ *      with its pinned sha — 40,960 bytes, plus whole 8 KiB banks of art
+ *      for a toy that exports art (#288: STARFALL, one bank).  The source
+ *      line the table names is checked against the IL (the refused
+ *      instruction's own line, derived from the message's function and
+ *      line), so the table's "line" column is reproducible and not a
+ *      comment.  A blocker that lands moves the refusal: this pin goes red
+ *      and asks for the table and the pin to be updated — a tripwire, not
+ *      a broken test.
  *   2. Every game that builds is measured with tools/measure-rom.js
  *      (Mednafen, headless) and its picture is compared with the browser's
  *      frames of the same toy: the tail of a `-qtrecord` capture must be
@@ -50,12 +54,10 @@
  *      A game whose one-time build outlasts the default 300-frame measure
  *      or 5.5 s capture tail is pinned with its own measure frame count and
  *      capture length (GAME_PINS) — PLATFORMER is that game since #186.
- *      A game that builds on the bytecode route and runs but whose
- *      displayed frame is not the browser's yet (STARFALL, after #227 left
- *      its status bar's two edge columns different) is pinned as its ROM
- *      sha plus `unmatched`: the capture must be not black AND not a
- *      browser frame, so either half going stale fails and asks for a
- *      re-pin.
+ *      A game that builds and runs but whose displayed frame is not the
+ *      browser's yet is pinned as its ROM sha plus `unmatched`: the
+ *      capture must be not black AND not a browser frame, so either half
+ *      going stale fails and asks for a re-pin.
  *      Two controls prove the capture-and-compare instrument works on a
  *      toy that exports: tools/toys/palette.lua (its ROM sha and its
  *      eight-frame picture cycle are pinned) and, for #183,
@@ -91,6 +93,7 @@ const cgen = require("../renderer/pce-cgen.js");
 const romLib = require("../renderer/pce-rom.js");
 const toys = require("../renderer/pce-toys.js");
 const validate = require("../renderer/pce-validate.js");
+const toyhost = require("../renderer/pce-toyhost.js");
 const gallery = require("../renderer/gallery-toys.js");
 
 const ROOT = path.join(__dirname, "..");
@@ -164,14 +167,17 @@ function studioFiles(id) {
  * emitter (its `raster(0, { bxr = 0 })` call — the spec-table form has no
  * C form, while the hook form raster(line) is supported) before the
  * bytecode encoder — its studio refusal is `cgen-op`, not the bytecode
- * route's refusal the MCP's export_pce returns.  STARFALL reaches the
- * encoder and is refused `toy-data-bank-full`: its bytecode is 6,285 B
- * and its asset tail (the three art files) 68,702 B against one 8 KiB
- * data bank — the maintainer's 2026-11-04 screenshot.  Since the
- * 2026-11-13 cgen step (b8cefc2) lowered `unm`/`bnot`/`not`, DUSK RUN's
- * old `unm` refusal is gone: the studio builds it (see GAME_PINS).  The
- * three games with no art files: TOWER and PLATFORMER built from the
- * start, DUSK RUN joins them.
+ * route's refusal the MCP's export_pce returns.  Since #288 (2026-11-13)
+ * STARFALL is no longer refused at all: its art files export as a
+ * banked-data plan (the art blob on whole banks after the container, the
+ * copyv prologue loads it), so it builds and is pinned in GAME_PINS.  The
+ * pre-#288 refusal was `toy-data-bank-full` — the bytecode 6,285 B plus
+ * the three art files' 68,702 B JSON tail against one 8 KiB data bank,
+ * the maintainer's 2026-11-04 screenshot.  Since the 2026-11-13 cgen
+ * step (b8cefc2) lowered `unm`/`bnot`/`not`, DUSK RUN's old `unm` refusal
+ * is gone: the studio builds it (see GAME_PINS).  The three games with no
+ * art files: TOWER and PLATFORMER built from the start, DUSK RUN joins
+ * them.
  * `expect.message` is the dialog's exact text, asserted whole, so a
  * refusal that loses or rewords its detail fails.  `where` is the source
  * line the table names, re-derived from the IL; null is what the refusal
@@ -190,14 +196,6 @@ const GAMES = [
     bytecode: { code: "ilbc-op",
                 message: "instruction raster (function 34, pc 53) has no bytecode form" },
     bytecodeWhere: "main.lua:530"
-  },
-  {
-    name: "STARFALL", toy: "toys/demo-game/main.lua", galleryId: "starfall",
-    expect: { code: "toy-data-bank-full",
-              message: "pce-rom: toy-data-bank-full: the bytecode (6285 B) " +
-                "and assets (68702 B) need 74987 bytes; a data bank holds " +
-                "8,160 usable (its last 32 bytes are the song trailer)" },
-    where: null
   }
 ];
 
@@ -208,45 +206,57 @@ const GAMES = [
  * emitter accepts them) — their ROM is the same bytes the bytecode route
  * built before #284; DUSK RUN joined them on 2026-11-13, when the cgen
  * step (b8cefc2) lowered unm/bnot/not and its `unm` refusal moved off.
- * STARFALL is refused by the studio's Export (GAMES above) but still
- * builds on the bytecode route, so it is pinned `bytecodeOnly`: the pin's
- * ROM and picture are that route's, and the suite's verdict for it is the
- * studio's refusal. */
+ * STARFALL joined them on 2026-11-13 (#288): its art files export as a
+ * banked-data plan, so the studio's ROM is the bytecode-route bytes plus
+ * the art blob on whole banks (its pin carries `art`). */
 const GAME_PINS = {
-  /* STARFALL's bytecode-route ROM (the studio refuses the export — see
-   * GAMES): the art block computes its VRAM addresses instead of listing
-   * 225 of them and the sprites are placed with sat(), so the bytecode is
-   * 6,285 B of the 8,160 B data bank and the constant pool is 111 of 127 —
-   * no capacity is over, and it builds a 40,960 B ROM with the art left
-   * out.  What it does NOT have yet is the browser's picture on the
-   * console.  #227 fixed the two causes this pin used to name: the chain
-   * is re-armed on every display frame (so the tail is a real frame, not
-   * the collection's static screen) and each line's entry is preloaded and
-   * written inside the blank (so row 16's first pixels are this line's
-   * colour).  On the #280/#281 image (re-measured 2026-11-13) the capture's
-   * closest browser frame is 24 bytes off — one one-pixel column, rows 0-7
-   * of the status bar's first tile row; the pre-#280 image measured 48
-   * bytes (two columns, x=1 and x=249) at a different sampled game frame,
-   * so the step is not attributable to the image.  Before #227 the same
-   * capture showed the armed replay 16 bytes off on row 24 (the split
-   * line's palette write) and 372-632 bytes on the moving picture rows
-   * (measured 2026-11-03); why the remaining column differs is not
-   * proven.  So this pin stays the DUSK RUN shape: the ROM sha, the
-   * counters, and the screen asserted not black and not yet a browser
-   * frame.  The measured
-   * run needs its own window: 600 frames of counters and a 12 s capture,
-   * the latter long enough that the movie holds the running game, not the
-   * boot. */
+  /* STARFALL builds on the studio's route since #288 (2026-11-13): its
+   * art files export as the importer's banked-data plan — a 5,520 B blob
+   * (CRAM carried, BAT + SAT + the tile/pattern span loaded) on one whole
+   * bank after the container, and a copyv/reg prologue prepended to the
+   * chunk (bytecode 6,285 B + 33 B = 6,318 B of the 8,160 B data bank;
+   * the constant pool is 113 of 127).  Before #288 the studio refused it
+   * `toy-data-bank-full` (the 2026-11-04 click: the bytecode plus the
+   * three art files' 68,702 B JSON tail against one 8 KiB bank); that ROM
+   * is now the bytecode route's (still 40,960 B) and no longer pinned
+   * here.  The #288 host proof (this suite's own harness shape,
+   * tools/ilvm/hostvm.c): the art ROM's data half booted for two frames
+   * is word-for-word the browser's VRAM and CRAM (diff 0), so the ROM
+   * shows the art the browser shows; the Mednafen capture below is the
+   * console-half witness (the copyv bank-3 shim).  Before #288 the
+   * bytecode-route ROM drew the same picture the toy's own code draws
+   * (the #273 rework computes the art block's VRAM addresses), but the
+   * captured frame was not the browser's: 24 bytes off — one one-pixel
+   * column, rows 0-7 of the status bar's first tile row (re-measured
+   * 2026-11-13; the pre-#280 image measured 48 bytes, two columns, at a
+   * different sampled game frame).  #288's capture of the art ROM shows
+   * the same picture and the same gap, named and measured in
+   * BANKED-DATA §5.10: the one-pixel column stays (24 bytes at the
+   * closest browser frame), some game frames add the moving-picture rows
+   * (419 bytes at the closest frame in this run), and some display
+   * frames drop the split line's line-24 release — the field displays at
+   * the bar's scroll and backdrop, ~50,000 bytes off — on the
+   * bytecode-route ROM too (measured pairwise), so it is the display
+   * machinery's, not the art path's.  The prologue's copyv load neither
+   * removes nor adds to any of them; the pin stays `unmatched`.  The
+   * measured run needs its own window: 600 frames of counters and a 12 s
+   * capture, the latter long enough that the movie holds the running
+   * game, not the boot. */
   "STARFALL": {
     toy: "toys/demo-game/main.lua",
-    bytecodeOnly: true,
-    rom: "5984b3246858d28677bcee5b542079a9202d7e23fdc6a19da870af7025f38eb8",
+    galleryId: "starfall",
+    rom: "2d9290d7f620cfea6c1f72ea542198225faecc59197317d34587adea1aa9fb13",
+    art: { blobBytes: 5520, copies: 3, tiles: 5, patterns: 14, sprites: 17 },
+    /* The MCP's export_pce has no assets: the bytecode route still builds
+     * the 40,960 B art-left-out ROM (the docs' `bytecodeOnly` sha). */
+    bytecode: { rom: "5984b3246858d28677bcee5b542079a9202d7e23fdc6a19da870af7025f38eb8" },
     frames: [],
-    unmatched: "the bytecode-route ROM runs and draws; no captured frame " +
-               "is the browser's picture yet — the closest is 24 bytes " +
-               "off, in the status bar's first tile row (one one-pixel " +
-               "edge column); #227's replay and row-16 lag are fixed, " +
-               "the cause of that column is not proven",
+    unmatched: "the art-banked ROM runs and draws; no captured frame " +
+               "is the browser's picture yet — the closest is N bytes " +
+               "off (the log line above names the closest browser frame " +
+               "and the byte count, and BANKED-DATA §5.10 names the " +
+               "difference); #288's host proof is diff 0, the " +
+               "console-half difference is measured, not matched",
     measureFrames: 600,
     captureMs: 12000,
     captureTail: true,
@@ -402,13 +412,16 @@ function sha256(buf) {
 
 /* ---- the studio's Export route, exactly the button's order ------------- */
 
-/* Returns {rom, source, program, bytecodeBytes, warn} or {code, message,
- * warn} — never throws.  `files` is the toy's file set as the studio
- * installs it (studioFiles above); the asset tail is the page's
- * exportAssetTail() over it.  The order is the Export button's: the
- * CONSOLE tab's three stages (compile, validator 8 frames, C emitter),
- * whose first error finding refuses the dialog, then the bytecode encoder
- * and buildToyRom with the assets. */
+/* Returns {rom, source, program, bytecodeBytes, art, warn} or {code,
+ * message, warn} — never throws.  `files` is the toy's file set as the
+ * studio installs it (studioFiles above).  The order is the Export
+ * button's: the CONSOLE tab's three stages (compile, validator 8 frames,
+ * C emitter), whose first error finding refuses the dialog, then the
+ * bytecode encoder and buildToyRom.  Since #288 a toy with art files
+ * exports them as the importer's banked-data plan (pce-toyhost.js's
+ * artPlan): the encoder prepends the plan's copyv/reg prologue and the
+ * build carries the blob on whole banks after the container.  A toy
+ * without art keeps the old optional JSON tail (assetTail above). */
 function exportStudio(toyPath, files, frames) {
   const source = fs.readFileSync(path.join(ROOT, toyPath), "utf8");
   const findings = [];
@@ -446,13 +459,22 @@ function exportStudio(toyPath, files, frames) {
     return { code: errors[0].code, message: errors[0].message, warn: warn };
   }
   try {
-    const encoded = ilbc.encode(program);
+    const plan = toyhost.importer.plan(files);
+    const encoded = plan ? ilbc.encode(program, { art: plan })
+                         : ilbc.encode(program);
     const bank0 = fs.readFileSync(BANK0);
     const rom = romLib.buildToyRom({
-      bank0: bank0, bytecode: encoded.bytes, assets: assetTail(files)
+      bank0: bank0, bytecode: encoded.bytes,
+      assets: plan ? plan.blob : assetTail(files)
     });
     return { rom: Buffer.from(rom), source: source, program: program,
-             bytecodeBytes: encoded.bytes.length, warn: warn };
+             bytecodeBytes: encoded.bytes.length, warn: warn,
+             art: plan ? {
+               blobBytes: plan.stats.blobBytes,
+               copies: plan.copies.length,
+               tiles: plan.stats.tiles, patterns: plan.stats.patterns,
+               sprites: plan.stats.sprites, blob: Buffer.from(plan.blob)
+             } : null };
   } catch (e) {
     return { code: e && e.code || "error",
              message: String(e && e.message || e), warn: warn };
@@ -870,20 +892,51 @@ async function main() {
       const files = studioFiles(pin.galleryId);
       check(!!files, n + ": the gallery has the studio's file set");
       out = exportStudio(pin.toy, files);
-      /* A no-art game's studio build is the bytecode route's bytes: the
-       * asset tail is empty and the C emitter accepted it, so the pinned
-       * sha (made by the old no-asset route) still holds. */
-      if (out.rom) {
+      if (out.rom && !pin.art) {
+        /* A no-art game's studio build is the bytecode route's bytes: the
+         * asset tail is empty and the C emitter accepted it, so the pinned
+         * sha (made by the old no-asset route) still holds. */
         const bc = exportToy(pin.toy);
         eq(n + ": the studio's build is the bytecode route's (no assets)",
            sha256(out.rom), bc.rom ? sha256(bc.rom) : "refused");
+      }
+      if (out.rom && pin.art) {
+        /* #288: an art game's studio ROM is the bytecode-route bytes plus
+         * the art blob on whole banks after the container — the copyv
+         * prologue's bank operand names bank 1 (or 1 + code banks for a
+         * v4 container), the same boundary pce-rom.js places the assets
+         * on.  The pin holds the plan's own numbers, so the plan builder
+         * cannot drift silently. */
+        const banks = Math.ceil(pin.art.blobBytes / 8192);
+        eq(n + ": builds a ROM with the art on whole banks",
+           out.rom.length, ROM_BYTES + banks * 8192);
+        eq(n + ": the plan carries the pinned blob",
+           out.art && out.art.blobBytes, pin.art.blobBytes);
+        eq(n + ": the plan carries the pinned copies",
+           out.art && out.art.copies, pin.art.copies);
+        eq(n + ": the plan carries the pinned tiles/patterns/sprites",
+           out.art && [out.art.tiles, out.art.patterns, out.art.sprites]
+             .join("/"),
+           [pin.art.tiles, pin.art.patterns, pin.art.sprites].join("/"));
+        check(out.rom.subarray(ROM_BYTES,
+                               ROM_BYTES + out.art.blobBytes)
+              .equals(out.art.blob),
+              n + ": the art blob sits whole on the bank after the container");
+        const bc = exportToy(pin.toy);
+        eq(n + ": the bytecode route still builds the artless ROM",
+           bc.rom ? bc.rom.length : 0, ROM_BYTES);
+        eq(n + ": … and its sha is the pinned one (the docs' bytecodeOnly)",
+           bc.rom ? sha256(bc.rom) : "refused", pin.bytecode.rom);
       }
     }
     if (out.rom) {
       (pin.bytecodeOnly ? bytecodeBuilt : studioBuilt)
         .push({ game: pin, name: n, out: out });
-      eq(n + ": builds a " + ROM_BYTES + "-byte ROM",
-         out.rom.length, ROM_BYTES);
+      eq(n + ": builds a " + (ROM_BYTES +
+           (pin.art ? Math.ceil(pin.art.blobBytes / 8192) * 8192 : 0)) +
+         "-byte ROM",
+         out.rom.length, ROM_BYTES +
+           (pin.art ? Math.ceil(pin.art.blobBytes / 8192) * 8192 : 0));
       eq(n + ": the ROM is the pinned one", sha256(out.rom), pin.rom);
       continue;
     }

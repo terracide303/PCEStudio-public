@@ -866,7 +866,7 @@ A row past 80% is `near`; past 100% is `over`, and the row names the finding tha
 
 | limit | value | what it is |
 | --- | --- | --- |
-| data bank | 8,160 B | the bytecode the interpreter reads |
+| data bank | 8,160 B | the bytecode the interpreter reads (a toy's art files do not count against it: the Export puts them in art banks after the container and the encoder's copyv prologue loads them — docs/BANKED-DATA.md §5.10) |
 | constants | 127 | distinct int/bool/nil constants in the container |
 | functions | 41 | function ids the interpreter's table holds |
 | registers | 41 | registers in the toy's busiest function |

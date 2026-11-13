@@ -850,6 +850,111 @@ update count). [`ROM_LAYOUT.md`](ROM_LAYOUT.md) carries no ilvm-derived pin —
 its ROMs are the viewer/PCEAS and C-route builds, which do not embed
 `renderer/ilvm.bin` — so it is unchanged.
 
+### 5.10 As built (#288, 2026-11-13): the art banks
+
+Card #288 built §5.4's remaining item: **an encoder step that puts a toy's
+sprites, tiles and palettes into art banks and emits the COPYV calls the
+toy's dma/sprite loads need**, so the studio's Export carries the art and
+the exported ROM shows it. STARFALL first. Every number below is measured
+on this tree.
+
+- **The plan** (`renderer/pce-toyhost.js`'s `importer.plan`, exported on
+  the importer namespace).  The toy's asset files go through the importer's
+  own path — `sat.pictureFromFiles` + `editor.toPicture`, the same two
+  calls the browser's `applyAssets` makes — and the picture becomes one
+  blob in a fixed order: **CRAM (1,024 B), BAT (2,048 B), SAT (512 B),
+  then the tile/pattern span** (the bytes between 2,048 and the SAT at
+  65,024 that hold a nonzero word; gaps inside the span are the picture's
+  zeros, copied byte-exact).  The order keeps every copy's start below
+  copyv's 13-bit `off` ceiling (8,191): BAT at 1,024, SAT at 3,072, the
+  span at 3,584 — and the span streams across bank boundaries (§5.8's
+  remap), so one copy covers any length.  A toy with no art (the default
+  files: `hasArt` false) gets no plan and keeps its bytes exactly, so
+  every single-bank game's ROM bytes are unchanged.
+- **The prologue** (`renderer/pce-ilbc.js`).  `encode(program, { art })`
+  prepends to the chunk (function 0 — what the runtime execs at boot) one
+  `copyv` per plan copy (BAT, SAT, span) and `reg` ops for BXR, BYR and
+  CR with constant operands.  The `bank` operand is patched once the
+  layout is known: **1 for a v1-3 container, 1 + code banks for v4** —
+  the assets sit on the bank after the container, whatever the version.
+  The prologue costs 33 B (3 × 8 + 3 × 3) and two pool constants at most
+  (the reg values dedup); STARFALL's container grew 6,285 → 6,318 B,
+  constants 111 → 113 of 127.  `encode()` never mutates its input: the
+  prologue joins the chunk on copies, so the same IL encodes with and
+  without art and the ROM check's `check()` always sees the toy's own
+  instructions.  The new opcode 0x23 entry, its 8-byte size and its
+  operand-range validation live beside the other instructions; the
+  `validate-slow-frame` warning (2.34 frames) is recorded in
+  [`ROM_SPEED.md`](ROM_SPEED.md).
+- **Carried, not loaded: CRAM (and MWR).**  The blob carries the
+  picture's CRAM bytes, but nothing in the first half can write them: no
+  vget, and emitting `pal` ops with pooled constants would blow the
+  127-constant pool (STARFALL's ~35 addrs plus ~25 colours on top of
+  111).  The #288 measurement (the IL host run of STARFALL with the
+  importer vs without): **CRAM diff 0** — the toy's own code writes the
+  same CRAM the importer would — and its VRAM differs only in the SAT
+  region (71 B), which the prologue's SAT copy supplies before the toy's
+  own `sat()` calls overwrite identically (the browser's order).  So the
+  ROM shows the art regardless, for every gallery toy; a future half can
+  load the carried CRAM bytes the same way.  MWR is not carried: the IL's
+  `reg` has no MWR name and the interpreter's boot default is the
+  picture's (0).
+- **The builder** (`renderer/pce-rom.js`).  The v1-3 asset tail moved to
+  whole banks after the container — the v4 rule (§5.6) for every version —
+  so `toy-data-bank-full` now checks the bytecode alone (F1's 8,160 B
+  finding and its message wording unchanged in substance) and an art toy
+  no longer needs its bytecode to shrink into the same bank.  ROM size:
+  image + container + ceil(blob / 8,192) banks; STARFALL builds a
+  49,152 B ROM (one 5,520 B art bank).
+- **The studio** (`renderer/studio.html`).  The Export dialog's analysis
+  builds the plan from the toy's files and encodes with it; the build
+  carries the blob as the asset tail.  A toy whose files are not a
+  picture the importer accepts (a half-typed tiles.json) gets no plan
+  and keeps the old optional JSON envelope of non-default files —
+  carried, not loaded, now on a whole bank too, like every asset tail —
+  and an art toy's non-picture files (a non-default waves.json) ride
+  after the blob in the same envelope, so no non-default file is
+  silently dropped.  The dialog's route line names the blob size and the
+  tile/pattern/sprite counts.  The MCP's `export_pce` stays the bytecode
+  route (no assets).
+- **Evidence.**  `tests/check-export-games.js` builds STARFALL through
+  the studio's route with no refusal and pins the ROM sha, the plan's
+  numbers (blob 5,520 B, 3 copies, 5 tiles, 14 patterns, 17 sprites) and
+  the blob's place in the ROM, and measures and captures the picture.
+  The host proof (the suite's own hostvm harness shape): the art ROM's
+  data half booted for two frames is **word-for-word the browser's VRAM
+  and CRAM (diff 0)**.  The console half (the bank-3 CopyvShim) is the
+  Mednafen capture: the ROM runs and draws the game (the capture is not
+  black, and the game picture is in the tail), but no captured frame is
+  diff 0 against a browser frame, so the pin stays `unmatched` — and the
+  remaining difference is now **named and measured**, in three classes:
+  **(1) the one-pixel column**, 24 bytes across rows 0-7 of the status
+  bar's first tile row, at the closest browser frame (the pre-#288
+  bytecode-route gap; the prologue neither removed nor changed the class —
+  the column's position follows the sampled game frame's bar content); **(2)
+  the moving-picture rows**, which at some sampled game frames add their
+  measured share (the suite's 12 s capture lands at browser frame 23,
+  419 bytes: the column plus the moving rows — the 372-632-byte class of
+  the pre-#227 measurement); **(3) the split line's line-24 release
+  dropped on some display frames** — the field displays at the bar's
+  scroll and backdrop, 50,164 bytes across 208 field rows at the
+  measured frame.  Class (3) is not the art path: a pairwise capture of
+  the bytecode-route ROM and the art ROM (14 s each, same instrument)
+  shows the bytecode ROM dropping the same write (50,742 bytes) and the
+  two ROMs' tails otherwise at one or two game frames of each other
+  (717-828 bytes in the bar and drone strip, or one full-field scroll
+  step), so the prologue adds no visible difference — only a boot-time
+  shift of the game frame.
+  `tests/check-banked-data.js` re-pinned the v1-3 (11) break to the new
+  place rule, and its container walker knows opcode 0x23;
+  `tests/check-ilvm.js`'s `INSN_LEN` map gained `0x23: 8`.
+- **Speed.**  The prologue adds one-time boot cost, not frame cost (copyv
+  is the shim's DMA loop, not interpreted writes); the toy's own art
+  block still runs and the game remains too slow on the interpreter —
+  the validator prices one STARFALL toy frame at 279,353 cycles, 2.34 of
+  a 60 Hz frame (25.6 Hz), the finding the card asked to record
+  ([`ROM_SPEED.md`](ROM_SPEED.md)).
+
 ---
 
 ## 6. Which gallery toys it unlocks (measured)
@@ -882,6 +987,10 @@ hitting the wall. That is still worth building — the maintainer asked for
 other is the interpreter's RAM capacity, #222/#272) — but it should be chosen
 with the right expectation.
 
+*(This table is the 2026-11-04 measurement, kept as evidence.  The #273
+rework and #288's art banks (§5.10) moved the verdicts: the current
+per-game state is [`ROM_SPEED.md`](ROM_SPEED.md)'s table.)*
+
 ---
 
 ## 7. What banked data does not fix
@@ -900,7 +1009,8 @@ with the right expectation.
 - **The raster display's one-replay-frame-per-toy-frame latency and its
   16-pixel row-16 lag were #227 and are fixed** (the chain now re-arms every
   display frame and writes from a zero-page preload); STARFALL's remaining
-  48-byte bar-row difference and the other console gaps are untouched.
+  bar-row difference and the other console gaps are untouched (#288's art
+  banks and capture: §5.10).
 
 ---
 

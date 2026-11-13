@@ -234,11 +234,12 @@
     pal: 0x14, reg: 0x15, vset: 0x16, vget: 0x17,
     table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B,
     padref: 0x1C, padget: 0x1D, sat: 0x1E, sprite: 0x1F,
-    music: 0x20, sfx: 0x21, release: 0x22
-    /* 0x23 is copyv (#281): the interpreter has the op
-     * (docs/IL.md §14.1) but the IL has no instruction for it yet — #218
-     * emits it for constant vram[] runs.  CALLASM takes 0x24
-     * (docs/ASM.md §4.2), not this slot. */
+    music: 0x20, sfx: 0x21, release: 0x22,
+    copyv: 0x23
+    /* 0x23 copyv (#281, #288): the interpreter has the op since #281
+     * (docs/IL.md §14.1) and the IL's instruction since #288 — the art
+     * prologue emits it for the importer's VRAM regions (docs/BANKED-DATA.md
+     * §5.10).  CALLASM takes 0x24 (docs/ASM.md §4.2), not this slot. */
   };
   var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
   var SOUND_OPS = { music: 1, sfx: 1, release: 1 };
@@ -345,6 +346,7 @@
     if (t === "sprite") return 7;
     if (t === "music" || t === "release") return 2;
     if (t === "sfx") return 5;
+    if (t === "copyv") return 8;
     if (t === "arith" || t === "cmp") return 5;
     if (t === "table") return 3;
     if (t === "setlist") return 4 + (ins.values || []).length;
@@ -386,6 +388,22 @@
     if (ins.t === "vget") {
       refuse("ilbc-op", "vget (a VRAM read) is not in the first half");
     }
+    /* copyv's four operands are raw immediates (no pool constants): vram
+     * is a word address, off is the bank-relative byte offset (13 bits),
+     * count is words, and the copy must stay inside VRAM's 32,768 words. */
+    if (ins.t === "copyv") {
+      if (ins.vram == null || ins.vram < 0 || ins.vram > 0xFFFF ||
+          ins.count == null || ins.count < 1 || ins.count > 0xFFFF ||
+          ins.vram + ins.count > 0x8000) {
+        refuse("ilbc-range", "copyv vram/count out of range (function " +
+               fnid + ", pc " + pc + ")");
+      }
+      if (ins.bank == null || ins.bank < 0 || ins.bank > 255 ||
+          ins.off == null || ins.off < 0 || ins.off > 0x1FFF) {
+        refuse("ilbc-range", "copyv bank/off out of range (function " +
+               fnid + ", pc " + pc + ")");
+      }
+    }
     if (ins.t === "builtin") {
       if (BUILTIN[ins.name] == null) {
         refuse("ilbc-builtin", "builtin `" + ins.name +
@@ -407,7 +425,7 @@
 
   /* ---- encode ---------------------------------------------------------- */
 
-  function encode(program) {
+  function encode(program, opts) {
     if (!program || program.lang !== "pce-il" || program.version !== 1) {
       refuse("ilbc-program", "not a pce-il version 1 program");
     }
@@ -427,6 +445,53 @@
     }
     var globalIds = {};
     for (var g = 0; g < globals.length; g++) globalIds[globals[g].name] = g;
+
+    /* #288: the art prologue.  opts.art is the importer's picture as a
+     * banked-data plan (pce-toyhost.js's artPlan): copyv ops stream the
+     * blob's BAT, SAT and tile/pattern words into VRAM and reg ops set the
+     * scroll and control registers — before the toy's first instruction,
+     * the ROM-side twin of the browser's asset import.  It is prepended to
+     * the chunk (function 0), which the runtime execs at boot, so every
+     * scan and pass below already includes it; the copyv bank operand is
+     * patched once the layout knows where the art banks start.  A toy with
+     * no art passes no opts.art and keeps its bytes exactly. */
+    var art = (opts && opts.art) || null;
+    var artCopies = [];
+    if (art) {
+      var pro = [];
+      for (var ci = 0; ci < art.copies.length; ci++) {
+        var cp = art.copies[ci];
+        var ins = { t: "copyv", vram: cp.vram, bank: 0, off: cp.blobOff,
+                    count: cp.words };
+        pro.push(ins);
+        artCopies.push(ins);
+      }
+      var artRegs = art.regs || {};
+      for (var rn in artRegs) {
+        if (Object.prototype.hasOwnProperty.call(artRegs, rn)) {
+          pro.push({ t: "reg", name: rn,
+                     value: { k: { t: "int", v: artRegs[rn] } } });
+        }
+      }
+      /* The prologue joins the chunk on copies, not on the caller's
+       * program object: encode() never mutates its input, so the same IL
+       * can be encoded with and without art and the rom check (check()
+       * below) always sees the toy's own instructions. */
+      var patched = functions.slice();
+      var patched0 = {};
+      for (var k0 in functions[0]) {
+        if (Object.prototype.hasOwnProperty.call(functions[0], k0)) {
+          patched0[k0] = functions[0][k0];
+        }
+      }
+      patched0.code = pro.concat(functions[0].code || []);
+      patched[0] = patched0;
+      functions = patched;
+      program = {
+        version: program.version, lang: program.lang, source: program.source,
+        hooks: program.hooks, globals: program.globals, functions: patched
+      };
+    }
 
     /* Hooks are global slots: the chunk stores a closure in `init`, `frame`
      * or `raster`, and the runtime calls whatever is there (the C backend
@@ -646,6 +711,13 @@
                "at most " + MAX_CODE_BANKS + " code banks");
       }
     }
+
+    /* #288: the art banks start after the container's banks — bank 1 alone
+     * for a v1-3 toy (bank 0 is the container), 1 + codeBankCount for v4
+     * (bank 0 is the tables bank).  pce-rom.js puts the assets on the same
+     * boundary for every version. */
+    var artBank = banked ? 1 + codeBankCount : 1;
+    for (ci = 0; ci < artCopies.length; ci++) artCopies[ci].bank = artBank;
 
     /* Absolute code offsets (v1-v3), or bank-relative offsets (v4). */
     var fnCodeAt = [];
@@ -1044,6 +1116,14 @@
         break;
       case "release":
         buf.u8(op(ins.ch));
+        break;
+      case "copyv":
+        /* #288: all four operands are raw immediates — no pool constants.
+         * vram is a word address, bank the container data bank, off the
+         * bank-relative byte offset (13 bits), count words
+         * (docs/IL.md §14.1). */
+        buf.u16(ins.vram); buf.u8(ins.bank);
+        buf.u16(ins.off); buf.u16(ins.count);
         break;
       default:
         refuse("ilbc-op", "instruction " + ins.t);

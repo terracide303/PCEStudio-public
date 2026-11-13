@@ -60,7 +60,10 @@
       unit: "B", refusal: "toy-data-bank-full",
       source: "renderer/pce-rom.js SONG_TABLE_OFF (an 8,192 B bank less " +
               "the 32 B song trailer)",
-      what: "the bytecode the interpreter reads" },
+      what: "the bytecode the interpreter reads (a toy's art files do " +
+            "not count against it: the Export puts them in art banks " +
+            "after the container and the encoder's copyv prologue loads " +
+            "them — docs/BANKED-DATA.md §5.10)" },
     { id: "constants", label: "constants", limit: ilbc.MAX_CONST,
       refusal: "ilbc-range", source: "renderer/pce-ilbc.js MAX_CONST",
       what: "distinct int/bool/nil constants in the container" },

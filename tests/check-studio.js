@@ -934,28 +934,33 @@ async function checkExport(page) {
           "#115: the projection is the interpreter's cost, not the ROM's size");
   }
 
-  /* the asset tail: a non-default file rides after the bytecode, and the
-   * default empty files add nothing (so the evidence toys stay identical). */
+  /* the asset tail: a non-default file rides on a whole bank after the
+   * container (#288 moved every asset tail there, art blob and JSON alike),
+   * and the default empty files add nothing (so the evidence toys stay
+   * identical).  This toy's tiles.json is not a picture the importer
+   * accepts (a half-typed tile), so the export falls back to the carried
+   * JSON tail, exactly as before the art banks. */
   studio.loadExample("palette", true);
   const plain = studio.exportBytes(bank0);
   const tiles = studio.toy.file("tiles.json");
   tiles.source = '{"version":1,"tiles":[{"char":64}]}\n';
   const withTail = pageBuild("asset tail");
   if (plain.ok && withTail.ok) {
-    /* The data bank is one 8 KiB bank, so the ROM's length does not change:
-     * the tail starts right after the bytecode and the bank's 0xFF padding
-     * follows it. */
+    /* The assets start on the bank after the container, so the ROM grows
+     * by one 8 KiB bank: the tail starts right after the container bank
+     * and 0xFF pads the rest of its bank. */
     const tail = Buffer.from(JSON.stringify({ version: 1, files: [
       { name: "tiles.json", source: tiles.source }] }), "utf8");
-    const at = romLib.ILVM_BYTES + withTail.bytecodeBytes;
-    eq("#115: the asset tail starts after the bytecode", at,
-       romLib.ILVM_BYTES + plain.bytecodeBytes);
+    const at = romLib.ILVM_BYTES + 8192;
+    check(withTail.bytes[romLib.ILVM_BYTES + withTail.bytecodeBytes] === 0xFF,
+          "#115: the bytecode still ends inside its own bank");
     check(Buffer.from(withTail.bytes.slice(at, at + tail.length))
       .equals(tail), "#115: the tail is the asset files' JSON bytes");
     check(withTail.bytes[at + tail.length] === 0xFF,
-          "#115: … and 0xFF pads the rest of the data bank");
-    check(withTail.bytes.length === plain.bytes.length,
-          "#115: the tail rides inside the one data bank, not on top of it");
+          "#115: … and 0xFF pads the rest of the asset bank");
+    check(withTail.bytes.length === plain.bytes.length + 8192,
+          "#115: the tail rides on a whole bank after the container (" +
+          withTail.bytes.length + " B), not inside the bytecode's");
   }
   studio.loadExample("palette", true);
 

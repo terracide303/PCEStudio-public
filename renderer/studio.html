@@ -4760,6 +4760,27 @@ function exportAssetTail() {
   return exportUtf8(JSON.stringify({ version: 1, files: tail }));
 }
 
+/* #288: an art toy's assets are its art blob (the copyv prologue's banked
+ * data), plus, after it, the old JSON envelope of any non-default file the
+ * plan does not cover (waves.json and friends) — carried, not loaded, on
+ * the same art banks, so no non-default file is silently dropped. */
+function exportArtAssets(art) {
+  const tail = [];
+  for (const f of files) {
+    if (f.name === "main.lua" || f.name === "tiles.json" ||
+        f.name === "palettes.json" || f.name === "sprites.json") continue;
+    const def = DEFAULT_ASSET_FILES.find((a) => a.name === f.name);
+    if (def && f.source === def.source) continue;
+    tail.push({ name: f.name, source: f.source });
+  }
+  if (!tail.length) return art.blob;
+  const json = exportUtf8(JSON.stringify({ version: 1, files: tail }));
+  const out = new Uint8Array(art.blob.length + json.length);
+  out.set(art.blob, 0);
+  out.set(json, art.blob.length);
+  return out;
+}
+
 function exportConsole() {
   const api = panelApi("console");
   return api ? api.state() : null;
@@ -4789,7 +4810,7 @@ function exportAnalysis() {
       "the IL encoder or ROM builder did not load (pce-ilbc.js, pce-rom.js)"));
     return { ok: false, source: source, findings: findings, route1: null };
   }
-  let program = null, encoded = null;
+  let program = null, encoded = null, art = null;
   try {
     program = IL.compile(source, { chunkName: "@main.lua" });
   } catch (e) {
@@ -4798,7 +4819,14 @@ function exportAnalysis() {
   }
   if (program) {
     try {
-      encoded = BC.encode(program);
+      /* #288: a toy with art files exports them as a banked-data plan
+       * (the importer's picture; pce-toyhost.js's artPlan).  The encoder
+       * prepends the plan's copyv/reg prologue and the build carries the
+       * blob on whole banks after the container.  A toy without art keeps
+       * its bytes exactly. */
+      const imp = PCEStudio.toyhost && PCEStudio.toyhost.importer;
+      if (imp && imp.plan) art = imp.plan(files);
+      encoded = art ? BC.encode(program, { art: art }) : BC.encode(program);
     } catch (e) {
       findings.push(exportFinding("error", e && e.code || "ilbc-error",
         "route 1 cannot carry this toy: " + (e && e.message || String(e)),
@@ -4809,6 +4837,7 @@ function exportAnalysis() {
     return { ok: false, source: source, findings: findings, route1: null };
   }
   return { ok: true, source: source, findings: findings, encoded: encoded,
+           art: art || null,
            route1: con && con.stats ? con.stats.route1 : null };
 }
 
@@ -4820,11 +4849,20 @@ function exportBuild(bank0, analysis) {
   if (!A.ok) return { ok: false, name: name, findings: A.findings,
                       route1: A.route1 };
   try {
+    /* #288: an art toy's assets are its art blob (the copyv prologue's
+     * banked data, whole banks after the container) plus any non-picture
+     * tail; a toy without art keeps the old optional JSON tail of
+     * non-default files (carried, not loaded, on a whole bank too). */
     const bytes = PCEStudio.rom.buildToyRom({
-      bank0: bank0, bytecode: A.encoded.bytes, assets: exportAssetTail()
+      bank0: bank0, bytecode: A.encoded.bytes,
+      assets: A.art ? exportArtAssets(A.art) : exportAssetTail()
     });
     return { ok: true, name: name, bytes: bytes,
              bytecodeBytes: A.encoded.bytes.length,
+             art: A.art ? { blobBytes: A.art.stats.blobBytes,
+                            tiles: A.art.stats.tiles,
+                            patterns: A.art.stats.patterns,
+                            sprites: A.art.stats.sprites } : null,
              findings: A.findings, route1: A.route1 };
   } catch (e) {
     return { ok: false, name: name,
@@ -4878,6 +4916,12 @@ function exportRouteText(state) {
   const r = state.route1;
   let text = "Route 1: " + state.bytecodeBytes + " B of IL bytecode on the " +
              "interpreter in renderer/ilvm.bin.";
+  if (state.art) {
+    text += " Its art exports as a " + state.art.blobBytes + " B banked " +
+            "blob (" + state.art.tiles + " tiles, " + state.art.patterns +
+            " patterns, " + state.art.sprites + " sprites) on whole banks " +
+            "after the container, loaded by copyv before the toy runs.";
+  }
   if (r && r.collectionCycles != null) {
     text += " The validator projects " + r.collectionCycles +
             " cycles a toy frame (~" + (r.hz >= 10 ? r.hz.toFixed(0) :
@@ -4975,7 +5019,8 @@ function exportToy(opts) {
     return exportSetState({
       phase: "built", name: built.name, findings: built.findings,
       route1: built.route1, bytes: built.bytes,
-      bytecodeBytes: built.bytecodeBytes, downloaded: downloaded
+      bytecodeBytes: built.bytecodeBytes, art: built.art || null,
+      downloaded: downloaded
     });
   }).catch((e) => {
     if (run !== exportRun) return exportDialogState;

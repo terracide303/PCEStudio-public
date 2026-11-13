@@ -483,27 +483,34 @@ function checkRefusals() {
   check(withAssets.slice(32768 + enc.bytes.length + assets.length)
         .every(function (b) { return b === 0xFF; }),
         "v4 (11) the banks after the asset tail are 0xFF fill");
-  /* Break (11), unbanked: the v1-v3 asset tail has the same place rule, and
-   * the broken builder wrote it one byte early on this path too — equally
-   * green until these lines. */
+  /* Break (11), unbanked: since #288 the v1-3 asset tail has the v4 place
+   * rule — whole banks after the container (docs/BANKED-DATA.md §5.10), so
+   * the copyv bank math is one rule for every version and a toy's art no
+   * longer needs the bytecode to shrink into the same bank.  The broken
+   * builder wrote assets one byte early on this path too — equally green
+   * until these lines. */
   const flatAssets = new Uint8Array(100);
   flatAssets.fill(7);
   const withFlatAssets = romLib.buildToyRom({
     bank0: bank0, bytecode: fakeContainer(300), assets: flatAssets });
-  eq("a v1-3 container plus a 100 B asset tail builds a 40,960 B ROM",
-     withFlatAssets.length, 32768 + BANK);
+  eq("a v1-3 container plus a 100 B asset tail builds a 49,152 B ROM",
+     withFlatAssets.length, 32768 + 2 * BANK);
   check(Buffer.from(withFlatAssets.slice(32768, 32768 + 300))
         .equals(Buffer.from(fakeContainer(300))),
-        "v1-3 (11) the container's bytes are intact before the asset tail");
-  check(Buffer.from(withFlatAssets.slice(32768 + 300, 32768 + 400))
+        "v1-3 (11) the container's bytes are intact in bank 0");
+  check(Buffer.from(withFlatAssets.slice(32768 + BANK, 32768 + BANK + 100))
         .equals(Buffer.from(flatAssets)),
-        "v1-3 (11) the asset tail is byte-identical after the container");
+        "v1-3 (11) the asset tail is byte-identical on the bank after the " +
+        "container");
   eq("v1-3 (11) its song trailer is zero", withFlatAssets[32768 + USABLE], 0);
-  const rest = withFlatAssets.slice(32768 + 400);
+  const rest = withFlatAssets.slice(32768 + 300, 32768 + BANK);
   check(rest.every(function (b, i) {
-          return i === USABLE - 400 ? b === 0 : b === 0xFF;
+          return i === USABLE - 300 ? b === 0 : b === 0xFF;
         }),
-        "v1-3 (11) the rest of the bank is 0xFF fill (the trailer zero)");
+        "v1-3 (11) the rest of bank 0 is 0xFF fill (the trailer zero)");
+  check(withFlatAssets.slice(32768 + BANK + 100)
+        .every(function (b) { return b === 0xFF; }),
+        "v1-3 (11) the asset bank's rest is 0xFF fill");
 }
 
 /* ---- 4. the nine #285 cold breaks, now checked -------------------------- */
@@ -520,7 +527,7 @@ const OPC = { const: 0x01, move: 0x02, getglobal: 0x03, setglobal: 0x04,
               builtin: 0x13, pal: 0x14, reg: 0x15, vset: 0x16, vget: 0x17,
               table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B,
               padref: 0x1C, padget: 0x1D, sat: 0x1E, sprite: 0x1F,
-              music: 0x20, sfx: 0x21, release: 0x22 };
+              music: 0x20, sfx: 0x21, release: 0x22, copyv: 0x23 };
 const OP_BYTE = {};
 for (const name of Object.keys(OPC)) OP_BYTE[OPC[name]] = name;
 
@@ -535,6 +542,8 @@ function ilSize(ins) {                /* the instruction's encoded length */
   case "jmp": return 3;
   case "forprep": case "ret": case "music": case "release": return 2;
   case "sprite": return 7;
+  case "copyv": return 8;                  /* #288: vram u16, bank u8,
+                                              off u16, count u16 */
   default: return 3; /* const move getglobal setglobal getupval setupval
                         closure unm bnot not pal reg vset vget table padref */
   }
@@ -551,6 +560,7 @@ function byteSize(op, bytes, at) {    /* the emitted instruction's length */
   case OPC.jmp: return 3;
   case OPC.forprep: case OPC.ret: case OPC.music: case OPC.release: return 2;
   case OPC.sprite: return 7;
+  case OPC.copyv: return 8;
   default:
     return OP_BYTE[op] != null ? 3 : 0;
   }
