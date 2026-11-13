@@ -245,8 +245,9 @@ function checkInventory() {
      no.rows.map(function (x) {
        return [x.kind, x.backend, x.n, x.lines];
      }),
-     [["raster", "route 1 (ilbc)", 5, [530, 531, 532, 533, 534]],
-      ["raster", "C backend (cgen)", 5, [530, 531, 532, 533, 534]]]);
+     /* since 2026-11-13 the C backend lowers raster(line, spec); only the
+      * interpreter's encoder still has no form for it */
+     [["raster", "route 1 (ilbc)", 5, [530, 531, 532, 533, 534]]]);
 }
 
 /* ---- 4. refusals that name an operand ---------------------------------- */
@@ -340,17 +341,17 @@ const CITATIONS = [
   ["renderer/studio.html", 4820, "if (errors) return"],
   ["renderer/studio-panel-console.js", 145, "emitC"],
   ["renderer/studio-panel-console.js", 148, "severity: \"error\""],
-  ["renderer/pce-cgen.js", 547, "fn|vram|int|bool|padset|table"],
-  ["renderer/pce-cgen.js", 626, "case \"padget\""],
-  ["renderer/pce-cgen.js", 635, "case \"padref\""],
-  ["renderer/pce-cgen.js", 655, "builtin `"],
-  ["renderer/pce-cgen.js", 716, "refuse(\"cgen-op\""],
+  ["renderer/pce-cgen.js", 592, "fn|vram|int|bool|padset|table"],
+  ["renderer/pce-cgen.js", 686, "case \"padget\""],
+  ["renderer/pce-cgen.js", 695, "case \"padref\""],
+  ["renderer/pce-cgen.js", 715, "builtin `"],
+  ["renderer/pce-cgen.js", 715, "refuse(\"cgen-op\""],
   ["renderer/pce-ilbc.js", 229, "var OPS = {"],
   ["renderer/pce-ilbc.js", 250, "var BUILTIN = {"],
   ["renderer/pce-ilbc.js", 502, "refuse(\"ilbc-op\""],
   ["renderer/pce-ilbc.js", 543, "refuse(\"ilbc-builtin\""],
   ["renderer/pce-ilbc.js", 642, "hookSlot(\"raster\""],
-  ["renderer/pce-rom.js", 647, "if (bytecode.length > SONG_TABLE_OFF)"],
+  ["renderer/pce-rom.js", 666, "if (bytecode.length > SONG_TABLE_OFF)"],
   ["renderer/pce-il.js", 1619, "t: \"raster\""]
 ];
 
