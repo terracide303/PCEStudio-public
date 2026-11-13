@@ -7,14 +7,14 @@
 # figure for the same toy is in docs/ROM_SPEED.md.
 ROM="$1"; NAME="$2"; ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/nm.XXXXXX")"
-rm -f "$HOME/.mednafen/mcs/$NAME".*.mca
-SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy mednafen -force_module pce -autosave 1 "$ROM" >"$OUT/log" 2>&1 &
+mkdir -p "$OUT/home/mcs"   # a private Mednafen home: the shared one holds other runs' states
+MEDNAFEN_HOME="$OUT/home" SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy mednafen -force_module pce -autosave 1 "$ROM" >"$OUT/log" 2>&1 &
 PID=$!
 sleep "${SLEEP:-10}"
 kill -INT $PID
 for i in $(seq 1 15); do kill -0 $PID 2>/dev/null || break; sleep 1; done
 kill -9 $PID 2>/dev/null
-MCA=$(ls -t "$HOME/.mednafen/mcs/"*.mca 2>/dev/null | head -1)
+MCA=$(ls -t "$OUT"/home/mcs/*.mca 2>/dev/null | head -1)
 python3 -I "$ROOT/tools/mcs-extract.py" "$MCA" "$OUT" 3 --ram >/dev/null 2>&1
 python3 -I - "$OUT/ram.bin" <<'PY'
 import struct,sys

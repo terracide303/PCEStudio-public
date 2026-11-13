@@ -1,7 +1,7 @@
 # Music and sound in a natively compiled ROM — the options
 
-A proposal, not built. Written 2026-11-13. It needs the maintainer's choice
-before any code. Background: docs/NATIVE.md (what compiles) and
+Written 2026-11-13. The maintainer chose option C (banked code, the engine in
+its own pages). **Step 1 is built and proved, see "Built so far" at the end.** Background: docs/NATIVE.md (what compiles) and
 docs/ROM-SOUND.md (how the interpreter ROM carries the HuTrack engine).
 
 ## The problem
@@ -77,3 +77,46 @@ nothing extra if B is built (a small game simply needs no map-swap).
 5. The test that already exists for the interpreter (`tests/check-rom-sound.js`,
    PSG write streams equal the studio's) pointed at the native ROM.
 6. Measure the tick's cycles and the raster shift on DUSK RUN.
+
+## Built so far (option C, step 1)
+
+`tools/build-toyc-banked.sh toy.lua name` now gives a toy that calls `sfx()`,
+`note()`, `release()` or `music()` the sound engine: the interpreter ROM's
+HuTrack engine and sound glue in physical banks 2 and 3, a song bank in 4 (empty
+trailer, no songs yet), the toy's code in banks 1, 5, 6, ...; the compiler's zero
+page held to 96 bytes (`-mlto-zp=96`) so the engine's own starts at $2080, and
+the engine's RAM placed after the program's by a second pass. The emitter adds
+`toy_sound_boot()` to the boot and `toy_sound_tick()` before each `frame()`;
+`tools/toyc/toy_sound.c` is the wrapper over the glue's fixed addresses.
+
+Songs: `tools/native-songs.js` reads the toy folder's `song.json`/`songs.json`
+the way the studio does, converts each song with `pce-hutrack.js` and assembles
+them into the song bank (physical bank 4) at 16-byte offsets with the trailer the
+glue reads (up to 8 songs, 8,160 bytes). `tools/toyc/emit.js` hands the songs to
+the validator so `music(0)` is accepted. The interpreter ROM's builder still
+writes "no songs", so this is the first ROM route that carries one.
+
+Proof, `tests/check-native-sound.js` (18 checks, the ROMs run in Geargrafx through
+its MCP server, `tools/ggmcp.py`): sfx.lua and note.lua write exactly the studio's
+PSG stream over frames 0..23, write for write, from the engine's own write log;
+and a music fixture (`tests/native-music`, the sequencer's demo song, 521 bytes)
+is compared after every toy frame: the four tonal channels' frequency and on/off
+equal the studio's in all 59 frames compared, and the two noise channels' on/off
+too (a drum's pitch lands on the nearest legacy value, ROM-SOUND.md §6). The
+engine writes its own registers, which the write log does not carry, hence the
+state comparison.
+
+**What the tick costs** (the demo song, measured in Geargrafx from the runtime's own
+cycle counters, 408 toy frames): 15,550 cycles per frame on average (13% of a
+video frame's 119,000), 14,300 median, 37,900 at most (32%) on the busiest row,
+and about 70,000 (59%) on the one frame where the song starts. A game with music
+has about two thirds of a frame left in its worst case: native TOWER's worst
+frame is 91% of a frame without sound, so TOWER with this song would overrun
+some frames. A game that needs music and every cycle needs either a lighter song,
+the tick spread over two frames, or the engine rewritten for speed.
+
+Not done: raster toys (the raster tables leave too
+little RAM beside the engine's 1.1 KB); the studio's Export button, which still
+builds the interpreter ROM. The Oak Woods song converts too (its rows carry empty
+effect-slot lists, which `tools/native-songs.js` pads to the converter's filler);
+`tests/native-music-oak` plays it and equals the studio's model like the demo song.

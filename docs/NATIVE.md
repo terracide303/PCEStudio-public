@@ -15,7 +15,7 @@ does.
 |---|---|---|---|
 | PLATFORMER | yes | **yes**, `ROM_KB=16` | its code is 8.5 KiB; the default ROM is 8 KiB |
 | TOWER | yes | **yes**, `ROM_KB=40`, with a silent `toy_sfx` | the native runtime has no sound engine yet, so this build is silent |
-| STARFALL | yes | code links at `ROM_KB=24`, silent `toy_sfx` | no art: the native runtime has no way to load tiles or sprites, so it runs but draws nothing meaningful (not measured) |
+| STARFALL | yes | **yes**, banked, with its art and the real sound engine (`tools/build-toyc-banked.sh toys/demo-game/main.lua name`) | the console's sprite list equals the browser's, word for word (`tools/native-sat-compare.js`), the art loads exactly (`tests/check-native-art.js`: 0 of 32,768 VRAM words and 0 of 512 colours differ from the importer's picture) and the compiled logic matches (`tools/host-c-compare.js`). The picture is still not diff 0: 127 rows differ, all in the starfield area (rows 7 to 102), which is what a one-line raster timing offset would do to one-pixel stars; not yet shown to be the cause |
 | DUSK RUN | yes (since `unm`, `bnot`, `not`) | **yes**, `ROM_KB=48`, silent `toy_sfx` | builds since the table pool is sized to the toy's own cells (it was a fixed 768 B and overflowed RAM by 146 B); but it **stalls after the first frame** and the screen stays black: the runtime's raised flag says a frame() wrote more colours than its 32-entry list holds. Not measured |
 | NOVA TIDE | **no** | — | `raster(line, spec)`, the table form, is not lowered; it also needs its art |
 
@@ -68,6 +68,55 @@ banked with its function split and draws, but hits the runtime stall described
 above (10 frames, then nothing), and does not match yet. The 8 KiB fixed page
 holds the runtime, the dispatcher and the constants: 3.9 KB for TOWER, more for
 a raster toy.
+
+## VDC access rules (checked 2026-11-13)
+
+The VDC has global state: the selected register, the VRAM write address and its
+auto-increment. An interrupt that writes the VDC in the middle of a main-loop write or
+copy corrupts it (`docs/REFERENCES.md`, the PCE_knowledge notes). The native runtime
+avoids this by construction, and the engine must keep it that way:
+
+1. The main loop writes the VDC only while no scan interrupt is armed: at boot, and
+   in the VBlank that applies the frame's base and line 0, before the display and the
+   raster chain are armed. During the toy's own `frame()` and `raster()` calls the
+   writes are captured into lists and applied later, not made.
+2. The scan-line handler (`irq_vdc` in `tools/toyc/toy_runtime.c`) writes only
+   registers 5 to 8 (control, raster compare, scroll) and the colour table. It never
+   touches the VRAM address, the data port or the DMA registers.
+3. The VBlank part of the same handler reads the status register (which acknowledges
+   it) and increments a counter; it writes nothing.
+4. Because of 1 to 3 the handler does not save or restore the selected register. If a
+   later change lets main-loop VDC code run while the chain is armed, either the
+   handler must restore the selected register from a shadow, or that code must mask
+   interrupts or work in chunks of at most 64 words, re-setting the address each time.
+
+Not yet checked: the interpreter ROM's COPYV (it runs in `frame()`, which is the
+unarmed phase, so rule 1 covers it) against a trace.
+
+## Two bugs the console runtime and linker had (fixed 2026-11-13)
+
+- **A division next to a remainder corrupted the control register.** llvm-mos fuses `x / y` and
+  `x % y` into one library call that returns the remainder through a pointer to a zero-page
+  variable; that pointer is `$00xx` where the CPU's zero page is `$20xx`, so the store landed in the VDC
+  and clobbered CR. `pce-cgen.js` now computes `x - q*y` and calls the division alone (found by the
+  card #289 seat). The same family of bug: a `memset` through a pointer to a zero-page array
+  (found with Geargrafx's call stack, see the banked-split section above).
+- **`frame()`'s VRAM writes were dropped in raster builds.** They went into a 32-word capture list and
+  the rest were lost, which is why STARFALL had no enemies and DUSK RUN stalled. The display is idle
+  while `frame()` runs, so the writes now go straight to the VDC (also the #289 seat).
+- **The art blob was missing from the ROM** until `retain` was added (nothing referred to it by name,
+  so the linker dropped it), and the run table was a zero-page copy that was all zeros at run time.
+  `tests/check-native-art.js` found both.
+
+## Is the compiler right? The host comparison
+
+`tools/host-c-compare.js toys/NAME/main.lua` compiles the generated C on this machine against a stub
+runtime (`tests/hostc/stub_runtime.c`: VRAM and the sprite list as arrays, an idle pad) and compares the
+sprite list after every toy frame with the browser runtime's. It needs no emulator and no llvm-mos, so it
+separates the compiler's logic from the console runtime's behaviour. For PLATFORMER, TOWER, DUSK RUN and
+STARFALL, 120 of 120 frames are equal (`tests/check-cgen-host.js`). So when a native ROM's picture is wrong
+the cause is the runtime, the banking or the build, not `pce-cgen.js`: that is how STARFALL's missing
+sprites were traced to the runtime's 32-word VRAM capture list within an hour.
 
 ## Native against interpreter
 

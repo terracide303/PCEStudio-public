@@ -162,7 +162,14 @@ function sampleHash(pixels) {
  * toy frames in, so its pin asks for a wider window (TOWER: 600). */
 function browserFrames(toyPath, count) {
   const source = fs.readFileSync(path.join(ROOT, toyPath), "utf8");
-  const browser = toys.create(source, { budgetMs: 2000 });
+  /* the toy folder's art files, as the studio hands them to the runtime */
+  const dir = path.dirname(path.join(ROOT, toyPath));
+  const files = ["tiles.json", "palettes.json", "sprites.json"]
+    .filter((n) => fs.existsSync(path.join(dir, n)))
+    .map((n) => ({ name: n, source: fs.readFileSync(path.join(dir, n), "utf8") }));
+  const options = { budgetMs: 2000 };
+  if (files.length) options.files = files;
+  const browser = toys.create(source, options);
   browser.load();
   const frames = [];
   const n = count || BROWSER_FRAMES;
@@ -220,4 +227,13 @@ function notBlack(framesDir, files) {
  const want=browserFrames(toy,+process.argv[5]||60);
  const r=compareCapture(cap.frames,cap.files,want);
  console.log("captured",cap.files.length,"lit",lit.length,"compare",JSON.stringify(r));
+ if(r.match<0 && r.file){
+  /* which picture rows differ from the closest browser frame: a few clustered rows
+   * point at a timing difference (raster), a scattered picture at wrong data */
+  const img=decodePng(fs.readFileSync(path.join(cap.frames,r.file)));
+  const w=want[r.best].pixels, row=img.width*3, rows=[];
+  for(let y=0;y<img.pixels.length/row;y++){let d=0;for(let k=y*row;k<(y+1)*row;k++)if(img.pixels[k]!==w[k])d++;if(d)rows.push(y);}
+  const ranges=[];for(const y of rows){const l=ranges[ranges.length-1];if(l&&y===l[1]+1)l[1]=y;else ranges.push([y,y]);}
+  console.log("differing rows:",rows.length,"in",ranges.length,"range(s):",ranges.slice(0,12).map(a=>a[0]===a[1]?a[0]:a[0]+"-"+a[1]).join(","));
+ }
 })();

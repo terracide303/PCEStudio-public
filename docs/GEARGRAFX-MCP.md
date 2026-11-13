@@ -8,6 +8,10 @@ With Geargrafx we can stop a running ROM, read the CPU and the eight bank
 registers, look at the call stack and the disassembly, set breakpoints and read
 or write memory, all from a script.
 
+See also `docs/GEARGRAFX.md` (#253), the earlier research note: the tool catalog quoted from
+the README, the symbol-file loader and where we could plug in. This file is the recipe that
+works and what it found.
+
 ## Run it
 
 The app is a zip (`Geargrafx.app.zip`, v1.8.5) in `pce-tools/geargrafx/`;

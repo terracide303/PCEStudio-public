@@ -285,6 +285,16 @@
         if (okt === "sprite") usesSprites = true;
       }
     }
+    /* music/sfx/release and the note builtin lower to toy_sound.h (the native
+     * sound glue, docs/NATIVE-SOUND.md): the boot and each frame then call it. */
+    var usesSound = false;
+    for (f = 0; f < functions.length && !usesSound; f++) {
+      for (pc = 0; pc < functions[f].code.length; pc++) {
+        var ost = functions[f].code[pc];
+        if (ost.t === "music" || ost.t === "sfx" || ost.t === "release" ||
+            (ost.t === "builtin" && ost.name === "note")) { usesSound = true; break; }
+      }
+    }
     var table = null;
     var tableSiteAt = [];
     var tableFieldIds = {};
@@ -396,6 +406,7 @@
       hookFrame: program.hooks.frame,
       hookRaster: hookRaster,
       usesTables: usesTables,
+      usesSound: usesSound,
       usesSprites: usesSprites,
       table: table,
       sprites: table ? table.sprites : null,
@@ -1204,6 +1215,8 @@
     } else {
       line("#include <stdint.h>");
       line("#include \"toy_runtime.h\"");
+      if (a.usesSound) line("#include \"toy_sound.h\"");
+      if (options && options.assets) line("#include \"toy_assets.h\"");
     }
     line("");
     line("#define IL_NCLOSURES " + Math.max(1, a.closureCount));
@@ -1301,11 +1314,22 @@
     /* ---- integer helpers the lowering needs -------------------------- */
     if (uses.mod) {
       line("/* Lua's `%`: the result has the divisor's sign. */");
-      line("static " + T + " il_lua_mod(" + T + " x, " + T + " y) {");
-      /* HuC only initialises a local with a constant (measured: `int m =
-       * x % y;` fails to compile), so the dialect splits declaration and
-       * assignment. */
-      line(huc ? "  " + T + " m; m = x % y;" : "  " + T + " m = x % y;");
+      line("static " + (huc ? "" : "__attribute__((noinline)) ") + T
+           + " il_lua_mod(" + T + " x, " + T + " y) {");
+      if (huc) {
+        /* HuC only initialises a local with a constant (measured: `int m =
+         * x % y;` fails to compile), so the dialect splits declaration and
+         * assignment. */
+        line("  " + T + " m; m = x % y;");
+      } else {
+        /* No `%`, as in il_lua_idiv: an srem next to the division llvm-mos
+         * fuses into __divmodsi4(x, y, &rem), whose rem pointer is a zp
+         * static materialised with the $2000 bank dropped, so the remainder
+         * store lands in the VDC page and kills CR (#289).  x - q*y is the
+         * same trunc remainder. */
+        line("  " + T + " q = x / y;");
+        line("  " + T + " m = x - q * y;");
+      }
       line("  if (m != 0 && ((m < 0) != (y < 0))) m += y;");
       line("  return m;");
       line("}");
@@ -1313,13 +1337,20 @@
     }
     if (uses.idiv) {
       line("/* Lua's `//`: floor division. */");
-      line("static " + T + " il_lua_idiv(" + T + " x, " + T + " y) {");
+      line("static " + (huc ? "" : "__attribute__((noinline)) ") + T
+           + " il_lua_idiv(" + T + " x, " + T + " y) {");
       if (huc) {
         line("  " + T + " q; " + T + " r;");
         line("  q = x / y; r = x % y;");
       } else {
+        /* No `%`: llvm-mos fuses `x / y` with a `x % y` into one
+         * __divmodsi4(x, y, &rem) call whose remainder pointer is a
+         * zero-page static materialised with the $2000 bank dropped, so
+         * the remainder store lands in the VDC page ($00E5 aliases the
+         * data/select ports) and kills CR (#289).  x - q*y is the same
+         * trunc remainder, and the quotient call needs no pointer. */
         line("  " + T + " q = x / y;");
-        line("  " + T + " r = x % y;");
+        line("  " + T + " r = x - q * y;");
       }
       line("  if (r != 0 && ((r < 0) != (y < 0))) q--;");
       line("  return q;");
@@ -1410,6 +1441,11 @@
 
     line("/* The runtime calls toy_boot() once, then toy_frame(f) each VBlank. */");
     line("void toy_boot(void) {");
+    /* the toy's art (tiles, palettes, sprites) goes into VRAM, the colour table and
+     * the sprite list before its first statement, as the browser's importer does
+     * (tools/native-assets.js, tools/toyc/toy_assets.c) */
+    if (options && options.assets && !huc) line("  toy_assets_boot();");
+    if (a.usesSound && !huc) line("  toy_sound_boot();");
     /* The chunk is function 0, not a closure value: call it directly. */
     line("  (void)il_fn_0(&il_closures[0], " + callArgs([]) + ");");
     if (a.hookInit) {
@@ -1421,6 +1457,7 @@
     line("}");
     line("");
     line("void toy_frame(" + T + " f) {");
+    if (a.usesSound && !huc) line("  toy_sound_tick();");
     if (a.usesTimer) line("  il_timer_pump();");
     line("  (void)il_call(il_globals[" + a.globalIds["frame"] + "], " +
          callArgs(["0", "f"]) + ");");
