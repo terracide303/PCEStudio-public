@@ -15,7 +15,7 @@ does.
 |---|---|---|---|
 | PLATFORMER | yes | **yes**, `ROM_KB=16` | its code is 8.5 KiB; the default ROM is 8 KiB |
 | TOWER | yes | **yes**, `ROM_KB=40`, with a silent `toy_sfx` | the native runtime has no sound engine yet, so this build is silent |
-| STARFALL | yes | code links at `ROM_KB=24`, silent `toy_sfx` | no art: the native runtime has no way to load tiles or sprites, so it runs but draws nothing meaningful (not measured) |
+| STARFALL | yes | **yes**, banked, with its art and the real sound engine (`tools/build-toyc-banked.sh toys/demo-game/main.lua name`: code in banks 1, 5, 6, art in bank 7) | the art loads at boot (`tools/native-assets.js`, `tools/toyc/toy_assets.c`: the studio importer's VRAM, colour and sprite words, 1,293 words in 22 runs). The picture is lit and recognisable but **not diff 0**: against the closest of 300 browser frames, 127 rows differ, in clusters between rows 7 and 102 (the raster path has a known four-line phase difference, docs/IL.md §10.4; not yet shown to be the cause) |
 | DUSK RUN | yes (since `unm`, `bnot`, `not`) | **yes**, `ROM_KB=48`, silent `toy_sfx` | builds since the table pool is sized to the toy's own cells (it was a fixed 768 B and overflowed RAM by 146 B); but it **stalls after the first frame** and the screen stays black: the runtime's raised flag says a frame() wrote more colours than its 32-entry list holds. Not measured |
 | NOVA TIDE | **no** | — | `raster(line, spec)`, the table form, is not lowered; it also needs its art |
 

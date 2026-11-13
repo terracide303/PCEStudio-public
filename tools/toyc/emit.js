@@ -46,6 +46,11 @@ try {
     const sp = path.join(path.dirname(srcPath), nm);
     if (fs.existsSync(sp)) songFiles.push({ name: nm, source: fs.readFileSync(sp, "utf8") });
   }
+  /* the toy folder's art files: the native ROM replays the importer's picture at boot */
+  const artFiles = require("../../renderer/pce-toyhost.js").importer.FILES
+    .filter((nm) => fs.existsSync(path.join(path.dirname(srcPath), nm)))
+    .map((nm) => ({ name: nm, source: fs.readFileSync(path.join(path.dirname(srcPath), nm), "utf8") }));
+  const hasArt = artFiles.length > 0 && !!require("../../renderer/pce-toyhost.js").importer.read(artFiles);
   const songs = songFiles.length ? require("../../renderer/pce-seq.js").songsFromFiles(songFiles) : [];
   const report = validate.validateProgram(program, {
     chunkName: path.basename(srcPath),
@@ -57,7 +62,7 @@ try {
                   ": " + (first ? first.message : "the toy failed"));
     process.exit(1);
   }
-  fs.writeFileSync(outPath, cgen.emitC(program, { target: target,
+  fs.writeFileSync(outPath, cgen.emitC(program, { target: target, assets: hasArt,
     splitOver: +process.env.PCE_SPLIT_OVER || undefined,
     splitChunk: +process.env.PCE_SPLIT_CHUNK || undefined,
     splitOnly: process.env.PCE_SPLIT_ONLY ? process.env.PCE_SPLIT_ONLY.split(",").map(Number) : undefined }));

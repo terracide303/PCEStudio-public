@@ -1216,6 +1216,7 @@
       line("#include <stdint.h>");
       line("#include \"toy_runtime.h\"");
       if (a.usesSound) line("#include \"toy_sound.h\"");
+      if (options && options.assets) line("#include \"toy_assets.h\"");
     }
     line("");
     line("#define IL_NCLOSURES " + Math.max(1, a.closureCount));
@@ -1422,6 +1423,10 @@
 
     line("/* The runtime calls toy_boot() once, then toy_frame(f) each VBlank. */");
     line("void toy_boot(void) {");
+    /* the toy's art (tiles, palettes, sprites) goes into VRAM, the colour table and
+     * the sprite list before its first statement, as the browser's importer does
+     * (tools/native-assets.js, tools/toyc/toy_assets.c) */
+    if (options && options.assets && !huc) line("  toy_assets_boot();");
     if (a.usesSound && !huc) line("  toy_sound_boot();");
     /* The chunk is function 0, not a closure value: call it directly. */
     line("  (void)il_fn_0(&il_closures[0], " + callArgs([]) + ");");

@@ -78,6 +78,16 @@ elif [ $RC -ne 0 ]; then
   echo "$OUT" >&2; exit $RC
 fi
 BANKS=$(echo "$OUT" | sed -n 's/^BANKS //p')
+# the toy's art (tiles.json, palettes.json, sprites.json beside the Lua): data banks after the code banks
+if grep -q '#include "toy_assets.h"' "$G.c"; then
+  LAST=0; for b in $BANKS; do [ "$b" -gt "$LAST" ] && LAST=$b; done
+  [ "$LAST" -lt 4 ] && LAST=4
+  ART=$(node tools/native-assets.js "$(dirname "$SRC")" $((LAST + 1)) "$G.art.c")
+  case "$ART" in
+    BANKS*) BANKS="$BANKS ${ART#BANKS }"; SRCS="$SRCS $G.art.c tools/toyc/toy_assets.c"; EXTRA="$EXTRA -DTOY_INPUT_BUILD -Itools/toyc" ;;
+    *) echo "the toy has art files but the importer read none" >&2; exit 1 ;;
+  esac
+fi
 DEFS=""
 for b in $BANKS; do DEFS="$DEFS -Wl,--defsym=__rom_bank${b}_size=0x2000"; done
 link() { "$CC" -Os $EXTRA $DEFS -Itools/toyc -o "$G.pce" $SRCS; }
