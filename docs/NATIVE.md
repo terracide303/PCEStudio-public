@@ -93,6 +93,27 @@ avoids this by construction, and the engine must keep it that way:
 Not yet checked: the interpreter ROM's COPYV (it runs in `frame()`, which is the
 unarmed phase, so rule 1 covers it) against a trace.
 
+## A picture that jumped once a second (found on real hardware, fixed 2026-11-13)
+
+The maintainer ran the native PCEHero intro on a real PC Engine and in a web emulator and saw the
+picture jump up and down about once a second. The cause was in our runtime: a game with no `raster()`
+callback runs `frame()` right after the VBlank starts, and a slow frame (the music tick takes up to a
+third of a frame on a busy row) pushed the game's `reg("BYR", ...)` write past the 22-line blanking
+period into the visible picture. Measured with Geargrafx's VDC trace: the write landed 5 to 40 lines
+after the VBlank started, and in 8 of 400 frames (every 96 and 36 frames in turn, following the music
+rows) it was late. Emulators that draw a whole frame at a time (Mednafen's capture, the browser) show
+nothing, which is why no earlier check saw it.
+
+The fix: `frame()`'s writes to the scroll, control and colour registers are held and applied at the
+start of the next VBlank (`TOY_HOLD_BUILD` in `tools/toyc/toy_runtime.c`, on in every
+`tools/build-toyc-banked.sh` build; the committed 8 KiB runtime ROMs are unchanged). After it, every
+write lands exactly 2 lines after the VBlank starts, 400 of 400 frames. It costs a frame of latency
+and never tears. Sprites are not held: their list is read by the VDC at the VBlank. A game with a
+`raster()` callback already did this (its writes are captured and applied in the VBlank).
+`tests/check-native-vblank.js` pins it, with a control (the old behaviour, `NO_HOLD=1`) that must fail.
+What it does not cover: VRAM tile writes made by a game's own `frame()` still go straight to the VDC
+and could tear the same way if a frame overruns; none of the gallery games does that.
+
 ## Two bugs the console runtime and linker had (fixed 2026-11-13)
 
 - **A division next to a remainder corrupted the control register.** llvm-mos fuses `x / y` and

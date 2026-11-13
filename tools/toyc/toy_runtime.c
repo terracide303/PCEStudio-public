@@ -229,6 +229,24 @@ static void measure_flag(uint8_t bit) {
 }
 #endif
 
+#ifdef TOY_HOLD_BUILD
+/* A toy with no raster() callback runs frame() right after the VBlank starts, and a slow
+ * frame (the sound tick, a busy game) can still be running when the visible picture
+ * begins.  A scroll, control or colour write made then lands in the middle of the picture
+ * and the picture jumps (measured on real hardware: PCEHero's BYR write landed 24 to 40
+ * lines after the VBlank started in about one frame in 50, where the blanking period is
+ * 22 lines).  So frame()'s writes to BXR, BYR, CR and the colour table are held and
+ * applied at the start of the next VBlank, which costs a frame of latency and never tears.
+ * Sprites are not held: their list is read by the VDC at the VBlank. */
+#define HOLD_COLOURS 32
+static uint8_t hold_on;                 /* 1 while frame() runs */
+static uint8_t hold_has;                /* bit0 BXR, bit1 BYR, bit2 CR */
+static uint16_t hold_bxr, hold_byr;
+static uint8_t hold_cr;
+static uint8_t hold_npal;
+static uint16_t hold_pal_a[HOLD_COLOURS], hold_pal_w[HOLD_COLOURS];
+#endif
+
 void toy_pal(int32_t addr, int32_t word) {
 #ifdef TOY_RASTER_BUILD
   uint16_t a = (uint16_t)addr & 0x1FF;
@@ -267,11 +285,23 @@ void toy_pal(int32_t addr, int32_t word) {
     }
     return;
   }
+#ifdef TOY_HOLD_BUILD
+  if (hold_on && hold_npal < HOLD_COLOURS) {
+    hold_pal_a[hold_npal] = a; hold_pal_w[hold_npal] = w; hold_npal++;
+    return;
+  }
+#endif
   /* The VCE's CTA is 9 bits and auto-increments after each data write. */
   *IO_VCE_COLOR_INDEX = a;
   *IO_VCE_COLOR_DATA = w;
 #else
   /* Part A's body, unchanged: its palette ROM is a committed image. */
+#ifdef TOY_HOLD_BUILD
+  if (hold_on && hold_npal < HOLD_COLOURS) {
+    hold_pal_a[hold_npal] = (uint16_t)addr & 0x1FF; hold_pal_w[hold_npal] = (uint16_t)word & 0x1FF; hold_npal++;
+    return;
+  }
+#endif
   *IO_VCE_COLOR_INDEX = (uint16_t)addr;
   *IO_VCE_COLOR_DATA = (uint16_t)word;
 #endif
@@ -312,6 +342,14 @@ void toy_reg(int32_t which, int32_t value) {
     return;
   }
 #endif
+#ifdef TOY_HOLD_BUILD
+  if (hold_on) {
+    if (which == TOY_REG_BXR) { hold_bxr = v; hold_has |= 1; }
+    else if (which == TOY_REG_BYR) { hold_byr = v; hold_has |= 2; }
+    else { hold_cr = (uint8_t)v; hold_has |= 4; }
+    return;
+  }
+#endif
   if (which == TOY_REG_BXR) {
     vdc_write(0x07, (uint16_t)(v & 0x3FF));
   } else if (which == TOY_REG_BYR) {
@@ -329,6 +367,27 @@ void toy_reg(int32_t which, int32_t value) {
 #endif
   }
 }
+
+#ifdef TOY_HOLD_BUILD
+/* Apply what frame() held, at the start of a VBlank (see the hold block above). */
+static void hold_flush(void) {
+  uint8_t i;
+  for (i = 0; i < hold_npal; i++) {
+    *IO_VCE_COLOR_INDEX = hold_pal_a[i];
+    *IO_VCE_COLOR_DATA = hold_pal_w[i];
+  }
+  hold_npal = 0;
+  if (hold_has & 1) vdc_write(0x07, (uint16_t)(hold_bxr & 0x3FF));
+  if (hold_has & 2) vdc_write(0x08, (uint16_t)(hold_byr & 0x1FF));
+  if (hold_has & 4) {
+    vdc_write(0x05, (uint16_t)(hold_cr | 0x0C));
+#ifdef TOY_INPUT_BUILD
+    toy_cr = hold_cr;
+#endif
+  }
+  hold_has = 0;
+}
+#endif
 
 void toy_vram_set(int32_t addr, int32_t word) {
 #ifdef TOY_RASTER_BUILD
@@ -675,12 +734,19 @@ int main(void) {
     int32_t f;
     for (f = 0;; f++) {
       toy_wait_vblank();
+#ifdef TOY_HOLD_BUILD
+      hold_flush();             /* last frame's scroll/control/colour writes, inside the blanking */
+      hold_on = 1;
+#endif
 #ifdef TOY_INPUT_BUILD
       joy_scan();               /* the pads, once per toy frame (#45) */
 #endif
       toy_measure_begin();
       toy_frame(f);
       toy_measure_end();
+#ifdef TOY_HOLD_BUILD
+      hold_on = 0;
+#endif
     }
     }
 #ifdef TOY_RASTER_BUILD
