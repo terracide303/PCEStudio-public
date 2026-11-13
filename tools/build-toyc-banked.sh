@@ -25,8 +25,9 @@ CC="$LLVM_MOS/bin/mos-pce-clang"
 G="tools/gen/$NAME"
 mkdir -p tools/gen
 node tools/toyc/emit.js "$SRC" "$G.c"
-EXTRA=""
-grep -q "void toy_raster(int32_t line)" "$G.c" && EXTRA="-DTOY_RASTER_BUILD"
+EXTRA="-DTOY_HOLD_BUILD"   # hold frame()'s scroll/control/colour writes for the next VBlank (tools/toyc/toy_runtime.c)
+[ "${NO_HOLD:-0}" = "1" ] && EXTRA=""   # NO_HOLD=1: the old behaviour, for tests/check-native-vblank.js's control
+grep -q "void toy_raster(int32_t line)" "$G.c" && EXTRA="$EXTRA -DTOY_RASTER_BUILD"
 grep -qE "toy_pad\(|toy_timer_set\(|toy_sat\(|toy_sprite\(" "$G.c" && EXTRA="$EXTRA -DTOY_INPUT_BUILD"
 SOUND=0
 SRCS="tools/toyc/toy_runtime.c $G.banked.c"
