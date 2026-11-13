@@ -64,6 +64,35 @@
   <b>tested</b> and how. Anything not listed under "works" is not finished. What comes next, and why, is on the <a href="roadmap.html">roadmap</a>. The honest list of gaps is in the
   <a href="testers.html#not-yet">beta guide</a>.</p>
 
+  <h2 id="b7">Build 7 · Friday 13 November</h2>
+  <h3>Bigger games export, with their music</h3>
+  <ul>
+    <li>A game's art files no longer have to fit in one 8 KiB bank. The art now travels in its own ROM banks, so the "toy-data-bank-full" refusal for games with big art is gone. STARFALL builds as a 49,152-byte ROM, and a 221 KB art project (the PCEHero intro) builds as a 57,344-byte ROM.
+      <span class="status ok">tested: the build steps the Export button runs, in a test</span>
+      <span class="status soon">the exported games still run on the slow interpreter; speed is the next item below</span></li>
+    <li>Export now carries the game's songs. Before, an exported game was silent. The song is converted for the HuTrack sound engine and put in its own bank.
+      <span class="status ok">tested: an exported ROM played in an emulator sounds the notes the studio's own player writes for the song</span>
+      <span class="status soon">up to 8 songs and 8,160 bytes of song data per game</span></li>
+  </ul>
+  <h3>A faster way to a ROM (developer preview, not on the Export button)</h3>
+  <ul>
+    <li>Games can now be turned into real machine code for the PC Engine instead of being interpreted. The PCEHero intro built this way <b>runs correctly on a real PC Engine and on an FPGA core</b>: the picture matches the browser's pixel for pixel and the jingle plays.
+      <span class="status ok">tested: real console and FPGA core by the maintainer; emulator checks of the picture, the sprites and the sound</span></li>
+    <li>TOWER, which the interpreter runs at about five updates a second, fits in a 60 Hz frame this way (70 percent of a frame on average, 91 percent worst case, without sound). PLATFORMER costs 27 times fewer cycles.
+      <span class="status ok">tested: cycle counts measured in an emulator</span></li>
+    <li>The machine-code route has its own sound (the music engine, with real songs), loads a game's art at start-up, and handles games bigger than the console's normal 8 KiB window by switching ROM banks.
+      <span class="status ok">tested: the sound is compared note for note with the studio's; the art is compared word for word with what the studio shows</span></li>
+    <li>Found on real hardware and fixed: the picture jumped up and down about once a second. The game's scroll write was landing in the visible picture whenever the music made a frame slow. Scroll, control and colour writes are now applied at the start of the next blanking period.
+      <span class="status ok">tested: all 400 measured frames now write inside the blanking period; before, 8 of 400 did not</span></li>
+    <li>Not finished: STARFALL's sprites, art and logic are exact but 127 rows of its picture differ (the starfield). DUSK RUN runs but slowly. NOVA TIDE does not compile yet. The Export button does not use this route: that needs the compiler to run in the browser.
+      <span class="status soon">in progress</span></li>
+  </ul>
+  <h3>How real games work</h3>
+  <ul>
+    <li>Three commercial HuCards from the maintainer's own collection were run in a scriptable emulator and measured, one frame at a time: how much of a frame they leave idle, how often they switch ROM banks, how they write video memory and how they load a scene. The numbers shape the game engine plan. Only counts were kept; nothing from the games is stored.
+      <span class="status ok">tested: measured with an emulator's trace</span></li>
+  </ul>
+
   <h2 id="b6">Build 6 · Wednesday 4 November</h2>
   <h3>Exporting the example games</h3>
   <ul>
