@@ -64,6 +64,28 @@
   <b>tested</b> and how. Anything not listed under "works" is not finished. What comes next, and why, is on the <a href="roadmap.html">roadmap</a>. The honest list of gaps is in the
   <a href="testers.html#not-yet">beta guide</a>.</p>
 
+  <h2 id="b8">Build 8 · Friday 13 November (evening)</h2>
+  <h3>All five example games now compile to machine code (developer preview)</h3>
+  <ul>
+    <li>NOVA TIDE, the game with scrolling bands of sky, hills, city and sea, now compiles and runs in the emulator. The compiled game logic is the same as the studio's, frame for frame, and its sprite list equals the studio's word for word. 65 rows of its picture still differ from the studio's (the score bar and the sprites), as with STARFALL; the cause is not found yet.
+      <span class="status ok">tested: 60 of 60 frames equal on the logic, 0 differing words in the sprite list, the ROM runs in an emulator</span>
+      <span class="status soon">picture not pixel for pixel; not yet run on a real console</span></li>
+    <li>DUSK RUN's slowness is explained. For its first couple of minutes it draws its background piece by piece, and every piece needs many multiplications that the console does in software. Multiplication now costs what the smaller number needs instead of a fixed 2,000 cycles, and division by 2, 4, 8 and so on is a shift, so that start-up is about a fifth shorter (9,000 down to 7,000 video frames). After it a test copy of the game, with the sky gradient computed without division, runs at about 9 updates a second; the gallery game itself is slower.
+      <span class="status ok">tested: the new multiply equals the studio's result on 29,952 products, including negative numbers; speed measured in an emulator over 21,000 frames</span>
+      <span class="status soon">still slow at the start; drawing the background ahead of time would remove it</span></li>
+    <li>Games use less of the console's 8 KiB of RAM: the table the compiler kept for functions inside functions took 3 KiB in DUSK RUN and now takes what each function needs, and games with scrolling bands no longer reserve 2 KiB for per-line colour writes they never make. Before this, DUSK RUN and NOVA TIDE did not fit beside the sound engine.
+      <span class="status ok">tested: both games run; STARFALL, TOWER and PLATFORMER still run and their sound and art checks pass</span></li>
+  </ul>
+  <h3>The site</h3>
+  <ul>
+    <li>The credits page now names Geargrafx, the emulator and debugger we use to look inside our ROMs. The roadmap is brought up to date: what exports, what is compiled, and the one real-console test so far.</li>
+  </ul>
+  <h3>Not finished</h3>
+  <ul>
+    <li>The Export button still refuses NOVA TIDE: the interpreter in the ROM has no form for its per-line scroll calls. Apart from the small PCEHero intro, nothing compiled this way has run on a real console yet.
+      <span class="status soon">in progress</span></li>
+  </ul>
+
   <h2 id="b7">Build 7 · Friday 13 November</h2>
   <h3>Bigger games export, with their music</h3>
   <ul>
