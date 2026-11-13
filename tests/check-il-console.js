@@ -118,7 +118,7 @@ const RASTER_FILE = path.join(ROOT, "toys/parallax.lua");
 const TOY_IDIV = [
   "function frame(t, f)",
   "  local x = -7",
-  "  local q = x // 2",
+  "  local q = x // 3",   /* not a power of two: those lower to a shift now (55739bb); // 3 keeps the floor correction exercised */
   "  pal(1, q + 8)",
   "end",
   ""
@@ -241,8 +241,11 @@ const IDIV_CASES = [
 ];
 
 function extractIdivHelper(c) {
-  const start = c.indexOf("static int32_t il_lua_idiv(");
+  /* the helper is `__attribute__((noinline)) int32_t il_lua_idiv(` since the #289 rewrite */
+  let start = c.indexOf("int32_t il_lua_idiv(int32_t x, int32_t y) {");
   if (start < 0) return null;
+  const lineStart = c.lastIndexOf("\n", start) + 1;
+  start = lineStart;
   const end = c.indexOf("\n}\n", start);
   if (end < 0) return null;
   return c.slice(start, end + 3);
