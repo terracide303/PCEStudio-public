@@ -570,8 +570,26 @@ Card #279 built §5.2 in `renderer/pce-ilbc.js` and `renderer/pce-rom.js`:
 - **The assets tail** after a v4 container starts on the next whole bank and
   occupies whole banks; the container banks' trailers are written first, so
   assets never overwrite one.
-- **The interpreter reads v4 since #280** (§5.7). Rule 2 is still owed for
-  `tests/check-banked-data.js` (a different seat and model).
+- **The interpreter reads v4 since #280** (§5.7). Rule 2 for
+  `tests/check-banked-data.js` ran 2026-11-13 (seat test-PCEStudio-1113-125559,
+  deepseek-v4-pro — a different seat and model from the 2026-11-04 pass that
+  wrote the nine checks). The nine v4 (1)..(9) breaks were re-applied in new
+  spellings (the entry's codeOff one off its payload, every jump target +1, the
+  v4 fill byte 0xAA, the header's tabTabOff and bank count swapped, the fit
+  threshold -1, the packing and tables edges `>=`, the encoder's toy-rom-full
+  guard removed, the trailer re-zero and zeroing loops from bank 1, the bank
+  count +1, an upvalue kind/index swap — caught by the always-run pins, since
+  the table fixture and the seven v1-v3 toys carry upvalues); every one turned
+  the suite red with its named FAIL. Four breaks of that seat's own stayed
+  green and are now checked, so the suite is 1,639 checks whose only reds are
+  the three whole-dump ROM pins #282 re-pins: **v4 (10)** the 123-code-bank
+  acceptance edge (a 128-bank, 1,048,576 B ROM) and the builder's own
+  `toy-rom-full` for a hand-made 124-bank container and for a 123-bank
+  container plus any asset tail; **v4 (11)** the asset tail's place on the v4
+  and the v1-3 path (container intact, tail byte-identical, 0xFF fill after);
+  **v4 (12)** the fit decision counting the table section of a table-bearing
+  toy (exactly 8,160 B stays v2, one byte more is v4). The checks v4 (10)..(12)
+  owe their own rule-2 pass.
 - **Version-number collision with `docs/ASM.md`.** That note reserved
   container version 4 for CALLASM (#225/#236), which is not built. #279 takes
   version 4 for the banked container; when the assembly-routine card is

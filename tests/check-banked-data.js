@@ -36,14 +36,29 @@
  *      the header's tabTabOff, the fit/packing/tables exact-8,160 edges, the
  *      124-bank toy-rom-full refusal, and the builder's per-bank trailer
  *      re-zero.  Each check's name carries its break number, v4 (1)..(9).
+ *   6. The rule-2 re-break of those nine, plus four breaks of this seat's
+ *      own (2026-11-13, seat test-PCEStudio-1113-125559, deepseek-v4-pro — a
+ *      different seat and model from #285's).  Re-broken red: the entry's
+ *      codeOff one off its payload's place, every jump target +1, the v4
+ *      fill byte 0xAA, tabTabOff and the bank count swapped in the header,
+ *      the fit threshold -1, the packing rule >=, the encoder's toy-rom-full
+ *      guard removed (a 124-bank program encoded), the tables edge >=, the
+ *      builder's trailer re-zero loop from bank 1, the encoder's trailer
+ *      zeroing skipping the tables bank, the header's bank count +1, and an
+ *      upvalue kind/index swap (caught by the always-run pins: the table
+ *      fixture and the seven v1-v3 toys carry upvalues).  Four stayed green
+ *      and became checks v4 (10)..(12): the 123-code-bank acceptance edge and
+ *      the builder's own toy-rom-full guard, an asset tail one byte early on
+ *      both the v4 and the v1-3 path (the tail's first byte alone was
+ *      probed), and the fit decision ignoring the table section of a
+ *      table-bearing toy.
  *
  * NOT PROVEN HERE: this suite does not boot a banked ROM.  Since #280 the
  * interpreter does read v4 (boot maps MPR3 to the tables bank and MPR2 per
  * call); its boot and picture evidence is in docs/BANKED-DATA.md §5.7
  * (host-vs-browser parity and a Mednafen save-state diff), not in this file.
- * Rule 2 applies to these nine checks too: a different seat and model must
- * re-break them (and the check catch every break) before #285 — and with it
- * #279 — closes.
+ * Rule 2 applies to checks v4 (10)..(12) as it did to (1)..(9): a different
+ * seat and model must re-break them (and the check catch every break).
  *
  * FOUND WHILE WRITING THEM (2026-11-04, @test): the banked encode path called
  * encodeFunction with codeOff 0 (renderer/pce-ilbc.js, the out.set loop), so
@@ -242,9 +257,18 @@ function checkContainer(bytes, wantBanks, label) {
        bytes[b * BANK + USABLE], 0);
   }
 
-  const rom = romLib.buildToyRom({
-    bank0: fs.readFileSync(ILVM), bytecode: bytes });
-  eq(label + ": ROM bytes", rom.length, 32768 + (1 + wantBanks) * BANK);
+  let rom;
+  try {
+    rom = romLib.buildToyRom({
+      bank0: fs.readFileSync(ILVM), bytecode: bytes });
+  } catch (e) {
+    rom = null;
+    eq(label + ": the builder takes the container",
+       (e && e.code) || (e && e.name) || "error", null);
+  }
+  if (rom) {
+    eq(label + ": ROM bytes", rom.length, 32768 + (1 + wantBanks) * BANK);
+  }
 }
 
 function checkVanillaFixture() {
@@ -432,6 +456,40 @@ function checkRefusals() {
      withAssets.length, 32768 + 5 * BANK);
   eq("the asset tail starts on the bank after the container",
      withAssets[32768 + enc.bytes.length], 7);
+  /* Break (11): the asset tail must not overlap the container.  The broken
+   * builder wrote assets one byte early: the suite stayed green because only
+   * the tail's first byte was probed.  The whole data region is compared. */
+  check(Buffer.from(withAssets.slice(32768, 32768 + enc.bytes.length))
+        .equals(Buffer.from(enc.bytes)),
+        "v4 (11) the container's bytes are intact before the asset tail");
+  check(Buffer.from(withAssets.slice(32768 + enc.bytes.length,
+                                     32768 + enc.bytes.length + assets.length))
+        .equals(Buffer.from(assets)),
+        "v4 (11) the asset tail is byte-identical after the container");
+  check(withAssets.slice(32768 + enc.bytes.length + assets.length)
+        .every(function (b) { return b === 0xFF; }),
+        "v4 (11) the banks after the asset tail are 0xFF fill");
+  /* Break (11), unbanked: the v1-v3 asset tail has the same place rule, and
+   * the broken builder wrote it one byte early on this path too — equally
+   * green until these lines. */
+  const flatAssets = new Uint8Array(100);
+  flatAssets.fill(7);
+  const withFlatAssets = romLib.buildToyRom({
+    bank0: bank0, bytecode: fakeContainer(300), assets: flatAssets });
+  eq("a v1-3 container plus a 100 B asset tail builds a 40,960 B ROM",
+     withFlatAssets.length, 32768 + BANK);
+  check(Buffer.from(withFlatAssets.slice(32768, 32768 + 300))
+        .equals(Buffer.from(fakeContainer(300))),
+        "v1-3 (11) the container's bytes are intact before the asset tail");
+  check(Buffer.from(withFlatAssets.slice(32768 + 300, 32768 + 400))
+        .equals(Buffer.from(flatAssets)),
+        "v1-3 (11) the asset tail is byte-identical after the container");
+  eq("v1-3 (11) its song trailer is zero", withFlatAssets[32768 + USABLE], 0);
+  const rest = withFlatAssets.slice(32768 + 400);
+  check(rest.every(function (b, i) {
+          return i === USABLE - 400 ? b === 0 : b === 0xFF;
+        }),
+        "v1-3 (11) the rest of the bank is 0xFF fill (the trailer zero)");
 }
 
 /* ---- 4. the nine #285 cold breaks, now checked -------------------------- */
@@ -709,6 +767,93 @@ function checkRule2Breaks() {
       checkStream(tower, fid, towerProg.functions[fid].code, "TOWER");
     }
   }
+
+  /* Break (10): the acceptance edge of toy-rom-full.  A program that needs
+   * exactly 123 code banks fills the HuCard (123 code banks + the tables
+   * bank + the 4 image banks = 128).  The broken `>=` guard refuses it — the
+   * suite stayed green because v4 (7) pins only the 124 refusal — and a
+   * builder whose toy-rom-full guard is gone builds a 129-bank ROM from a
+   * hand-made 124-bank container. */
+  const maxProgram = program(
+    Array.from({ length: 123 }, function () { return consts(2720); }));
+  const maxRefusal = refuseCode(function () { ilbc.encode(maxProgram); });
+  eq("v4 (10) a 123-code-bank program encodes (no refusal)", maxRefusal, null);
+  if (maxRefusal === null) {
+    const maxEnc = ilbc.encode(maxProgram);
+    eq("v4 (10) it names 123 code banks", maxEnc.codeBanks, 123);
+    eq("v4 (10) its container is 124 banks", maxEnc.bytes.length, 124 * BANK);
+    checkContainer(maxEnc.bytes, 123, "the 123-bank fixture");
+    eq("v4 (10) the builder takes it: a 128-bank, 1,048,576 B ROM",
+       refuseCode(function () {
+         romLib.buildToyRom({ bank0: bank0, bytecode: maxEnc.bytes });
+       }), null);
+    const tail = new Uint8Array(100);
+    tail.fill(7);
+    eq("v4 (10) the same container plus any asset tail is toy-rom-full",
+       refuseCode(function () {
+         romLib.buildToyRom({ bank0: bank0, bytecode: maxEnc.bytes,
+                              assets: tail });
+       }), "toy-rom-full");
+  }
+  const overHand = new Uint8Array((1 + 124) * BANK);
+  overHand.set([0x49, 0x4C, 0x42, 0x43], 0);      /* the ILBC magic */
+  overHand[4] = 4;
+  overHand[26] = 124;
+  eq("v4 (10) a hand-made 124-code-bank container is toy-rom-full",
+     refuseCode(function () {
+       romLib.buildToyRom({ bank0: bank0, bytecode: overHand });
+     }), "toy-rom-full");
+
+  /* Break (12): the fit decision for a table-bearing (wide) program must
+   * count the table section.  The broken encoder subtracted the section and
+   * emitted an 8,161 B v2 container instead of banking — the suite stayed
+   * green because breaks (5) and (8) are table-free.  A wide toy whose
+   * v1-v3 layout totals exactly 8,160 B stays v2; one byte more is v4. */
+  const edgeProg = il.compile(tableSrc, { chunkName: "banked-table-edge.lua" });
+  const pad12 = [];
+  for (let p = 0; p < 2600; p++) pad12.push(C);
+  edgeProg.functions[1].code = pad12.concat(edgeProg.functions[1].code);
+  const edgeBase = ilbc.encode(edgeProg);
+  eq("v4 (12) the padded table toy still fits one bank (version 2)",
+     edgeBase.version, 2);
+  check(edgeBase.bytes.length < USABLE,
+        "v4 (12) its v2 container is below 8,160 B (" +
+        edgeBase.bytes.length + ")");
+  /* The gap to 8,160 is closed with 3-byte consts plus one global name of
+   * length L (a global adds exactly L+1 bytes; a name is one u8 length). */
+  const gap = USABLE - edgeBase.bytes.length;
+  const k12 = Math.max(0, Math.ceil((gap - 256) / 3));
+  const L12 = gap - 3 * k12 - 1;
+  check(L12 >= 1 && L12 <= 255,
+        "v4 (12) the exact-fit global length is a u8 (L=" + L12 + ")");
+  function edgeToy(extraConsts, globalLen) {
+    const more = [];
+    for (let p = 0; p < extraConsts; p++) more.push(C);
+    return {
+      lang: edgeProg.lang, version: edgeProg.version,
+      globals: edgeProg.globals.concat([{ name: "z".padEnd(globalLen, "x") }]),
+      hooks: edgeProg.hooks,
+      functions: edgeProg.functions.map(function (fn, i) {
+        return i === 1 ? Object.assign({}, fn, { code: fn.code.concat(more) })
+                       : fn;
+      })
+    };
+  }
+  const fitsWide = ilbc.encode(edgeToy(k12, L12));
+  eq("v4 (12) tables+code of exactly 8,160 B stay a v2 container",
+     fitsWide.version, 2);
+  eq("v4 (12) its container is exactly 8,160 B", fitsWide.bytes.length, USABLE);
+  eq("v4 (12) it builds",
+     refuseCode(function () {
+       romLib.buildToyRom({ bank0: bank0, bytecode: fitsWide.bytes });
+     }), null);
+  const overWide = ilbc.encode(edgeToy(k12, L12 + 1));
+  eq("v4 (12) one byte more is version 4", overWide.version, 4);
+  eq("v4 (12) it is a 2-bank container", overWide.bytes.length, 2 * BANK);
+  eq("v4 (12) it builds",
+     refuseCode(function () {
+       romLib.buildToyRom({ bank0: bank0, bytecode: overWide.bytes });
+     }), null);
 }
 
 /* ---- run ---------------------------------------------------------------- */
