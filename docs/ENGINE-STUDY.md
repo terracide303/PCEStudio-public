@@ -60,10 +60,40 @@ samples, not averages.
    player pushes five page registers). Our handlers use only the fixed page, so they
    never need to.
 
+## A scene load (R-Type, measured)
+
+`tools/study-scene.py` traced R-Type for 1,300 frames from the title through its
+start and into a stage, logging only the VDC's register writes, its DMA and the bank
+mapping (Geargrafx trace filters), and summarized each video frame.
+
+- **An ordinary frame writes about 160 VRAM words.** A scene load writes 30,000 or
+  more: a first burst of 4,480 words in 2 frames (the title screen) and a second of
+  32,144 words over 21 frames, which is the whole of VRAM, at 700 to 1,400 words a
+  frame and 2,670 words in each of the last frames.
+- **The screen is blanked while it loads.** The VDC control register is written with
+  background and sprites off on every one of those frames and turned on again at the
+  end. The game does not try to keep the picture running through a load.
+- **It streams, it does not copy a block.** The write address is set once (for example
+  to $0C00) and then long sequential runs of words follow, carrying on from frame to
+  frame, with a new address only when the destination region changes. 1,400 words is
+  about 40,000 cycles at 30 a word, a third of a frame; the other two thirds are the
+  work of reading the data out of its banks. The last step writes the background map
+  in small pieces: 8 words at each 64-word step.
+- **Bank switching around the load is light:** a handful of mapping changes per frame,
+  the data banks mapped into pages 4 to 6 around the copy and restored after.
+- **Soldier Blade did not reach a stage** in 1,300 frames of the same script (small
+  loads only, 1,261 words in two frames), so there is one game here, one scene change.
+
+What this means for us: a scene-load call in the toy language would blank the display
+(or fade out), stream the scene's banked data to VRAM at a fixed budget per frame (about
+1,400 words, a third of a frame) while the rest of the frame does other work, and bring the
+display back. That is what shipped games do and it needs no compression to be useful.
+The cost is the blank, and a loading time of about a third of a second for all of VRAM.
+
 ## What it does not tell us yet
 
-The priors from the one Konami title in the notes (a central table of asset slots,
-per-scene lazy loading, animation by scheduled decompression, pre-baked fades) need
-load-time traces: step through a level change and watch what is read and where it
-goes. The next measurement is a trace across a scene change in one of these games,
-with a memory watch on the VDC data port. Not done.
+Whether a game keeps a central table of asset slots (the Konami prior), animates by
+scheduled decompression or bakes its fades is not visible from VDC traffic alone; that
+needs the reads from the banks (the instruction trace around a load, or a read watch on
+the data banks). Not done. More games and a stage change inside a game (Soldier Blade,
+Air Zonk) are the next samples.
