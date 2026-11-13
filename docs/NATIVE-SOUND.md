@@ -1,7 +1,7 @@
 # Music and sound in a natively compiled ROM — the options
 
-A proposal, not built. Written 2026-11-13. It needs the maintainer's choice
-before any code. Background: docs/NATIVE.md (what compiles) and
+Written 2026-11-13. The maintainer chose option C (banked code, the engine in
+its own pages). **Step 1 is built and proved, see "Built so far" at the end.** Background: docs/NATIVE.md (what compiles) and
 docs/ROM-SOUND.md (how the interpreter ROM carries the HuTrack engine).
 
 ## The problem
@@ -77,3 +77,22 @@ nothing extra if B is built (a small game simply needs no map-swap).
 5. The test that already exists for the interpreter (`tests/check-rom-sound.js`,
    PSG write streams equal the studio's) pointed at the native ROM.
 6. Measure the tick's cycles and the raster shift on DUSK RUN.
+
+## Built so far (option C, step 1)
+
+`tools/build-toyc-banked.sh toy.lua name` now gives a toy that calls `sfx()`,
+`note()`, `release()` or `music()` the sound engine: the interpreter ROM's
+HuTrack engine and sound glue in physical banks 2 and 3, a song bank in 4 (empty
+trailer, no songs yet), the toy's code in banks 1, 5, 6, ...; the compiler's zero
+page held to 96 bytes (`-mlto-zp=96`) so the engine's own starts at $2080, and
+the engine's RAM placed after the program's by a second pass. The emitter adds
+`toy_sound_boot()` to the boot and `toy_sound_tick()` before each `frame()`;
+`tools/toyc/toy_sound.c` is the wrapper over the glue's fixed addresses.
+
+Proof: `tests/check-native-sound.js` compiles tools/toys/sfx.lua and note.lua with
+the engine's PSG write log, runs them in Mednafen and compares the log with the
+studio's own sound events for frames 0..23: write for write, 16 checks. Not done:
+songs (`music()` with a song bank; the songs and trailer come from
+`renderer/pce-hutrack.js`), the cost per frame of the tick, raster toys (the
+raster tables leave too little RAM beside the engine's 1.1 KB), and the studio's
+Export button, which still builds the interpreter ROM.

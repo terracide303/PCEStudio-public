@@ -285,6 +285,16 @@
         if (okt === "sprite") usesSprites = true;
       }
     }
+    /* music/sfx/release and the note builtin lower to toy_sound.h (the native
+     * sound glue, docs/NATIVE-SOUND.md): the boot and each frame then call it. */
+    var usesSound = false;
+    for (f = 0; f < functions.length && !usesSound; f++) {
+      for (pc = 0; pc < functions[f].code.length; pc++) {
+        var ost = functions[f].code[pc];
+        if (ost.t === "music" || ost.t === "sfx" || ost.t === "release" ||
+            (ost.t === "builtin" && ost.name === "note")) { usesSound = true; break; }
+      }
+    }
     var table = null;
     var tableSiteAt = [];
     var tableFieldIds = {};
@@ -396,6 +406,7 @@
       hookFrame: program.hooks.frame,
       hookRaster: hookRaster,
       usesTables: usesTables,
+      usesSound: usesSound,
       usesSprites: usesSprites,
       table: table,
       sprites: table ? table.sprites : null,
@@ -1204,6 +1215,7 @@
     } else {
       line("#include <stdint.h>");
       line("#include \"toy_runtime.h\"");
+      if (a.usesSound) line("#include \"toy_sound.h\"");
     }
     line("");
     line("#define IL_NCLOSURES " + Math.max(1, a.closureCount));
@@ -1410,6 +1422,7 @@
 
     line("/* The runtime calls toy_boot() once, then toy_frame(f) each VBlank. */");
     line("void toy_boot(void) {");
+    if (a.usesSound && !huc) line("  toy_sound_boot();");
     /* The chunk is function 0, not a closure value: call it directly. */
     line("  (void)il_fn_0(&il_closures[0], " + callArgs([]) + ");");
     if (a.hookInit) {
@@ -1421,6 +1434,7 @@
     line("}");
     line("");
     line("void toy_frame(" + T + " f) {");
+    if (a.usesSound && !huc) line("  toy_sound_tick();");
     if (a.usesTimer) line("  il_timer_pump();");
     line("  (void)il_call(il_globals[" + a.globalIds["frame"] + "], " +
          callArgs(["0", "f"]) + ");");
