@@ -415,6 +415,41 @@
     };
   }
 
+  /* The table form of raster(line, spec): which fields the spec table sets,
+   * read off the IL (the `table` site and the `tset`s with a string key that
+   * come before the call, in one straight run).  Returns the field names, or
+   * a string saying why not.  A spec built across a branch, or with a key that
+   * is not bxr/byr/cr, is refused here rather than guessed at. */
+  var RASTER_KEYS = { bxr: 1, byr: 2, cr: 4 };
+  function rasterSpecKeys(fn, pc) {
+    var ins = fn.code[pc];
+    if (!ins.spec || ins.spec.r == null) return "the spec is not a table value";
+    var reg = ins.spec.r, targets = {}, q, keys = [];
+    for (q = 0; q < fn.code.length; q++) {
+      var t = fn.code[q];
+      if (t.t === "jmp" || t.t === "br" || t.t === "fornext") targets[t.target] = true;
+    }
+    for (q = pc - 1; q >= 0; q--) {
+      var c = fn.code[q];
+      if (c.t === "table" && c.dst === reg) {
+        if (targets[q]) return "the spec table is built across a branch";
+        return keys;
+      }
+      if (targets[q + 1] && q + 1 !== pc) {
+        /* a branch lands inside the run that builds the spec */
+        return "the spec table is built across a branch";
+      }
+      if (c.t === "tset" && c.base && c.base.r === reg) {
+        if (!c.key || !c.key.k || c.key.k.t !== "str") return "the spec has a non-field key";
+        if (!RASTER_KEYS[c.key.k.v]) return "the spec field `" + c.key.k.v + "` is not bxr, byr or cr (cram is not lowered)";
+        if (keys.indexOf(c.key.k.v) < 0) keys.push(c.key.k.v);
+      } else if (c.dst === reg || (c.t === "call" && c.dst === reg)) {
+        return "the spec register is rewritten before the call";
+      }
+    }
+    return "the spec table is not built in this function";
+  }
+
   /* Registers read before any write on a linear path.  The llvm-mos
    * dialect zero-initialises the whole register file (`int32_t r[N] = { 0 }`);
    * HuC's C has no initialiser list for a local array, so this backend emits
@@ -620,6 +655,21 @@
           if (!spr || !spr.ok) {
             refuse("cgen-op", where + ": " + (spr && spr.why
                    ? spr.why : "the sprite has no resolved spec"));
+          }
+          break;
+        }
+        case "raster": {
+          /* raster(line, spec): the table form; the spec's fields are read off
+           * the IL, the values at the call (toy_raster_entry). */
+          var rk = rasterSpecKeys(fn, j);
+          if (typeof rk === "string") refuse("cgen-op", where + ": " + rk);
+          if (staticType(ins.lineArg) !== "int") {
+            refuse("cgen-op", where + ": raster()'s line must be an int");
+          }
+          for (var rki = 0; rki < rk.length; rki++) {
+            if (!Object.prototype.hasOwnProperty.call(a.tableFieldIds, rk[rki])) {
+              refuse("cgen-op", where + ": the spec field `" + rk[rki] + "` has no cell");
+            }
           }
           break;
         }
@@ -1086,6 +1136,19 @@
              constLit({ t: "int", v: spr.pattern }) + ", " +
              constLit({ t: "int", v: spr.palette }) + ", " +
              constLit({ t: "int", v: spr.attr }) + ");");
+        break;
+      }
+      case "raster": {
+        var rkeys = rasterSpecKeys(fn, pc);
+        var rmask = 0, rvals = [];
+        ["bxr", "byr", "cr"].forEach(function (nm) {
+          if (rkeys.indexOf(nm) >= 0) {
+            rmask |= RASTER_KEYS[nm];
+            rvals.push("il_table_getf(" + operand(ins.spec) + ", " + a.tableFieldIds[nm] + ")");
+          } else rvals.push("0");
+        });
+        line("  toy_raster_entry(" + operand(ins.lineArg) + ", " + rmask + ", " +
+             rvals.join(", ") + ");");
         break;
       }
       case "padref":

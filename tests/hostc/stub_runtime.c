@@ -54,3 +54,8 @@ int main(int argc, char **argv) {
   }
   return 0;
 }
+
+/* the raster table form: the host comparison checks the sprite list, not the lines */
+void toy_raster_entry(int32_t line, int32_t mask, int32_t bxr, int32_t byr, int32_t cr) {
+  (void)line; (void)mask; (void)bxr; (void)byr; (void)cr;
+}

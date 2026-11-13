@@ -27,6 +27,11 @@ void toy_reg(int32_t which, int32_t value);
 /* The IL's vset(addr, word): one VDC VRAM word. */
 void toy_vram_set(int32_t addr, int32_t word);
 
+/* The IL's raster(line, spec), the table form: one line's entry from inside
+ * frame().  `mask` has bit0 BXR, bit1 BYR, bit2 CR; the values are read only
+ * for the bits set.  Only a raster build keeps entries. */
+void toy_raster_entry(int32_t line, int32_t mask, int32_t bxr, int32_t byr, int32_t cr);
+
 /* The frame flow: wait for the VDC's VBlank flag, turn the display on. */
 void toy_wait_vblank(void);
 void toy_display_on(void);

@@ -37,6 +37,9 @@ EXTRA=""
 if grep -q "void toy_raster(int32_t line)" "tools/gen/$NAME.c"; then
   EXTRA="-DTOY_RASTER_BUILD"
 fi
+if grep -q "toy_raster_entry(" "tools/gen/$NAME.c"; then
+  EXTRA="-DTOY_RASTER_BUILD -DTOY_RASTER_TABLE"
+fi
 # Pads, the SAT, sprites and the TMA timer (#45): the runtime carries the
 # $1000 read, the $7F00 SAT write and the $0C00/$0C01 timer with its
 # interrupt only in a ROM whose toy uses them, so a toy without them stays

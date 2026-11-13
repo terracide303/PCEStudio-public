@@ -53,8 +53,12 @@
 extern void toy_boot(void);
 extern void toy_frame(int32_t f);
 #ifdef TOY_RASTER_BUILD
-/* Defined by the generated C only when the toy has a raster() callback. */
+/* Defined by the generated C only when the toy has a raster() callback.  A toy
+ * that registers its lines with raster(line, spec) from frame() (TOY_RASTER_TABLE)
+ * has no callback: the entries are in the table when frame() returns. */
+#ifndef TOY_RASTER_TABLE
 extern void toy_raster(int32_t line) __attribute__((weak));
+#endif
 #endif
 
 #define VDW_LINES 224          /* the toy's frame (pce-toyhost.js HEIGHT) */
@@ -94,14 +98,22 @@ volatile uint8_t toy_r_bxr_hi[256] __attribute__((aligned(256)));
 volatile uint8_t toy_r_byr_lo[256] __attribute__((aligned(256)));
 volatile uint8_t toy_r_byr_hi[256] __attribute__((aligned(256)));
 volatile uint8_t toy_r_cr[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_a1_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_a1_hi[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_v1_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_v1_hi[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_a2_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_a2_hi[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_v2_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_v2_hi[256] __attribute__((aligned(256)));
+/* The eight colour arrays are 2 KiB of the console's 8 KiB of RAM.  The table
+ * form (raster(line, spec) from frame()) carries no colour writes, so op bits
+ * 0x08 and 0x10 are never set and a byte each stands in for them. */
+#ifdef TOY_RASTER_TABLE
+#define RCOL 1
+#else
+#define RCOL 256
+#endif
+volatile uint8_t toy_r_a1_lo[RCOL] __attribute__((aligned(RCOL)));
+volatile uint8_t toy_r_a1_hi[RCOL] __attribute__((aligned(RCOL)));
+volatile uint8_t toy_r_v1_lo[RCOL] __attribute__((aligned(RCOL)));
+volatile uint8_t toy_r_v1_hi[RCOL] __attribute__((aligned(RCOL)));
+volatile uint8_t toy_r_a2_lo[RCOL] __attribute__((aligned(RCOL)));
+volatile uint8_t toy_r_a2_hi[RCOL] __attribute__((aligned(RCOL)));
+volatile uint8_t toy_r_v2_lo[RCOL] __attribute__((aligned(RCOL)));
+volatile uint8_t toy_r_v2_hi[RCOL] __attribute__((aligned(RCOL)));
 
 volatile uint8_t toy_collect_line;
 
@@ -251,6 +263,7 @@ void toy_pal(int32_t addr, int32_t word) {
 #ifdef TOY_RASTER_BUILD
   uint16_t a = (uint16_t)addr & 0x1FF;
   uint16_t w = (uint16_t)word & 0x1FF;
+#ifndef TOY_RASTER_TABLE
   if (toy_host_mode == MODE_RASTER) {
     /* The line's entry: two colour words, then the op bit.  Writing op last
      * means a (hypothetical) re-read never sees half an entry. */
@@ -272,6 +285,7 @@ void toy_pal(int32_t addr, int32_t word) {
     }
     return;
   }
+#endif
   if (toy_host_mode == MODE_BASE) {
     uint8_t n = toy_pend_npal;
     if (n < BASE_COLOURS) {
@@ -310,6 +324,7 @@ void toy_pal(int32_t addr, int32_t word) {
 void toy_reg(int32_t which, int32_t value) {
   uint16_t v = (uint16_t)value;
 #ifdef TOY_RASTER_BUILD
+#ifndef TOY_RASTER_TABLE
   if (toy_host_mode == MODE_RASTER) {
     uint8_t l = toy_collect_line;
     if (which == TOY_REG_BXR) {
@@ -326,6 +341,7 @@ void toy_reg(int32_t which, int32_t value) {
     }
     return;
   }
+#endif
   if (toy_host_mode == MODE_BASE) {
     if (which == TOY_REG_BXR) {
       toy_pend_bxr_lo = (uint8_t)v;
@@ -559,6 +575,7 @@ __asm__(
 "  sta $0002\n"
 "  stz $0003\n"
 "irq_no_cr:\n"
+#ifndef TOY_RASTER_TABLE        /* the table form carries no colour writes */
 "  lda toy_r_op,x\n"           /* first colour word */
 "  and #$08\n"
 "  beq irq_no_c1\n"
@@ -583,6 +600,7 @@ __asm__(
 "  lda toy_r_v2_hi,x\n"
 "  sta $0405\n"
 "irq_no_c2:\n"
+#endif
 "  inx\n"
 "  stx toy_isr_line\n"
 "  cpx #224\n"
@@ -655,6 +673,7 @@ static void apply_entry0(void) {
   if (op & 0x04) {
     vdc_write(0x05, (uint16_t)(toy_r_cr[0] | 0x0C));
   }
+#ifndef TOY_RASTER_TABLE
   if (op & 0x08) {
     *IO_VCE_COLOR_INDEX = (uint16_t)(((uint16_t)toy_r_a1_hi[0] << 8) |
                                      toy_r_a1_lo[0]);
@@ -667,11 +686,40 @@ static void apply_entry0(void) {
     *IO_VCE_COLOR_DATA = (uint16_t)(((uint16_t)toy_r_v2_hi[0] << 8) |
                                     toy_r_v2_lo[0]);
   }
+#endif
 }
 
 /* One frame's raster(0..223), back to back.  The display is not armed while
  * this runs, so the video keeps the previous frame's last values; the
  * collection is the toy's own cost and the timer sum is the measurement. */
+#ifdef TOY_RASTER_TABLE
+/* The table form: frame() fills the entries itself; clear them first. */
+static void clear_entries(void) {
+  int32_t l;
+  for (l = 0; l < VDW_LINES; l++) toy_r_op[l] = 0;
+}
+
+void toy_raster_entry(int32_t line, int32_t mask, int32_t bxr, int32_t byr, int32_t cr) {
+  uint8_t l = (uint8_t)line;
+  uint8_t op = 0;
+  if (line < 0 || line >= VDW_LINES) return;
+  if (mask & 1) {
+    toy_r_bxr_lo[l] = (uint8_t)bxr;
+    toy_r_bxr_hi[l] = (uint8_t)((bxr >> 8) & 0x03);
+    op |= 0x01;
+  }
+  if (mask & 2) {
+    toy_r_byr_lo[l] = (uint8_t)byr;
+    toy_r_byr_hi[l] = (uint8_t)((byr >> 8) & 0x01);
+    op |= 0x02;
+  }
+  if (mask & 4) {
+    toy_r_cr[l] = (uint8_t)cr;
+    op |= 0x04;
+  }
+  toy_r_op[l] = (uint8_t)(toy_r_op[l] | op);
+}
+#else
 static void collect_all(void) {
   int32_t l;
   for (l = 0; l < VDW_LINES; l++) {
@@ -682,6 +730,7 @@ static void collect_all(void) {
     toy_measure_raster_end();
   }
 }
+#endif
 #endif /* TOY_RASTER_BUILD */
 
 int main(void) {
@@ -727,7 +776,11 @@ int main(void) {
   toy_boot();
 
 #ifdef TOY_RASTER_BUILD
+#ifdef TOY_RASTER_TABLE
+  if (0) {
+#else
   if (toy_raster == 0) {
+#endif
 #endif
     /* Part A: no raster() callback.  One frame() per VBlank, direct. */
     {
@@ -779,13 +832,18 @@ int main(void) {
       toy_pend_op = 0;
       toy_pend_npal = 0;
       toy_host_mode = MODE_BASE;
+#ifdef TOY_RASTER_TABLE
+      clear_entries();
+#endif
       toy_measure_begin();
       toy_frame(f);
       toy_measure_end();
 
       toy_host_mode = MODE_RASTER;
       c0 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
+#ifndef TOY_RASTER_TABLE
       collect_all();
+#endif
       c1 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
       toy_host_mode = MODE_DIRECT;
 

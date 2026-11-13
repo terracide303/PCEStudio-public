@@ -64,14 +64,21 @@ static inline __attribute__((always_inline)) void il_map(uint8_t b) {
 m_call=re.search(r"^static int32_t il_call\([^)]*\) __attribute__\(\(noinline\)\);",text,flags=re.M)
 if not m_call: sys.exit("il_call's declaration not found in "+src)
 text=text.replace(m_call.group(0),bank_table+helper+m_call.group(0),1)
+# one table gives each function's bank (0: it is in the fixed page, nothing to map), and the
+# switch holds only the calls, so the map/unmap code is in il_call once, not in every case
+nfn=max([int(x) for x in re.findall(r"^  case (\d+): return il_fn_\1\(",text,flags=re.M)]+[0])+1
+bank_of=[assign.get(str(i),0) for i in range(nfn)]
 def case(m):
-    fid=int(m.group(1))
-    if str(fid) not in assign:   # a split function's dispatcher is in the fixed page
-        return m.group(0)
-    b=assign[str(fid)]
-    return "  case %d: { uint8_t o = il_bank; int32_t rv; il_bank = %d; il_map(%d); rv = il_fn_%d(&il_closures[cv]%s); il_bank = o; il_map(o); return rv; }"%(fid,b,b,fid,m.group(2))
+    return "  case %s: rv = il_fn_%s(&il_closures[cv]%s); break;"%(m.group(1),m.group(1),m.group(2))
 text,ncase=re.subn(r"^  case (\d+): return il_fn_\1\(&il_closures\[cv\]((?:, a\d)*)\);",case,text,flags=re.M)
 if ncase==0: sys.exit("no il_call cases found in "+src)
+old_head="  fid = il_closures[cv].fid;\n  switch (fid) {\n"
+if old_head not in text: sys.exit("il_call's switch head not found in "+src)
+text=text.replace(old_head,"  uint8_t o = il_bank, b = 0;\n  int32_t rv = 0;\n  fid = il_closures[cv].fid;\n  if (fid >= 0 && fid < %d) b = il_bank_of[fid];\n  if (b) { il_bank = b; il_map(b); }\n  switch (fid) {\n"%nfn,1)
+old_tail="  default: return 0;\n  }\n}"
+if old_tail not in text: sys.exit("il_call's switch tail not found in "+src)
+text=text.replace(old_tail,"  default: break;\n  }\n  if (b) { il_bank = o; il_map(o); }\n  return rv;\n}",1)
+text=text.replace(m_call.group(0),"static const uint8_t il_bank_of[%d] = {%s};\n"%(nfn,",".join(map(str,bank_of)))+m_call.group(0),1)
 # 3. the direct boot call
 if "0" in assign:
     boot=re.compile(r"\(void\)il_fn_0\(&il_closures\[0\][^;]*\);")

@@ -28,6 +28,7 @@ node tools/toyc/emit.js "$SRC" "$G.c"
 EXTRA="-DTOY_HOLD_BUILD"   # hold frame()'s scroll/control/colour writes for the next VBlank (tools/toyc/toy_runtime.c)
 [ "${NO_HOLD:-0}" = "1" ] && EXTRA=""   # NO_HOLD=1: the old behaviour, for tests/check-native-vblank.js's control
 grep -q "void toy_raster(int32_t line)" "$G.c" && EXTRA="$EXTRA -DTOY_RASTER_BUILD"
+grep -q "toy_raster_entry(" "$G.c" && EXTRA="$EXTRA -DTOY_RASTER_BUILD -DTOY_RASTER_TABLE"
 grep -qE "toy_pad\(|toy_timer_set\(|toy_sat\(|toy_sprite\(" "$G.c" && EXTRA="$EXTRA -DTOY_INPUT_BUILD"
 SOUND=0
 SRCS="tools/toyc/toy_runtime.c $G.banked.c"
@@ -60,7 +61,7 @@ H
     SRCS="$SRCS tools/toyc/toy_sound.c"
   fi
 fi
-compile_obj() { "$CC" -Os $EXTRA -fno-lto -c -Itools/toyc -o "$G.o" "$G.c"; }
+compile_obj() { "$CC" ${OPT:--Os} $EXTRA -fno-lto -c -Itools/toyc -o "$G.o" "$G.c"; }
 compile_obj
 set +e
 OUT=$(python3 -I tools/bank-toyc.py "$G.c" "$G.o" "$G.banked.c" "$LLVM_MOS")
@@ -71,10 +72,20 @@ if [ $RC -eq 4 ]; then
   # into chunks (pce-cgen.js), then pack once more
   IDS="${OUT#SPLIT }"
   echo "splitting functions $IDS"
-  PCE_SPLIT_ONLY="$IDS" PCE_SPLIT_OVER=1 node tools/toyc/emit.js "$SRC" "$G.c"
-  [ "${SILENT_SFX:-0}" = "1" ] && sed -i.bak 's|#include "toy_sound.h"|#include "'"$(basename "$G").silent.h"'"|' "$G.c" && rm -f "$G.c.bak"
-  compile_obj
-  OUT=$(python3 -I tools/bank-toyc.py "$G.c" "$G.o" "$G.banked.c" "$LLVM_MOS")
+  # a dense chunk can still be larger than a bank: try smaller chunks (instructions per chunk)
+  for CH in ${PCE_SPLIT_CHUNK:-100} 60 40 25; do
+    PCE_SPLIT_ONLY="$IDS" PCE_SPLIT_OVER=1 PCE_SPLIT_CHUNK="$CH" node tools/toyc/emit.js "$SRC" "$G.c"
+    [ "${SILENT_SFX:-0}" = "1" ] && sed -i.bak 's|#include "toy_sound.h"|#include "'"$(basename "$G").silent.h"'"|' "$G.c" && rm -f "$G.c.bak"
+    compile_obj
+    set +e
+    OUT=$(python3 -I tools/bank-toyc.py "$G.c" "$G.o" "$G.banked.c" "$LLVM_MOS" 2>"$G.pack.err")
+    RC2=$?
+    set -e
+    [ $RC2 -eq 0 ] && break
+    grep -q "chunk is larger" "$G.pack.err" || { cat "$G.pack.err" >&2; echo "$OUT" >&2; exit $RC2; }
+    echo "a chunk of $CH instructions is larger than a bank; trying smaller chunks" >&2
+  done
+  [ $RC2 -ne 0 ] && { cat "$G.pack.err" >&2; echo "$OUT" >&2; exit $RC2; }
 elif [ $RC -ne 0 ]; then
   echo "$OUT" >&2; exit $RC
 fi
@@ -91,12 +102,13 @@ if grep -q '#include "toy_assets.h"' "$G.c"; then
 fi
 DEFS=""
 for b in $BANKS; do DEFS="$DEFS -Wl,--defsym=__rom_bank${b}_size=0x2000"; done
-link() { "$CC" -Os $EXTRA $DEFS -Itools/toyc -o "$G.pce" $SRCS; }
+link() { "$CC" ${OPT:--Os} $EXTRA $DEFS ${LINK_EXTRA:-} -Itools/toyc -o "$G.pce" $SRCS; }
 # the packer sizes functions from a non-LTO object, which can understate the linked size:
 # if a bank overflows, start again with more slack in each bank (1, 2, 3 and 4 KiB)
 if ! LINKLOG=$(link 2>&1); then
-  if echo "$LINKLOG" | grep -q "will not fit in region 'rom_bank" && [ "${BANK_SLACK:-1024}" -lt 4096 ]; then
+  if echo "$LINKLOG" | grep -q "will not fit in region 'rom_bank[1-9]" && [ "${BANK_SLACK:-1024}" -lt 4096 ]; then
     NEXT=$(( ${BANK_SLACK:-1024} + 1024 )); echo "a bank overflowed; repacking with $NEXT bytes of slack" >&2
+    [ -n "${NO_RETRY:-}" ] && { echo "$LINKLOG" >&2; exit 1; }
     BANK_SLACK=$NEXT exec "$0" "$@"
   fi
   echo "$LINKLOG" >&2; exit 1
