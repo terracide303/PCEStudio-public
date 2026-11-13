@@ -727,20 +727,40 @@ number below is measured on this tree; the commands are named.
   `COPYV_PC $20DE-$20DF` (the container `pc` in/out) and the source pointer
   `$20F1-$20F2`; `docs/ASM.md` §2.3 now records those, the #227 raster IRQ
   block at `$20E0-$20F0`, and the 13 B that are actually free.
-- **Evidence (`tests/check-ilvm-copyv.js`, 24 checks).** A hand-laid version
+- **Evidence (`tests/check-ilvm-copyv.js`, 47 checks).** A hand-laid version
   1 container copies 300 words from bank 0 offset `0x200` to VRAM `0x1000`;
   the host harness's `vram.bin` holds them word for word, and a `vset` after
-  the copy lands. A version 4 container (tables bank, one code bank, two
-  asset banks appended after it) copies 300 words from asset bank 2 offset
-  `0x100`, then another 300 from bank 2 offset `0x1F00` that crosses into
-  bank 3 after 128 words; both runs are word for word, and the `vset`/`ret`
-  after them prove MPR2 was mapped back to the code bank. `buildToyRom`
-  lays those container+asset bytes exactly as the harness runs them. Two
-  scratch mutations — the bank operand ignored, and the boundary carry one
-  byte wrong — each turn the run red.
+  the copy lands. A version 4 container (tables bank, one code bank, four
+  asset banks appended after it) runs five copies, each checked word for
+  word, and the `vset`/`ret` after them prove MPR2 was mapped back to the
+  code bank: 300 words from asset bank 2 offset `0x100` (one bank); 300
+  from bank 2 offset `0x1F00` crossing into bank 3 after 128 words; 300
+  from bank 2 offset `0x2100` — a **malformed** `off` carrying its top
+  three bits, which the host (`& 0x1FFF`) and the shim (`and #$1F`) both
+  mask, so this copy lands exactly the words the legal-offset copy reads
+  (the two halves agree on malformed input, not only legal input); 4,324
+  words from bank 3 offset `0x1FFF` spanning **three banks** (bank 3's last
+  byte, all of bank 4, 455 bytes of bank 5, the first word straddling a
+  boundary); and 300 words into VRAM `0xFF00` near the **top of VRAM**,
+  which land at `0x7F00..0x7FFF` then wrap to `0x0000..0x002B`.
+  `buildToyRom` lays those container+asset bytes exactly as the harness
+  runs them. Five scratch mutations each turn the run red: the bank
+  operand ignored, the boundary carry one byte wrong, the 13-bit off mask
+  removed, the data-bank map folding banks >= 4, and the VRAM write's
+  16-bit wrap removed. The last is the one break `vram.bin` cannot see —
+  the harness's `toy_vram_set` masks `& 0x7FFF` and
+  `(x & 0xFFFF) & 0x7FFF == x & 0x7FFF` — so a trace build of `hostvm.c`
+  pins the pre-mask addresses: the intact host never passes one past
+  `0xFFFF`, the wrap-removed host does. The wrap is otherwise by
+  construction: the console's MAWR auto-increment wraps at 16 bits while
+  its 32K-word VRAM ignores the register's top bit, so the host's 16-bit
+  cast and the shim's register agree and neither changes the copied words.
 - **Not proven here.** The console shim's Mednafen capture is the one §3.3
   asks for; it waits on #218 emitting an asset blob (the card's own closing
-  line). Rule 2 (a different seat and model breaks the test) is owed.
+  line). Rule 2 (a different seat and model breaks the test) ran on
+  2026-11-04: its three missed breaks are the malformed-`off`, three-bank
+  and near-top copies above, and each re-applied alone turns the suite
+  red.
 - **Known reds.** A fresh clone of the #281 tree (`feedb35`) ran
   `tests/all.sh`: **67 PASS, 3 SKIP, 6 FAIL**, and every FAIL is
   pre-existing since #280 — none is COPYV's. Four are the ROM-sha pins the
