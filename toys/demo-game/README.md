@@ -87,18 +87,19 @@ The bytecode is **6,285 B of the 8,160 B data bank** (77.0%), with **111 of
 Every other interpreter capacity is comfortable: 17 functions, 21 registers,
 10 upvalues, 35 boot upvalue cells, 24 globals, 16 boot closures, 8 table
 slots, 63 table cells, 4 arguments; `rom_check` has no finding.  The export
-is a 40,960 B ROM, sha256 `a9f5140e1143f47a…`.
+is a 40,960 B ROM, sha256 `5984b3246858d286…`.
 
 **The console picture is close but not the browser's yet.**  The ROM runs and
 draws.  #227 fixed the raster backend's one-replay-frame-per-toy-frame latency
 (the line chain is re-armed on every display frame, so a capture's tail is a
 real frame of the last complete toy frame) and the row-16 colour lag (each
 line's entry is written from a zero-page preload inside the blank).  The
-closest browser frame is now **48 bytes off**, all in the status bar's first
-tile row — two one-pixel columns at the screen edges.  Before #227 the same
+closest browser frame is now **24 bytes off** on the #280/#281 image (48 on
+the image before it, at a different sampled game frame), in the status
+bar's first tile row — one one-pixel column.  Before #227 the same
 capture showed the armed replay 16 bytes off on row 24 (the split line's
 palette write) and 372-632 bytes on the moving picture rows, measured over a
-710-frame 12 s movie on 2026-11-03.  Why the two edge columns differ now is
+710-frame 12 s movie on 2026-11-03.  Why that edge column differs is
 not proven.
 `tests/check-export-games.js` pins the ROM sha and asserts the screen is not
 black and not yet a browser frame, so the pin cannot claim a picture the ROM
@@ -160,7 +161,7 @@ The rework's own evidence, beyond that suite:
   budget numbers above are it.  `tests/check-rom-budget.js` pins every row
   and `tests/check-tables.js` the table inventory (8 sites, 63 cells).
 - **It exports.**  `tests/check-export-games.js` builds the 40,960 B ROM
-  (sha256 `a9f5140e1143f47a…`), measures it in Mednafen (23 updates in 600
+  (sha256 `5984b3246858d286…`), measures it in Mednafen (25 updates in 600
   frames, too slow — the interpreter) and pins the picture as **not black
   and not yet the browser's**, with the reason.
 

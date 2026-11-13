@@ -1423,9 +1423,10 @@ are shallow); closures are 32 slots of `{fid, up[6]}`, allocated round-robin,
 with upvalues copied at creation (the toys have no `setupval`, as part A
 assumed).
 
-Measured sizes (the #213 build): the llvm-mos part is 16,384 B and the
-committed image 32,768 B (banks 2-3 are the engine and tables banks);
-`.bss` 6,781 B; `exec` 9,724 B, `main` 2,410 B, `toy_frame` 198 B.
+Measured sizes (the #281 build, `tools/gen/ilvm.json`, re-pinned by #282):
+the llvm-mos part is 16,384 B and the committed image 32,768 B (banks 2-3
+are the engine and tables banks); `.bss` 5,537 B; `exec` 10,540 B, `main`
+2,277 B, `toy_frame` 163 B.
 
 ### 14.3 The console frame flow
 

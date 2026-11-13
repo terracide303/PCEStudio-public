@@ -752,6 +752,84 @@ number below is measured on this tree; the commands are named.
   rebuild matches the committed `renderer/ilvm.bin` (`b39d4266`), and
   `check-hutrack-image`, `check-docs` and `check-ilvm-copyv` pass.
 
+### 5.9 As built (#282, 2026-11-13): the re-pin
+
+#280 (the interpreter maps a function's bank) and #281 (COPYV) rebuilt
+`renderer/ilvm.bin`; every toy ROM embeds the committed image as its first
+32 KiB, so every pinned ROM sha moved. The pins were changed **after** the
+pictures were compared, not instead of comparing them: each pinned toy was
+built twice — with the image before #280 (`git show 252b803^:renderer/ilvm.bin`,
+sha256 `d68a1b5f567d824b…`) and with the committed `b39d4266070eb4e4…` — and
+both ROMs were run in Mednafen on the capture route `tools/capture-ilvm.sh`
+proves (SDL video and audio dummy drivers, `-qtrecord` with the PNG codec,
+`-pce.slstart 3 -pce.slend 234`, 256x224, SIGINT, no input), every recorded
+frame decoded and compared byte for byte. This is #221's procedure
+([`ROM-SOUND.md`](ROM-SOUND.md) §10).
+
+The two builds of a toy differ **only inside the image**: across all eleven
+toys the ILBC data bank (offsets 32,768-40,959, the toy's program) differs in
+**0 bytes**, and the image differs in the same 16,261 bytes for every one
+(first at offset 0, last at 29,351, in the tables bank's glue). So the
+program is identical and the only variable is the interpreter.
+
+| toy | old ROM sha256 | new ROM sha256 | frames old / new | distinct pictures old / new | shared | old-only / new-only | frame 0 / last |
+|---|---|---|---|---|---|---|---|
+| palette | `b12ec9c961006cff…` | `f605155a3c66bbb1…` | 354 / 357 | 9 / 9 | 9 | 0 / 0 | same; same picture at another index |
+| arity | `ea4f014915bb5975…` | `9c94805b4b017dc7…` | 355 / 353 | 16 / 16 | 16 | 0 / 0 | differs (OSD splash); same picture at another index |
+| not | `fe9672f4ee2b93a7…` | `385636cbd6c796f1…` | 354 / 326 | 5 / 5 | 5 | 0 / 0 | same; same picture at another index |
+| sprite | `4f212ee9128f76d5…` | `8904eabd3c067460…` | 353 / 354 | 2 / 2 | 2 | 0 / 0 | identical; identical |
+| parallax | `5f303972300305dc…` | `2a49ab9e4791721b…` | 352 / 357 | 1 / 1 | 1 | 0 / 0 | identical; identical |
+| status-bar | `ce08f5d066a7062f…` | `91b22ff910cad377…` | 356 / 354 | 1 / 1 | 1 | 0 / 0 | identical; identical |
+| platformer | `c067d74ac688c1ac…` | `ccc5f20a1405816a…` | 707 / 664 | 3 / 3 | 3 | 0 / 0 | identical; identical |
+| DUSK RUN | `cabf674e632725d6…` | `2a569de95c3a1bfb…` | 709 / 697 | 10 / 14 | 5 | 5 / 9 | identical; identical |
+| STARFALL | `a9f5140e1143f47a…` | `5984b3246858d286…` | 12 / 12 (tail) | 2 / 2 | 0 | 2 / 2 | differs; differs |
+| TOWER | `048948fe18f9d432…` | `1b1d151ae2fbdd35…` | 12 / 12 (tail) | 2 / 2 | 0 | 2 / 2 | differs; differs |
+| padtest | `dedbfd636f6735fa…` | `3d767aa5e282a66c…` | 357 / 353 | 204 / 196 | 43 | 161 / 153 | identical; identical |
+
+For the seven toys above DUSK RUN the picture is unchanged in the strong
+sense: **every distinct old picture is in the new capture** (old-only 0), and
+frame 0 and the last frame are byte-identical or the same picture at another
+index (a boot/OSD frame lands at a different index because the wall-clock
+capture sees a different number of display frames). The three toys whose
+state advances every toy frame sample different phases: DUSK RUN shares 5 of
+its 10 old pictures (frame 0 and the last frame identical — the #221 caveat
+for continuous animations); STARFALL's and TOWER's 12-frame tails hold
+different game frames; the padtest toy animates (204 distinct pictures) and
+shares 43, with frame 0 and the last frame identical. The decisive
+comparison for those four is the suite's own capture-and-compare against the
+browser (below), which runs the same instrument for any image.
+
+On the new image, `tests/check-export-games.js` — run before the pins moved —
+captured and compared every buildable pin: control **diff 0 against browser
+frame 4**, wide-arity **8**, not **1**, SPRITE **0**, TOWER **98**,
+PLATFORMER **0**, DUSK RUN **1**. So each of those ROMs still draws an exact
+browser picture, which is what its pin claims. **STARFALL is still
+`unmatched`**: its closest browser frame is 24 bytes off frame 23 (one
+one-pixel edge column) where the old image measured 48 bytes off frame 22
+(two columns); the two captures sampled different game frames, so the change
+cannot be attributed to the image, and the pin keeps its `unmatched` verdict.
+
+**Re-pinned in the same commit.** `tests/check-export-games.js`: the five
+`GAME_PINS` games, `SPRITE`, and the three controls (palette, arity, not).
+The four picture-cycle fixtures, `tests/dumps/toypalette-ilvm`,
+`toyparallax-ilvm`, `toystatusbar-ilvm` and `toysprite-ilvm`: `rom_sha256`
+and the image sha (the frames and RAM images are **not** recaptured — they
+are the browser's pictures and the browser did not change; the table above
+is what makes them evidence for the new image, the same argument as
+[`ROM-SOUND.md`](ROM-SOUND.md) §10). `tests/check-pad-buttons.js`'s
+`ROM_PIN`. `tools/gen/ilvm.json` was already the shipped build (#281).
+Docs: [`ROM_SPEED.md`](ROM_SPEED.md) (the nine shas above and the build's
+own measure counters re-read on this image), [`ASM.md`](ASM.md) §2.1 (the
+build's printed sha and RAM budget — interpreter heap `$373E` → `$3742`,
+engine `.bss` 1,111 → 1,115 B, stack headroom 1,131 → 1,123 B — and the
+fixed bank's slack, now 0), [`IL.md`](IL.md) §14.2 (the image's measured
+sizes), [`ROM-SOUND.md`](ROM-SOUND.md) §1 (its parenthetical about "the
+committed image's HuTrack banks" now names #227's image, because #281 moved
+that image's glue) and `toys/demo-game/README.md` (the STARFALL sha and its
+update count). [`ROM_LAYOUT.md`](ROM_LAYOUT.md) carries no ilvm-derived pin —
+its ROMs are the viewer/PCEAS and C-route builds, which do not embed
+`renderer/ilvm.bin` — so it is unchanged.
+
 ---
 
 ## 6. Which gallery toys it unlocks (measured)
