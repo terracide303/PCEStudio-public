@@ -106,7 +106,16 @@ too (a drum's pitch lands on the nearest legacy value, ROM-SOUND.md §6). The
 engine writes its own registers, which the write log does not carry, hence the
 state comparison.
 
-Not done: the per-frame cost of the tick; raster toys (the raster tables leave too
+**What the tick costs** (the demo song, measured in Geargrafx from the runtime's own
+cycle counters, 408 toy frames): 15,550 cycles per frame on average (13% of a
+video frame's 119,000), 14,300 median, 37,900 at most (32%) on the busiest row,
+and about 70,000 (59%) on the one frame where the song starts. A game with music
+has about two thirds of a frame left in its worst case: native TOWER's worst
+frame is 91% of a frame without sound, so TOWER with this song would overrun
+some frames. A game that needs music and every cycle needs either a lighter song,
+the tick spread over two frames, or the engine rewritten for speed.
+
+Not done: raster toys (the raster tables leave too
 little RAM beside the engine's 1.1 KB); the studio's Export button, which still
 builds the interpreter ROM; and the Oak Woods song, whose `song.json` is a DMF
 import that `pce-hutrack.js` cannot convert yet (a row field is missing; the
