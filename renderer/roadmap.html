@@ -66,24 +66,22 @@
   <div class="box"><b>Beta 2: the next milestone.</b> The goal is that a developer can write assembly in the studio and
   take the project out. It means: an assembly project in the studio, a HuCard builder and our register include file;
   symbol files that Geargrafx loads; a plain project folder with a Makefile for your own tools; and music data in
-  exported ROMs (Export now writes the songs and the engine plays them in the emulator; a console test is still open). It also needs one test on a real console, which
-  has not happened yet, so Beta 2 will not be declared without it. No date is promised.</div>
+  exported ROMs (Export now writes the songs and the engine plays them in the emulator; a console test is still open). It also needs a test of an Export-button ROM on a real console. A compiled intro has run on a real console and an FPGA core, but an exported ROM has not, so Beta 2 will not be declared without it. No date is promised.</div>
   <div class="box"><b>How to read the state column.</b>
     <span class="status ok">works</span> is built and tested.
     <span class="status soon">in progress</span> is being built now.
     <span class="status no">planned</span> is decided but not started.</div>
   <h2>1. Games that really export</h2>
-  <p>A studio is only as good as what you can play outside it. Today PLATFORMER, TOWER and the simple example toys export
-  and run in an emulator. STARFALL cannot export from the studio yet: its art files are too big for the ROM's one 8 KiB data bank. DUSK RUN and NOVA TIDE cannot export from the studio either: its C compiler refuses both (a construct it has no form for), before their size is even counted. TOWER builds but runs too slowly through the interpreter. Nothing has run on a real console.</p>
+  <p>A studio is only as good as what you can play outside it. Today PLATFORMER, TOWER, STARFALL, DUSK RUN and the simple example toys all export and run in an emulator, but only PLATFORMER holds 60 Hz through the interpreter; the others are too slow. NOVA TIDE does not export: the interpreter has no form for its per-line scroll calls. A faster route that turns a game into real machine code exists as a developer preview outside the Export button, and a small intro built that way has run on a real console and on an FPGA core.</p>
   <table>
     <tr><th>Feature</th><th>Why we want it</th><th>State</th></tr>
-    <tr><td>The five example games export</td><td>They are the test of every limit in the exporter. Each refusal teaches us what is missing. PLATFORMER exports and holds 60 Hz; TOWER exports but is too slow; STARFALL is refused until games with art can use more than one data bank; DUSK RUN and NOVA TIDE are refused at the C compiler (its unary minus), and NOVA TIDE also needs its raster effect expressed in a form the ROM can run.</td><td class="status soon">in progress</td></tr>
-    <tr><td>Bigger games (bank switching, the larger mapper)</td><td>The interpreter ROM has one 8 KiB data bank. Real games are larger. The design is written; building it is next.</td><td class="status soon">in progress</td></tr>
+    <tr><td>The five example games export</td><td>They are the test of every limit in the exporter. Each refusal teaches us what is missing. PLATFORMER exports and holds 60 Hz; TOWER, STARFALL and DUSK RUN export but are too slow on the interpreter; NOVA TIDE is refused because the interpreter has no form for its table-form <code>raster(line, spec)</code> calls.</td><td class="status soon">in progress</td></tr>
+    <tr><td>Bigger games (bank switching, the larger mapper)</td><td>The art of a game now travels in its own ROM banks, so games with big art export (Build 7). The game's bytecode and constants still have to fit one 8 KiB bank in the interpreter ROM. The compiled route already switches banks for its code.</td><td class="status soon">in progress</td></tr>
     <tr><td>Controllers: a real pad in the studio and in exported ROMs</td><td>You play and test with a pad. The studio and the toy page read it, and an exported ROM reads the console's pad port. The ROM side is proven in an emulator with scripted button presses only, not with a real pad yet.</td><td class="status soon">in progress</td></tr>
-    <tr><td>A compiler from Lua to console code</td><td>Instead of an interpreter in the ROM, the studio would translate a game once into HuC6280 machine code. That is how games reach 60 Hz and fit in real cartridges, and it is what ppu.toys does for the SNES. Planned, not built.</td><td class="status no">planned</td></tr>
-    <tr><td>Faster output</td><td>PLATFORMER now holds 60 Hz through the interpreter, but the larger games are far slower; small toys reach 60 Hz too. A direct code generator would reach 60 Hz for real games.</td><td class="status no">planned</td></tr>
+    <tr><td>A compiler from Lua to console code</td><td>Instead of an interpreter in the ROM, the studio translates a game once into HuC6280 machine code. That is how games reach 60 Hz and fit in real cartridges, and it is what ppu.toys does for the SNES. A developer preview exists and all five example games compile; it is not on the Export button, because the compiler (llvm-mos) cannot run in a browser yet.</td><td class="status soon">in progress</td></tr>
+    <tr><td>Faster output</td><td>PLATFORMER holds 60 Hz through the interpreter, but the larger games are far slower. Through the compiled route TOWER fits a 60 Hz frame; STARFALL and NOVA TIDE run but some rows of their pictures still differ from the browser's, and DUSK RUN does not run properly yet. Getting that onto the Export button is the next large step.</td><td class="status soon">in progress</td></tr>
     <tr><td>Save data (backup RAM)</td><td>Many games need to remember progress.</td><td class="status no">planned</td></tr>
-    <tr><td>A test on real hardware</td><td>Nothing is proven until a console or a flash cart runs it.</td><td class="status no">planned</td></tr>
+    <tr><td>A test on real hardware</td><td>Nothing is proven until a console or a flash cart runs it. A compiled intro with music has run on a real console and on an FPGA core. ROMs from the Export button still need their own test.</td><td class="status soon">in progress</td></tr>
   </table>
   <h2>2. Sound and music</h2>
   <p>A game without sound is half a game, and a song should sound the same in the studio and in the ROM.</p>
@@ -99,7 +97,7 @@
   emulators and assemblers developers trust, not to replace them. Build and look inside here, in the browser,
   with the chip views and an AI beside you; take the project out as plain files and debug it in
   <a href="https://github.com/drhelius/Geargrafx">Geargrafx</a> or Mednafen if you want a full debugger.
-  Our own Run panel will stay small on purpose. We are reading what Geargrafx offers before deciding how far to work with it.</div>
+  Our own Run panel will stay small on purpose. We use Geargrafx ourselves every day to debug native ROMs; how far the studio itself goes with it is still open.</div>
   <div class="box"><b>What you can bring today.</b> Plain PCEAS assembly is the realistic route to reuse once the
   assembly project and the include file and HuCard builder land: most plain PCEAS/MagicKit source
   should carry over, with the include-file and macro differences to fix. HuC/HuCC C code and other assemblers
@@ -120,7 +118,7 @@
     <tr><td>Run panel and debugger</td><td>Step, registers, memory, disassembly and breakpoints. Opening any .pce falls out of it.</td><td class="status no">planned</td></tr>
     <tr><td>Lua toys that call assembly routines</td><td>Fast inner loops in assembly, the rest in Lua.</td><td class="status no">planned</td></tr>
     <tr><td>A built-in assembly game engine</td><td>The speed tricks (sprite lists, scrolling maps, collisions) written once in assembly and called from Lua, so every game does not rebuild them. Design first.</td><td class="status no">planned</td></tr>
-    <tr><td>Work with Geargrafx (research first)</td><td>Symbol files it loads by itself, and possibly Claude building here and running and breaking there through its MCP server. Not started: the card only reads what it offers.</td><td class="status no">planned</td></tr>
+    <tr><td>Work with Geargrafx</td><td>We already use Geargrafx's built-in MCP server to look inside our native ROMs while we build them (CPU, banks, sprite list, sound writes, instruction trace). Still planned: symbol files it loads by itself, and Claude building here and running and breaking there from the studio.</td><td class="status soon">in progress</td></tr>
     <tr><td>Take the project out as source</td><td>A plain folder with the assembly, assets and a build script, so nobody is locked in.</td><td class="status no">planned</td></tr>
   </table>
   <h2>4. Working with an AI</h2>
