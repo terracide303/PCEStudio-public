@@ -113,13 +113,16 @@ and sprites are byte-equal to the browser's at frame 3. Its *displayed* picture 
 raster backend re-arms the line chain on every display frame, so a toy frame that takes tens of display
 frames still shows its last complete picture, and the capture's tail is diff 0 against the browser's.
 
-STARFALL and TOWER were reworked in place for the gallery export and now build 40,960-byte ROMs
-(6,285 B and 7,862 B of bytecode, no interpreter capacity over). TOWER's Mednafen picture is the browser's.
-STARFALL runs and draws; its closest browser frame is 48 bytes off in the status bar's first tile row, so
-it is pinned as not yet the browser's. NOVA TIDE still stops on its `raster` table.
-[`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five. Sound effects and notes play in an
-exported ROM (measured in Mednafen); a song's data is not in the ROM yet. The ROMs are checked in
-Mednafen; nothing has run on a real console yet.
+Since Build 7 a game's art travels in its own ROM banks, so STARFALL and the other games with art files
+build, and since Build 8 an exported game's art really reaches the console (Build 7 shipped a bug that left
+it black; the exported PCEHero intro now matches the studio's picture pixel for pixel in the emulator).
+TOWER, STARFALL and DUSK RUN export but run too slowly on the interpreter; PLATFORMER holds 60 Hz. NOVA TIDE
+is still refused: the interpreter has no form for its table-form `raster(line, spec)` calls.
+[`docs/ROM_SPEED.md`](docs/ROM_SPEED.md) records the exact code and line for all five. Export carries up to
+eight songs and the sound effects and notes; they are checked in Mednafen. A separate developer preview
+compiles a game to real HuC6280 code (`docs/NATIVE.md`); all five example games compile through it, and a
+small intro built that way has run on a real console and on an FPGA core. Nothing from the Export button
+has run on a real console yet.
 
 ## Project files
 

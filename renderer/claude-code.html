@@ -397,17 +397,18 @@ function frame(t, f) end</code></pre>
 
   <h2 id="limits">13. What doesn't work yet</h2>
   <ul>
-    <li><b>Which games export</b>: PLATFORMER and the simple example toys export and run, and the sprite toy
-    exports; DUSK RUN builds and draws, but its displayed picture is not the browser's yet. STARFALL
-    (127-constant pool and ten sprite specs it cannot pin), TOWER (8,524-byte bytecode against the 8 KiB data
-    bank) and NOVA TIDE (the <code>raster</code> table) are refused, each at a named line. Lua tables,
-    <code>sprite()</code> with constant fields, the pad, <code>sat()</code>, <code>sfx()</code>,
-    <code>note()</code> and <code>music()</code> are carried by the bytecode route; the C route still lacks
-    logical <code>not</code>, unary minus and some builtins, which is why the page's Export can stop where the
-    MCP's does not. <code>docs/ROM_SPEED.md</code> records every line.</li>
-    <li><b>Music data in a ROM</b>: notes and effects play, but the song table has no song data yet, so a
-    song plays in the studio, not in the exported ROM.</li>
-    <li><b>Real hardware</b>: exports are checked in an emulator only.</li>
+    <li><b>Which games export</b>: PLATFORMER and the simple example toys export and run (PLATFORMER at
+    60 Hz), and so does the sprite toy. TOWER, STARFALL and DUSK RUN build too (a game's art travels in its own
+    ROM banks since Build 7) but run too slowly on the interpreter; DUSK RUN's picture is the browser's,
+    STARFALL's is not yet. NOVA TIDE (the <code>raster(line, spec)</code> table) is refused at a named line.
+    Lua tables, <code>sprite()</code> with constant fields, the pad, <code>sat()</code>, <code>sfx()</code>,
+    <code>note()</code> and <code>music()</code> are carried by the bytecode route. <code>docs/ROM_SPEED.md</code>
+    records every line.</li>
+    <li><b>Music data in a ROM</b>: the studio's Export button carries up to eight songs and the ROM plays them
+    in an emulator; the MCP's <code>export_pce</code> does not carry songs yet, and no song has been heard on
+    a real console.</li>
+    <li><b>Real hardware</b>: exports from the Export button are checked in an emulator only. A game compiled by
+    the separate developer preview has run on a real console and on an FPGA core.</li>
     <li><b>Linux and Windows</b> haven't been tested yet (section 2).</li>
   </ul>
   <p>What comes next, and why, is on the <a href="roadmap.html">roadmap</a>. The people and projects PCEStudio

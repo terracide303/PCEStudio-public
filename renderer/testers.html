@@ -232,7 +232,7 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
     when you break it?</li>
     <li><b>Export</b> a simple toy (try <i>Sky gradient</i>) and run the <code>.pce</code> in an emulator
     (Mednafen, Ares, …) or on real hardware. If you own a real PC Engine with a flash cart, we'd especially
-    like to hear from you: nothing has run on real hardware yet.</li>
+    like to hear from you: no ROM from the Export button has run on real hardware yet.</li>
     <li><b>Your browser and computer.</b> Tell us what you use, even if everything works.</li>
   </ul>
 
@@ -240,18 +240,15 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
   <p>Known and on the board. No need to report these, but tell us if one of them stops you completely.</p>
   <table>
     <tr><th>Area</th><th>What happens</th><th>Status</th></tr>
-    <tr><td>Export to <code>.pce</code></td><td>The simple example toys export, and so do PLATFORMER (the
-      <code>sat</code> instruction is carried; re-measured 2026-11-01, it runs at 30 Hz) and the sprite toy
-      (<code>sprite()</code> is carried for a spec whose slot and fields are constants; it runs at 60 Hz).
-      DUSK RUN also builds a 40,960-byte ROM and loads, runs and draws (41 registers, 41
-      functions, a pooled 19-upvalue closure; its state is byte-equal to the browser's at frame 3), and
-      its displayed picture is the browser's too. TOWER and STARFALL were reworked in place and now
-      build; TOWER's picture is the browser's, while STARFALL's closest browser frame is 48 bytes off in
-      the status bar's first tile row, so it is still listed as not yet the browser's. NOVA TIDE still
-      stops on its <code>raster</code> table. <code>docs/ROM_SPEED.md</code> records every code, Lua line
+    <tr><td>Export to <code>.pce</code></td><td>The simple example toys export, and so do PLATFORMER (it holds
+      60 Hz) and the sprite toy. TOWER, STARFALL and DUSK RUN also build (a game's art travels in its own
+      ROM banks since Build 7) but run too slowly on the interpreter in the ROM. DUSK RUN's displayed picture is
+      the browser's; STARFALL's is not yet. NOVA TIDE is still refused: the interpreter has no form for its
+      <code>raster(line, spec)</code> calls. Build 7 had a bug that left an exported game's art unloaded on the
+      console (a black picture); Build 8 fixes it. <code>docs/ROM_SPEED.md</code> records every code, Lua line
       and refusing <code>file:line</code>. All five run in the browser.</td>
       <td class="status soon">next big job</td></tr>
-    <tr><td>Real hardware</td><td>Exports are checked in an emulator only.</td><td class="status no">untested</td></tr>
+    <tr><td>Real hardware</td><td>Exports from the Export button are checked in an emulator only. A game compiled by the separate developer preview (a small intro with music) has run on a real console and on an FPGA core.</td><td class="status soon">partly tested</td></tr>
     <tr><td>Dropping a <code>.lua</code> file</td><td>A dropped or pasted single <code>.lua</code> starts a new
       toy (<code>main.lua</code> and no asset files), so the SCREEN panel shows only the new toy's state — it can
       no longer show the previous toy's art. If the old toy has unsaved edits, the studio asks before replacing
@@ -262,19 +259,19 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
       toy carries a <code>sources.json</code> — Add Source writes one for the art it imports. Art a game draws
       purely in code, with no asset file, still shows only in VRAM: there is no file to preview.</td>
       <td class="status ok">fixed</td></tr>
-    <tr><td>Sound in an exported ROM</td><td>The sound engine is in the ROM (2026-11-02): a toy that calls
-      <code>sfx()</code>, <code>note()</code> or <code>release()</code> encodes and builds, and the
-      recordings are audible in Mednafen at the pitches the studio writes (note 261/330/392/523 Hz,
-      sfx 559/131 Hz); the console's PSG writes match the studio's over the traced frames. A song's data
-      is not in the ROM yet.</td><td class="status ok">notes play; songs planned</td></tr>
+    <tr><td>Sound in an exported ROM</td><td>The sound engine is in the ROM: a toy that calls
+      <code>sfx()</code>, <code>note()</code> or <code>release()</code> encodes and builds, and the recordings
+      are audible in Mednafen at the pitches the studio writes. Since Build 7 Export also carries up to eight
+      songs (8,160 bytes of song data) and the ROM plays them in the emulator. Not yet heard on a real
+      console.</td><td class="status ok">plays in an emulator</td></tr>
     <tr><td>What the ROM can run, while you write</td><td>ROM CHECK (and the MCP's <code>rom_check</code>)
       now reports the exact findings for both routes while you write. It is a front-end check: it does not
       build the ROM or run it, so the frame rate still needs Export and an emulator.</td>
       <td class="status ok">built; front end only</td></tr>
     <tr><td>Claude Code: songs</td><td>Through the MCP server a toy's <code>music(0)</code> encodes and
-      <code>song_write</code> writes its <code>song.json</code>, so the song plays in the studio. The ROM's
-      song table still has no song data, so the exported ROM plays no music yet.</td>
-      <td class="status soon">studio only</td></tr>
+      <code>song_write</code> writes its <code>song.json</code>, so the song plays in the studio and in a ROM
+      built with the Export button. The MCP's own <code>export_pce</code> does not carry songs yet.</td>
+      <td class="status soon">Export button only</td></tr>
     <tr><td>Connect Claude (live link)</td><td>New and lightly tested: if Connect does not give you a working
       command, or Claude says no studio tab is connected, please report it.</td><td class="status soon">please test</td></tr>
     <tr><td>Export error reports</td><td>Planned: when an export is refused, the studio will send only the
