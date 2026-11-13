@@ -1248,13 +1248,22 @@ A **`copyv`** (#281) streams static asset data to VRAM. Its operands are
 127-constant pool #218 relieves. `vram` is the first VRAM word address;
 `bank` is a container bank number (0 is the tables/data bank, physical 4);
 `off` is 13 bits, a byte offset from the start of that bank; `count` is a
-word count. The source is one contiguous stream: after 8,192 bytes it
+word count. The host masks `off`'s top three bits (`& 0x1FFF`) and the shim
+masks them too (`and #$1F` before the pointer's `ora #$40`), so the two
+halves agree on a malformed `off`, not only a legal one. The source is one
+contiguous stream: after 8,192 bytes it
 continues at offset 0 of bank+1, then bank+2, and so on, so a blob may span
 whole banks (a v4 container's asset tail, `docs/BANKED-DATA.md` §5.2). The
 interpreter maps the source bank into MPR2 **once**, streams the words
 through the VDC data port with MAWR set once (the viewer's `copy_words`
 shape, `tools/viewer.asm`), remaps only at a bank boundary, and maps the
-function's code bank back before the next opcode. The console body is a
+function's code bank back before the next opcode. MAWR auto-increments per
+word and wraps at 16 bits, while the VDC's 32K-word VRAM ignores the
+register's top bit, so a copy that runs past the top of VRAM continues at
+word 0; the host wraps its write address to 16 bits the same way, and
+`tests/check-ilvm-copyv.js` pins the wrap with a trace build (`vram.bin`
+alone cannot: the harness masks `& 0x7FFF` and
+`(x & 0xFFFF) & 0x7FFF == x & 0x7FFF`). The console body is a
 bank-3 shim (`CopyvShim` in `tools/ilvm/hutrack_engine.asm`, called by fixed
 address); the fixed 16 KiB image pays one store, one `jsr` and one load
 because it has no room for the loop. The host harness runs a C body with
@@ -1268,8 +1277,10 @@ would land during the display instead of at the next VBlank. The intended
 site is an asset load in `init()`/boot straight-line code before
 display-on; a run that is deferred today must stay as `vset` ops. The
 encoder does not emit `copyv` yet; the op's evidence is the host harness
-(`tests/check-ilvm-copyv.js`: 300 words in a v1 container and two copies in
-a v4 one, the second crossing a bank), and the console capture is owed once
+(`tests/check-ilvm-copyv.js`: 300 words in a v1 container and five copies in
+a v4 one — one bank, one crossing a bank, one with a malformed `off` whose
+top three bits both halves mask, one spanning three banks, and one near the
+top of VRAM), and the console capture is owed once
 #218 emits a blob.
 
 A **`padget`'s field byte** is the runtime's `TOY_PAD_*` bit
