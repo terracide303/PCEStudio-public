@@ -46,8 +46,17 @@ if grep -qE "toy_pad\(|toy_timer_set\(|toy_sat\(|toy_sprite\(" "tools/gen/$NAME.
   EXTRA="$EXTRA -DTOY_INPUT_BUILD"
 fi
 
-# -Os: the ROM is 8 KiB (bank 0).  -I tools/toyc is where toy_runtime.h lives.
-"$CC" -Os $EXTRA -Itools/toyc -o "tools/gen/$NAME.pce" \
+# -Os: the ROM is 8 KiB (bank 0) unless ROM_KB says more.  -I tools/toyc is
+# where toy_runtime.h lives.  ROM_KB=16|24|32|40|48 makes the fixed ROM that
+# many KiB: the SDK's linker script maps the extra 8 KiB pages into MPR6, MPR5
+# ... below $E000, so the code is one contiguous image and needs no bank
+# switching (compiler step 1: a game over 8 KiB of code, PLATFORMER's 8.5 KiB).
+# Unset, the build is the 8 KiB one the committed ROMs were made with.
+ROMSZ=""
+if [ -n "${ROM_KB:-}" ]; then
+  ROMSZ="-Wl,--defsym=__rom_bank0_size=$((ROM_KB * 1024)) -Wl,--defsym=__rom_bank0=$((65536 - ROM_KB * 1024))"
+fi
+"$CC" -Os $EXTRA $ROMSZ -Itools/toyc -o "tools/gen/$NAME.pce" \
   tools/toyc/toy_runtime.c "tools/gen/$NAME.c"
 
 ROM="tools/gen/$NAME.pce"
