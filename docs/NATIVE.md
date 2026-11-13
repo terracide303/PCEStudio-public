@@ -15,7 +15,7 @@ does.
 |---|---|---|---|
 | PLATFORMER | yes | **yes**, `ROM_KB=16` | its code is 8.5 KiB; the default ROM is 8 KiB |
 | TOWER | yes | **yes**, `ROM_KB=40`, with a silent `toy_sfx` | the native runtime has no sound engine yet, so this build is silent |
-| STARFALL | yes | **yes**, banked, with its art and the real sound engine (`tools/build-toyc-banked.sh toys/demo-game/main.lua name`: code in banks 1, 5, 6, art in bank 7) | the art loads at boot (`tools/native-assets.js`, `tools/toyc/toy_assets.c`: the studio importer's VRAM, colour and sprite words, 1,293 words in 22 runs). The picture is lit and recognisable but **not diff 0**: against the closest of 300 browser frames, 127 rows differ, in clusters between rows 7 and 102 (the raster path has a known four-line phase difference, docs/IL.md §10.4; not yet shown to be the cause) |
+| STARFALL | yes | **yes**, banked, with its art and the real sound engine (`tools/build-toyc-banked.sh toys/demo-game/main.lua name`: code in banks 1, 5, 6, art in bank 7) | the art loads at boot (`tools/native-assets.js`, `tools/toyc/toy_assets.c`: the studio importer's VRAM, colour and sprite words, 1,293 words in 22 runs) and is **exactly the browser's**: after 400 frames the console's VRAM outside the sprite list and all 512 colours equal the browser's, word for word. The picture is not diff 0 because the console's sprite list is missing the enemies and bullets (entries 8 to 16): in a raster build `frame()`'s VRAM writes went into a 32-word capture list and the rest were dropped. The compiled logic is right (`tools/host-c-compare.js`: 120 of 120 frames equal the browser's). The card #289 seat removed the capture list in its working copy; re-test when that lands |
 | DUSK RUN | yes (since `unm`, `bnot`, `not`) | **yes**, `ROM_KB=48`, silent `toy_sfx` | builds since the table pool is sized to the toy's own cells (it was a fixed 768 B and overflowed RAM by 146 B); but it **stalls after the first frame** and the screen stays black: the runtime's raised flag says a frame() wrote more colours than its 32-entry list holds. Not measured |
 | NOVA TIDE | **no** | — | `raster(line, spec)`, the table form, is not lowered; it also needs its art |
 
@@ -92,6 +92,16 @@ avoids this by construction, and the engine must keep it that way:
 
 Not yet checked: the interpreter ROM's COPYV (it runs in `frame()`, which is the
 unarmed phase, so rule 1 covers it) against a trace.
+
+## Is the compiler right? The host comparison
+
+`tools/host-c-compare.js toys/NAME/main.lua` compiles the generated C on this machine against a stub
+runtime (`tests/hostc/stub_runtime.c`: VRAM and the sprite list as arrays, an idle pad) and compares the
+sprite list after every toy frame with the browser runtime's. It needs no emulator and no llvm-mos, so it
+separates the compiler's logic from the console runtime's behaviour. For PLATFORMER, TOWER, DUSK RUN and
+STARFALL, 120 of 120 frames are equal (`tests/check-cgen-host.js`). So when a native ROM's picture is wrong
+the cause is the runtime, the banking or the build, not `pce-cgen.js`: that is how STARFALL's missing
+sprites were traced to the runtime's 32-word VRAM capture list within an hour.
 
 ## Native against interpreter
 
