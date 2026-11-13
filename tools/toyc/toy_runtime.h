@@ -27,6 +27,14 @@ void toy_reg(int32_t which, int32_t value);
 /* The IL's vset(addr, word): one VDC VRAM word. */
 void toy_vram_set(int32_t addr, int32_t word);
 
+/* The same write with 16-bit arguments: what the compiled route's generated C calls.  A VRAM address and a
+ * word are 16 bits to the VDC; passing them as int32 cost four argument bytes each for nothing. */
+void toy_vram_set16(uint16_t addr, uint16_t word);
+
+/* Four consecutive VRAM words from `addr`: one MAWR load and eight data stores instead of four of each
+ * (a sprite's SAT entry, which the generated C knows is four consecutive constants). */
+void toy_vram_set4(uint16_t addr, uint16_t w0, uint16_t w1, uint16_t w2, uint16_t w3);
+
 /* The IL's raster(line, spec), the table form: one line's entry from inside
  * frame().  `mask` has bit0 BXR, bit1 BYR, bit2 CR; the values are read only
  * for the bits set.  Only a raster build keeps entries. */

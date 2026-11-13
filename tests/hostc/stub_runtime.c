@@ -15,6 +15,8 @@ uint16_t host_cram[512];
 void toy_pal(int32_t a, int32_t w) { host_cram[a & 511] = (uint16_t)w; }
 void toy_reg(int32_t which, int32_t value) { (void)which; (void)value; }
 void toy_vram_set(int32_t a, int32_t w) { host_vram[a & 0xFFFF] = (uint16_t)w; }
+void toy_vram_set16(uint16_t a, uint16_t w) { host_vram[a] = w; }
+void toy_vram_set4(uint16_t a, uint16_t w0, uint16_t w1, uint16_t w2, uint16_t w3) { host_vram[a] = w0; host_vram[(uint16_t)(a + 1)] = w1; host_vram[(uint16_t)(a + 2)] = w2; host_vram[(uint16_t)(a + 3)] = w3; }
 void toy_sat(int32_t i, int32_t k, int32_t v) {
   if (i < 0 || i > 63 || k < 0 || k > 3) return;
   host_vram[0x7F00 + i * 4 + k] = (uint16_t)v;

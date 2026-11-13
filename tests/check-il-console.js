@@ -220,7 +220,7 @@ function checkEmitter() {
   check(/void toy_boot\(void\)/.test(c) && /void toy_frame\(int32_t f\)/.test(c),
         "the C has the boot/frame entry points");
   check(/toy_pal\(/.test(c), "the IL pal instruction lowers to toy_pal()");
-  check(/toy_vram_set\(/.test(c), "the IL vset instruction lowers to toy_vram_set()");
+  check(/toy_vram_set16\(/.test(c), "the IL vset instruction lowers to toy_vram_set16() (the 16-bit entry of toy_vram_set)");
   check(/il_fn_4/.test(c) && /il_lua_mod\(/.test(c),
         "the frame function and Lua's modulo helper are emitted");
   check(!/\b(double|float)\b/.test(c), "the C carries no floating-point type");
@@ -360,9 +360,10 @@ function checkRefusals() {
       ""
     ].join("\n");
     const c = cgen.emitC(il.compile(SPRITE, { chunkName: "sprite.lua" }));
-    check(/toy_sprite\(\(int32_t\)0x2u, \(int32_t\)0x20u, \(int32_t\)0x40u, \(int32_t\)0x3u, \(int32_t\)0x1u, \(int32_t\)0x4u\);/
-          .test(c),
-          "cgen lowers a resolved sprite to toy_sprite(slot, x, y, pat, pal, flag)");
+    /* since 2026-11-13 the four SAT words are folded at compile time into one toy_vram_set4 burst:
+     * slot 2 is $7F08, words y=64, x=32, pattern<<1=6, palette | hflip<<11 = 2049 */
+    check(/toy_vram_set4\(32520, 64, 32, 6, 2049\);/.test(c),
+          "cgen lowers a resolved sprite to toy_vram_set4(SAT address, y, x, pattern<<1, attribute word)");
   }
   /* …and a spec the SAME resolution cannot prove refuses cgen-op, at the
    * sites the encoder refuses ilbc-op (a runtime field, a runtime slot). */
@@ -579,8 +580,8 @@ function frame(t, f) pal(1, g[1]) end`, "cgen-op", null, { target: "huc" });
   if (sr.status === 0) {
     const csrc = fs.readFileSync(path.join(ROOT, "tools/gen/toysprite.c"),
                                  "utf8");
-    check(/toy_sprite\(/.test(csrc),
-          "the sprite ROM's C calls toy_sprite");
+    check(/toy_vram_set4\(/.test(csrc),
+          "the sprite ROM's C writes its SAT entry with toy_vram_set4");
   }
 }
 

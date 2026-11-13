@@ -208,7 +208,7 @@ int32_t toy_pad(int32_t n, int32_t field) {
 /* The SAT is VRAM $7F00..$7FFF (docs/ROM_LAYOUT.md); the startup set DSR so
  * the VDC reloads SATB from there every VBlank. */
 void toy_sat(int32_t i, int32_t k, int32_t v) {
-  if (i < 0 || i > 63 || k < 0 || k > 3) return;
+  if ((uint32_t)i > 63u || (uint32_t)k > 3u) return;
   toy_vram_set(0x7F00 + i * 4 + k, v);
 }
 
@@ -405,10 +405,13 @@ static void hold_flush(void) {
 }
 #endif
 
-void toy_vram_set(int32_t addr, int32_t word) {
+/* the zero source of the boot clear's block moves (64 bytes of ROM) */
+static const uint8_t toy_zeros[64];
+
+void toy_vram_set16(uint16_t addr, uint16_t word) {
 #ifdef TOY_RASTER_BUILD
-  uint16_t a = (uint16_t)addr & 0x7FFF;
-  uint16_t w = (uint16_t)word;
+  uint16_t a = addr & 0x7FFF;
+  uint16_t w = word;
   if (toy_host_mode == MODE_RASTER) {
     /* VRAM is fetched as the line draws; a write from a raster callback
      * cannot be replayed at a line boundary by this backend.  Flag it and
@@ -429,9 +432,30 @@ void toy_vram_set(int32_t addr, int32_t word) {
   vdc_write(0x02, w);
 #else
   /* Part A's body, unchanged: its palette ROM is a committed image. */
-  vdc_write(0x00, (uint16_t)addr);
-  vdc_write(0x02, (uint16_t)word);
+  vdc_write(0x00, addr);
+  vdc_write(0x02, word);
 #endif
+}
+
+void toy_vram_set(int32_t addr, int32_t word) {
+  toy_vram_set16((uint16_t)addr, (uint16_t)word);
+}
+
+void toy_vram_set4(uint16_t addr, uint16_t w0, uint16_t w1, uint16_t w2, uint16_t w3) {
+#ifdef TOY_RASTER_BUILD
+  addr &= 0x7FFF;
+  if (toy_host_mode == MODE_RASTER) {
+    measure_flag(0x04);              /* as toy_vram_set16: a VRAM write from a raster callback is dropped */
+    return;
+  }
+#endif
+  /* MAWR, then VWR selected once; the VDC advances MAWR itself after each high byte */
+  vdc_write(0x00, addr);
+  *IO_VDC_INDEX = 0x02;
+  *IO_VDC_DATA_LO = (uint8_t)w0; *IO_VDC_DATA_HI = (uint8_t)(w0 >> 8);
+  *IO_VDC_DATA_LO = (uint8_t)w1; *IO_VDC_DATA_HI = (uint8_t)(w1 >> 8);
+  *IO_VDC_DATA_LO = (uint8_t)w2; *IO_VDC_DATA_HI = (uint8_t)(w2 >> 8);
+  *IO_VDC_DATA_LO = (uint8_t)w3; *IO_VDC_DATA_HI = (uint8_t)(w3 >> 8);
 }
 
 void toy_wait_vblank(void) {
@@ -760,9 +784,11 @@ int main(void) {
   /* The browser host starts with a zeroed VRAM. */
   vdc_write(0x00, 0x0000);            /* MAWR = 0 */
   *IO_VDC_INDEX = 0x02;               /* select R02 (VWR) for the data port */
-  for (i = 0; i < 32768; i++) {
-    *IO_VDC_DATA_LO = 0;
-    *IO_VDC_DATA_HI = 0;
+  /* 64 KiB of zero bytes by block move: TIA copies from an incrementing source and alternates its
+   * destination between $0002 and $0003, which is the VDC's data low/high pair; 6 cycles a byte,
+   * about 3.5 video frames, where a store loop took about 8. */
+  for (i = 0; i < 1024; i++) {
+    __asm__ volatile ("tia %0, $0002, #64" : : "i"(toy_zeros) : "memory");
   }
 
   /* Load the zeroed SAT ($7F00) into SATB every VBlank. */
