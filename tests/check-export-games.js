@@ -578,7 +578,7 @@ function sleep(ms) {
 function measure(romPath, frames) {
   const m = spawnSync(process.execPath,
                       [MEASURE, romPath, "--frames", String(frames || 300)],
-                      { cwd: ROOT, encoding: "utf8", timeout: 120000 });
+                      { cwd: ROOT, encoding: "utf8", timeout: 600000 });  /* a long capture on a busy machine needs more than 2 minutes */
   if (m.status !== 0) {
     return { error: "measure-rom exited " + m.status + ": " +
                     (m.stderr || m.stdout || "").trim().split("\n").slice(-1)[0] };
@@ -640,7 +640,7 @@ async function captureFrames(romPath, outDir, sleepMs, tailOnly) {
   const m = spawnSync("python3",
     ["-I", MOVFRAMES, movie, tailOnly ? "--tail" : "--all",
      ...(tailOnly ? [String(CAPTURE_TAIL)] : []), frames, "256", "224", "4"],
-    { cwd: ROOT, encoding: "utf8", timeout: 120000 });
+    { cwd: ROOT, encoding: "utf8", timeout: 600000 });  /* a long capture on a busy machine needs more than 2 minutes */
   if (m.status !== 0) {
     return { error: "movframes.py failed: " +
                     (m.stderr || m.stdout || "").trim() };
