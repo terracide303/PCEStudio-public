@@ -69,6 +69,30 @@ above (10 frames, then nothing), and does not match yet. The 8 KiB fixed page
 holds the runtime, the dispatcher and the constants: 3.9 KB for TOWER, more for
 a raster toy.
 
+## VDC access rules (checked 2026-11-13)
+
+The VDC has global state: the selected register, the VRAM write address and its
+auto-increment. An interrupt that writes the VDC in the middle of a main-loop write or
+copy corrupts it (`docs/REFERENCES.md`, the PCE_knowledge notes). The native runtime
+avoids this by construction, and the engine must keep it that way:
+
+1. The main loop writes the VDC only while no scan interrupt is armed: at boot, and
+   in the VBlank that applies the frame's base and line 0, before the display and the
+   raster chain are armed. During the toy's own `frame()` and `raster()` calls the
+   writes are captured into lists and applied later, not made.
+2. The scan-line handler (`irq_vdc` in `tools/toyc/toy_runtime.c`) writes only
+   registers 5 to 8 (control, raster compare, scroll) and the colour table. It never
+   touches the VRAM address, the data port or the DMA registers.
+3. The VBlank part of the same handler reads the status register (which acknowledges
+   it) and increments a counter; it writes nothing.
+4. Because of 1 to 3 the handler does not save or restore the selected register. If a
+   later change lets main-loop VDC code run while the chain is armed, either the
+   handler must restore the selected register from a shadow, or that code must mask
+   interrupts or work in chunks of at most 64 words, re-setting the address each time.
+
+Not yet checked: the interpreter ROM's COPYV (it runs in `frame()`, which is the
+unarmed phase, so rule 1 covers it) against a trace.
+
 ## Native against interpreter
 
 Measured in Mednafen 1.32.1 (windowless), no buttons pressed. A video frame is
