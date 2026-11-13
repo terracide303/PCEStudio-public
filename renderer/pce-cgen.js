@@ -1147,7 +1147,10 @@
      * tableLayout() (pce-ilbc.js), so both backends report the same sites
      * and cells for the same IL. */
     if (a.usesTables) {
-      line("#define IL_TABLE_CELLS " + ilbc.TABLE_POOL_CELLS);
+      /* The native pool is the toy's own cells, not the interpreter's fixed
+       * 192: the pool is RAM, and 8 KiB is all the console has (DUSK RUN's
+       * variables overflowed it by 146 B with three small tables in 768 B). */
+      line("#define IL_TABLE_CELLS " + Math.max(1, a.table.cells));
       line("#define IL_NSLOTS " + a.table.nslots);
       line("static " + T + " il_table_cells[IL_TABLE_CELLS]");
       line("    __attribute__((section(\".bss\")));");
