@@ -71,6 +71,12 @@
       <span class="status ok">tested: the exported ROM's video memory equals the importer's image word for word, and a control with the old interpreter fails the same test; the exported PCEHero picture is identical to the studio's</span>
       <span class="status soon">exported games still run on the slow interpreter; not yet run on a real console</span></li>
   </ul>
+  <h3>The compiled games run faster (developer preview)</h3>
+  <ul>
+    <li>Calls between a game's own functions no longer go through a general dispatcher: the compiler sees which function is meant and calls it directly, functions that call each other are packed into the same ROM bank, the per-line scroll callback is a plain call, and division, remainder and multiplication by a constant are several times cheaper. Measured in an emulator, game updates per 300 video frames: TOWER 180 to 236, STARFALL 71 to 125, NOVA TIDE 49 to 64. The sprite writes cost a third less and the start-up before a game's own code runs is shorter (8 to 5 video frames).
+      <span class="status ok">tested: the compiled logic is still equal to the studio's, frame for frame; sound, art and picture checks pass; the constant arithmetic is checked against an exact reference over every 16-bit dividend</span>
+      <span class="status soon">nothing here is on the Export button yet; not yet run on a real console</span></li>
+  </ul>
   <h3>All five example games now compile to machine code (developer preview)</h3>
   <ul>
     <li>NOVA TIDE, the game with scrolling bands of sky, hills, city and sea, now compiles and runs in the emulator. The compiled game logic is the same as the studio's, frame for frame, and its picture in the emulator is <b>identical to the studio's, pixel for pixel</b>. A bug found on the way: games with scrolling bands had every sprite switched off on the console (the list was right, the sprite layer was off). That is fixed, and STARFALL's picture went from 127 differing rows to one.
