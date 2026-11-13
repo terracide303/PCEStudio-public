@@ -21,8 +21,8 @@ Starting Mednafen 1.32.1
     Failed: Error opening file "/Volumes/External II/agent-tmp/mdfn-home-cave-style-ilvm/pgconfig/cave-style-ilvm.pce.cfg" for reading: No such file or directory
 
    ROM:       40KiB
-   ROM CRC32: 0x07dd7283
-   ROM MD5:   0x5ea4dea804ccbf4d88e15a4af722ceb4
+   ROM CRC32: 0x19b561c7
+   ROM MD5:   0x1c1754adba2099c40d9ea2e1a0d15125
    PSG Revision: HuC6280
 
   Loading custom palette from "/Volumes/External II/agent-tmp/mdfn-home-cave-style-ilvm/palettes/pce.pal"...
