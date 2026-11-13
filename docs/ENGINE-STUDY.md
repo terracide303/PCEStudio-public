@@ -15,10 +15,11 @@ samples, not averages.
 |---|---|---|---|
 | CPU cycles in a frame (trace units ÷ 3) | 119,660 | 119,650 | 119,650 |
 | time idle in the wait loop | 57–77% | 54–63% | 33–51% |
-| interrupts per frame | 1 to 4 | 3 to 4 | 3 to 4 |
+| interrupts per frame | 4 (1 on the title) | about 117 | about 140 |
+| share of the frame spent inside interrupts | 8% | 33% | 32% |
 | subroutine calls per frame | 180–360 | 290–340 | 260–280 |
 | bank-mapping instructions per frame | 31–35 | about 2,050–2,090 | about 1,800–2,170 |
-| VRAM words written per frame | 420–490 | 300–360 | 512 |
+| VRAM words written per frame | 210–250 | 150–180 | 256 |
 | raster splits (range compare writes) | 3 | 1 | 12 in two of four points |
 | block-transfer instructions | none | none | none |
 | share of cycles run from the fixed top page | 80% | 80% | 75% |
@@ -31,21 +32,25 @@ samples, not averages.
    CPU cycle.
 2. **The main loop is a spin on a frame counter** that the VBlank interrupt bumps
    (R-Type: compare a zero-page byte, branch back). The games are idle a third to
-   three quarters of the time, so a real game's work is 25 to 65% of a frame. Our
+   three quarters of the time, so a real game's work, interrupts included, is 25 to
+   65% of a frame. Our
    native TOWER at 70% mean and 91% worst is in that range, without sound.
 3. **Bank switching is cheap and used heavily.** R-Type switches about 30 times a
-   frame, in its calls. Soldier Blade and Air Zonk switch about 2,100 times, nearly
-   all in one timer interrupt that fires about 111 times a frame (about 6.7 kHz): a
-   sample player. Each time it saves the five switched pages on the stack, maps five
-   consecutive data banks, calls a routine in the window, and restores them. That is
-   the shape of HuTrack's own song window. At roughly 300 cycles an interrupt, a
-   sample player costs about 28% of a frame. So bank switching per call (ours, under
-   2% on TOWER) is well inside what shipped games do.
+   frame, in its calls; its one big interrupt (the VBlank, about 8,300 cycles) does
+   its VRAM work and is the only heavy one. Soldier Blade and Air Zonk switch about
+   2,100 times a frame, nearly all in one timer interrupt that fires about 111 times a
+   frame (about 6.7 kHz): a sample player. Each time it saves the five switched pages
+   on the stack, maps five consecutive data banks, calls a routine in the window and
+   restores them, for about 360 cycles (Air Zonk: about 345). Inside interrupts these
+   games spend a third of every frame. That is the shape of HuTrack's own song window.
+   So bank switching per call (ours: under 2% on TOWER) is far inside what shipped
+   games do, and a sample player is a budget of its own: about 30% of a frame.
 4. **The top page carries the game.** Three quarters or more of all cycles run from
    the fixed page; the switched pages are mostly data and occasional routines. This
    is the layout option C copies.
-5. **VRAM is written with plain stores**, 300 to 510 words a frame (about 10 to 13
-   thousand cycles at the ~30 a word measured elsewhere), no block-transfer
+5. **VRAM is written with plain stores**, 150 to 250 words a frame (the trace counts
+   byte stores to the data port; a word is two), about 5 to 8 thousand cycles at the
+   ~30 a word measured elsewhere, no block-transfer
    instruction in the sampled frames. The sprite list is moved by the VDC's own DMA,
    its source address set two or three times a frame.
 6. **Raster use varies**: one split (Soldier Blade), three (R-Type), twelve (Air Zonk,
