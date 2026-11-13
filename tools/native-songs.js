@@ -47,6 +47,18 @@ songs.forEach(function (song, i) {
     /* convert() needs the DMF reader's legacyArpSpeed; fromSequencer defaults it to 1 */
     adapted = JSON.parse(JSON.stringify(song));
     if (adapted.legacyArpSpeed === undefined || adapted.legacyArpSpeed === null) adapted.legacyArpSpeed = 1;
+    /* convert() wants every row to carry the same number of effect slots, the
+     * unused ones as the DMF reader's filler (code 0xFFFF, arg 0xFFFF); a song
+     * saved with empty slot lists (oak-woods) is padded to its widest row, at
+     * least one slot, as fromSequencer does for a sequencer row */
+    let width = 1;
+    adapted.patterns.forEach((ch) => ch.forEach((pat) => pat.forEach((row) => {
+      if (row.fxSlots && row.fxSlots.length > width) width = row.fxSlots.length;
+    })));
+    adapted.patterns.forEach((ch) => ch.forEach((pat) => pat.forEach((row) => {
+      row.fxSlots = row.fxSlots || [];
+      while (row.fxSlots.length < width) row.fxSlots.push({ code: 0xFFFF, arg: 0xFFFF });
+    })));
   }
   const converted = hutrack.convert(adapted, { songName: name, subFolder: name });
   const bytes = hutrack.assemble(converted.files, converted.entry, { bank: SONG_BANK, org: ORG + pos });

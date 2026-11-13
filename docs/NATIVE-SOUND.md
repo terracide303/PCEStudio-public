@@ -117,6 +117,6 @@ the tick spread over two frames, or the engine rewritten for speed.
 
 Not done: raster toys (the raster tables leave too
 little RAM beside the engine's 1.1 KB); the studio's Export button, which still
-builds the interpreter ROM; and the Oak Woods song, whose `song.json` is a DMF
-import that `pce-hutrack.js` cannot convert yet (a row field is missing; the
-sequencer's own songs convert).
+builds the interpreter ROM. The Oak Woods song converts too (its rows carry empty
+effect-slot lists, which `tools/native-songs.js` pads to the converter's filler);
+`tests/native-music-oak` plays it and equals the studio's model like the demo song.

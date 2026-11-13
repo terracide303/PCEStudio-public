@@ -141,6 +141,7 @@ if (!fs.existsSync(gg) || !fs.existsSync(
   runStream("tools/toys/sfx.lua", "sfx", scratch);
   runStream("tools/toys/note.lua", "note", scratch);
   runMusic("tests/native-music", "music", scratch);
+  runMusic("tests/native-music-oak", "music-oak", scratch);   /* a DMF-style song.json (toys/oak-woods) */
 }
 skipped.forEach((s) => console.log("SKIP: " + s));
 if (failures.length) { console.log("FAIL  " + failures.length + " of " + checks + " checks failed"); process.exit(1); }
