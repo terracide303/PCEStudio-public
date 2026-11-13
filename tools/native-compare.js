@@ -237,6 +237,17 @@ function notBlack(framesDir, files) {
   const w=want[r.best].pixels, row=img.width*3, rows=[];
   for(let y=0;y<img.pixels.length/row;y++){let d=0;for(let k=y*row;k<(y+1)*row;k++)if(img.pixels[k]!==w[k])d++;if(d)rows.push(y);}
   const ranges=[];for(const y of rows){const l=ranges[ranges.length-1];if(l&&y===l[1]+1)l[1]=y;else ranges.push([y,y]);}
-  console.log("differing rows:",rows.length,"in",ranges.length,"range(s):",ranges.slice(0,12).map(a=>a[0]===a[1]?a[0]:a[0]+"-"+a[1]).join(","));
+  /* a raster phase difference moves everything below the split by whole rows: try shifting the lower picture */
+  {
+    const out=[];
+    for(const split of [24,32]) for(let sh=-3;sh<=3;sh++){
+      let d=0;const H=img.pixels.length/row;
+      for(let y=split;y<H;y++){const yy=y+sh; if(yy<0||yy>=H){continue;} for(let k=0;k<row;k++) if(img.pixels[y*row+k]!==w[yy*row+k]) d++;}
+      for(let y=0;y<split;y++) for(let k=0;k<row;k++) if(img.pixels[y*row+k]!==w[y*row+k]) d++;
+      out.push("split "+split+" shift "+sh+": "+d);
+    }
+    console.log("shift test (differing bytes, rows below the split compared one browser row apart):\n  "+out.join("\n  "));
+  }
+ console.log("differing rows:",rows.length,"in",ranges.length,"range(s):",ranges.slice(0,12).map(a=>a[0]===a[1]?a[0]:a[0]+"-"+a[1]).join(","));
  }
 })();

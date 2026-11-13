@@ -922,6 +922,13 @@
       line("}");
     }
 
+    /* the divisor as a positive power of two (1, 2, 4, ... 2^30), else 0 */
+    function pow2(op) {
+      if (!op || !op.k || op.k.t !== "int") return 0;
+      var v = op.k.v | 0;
+      return v > 0 && (v & (v - 1)) === 0 ? v : 0;
+    }
+
     function emitInstruction(fn, fid, ins, pc) {
       var d = ins.dst != null ? "r[" + ins.dst + "]" : null;
       switch (ins.t) {
@@ -977,10 +984,19 @@
           expr = "(" + T + ")((" + U + ")" + lhs + " * (" + U + ")" + rhs + ")";
           break;
         case "mod":
-          expr = "il_lua_mod(" + lhs + ", " + rhs + ")";
+          /* x % 2^k is a mask (Lua's floor remainder is non-negative for a positive divisor, which is
+           * what two's complement `&` gives); a software 32-bit remainder costs ~2,000 cycles here */
+          if (!huc && pow2(ins.b) > 0) {
+            expr = pow2(ins.b) === 1 ? "(" + T + ")0"
+              : "(" + T + ")((" + U + ")" + lhs + " & 0x" + (pow2(ins.b) - 1).toString(16) + "u)";
+          } else expr = "il_lua_mod(" + lhs + ", " + rhs + ")";
           break;
         case "idiv":
-          expr = "il_lua_idiv(" + lhs + ", " + rhs + ")";
+          /* x // 2^k is an arithmetic shift (floor division); k = 0 is the value itself */
+          if (!huc && pow2(ins.b) > 0) {
+            var sh = Math.round(Math.log2(pow2(ins.b)));
+            expr = sh === 0 ? lhs : "(" + T + ")(" + lhs + " >> " + sh + ")";
+          } else expr = "il_lua_idiv(" + lhs + ", " + rhs + ")";
           break;
         case "band":
           expr = "(" + T + ")((" + U + ")" + lhs + " & (" + U + ")" + rhs + ")";

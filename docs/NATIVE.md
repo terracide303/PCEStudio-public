@@ -23,8 +23,8 @@ Only the picture and the music were judged, by eye and ear; no cycle measurement
 |---|---|---|---|
 | PLATFORMER | yes | **yes**, `ROM_KB=16` | its code is 8.5 KiB; the default ROM is 8 KiB |
 | TOWER | yes | **yes**, `ROM_KB=40`, with a silent `toy_sfx` | the native runtime has no sound engine yet, so this build is silent |
-| STARFALL | yes | **yes**, banked, with its art and the real sound engine (`tools/build-toyc-banked.sh toys/demo-game/main.lua name`) | the console's sprite list equals the browser's, word for word (`tools/native-sat-compare.js`), the art loads exactly (`tests/check-native-art.js`: 0 of 32,768 VRAM words and 0 of 512 colours differ from the importer's picture) and the compiled logic matches (`tools/host-c-compare.js`). The picture is still not diff 0: 127 rows differ, all in the starfield area (rows 7 to 102), which is what a one-line raster timing offset would do to one-pixel stars; not yet shown to be the cause |
-| DUSK RUN | yes (since `unm`, `bnot`, `not`) | **yes**, `ROM_KB=48`, silent `toy_sfx` | builds since the table pool is sized to the toy's own cells (it was a fixed 768 B and overflowed RAM by 146 B); but it **stalls after the first frame** and the screen stays black: the runtime's raised flag says a frame() wrote more colours than its 32-entry list holds. Not measured |
+| STARFALL | yes | **yes**, banked, with its art and the real sound engine (`tools/build-toyc-banked.sh toys/demo-game/main.lua name`) | the console's sprite list equals the browser's, word for word (`tools/native-sat-compare.js`), the art loads exactly (`tests/check-native-art.js`: 0 of 32,768 VRAM words and 0 of 512 colours differ from the importer's picture) and the compiled logic matches (`tools/host-c-compare.js`). The picture is still not diff 0: 127 rows differ, all in the starfield area (rows 7 to 102), which is what a one-line raster timing offset would do to one-pixel stars; a whole-row shift of the lower picture does not remove them (tested, shifts of -3 to +3 rows), so it is not a raster phase error; with the sprite list exactly equal the likeliest cause is a difference between the browser's renderer and the emulator's, as the interpreter route's STARFALL is already pinned "unmatched" for a related reason. Not proven; the hardware is the judge |
+| DUSK RUN | yes (since `unm`, `bnot`, `not`) | **yes**, banked (the function over a bank is split), runs: no stall, runtime flags 0 | **slow, and the cause is measured**: `frame()` costs 75,000 cycles (63% of a frame) but each of the 224 `raster(line)` calls a game frame costs about 7,500 cycles, 14 video frames of raster work per game frame (9 game frames in 400 video frames). The cost is the sky gradient's three 32-bit divisions by 151 and 76 (about 2,000 cycles each in software). A game-level fix is to compute the gradient without dividing each line; that is a change to the gallery game, the maintainer's call. Picture not diff 0 yet (not looked at again) |
 | NOVA TIDE | **no** | — | `raster(line, spec)`, the table form, is not lowered; it also needs its art |
 
 "IL → C" means `emitC` returns C text; only a llvm-mos build counts as
@@ -100,6 +100,13 @@ avoids this by construction, and the engine must keep it that way:
 
 Not yet checked: the interpreter ROM's COPYV (it runs in `frame()`, which is the
 unarmed phase, so rule 1 covers it) against a trace.
+
+## Division by a power of two is a shift (2026-11-13)
+
+`x // 2^k` lowers to an arithmetic shift and `x % 2^k` to a mask (`pce-cgen.js`; `tests/check-cgen-pow2.js`
+compares the C with the browser for negative and positive dividends). A software 32-bit division costs about
+2,000 cycles on this CPU, so this matters for games that divide in `frame()` or in a raster callback; division
+by any other constant still calls the helpers. A reciprocal-multiply lowering for other constants is not done.
 
 ## A picture that jumped once a second (found on real hardware, fixed 2026-11-13)
 
