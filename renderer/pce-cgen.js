@@ -565,6 +565,14 @@
             refuse("cgen-op", where + ": arithmetic `" + ins.op + "`");
           }
           break;
+        case "unm":
+          if (ins.type !== "int") {
+            refuse("cgen-fixed", where + ": `" + ins.type + "` negation");
+          }
+          break;
+        case "bnot":
+        case "not":
+          break;
         case "cmp":
           if (ins.type === "fixed") {
             refuse("cgen-fixed", where + ": a fixed-point comparison");
@@ -883,6 +891,15 @@
         line("  " + d + " = " + expr + ";");
         break;
       }
+      case "unm":
+        line("  " + d + " = (" + T + ")(0 - (" + U + ")" + operand(ins.a) + ");");
+        break;
+      case "bnot":
+        line("  " + d + " = (" + T + ")(~(" + U + ")" + operand(ins.a) + ");");
+        break;
+      case "not":
+        line("  " + d + " = (" + operand(ins.a) + " == 0);");
+        break;
       case "cmp": {
         var ca = operand(ins.a);
         var cb = operand(ins.b);
