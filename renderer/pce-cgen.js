@@ -909,6 +909,52 @@
       return target ? c : null;
     }
 
+    /* Call affinity for the bank packer (tools/bank-toyc.py): a direct call is only fast when caller
+     * and callee share a bank, so every direct call site carries a weight = how often it runs per
+     * frame, roughly: the caller's own frequency (the frame hook 10,000, the raster hook 224 times that,
+     * everything else, init and the main chunk included, once) times 8 per loop level the site sits in, and
+     * a callee inherits what its callers send it (eight levels deep, capped).  Relative, not cycles. */
+    var siteWeight = {};
+    if (!huc && !NO_DIRECT) (function () {
+      var nf = a.functions.length, loopW = [], calls = [];
+      a.functions.forEach(function (f, fi) {
+        var lw = new Array(f.code.length), q, e;
+        for (q = 0; q < f.code.length; q++) lw[q] = 1;
+        for (q = 0; q < f.code.length; q++) {
+          var c = f.code[q];
+          if ((c.t === "jmp" || c.t === "br" || c.t === "fornext") && c.target != null && c.target <= q) {
+            for (e = c.target; e <= q; e++) lw[e] = Math.min(lw[e] * 8, 4096);
+          }
+        }
+        loopW[fi] = lw;
+        f.code.forEach(function (c, pc) {
+          if (c.t !== "call") return;
+          var dc = directCallee(fi, pc, c);
+          if (dc) calls.push({ from: fi, pc: pc, to: dc.fid, w: lw[pc] });
+        });
+      });
+      var base = new Array(nf), level, total = new Array(nf), k;
+      for (k = 0; k < nf; k++) { base[k] = 1; total[k] = 0; }
+      if (a.hookFrame != null) base[a.hookFrame] = 10000;
+      if (a.hookRaster != null) base[a.hookRaster] = 10000 * 224;
+      level = base.slice();
+      for (k = 0; k < nf; k++) total[k] = level[k];
+      for (var round = 0; round < 8; round++) {
+        var next = new Array(nf).fill(0), any = false;
+        calls.forEach(function (cl) {
+          if (!level[cl.from]) return;
+          next[cl.to] = Math.min(1e12, next[cl.to] + level[cl.from] * cl.w);
+          any = true;
+        });
+        if (!any) break;
+        for (k = 0; k < nf; k++) total[k] = Math.min(1e12, total[k] + next[k]);
+        level = next;
+      }
+      calls.forEach(function (cl) {
+        siteWeight[cl.from + ":" + cl.pc] = Math.max(1, Math.min(1e12, Math.round(base[cl.from] > 1 || total[cl.from] > 1 ? total[cl.from] * cl.w : cl.w)));
+      });
+    })();
+
     var chunkCtx = null;
 
     function jumpTo(target) {
@@ -954,7 +1000,7 @@
         });
         line("  default: return -1;");
         line("  }");
-        chunkCtx = { lo: bounds[k][0], hi: bounds[k][1] };
+        chunkCtx = { lo: bounds[k][0], hi: bounds[k][1], name: cname };
         for (pc = bounds[k][0]; pc < bounds[k][1]; pc++) {
           if (labels[pc] || entries[k][pc]) line("L" + pc + ": ;");
           emitInstruction(fn, fid, fn.code[pc], pc);
@@ -1187,7 +1233,7 @@
         var dc = directCallee(fid, pc, ins);
         if (dc) {
           /* the caller's own symbol names its bank; a chunk has no single one (IL_BANK_NONE) */
-          var callerSym = chunkCtx ? "none" : "il_fn_" + fid;
+          var callerSym = chunkCtx && chunkCtx.name ? chunkCtx.name : chunkCtx ? "none" : "il_fn_" + fid;
           call = "";
           for (var ci2 = 0; ci2 < ARGS.length; ci2++) call += (ci2 ? ", " : "") + argOf(ins, ci2);
           call = "IL_DIRECT(" + callerSym + ", " + dc.fid + ", " + dc.cid + ", " + call + ")";
@@ -1196,7 +1242,9 @@
           for (var ci = 0; ci < ARGS.length; ci++) call += ", " + argOf(ins, ci);
           call += ")";
         }
-        line("  " + (d ? d + " = " : "(void)") + call + ";");
+        line("  " + (d ? d + " = " : "(void)") + call + ";" +
+             (dc ? " /* AFF " + (chunkCtx && chunkCtx.name ? chunkCtx.name : "il_fn_" + fid) + " il_fn_" + dc.fid + " " +
+                   (siteWeight[fid + ":" + pc] || 1) + " */" : ""));
         break;
       }
       case "sat":

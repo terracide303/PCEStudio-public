@@ -29,10 +29,50 @@ for f in split: sizes.pop(f,None)
 # leave 1 KiB for the difference to the LTO link
 CAP=8192-int(os.environ.get("BANK_SLACK","1024"))   # build-toyc-banked.sh retries with more slack if the link overflows
 banks=[]; assign={}
-for fid,sz in sorted(sizes.items(),key=lambda x:-x[1]):  # fid is the symbol suffix, e.g. 7 or 39_c1
+# Call affinity.  A direct call (IL_DIRECT) is a plain call only when caller and callee share a bank
+# (or the callee is in the fixed page); across banks it falls back to il_call, ~500 cycles dearer.
+# pce-cgen.js marks every direct call site `/* AFF caller callee weight */` (weight: how often the
+# site runs per frame, relative).  Cluster greedily along the heaviest edges while a cluster still
+# fits one bank (union-find, deterministic tie-breaks), then first-fit-decreasing the clusters.
+# BANK_AFFINITY=0 packs by size alone, the way it was before (for the measurements).
+edges={}
+use_affinity=os.environ.get("BANK_AFFINITY","1")!="0"
+if True:
+    for m in re.finditer(r"/\* AFF il_fn_(\d+(?:_c\d+)?) il_fn_(\d+(?:_c\d+)?) (\d+) \*/",text):
+        a_,b_,w=m.group(1),m.group(2),int(m.group(3))
+        if a_ in sizes and b_ in sizes and a_!=b_:
+            k=(a_,b_) if a_<b_ else (b_,a_)
+            edges[k]=edges.get(k,0)+w
+        elif a_ in sizes and b_ not in sizes:
+            pass   # the callee is in the fixed page (a split function's dispatcher): already free
+parent={k:k for k in sizes}; csize=dict(sizes)
+def find(x):
+    while parent[x]!=x:
+        parent[x]=parent[parent[x]]; x=parent[x]
+    return x
+same_w=0
+for (a_,b_),w in sorted(edges.items() if use_affinity else [],key=lambda e:(-e[1],e[0])):
+    ra,rb=find(a_),find(b_)
+    if ra==rb: continue
+    if csize[ra]+csize[rb]<=CAP:
+        parent[rb]=ra; csize[ra]+=csize[rb]
+clusters={}
+for k in sorted(sizes): clusters.setdefault(find(k),[]).append(k)
+for root,members in sorted(clusters.items(),key=lambda c:(-sum(sizes[m] for m in c[1]),c[0])):
+    total=sum(sizes[m] for m in members)
+    if total>CAP and len(members)==1:   # a single oversized function: the SPLIT path below handles it
+        banks.append(total); assign[members[0]]=len(banks); continue
     for b,used in enumerate(banks):
-        if used+sz<=CAP: banks[b]+=sz; assign[fid]=b+1; break
-    else: banks.append(sz); assign[fid]=len(banks)
+        if used+total<=CAP:
+            banks[b]+=total
+            for m in members: assign[m]=b+1
+            break
+    else:
+        banks.append(total)
+        for m in members: assign[m]=len(banks)
+if edges:
+    tw=sum(edges.values()); sw=sum(w for (a_,b_),w in edges.items() if assign[a_]==assign[b_])
+    print("call affinity (%s): %d of %d edge weight is same-bank (%d%%), %d edges"%("on" if use_affinity else "off",sw,tw,100*sw//max(tw,1),len(edges)),file=sys.stderr)
 # physical bank numbers for the packed banks: 1, 2, 3, ... or, when the ROM
 # keeps banks for the sound engine, BANK_IDS="1,5,6,..." (tools/build-toyc-banked.sh)
 ids=[int(x) for x in os.environ.get("BANK_IDS","").split(",") if x] or list(range(1,200))
