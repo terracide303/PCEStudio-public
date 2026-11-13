@@ -274,6 +274,39 @@ would ride on 24 art banks instead of the data bank, so carrying
 | *control #187* `tools/toys/not.lua` | **yes** — 40,960 B, sha256 `385636cbd6c796f1…`, a toy whose picture is painted by the logical `not` | **diff 0** (4-picture cycle pinned) | 0 | **153** lines | **60 Hz** | — |
 | *control #191* `tools/toys/sprite.lua` | **yes** — 40,960 B, sha256 `8904eabd3c067460…`, three constant sprite specs (the full spec; a partial one with `hflip`/`cgx`; `spbg`/`cgy`/`vflip`), so `sprite()` is carried end to end (#188 encoder, #189 interpreter, #190 cgen) | **diff 0** (its constant picture is pinned as one hash; `tests/check-ilvm.js` also compares the saved SAT word for word) | 0 | **110** lines | **60 Hz** | — |
 
+### The constant pool, cave-style picture, and STARFALL's next blocker (#219, closes #148)
+
+- **A cave-style picture exports and its ROM shows it (#219).** The toy is
+  `tests/cave-style/main.lua`: an original 32x28 BAT, 16 tiles and a 16-entry
+  palette, written as constants in `init()` with no pad and no sprites. It
+  has far more than 127 distinct constants (256 tile words alone); the
+  encoder keeps them in one blob and copyv ops (`renderer/pce-ilbc.js`
+  `constVramRuns`), where it used to stop at the 127-entry pool. `tools/capture-ilvm.sh
+  cave-style-ilvm tests/cave-style/main.lua` exports it through the studio's
+  route (`tools/ilvm/emit.js`) and runs the ROM in Mednafen (`VIDEO_DRIVER=sdl`,
+  no input sent). `node tests/check-cave-style.js` PASSES 4 checks: the
+  capture's ROM sha equals a fresh export, the picture is not flat, and
+  Mednafen's 256x232 frame diffs **0** pixels (at the 3-bit colour) against
+  `renderer/pce-sprites.js` over `renderer/pce-bg.js` on the capture's VRAM,
+  CRAM and regs. The capture now records `slstart`/`slend` in `regs.json`
+  as `tools/capture.sh` does; without it the window was one VCE line off
+  (the renderer's default `firstScanline` is 18, this capture's row 0 is 17).
+- **STARFALL re-run through the studio's Export (#219).** It is no longer
+  refused: `tests/check-export-games.js` builds it (art in banks, #288) with
+  no refusal. Its next blocker is **speed**, and it is not a rule of the game:
+  `toys/demo-game/main.lua:630` (`function raster(line)`) is called once per
+  scanline, 224 times per frame, and each call costs the interpreter about
+  1,200 cycles on top of `frame()`'s 9,730 (the validator prices the
+  collection at 279,353 cycles, 2.34 frames, 25.6 Hz: the
+  `validate-slow-frame` warning, `renderer/pce-validate.js:539`). On the
+  interpreter the worst update is **6,896 lines**, 25 updates and 25 overruns
+  in the check's 600 frames. The picture is the second blocker: the closest
+  browser frame is 419 bytes off (`docs/BANKED-DATA.md` §5.10, unchanged by
+  this card). Next step for the speed: the per-line `raster(line)` hook has no
+  work on 222 of its 224 lines, so the cheap route is the table form or a
+  two-call split, decided by the card that owns the raster collection (the
+  table form is refused by both routes at the same line).
+
 ### What this says, plainly
 
 - **PLATFORMER exports — the first game that does (#186) — and now holds

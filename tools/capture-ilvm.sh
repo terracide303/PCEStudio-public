@@ -90,6 +90,15 @@ echo "state: $new_mcs"
 echo "movie: $MOV ($(stat -f%z "$MOV") bytes)"
 
 python3 -I tools/mcs-extract.py "$new_mcs" "$DUMPDIR" "$SLSTART" --ram
+# #219: record the crop this dump was captured with, as tools/capture.sh does:
+# the renderer's vertical calibration is firstScanline = 14 + slstart.
+python3 -I - "$DUMPDIR/regs.json" "$SLSTART" "$SLEND" <<'PYEOF'
+import json, sys
+regs = json.load(open(sys.argv[1]))
+regs["slstart"] = int(sys.argv[2])
+regs["slend"] = int(sys.argv[3])
+json.dump(regs, open(sys.argv[1], "w"), indent=1, sort_keys=True)
+PYEOF
 python3 -I tools/movframes.py "$MOV" "$DUMPDIR/mednafen.png" 256 232 4
 python3 -I tools/movframes.py "$MOV" --all "$DUMPDIR/frames" 256 224 4
 # ilvm: a slow interpreted toy can record thousands of frames, most of them
