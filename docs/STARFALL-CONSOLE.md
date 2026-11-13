@@ -136,7 +136,7 @@ as the gate:
 
 Two first-hit aborts sit between the page and the truth:
 
-1. `pce-cgen.js:697` refuses the **first** IL instruction it cannot lower and
+1. `pce-cgen.js:705` refuses the **first** IL instruction it cannot lower and
    throws. STARFALL's first was the `table` for the `DIGIT` digit-code array at
    `main.lua:47`; #176 (2026-10-31) carried the four table kinds and the
    table-typed globals, so the first was then the `sprite` at `main.lua:406`
@@ -152,7 +152,7 @@ So the page's single line is the first of many. The rest are below — and one
 of them is not an instruction kind at all: if #132 carried the four table
 kinds in the C emitter, the very next thing it lowers is
 `setglobal DIGIT` at function 0 **pc 14** (`main.lua:47`), and
-`renderer/pce-cgen.js:536` refuses a global typed `table`. That gate is
+`renderer/pce-cgen.js:537` refuses a global typed `table`. That gate is
 [#143](#143); the ordered list in `tools/starfall-console.js` prints it.
 (#176 closed both: the allow-list is now `fn|vram|int|bool|padset|table`, so
 the ordered list's next refusal was then the `sprite` at `main.lua:406`;
@@ -182,7 +182,7 @@ than stopping at the first hit. "Route 1" is `pce-ilbc.js` + `renderer/ilvm.bin`
 **246 of 1,919 instructions (12.8%)** are refused by at least one backend.
 Nine of the eleven kinds are refused by both; pad reads are a
 **route-1-only** gap (the C backend lowers `padref`/`padget` —
-`pce-cgen.js:607 and 616` — so the two backends disagree about what a toy can
+`pce-cgen.js:615 and 624` — so the two backends disagree about what a toy can
 do). (#174 and #176 carried the four table kinds on both backends, so as of
 2026-10-31 the count is **49 of 1,919 (2.6%)** over seven kinds. #185–#190
 then carried pads, `sat`, `not` and `sprite`, and #197 (2026-11-01) carried
