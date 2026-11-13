@@ -1960,9 +1960,11 @@
                 "number to the PSG's 12-bit F); min/max/floor/abs/clamp/sr " +
                 "and the fixed helpers do not encode here",
         ops: ["builtin"] },
-      { id: "display", label: "pal(), reg(BXR/BYR/CR), vram[...] writes",
+      { id: "display", label: "pal(), reg(BXR/BYR/CR), vram[...] writes " +
+        "and copyv(vram, bank, off, count): stream banked data into VRAM " +
+        "(the art prologue, docs/BANKED-DATA.md §5.10)",
         detail: "vram reads (vget) have no bytecode form",
-        ops: ["pal", "reg", "vset"] },
+        ops: ["pal", "reg", "vset", "copyv"] },
       { id: "tables", label: "tables: int array keys and string fields",
         detail: "the interpreter's fixed pool of " + TABLE_POOL_CELLS +
                 " cells", ops: ["table", "setlist", "tget", "tset"] },

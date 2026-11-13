@@ -121,14 +121,17 @@ function checkTables() {
 
   /* Every opcode in the bytecode's own table is either carried (some group's
    * `ops`) or explicitly refused.  The one refused opcode is vget, which
-   * ilbc.check reports as ilbc-op. */
+   * ilbc.check reports as ilbc-op.  The C route's missing set gained copyv
+   * on 2026-11-13 (#288): the bytecode route carries it (the art prologue)
+   * but the C emitter has not lowered it — its native art path is the
+   * #289 seat's, not this opcode. */
   const carriedOps = {};
   for (const f of cgen.FEATURES.carried) for (const op of f.ops || []) carriedOps[op] = true;
   const cgenMissing = Object.keys(ilbc.OPS).filter(function (op) {
     return !carriedOps[op];
   }).sort();
   eq("the C route's carried ops leave exactly the refused opcodes", cgenMissing,
-     ["bnot", "not", "setupval", "unm", "vget"]);
+     ["bnot", "copyv", "not", "setupval", "unm", "vget"]);
 
   const byteOps = {};
   for (const f of ilbc.FEATURES.carried) for (const op of f.ops || []) byteOps[op] = true;

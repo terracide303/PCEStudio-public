@@ -909,7 +909,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | bytecode (every .pce) | values, globals, closures and control flow | int/bool/nil and function values; upvalues; jumps, branches, numeric for and returns |
 | bytecode (every .pce) | 32-bit integer arithmetic and comparisons | add sub mul mod idiv band bor bxor shl shr; eq lt le; unm, bnot and logical not |
 | bytecode (every .pce) | rgb(r, g, b) and note(midi) | the two builtins with a bytecode form (note is a MIDI number to the PSG's 12-bit F); min/max/floor/abs/clamp/sr and the fixed helpers do not encode here |
-| bytecode (every .pce) | pal(), reg(BXR/BYR/CR), vram[...] writes | vram reads (vget) have no bytecode form |
+| bytecode (every .pce) | pal(), reg(BXR/BYR/CR), vram[...] writes and copyv(vram, bank, off, count): stream banked data into VRAM (the art prologue, docs/BANKED-DATA.md §5.10) | vram reads (vget) have no bytecode form |
 | bytecode (every .pce) | tables: int array keys and string fields | the interpreter's fixed pool of 192 cells |
 | bytecode (every .pce) | pad[n].field |  |
 | bytecode (every .pce) | sat(i, k, v) and sprite(i, spec) |  |
