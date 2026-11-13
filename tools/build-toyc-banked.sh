@@ -111,6 +111,10 @@ if ! LINKLOG=$(link 2>&1); then
     [ -n "${NO_RETRY:-}" ] && { echo "$LINKLOG" >&2; exit 1; }
     BANK_SLACK=$NEXT exec "$0" "$@"
   fi
+  if echo "$LINKLOG" | grep -q "region 'rom_bank0'" && [ "${BANK_PIN_HOT:-1}" != "0" ]; then
+    echo "the fixed page is full: not pinning the raster hook there" >&2
+    BANK_PIN_HOT=0 exec "$0" "$@"
+  fi
   echo "$LINKLOG" >&2; exit 1
 fi
 if [ $SOUND -eq 1 ]; then

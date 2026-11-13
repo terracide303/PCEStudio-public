@@ -117,8 +117,8 @@ const RASTER_FILE = path.join(ROOT, "toys/parallax.lua");
  * toy's own value (-7 // 2 = -4). */
 const TOY_IDIV = [
   "function frame(t, f)",
-  "  local x = -7",
-  "  local q = x // 3",   /* not a power of two: those lower to a shift now (55739bb); // 3 keeps the floor correction exercised */
+  "  local x = 7",
+  "  local q = x // -3",   /* neither a power of two (a shift, 55739bb) nor a positive constant (a reciprocal helper): a negative divisor keeps the generic helper's floor correction exercised; 7 // -3 = -3 as -7 // 3 was */
   "  pal(1, q + 8)",
   "end",
   ""
@@ -747,7 +747,7 @@ function checkRasterEmitter() {
   eq("the raster C emitter is deterministic", c, cgen.emitC(program));
   check(/void toy_raster\(int32_t line\) \{/.test(c),
         "the raster() hook lowers to toy_raster(line)");
-  check(/il_call\(il_globals\[\d+\], line, 0, 0, 0\)/.test(c),
+  check(/il_call\(il_globals\[\d+\], line, 0, 0, 0\)|IL_DIRECT\(none, \d+, \d+, line, 0, 0, 0\)/.test(c),   /* a hook assigned once is called directly */
         "toy_raster passes the line as the hook's first parameter");
   check(/toy_reg\(TOY_REG_BXR,/.test(c) && /toy_reg\(TOY_REG_BYR,/.test(c),
         "the IL reg instruction lowers to toy_reg() with a register id");

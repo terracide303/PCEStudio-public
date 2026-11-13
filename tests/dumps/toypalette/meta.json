@@ -26,7 +26,7 @@
  "name": "toypalette",
  "rom": "tools/gen/toypalette.pce",
  "rom_bytes": 8192,
- "rom_sha256": "6a43dffeb4c27210275bc085df349cd028202a5b3b3510e6e479e4428b1a9067",
+ "rom_sha256": "0ef3898619b0cac0d0e4c0abd8faa7f6c32b2b3278186773a21afa7dda2ac7df",
  "section_sizes": {
   ".bss": 40,
   ".data": 8,

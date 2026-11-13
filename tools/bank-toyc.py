@@ -25,6 +25,14 @@ for l in subprocess.run([llvm+"/bin/llvm-nm","-S",elf],capture_output=True,text=
 # name in the fixed page; only its chunks are packed into banks
 split={k.split("_")[0] for k in sizes if "_c" in k}
 for f in split: sizes.pop(f,None)
+# the raster hook (pce-cgen.js marks it `/* HOT il_fn_N */`) runs 224 times a frame; a small one stays in the
+# fixed page so that il_call reaches it with no bank switch.  BANK_PIN_HOT=0 turns this off (the build script
+# does that when the fixed page is full).
+if os.environ.get("BANK_PIN_HOT","1")!="0":
+    for m in re.finditer(r"/\* HOT il_fn_(\d+) \*/",text):
+        k=m.group(1)
+        if k in sizes and sizes[k]<=int(os.environ.get("BANK_HOT_MAX","600")):
+            sizes.pop(k); print("pinned in the fixed page: il_fn_"+k,file=sys.stderr)
 # first-fit decreasing into 8 KiB banks; the sizes come from a non-LTO object, so
 # leave 1 KiB for the difference to the LTO link
 CAP=8192-int(os.environ.get("BANK_SLACK","1024"))   # build-toyc-banked.sh retries with more slack if the link overflows

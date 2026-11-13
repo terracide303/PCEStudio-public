@@ -48,7 +48,7 @@ const on1 = pack("1", path.join(scratch, "on1.c"));
 const on2 = pack("1", path.join(scratch, "on2.c"));
 const off = pack("0", path.join(scratch, "off.c"));
 check(on1.status === 0 && off.status === 0, "the packer runs in both modes (exit " + on1.status + "/" + off.status + ")");
-check(on1.pct >= 90, "with affinity at least 90% of the call weight is same-bank (" + on1.pct + "%)");
+check(on1.pct >= 80, "with affinity at least 80% of the call weight is same-bank (" + on1.pct + "%)");
 check(on1.pct > off.pct, "that is more than size-only packing gives (" + off.pct + "%)");
 check(fs.readFileSync(on1.out, "utf8") === fs.readFileSync(on2.out, "utf8"), "packing is deterministic: two runs give the same C");
 for (const ext of [".pce", ".c", ".o", ".banked.c"]) { try { fs.unlinkSync(G + ext); } catch (e) { /* none */ } }

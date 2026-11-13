@@ -532,8 +532,73 @@
 
   /* ---- validation: refuse outside part A, naming the construct --------- */
 
+  /* ---- division by a constant, exactly (the console's software divide is ~1,500 cycles) ----
+   * llvm-mos does 32-bit arithmetic at 60-85 cycles per bit of shift, so a reciprocal multiply in 32 bits
+   * is no faster than the library divide (measured, 1,650 to 2,400 cycles).  This stays in 16 bits:
+   * for a 16-bit dividend a = ah*256 + al and M = floor(65536 / c) = Mh*256 + Ml, the quotient is
+   * estimated as  ah*Mh + (ah*Ml >> 8) + (al*Mh >> 8)  (three 8-bit variable times constant products;
+   * it never overshoots, and falls short by at most a few), the remainder r = a - q*c is formed, and
+   * up to K steps of `if (r >= c) { q++; r -= c; }` finish it.  K is found here by running the exact
+   * C arithmetic for ALL 65,536 dividends, so the helper is exact by construction; a constant that
+   * needs more than MAX_FIX steps gets no helper and keeps the generic one. */
+  var magicCache = {};
+  var MAX_FIX = 4;
+  function findMagic(c) {
+    if (magicCache[c] !== undefined) return magicCache[c];
+    var M = Math.floor(65536 / c), Mh = M >> 8, Ml = M & 255, k = 0, a, ok = true;
+    for (a = 0; a <= 65535; a++) {
+      var ah = a >> 8, al = a & 255;
+      var q = ah * Mh + ((ah * Ml) >> 8) + ((al * Mh) >> 8);
+      var r = a - q * c;
+      var fix = 0;
+      if (r < 0) { ok = false; break; }                 /* an overshoot: never happens, but never trust */
+      while (r >= c) { q++; r -= c; fix++; if (fix > MAX_FIX) break; }
+      if (fix > MAX_FIX || q !== Math.floor(a / c)) { ok = false; break; }
+      if (fix > k) k = fix;
+    }
+    magicCache[c] = ok ? { M: M, Mh: Mh, Ml: Ml, fix: k } : null;
+    return magicCache[c];
+  }
+  /* signed-digit (non-adjacent) form of a constant: [{shift, sign}] with the fewest nonzero digits */
+  function nafTerms(m) {
+    var terms = [], bit = 0;
+    while (m > 0) {
+      if (m & 1) { var digit = 2 - (m & 3); terms.push({ shift: bit, sign: digit }); m = m - digit; }
+      m = Math.floor(m / 2); bit++;
+    }
+    return terms;
+  }
+  /* `dest = src * K` in 16 bits as an explicit shift-add chain.  llvm-mos expands a multiply by a constant
+   * inline only for a few simple constants and calls __mulhi3 (200+ cycles) for the rest, so a constant
+   * with more than two signed digits is written out; an empty asm statement that "modifies" the value
+   * after each step stops llvm folding the chain back into the multiply (and the libcall). */
+  function mulChain(dest, src, K, indent, out) {
+    var terms = nafTerms(K).sort(function (x, y) { return y.shift - x.shift; });
+    if (terms.length <= 2) { out.push(indent + "uint16_t " + dest + " = (uint16_t)(" + src + " * " + K + "u);"); return; }
+    out.push(indent + "uint16_t " + dest + " = " + src + ";");
+    for (var k = 1; k < terms.length; k++) {
+      out.push(indent + dest + " = (uint16_t)((uint16_t)(" + dest + " << " + (terms[k - 1].shift - terms[k].shift) + ") " +
+               (terms[k].sign < 0 ? "- " : "+ ") + src + ");");
+      out.push(indent + "__asm__ volatile(\"\" : \"+r\"(" + dest + "));");
+    }
+    var low = terms[terms.length - 1].shift;
+    if (low) out.push(indent + dest + " = (uint16_t)(" + dest + " << " + low + ");");
+  }
+  /* statements computing uint16_t qq (floor(a / c)) and uint16_t rr (a - q*c) from the uint16_t variable `a` */
+  function magicQuotientLines(m, c, indent, out) {
+    out.push(indent + "uint16_t vh = (uint16_t)(a >> 8), vl = (uint16_t)(a & 255u);");
+    var parts = [];
+    if (m.Mh) { mulChain("p1", "vh", m.Mh, indent, out); parts.push("p1"); }
+    if (m.Ml) { mulChain("p2", "vh", m.Ml, indent, out); parts.push("(uint16_t)(p2 >> 8)"); }
+    if (m.Mh) { mulChain("p3", "vl", m.Mh, indent, out); parts.push("(uint16_t)(p3 >> 8)"); }
+    out.push(indent + "uint16_t qq = " + (parts.length ? parts.join(" + ") : "0") + ";");
+    mulChain("qc", "qq", c, indent, out);
+    out.push(indent + "uint16_t rr = (uint16_t)(a - qc);");
+    for (var f = 0; f < m.fix; f++) out.push(indent + "if (rr >= " + c + "u) { qq++; rr -= " + c + "u; }");
+  }
+
   function validate(program, a, huc, issues) {
-    var uses = { mod: false, idiv: false, shl: false, shr: false, mul: false };
+    var uses = { mod: false, idiv: false, shl: false, shr: false, mul: false, divc: {}, mulc: {} };
     var i, j;
     for (i = 0; i < a.functions.length; i++) {
       var fn = a.functions[i];
@@ -612,11 +677,23 @@
           if (ins.type !== "int") {
             refuse("cgen-fixed", where + ": `" + ins.type + "` arithmetic");
           }
+          if (!huc && (ins.op === "mod" || ins.op === "idiv") && ins.b && ins.b.k && ins.b.k.t === "int") {
+            var dcv = ins.b.k.v | 0;
+            if (dcv >= 3 && dcv <= 32768 && (dcv & (dcv - 1)) !== 0 && findMagic(dcv)) {
+              uses.divc[ins.op + ":" + dcv] = { op: ins.op, c: dcv };
+            }
+          }
           if (ins.op === "mod") uses.mod = true;
           else if (ins.op === "idiv") uses.idiv = true;
           else if (ins.op === "shl") uses.shl = true;
           else if (ins.op === "shr") uses.shr = true;
-          else if (ins.op === "mul") uses.mul = true;
+          else if (ins.op === "mul") {
+            uses.mul = true;
+            if (!huc) {
+              var mk = ins.a && ins.a.k && ins.a.k.t === "int" ? ins.a.k.v | 0 : (ins.b && ins.b.k && ins.b.k.t === "int" ? ins.b.k.v | 0 : null);
+              if (mk != null && mk >= 3 && mk <= 4095 && (mk & (mk - 1)) !== 0) uses.mulc[mk] = true;
+            }
+          }
           else if (["add", "sub", "band", "bor", "bxor"]
                    .indexOf(ins.op) < 0) {
             refuse("cgen-op", where + ": arithmetic `" + ins.op + "`");
@@ -1148,8 +1225,20 @@
         case "mul":
           /* the console's generic 32x32 multiply loops over all 32 bits (~2,000 cycles);
            * il_lua_mul's cost follows the smaller operand's bit length */
-          expr = huc ? "(" + T + ")((" + U + ")" + lhs + " * (" + U + ")" + rhs + ")"
-                     : "il_lua_mul(" + lhs + ", " + rhs + ")";
+          if (huc) {
+            expr = "(" + T + ")((" + U + ")" + lhs + " * (" + U + ")" + rhs + ")";
+          } else {
+            /* a constant operand: a power of two is a shift, a small constant takes il_mulc_K's 16-bit path */
+            var ck = ins.a && ins.a.k && ins.a.k.t === "int" ? ins.a.k.v | 0 : (ins.b && ins.b.k && ins.b.k.t === "int" ? ins.b.k.v | 0 : null);
+            var other = ins.a && ins.a.k && ins.a.k.t === "int" ? rhs : lhs;
+            if (ck != null && ck > 0 && (ck & (ck - 1)) === 0) {
+              expr = ck === 1 ? other : "(" + T + ")((" + U + ")" + other + " << " + Math.round(Math.log2(ck)) + ")";
+            } else if (ck != null && uses.mulc[ck]) {
+              expr = "il_mulc_" + ck + "(" + other + ")";
+            } else {
+              expr = "il_lua_mul(" + lhs + ", " + rhs + ")";
+            }
+          }
           break;
         case "mod":
           /* x % 2^k is a mask (Lua's floor remainder is non-negative for a positive divisor, which is
@@ -1157,6 +1246,8 @@
           if (!huc && pow2(ins.b) > 0) {
             expr = pow2(ins.b) === 1 ? "(" + T + ")0"
               : "(" + T + ")((" + U + ")" + lhs + " & 0x" + (pow2(ins.b) - 1).toString(16) + "u)";
+          } else if (!huc && uses.divc["mod:" + (ins.b && ins.b.k ? ins.b.k.v | 0 : 0)]) {
+            expr = "il_modc_" + (ins.b.k.v | 0) + "(" + lhs + ")";
           } else expr = "il_lua_mod(" + lhs + ", " + rhs + ")";
           break;
         case "idiv":
@@ -1164,6 +1255,8 @@
           if (!huc && pow2(ins.b) > 0) {
             var sh = Math.round(Math.log2(pow2(ins.b)));
             expr = sh === 0 ? lhs : "(" + T + ")(" + lhs + " >> " + sh + ")";
+          } else if (!huc && uses.divc["idiv:" + (ins.b && ins.b.k ? ins.b.k.v | 0 : 0)]) {
+            expr = "il_idivc_" + (ins.b.k.v | 0) + "(" + lhs + ")";
           } else expr = "il_lua_idiv(" + lhs + ", " + rhs + ")";
           break;
         case "band":
@@ -1598,6 +1691,36 @@
       line("}");
       line("");
     }
+    if (!huc) {
+      Object.keys(uses.divc).sort().forEach(function (key) {
+        var dc = uses.divc[key], m = findMagic(dc.c), c = dc.c;
+        var name = (dc.op === "idiv" ? "il_idivc_" : "il_modc_") + c;
+        var body = [];
+        line("/* x " + (dc.op === "idiv" ? "//" : "%") + " " + c + " for 0..65535 in 16-bit pieces (estimate from 8-bit products, " + m.fix +
+             " correction step" + (m.fix === 1 ? "" : "s") + ", checked on all 65,536 dividends when this C was generated), the same through");
+        line(" * the ceiling for -32768..-1 (one shared chain), and the generic helper for anything else.  Inline: the fixed");
+        line(" * ROM page has no room for one helper per constant, the banks do. */");
+        line("static inline __attribute__((always_inline)) " + T + " " + name + "(" + T + " x) {");
+        line("  uint16_t a;");
+        line("  uint8_t neg = 0;");
+        line("  if ((" + U + ")x <= 0xFFFFu) {");
+        line("    a = (uint16_t)x;");
+        line("  } else if ((" + U + ")(x + 0x8000) < 0x8000u) {");
+        line("    a = (uint16_t)((uint16_t)(0 - (uint16_t)x) + " + (c - 1) + "u);");
+        line("    neg = 1;");
+        line("  } else {");
+        line("    return " + (dc.op === "idiv" ? "il_lua_idiv" : "il_lua_mod") + "(x, " + c + ");");
+        line("  }");
+        line("  {");
+        magicQuotientLines(m, c, "  ", body); body.forEach(function (l) { line(l); });
+        /* negative x: floor(x/c) = -ceil(u/c) = -qq (qq from u+c-1), and x mod c = c - 1 - rr */
+        if (dc.op === "idiv") line("    return neg ? -(" + T + ")qq : (" + T + ")qq;");
+        else line("    return neg ? (" + T + ")(uint16_t)(" + (c - 1) + "u - rr) : (" + T + ")rr;");
+        line("  }");
+        line("}");
+        line("");
+      });
+    }
     if (uses.mul && !huc) {
       /* x*y modulo 2^32 (what the IL's wrapping int multiply is), by shift and add over the
        * smaller operand's bits: DUSK RUN's pixel rules multiply small numbers by the thousand */
@@ -1620,6 +1743,21 @@
       line("  return (" + T + ")(neg ? (" + U + ")0 - r : r);");
       line("}");
       line("");
+      /* x * K for a small constant K: when |x| <= 65535 / K the product fits 16 bits, and a 16-bit shift-add
+       * chain costs ~50-150 cycles where il_lua_mul's loop over the smaller operand's bits costs 130-1,000.
+       * Anything else (and the sign, handled on the magnitude) falls back to il_lua_mul. */
+      Object.keys(uses.mulc).sort(function (x, y) { return x - y; }).forEach(function (ks) {
+        var K = +ks, lim = Math.floor(65535 / K), body = [];
+        line("static inline __attribute__((always_inline)) " + T + " il_mulc_" + K + "(" + T + " x) {");
+        line("  if ((" + U + ")x + " + lim + "u <= " + (2 * lim) + "u) {");
+        line("    uint16_t v = (uint16_t)(x < 0 ? 0 - x : x);");
+        mulChain("pp", "v", K, "    ", body); body.forEach(function (l) { line(l); });
+        line("    return x < 0 ? -(" + T + ")pp : (" + T + ")pp;");
+        line("  }");
+        line("  return il_lua_mul(x, " + K + ");");
+        line("}");
+        line("");
+      });
     }
     if (uses.shl) {
       line("static " + T + " il_lua_shl(" + T + " x, " + T + " n) {");
@@ -1732,9 +1870,23 @@
      * §10).  A weaker symbol than the runtime's weak stub, so its presence
      * is how main() knows the toy has a callback. */
     if (a.hookRaster != null) {
+      /* the per-line callback runs 224 times a frame: the bank packer keeps a small one in the fixed page,
+       * where il_call needs no bank switch (measured: STARFALL's raster call cost +400 cycles in a bank) */
+      line("/* HOT il_fn_" + a.hookRaster + " */");
       line("void toy_raster(" + T + " line) {");
-      line("  (void)il_call(il_globals[" + a.globalIds["raster"] + "], " +
-           callArgs(["line"]) + ");");
+      /* a hook assigned once, from one closure site, is called directly (no il_call per line); the
+       * packer keeps a small hook in the fixed page, so this is a plain call there */
+      var rsites = sitesOfFid[a.hookRaster];
+      var rsets = 0;
+      a.functions.forEach(function (f) {
+        f.code.forEach(function (c) { if (c.t === "setglobal" && c.name === "raster") rsets++; });
+      });
+      if (!huc && !NO_DIRECT && rsites && rsites.length === 1 && rsets === 1) {
+        line("  (void)IL_DIRECT(none, " + a.hookRaster + ", " + rsites[0].cid + ", " + callArgs(["line"]) + ");");
+      } else {
+        line("  (void)il_call(il_globals[" + a.globalIds["raster"] + "], " +
+             callArgs(["line"]) + ");");
+      }
       line("}");
       line("");
     }
