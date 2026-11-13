@@ -46,7 +46,7 @@
  "name": "toyparallax-ilvm",
  "rom": "tools/gen/toyparallax-ilvm.pce",
  "rom_bytes": 40960,
- "rom_sha256": "2a49ab9e4791721b0df0c9345fd8ef098b7e802a93fad1d57ac62c8e99fbc310",
+ "rom_sha256": "90aba57b676f55d4a2d567b09ea8c34835ebf4acc9ae97650a40d295d9e6d713",
  "source": "toys/parallax.lua",
  "source_sha256": "b22ff94879c3ca94c74fe7838b5023633a6802fc1cd97342314b174dbb213a80"
 }

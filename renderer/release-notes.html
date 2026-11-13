@@ -65,6 +65,12 @@
   <a href="testers.html#not-yet">beta guide</a>.</p>
 
   <h2 id="b8">Build 8 · Friday 13 November (evening)</h2>
+  <h3>Exported games with art now show their art</h3>
+  <ul>
+    <li>A bug in Build 7: a game exported from the studio with art files (the PCEHero intro, STARFALL) built and started, but on the console its art was not loaded: the picture stayed black. The part of the ROM that copies the art into video memory was handed the wrong address and read garbage. It is fixed. The exported PCEHero intro now shows the same picture as the studio, pixel for pixel, in the emulator.
+      <span class="status ok">tested: the exported ROM's video memory equals the importer's image word for word, and a control with the old interpreter fails the same test; the exported PCEHero picture is identical to the studio's</span>
+      <span class="status soon">exported games still run on the slow interpreter; not yet run on a real console</span></li>
+  </ul>
   <h3>All five example games now compile to machine code (developer preview)</h3>
   <ul>
     <li>NOVA TIDE, the game with scrolling bands of sky, hills, city and sea, now compiles and runs in the emulator. The compiled game logic is the same as the studio's, frame for frame, and its picture in the emulator is <b>identical to the studio's, pixel for pixel</b>. A bug found on the way: games with scrolling bands had every sprite switched off on the console (the list was right, the sprite layer was off). That is fixed, and STARFALL's picture went from 127 differing rows to one.

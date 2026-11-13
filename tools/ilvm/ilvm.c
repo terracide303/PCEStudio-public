@@ -822,9 +822,13 @@ static int32_t exec(uint8_t fid, uint8_t clh,
 #else
       /* Bank 3's CopyvShim reads and advances the operands itself: the fixed
        * image pays one store, one jsr and one load (docs/ASM.md §6). */
-      *COPYV_PC = pc;
+      /* pc is an offset into the $4000 code window; the shim reads its operands through an
+       * absolute pointer, so it gets $4000 + pc and hands back the same (found 2026-11-13: it
+       * was given the bare offset, read $003F instead of $403F, and every exported art load
+       * wrote garbage; the host harness cannot see it, tests/check-export-art-console.js can). */
+      *COPYV_PC = (uint16_t)(pc + 0x4000u);
       COPYV_CALL();
-      pc = *COPYV_PC;
+      pc = (uint16_t)(*COPYV_PC - 0x4000u);
 #endif
       break;
     default:

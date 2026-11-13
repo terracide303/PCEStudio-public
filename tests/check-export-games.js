@@ -246,11 +246,11 @@ const GAME_PINS = {
   "STARFALL": {
     toy: "toys/demo-game/main.lua",
     galleryId: "starfall",
-    rom: "2d9290d7f620cfea6c1f72ea542198225faecc59197317d34587adea1aa9fb13",
+    rom: "04599e66b5ab8e3fb9fd9c2d0e159b45939d87bd270708b1ef64eb2677dff3fd",
     art: { blobBytes: 5520, copies: 3, tiles: 5, patterns: 14, sprites: 17 },
     /* The MCP's export_pce has no assets: the bytecode route still builds
      * the 40,960 B art-left-out ROM (the docs' `bytecodeOnly` sha). */
-    bytecode: { rom: "5984b3246858d28677bcee5b542079a9202d7e23fdc6a19da870af7025f38eb8" },
+    bytecode: { rom: "593232435c7b1420d3ca7827e3fcc8247dd0ac877589662a6ae28c20b228ba44" },
     frames: [],
     unmatched: "the art-banked ROM runs and draws; no captured frame " +
                "is the browser's picture yet — the closest is N bytes " +
@@ -280,7 +280,7 @@ const GAME_PINS = {
   "TOWER": {
     toy: "toys/tower/main.lua",
     galleryId: "tower",
-    rom: "1b1d151ae2fbdd35b771dfc4ebc21410ea53740adcec6f859aca6014d45175a9",
+    rom: "c67d2f2ccdaea11c3237b27d2737a35ddcac05b00c6d9b86c9c94a68176bc29b",
     framesAny: true,
     measureFrames: 1800,
     captureMs: 40000,
@@ -305,7 +305,7 @@ const GAME_PINS = {
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
     galleryId: "platformer",
-    rom: "ccc5f20a1405816a16f80612479a8653c2e567b0bfacaf687c635d3060b7c156",
+    rom: "8681b1c897365f2f9a9ce132e32d228b5543496b709e6aaaa6593835fee34d44",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
@@ -332,7 +332,7 @@ const GAME_PINS = {
   "DUSK RUN": {
     toy: "toys/dusk-run/main.lua",
     galleryId: "dusk-run",
-    rom: "2a569de95c3a1bfb07326f16c6eeb842f97b5806f46985dd9f79896698c0523a",
+    rom: "b955f58d7f454d8afd6c1c005bd53ddd0656e92f298755e369254ac1bd24f8bb",
     frames: [2819597916, 3584516448],
     measureFrames: 600,
     captureMs: 12000,
@@ -349,7 +349,7 @@ const GAME_PINS = {
   "SPRITE": {
     kind: "toy",
     toy: "tools/toys/sprite.lua",
-    rom: "8904eabd3c067460406e465c29521ddec127434df16037673177970542722b1e",
+    rom: "dec7c595be8fc537d7f6bef81da1387fbcc603c69d5e4e25ad20310afa9df7f0",
     frames: [1994475180]
   }
 };
@@ -360,7 +360,7 @@ const GAME_PINS = {
  * they were written for; the card's games run the studio's route above. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "f605155a3c66bbb12128072291a22f5d10dbb5b256acd5e351b4abdd0c073ac4",
+  rom: "8d21e951b63f694b176602512a71f0034c863dbbeb3b375cda102a256ba83811",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -373,7 +373,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "9c94805b4b017dc789e686282143cd887bd900d8bc92aee1459331695d98754a",
+  rom: "2b2294e0598c082bc9e9ee157baaeb5e7669369f3c0b1fd2bebe40ca7900a412",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -392,7 +392,7 @@ const WIDE = {
  * the controls'.) */
 const NOT = {
   toy: "tools/toys/not.lua",
-  rom: "385636cbd6c796f177e421c5e83ea882774f34754390368339725ed434adb509",
+  rom: "b98a6ac8d5c1739743be59e21ec41db044c77c8633b8b7b35aca5c3a1d442edd",
   frames: [2266090996, 2632876444, 887268600, 1464026320]
 };
 
