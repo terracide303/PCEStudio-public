@@ -18,6 +18,9 @@
  *   renderer/pce-psg.js       the nine PSG registers and their manual pages
  *   renderer/pce-validate.js  the cartridge validator's refusal codes
  *   renderer/pce-cgen.js      the console C backend's refusal codes
+ *   renderer/pce-rom.js       the data bank and HuCard sizes
+ *   renderer/pce-romcheck.js  the interpreter capacities (LIMITS) and the
+ *                             near/over percentages the ROM rules print
  *
  * tools/docs.js renders `markdown(reference())` to stdout and
  * `html(reference())` to renderer/docs.html; tests/check-docs.js proves the
@@ -37,7 +40,9 @@
                              require("./pce-psg.js"),
                              require("./pce-validate.js"),
                              require("./pce-cgen.js"),
-                             require("./pce-ilbc.js"));
+                             require("./pce-ilbc.js"),
+                             require("./pce-rom.js"),
+                             require("./pce-romcheck.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.docs = factory(root.PCEStudio.toyhost,
@@ -47,10 +52,13 @@
                                   root.PCEStudio.psg,
                                   root.PCEStudio.validate,
                                   root.PCEStudio.cgen,
-                                  root.PCEStudio.ilbc);
+                                  root.PCEStudio.ilbc,
+                                  root.PCEStudio.rom,
+                                  root.PCEStudio.romcheck);
   }
 })(typeof self !== "undefined" ? self : this,
-   function (host, editor, toys, il, psg, validate, cgen, ilbc) {
+   function (host, editor, toys, il, psg, validate, cgen, ilbc, rom,
+             romcheck) {
   "use strict";
 
   function range(lo, hi) { return lo + ".." + hi; }
@@ -99,7 +107,7 @@
    * compiler gains or refuses appears everywhere with no second edit.
    * tools/docs.js also writes this section's HTML into the Claude Code
    * manual (renderer/claude-code.html). */
-  function romSection() {
+  function romWritingBlocks() {
     var carriedRows = [];
     var groups = [
       { key: "cgen", name: "C compiler (Export…)", feat: cgen.FEATURES },
@@ -121,36 +129,373 @@
         refusedRows.push([groups[i].name, codes[j], map[codes[j]]]);
       }
     }
+    return [
+      { type: "p", text: "Two routes build a .pce, and this page lists " +
+          "what each carries today. The C route is " + cgen.FEATURES.route +
+          ". The interpreter route is " + ilbc.FEATURES.route + ". A toy " +
+          "the Studio exports must pass both; a toy exported over MCP " +
+          "needs the interpreter route. The lists below are the compilers' " +
+          "own tables (renderer/pce-cgen.js and renderer/pce-ilbc.js), not " +
+          "a summary: a feature added to either compiler appears here " +
+          "without a second edit." },
+      { type: "p", text: "The Studio's ROM CHECK drawer checks both routes " +
+          "as you type, marks the lines in the gutter, and shows 'ROM: ok' " +
+          "or 'ROM: N problems' beside Export. The same check is the MCP " +
+          "tool rom_check, which returns every finding at once as " +
+          "{code, line, message}." },
+      { type: "h3", text: "Carried today", source: "renderer/pce-cgen.js, " +
+          "renderer/pce-ilbc.js (FEATURES)" },
+      { type: "table", headers: ["route", "feature", "notes"],
+        rows: carriedRows },
+      { type: "h3", text: "Refused today", source: "renderer/pce-cgen.js, " +
+          "renderer/pce-ilbc.js (REFUSALS)" },
+      { type: "table", headers: ["route", "code", "meaning"],
+        rows: refusedRows },
+      { type: "p", text: "A refusal is not a crash: the exported ROM " +
+          "cannot carry the construct, so the finding names it and the " +
+          "line. The browser may still run the toy — the CONSOLE tab " +
+          "answers that question (renderer/pce-validate.js)." }
+    ];
+  }
+
+  /* ---- the ROM rules (the rom-rules docs topic) ------------------------ *
+   *
+   * The compact rule set the maintainer asked the MCP-connected Claude to
+   * follow, so Export works first time.  Every NUMBER below is read from
+   * the module that enforces it (the host's, the editor's and the ROM
+   * builder's constants plus renderer/pce-romcheck.js's LIMITS, which
+   * tests/check-rom-budget.js holds to the C interpreter); the hand-written
+   * part — the fixes, the idioms, the state table — is held to the code by
+   * tests/check-rom-rules.js (every named code is a refusal the code
+   * raises, and every number is a module constant).  The section is the
+   * docs topic `rom-rules`, and tools/docs.js writes it into the Claude
+   * Code manual after the two route tables above. */
+
+  /* The budget rows: each names the module field its number comes from
+   * (`from`), which tests/check-rom-rules.js re-reads.  The interpreter
+   * capacities ride romcheck.LIMITS, the one table the ROM CHECK drawer
+   * and check-rom-budget.js already hold to tools/ilvm/ilvm.c. */
+  function ruleBudgets() {
+    var rows = [
+      { label: "sprites", value: host.SAT_ENTRIES, unit: " SAT entries",
+        refusal: "sprite-range", what: "the sprite attribute table",
+        from: "host.SAT_ENTRIES" },
+      { label: "sprites on one display line", value: editor.LINE_STRIPS,
+        unit: " strips of " + editor.STRIP_PX + " pixels",
+        refusal: "validate-sprite-line",
+        what: "the VDC drops the rest (the line budget)",
+        from: "editor.LINE_STRIPS" },
+      { label: "VRAM", value: host.VRAM_WORDS, unit: " words",
+        refusal: "vram-range", what: "characters, the BAT, sprite patterns",
+        from: "host.VRAM_WORDS" },
+      { label: "CRAM", value: host.CRAM_ENTRIES, unit: " entries",
+        refusal: "pal-range", what: "pal() and the palettes",
+        from: "host.CRAM_ENTRIES" },
+      { label: "display lines", value: host.VDW_LINES, unit: "",
+        refusal: "raster-line", what: "one raster entry per line",
+        from: "host.VDW_LINES" },
+      { label: "raster colour writes on one line", value: host.RASTER_WRITES_MAX,
+        unit: "", refusal: "raster-line-full",
+        what: "the colour entries one line's callback may write",
+        from: "host.RASTER_WRITES_MAX" },
+      { label: "one hook's Lua time", value: toys.BUDGET_MS, unit: " ms",
+        refusal: "toy-timeout", what: "the page's budget per hook",
+        from: "toys.BUDGET_MS" },
+      { label: "frame rate", value: host.FRAME_HZ, unit: " Hz",
+        refusal: "validate-slow-frame",
+        what: "an update past one display frame is an overrun; the " +
+              "validator's model reports the estimate",
+        from: "host.FRAME_HZ" },
+      { label: "the data bank (the bytecode)", value: rom.SONG_TABLE_OFF,
+        unit: " B usable of the " + rom.BANK + " B bank (the last " +
+              (rom.BANK - rom.SONG_TABLE_OFF) + " B are the song trailer)",
+        refusal: "toy-data-bank-full",
+        what: "the bytecode the interpreter reads; a toy's art files " +
+              "travel in their own banks",
+        from: "rom.SONG_TABLE_OFF" },
+      { label: "the ROM", value: rom.BANK, unit: " B per bank, " +
+        rom.MAX_ROM_BANKS + " banks a HuCard",
+        refusal: "toy-rom-full", what: "the bytecode plus its asset banks",
+        from: "rom.BANK" }
+    ];
+    /* The interpreter's capacities, from the one table the drawer prints
+     * (the data bank is the row above; the rest ride along). */
+    for (var i = 0; i < romcheck.LIMITS.length; i++) {
+      var L = romcheck.LIMITS[i];
+      if (L.id === "data-bank") continue;
+      rows.push({ label: L.label, value: L.limit, unit: L.unit || "",
+                  refusal: L.refusal, what: L.what,
+                  from: "romcheck.LIMITS:" + L.id });
+    }
+    return rows;
+  }
+
+  /* What the Export route does with the gallery's five games today
+   * (docs/ROM_SPEED.md is the long form).  tests/check-rom-rules.js runs
+   * rom_check on each toy named here and holds the verdict and the code. */
+  var RULE_STATE = [
+    { game: "PLATFORMER", toy: "toys/platformer/main.lua", builds: true,
+      code: null,
+      detail: "builds, and runs at " + host.FRAME_HZ +
+              " Hz (the measured run overran no frame; the picture is " +
+              "the browser's)" },
+    { game: "TOWER", toy: "toys/tower/main.lua", builds: true, code: null,
+      detail: "builds, but too slow to play: its one-time init draw and " +
+              "each frame take several video frames" },
+    { game: "STARFALL", toy: "toys/demo-game/main.lua", builds: true,
+      code: null,
+      detail: "builds (its art travels in its own ROM bank), but too " +
+              "slow, and no captured frame is the browser's picture yet" },
+    { game: "DUSK RUN", toy: "toys/dusk-run/main.lua", builds: true,
+      code: null,
+      detail: "builds, but too slow: its boot alone takes several " +
+              "seconds" },
+    { game: "NOVA TIDE", toy: "toys/nova-tide/main.lua", builds: false,
+      code: "ilbc-op",
+      detail: "refused: its raster(line, spec) table call has no " +
+              "bytecode form, so the interpreter cannot carry it yet" }
+  ];
+
+  /* The idioms that compile fast (docs/ORIGINAL-CODE-IDIOMS.md and
+   * docs/ROUTINE-BENCH.md are the measured long form).  A row's `code` is
+   * the refusal a violation draws, and the test holds it to the tables. */
+  var RULE_IDIOMS = [
+    { rule: "divide and take the remainder by powers of two (// and %)",
+      why: "a shift, not a soft routine — part of how PLATFORMER's frame " +
+           "got small enough for " + host.FRAME_HZ + " Hz",
+      code: null },
+    { rule: "take the low byte with a band mask (the code block below)",
+      why: "one cheap op instead of arithmetic",
+      code: null },
+    { rule: "keep the arithmetic small",
+      why: "every Lua integer is wider than the CPU's accumulator; " +
+           "counters and coordinates that stay small are cheaper",
+      code: null },
+    { rule: "call local functions directly",
+      why: "a direct call costs a jump and a return; a call reached " +
+           "through a table or a first-class value costs far more",
+      code: null },
+    { rule: "read each table cell once, into a local",
+      why: "one cell read is dozens of instructions (the measured " +
+           "routines in docs/ROUTINE-BENCH.md); read it once and reuse " +
+           "the local",
+      code: null },
+    { rule: "write sprite specs as constants, or use sat()",
+      why: "a sprite() spec the walker cannot pin to constants is " +
+           "refused; a moving sprite writes its four sat() words instead",
+      code: "ilbc-op" },
+    { rule: "no division by a variable",
+      why: "a divisor the compiler does not know is a soft routine per " +
+           "operation; divide by constants, powers of two especially",
+      code: null },
+    { rule: "no strings",
+      why: "a string is not a value on either route; name things with " +
+           "numbers — note(midi), a number in print() — and reg(\"BXR\", " +
+           "v) is the one string form carried",
+      code: "ilbc-key" }
+  ];
+
+  /* The common refusals and the fix for each.  The meaning is the
+   * refusing module's own description (the refusalIndex) where the module
+   * has one; the fix is hand-written advice held to the code by
+   * tests/check-rom-rules.js. */
+  function ruleFixes() {
+    var index = refusalIndex();
+    var custom = {
+      "rom-budget": "a capacity the interpreter holds is over — the budget " +
+                    "table names which one",
+      "toy-data-bank-full": "the bytecode does not fit the data bank"
+    };
+    var fixes = [
+      { code: "toy-data-bank-full",
+        fix: "trim the bytecode: share and reuse constants, move tables " +
+             "to declared arrays, draw less in code. Art no longer shares " +
+             "this bank" },
+      { code: "rom-budget",
+        fix: "cut what the budget row names: fewer functions, registers, " +
+             "globals or closures" },
+      { code: "ilbc-range",
+        fix: "share and reuse constants, keep fewer distinct values, move " +
+             "repeated data into declared tables" },
+      { code: "ilbc-op",
+        fix: "replace the uncarried form: drop print() or log a number, " +
+             "never read vram back (keep the value you wrote), and a " +
+             "raster(line, spec) table has no form yet — the raster(line) " +
+             "callback does, and costs only the lines that change" },
+      { code: "cgen-op",
+        fix: "the C route's own gaps: fixed-point helpers, print, and a " +
+             "sprite spec it cannot pin — the bytecode-route fixes above " +
+             "cover most, and a constant spec fixes the sprite" },
+      { code: "ilbc-fixed",
+        fix: "use integer // and % instead of the fixed-point helpers" },
+      { code: "ilbc-key",
+        fix: "a string is not a value: store numbers, compare numbers, " +
+             "print numbers — note(midi), never a note name" },
+      { code: "ilbc-arity",
+        fix: "keep calls to " + ilbc.MAX_ARGS + " arguments or fewer; " +
+             "hoist the rest into globals or split the function" },
+      { code: "ilbc-table-ram",
+        fix: "fewer cells: smaller tables, fewer string fields, int array " +
+             "keys where you can" },
+      { code: "ilbc-table-escape",
+        fix: "build the table once in init() or at the top level, not " +
+             "inside frame() or a loop" },
+      { code: "validate-sprite-line",
+        fix: "spread the sprites across display lines; the VDC drops the " +
+             "rest of the line" },
+      { code: "validate-slow-frame",
+        fix: "cheaper frame(): the idioms above — powers of two, masks, " +
+             "small integers, fewer table reads" }
+    ];
+    for (var i = 0; i < fixes.length; i++) {
+      var code = fixes[i].code;
+      fixes[i].meaning = index[code]
+        ? index[code].description
+        : (cgen.REFUSALS[code] || ilbc.REFUSALS[code] || custom[code]);
+    }
+    return fixes;
+  }
+
+  /* The template: a toy built on this shape passes both routes today
+   * (tests/check-rom-rules.js compiles and exports it). */
+  var RULE_TEMPLATE =
+"-- ROM-safe toy template: every form here is carried by both routes.\n" +
+"x = 144                       -- SAT X (32 is display column 0)\n" +
+"y = 128                       -- SAT Y (64 is display row 0)\n" +
+"\n" +
+"function init()\n" +
+"  reg(\"CR\", 0xC0)             -- background + sprites on (sprites start OFF)\n" +
+"  pal(0, rgb(0, 0, 3))        -- the backdrop: dark blue\n" +
+"  pal(0x101, rgb(7, 7, 7))    -- sprite palette 0, colour 1: white\n" +
+"  local i = 0\n" +
+"  while i < 64 do             -- one filled 16x16 cell (four 16-word planes)\n" +
+"    vram[0x100 * 64 + i] = 0xFFFF\n" +
+"    i = i + 1\n" +
+"  end\n" +
+"  sat(0, 2, 0x100 << 1)       -- the pattern word never changes: write once\n" +
+"  sat(0, 3, 1 << 7)           -- sprite palette 0, SPBG set (in front)\n" +
+"end\n" +
+"\n" +
+"function frame(t, f)\n" +
+"  if pad[1].left  then x = x - 2 end\n" +
+"  if pad[1].right then x = x + 2 end\n" +
+"  if pad[1].up    then y = y - 2 end\n" +
+"  if pad[1].down  then y = y + 2 end\n" +
+"  -- keep the 16x16 sprite on the 256x224 picture: X 32..272, Y 64..272\n" +
+"  if x < 32  then x = 32  end\n" +
+"  if x > 272 then x = 272 end\n" +
+"  if y < 64  then y = 64  end\n" +
+"  if y > 272 then y = 272 end\n" +
+"  sat(0, 0, y)                -- word 0 is Y, word 1 is X\n" +
+"  sat(0, 1, x)\n" +
+"end";
+
+  var RULE_IDIOM_CODE =
+"-- fast forms (docs/ORIGINAL-CODE-IDIOMS.md, docs/ROUTINE-BENCH.md):\n" +
+"function frame(t, f)\n" +
+"  local x = f * 3\n" +
+"  x = x // 8      -- power-of-two division: a shift, not a soft routine\n" +
+"  x = x % 16      -- power-of-two remainder: the same\n" +
+"  x = x & 255     -- the low byte: one cheap op\n" +
+"  x = x << 3      -- a shift by a constant: a few cheap shifts\n" +
+"  reg(\"BXR\", x % 1024)  -- the register's wrap, by a power of two\n" +
+"end";
+
+  function rulePreflight() {
+    return "Before you call export_pce: rom_check reports ok with no " +
+      "findings; every budget row is under " + romcheck.OVER_PERCENT +
+      " percent, with nothing past " + romcheck.NEAR_PERCENT +
+      " percent unless the person accepted it; validate reports no error " +
+      "findings; the frames you looked at look right; and toy_save wrote " +
+      "the toy so the person can open it in the studio.";
+  }
+
+  /* The blocks, shared by the reference's rom-rules chapter and (after
+   * the route tables) by the guide and the Claude Code manual. */
+  function romRulesBlocks() {
+    var budgetRows = ruleBudgets().map(function (r) {
+      return [r.label, r.value + r.unit,
+              r.refusal + " — " + r.what];
+    });
+    var stateRows = RULE_STATE.map(function (s) {
+      return [s.game, s.builds ? "builds" : "refused",
+              s.detail + (s.code ? " (" + s.code + ")" : "")];
+    });
+    var idiomRows = RULE_IDIOMS.map(function (d) {
+      return [d.rule, d.why, d.code || ""];
+    });
+    var fixRows = ruleFixes().map(function (f) {
+      return [f.code, f.meaning, f.fix];
+    });
+    return [
+      { type: "p", text: "The compact rule set for a Lua game that " +
+          "exports to a ROM first time: the budgets, what each export " +
+          "route carries and refuses (the full lists are the Writing for " +
+          "the ROM chapter), the idioms that compile fast, a template, " +
+          "the common refusals with their fixes, and the preflight " +
+          "checklist. Every number here is read from the module that " +
+          "enforces it; tests/check-rom-rules.js holds the hand-written " +
+          "part to the code." },
+      { type: "h3", text: "The loop", source: "the MCP server's " +
+          "instructions and this chapter" },
+      { type: "p", text: "Before writing a game, read this chapter. Then " +
+          "work in small steps: after every change run validate (the " +
+          "picture's limits — sprites per line, VRAM, the frame budget) " +
+          "and rom_check (what the exported ROM carries), and fix every " +
+          "finding before the next change. Undo a change that turns a " +
+          "budget row red. Stop adding content at " + romcheck.NEAR_PERCENT +
+          " percent of every limit. Call export_pce at the end. Look at " +
+          "frames while you work: a clean run is not a good picture." },
+      { type: "h3", text: "Budgets", source: "renderer/pce-romcheck.js " +
+          "LIMITS, renderer/pce-toyhost.js, renderer/pce-editor.js, " +
+          "renderer/pce-rom.js" },
+      { type: "table", headers: ["budget", "limit", "refusal — what it is"],
+        rows: budgetRows },
+      { type: "p", text: "A row past " + romcheck.NEAR_PERCENT +
+          " percent is near, past " + romcheck.OVER_PERCENT +
+          " percent is over and refuses the export with the named code. " +
+          "A sprite spec the walker cannot pin to constants and a " +
+          "raster(line, spec) table are findings, not capacities." },
+      { type: "h3", text: "What exports today", source: "the gallery's " +
+          "five games, held by tests/check-rom-rules.js (the long form " +
+          "is docs/ROM_SPEED.md)" },
+      { type: "table", headers: ["game", "verdict", "what that means"],
+        rows: stateRows },
+      { type: "h3", text: "Idioms that compile fast", source: "docs/" +
+          "ORIGINAL-CODE-IDIOMS.md, docs/ROUTINE-BENCH.md" },
+      { type: "table", headers: ["idiom", "why", "refusal it avoids"],
+        rows: idiomRows },
+      { type: "code", lang: "lua", text: RULE_IDIOM_CODE },
+      { type: "h3", text: "Common refusals and the fix",
+        source: "renderer/pce-cgen.js, renderer/pce-ilbc.js, " +
+                "renderer/pce-validate.js, renderer/pce-rom.js" },
+      { type: "table", headers: ["code", "meaning", "fix"],
+        rows: fixRows },
+      { type: "h3", text: "A toy template", source: "tests/check-rom-" +
+          "rules.js compiles and exports this template" },
+      { type: "p", text: "A toy built on this shape passes both routes " +
+          "today: rom_check clean, the " + rom.ILVM_BYTES +
+          " B interpreter plus one data bank, and the bytecode well under " +
+          "the bank." },
+      { type: "code", lang: "lua", text: RULE_TEMPLATE },
+      { type: "h3", text: "The preflight checklist" },
+      { type: "p", text: rulePreflight() }
+    ];
+  }
+
+  /* The one section the reference pushes as the rom-rules topic, and the
+   * one tools/docs.js appends to the Writing-for-the-ROM chapter of the
+   * guide and the Claude Code manual. */
+  function romRulesSection() {
+    return { id: "rom-rules", title: "ROM rules",
+             blocks: romRulesBlocks() };
+  }
+
+  function romSection() {
     return {
       id: "writing-for-the-rom",
       title: "Writing for the ROM",
-      blocks: [
-        { type: "p", text: "Two routes build a .pce, and this page lists " +
-            "what each carries today. The C route is " + cgen.FEATURES.route +
-            ". The interpreter route is " + ilbc.FEATURES.route + ". A toy " +
-            "the Studio exports must pass both; a toy exported over MCP " +
-            "needs the interpreter route. The lists below are the compilers' " +
-            "own tables (renderer/pce-cgen.js and renderer/pce-ilbc.js), not " +
-            "a summary: a feature added to either compiler appears here " +
-            "without a second edit." },
-        { type: "p", text: "The Studio's ROM CHECK drawer checks both routes " +
-            "as you type, marks the lines in the gutter, and shows 'ROM: ok' " +
-            "or 'ROM: N problems' beside Export. The same check is the MCP " +
-            "tool rom_check, which returns every finding at once as " +
-            "{code, line, message}." },
-        { type: "h3", text: "Carried today", source: "renderer/pce-cgen.js, " +
-            "renderer/pce-ilbc.js (FEATURES)" },
-        { type: "table", headers: ["route", "feature", "notes"],
-          rows: carriedRows },
-        { type: "h3", text: "Refused today", source: "renderer/pce-cgen.js, " +
-            "renderer/pce-ilbc.js (REFUSALS)" },
-        { type: "table", headers: ["route", "code", "meaning"],
-          rows: refusedRows },
-        { type: "p", text: "A refusal is not a crash: the exported ROM " +
-            "cannot carry the construct, so the finding names it and the " +
-            "line. The browser may still run the toy — the CONSOLE tab " +
-            "answers that question (renderer/pce-validate.js)." }
-      ]
+      blocks: romWritingBlocks().concat(romRulesBlocks())
     };
   }
 
@@ -632,9 +977,16 @@
     });
 
     /* 10. writing for the ROM --------------------------------------------- */
-    sections.push(romSection());
+    sections.push({
+      id: "writing-for-the-rom",
+      title: "Writing for the ROM",
+      blocks: romWritingBlocks()
+    });
 
-    /* 11. refusals -------------------------------------------------------- */
+    /* 11. the ROM rules (the rom-rules docs topic) ------------------------ */
+    sections.push(romRulesSection());
+
+    /* 12. refusals -------------------------------------------------------- */
     var refusalBlocks = [
       { type: "p", text: "A refusal is a named failure, not a silent drop: the " +
           "call throws (or the page shows) an error whose code is one of these, " +
@@ -665,7 +1017,8 @@
         "renderer/pce-toyhost.js", "renderer/pce-editor.js",
         "renderer/pce-toys.js", "renderer/pce-il.js", "renderer/pce-psg.js",
         "renderer/pce-validate.js", "renderer/pce-cgen.js",
-        "renderer/pce-ilbc.js", "renderer/pce-song.js"
+        "renderer/pce-ilbc.js", "renderer/pce-rom.js",
+        "renderer/pce-romcheck.js", "renderer/pce-song.js"
       ],
       footer: "Generated by node tools/docs.js from the modules listed above. " +
               "Do not edit renderer/docs.html by hand: tests/check-docs.js " +
@@ -824,6 +1177,20 @@ body +
     html: html,
     htmlSection: htmlSection,
     romSection: romSection,
+    romWritingBlocks: romWritingBlocks,
+    romRulesSection: romRulesSection,
+    /* The rom-rules data, for tests/check-rom-rules.js to hold to the
+     * code: every named refusal is one the code raises, every number a
+     * module constant. */
+    ROM_RULES: {
+      budgets: ruleBudgets,
+      state: RULE_STATE,
+      idioms: RULE_IDIOMS,
+      fixes: ruleFixes,
+      template: RULE_TEMPLATE,
+      idiomCode: RULE_IDIOM_CODE,
+      preflight: rulePreflight
+    },
     refusalIndex: refusalIndex,
     REFUSAL_GROUPS: REFUSAL_GROUPS
   };

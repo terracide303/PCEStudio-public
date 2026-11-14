@@ -456,6 +456,8 @@
     /* #261: the capacities and the toy's use of them, for callers that want
      * the numbers without a report. */
     LIMITS: LIMITS,
+    NEAR_PERCENT: NEAR_PERCENT,
+    OVER_PERCENT: OVER_PERCENT,
     constants: interpreterConstants,
     budget: budgetOf,
     check: check,

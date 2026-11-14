@@ -322,6 +322,10 @@ const INSTRUCTIONS =
   "project_open (project_open answers with NOTES.md's text first — read it " +
   "before anything else, and pass the updated NOTES.md to project_save), " +
   "export a .pce with export_pce, and read the toy language with docs. " +
+  "Before writing a game, call docs with topic \"rom-rules\" and follow " +
+  "it: run validate and rom_check after every change and fix every " +
+  "finding, undo a change that turns the budget red, and call export_pce " +
+  "at the end. " +
   "Every tool wraps the same modules the studio and the tests use; there is " +
   "no second model.";
 

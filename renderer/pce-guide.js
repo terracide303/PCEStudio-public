@@ -695,8 +695,9 @@ function guide() {
       table(["limit", "value", "what it is"], budgetRows),
       p("Keep to the carried lists below from the first version. They are " +
         "generated from the two compilers' own tables, so they are what the " +
-        "code does, not a summary of it.")
-    ].concat(docs.romSection().blocks)
+        "code does, not a summary of it. The docs tool's rom-rules topic " +
+        "is the compact rule set for a game that exports first time.")
+    ].concat(docs.romWritingBlocks())
   });
 
   /* 9. errors ------------------------------------------------------------ */
