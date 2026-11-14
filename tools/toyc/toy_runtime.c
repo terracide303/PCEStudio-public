@@ -63,6 +63,8 @@ extern void toy_raster(int32_t line) __attribute__((weak));
 
 #define VDW_LINES 224          /* the toy's frame (pce-toyhost.js HEIGHT) */
 #define RCR_BASE 0x40          /* RCR R06 = 0x40 + VDW line (#15) */
+#define XSTR_(x) #x
+#define STR(x) XSTR_(x)
 #define RASTER_COLOURS 2       /* colour writes one line may carry */
 #define BASE_COLOURS 32        /* colour writes one frame() may carry */
 
@@ -90,56 +92,85 @@ extern void toy_raster(int32_t line) __attribute__((weak));
 #ifdef TOY_RASTER_BUILD
 volatile uint8_t toy_host_mode;
 
-/* The line table: 14 page-aligned arrays indexed by VDW line, so the IRQ
- * handler's `lda array,x` never crosses a page (viewer.asm's reason). */
-volatile uint8_t toy_r_op[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_bxr_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_bxr_hi[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_byr_lo[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_byr_hi[256] __attribute__((aligned(256)));
-volatile uint8_t toy_r_cr[256] __attribute__((aligned(256)));
-/* The eight colour arrays are 2 KiB of the console's 8 KiB of RAM.  The table
- * form (raster(line, spec) from frame()) carries no colour writes, so op bits
- * 0x08 and 0x10 are never set and a byte each stands in for them. */
+/* ---- raster runtime v2 (docs/NATIVE.md) ------------------------------------------------------
+ * Two buffers of effect data.  The game computes into the PENDING one while the line-interrupt
+ * chain replays the ACTIVE one, on EVERY video frame; a finished game frame is published at a
+ * VBlank, where the handler swaps them.  Before this the chain was disarmed while the game
+ * computed, and those video frames showed the last line's scroll and backdrop for the whole screen
+ * (STARFALL: two frames in three were wrong).
+ *
+ * A buffer is a header (the base values frame() wrote outside raster(): BXR/BYR/CR and up to
+ * RBASE_COLOURS colour words) followed by a stream of effect records sorted by line:
+ *     line (0..223) | op | payload...        ends with line = $FF
+ * op: bit0 BXR (2 bytes), bit1 BYR (2), bit2 CR (1), bit3 colour word (index 2, value 2),
+ * bit4 a second colour word.  Only lines that change something have a record, so a toy with two or
+ * five effect lines costs two or five interrupts a frame (the old chain took 224), and a dense
+ * toy (DUSK RUN's colour per line) costs about 6 bytes a line.  The VBlank handler re-applies the
+ * header and the line-0 record, then programs the RCR for the next record; each scan interrupt
+ * serves one record and programs the next. */
+#define RBASE_COLOURS 32
+#define RHDR (8 + 4 * RBASE_COLOURS)       /* header: op, bxr(2), byr(2), cr, npal, spare, colours */
 #ifdef TOY_RASTER_TABLE
-#define RCOL 1
+#define RSTREAM 192                        /* raster(line, spec) from frame(): a handful of lines */
 #else
-#define RCOL 256
+#define RSTREAM 1100                       /* raster(line): up to ~180 colour lines */
 #endif
-volatile uint8_t toy_r_a1_lo[RCOL] __attribute__((aligned(RCOL)));
-volatile uint8_t toy_r_a1_hi[RCOL] __attribute__((aligned(RCOL)));
-volatile uint8_t toy_r_v1_lo[RCOL] __attribute__((aligned(RCOL)));
-volatile uint8_t toy_r_v1_hi[RCOL] __attribute__((aligned(RCOL)));
-volatile uint8_t toy_r_a2_lo[RCOL] __attribute__((aligned(RCOL)));
-volatile uint8_t toy_r_a2_hi[RCOL] __attribute__((aligned(RCOL)));
-volatile uint8_t toy_r_v2_lo[RCOL] __attribute__((aligned(RCOL)));
-volatile uint8_t toy_r_v2_hi[RCOL] __attribute__((aligned(RCOL)));
-
-volatile uint8_t toy_collect_line;
-
-/* The IRQ handler's state (read and written by the asm below). */
-volatile uint8_t toy_isr_line;    /* next VDW line to serve, 0..224 */
-/* VBlanks seen: an 8-bit count so the main loop's read cannot tear
- * against the interrupt's increment (a 16-bit counter did, measured: a
- * skipped wait armed the chain mid-frame and mixed two collections). */
+#define RBUFSZ (RHDR + RSTREAM + 2)
+volatile uint8_t toy_rbuf[2][RBUFSZ];
+volatile uint8_t toy_rbase_lo[2], toy_rbase_hi[2];   /* the buffers' addresses, for the handler */
+volatile uint8_t toy_active;       /* the buffer the chain reads */
+volatile uint8_t toy_widx;         /* the buffer the game writes (the other one) */
+volatile uint8_t toy_publish;      /* 1: the game's buffer is finished, swap at the next VBlank */
+/* the handler's read pointer: zero page, for (zp),y */
+__attribute__((section(".zp.bss"))) volatile uint16_t toy_rptr;
+/* VBlanks seen (8 bits, so a read cannot tear against the interrupt's increment) */
 volatile uint8_t toy_vblank_count;
 
-/* The next frame's base: what frame() wrote while the display was running. */
-volatile uint8_t toy_pend_op;     /* bit0 BXR, bit1 BYR, bit2 CR */
-volatile uint8_t toy_pend_bxr_lo, toy_pend_bxr_hi;
-volatile uint8_t toy_pend_byr_lo, toy_pend_byr_hi;
-volatile uint8_t toy_pend_cr;
-volatile uint8_t toy_pend_npal;
-volatile uint8_t toy_pend_pal_a_lo[BASE_COLOURS];
-volatile uint8_t toy_pend_pal_a_hi[BASE_COLOURS];
-volatile uint8_t toy_pend_pal_w_lo[BASE_COLOURS];
-volatile uint8_t toy_pend_pal_w_hi[BASE_COLOURS];
+/* The sprite attribute table (VRAM $7F00..$7FFF, 256 words) is double-buffered too: frame() writes a
+ * RAM shadow and the VBlank handler copies it to VRAM when it swaps the effect buffers.  Written to
+ * VRAM directly while the game computes, a VBlank in the middle of the writes showed half of one
+ * game frame's sprites and half of the previous one's (found by the flicker test). */
+#define SAT_BASE 0x7F00u
+volatile uint16_t toy_sat_sh[256];
+volatile uint8_t toy_sat_dirty;
+volatile uint8_t toy_sat_req;      /* 1: a published frame's SAT shadow still has to be copied (by the tail stop) */
+/* The same for the other VRAM words frame() writes (a scrolling tile map, a score): a queue of
+ * (address, word) pairs, applied at the VBlank in order.  When it is full the main loop drains it
+ * itself, so order is kept and a frame with a great many writes (a build frame) still works, only
+ * without the all-at-once guarantee. */
+#define VQ_N 48
+volatile uint8_t toy_vq_alo[VQ_N], toy_vq_ahi[VQ_N], toy_vq_wlo[VQ_N], toy_vq_whi[VQ_N];
+volatile uint8_t toy_vq_n;
+volatile uint8_t toy_vq_cnt;
+
+static uint8_t *wb;                /* the game's (pending) buffer */
+static uint16_t wlen;
+static uint8_t wlast;              /* the last record's line */              /* stream bytes written into it */
+/* raster(line) callback form: what the current line's callback has written so far */
+static uint8_t cur_op, cur_cr;
+static uint16_t cur_bxr, cur_byr, cur_c1a, cur_c1v, cur_c2a, cur_c2v;
 #endif /* TOY_RASTER_BUILD */
 
+#ifdef TOY_RASTER_BUILD
+/* The line interrupt chain now runs while the game computes, and its handler writes the VDC's index
+ * register, the 16-bit data pair of R05-R08 and the VCE's colour index and data.  The VDC's index is
+ * write-only and its low byte is held in ONE latch shared by every register, and the VCE's index
+ * auto-increments: an interrupt between a main-thread select and its data stores corrupts both.  So
+ * every main-thread access sequence runs with interrupts masked (PHP/SEI ... PLP: the caller's I flag
+ * comes back, so boot, which runs masked, stays masked). */
+#define IRQ_MASK() __asm__ volatile ("php\n\tsei" ::: "memory")
+#define IRQ_UNMASK() __asm__ volatile ("plp" ::: "memory")
+#else
+#define IRQ_MASK() ((void)0)
+#define IRQ_UNMASK() ((void)0)
+#endif
+
 static void vdc_write(uint8_t reg, uint16_t value) {
+  IRQ_MASK();
   *IO_VDC_INDEX = reg;
   *IO_VDC_DATA_LO = (uint8_t)value;
   *IO_VDC_DATA_HI = (uint8_t)(value >> 8);
+  IRQ_UNMASK();
 }
 
 #ifdef TOY_INPUT_BUILD
@@ -265,35 +296,19 @@ void toy_pal(int32_t addr, int32_t word) {
   uint16_t w = (uint16_t)word & 0x1FF;
 #ifndef TOY_RASTER_TABLE
   if (toy_host_mode == MODE_RASTER) {
-    /* The line's entry: two colour words, then the op bit.  Writing op last
-     * means a (hypothetical) re-read never sees half an entry. */
-    uint8_t l = toy_collect_line;
-    if (!(toy_r_op[l] & 0x08)) {
-      toy_r_a1_lo[l] = (uint8_t)a;
-      toy_r_a1_hi[l] = (uint8_t)(a >> 8);
-      toy_r_v1_lo[l] = (uint8_t)w;
-      toy_r_v1_hi[l] = (uint8_t)(w >> 8);
-      toy_r_op[l] = (uint8_t)(toy_r_op[l] | 0x08);
-    } else if (!(toy_r_op[l] & 0x10)) {
-      toy_r_a2_lo[l] = (uint8_t)a;
-      toy_r_a2_hi[l] = (uint8_t)(a >> 8);
-      toy_r_v2_lo[l] = (uint8_t)w;
-      toy_r_v2_hi[l] = (uint8_t)(w >> 8);
-      toy_r_op[l] = (uint8_t)(toy_r_op[l] | 0x10);
-    } else {
-      measure_flag(0x02);          /* more colour writes than a line carries */
-    }
+    /* the current line's record carries two colour words */
+    if (!(cur_op & 0x08)) { cur_c1a = a; cur_c1v = w; cur_op |= 0x08; }
+    else if (!(cur_op & 0x10)) { cur_c2a = a; cur_c2v = w; cur_op |= 0x10; }
+    else measure_flag(0x02);         /* more colour writes than a line carries */
     return;
   }
 #endif
   if (toy_host_mode == MODE_BASE) {
-    uint8_t n = toy_pend_npal;
-    if (n < BASE_COLOURS) {
-      toy_pend_pal_a_lo[n] = (uint8_t)a;
-      toy_pend_pal_a_hi[n] = (uint8_t)(a >> 8);
-      toy_pend_pal_w_lo[n] = (uint8_t)w;
-      toy_pend_pal_w_hi[n] = (uint8_t)(w >> 8);
-      toy_pend_npal = (uint8_t)(n + 1);
+    uint8_t n = wb[6];
+    if (n < RBASE_COLOURS) {
+      uint8_t *q = wb + 8 + 4 * n;
+      q[0] = (uint8_t)a; q[1] = (uint8_t)(a >> 8); q[2] = (uint8_t)w; q[3] = (uint8_t)(w >> 8);
+      wb[6] = (uint8_t)(n + 1);
     } else {
       measure_flag(0x01);
     }
@@ -306,8 +321,10 @@ void toy_pal(int32_t addr, int32_t word) {
   }
 #endif
   /* The VCE's CTA is 9 bits and auto-increments after each data write. */
+  IRQ_MASK();
   *IO_VCE_COLOR_INDEX = a;
   *IO_VCE_COLOR_DATA = w;
+  IRQ_UNMASK();
 #else
   /* Part A's body, unchanged: its palette ROM is a committed image. */
 #ifdef TOY_HOLD_BUILD
@@ -326,34 +343,19 @@ void toy_reg(int32_t which, int32_t value) {
 #ifdef TOY_RASTER_BUILD
 #ifndef TOY_RASTER_TABLE
   if (toy_host_mode == MODE_RASTER) {
-    uint8_t l = toy_collect_line;
-    if (which == TOY_REG_BXR) {
-      toy_r_bxr_lo[l] = (uint8_t)v;
-      toy_r_bxr_hi[l] = (uint8_t)((v >> 8) & 0x03);
-      toy_r_op[l] = (uint8_t)(toy_r_op[l] | 0x01);
-    } else if (which == TOY_REG_BYR) {
-      toy_r_byr_lo[l] = (uint8_t)v;
-      toy_r_byr_hi[l] = (uint8_t)((v >> 8) & 0x01);
-      toy_r_op[l] = (uint8_t)(toy_r_op[l] | 0x02);
-    } else {
-      toy_r_cr[l] = (uint8_t)v;
-      toy_r_op[l] = (uint8_t)(toy_r_op[l] | 0x04);
-    }
+    if (which == TOY_REG_BXR) { cur_bxr = v & 0x3FF; cur_op |= 0x01; }
+    else if (which == TOY_REG_BYR) { cur_byr = v & 0x1FF; cur_op |= 0x02; }
+    else { cur_cr = (uint8_t)v; cur_op |= 0x04; }
     return;
   }
 #endif
   if (toy_host_mode == MODE_BASE) {
     if (which == TOY_REG_BXR) {
-      toy_pend_bxr_lo = (uint8_t)v;
-      toy_pend_bxr_hi = (uint8_t)((v >> 8) & 0x03);
-      toy_pend_op = (uint8_t)(toy_pend_op | 0x01);
+      wb[1] = (uint8_t)v; wb[2] = (uint8_t)((v >> 8) & 0x03); wb[0] |= 0x01;
     } else if (which == TOY_REG_BYR) {
-      toy_pend_byr_lo = (uint8_t)v;
-      toy_pend_byr_hi = (uint8_t)((v >> 8) & 0x01);
-      toy_pend_op = (uint8_t)(toy_pend_op | 0x02);
+      wb[3] = (uint8_t)v; wb[4] = (uint8_t)((v >> 8) & 0x01); wb[0] |= 0x02;
     } else {
-      toy_pend_cr = (uint8_t)v;
-      toy_pend_op = (uint8_t)(toy_pend_op | 0x04);
+      wb[5] = (uint8_t)v; wb[0] |= 0x04;
     }
     return;
   }
@@ -408,6 +410,34 @@ static void hold_flush(void) {
 /* the zero source of the boot clear's block moves (64 bytes of ROM) */
 static const uint8_t toy_zeros[64];
 
+#ifdef TOY_RASTER_BUILD
+static void vdc_put(uint16_t a, uint16_t w) {
+  IRQ_MASK();
+  *IO_VDC_INDEX = 0x00; *IO_VDC_DATA_LO = (uint8_t)a; *IO_VDC_DATA_HI = (uint8_t)(a >> 8);
+  *IO_VDC_INDEX = 0x02; *IO_VDC_DATA_LO = (uint8_t)w; *IO_VDC_DATA_HI = (uint8_t)(w >> 8);
+  IRQ_UNMASK();
+}
+
+/* one VRAM word from frame(): queued for the next VBlank (direct in the boot, where nothing is on
+ * screen; and from here, in order, when the queue is full) */
+static void vq_write(uint16_t a, uint16_t w) {
+  uint8_t n;
+  if (toy_host_mode == MODE_DIRECT) { vdc_put(a, w); return; }
+  n = toy_vq_n;
+  if (n >= VQ_N) {
+    uint8_t i;
+    for (i = 0; i < n; i++)
+      vdc_put((uint16_t)(toy_vq_alo[i] | (toy_vq_ahi[i] << 8)), (uint16_t)(toy_vq_wlo[i] | (toy_vq_whi[i] << 8)));
+    toy_vq_n = n = 0;
+    vdc_put(a, w);
+    return;
+  }
+  toy_vq_alo[n] = (uint8_t)a; toy_vq_ahi[n] = (uint8_t)(a >> 8);
+  toy_vq_wlo[n] = (uint8_t)w; toy_vq_whi[n] = (uint8_t)(w >> 8);
+  toy_vq_n = (uint8_t)(n + 1);
+}
+#endif
+
 void toy_vram_set16(uint16_t addr, uint16_t word) {
 #ifdef TOY_RASTER_BUILD
   uint16_t a = addr & 0x7FFF;
@@ -420,16 +450,20 @@ void toy_vram_set16(uint16_t addr, uint16_t word) {
     measure_flag(0x04);
     return;
   }
-  /* MODE_BASE falls through: the display is idle while frame() runs
-   * (nothing armed), so its VRAM writes go straight to the VDC.  A capture
-   * list would cap the write volume, and a build frame's writes (DUSK RUN
-   * step 7: 208 words) would overflow any list that fits in RAM (#289). */
-  /* Set MAWR, then select the VRAM data register (R02, VWR) before the word:
-   * after a register write the VDC's select latch still holds that register,
-   * so a data-port write without selecting R02 would land back in MAWR.
-   * viewer.asm's copy_words does exactly this (st0 #$00/st1/st2, st0 #$02). */
-  vdc_write(0x00, a);
-  vdc_write(0x02, w);
+  if (a >= SAT_BASE) {
+    /* the sprite attribute table: into the shadow, copied at the VBlank (see the data block above);
+     * the boot's direct writes also reach the VRAM, which no interrupt serves yet */
+    toy_sat_sh[a - SAT_BASE] = w;
+    toy_sat_dirty = 1;
+    if (toy_host_mode != MODE_DIRECT) return;
+  }
+  /* Everything else goes straight to the VDC, MAWR and data as ONE atomic sequence (the VBlank
+   * handler's SAT copy sets MAWR, and the index is write-only).  A capture list would cap the write
+   * volume, and a build frame's writes (DUSK RUN step 7: 208 words) would overflow any list that
+   * fits in RAM (#289); the cost is that a tile written now can show in the lower part of the frame
+   * being displayed (docs/NATIVE.md, raster runtime v2).  Select VWR (R02) before the word: after a
+   * register write the select latch still holds that register (viewer.asm's copy_words). */
+  vq_write(a, w);
 #else
   /* Part A's body, unchanged: its palette ROM is a committed image. */
   vdc_write(0x00, addr);
@@ -448,14 +482,22 @@ void toy_vram_set4(uint16_t addr, uint16_t w0, uint16_t w1, uint16_t w2, uint16_
     measure_flag(0x04);              /* as toy_vram_set16: a VRAM write from a raster callback is dropped */
     return;
   }
-#endif
-  /* MAWR, then VWR selected once; the VDC advances MAWR itself after each high byte */
+  if (addr >= SAT_BASE && addr <= 0x7FFC) {      /* a sprite: into the shadow SAT */
+    volatile uint16_t *q = toy_sat_sh + (addr - SAT_BASE);
+    q[0] = w0; q[1] = w1; q[2] = w2; q[3] = w3;
+    toy_sat_dirty = 1;
+    if (toy_host_mode != MODE_DIRECT) return;
+  }
+  vq_write(addr, w0); vq_write((uint16_t)(addr + 1), w1);
+  vq_write((uint16_t)(addr + 2), w2); vq_write((uint16_t)(addr + 3), w3);
+#else
   vdc_write(0x00, addr);
   *IO_VDC_INDEX = 0x02;
   *IO_VDC_DATA_LO = (uint8_t)w0; *IO_VDC_DATA_HI = (uint8_t)(w0 >> 8);
   *IO_VDC_DATA_LO = (uint8_t)w1; *IO_VDC_DATA_HI = (uint8_t)(w1 >> 8);
   *IO_VDC_DATA_LO = (uint8_t)w2; *IO_VDC_DATA_HI = (uint8_t)(w2 >> 8);
   *IO_VDC_DATA_LO = (uint8_t)w3; *IO_VDC_DATA_HI = (uint8_t)(w3 >> 8);
+#endif
 }
 
 void toy_wait_vblank(void) {
@@ -533,225 +575,389 @@ void toy_measure_raster_end(void) {
 #endif /* TOY_RASTER_BUILD */
 
 #ifdef TOY_RASTER_BUILD
-/* ---- the RCR chain ---------------------------------------------------
+/* ---- the RCR chain (raster runtime v2) -----------------------------------------------------
  *
- * The compiled raster() handler cannot run in the interrupt: measured from
- * the linked code, its entry to first write is far past the ~100-cycle
- * horizontal blank (docs/IL.md §10).  This handler is the #16 viewer's
- * answer: a handful of loads and stores per line, from a table the toy's
- * callbacks filled before the frame.  It uses A/X/Y only and calls no C, so
- * the C main loop's soft registers (the mos ABI's zero-page file) survive
- * untouched; A/X/Y are saved because that loop is live between lines.
+ * The compiled raster() handler cannot run in the interrupt: measured from the linked code, its
+ * entry to first write is far past the ~100-cycle horizontal blank (docs/IL.md §10).  These
+ * handlers are the #16 viewer's answer: a handful of loads and stores per effect line, from the
+ * ACTIVE buffer the game published (see the data block above).  They use A/X/Y only and call no C,
+ * so the C main loop's soft registers (the mos ABI's zero-page file) survive untouched; A/X/Y are
+ * saved because that loop is live between lines.
  *
- * The table's op byte: bit 0 BXR, bit 1 BYR, bit 2 CR, bit 3 first colour
- * word, bit 4 second colour word.  Colour words are written first because
- * their four-store chain is the longest one the line's first pixel can
- * catch.  RCR is re-armed last: it only has to land before the next match,
- * a full line away.  The RCR is nine bits: 0x40 + 192 carries into bit 8,
- * and zeroing the high byte (measured) ends the chain at line 191.
+ * VBlank (irq_vbl_near): count it; if the game has published a finished buffer, swap; point the read
+ * pointer at the active buffer; re-apply its header (the base BXR/BYR/CR and colour words frame()
+ * wrote outside raster(): idempotent, so a frame shown twice looks the same twice); serve a line-0
+ * record now (the VDC latches BYR for the first display line at the VDW entry, before the RCR=0x40
+ * match, so the RCR interrupt would be one line late: pce-bg.js's model comment, measured on
+ * status-bar.lua); program the RCR for the next record, or park it where it never matches ($3FF).
+ * Scan interrupt (irq_scan): serve the record at the pointer and program the RCR for the next one.
  *
- * VBlank needs nothing from the interrupt: it increments the counter the
- * main loop schedules on.  The base frame() captured and the table are
- * applied by the main loop in the VBlank before the display is armed.
+ * A record's writes are ordered BXR, BYR, CR, colour words: BXR is the write whose latch line is
+ * closest.  The RCR is nine bits: line + 0x40 carries into bit 8 from line 192.
  */
 __asm__(
 ".text\n"
+"irq_vbl_j:\n"                /* before irq_vdc, so its `bne` reaches back to it */
+"  phx\n"
+"  phy\n"
+"  jmp irq_vbl_near\n"
 ".global irq_vdc\n"
 ".type irq_vdc,@function\n"
 "irq_vdc:\n"
 "  pha\n"
-"  phx\n"
-"  phy\n"
 "  lda $0000\n"                 /* VDC status: also acknowledges */
 "  and #$20\n"                 /* VD, the VBlank flag */
-"  beq irq_scan\n"
-"  jmp irq_vbl_near\n"
-"irq_scan:\n"
-"  ldx toy_isr_line\n"
-"  cpx #224\n"
-"  bcc irq_scan_go\n"
-"  jmp irq_scan_done\n"
-"irq_scan_go:\n"
-"  lda toy_r_op,x\n"           /* BXR first: it is the write whose */
-"  and #$01\n"                 /* latch line is closest, and the scroll */
-"  beq irq_no_bxr\n"           /* registers are the common raster write */
+"  bne irq_vbl_j\n"
+"  phx\n"                       /* a scan interrupt: the latency-critical path, no call, no guard */
+"  phy\n"
+"irq_serve:\n"
+"  ldy #1\n"
+"  lda (toy_rptr),y\n"
+"  tax\n"                       /* X = op */
+"  iny\n"                       /* Y = the payload offset */
+"  and #$01\n"
+"  beq irq_s_nbxr\n"
 "  st0 #7\n"
-"  lda toy_r_bxr_lo,x\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
 "  sta $0002\n"
-"  lda toy_r_bxr_hi,x\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
 "  sta $0003\n"
-"irq_no_bxr:\n"
-"  lda toy_r_op,x\n"           /* BYR */
+"irq_s_nbxr:\n"
+#ifndef TOY_RASTER_TABLE        /* the table form carries no colour writes */
+"  txa\n"
+"  and #$08\n"
+"  beq irq_s_nc1\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0402\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0403\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0404\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0405\n"
+"irq_s_nc1:\n"
+"  txa\n"
+"  and #$10\n"
+"  beq irq_s_nc2\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0402\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0403\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0404\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0405\n"
+"irq_s_nc2:\n"
+#endif
+"  txa\n"
 "  and #$02\n"
-"  beq irq_no_byr\n"
+"  beq irq_s_nbyr\n"
 "  st0 #8\n"
-"  lda toy_r_byr_lo,x\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
 "  sta $0002\n"
-"  lda toy_r_byr_hi,x\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
 "  sta $0003\n"
-"irq_no_byr:\n"
-"  lda toy_r_op,x\n"           /* CR */
+"irq_s_nbyr:\n"
+"  txa\n"
 "  and #$04\n"
-"  beq irq_no_cr\n"
+"  beq irq_s_ncr\n"
 "  st0 #5\n"
-"  lda toy_r_cr,x\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
 "  ora #$0C\n"                 /* VC + RC, as the direct path */
 "  sta $0002\n"
 "  stz $0003\n"
-"irq_no_cr:\n"
-#ifndef TOY_RASTER_TABLE        /* the table form carries no colour writes */
-"  lda toy_r_op,x\n"           /* first colour word */
-"  and #$08\n"
-"  beq irq_no_c1\n"
-"  lda toy_r_a1_lo,x\n"
-"  sta $0402\n"
-"  lda toy_r_a1_hi,x\n"
-"  sta $0403\n"
-"  lda toy_r_v1_lo,x\n"
-"  sta $0404\n"
-"  lda toy_r_v1_hi,x\n"
-"  sta $0405\n"
-"irq_no_c1:\n"
-"  lda toy_r_op,x\n"           /* second colour word */
-"  and #$10\n"
-"  beq irq_no_c2\n"
-"  lda toy_r_a2_lo,x\n"
-"  sta $0402\n"
-"  lda toy_r_a2_hi,x\n"
-"  sta $0403\n"
-"  lda toy_r_v2_lo,x\n"
-"  sta $0404\n"
-"  lda toy_r_v2_hi,x\n"
-"  sta $0405\n"
-"irq_no_c2:\n"
-#endif
-"  inx\n"
-"  stx toy_isr_line\n"
-"  cpx #224\n"
-"  bcs irq_scan_done\n"
-"  st0 #6\n"
-"  txa\n"
+"irq_s_ncr:\n"
+"  tya\n"                       /* the pointer steps past the record */
 "  clc\n"
-"  adc #$40\n"                 /* 0x40 + 192 carries into bit 8 */
+"  adc toy_rptr\n"
+"  sta toy_rptr\n"
+"  bcc irq_s_nc\n"
+"  inc toy_rptr+1\n"
+"irq_s_nc:\n"
+"  ldy #0\n"
+"  lda (toy_rptr),y\n"         /* the next record's line */
+"  cmp #$FF\n"
+"  beq irq_s_off\n"
+"  clc\n"
+"  adc #$40\n"
+"  st0 #6\n"
+"  sta $0002\n"
+"  lda #$00\n"
+"  adc #$00\n"                 /* the carry from line + 0x40: RCR bit 8 */
+"  sta $0003\n"
+"  bra irq_done\n"
+"irq_s_off:\n"
+"  st0 #6\n"                    /* no record left: park the RCR where no line matches */
+"  lda #$FF\n"
+"  sta $0002\n"
+"  lda #$03\n"
+"  sta $0003\n"
+"  txa\n"                       /* the stream's last record is the tail stop (op bit 7) */
+"  bpl irq_done\n"
+"  lda toy_sat_req\n"          /* the finished frame's sprites: shadow to VRAM, in this interrupt */
+"  beq irq_done\n"
+"  st0 #0\n"
+"  lda #$00\n"
+"  sta $0002\n"
+"  lda #$7F\n"
+"  sta $0003\n"
+"  st0 #2\n"
+"  tia toy_sat_sh, $0002, #512\n"
+"  stz toy_sat_req\n"
+"irq_done:\n"
+"  ply\n"
+"  plx\n"
+"  pla\n"
+"  rti\n"
+
+"irq_vbl_near:\n"
+"  inc toy_vblank_count\n"
+"  lda toy_publish\n"
+"  beq irq_v_np\n"
+"  lda toy_sat_req\n"          /* the sprites of that frame are not in VRAM yet: wait one more frame */
+"  bne irq_v_np\n"
+"  lda toy_active\n"            /* the game's buffer is finished: it becomes the active one */
+"  eor #$01\n"
+"  sta toy_active\n"
+"  lda toy_widx\n"
+"  eor #$01\n"
+"  sta toy_widx\n"
+"  stz toy_publish\n"
+"  ldx toy_vq_n\n"             /* queued VRAM words, in order */
+"  beq irq_v_np\n"
+"  stz toy_vq_n\n"
+"  stx toy_vq_cnt\n"
+"  ldx #0\n"
+"irq_v_q:\n"
+"  st0 #0\n"
+"  lda toy_vq_alo,x\n"
+"  sta $0002\n"
+"  lda toy_vq_ahi,x\n"
+"  sta $0003\n"
+"  st0 #2\n"
+"  lda toy_vq_wlo,x\n"
+"  sta $0002\n"
+"  lda toy_vq_whi,x\n"
+"  sta $0003\n"
+"  inx\n"
+"  cpx toy_vq_cnt\n"
+"  bne irq_v_q\n"
+"irq_v_np:\n"
+"  ldx toy_active\n"
+"  lda toy_rbase_lo,x\n"
+"  sta toy_rptr\n"
+"  lda toy_rbase_hi,x\n"
+"  sta toy_rptr+1\n"
+"  ldy #0\n"
+"  lda (toy_rptr),y\n"         /* the header's op: which base registers frame() wrote */
+"  tax\n"
+"  and #$01\n"
+"  beq irq_v_nbxr\n"
+"  st0 #7\n"
+"  ldy #1\n"
+"  lda (toy_rptr),y\n"
+"  sta $0002\n"
+"  ldy #2\n"
+"  lda (toy_rptr),y\n"
+"  sta $0003\n"
+"irq_v_nbxr:\n"
+"  txa\n"
+"  and #$02\n"
+"  beq irq_v_nbyr\n"
+"  st0 #8\n"
+"  ldy #3\n"
+"  lda (toy_rptr),y\n"
+"  sta $0002\n"
+"  ldy #4\n"
+"  lda (toy_rptr),y\n"
+"  sta $0003\n"
+"irq_v_nbyr:\n"
+"  txa\n"
+"  and #$04\n"
+"  beq irq_v_ncr\n"
+"  st0 #5\n"
+"  ldy #5\n"
+"  lda (toy_rptr),y\n"
+"  ora #$0C\n"
+"  sta $0002\n"
+"  stz $0003\n"
+"irq_v_ncr:\n"
+"  ldy #6\n"
+"  lda (toy_rptr),y\n"         /* the number of base colour words */
+"  beq irq_v_npal\n"
+"  tax\n"
+"  ldy #8\n"
+"irq_v_pal:\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0402\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0403\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0404\n"
+"  lda (toy_rptr),y\n"
+"  iny\n"
+"  sta $0405\n"
+"  dex\n"
+"  bne irq_v_pal\n"
+"irq_v_npal:\n"
+"  lda toy_rptr\n"              /* the pointer moves from the header to the stream */
+"  clc\n"
+"  adc #" STR(RHDR) "\n"
+"  sta toy_rptr\n"
+"  bcc irq_v_nc\n"
+"  inc toy_rptr+1\n"
+"irq_v_nc:\n"
+"  ldy #0\n"
+"  lda (toy_rptr),y\n"
+"  cmp #$FF\n"
+"  bne irq_v_have\n"
+"  st0 #6\n"                    /* an empty stream: park the RCR */
+"  lda #$FF\n"
+"  sta $0002\n"
+"  lda #$03\n"
+"  sta $0003\n"
+"  jmp irq_done\n"
+"irq_v_have:\n"
+"  cmp #$00\n"
+"  bne irq_v_arm\n"
+"  jmp irq_serve\n"             /* a line-0 record: now, in the VBlank; it programs the next RCR */
+"irq_v_arm:\n"
+"  clc\n"
+"  adc #$40\n"
+"  st0 #6\n"
 "  sta $0002\n"
 "  lda #$00\n"
 "  adc #$00\n"
 "  sta $0003\n"
-"irq_scan_done:\n"
-"  ply\n"
-"  plx\n"
-"  pla\n"
-"  rti\n"
-"irq_vbl_near:\n"
-"  inc toy_vblank_count\n"
-"irq_vbl_done:\n"
-"  ply\n"
-"  plx\n"
-"  pla\n"
-"  rti\n"
+"  jmp irq_done\n"
 );
 
-/* Apply the next frame's base: the register and colour writes that
- * frame() made while the previous frame was on screen.  Called in VBlank,
- * before the chain is armed.  (frame()'s VRAM writes went straight to the
- * VDC as they ran — see toy_vram_set.) */
-static void apply_base(void) {
-  uint8_t i;
-  if (toy_pend_op & 0x01) {
-    vdc_write(0x07, (uint16_t)(((uint16_t)toy_pend_bxr_hi << 8) |
-                               toy_pend_bxr_lo));
-  }
-  if (toy_pend_op & 0x02) {
-    vdc_write(0x08, (uint16_t)(((uint16_t)toy_pend_byr_hi << 8) |
-                               toy_pend_byr_lo));
-  }
-  if (toy_pend_op & 0x04) {
-    vdc_write(0x05, (uint16_t)(toy_pend_cr | 0x0C));
-  }
-  for (i = 0; i < toy_pend_npal; i++) {
-    *IO_VCE_COLOR_INDEX = (uint16_t)(((uint16_t)toy_pend_pal_a_hi[i] << 8) |
-                                     toy_pend_pal_a_lo[i]);
-    *IO_VCE_COLOR_DATA = (uint16_t)(((uint16_t)toy_pend_pal_w_hi[i] << 8) |
-                                    toy_pend_pal_w_lo[i]);
-  }
-  toy_pend_op = 0;
-  toy_pend_npal = 0;
+
+/* ---- the game's side: building a buffer ----------------------------------------------------- */
+
+/* Publish the finished game frame.  The VDC copies the SAT from VRAM into its own SATB at the START of
+ * every VBlank and shows that copy for the whole next picture, so the SAT in VRAM has to be complete
+ * BEFORE the VBlank that swaps in the new effects, and nothing may touch the VDC's registers from the
+ * main thread in the middle of the picture without delaying the line interrupts.  So the copy is done
+ * by the line-interrupt handler: every stream ends with a TAIL stop (op bit 7) one line after its last
+ * effect line, and that stop copies the shadow SAT (a 512-byte block move, ~7 lines) when `sat_req`
+ * is set.  The VBlank handler swaps only when the copy is done; if the frame was published after the
+ * tail stop had passed, the swap waits one more video frame (the old picture stays whole).  Copying
+ * the shadow in the VBlank handler instead put the sprites one video frame behind the scroll. */
+static void rec_put(uint8_t line, uint8_t op, uint16_t bxr, uint16_t byr, uint8_t cr,
+                    uint16_t c1a, uint16_t c1v, uint16_t c2a, uint16_t c2v);
+static void publish_frame(void) {
+  uint8_t line = (uint8_t)(wlast + 1);
+  if (line > 224) line = 224;
+  rec_put(line, 0x80, 0, 0, 0, 0, 0, 0, 0);
+  toy_sat_req = toy_sat_dirty;
+  toy_sat_dirty = 0;
+  toy_publish = 1;
 }
 
-/* Line 0's entry cannot come from the RCR chain: the VDC latches BYR for the
- * first display line at the VDW entry, before the RCR=0x40 match, so a write
- * in that interrupt is one line late (pce-bg.js's model comment; measured on
- * status-bar.lua, whose bar needs BYR=0 at line 0).  The main loop applies
- * entry 0 in the VBlank, while the display is still blank, and the chain
- * starts at line 1. */
-static void apply_entry0(void) {
-  uint8_t op = toy_r_op[0];
-  if (op & 0x01) {
-    vdc_write(0x07, (uint16_t)(((uint16_t)toy_r_bxr_hi[0] << 8) |
-                               toy_r_bxr_lo[0]));
-  }
-  if (op & 0x02) {
-    vdc_write(0x08, (uint16_t)(((uint16_t)toy_r_byr_hi[0] << 8) |
-                               toy_r_byr_lo[0]));
-  }
-  if (op & 0x04) {
-    vdc_write(0x05, (uint16_t)(toy_r_cr[0] | 0x0C));
-  }
-#ifndef TOY_RASTER_TABLE
-  if (op & 0x08) {
-    *IO_VCE_COLOR_INDEX = (uint16_t)(((uint16_t)toy_r_a1_hi[0] << 8) |
-                                     toy_r_a1_lo[0]);
-    *IO_VCE_COLOR_DATA = (uint16_t)(((uint16_t)toy_r_v1_hi[0] << 8) |
-                                    toy_r_v1_lo[0]);
-  }
-  if (op & 0x10) {
-    *IO_VCE_COLOR_INDEX = (uint16_t)(((uint16_t)toy_r_a2_hi[0] << 8) |
-                                     toy_r_a2_lo[0]);
-    *IO_VCE_COLOR_DATA = (uint16_t)(((uint16_t)toy_r_v2_hi[0] << 8) |
-                                    toy_r_v2_lo[0]);
-  }
-#endif
+/* start a new pending buffer: empty header, empty stream */
+static void rb_begin(void) {
+  wb = (uint8_t *)toy_rbuf[toy_widx];
+  wb[0] = 0;                         /* header op */
+  wb[6] = 0;                         /* header colour count */
+  wlen = 0;
+  wlast = 0;
+  wb[RHDR] = 0xFF;                   /* the stream's end mark */
 }
 
-/* One frame's raster(0..223), back to back.  The display is not armed while
- * this runs, so the video keeps the previous frame's last values; the
- * collection is the toy's own cost and the timer sum is the measurement. */
+static uint8_t rec_len(uint8_t op) {
+  uint8_t n = 2;
+  if (op & 0x01) n += 2;
+  if (op & 0x02) n += 2;
+  if (op & 0x04) n += 1;
+  if (op & 0x08) n += 4;
+  if (op & 0x10) n += 4;
+  return n;
+}
+
+/* append one line's record (callers go in ascending line order) */
+static void rec_put(uint8_t line, uint8_t op, uint16_t bxr, uint16_t byr, uint8_t cr,
+                    uint16_t c1a, uint16_t c1v, uint16_t c2a, uint16_t c2v) {
+  uint8_t n = rec_len(op);
+  uint8_t *q;
+  if ((uint16_t)(wlen + n) > ((op & 0x80) ? RSTREAM - 1 : RSTREAM - 6)) {
+    measure_flag(0x08);              /* the stream is full: this line's effect is dropped */
+    return;
+  }
+  q = wb + RHDR + wlen;
+  *q++ = line;
+  *q++ = op;
+  if (op & 0x01) { *q++ = (uint8_t)bxr; *q++ = (uint8_t)(bxr >> 8); }
+  if (op & 0x08) { *q++ = (uint8_t)c1a; *q++ = (uint8_t)(c1a >> 8); *q++ = (uint8_t)c1v; *q++ = (uint8_t)(c1v >> 8); }
+  if (op & 0x10) { *q++ = (uint8_t)c2a; *q++ = (uint8_t)(c2a >> 8); *q++ = (uint8_t)c2v; *q++ = (uint8_t)(c2v >> 8); }
+  if (op & 0x02) { if (line) byr = (uint16_t)((byr + 1) & 0x1FF); *q++ = (uint8_t)byr; *q++ = (uint8_t)(byr >> 8); }
+  if (op & 0x04) { *q++ = cr; }
+  *q = 0xFF;
+  wlen = (uint16_t)(wlen + n);
+  wlast = line;
+}
+
 #ifdef TOY_RASTER_TABLE
-/* The table form: frame() fills the entries itself; clear them first. */
-static void clear_entries(void) {
-  int32_t l;
-  for (l = 0; l < VDW_LINES; l++) toy_r_op[l] = 0;
-}
+/* The table form, raster(line, spec) from frame(): entries come in any order and a line may be
+ * named twice (the fields are merged); they are sorted into the stream when frame() returns. */
+#define NTBL 24
+static uint8_t t_n, t_line[NTBL], t_op[NTBL], t_cr[NTBL];
+static uint16_t t_bxr[NTBL], t_byr[NTBL];
 
 void toy_raster_entry(int32_t line, int32_t mask, int32_t bxr, int32_t byr, int32_t cr) {
-  uint8_t l = (uint8_t)line;
-  uint8_t op = 0;
+  uint8_t i, op = 0;
   if (line < 0 || line >= VDW_LINES) return;
-  if (mask & 1) {
-    toy_r_bxr_lo[l] = (uint8_t)bxr;
-    toy_r_bxr_hi[l] = (uint8_t)((bxr >> 8) & 0x03);
-    op |= 0x01;
+  for (i = 0; i < t_n; i++) if (t_line[i] == (uint8_t)line) break;
+  if (i == t_n) {
+    if (t_n >= NTBL) { measure_flag(0x10); return; }
+    t_n++;
+    t_line[i] = (uint8_t)line;
+    t_op[i] = 0;
   }
-  if (mask & 2) {
-    toy_r_byr_lo[l] = (uint8_t)byr;
-    toy_r_byr_hi[l] = (uint8_t)((byr >> 8) & 0x01);
-    op |= 0x02;
+  if (mask & 1) { t_bxr[i] = (uint16_t)bxr & 0x3FF; op |= 0x01; }
+  if (mask & 2) { t_byr[i] = (uint16_t)byr & 0x1FF; op |= 0x02; }
+  if (mask & 4) { t_cr[i] = (uint8_t)cr; op |= 0x04; }
+  t_op[i] = (uint8_t)(t_op[i] | op);
+}
+
+static void finish_table(void) {
+  uint8_t order[NTBL], i, j, n = t_n;
+  for (i = 0; i < n; i++) {          /* insertion sort of the entry numbers by line */
+    for (j = i; j > 0 && t_line[order[j - 1]] > t_line[i]; j--) order[j] = order[j - 1];
+    order[j] = i;
   }
-  if (mask & 4) {
-    toy_r_cr[l] = (uint8_t)cr;
-    op |= 0x04;
+  for (i = 0; i < n; i++) {
+    j = order[i];
+    rec_put(t_line[j], t_op[j], t_bxr[j], t_byr[j], t_cr[j], 0, 0, 0, 0);
   }
-  toy_r_op[l] = (uint8_t)(toy_r_op[l] | op);
 }
 #else
+/* The callback form: raster(0..223) back to back into the pending stream.  The collection is the
+ * toy's own cost and the timer sum is the measurement. */
 static void collect_all(void) {
   int32_t l;
   for (l = 0; l < VDW_LINES; l++) {
-    toy_r_op[l] = 0;
-    toy_collect_line = (uint8_t)l;
+    cur_op = 0;
     toy_measure_raster_begin();
     toy_raster(l);
     toy_measure_raster_end();
+    if (cur_op) rec_put((uint8_t)l, cur_op, cur_bxr, cur_byr, cur_cr, cur_c1a, cur_c1v, cur_c2a, cur_c2v);
   }
 }
 #endif
@@ -830,17 +1036,31 @@ int main(void) {
     }
 #ifdef TOY_RASTER_BUILD
   } else {
-    /* Part C, paced by VBlanks: frame(f) and its 224 raster() calls run
-     * into the table while nothing is armed (the screen holds the previous
-     * picture), then the base and line 0 are written, the next VBlank arms
-     * the chain, and one video frame replays the table line by line.  The
-     * toy's own raster work measures ~1,500 cycles a call for parallax.lua
-     * (≈340,000 a frame, 2.8 video frames), so one toy frame takes four to
-     * five video frames: ~12–15 Hz.  The picture sequence is the browser's;
-     * only the rate differs (docs/IL.md §10). */
+    /* Part C, raster runtime v2: the line-interrupt chain runs on EVERY video frame from the last
+     * PUBLISHED buffer (see the data block above), and the game computes the next frame into the
+     * other buffer meanwhile: frame(f), then its raster calls (the callback form) or its raster
+     * entries (the table form), then `publish` and wait for the next VBlank, whose handler swaps
+     * the buffers and starts replaying the new one.  A game frame that computes in under one video
+     * frame therefore takes one video frame (60 Hz); a longer one takes the next whole number.
+     * Every video frame shows a complete game frame with its per-line effects, never a half-built
+     * one.  Before this the chain was disarmed while the game computed, and those video frames showed
+     * the last line's scroll and backdrop for the whole screen (docs/NATIVE.md). */
     int32_t f;
-    uint8_t v;
     toy_host_mode = MODE_DIRECT;
+    /* both buffers start empty; the active one is replayed (as nothing) until the first publish */
+    for (i = 0; i < 2; i++) {
+      toy_rbuf[i][0] = 0;
+      toy_rbuf[i][6] = 0;
+      toy_rbuf[i][RHDR] = 1;           /* the tail stop at line 1: the first frame's sprites get copied */
+      toy_rbuf[i][RHDR + 1] = 0x80;
+      toy_rbuf[i][RHDR + 2] = 0xFF;
+      toy_rbase_lo[i] = (uint8_t)(uint16_t)toy_rbuf[i];
+      toy_rbase_hi[i] = (uint8_t)((uint16_t)toy_rbuf[i] >> 8);
+    }
+    toy_active = 0;
+    toy_widx = 1;
+    toy_publish = 0;
+    toy_rptr = (uint16_t)toy_rbuf[0] + RHDR;
 #ifdef TOY_INPUT_BUILD
     /* keep what the toy asked for: with sprites (SB, bit 6) CR is $C0.  Writing a plain
      * $8C here switched every sprite off in the raster builds (found by looking at the
@@ -851,30 +1071,30 @@ int main(void) {
 #endif
     pce_irq_enable(IRQ_VDC);
     pce_cpu_irq_enable();
-    v = toy_vblank_count;
 
     for (f = 0;; f++) {
       uint8_t c0, c1, cd;
       uint32_t csum;
       uint16_t ccount;
 
-      /* ---- compute: the display is idle (nothing armed) ---- */
+      /* ---- compute the next game frame into the pending buffer, while the active one is on screen ---- */
 #ifdef TOY_INPUT_BUILD
       joy_scan();               /* the pads, once per toy frame (#45) */
 #endif
-      toy_pend_op = 0;
-      toy_pend_npal = 0;
-      toy_host_mode = MODE_BASE;
+      rb_begin();
 #ifdef TOY_RASTER_TABLE
-      clear_entries();
+      t_n = 0;
 #endif
+      toy_host_mode = MODE_BASE;
       toy_measure_begin();
       toy_frame(f);
       toy_measure_end();
 
       toy_host_mode = MODE_RASTER;
       c0 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
-#ifndef TOY_RASTER_TABLE
+#ifdef TOY_RASTER_TABLE
+      finish_table();
+#else
       collect_all();
 #endif
       c1 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
@@ -895,30 +1115,9 @@ int main(void) {
       MEAS[MEAS_CCOUNT] = (uint8_t)ccount;
       MEAS[MEAS_CCOUNT + 1] = (uint8_t)(ccount >> 8);
 
-      /* ---- apply the base and line 0 now, while nothing is armed ----
-       * The VDC latches BYR for the first display line at (or before) the
-       * VDW entry; a write in the VBlank interrupt measured too late for
-       * status-bar.lua's bar, so the values are in the registers well
-       * before VBlank.  The video frame being computed stays static (the
-       * chain is disarmed); this is the frame the comparison ignores. */
-      apply_base();
-      apply_entry0();
-
-      /* ---- the next VBlank arms the chain ---- */
-      v = toy_vblank_count;
-      while (toy_vblank_count == v) {
-      }
-      toy_isr_line = 1;
-      vdc_write(0x06, (uint16_t)(RCR_BASE + 1));
-
-      /* ---- wait out the display frame before touching the table ------
-       * The chain reads entry L at line L, so the main loop must not start
-       * the next 224 calls while it runs: a collection slower than the chain
-       * would still win the race at a jittered entry, and the measured
-       * symptom was one video frame in ~10 with band 0 from the next frame
-       * and the other bands from the last. */
-      v = toy_vblank_count;
-      while (toy_vblank_count == v) {
+      /* ---- publish: the next VBlank swaps the buffers; do not touch the pending one before it has ---- */
+      publish_frame();
+      while (toy_publish) {
       }
     }
   }
