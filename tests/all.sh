@@ -27,6 +27,10 @@
 # unless KEEP=1 (then their path is printed).
 #
 # Make overridable: MAKE=/path/to/make tests/all.sh
+#
+# Arguments are forwarded to every suite unchanged, so `tests/all.sh
+# --browser` is the command check-browser.js's evidence names (#114/#295);
+# a suite that does not know an argument ignores it.
 
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
@@ -62,7 +66,7 @@ failed=()
 for t in "${suites[@]}"; do
   name="$(basename "$t" .js)"
   log="$SCRATCH/$name.log"
-  node "$t" >"$log" 2>&1
+  node "$t" "$@" >"$log" 2>&1
   status=$?
   if [ $status -ne 0 ]; then
     failed+=("$name")

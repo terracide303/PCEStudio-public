@@ -6,8 +6,9 @@
  * THE ART IS NOT IN THE REPO.  the maintainer, 2026-10-29: "About the artwork don't
  * put it on the repo but it's fine as demo on the website in PCE Studio"
  * (docs/DECISIONS.md).  The converted picture — the pack's scene and the
- * character's frames — lives beside the repo in
- * `/Volumes/External/agent-workshop-demo/demo-art/city/`, and tools/deploy.sh
+ * character's frames — lives beside the repo at
+ * `/Volumes/External II/agent-workshop-demo/support/deploy-art/city/`,
+ * and tools/deploy.sh
  * uploads it with the toy.  So on a fresh clone this file SKIPS with a clear
  * line and exits 0, and the suite stays green: the toy's own Lua is what the
  * repository holds, and that is what it can check without the art.
@@ -78,12 +79,13 @@ const sat = require("../renderer/pce-sat.js");
 const ed = require("../renderer/pce-editor.js");
 
 const REPO = path.join(__dirname, "..");
+const toolPaths = require(path.join(REPO, "tools", "tool-paths.js"));
 /* the PLAYABLE file: the repo's toys/city/main.lua plus the generated art
  * block (tools/city-assets.js).  It is the file tools/gallery.js
  * --with-demo-art puts on the site, so it is the one this test plays. */
 const TOY = null;      /* set below, once ART is known */
-const DEMO_ART = process.env.PCE_DEMO_ART ||
-  "/Volumes/External/agent-workshop-demo/demo-art";
+/* $PCE_DEMO_ART, else the demo art kept on External II (#295). */
+const DEMO_ART = toolPaths.demoArt(process.env.PCE_DEMO_ART);
 const ART = path.join(DEMO_ART, "city");
 const EVIDENCE = path.join(ART, "evidence");
 const ART_FILES = ["tiles.json", "palettes.json", "sprites.json", "main.lua"];
@@ -809,7 +811,8 @@ function runWithArt() {
   const missing = missingArt();
   if (missing) {
     console.log("SKIP  demo-art/city is not on this machine (" + missing.join(", ") +
-                " missing); the CITY pack's art is not in the repo, by the maintainer's " +
+                " missing under " + ART + "); set PCE_DEMO_ART to a demo-art " +
+                "folder; the CITY pack's art is not in the repo, by the maintainer's " +
                 "2026-10-29 decision (docs/DECISIONS.md).");
     console.log("      Build it with: node tools/city-assets.js --pack \"<the " +
                 "extracted pack>\"");

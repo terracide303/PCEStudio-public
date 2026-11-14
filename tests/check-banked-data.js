@@ -104,8 +104,9 @@ const ROOT = path.join(__dirname, "..");
 const ILVM = path.join(ROOT, "renderer", "ilvm.bin");
 const BANK = 8192;
 const USABLE = 8160;                 /* 0x1FE0, pce-rom.js's SONG_TABLE_OFF */
-const ORIGINAL_TOWER = process.env.PCESTUDIO_ORIGINAL_TOWER ||
-  "/Volumes/External/pcestudio-toys/originals/tower/main.lua";
+const toolPaths = require(path.join(ROOT, "tools", "tool-paths.js"));
+/* $PCESTUDIO_ORIGINAL_TOWER, else the copy kept on External II (#295). */
+const ORIGINAL_TOWER = toolPaths.originalTower();
 
 let checks = 0, failed = 0;
 const skipped = [];
@@ -339,8 +340,10 @@ function checkVanillaFixture() {
 }
 
 function checkOriginalTower() {
-  if (!fs.existsSync(ORIGINAL_TOWER)) {
-    const why = "the pre-#272 TOWER is not at " + ORIGINAL_TOWER +
+  if (!ORIGINAL_TOWER || !fs.existsSync(ORIGINAL_TOWER)) {
+    const why = "the pre-#272 TOWER is not at " +
+                (ORIGINAL_TOWER ||
+                 toolPaths.candidates.ORIGINAL_TOWER.join(" or ")) +
                 " (set PCESTUDIO_ORIGINAL_TOWER)";
     skipped.push(why);
     console.log("SKIP  TOWER's 2-bank container: " + why);
@@ -781,7 +784,7 @@ function checkRule2Breaks() {
    * fnCodeOff to its jump targets, so every jump operand in a function that
    * starts past a bank's first byte changed (the v4 (2) checks below say
    * the new bytes are the bank-relative targets the format promises). */
-  if (fs.existsSync(ORIGINAL_TOWER)) {
+  if (ORIGINAL_TOWER && fs.existsSync(ORIGINAL_TOWER)) {
     const towerProg = il.compile(fs.readFileSync(ORIGINAL_TOWER, "utf8"),
                                  { chunkName: "tower.lua" });
     const tower = ilbc.encode(towerProg);

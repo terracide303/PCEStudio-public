@@ -32,8 +32,9 @@
  *   node tools/oak-woods-art.js --check    exit 1 if that folder is stale
  *   node tools/oak-woods-art.js --pack F   a different copy of the zip
  *
- * The pack path defaults to the maintainer's download and can be overridden with
- * OAK_WOODS_PACK.  If the pack AND the written folder are both absent, --check
+ * The pack is --pack, then $OAK_WOODS_PACK, then the copies
+ * tools/tool-paths.js names on External II.  If the pack AND the written
+ * folder are both absent, --check
  * says SKIP and exits 0, so a fresh clone stays green.  --check compares
  * every file the tool writes, not just main.lua.
  */
@@ -48,10 +49,10 @@ const src = require("../renderer/pce-source.js");
 
 const ROOT = path.resolve(__dirname, "..");
 const TOY = path.join(ROOT, "toys", "oak-woods", "main.lua");
-const DEMO_ART = process.env.DEMO_ART ||
-  "/Volumes/External/agent-workshop-demo/demo-art";
+/* $DEMO_ART, else the demo art kept on External II (#295). */
+const toolPaths = require("./tool-paths.js");
+const DEMO_ART = toolPaths.demoArt(process.env.DEMO_ART);
 const OUT = path.join(DEMO_ART, "oak-woods");
-const DEFAULT_PACK = "/Volumes/External/Download/oak_woods_v1.0.zip";
 const OPEN = "-- >>> PCEStudio demo art";
 const CLOSE = "-- <<< PCEStudio demo art";
 
@@ -493,7 +494,8 @@ function luaBlock(built) {
 /* ---- the import -------------------------------------------------------- */
 function build(opts) {
   opts = opts || {};
-  const pack = opts.pack || process.env.OAK_WOODS_PACK || DEFAULT_PACK;
+  /* --pack, $OAK_WOODS_PACK, else the copies on External II (#295). */
+  const pack = toolPaths.oakPack(opts.pack);
   if (!fs.existsSync(pack)) {
     return { skip: "the Oak Woods pack is not at " + pack +
       " (set OAK_WOODS_PACK or --pack); no art can be imported" };

@@ -16,6 +16,12 @@ without llvm-mos, check-il-huc without the HuC compiler) is reported as
 printed and the suite is named in the summary.  Logs go under `$TMPDIR` and are
 kept with `KEEP=1`.
 
+**Where the tools live, every environment override, how to re-pin a hash and
+the Mednafen capture rules are in [`docs/TESTING.md`](../docs/TESTING.md).**
+The short version: a suite resolves its external tool through
+`tools/tool-paths.js` — the env override, then External II, then a named
+`SKIP`; the old `/Volumes/External` drive is not searched.
+
 The individual suites, and what each one needs:
 
 ```sh
@@ -146,7 +152,7 @@ lists, declarations first); `tools/toyc/huc_runtime.c` is the console side
 and `tools/toyc/huc_raster.asm` is part C's RCR handler as a bank-0 PCEAS
 file, hooked through HuC's user IRQ1 vector. `tools/build-huc.sh` compiles
 with `bin/huc` and `bin/pceas` from `HUC_DIR` (default
-`/Volumes/External/pce-tools/huc-src`, fetched and built by the script
+`/Volumes/External II/pce-tools/huc-src`, fetched and built by the script
 itself); `tools/capture-huc.sh` is the
 same Mednafen route and writes `tests/dumps/<name>-huc/`.
 

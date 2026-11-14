@@ -80,6 +80,7 @@ const ilbc = require("../renderer/pce-ilbc.js");
 const romLib = require("../renderer/pce-rom.js");
 
 const ROOT = path.join(__dirname, "..");
+const toolPaths = require(path.join(ROOT, "tools", "tool-paths.js"));
 const ILVM_C = path.join(ROOT, "tools", "ilvm", "ilvm.c");
 const HOSTVM_C = path.join(ROOT, "tools", "ilvm", "hostvm.c");
 
@@ -154,9 +155,10 @@ function haveCommand(cmd) {
                    { encoding: "utf8" }).status === 0;
 }
 function findLlvmMos() {
-  const roots = [process.env.LLVM_MOS,
-                 "/Volumes/External/pce-tools/llvm-mos",
-                 "/Volumes/External II/pce-tools/llvm-mos"];
+  /* $LLVM_MOS, then the SDK on External II (#295); the old drive is not
+   * searched.  An override that does not carry bin/mos-pce-clang falls
+   * through to the External II root, as it did before. */
+  const roots = [process.env.LLVM_MOS].concat(toolPaths.candidates.LLVM_MOS);
   for (const r of roots)
     if (r && fs.existsSync(path.join(r, "bin", "mos-pce-clang"))) return r;
   return null;

@@ -20,7 +20,7 @@
  *                 tests/asm/features.asm + tests/asm/banks.asm are assembled
  *                 twice: once by renderer/pce-asm.js (the WebAssembly build in
  *                 vendor/pceas/) and once by the native PCEAS named in the
- *                 card (/Volumes/External/pce-tools/bin/pceas, v3.23).  The
+ *                 card (/Volumes/External II/pce-tools/bin/pceas, v3.23).  The
  *                 two ROMs must be byte-for-byte equal.  viewer1 carries
  *                 .include and five .incbin files (one binary per bank
  *                 region), so the include path and binary files are covered,
@@ -58,7 +58,7 @@
  * the parity check as a REFUSAL, not an assembly: the native binary this card
  * names is PCEAS 3.23, and 3.23 cannot assemble that file — it uses PCEAS
  * 4.x's `&`/`<` expressions and dotted labels.  `tools/ilvm/build-engine.sh`
- * builds it with `pceas4` (docs/BUILD.md), not with /Volumes/External/
+ * builds it with `pceas4` (docs/BUILD.md), not with /Volumes/External II/
  * pce-tools/bin/pceas.  This test requires the wasm to reproduce the native
  * 3.23 output exactly — both as the parsed {line, message} diagnostics AND
  * as the full raw stdout byte for byte (banner, file header, diagnostics,
@@ -87,7 +87,9 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const ROOT = path.resolve(__dirname, "..");
-const PCEAS = process.env.PCEAS || "/Volumes/External/pce-tools/bin/pceas";
+const toolPaths = require(path.join(ROOT, "tools", "tool-paths.js"));
+/* $PCEAS, else External II — the old drive is not searched (#295). */
+const PCEAS = toolPaths.pceas();
 const NATIVE = PCEAS;
 const asm = require(path.join(ROOT, "renderer", "pce-asm.js"));
 
@@ -176,6 +178,14 @@ function parseNativeDiagnostics(text) {
   return out;
 }
 
+if (!NATIVE) {
+  /* Not installed: nothing to compare the wasm with, so this is a SKIP, not
+   * a failure of the thing the card checks (#295). */
+  console.log("SKIP  no native PCEAS: looked at " +
+              toolPaths.candidates.PCEAS.join(", ") +
+              " — docs/BUILD.md installs it (set PCEAS to override)");
+  process.exit(0);
+}
 if (PCEAS.includes("/") && !fs.existsSync(NATIVE)) {
   console.error("missing native PCEAS at " + NATIVE +
                 " — docs/BUILD.md installs it (set PCEAS to override)");

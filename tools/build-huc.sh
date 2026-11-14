@@ -10,8 +10,13 @@
 # HuC mainline itself and builds it outside the repo (the same rule as
 # PCEAS and llvm-mos, docs/DECISIONS.md):
 #
-#   /Volumes/External/pce-tools/huc-src     pce-devel/huc at the pinned
-#                                           commit, built (bin/huc, bin/pceas)
+#   /Volumes/External II/pce-tools/huc-src  pce-devel/huc at the pinned
+#                                           commit, built (bin/huc, bin/pceas).
+#                                           #295: the old /Volumes/External is
+#                                           not searched.  The clone that sits
+#                                           there today is uli/huc at 52a556a,
+#                                           not pce-devel/huc, so the check
+#                                           below refuses it by name.
 #
 # override with HUC_DIR=/path/to/huc-src.  The pinned commit is HUC_COMMIT
 # below — the revision the repo's vendored record pins (54f5c736, 2026-10-28).
@@ -30,7 +35,7 @@ cd "$(dirname "$0")/.."
 
 HUC_REPO="https://github.com/pce-devel/huc.git"
 HUC_COMMIT="54f5c73606c1e7142e8095c727cab2767e2b3cb3"
-HUC_DEFAULT="/Volumes/External/pce-tools/huc-src"
+HUC_DEFAULT="/Volumes/External II/pce-tools/huc-src"
 
 # Fetch and build the toolchain if it is not already there.  Runs from the
 # repo root (the cd above); the clone lives outside it, always.

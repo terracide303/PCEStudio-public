@@ -20,7 +20,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 
-SRC="${PCEAS_SRC:-/Volumes/External/pce-tools/pceas3-src}"
+# $PCEAS_SRC, else the source tree on External II (#295); the old drive is
+# not searched.
+SRC="${PCEAS_SRC:-/Volumes/External II/pce-tools/pceas3-src}"
 EMCC="${EMCC:-/opt/homebrew/bin/emcc}"
 PINNED_COMMIT="52a556a0556abb67a12889ca7047366a8cb2f59e"
 VERSION="52a556a"

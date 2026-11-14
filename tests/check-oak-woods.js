@@ -63,10 +63,11 @@ const il = require("../renderer/pce-il.js");
 const validate = require("../renderer/pce-validate.js");
 
 const REPO = path.join(__dirname, "..");
+const toolPaths = require(path.join(REPO, "tools", "tool-paths.js"));
 const TOY = path.join(REPO, "toys", "oak-woods", "main.lua");
 const SONG = path.join(REPO, "toys", "oak-woods", "song.json");
-const DEMO_ART = process.env.DEMO_ART ||
-  "/Volumes/External/agent-workshop-demo/demo-art";
+/* $DEMO_ART, else the demo art kept on External II (#295). */
+const DEMO_ART = toolPaths.demoArt(process.env.DEMO_ART);
 const ART = path.join(DEMO_ART, "oak-woods");
 const GAME = path.join(ART, "main.lua");
 const DUMPS = path.join(ART, "dumps");
@@ -90,11 +91,14 @@ function note(text) { console.log("NOTE  " + text); }
 /* ---- the skip ---------------------------------------------------------- */
 
 if (!fs.existsSync(GAME)) {
-  console.log("SKIP  no demo-art/oak-woods/main.lua in this clone — the art " +
-              "is not committed (docs/DECISIONS.md, 2026-10-29). Run\n" +
+  console.log("SKIP  no demo-art/oak-woods/main.lua at " + GAME +
+              " — the art " +
+              "is not committed (docs/DECISIONS.md, 2026-10-29); set DEMO_ART " +
+              "to a demo-art folder. Run\n" +
               "      node tools/oak-woods-art.js\n" +
-              "      with the pack at /Volumes/External/Download/oak_woods_v1.0.zip " +
-              "(or OAK_WOODS_PACK) to build it.");
+              "      with the pack at the path OAK_WOODS_PACK names " +
+              "(tools/tool-paths.js lists the copies it looks for) " +
+              "to build it.");
   process.exit(0);
 }
 

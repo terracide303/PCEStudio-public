@@ -265,7 +265,11 @@ const FRAMES = 40;
 const WIDTH = 256;
 const HEIGHT = 224;
 const FIRST_SCANLINE = 18;
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+/* #114, #295: the ONE browser setting (tests/browser.js) — the Chrome for
+ * Testing headless shell, never the user's app bundle. */
+const browser = require("./browser.js");
+const CHROME = browser.CHROME;
+const toolPaths = require(path.join(__dirname, "..", "tools", "tool-paths.js"));
 
 let checks = 0;
 const failures = [];
@@ -8068,8 +8072,8 @@ function checkGallery(page) {  const S = page.sandbox.PCEStudio;
    * minus its files (the control) black.  The committed gallery never
    * carries the art; where the art is not on the machine this block skips. */
   {
-    const demo = process.env.DEMO_ART ||
-      "/Volumes/External/agent-workshop-demo/demo-art";
+    /* $DEMO_ART, else the demo art kept on External II (#295). */
+    const demo = toolPaths.demoArt(process.env.DEMO_ART);
     const present = ["oak-woods", "city"].every((id) =>
       fs.existsSync(path.join(demo, id, "sources.json")));
     if (present) {

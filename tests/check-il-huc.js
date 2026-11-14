@@ -19,7 +19,7 @@
  *
  *   2. The ROMs rebuild.  tools/build-huc.sh (HuC's own compiler and
  *      PCEAS, fetched and built by the script itself as an external tool
- *      under /Volumes/External/pce-tools, #152) builds the palette and
+ *      under /Volumes/External II/pce-tools, #152) builds the palette and
  *      parallax toys; their sha256 must equal the committed dumps'
  *      meta.json.  Without HuC the section prints SKIP (the llvm-mos/PCEAS
  *      rule) and the dumps are still checked.
@@ -57,7 +57,11 @@ const cgen = require("../renderer/pce-cgen.js");
 const ilTest = require("./check-il.js");
 
 const ROOT = path.join(__dirname, "..");
-const HUC_DEFAULT = "/Volumes/External/pce-tools/huc-src";
+const toolPaths = require(path.join(ROOT, "tools", "tool-paths.js"));
+/* $HUC_DIR, else an External II huc-src with BOTH bin/huc and bin/pceas.
+ * The old drive is not searched (#295); today's External II copy has no
+ * bin/huc, so this stays an accurate SKIP. */
+const HUC_LOOKED = toolPaths.candidates.HUC.join(" or ");
 const PALETTE_FILE = path.join(ROOT, "tools/toys/palette.lua");
 const RASTER_FILE = path.join(ROOT, "toys/parallax.lua");
 const PALETTE_DUMP = path.join(ROOT, "tests/dumps/palette-huc");
@@ -285,7 +289,8 @@ function frame(t, f) reg("BXR", mix(1, 2, 3)) end`, "huc-three.lua");
   const tool = hucToolchain();
   if (!tool) {
     skipped.push("the H01/H05 edge programs' HuC build");
-    console.log("SKIP  the H01/H05 edge programs' HuC build: HuC not found");
+    console.log("SKIP  the H01/H05 edge programs' HuC build: HuC not found " +
+                "(looked at " + HUC_LOOKED + "; set HUC_DIR)");
   } else {
     const programs = [
       ["huc-edge-const", `function frame(t, f)
@@ -316,7 +321,8 @@ function frame(t, f) reg("BXR", mix(1, 2, 3)) end`]
 /* ---- 2. the ROMs rebuild --------------------------------------------- */
 
 function hucToolchain() {
-  const dir = process.env.HUC_DIR || HUC_DEFAULT;
+  const dir = toolPaths.huc();     /* $HUC_DIR, else External II, else null */
+  if (!dir) return null;
   return fs.existsSync(path.join(dir, "bin/huc")) &&
          fs.existsSync(path.join(dir, "bin/pceas")) ? dir : null;
 }
@@ -534,7 +540,8 @@ function rebuildAndCompare(tool, name, toy, dump) {
   const dir = tool || hucToolchain();
   if (!dir) {
     skipped.push(name + " ROM rebuild (HuC not found)");
-    console.log("SKIP  " + name + " ROM rebuild: HuC not found");
+    console.log("SKIP  " + name + " ROM rebuild: HuC not found (looked at " +
+                HUC_LOOKED + "; set HUC_DIR)");
     return meta;
   }
   const r = spawnSync(path.join(ROOT, "tools/build-huc.sh"),

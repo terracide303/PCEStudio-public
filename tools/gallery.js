@@ -198,9 +198,10 @@ const TOYS_META = [
 
 /* #128: where the uncommitted art lives (docs/DECISIONS.md).  Only
  * `--with-demo-art` reads it — the playable main.lua and the picture files
- * beside it (card #156); the committed gallery and `--check` never do. */
-const DEMO_ART = process.env.DEMO_ART ||
-  "/Volumes/External/agent-workshop-demo/demo-art";
+ * beside it (card #156); the committed gallery and `--check` never do.
+ * $DEMO_ART, else the demo art kept on External II (#295). */
+const toolPaths = require("./tool-paths.js");
+const DEMO_ART = toolPaths.demoArt(process.env.DEMO_ART);
 
 function readFile(file, id) {
   if (!fs.existsSync(file)) {

@@ -186,7 +186,19 @@ done
 # makes the site's gallery carry the playable source instead of the repo's
 # placeholder.  The repo's own renderer/gallery-toys.js stays the art-free
 # copy the tests check — this is the only place the two are joined.
-DEMO_ART="${DEMO_ART:-/Volumes/External/agent-workshop-demo/demo-art}"
+# $DEMO_ART, else the demo art kept on External II (#295).  The first
+# candidate is the name to report when neither exists, so the "none beside"
+# line still says where the deploy looked.
+first_existing() {
+  for p in "$@"; do
+    if [ -e "$p" ]; then printf '%s\n' "$p"; return 0; fi
+  done
+  printf '%s\n' "$1"
+  return 0
+}
+DEMO_ART="${DEMO_ART:-$(first_existing \
+  "/Volumes/External II/agent-workshop-demo/support/deploy-art" \
+  "/Volumes/External II/agent-workshop-demo/demo-art")}"
 demo_toys=""
 for toy in oak-woods city; do
   [ -f "$DEMO_ART/$toy/main.lua" ] && demo_toys="$demo_toys $toy"

@@ -11,7 +11,8 @@
  * pack or anything converted from it (the maintainer, 2026-10-29: "About the artwork
  * don't put it on the repo but it's fine as demo on the website in PCE
  * Studio"; docs/DECISIONS.md).  So this tool writes the converted PCE picture
- * to `/Volumes/External/agent-workshop-demo/demo-art/city/` — beside the
+ * to `/Volumes/External II/agent-workshop-demo/support/deploy-art/city/`
+ * — beside the
  * repo, never in it — and the toy (toys/city/main.lua) is committed without
  * a pixel of it.  tools/deploy.sh uploads that folder with the toy.
  *
@@ -68,8 +69,9 @@ const sat = require("../renderer/pce-sat.js");
 const ed = require("../renderer/pce-editor.js");
 
 const ROOT = path.resolve(__dirname, "..");
-const DEMO_ART = process.env.PCE_DEMO_ART ||
-  "/Volumes/External/agent-workshop-demo/demo-art";
+/* $PCE_DEMO_ART, else the demo art kept on External II (#295). */
+const toolPaths = require("./tool-paths.js");
+const DEMO_ART = toolPaths.demoArt(process.env.PCE_DEMO_ART);
 const OUT_DIR = path.join(DEMO_ART, "city");
 const DEFAULT_PACK = process.env.PCE_CITY_PACK || "";
 

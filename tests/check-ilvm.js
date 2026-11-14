@@ -160,9 +160,11 @@ const romLib = require("../renderer/pce-rom.js");
 const toys = require("../renderer/pce-toys.js");
 
 const ROOT = path.join(__dirname, "..");
+const toolPaths = require(path.join(ROOT, "tools", "tool-paths.js"));
 const ILVM = path.join(ROOT, "renderer", "ilvm.bin");
-const LLVM_DEFAULT = ["/Volumes/External II/pce-tools/llvm-mos/llvm-mos", "/Volumes/External/pce-tools/llvm-mos"]
-  .find((p) => fs.existsSync(path.join(p, "bin", "mos-pce-clang"))) || "/Volumes/External II/pce-tools/llvm-mos/llvm-mos";
+/* $LLVM_MOS, else the SDK on External II (#295); the old drive is not
+ * searched. */
+const LLVM_DEFAULT = toolPaths.llvmMos();
 
 const PALETTE = { name: "toypalette-ilvm", toy: "tools/toys/palette.lua",
                   period: 8, phase: 8, minMeanTicks: 127 };
@@ -888,9 +890,10 @@ function checkRom() {
 
 function checkRebuild() {
   const llvm = process.env.LLVM_MOS || LLVM_DEFAULT;
-  if (!fs.existsSync(path.join(llvm, "bin", "mos-pce-clang"))) {
-    skipped.push("ilvm.bin rebuild (llvm-mos not found at " + llvm + ")");
-    console.log("SKIP  ilvm.bin rebuild: llvm-mos not found at " + llvm);
+  if (!llvm || !fs.existsSync(path.join(llvm, "bin", "mos-pce-clang"))) {
+    const looked = llvm || toolPaths.candidates.LLVM_MOS.join(" or ");
+    skipped.push("ilvm.bin rebuild (llvm-mos not found at " + looked + ")");
+    console.log("SKIP  ilvm.bin rebuild: llvm-mos not found at " + looked);
     return;
   }
   /* #213: the image is now llvm-mos PLUS the engine banks build-engine.sh
