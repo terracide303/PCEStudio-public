@@ -39,17 +39,17 @@
  "name": "toyparallax",
  "rom": "tools/gen/toyparallax.pce",
  "rom_bytes": 8192,
- "rom_sha256": "9186a4b1fe859d19127b078a4915f92f5c5a14745269f55fc1fdc1f20124d422",
+ "rom_sha256": "e9e6e93da3ab7dfba3eb14a8b8a857042a74b6d8f227edfb515a77189386365a",
  "section_sizes": {
-  ".bss": 3808,
+  ".bss": 3244,
   ".data": 16,
-  ".early_start": 825,
+  ".early_start": 1106,
   ".noinit": 0,
   ".rodata": 16,
-  ".text": 7325,
+  ".text": 7044,
   ".vector": 10,
-  ".zp": 24,
-  ".zp.bss": 200,
+  ".zp": 3,
+  ".zp.bss": 39,
   ".zp.data": 0
  },
  "sections": {

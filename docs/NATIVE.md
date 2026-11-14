@@ -77,29 +77,94 @@ above (10 frames, then nothing), and does not match yet. The 8 KiB fixed page
 holds the runtime, the dispatcher and the constants: 3.9 KB for TOWER, more for
 a raster toy.
 
-## VDC access rules (checked 2026-11-13)
+## VDC access rules (revised 2026-11-14, raster runtime v2)
 
 The VDC has global state: the selected register, the VRAM write address and its
-auto-increment. An interrupt that writes the VDC in the middle of a main-loop write or
-copy corrupts it (`docs/REFERENCES.md`, the PCE_knowledge notes). The native runtime
-avoids this by construction, and the engine must keep it that way:
+auto-increment, and one low-byte latch shared by every register. An interrupt that writes
+the VDC in the middle of a main-loop write or copy corrupts it (`docs/REFERENCES.md`, the
+PCE_knowledge notes). Since raster runtime v2 the line interrupt chain runs on every video
+frame, including while `frame()` computes, so this is no longer true by construction. The
+rules:
 
-1. The main loop writes the VDC only while no scan interrupt is armed: at boot, and
-   in the VBlank that applies the frame's base and line 0, before the display and the
-   raster chain are armed. During the toy's own `frame()` and `raster()` calls the
-   writes are captured into lists and applied later, not made.
-2. The scan-line handler (`irq_vdc` in `tools/toyc/toy_runtime.c`) writes only
-   registers 5 to 8 (control, raster compare, scroll) and the colour table. It never
-   touches the VRAM address, the data port or the DMA registers.
-3. The VBlank part of the same handler reads the status register (which acknowledges
-   it) and increments a counter; it writes nothing.
-4. Because of 1 to 3 the handler does not save or restore the selected register. If a
-   later change lets main-loop VDC code run while the chain is armed, either the
-   handler must restore the selected register from a shadow, or that code must mask
-   interrupts or work in chunks of at most 64 words, re-setting the address each time.
+1. A raster build's main thread writes the VDC only at boot (before the interrupts are
+   enabled) or inside one masked sequence (`php`, `sei`, the stores, `plp`): `vdc_write`
+   and `vdc_put` in `tools/toyc/toy_runtime.c`, and the queue drain `toy_vq_drain`, one word
+   at a time. `frame()`'s sprite writes go to a RAM shadow (no VDC access at all); the shadow
+   is copied by the handler. The callback form queues its other VRAM words and the VBlank
+   handler applies them; the table form writes them straight to the VDC, one masked write each.
+2. The scan-line handler (`irq_vdc`) writes registers 5 to 8 (control, raster compare,
+   scroll), the colour table, and, in the tail stop only, the VRAM address and data port
+   (the SAT copy). It runs with interrupts masked, so nothing else touches the VDC then.
+3. The VBlank part of the handler reads the status register (which acknowledges it), swaps
+   the buffers when a game frame is published, applies the queued VRAM words and the base
+   colours, and serves the line-0 record.
+4. The handler does not save or restore the selected register: rule 1 makes every main-thread
+   sequence atomic. Code outside `toy_runtime.c` that touches the VDC while the chain is armed
+   must do the same. Audited 2026-11-14: `toy_assets.c` (boot only), `toy_sound.c` (PSG only),
+   the generated code (calls the runtime's `toy_vram_set16`, `toy_pal`, `toy_reg`), the
+   interpreter is another route. `toy_pal`'s direct path and `toy_wait_vblank` are boot or
+   non-raster only.
+5. Masked sequences delay the next line interrupt by up to their length (about 40 cycles for a
+   VRAM word, longer for the tail stop's block move, which is placed after the last effect).
+   A compiled block move (`tii` in a toy's own code) does the same: 107 cycles for 15 bytes.
 
-Not yet checked: the interpreter ROM's COPYV (it runs in `frame()`, which is the
-unarmed phase, so rule 1 covers it) against a trace.
+Not yet checked: the interpreter ROM's COPYV (it runs in `frame()`) against a trace.
+
+## Raster runtime v2: no flicker (2026-11-14)
+
+Before: the runtime computed `frame()` and the 224 `raster()` calls with the line chain
+disarmed, then armed it for one video frame. On a real screen one video frame in three showed the
+right picture and two showed the last line's backdrop colour and scroll for the whole screen
+(STARFALL, measured: of 24 consecutive captured frames 2 equal a browser frame; NOVA TIDE 4 of 24).
+`tools/native-compare.js` needs only one of its last 12 frames to match, so it never noticed.
+`tests/check-native-raster-flicker.js` keeps every frame of 24 consecutive ones and requires each to
+equal a browser frame (STARFALL: at most 24 differing pixels, all on row 24; NOVA TIDE: diff 0).
+Now both games pass 24 of 24 (STARFALL 0 to 5 pixels on row 24).
+
+How: two buffers of effect records. The game computes into the pending one while the chain
+replays the active one, the last complete game frame, on every video frame. A record is one
+line that changes something (`line | op | payload`), sorted by line, so STARFALL's two effect lines
+cost two interrupts a frame (the old chain took 224). The first record is always line 0 (the base
+registers `frame()` wrote, with `raster(0)` over them): the VBlank handler serves it, then programs the
+RCR for the next record, and each scan interrupt does the same. The stream ends with a TAIL stop one
+line after its last record. Layout in the comment at the top of the data block in `toy_runtime.c`.
+RAM: 2 buffers of 130 + 1,100 bytes (callback form) or 130 + 192 (table form), the SAT shadow
+(512), the queue (192, callback form); the old line table was 3.5 KiB.
+
+What had to be found, each by looking at the frames, not by theory:
+
+- **Sprites one video frame behind the scroll.** The VDC copies the SAT from VRAM into its own SATB at
+  the start of every VBlank. A shadow copied in the VBlank handler is late for that VBlank (the first
+  version showed new scroll with old sprites on every other frame). The copy is done by the TAIL stop,
+  inside the frame before; the VBlank handler swaps only when the copy is done, and waits one more
+  video frame otherwise.
+- **A masked VDC sequence in the main thread delays the next line interrupt.** 64 per-sprite sequences
+  at publish time moved the colour write at line 24 from pixel 22 to pixel 133 in some frames. The
+  tail stop copies the SAT in one block move after the last effect line instead.
+- **BYR written from the interrupt at line L shows one row less than the browser model.** The model
+  (`renderer/pce-bg.js`, the manual's "BYR+1") and Mednafen disagree by one row for a mid-frame write.
+  A frozen picture (the game stopped after one frame) showed it: BYR 101 drew the browser's 100.
+  The record stores BYR plus one for lines above 0 (line 0's latch takes the register itself).
+  STARFALL's "one row off" in the gates was this. Not tested on a real console.
+- **Colour words are written before BYR.** At line 24 the backdrop switch moved from pixel ~22 to ~0.
+- **The compiled timer interrupt** (`__attribute__((interrupt))` saves the soft-register file) is a
+  hand-written `pha`, `sta`, `inc`, `pla` in raster builds (smaller, and it cannot delay a line).
+
+Size: NOVA TIDE (`OPT=-Oz`) fills the fixed bank to the last byte. To keep it linking: the table form
+has no VRAM queue (its VRAM writes are direct and atomic), the VQ is assembly, the boot clear reads its
+zeros from the SAT shadow (RAM, still zero then) instead of a 64-byte ROM block, `toy_vram_set4` is four
+`toy_vram_set16` in raster builds. Raster builds only: every other ROM is byte for byte unchanged
+(PLATFORMER sha equal to the previous runtime's).
+
+Speed (game frames per 300 video frames, `python3 -I tools/ggmcp.py ROM satdump 300`): STARFALL 126
+(was 125), NOVA TIDE 79 (was 64), TOWER 236, PLATFORMER 283 (were 236, 282), DUSK RUN 9 (build phase).
+A game frame no longer waits a video frame to arm the chain: it takes its compute time rounded up to
+the next VBlank.
+
+Limits and what is not done: a record stream of 1,100 bytes holds about 180 colour lines, so a toy
+that writes a colour on all 224 lines drops the last ones (runtime flag bit 3, `$210F` & 8); the table form
+holds 24 entries (flag bit 4). Base colour words: 32 (flag bit 0). A game frame that publishes after its
+tail stop has passed costs one more video frame. Nothing was tested on a real console.
 
 ## Division by a power of two is a shift (2026-11-13)
 

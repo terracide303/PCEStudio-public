@@ -22,23 +22,18 @@
  * Frame flow without raster() (part A): run the chunk, run init(), turn the
  * display on, then for each VBlank run one frame(t=0, f).
  *
- * Frame flow with raster() (part C): the browser calls frame(f) once per
- * frame and then raster(line) for lines 0..223, in that order.  A callback
- * written during a display line would be late: the write must land in the
- * horizontal blank (~100 CPU cycles, viewer.asm / docs/IL.md §10).  The
- * compiled handler measured ~200 cycles before its first write (§10), so
- * this runtime does what #16's viewer does: the toy's raster() calls run a
- * frame EARLY, in the idle time of the previous display, and their writes
- * are recorded into a per-line table that a small hand-written IRQ handler
- * replays at each line.  Concretely, during display f the main loop runs
- * frame(f+1) (its register/colour writes captured, not applied) and
- * then raster(0..223) for f+1, overwriting table entry L only after line L
- * has been served; the VBlank after display f applies frame(f+1)'s base and
- * arms the chain.  frame()'s VRAM writes apply directly as they run: the
- * display is idle (nothing armed) while frame() executes, and one build
- * frame writes more VRAM words (DUSK RUN's step 7: 208) than any capture
- * list that fits in RAM, so there is no VRAM capture.  The picture
- * sequence is the browser's.
+ * Frame flow with raster() (part C, raster runtime v2, docs/NATIVE.md): the browser calls frame(f) once
+ * per frame and then raster(line) for lines 0..223, in that order.  A callback written during a display
+ * line would be late: the write must land in the horizontal blank (~100 CPU cycles, viewer.asm /
+ * docs/IL.md §10), and the compiled handler measured ~200 cycles before its first write.  So the main
+ * loop runs frame(f), then raster(0..223), into a PENDING buffer of effect records (a sparse stream, one
+ * record per line that changes something, sorted by line), while a small hand-written IRQ handler
+ * replays the ACTIVE buffer, the last complete game frame, on EVERY video frame.  The finished frame is
+ * published and the next VBlank swaps the buffers.  Every picture on screen is a complete game frame
+ * with its per-line effects (the chain used to be disarmed while the game computed, and two video frames
+ * in three were wrong).  frame()'s sprite writes go to a shadow SAT copied to VRAM by the handler
+ * before the VBlank that shows it, and its other VRAM writes are queued and applied in that VBlank
+ * (callback form; the table form writes them straight to the VDC, atomically).
  *
  * The TMA timer (huc6280.cpp TimerRead: timer_value, one decrement per 1024
  * CPU clocks) brackets frame() and each raster() call.  The sums (u32), the
@@ -99,15 +94,20 @@ volatile uint8_t toy_host_mode;
  * computed, and those video frames showed the last line's scroll and backdrop for the whole screen
  * (STARFALL: two frames in three were wrong).
  *
- * A buffer is a header (the base values frame() wrote outside raster(): BXR/BYR/CR and up to
- * RBASE_COLOURS colour words) followed by a stream of effect records sorted by line:
- *     line (0..223) | op | payload...        ends with line = $FF
- * op: bit0 BXR (2 bytes), bit1 BYR (2), bit2 CR (1), bit3 colour word (index 2, value 2),
- * bit4 a second colour word.  Only lines that change something have a record, so a toy with two or
- * five effect lines costs two or five interrupts a frame (the old chain took 224), and a dense
- * toy (DUSK RUN's colour per line) costs about 6 bytes a line.  The VBlank handler re-applies the
- * header and the line-0 record, then programs the RCR for the next record; each scan interrupt
- * serves one record and programs the next. */
+ * A buffer is a header (the base colour words frame() wrote outside raster(), up to RBASE_COLOURS)
+ * followed by a stream of effect records sorted by line:
+ *     line (0..224) | op | payload...        ends with line = $FF
+ * op: bit0 BXR (2 bytes), bit1 BYR (2), bit2 CR (1), bit3 colour word (index 2, value 2), bit4 a second
+ * colour word, bit7 the TAIL stop.  Payload order: BXR, colours, BYR, CR (the colours come before BYR,
+ * which has no latch to beat: a colour write at line 24 lands at pixel ~0 instead of ~22).  The FIRST
+ * record is always line 0: the base BXR/BYR/CR frame() wrote, with raster(0)'s writes over them; the
+ * VBlank handler serves it (it re-applies the base colour words first), then programs the RCR for the
+ * next record, and each scan interrupt serves one record and programs the next.  Only lines that change
+ * something have a record, so a toy with two or five effect lines costs two or five interrupts a frame
+ * (the old chain took 224), and a dense toy (DUSK RUN's colour per line) costs about 6 bytes a line.
+ * A BYR written from the interrupt at line L > 0 is stored plus one: Mednafen's VDC shows the row BYR
+ * from the next line where the browser model (pce-bg.js, the manual's "BYR+1") shows BYR+1.
+ * The TAIL stop is the last record, one line after the last effect: it copies the shadow SAT. */
 #define RBASE_COLOURS 32
 #define RHDR (1 + 4 * RBASE_COLOURS)       /* header: the base colour count, then the words (index 2, value 2) */
 #ifdef TOY_RASTER_TABLE
@@ -127,9 +127,9 @@ __attribute__((section(".zp.bss"))) volatile uint16_t toy_rptr;
 volatile uint8_t toy_vblank_count;
 
 /* The sprite attribute table (VRAM $7F00..$7FFF, 256 words) is double-buffered too: frame() writes a
- * RAM shadow and the VBlank handler copies it to VRAM when it swaps the effect buffers.  Written to
- * VRAM directly while the game computes, a VBlank in the middle of the writes showed half of one
- * game frame's sprites and half of the previous one's (found by the flicker test). */
+ * RAM shadow, and the TAIL stop of the line chain copies it to VRAM once the frame is published (see
+ * publish_frame).  Written to VRAM directly while the game computes, a VBlank in the middle of the
+ * writes showed half of one game frame's sprites and half of the previous one's. */
 #define SAT_BASE 0x7F00u
 volatile uint16_t toy_sat_sh[256];
 volatile uint8_t toy_sat_dirty;
