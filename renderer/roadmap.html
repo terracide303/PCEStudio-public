@@ -63,10 +63,7 @@
   <p class="lede">PCEStudio should be somewhere you can make a <b>real PC Engine game</b>, whether you write Lua, ask an
   AI, or program the chip in assembly. This is what we plan to build, and the reason for each part. Dates are
   not promised. What is already finished is on the <a href="release-notes.html">release notes</a>.</p>
-  <div class="box"><b>Beta 2: the next milestone.</b> The goal is that a developer can write assembly in the studio and
-  take the project out. It means: an assembly project in the studio, a HuCard builder and our register include file;
-  symbol files that Geargrafx loads; a plain project folder with a Makefile for your own tools; and music data in
-  exported ROMs (Export now writes the songs and the engine plays them in the emulator; a console test is still open). It also needs a test of an Export-button ROM on a real console. A compiled intro has run on a real console and an FPGA core, but an exported ROM has not, so Beta 2 will not be declared without it. No date is promised.</div>
+  <div class="box"><b>Beta 2: the next milestone.</b> The goal is that a game you make here runs on a real PC Engine, fast, and that anyone can build it. It means: compiled games (Lua turned into real machine code) running on a real console, not only in an emulator; a native build kit that works on macOS, Windows and Linux, so the compiled route does not depend on one machine; an AI connected through the MCP server that writes games inside the hardware's limits, guided by measured numbers from real HuCards; and the music in exported ROMs heard on a real console. It also needs a test of an Export-button ROM on a real console. A compiled intro has run on a real console and an FPGA core, but a compiled game and an exported ROM have not, so Beta 2 will not be declared without those tests. Writing games in assembly inside the studio is a later milestone. No date is promised.</div>
   <div class="box"><b>How to read the state column.</b>
     <span class="status ok">works</span> is built and tested.
     <span class="status soon">in progress</span> is being built now.
@@ -106,14 +103,14 @@
     <tr><th>Feature</th><th>Why we want it</th><th>State</th></tr>
     <tr><td>The assembler in your browser</td><td>PCEAS compiled to WebAssembly, so .s files assemble on the page. The WebAssembly proof works; wiring it into a project is planned.</td><td class="status soon">in progress</td></tr>
     <tr><td>A native compiler (Lua to machine code)</td><td>Compile the game to real HuC6280 code instead of running it in the interpreter, with banked code, the sound engine and your art loaded at start. A developer preview exists outside the Export button, because the compiler cannot run in a browser. Four of the five gallery games compile and their logic matches the studio's; a small intro built this way runs on a real console and on an FPGA core. Games with per-line scroll effects are still slow or not yet supported.</td><td class="status soon">in progress</td></tr>
-    <tr><td>Assembly projects and a HuCard builder</td><td>Write a whole game in assembly with our register include file, and build a .pce.</td><td class="status no">planned</td></tr>
+    <tr><td>Assembly projects and a HuCard builder</td><td>Write a whole game in assembly with our register include file, and build a .pce.</td><td class="status no">planned, after Beta 2</td></tr>
     <tr><td>A HuC6280 CPU in the studio</td><td>Run any program live next to the chip panels, instead of only toys.</td><td class="status no">planned</td></tr>
     <tr><td>Open an existing ROM in the studio</td><td>Drop in a .pce you made (or own) to look inside it: its picture, palettes, sprites and sound, and to step through its code. Good for checking your own builds and learning from your own homebrew.</td><td class="status no">planned</td></tr>
     <tr><td>A profiler: CPU cost per scanline and per frame</td><td>Show how much of each frame your main loop and interrupt handlers use. This is a gap in today's debuggers.</td><td class="status no">planned</td></tr>
     <tr><td>A live map of every ROM bank</td><td>See what is in each bank, how full it is and what moved after the last build. Squeezing out the last bytes is a long-running headache.</td><td class="status no">planned</td></tr>
-    <tr><td>Symbol files other emulators load</td><td>Write <code>.sym</code> files so Geargrafx and Mednafen show your labels. We aim to work with the tools you already use, not replace them.</td><td class="status no">planned</td></tr>
+    <tr><td>Symbol files other emulators load</td><td>Write <code>.sym</code> files so Geargrafx and Mednafen show your labels. We aim to work with the tools you already use, not replace them.</td><td class="status no">planned, after Beta 2</td></tr>
     <tr><td>Compression with the trade-off shown</td><td>Show each asset's size saving and decompression time with ZX0.</td><td class="status no">planned</td></tr>
-    <tr><td>A source folder for HuCC and PCEAS users</td><td>Export a project as plain files with a Makefile, so you can build it with your own toolchain.</td><td class="status no">planned</td></tr>
+    <tr><td>A source folder for HuCC and PCEAS users</td><td>Export a project as plain files with a Makefile, so you can build it with your own toolchain.</td><td class="status no">planned, after Beta 2</td></tr>
     <tr><td>Send a build to a flash cart</td><td>Research first: what a browser can do with a Turbo EverDrive or a programmable HuCard.</td><td class="status no">planned</td></tr>
     <tr><td>Run panel and debugger</td><td>Step, registers, memory, disassembly and breakpoints. Opening any .pce falls out of it.</td><td class="status no">planned</td></tr>
     <tr><td>Lua toys that call assembly routines</td><td>Fast inner loops in assembly, the rest in Lua.</td><td class="status no">planned</td></tr>
