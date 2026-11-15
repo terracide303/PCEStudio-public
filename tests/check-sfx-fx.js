@@ -35,7 +35,7 @@ const toolPaths = require("../tools/tool-paths.js");
 
 const ROOT = path.join(__dirname, "..");
 const TOY = "tools/toys/fx.lua";
-const FRAMES = 245;
+const FRAMES = 248;
 let checks = 0;
 const failures = [], skipped = [];
 function check(ok, name) { checks++; if (!ok) { failures.push(name); console.log("FAIL  " + name); } }
@@ -53,8 +53,20 @@ sfx.PRESETS.forEach((p) => {
   check(p.wave === sfx.WAVE_NOISE ? (p.from <= 31 && p.to <= 31) : (p.from <= 4095 && p.to <= 4095),
         p.name + ": from/to in the wave's range");
 });
-check(sfx.WAVES[0].length === 32 && sfx.WAVES[2].length === 32 && sfx.WAVES[3].length === 32,
-      "the three tone waves are 32 steps");
+check([0, 2, 3, 4, 5, 6, 7].every((w) => sfx.WAVES[w].length === 32 && sfx.WAVES[w].every((v) => v >= 0 && v <= 31)),
+      "the seven tone waves are 32 steps of 5 bits");
+eq("eight wave names", sfx.WAVE_NAMES, ["square", "noise", "triangle", "saw", "organ", "bass", "buzz", "sine"]);
+{
+  /* the glue's wave table is the model's, byte for byte (the 65C02 side cannot import it) */
+  const asm = fs.readFileSync(path.join(ROOT, "tools", "ilvm", "hutrack_engine.asm"), "utf8");
+  const body = asm.slice(asm.indexOf("SndGlueWave:"), asm.indexOf("SndGlueEnd:"));
+  const bytes = [];
+  body.split("\n").forEach((l) => { const m = l.match(/^\s*\.db\s+([0-9, ]+)\s*(;.*)?$/); if (m && !/^SndWaveOff/.test(l)) m[1].split(",").forEach((x) => bytes.push(+x)); });
+  const offs = bytes.splice(-8);       /* SndWaveOff's eight offsets are the last .db */
+  const model = []; [0, 2, 3, 4, 5, 6, 7].forEach((w) => model.push.apply(model, sfx.WAVES[w]));
+  eq("the glue's SndGlueWave holds the model's seven tone waves", bytes, model);
+  eq("SndWaveOff addresses them", offs, [0, 0, 32, 64, 96, 128, 160, 192]);
+}
 
 const source = fs.readFileSync(path.join(ROOT, TOY), "utf8");
 function rtEvents(src, frames) {
@@ -93,7 +105,7 @@ function codeOf(make, src) {
  ["a slide to F 4096", "function frame(t, f) sfx_slide(0, 100, 4096, 20, 5) end", "sfx-range"],
  ["attack + decay past the frames", "function frame(t, f) sfx_fx(0, 0, 100, 200, 20, 4, 4, 6) end", "sfx-range"],
  ["an effect of 256 frames", "function frame(t, f) sfx_fx(0, 0, 100, 200, 20, 0, 0, 256) end", "sfx-range"],
- ["wave 4", "function frame(t, f) sfx_fx(0, 4, 100, 200, 20, 0, 0, 6) end", "sfx-range"],
+ ["wave 8", "function frame(t, f) sfx_fx(0, 8, 100, 200, 20, 0, 0, 6) end", "sfx-range"],
  ["a preset on channel 6", 'function frame(t, f) sfx_preset("jump", 6) end', "sfx-range"],
  ["a noise preset on channel 0", 'function frame(t, f) sfx_preset("hit", 0) end', "sfx-range"]
 ].forEach(([label, src, code]) => {

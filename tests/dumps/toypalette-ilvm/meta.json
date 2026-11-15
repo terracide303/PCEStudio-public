@@ -46,7 +46,7 @@
  "name": "toypalette-ilvm",
  "rom": "tools/gen/toypalette-ilvm.pce",
  "rom_bytes": 40960,
- "rom_sha256": "d4d063ba1cbb5aa9b69d406681fffe3e54a5f31a87ba159b4f6d08f6238479b6",
+ "rom_sha256": "c9172b01295b1b48710869107e1e42815d79b8c2907d038cedb8145c7fb35fd1",
  "source": "tools/toys/palette.lua",
  "source_sha256": "458df4060eb9111db60241a0e1fac6a8f193c21a1543fa3d69899d4e7d8c7204"
 }

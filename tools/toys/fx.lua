@@ -27,4 +27,12 @@ function frame(t, f)
   if f == 236 then sfx_fx(1, 3, 500, 500, 31, 8, 0, 12) end
   if f == 237 then sfx_fx(2, 0, 100, 3000, 31, 0, 0, 1) end
   if f == 238 then sfx_fx(0, 2, 4095, 0, 31, 100, 100, 200) end
+  -- the wave instruments: organ, bass, buzz and sine, on a slide and a ramp
+  -- (the log window the ROM tests read is one byte of frames, so they fit
+  -- before frame 249)
+  if f == 239 then sfx_fx(3, 4, 300, 300, 24, 0, 4, 8) end
+  if f == 241 then sfx_fx(4, 5, 500, 500, 28, 2, 4, 10) end
+  if f == 243 then sfx_fx(5, 6, 150, 90, 20, 0, 6, 12) end
+  if f == 245 then sfx_fx(1, 7, 400, 200, 26, 3, 5, 16) end
+  if f == 247 then sfx_fx(2, 4, 100, 400, 30, 4, 4, 14) end
 end

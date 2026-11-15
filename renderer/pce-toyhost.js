@@ -244,9 +244,9 @@
       limits: "channel 0..5, from and to 0..4095, volume 0..31, frames 1..255" },
     { call: "sfx_fx(channel, wave, from, to, volume, attack, decay, frames)",
       what: "the general effect: wave 0 square, 1 noise, 2 triangle, 3 saw, " +
-            "a slide, and a level that climbs over `attack` frames and " +
+            "4 organ, 5 bass, 6 buzz (a pseudo-random tone), 7 sine, a slide, and a level that climbs over `attack` frames and " +
             "falls over the last `decay`",
-      limits: "as sfx_slide; wave 0..3; attack and decay 0..255, together " +
+      limits: "as sfx_slide; wave 0..7; attack and decay 0..255, together " +
               "no more than frames" },
     { call: "sfx_preset(name, channel)",
       what: "a named effect from one shared table: jump, shoot, hit, coin, " +
@@ -1064,7 +1064,7 @@
       sfxFx: function (ch, wave, from, to, volume, attack, decay, frames) {
         var lib = needSong();
         ch = intIn(ch, "an SFX channel", 0, SOUND_CHANNELS - 1, "sfx-range");
-        wave = intIn(wave, "an effect wave", 0, 3, "sfx-range");
+        wave = intIn(wave, "an effect wave", 0, sfxModel.WAVE_MAX, "sfx-range");
         var noise = wave === sfxModel.WAVE_NOISE;
         if (noise && sfxModel.NOISE_CHANNELS.indexOf(ch) < 0) {
           refuse("sfx-range", "a noise effect needs channel 4 or 5, the " +

@@ -152,7 +152,7 @@ frames. `t` is deterministic (`f/60`), not wall-clock: a frame is reproducible.
 | `sfx(channel, freq, volume, frames)` | write R1 `$FF` (the PSG's main amplitude), take `channel`, play a 32-step square at F = `freq`, AL = `volume`, for `frames` frames, then give it back | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 (`sfx-range`) |
 | `sfx_noise(channel, rate, volume, frames)` | `sfx()` with the PSG's noise generator: R7 = `$80 \| rate`, then AL = `volume` | channel 4 or 5 (the two noise channels), rate 0..31 (31 the highest hiss), volume 0..31, frames 1..255 (`sfx-range`) |
 | `sfx_slide(channel, from, to, volume, frames)` | `sfx()` whose F slides in a straight line from `from` to `to` over the frames | channel 0..5, from and to 0..4095 (a larger F is a LOWER note), volume 0..31, frames 1..255 (`sfx-range`) |
-| `sfx_fx(channel, wave, from, to, volume, attack, decay, frames)` | the general effect: wave 0 square, 1 noise, 2 triangle, 3 saw; a slide; the level climbs over `attack` frames, holds, and falls to 0 over the last `decay` frames | as above; wave 0..3; attack, decay 0..255 and attack + decay no more than frames (`sfx-range`) |
+| `sfx_fx(channel, wave, from, to, volume, attack, decay, frames)` | the general effect: wave 0 square, 1 noise, 2 triangle, 3 saw, 4 organ, 5 bass, 6 buzz, 7 sine; a slide; the level climbs over `attack` frames, holds, and falls to 0 over the last `decay` frames | as above; wave 0..3; attack, decay 0..255 and attack + decay no more than frames (`sfx-range`) |
 | `sfx_preset(name, channel)` | a named effect from one shared table: `"jump"`, `"shoot"`, `"hit"`, `"coin"`, `"explosion"`, `"powerup"`, `"select"`, `"hurt"`, `"laser"` | the name is a constant string; any other name is `sfx-preset` (`il-sfx-preset` in the validator and the export); `"hit"` and `"explosion"` are noise and need channel 4 or 5 |
 | `release(channel)` | give a channel back now; the music waits for a fresh note | channel 0..5 (`sfx-range`); a channel no SFX owns is left alone |
 | `password.pack(v)` / `password.unpack(code)` | a save as a short code | `password-value` / `password-code` |
@@ -323,6 +323,18 @@ numbers from it.
   (the chip's channels 5 and 6) have: R7 = `$80 | rate`, and the channel's
   wave is not loaded. `rate` is R7's NF field, 0..31, 31 the highest hiss
   (the divider is 31 - NF). A noise effect on channel 0..3 is `sfx-range`.
+- **Wave instruments.** The PSG plays a 32-step, 5-bit waveform per channel, and
+  `sfx_fx`'s `wave` picks one of eight: 0 square, 1 noise, 2 triangle, 3 saw,
+  4 organ (three harmonics), 5 bass (a soft-clipped sine, fat and round),
+  6 buzz (a pseudo-random tone: the nearest a channel without the noise
+  generator gets to noise) and 7 sine. The tables are one literal list in
+  `renderer/pce-sfx.js` and the same bytes in the interpreter's glue
+  (`SndGlueWave`); `tests/check-sfx-fx.js` compares the two and the PSG writes
+  of all eight on all three routes. A wave number past 7 is `sfx-range`.
+  `note()` is only a pitch (the 12-bit F), so a note on a chosen wave is
+  `sfx_fx(ch, 5, note("C2"), note("C2"), 28, 0, 6, 20)`. A song's own
+  instruments carry their waveforms in the song (the DMF's wavetables, up to 32
+  of them per song in the song bank); those play as written, with no extra call.
 - **Slide** moves F (or the noise rate) a step per frame. The arithmetic is
   integer and the same on the console: F is kept times 16, the step is
   `floor(|to - from| * 16 / (frames - 1))`, the frame's value is the sum
@@ -376,8 +388,7 @@ every write to BaseRAM and refuses to replace `renderer/ilvm.bin`
 
 **Limits.** 6 channels; F is the PSG's 12-bit divider (`note()` returns it; the
 same value from a MIDI number in both runtimes); volume is AL, 0..31; an SFX
-lasts 1..600 frames. `sfx()`'s waveform is a fixed square; `sfx_fx` also has a triangle, a saw and
-noise (above). The recording keeps
+lasts 1..600 frames. `sfx()`'s waveform is a fixed square; `sfx_fx` has eight (above). The recording keeps
 `SOUND_EVENTS_MAX` = 65,536 writes per runtime and then stops recording
 (`sound.overflow`), because the browser's real-time playback (#78) will feed
 the PSG incrementally instead of keeping the whole session.
