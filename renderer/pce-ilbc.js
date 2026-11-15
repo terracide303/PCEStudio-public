@@ -163,6 +163,7 @@
  * What this half refuses, by code rather than guessing:
  *   ilbc-program  not a pce-il version 1 program
  *   ilbc-op       an IL instruction the interpreter does not have
+ *   ilbc-sample   sample() (DDA playback): the browser and the native route only
  *                 (print, vget, raster tables, ...; tables are carried since
  *                 #172, pads since #185, sat since #186, logical not since
  *                 #187, sprites since #133, the sound ops since #197 — but
@@ -467,6 +468,7 @@
     if (ins.lineArg) fn(ins.lineArg, ins.line);
     if (ins.volume) fn(ins.volume, ins.line);
     if (ins.frames) fn(ins.frames, ins.line);
+    if (ins.ref) fn(ins.ref, ins.line);            /* sample()'s name (an index) */
     if (ins.wave) fn(ins.wave, ins.line);          /* sfxfx's own operands */
     if (ins.to) fn(ins.to, ins.line);
     if (ins.from) fn(ins.from, ins.line);
@@ -562,6 +564,10 @@
   }
 
   function validateInstruction(ins, fnid, pc) {
+    if (ins && ins.t === "sample") {
+      refuse("ilbc-sample", "line " + ins.line + ": sample() (DDA sample playback) is not in the interpreter ROM: " +
+             "it plays in the browser and in the native ROM (tools/build-toyc-banked.sh)", ins.line);
+    }
     if (!ins || (!OPS[ins.t] && ins.t !== "raster")) {
       refuse("ilbc-op", "instruction " + (ins && ins.t) +
              " (function " + fnid + ", pc " + pc + ") has no bytecode form");
@@ -2247,6 +2253,7 @@
                     "with no global slot",
     "ilbc-op": "an instruction the bytecode has no form for (print, " +
                "vget) or a sprite whose spec the walker cannot resolve",
+    "ilbc-sample": "sample(): DDA sample playback is carried by the browser and the native route, not the interpreter ROM",
     "ilbc-raster-spec": "a raster(line, spec) the encoder cannot read: a cram field, another key, or a spec built across a branch",
     "ilbc-fixed": "fixed-point arithmetic, comparison or constant",
     "ilbc-key": "a constant or operand with no bytecode form",

@@ -114,7 +114,7 @@
     "padref": 8, "padget": 8, "builtin": 36,
     /* #71: sound, priced where the other host calls are — the box's own
      * budget is #88's question, not this estimate's */
-    "music": 64, "sfx": 64, "sfxfx": 192, "release": 24
+    "music": 64, "sfx": 64, "sfxfx": 192, "release": 24, "sample": 96
   };
   /* arith's op chooses the row (`mul`, `mod`, `div` are the expensive ones) */
   /* ---- bytes per static IL op, for the ROM estimate -------------------- */
@@ -132,7 +132,7 @@
     "forprep": 20, "fornext": 36, "reg": 12, "pal": 14, "sat": 15,
     "sprite": 18, "raster": 18, "print": 15, "vget": 14, "vset": 14,
     "padref": 8, "padget": 8, "builtin": 17, "function": 10,
-    "music": 12, "sfx": 20, "sfxfx": 60, "release": 9
+    "music": 12, "sfx": 20, "sfxfx": 60, "release": 9, "sample": 24
   };
   var MODIFIER_OPS = { "mul": true, "mod": true, "div": true };
 
@@ -443,7 +443,8 @@
     var problems = [];
     /* the host needs the songs the toy was written for: music(0) without
      * them is a real run-time refusal (music-range), not a budget */
-    var host = toyhost.createHost({ songs: options.songs || [] });
+    var host = toyhost.createHost({ songs: options.songs || [], samples: options.samples,
+                                    files: options.files });
     var frameFid = program.hooks.frame;
     var rasterFid = program.hooks.raster;
     var maxVram = -1;
@@ -564,12 +565,48 @@
     options = options || {};
     var program;
     try {
-      program = il.compile(source, { chunkName: options.chunkName || "@toy.lua" });
+      program = il.compile(source, { chunkName: options.chunkName || "@toy.lua", files: options.files });
     } catch (e) {
       return emptyReport([finding("error", e.code || "il-syntax",
         String(e && e.message || e))]);
     }
     return validateProgram(program, options);
+  }
+
+  /* sample() (renderer/pce-sample.js): the sample bank's budget, the timer the sample owns, and the
+   * route note.  The samples are options.samples (parsed) or samples.json among options.files. */
+  function sampleProblems(program, options) {
+    var out = [], uses = false, timer = false, i, j;
+    for (i = 0; i < program.functions.length; i++) {
+      for (j = 0; j < program.functions[i].code.length; j++) {
+        var t = program.functions[i].code[j].t;
+        if (t === "sample") uses = true;
+        if (t === "timer") timer = true;
+      }
+    }
+    if (!uses) return out;
+    var lib = toyhost.sample && toyhost.sample();
+    var list = options.samples;
+    if (!list && options.files) {
+      for (i = 0; lib && i < options.files.length; i++) {
+        if (options.files[i].name === "samples.json") {
+          try { list = lib.parse(options.files[i].source); }
+          catch (e) { out.push(finding("error", "validate-sample-file", e.message)); return out; }
+        }
+      }
+    }
+    if (lib && list) {
+      var c = lib.check(list);
+      if (!c.ok) out.push(finding("error", "validate-sample-bank", c.message));
+    }
+    if (timer) {
+      out.push(finding("error", "validate-sample-timer",
+        "a toy that calls sample() cannot also use timer(): the sample's writes run from the timer interrupt"));
+    }
+    out.push(finding("warn", "validate-sample-native-only",
+      "sample() plays in the browser and in the native ROM (tools/build-toyc-banked.sh); the interpreter ROM " +
+      "the Export button builds refuses it (ilbc-sample)"));
+    return out;
   }
 
   /* A compiled IL program -> report (the export's entry, so a caller that
@@ -580,6 +617,7 @@
     var stat = staticProblems(program);
     problems = problems.concat(stat.problems);
 
+    problems = problems.concat(sampleProblems(program, options));
     var run = runBudgets(program, options);
     problems = problems.concat(run.problems);
     if (run.problems.length && run.problems[0].severity === "error" &&
@@ -767,6 +805,10 @@
       "validate-sprite-line": "more than 16 16-px strips on a line",
       "validate-vram": "a VRAM address or sprite pattern cell past 32,768 words",
       "validate-rom": "an estimated ROM past the HuCard's 1 MB",
+      "validate-sample-bank": "the toy's samples past the ROM's one sample bank (8 samples, 8,120 bytes of steps)",
+      "validate-sample-file": "samples.json is not a sample file",
+      "validate-sample-timer": "sample() and timer() in one toy: the sample's writes run from the timer interrupt",
+      "validate-sample-native-only": "sample() in a toy the Export button would build (reported: the interpreter ROM refuses it)",
       "validate-raster-blank": "a replay step past the horizontal blank (reported)",
       "validate-raster-line": "a raster entry the replay handler cannot carry",
       "validate-range": "a constant operand outside the host's range"

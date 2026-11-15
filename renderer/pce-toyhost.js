@@ -57,7 +57,8 @@
                              function () { return require("./pce-psg.js"); },
                              function () { return require("./pce-editor.js"); },
                              function () { return require("./pce-sat.js"); },
-                             require("./pce-sfx.js"));
+                             require("./pce-sfx.js"),
+                             function () { return require("./pce-sample.js"); });
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.toyhost = factory(root.PCEStudio.sprites,
@@ -65,10 +66,12 @@
       function () { return root.PCEStudio.psg; },
       function () { return root.PCEStudio.editor; },
       function () { return root.PCEStudio.sat; },
-      root.PCEStudio.sfx);
+      root.PCEStudio.sfx,
+      function () { return root.PCEStudio.sample; });
   }
 })(typeof self !== "undefined" ? self : this, function (sprites, songDep, psgDep,
-                                                        editorDep, satDep, sfxModel) {
+                                                        editorDep, satDep, sfxModel,
+                                                        sampleDep) {
   "use strict";
 
   var WIDTH = 256;               /* the toy frame: 32 BAT columns, 28 rows */
@@ -253,6 +256,15 @@
             "explosion, powerup, select, hurt, laser",
       limits: "name a constant string (`sfx-preset` if unknown); hit and " +
               "explosion are noise: channel 4 or 5" },
+    { call: "sample(name, channel)",
+      what: "plays a sample from the toy's samples.json on one channel by writing the PSG's DDA register " +
+            "(R6, the channel in DDA mode) from a timer interrupt at the sample's own rate; the channel " +
+            "is taken from the music like sfx() takes it and given back after the sample. Only ONE sample " +
+            "plays at a time: a second sample() cuts the first. The browser and the native ROM carry it; " +
+            "the interpreter ROM (the Export button) refuses it (ilbc-sample)",
+      limits: "name a constant string from samples.json (or its index); channel 0..5 (`sample-range`, " +
+              "`sample-name`); a toy that also uses timer() is refused (the sample owns the timer); the ROM's " +
+              "sample bank holds 8 samples and 8,120 bytes (validate-sample-bank)" },
     { call: "release(channel)",
       what: "gives a channel back now (HuTrack's release): control and noise " +
             "off, and the music waits for a fresh note on it",
@@ -600,7 +612,8 @@
       frame: 0,
       col: 0,                   /* write index within the frame */
       overflow: false,          /* the recording hit SOUND_EVENTS_MAX */
-      sfx: []                   /* per channel: what the toy is playing */
+      sfx: [],                  /* per channel: what the toy is playing */
+      sample: null              /* the one DDA sample playing: {ch, s, f0}, pce-sample.js */
     };
     for (var si = 0; si < SOUND_CHANNELS; si++) {
       sound.sfx.push({ active: false, frames: 0, freq: 0, volume: 0,
@@ -630,6 +643,37 @@
     }
 
     function ownedBySfx(ch) { return sound.sfx[ch].owned; }
+
+    function sampleModule() {
+      var lib = sampleDep && sampleDep();
+      if (!lib) refuse("no-psg", "the sample model (renderer/pce-sample.js) is not loaded");
+      return lib;
+    }
+    /* the toy's samples: options.samples (parsed), else samples.json among options.files */
+    var sampleListCache = null;
+    function sampleList() {
+      if (sampleListCache) return sampleListCache;
+      var list = options.samples;
+      if (!list && options.files) {
+        for (var i = 0; i < options.files.length; i++) {
+          if (options.files[i].name === "samples.json") {
+            try { list = sampleModule().parse(options.files[i].source); }
+            catch (e) { refuse(e.code || "sample-file", e.message); }
+          }
+        }
+      }
+      return (sampleListCache = list || []);
+    }
+    /* frame k after the call: the DDA writes the timer interrupt makes, each at its own cycle */
+    sound.sampleWrites = function (k) {
+      var sm = sound.sample;
+      var w = sampleModule().writesInFrame(sm.s, k);
+      for (var i = 0; i < w.length; i++) {
+        if (sound.events.length + 2 > SOUND_EVENTS_MAX) { sound.overflow = true; return; }
+        sound.events.push({ f: sound.frame, t: w[i].t, reg: 0, value: sm.ch });
+        sound.events.push({ f: sound.frame, t: w[i].t + 6, reg: 6, value: w[i].value });
+      }
+    };
 
     /* The two modules sound needs, resolved when a host exists: a page may
      * load them after this file (renderer/studio.html does) and a page that
@@ -1132,6 +1176,36 @@
                           p.decay, p.frames);
       },
 
+      /* sample(name, channel): DDA playback (renderer/pce-sample.js is the model).  The channel is
+       * taken exactly as sfx(channel, 0, 0, hold) takes it (the reserve, the square upload, the
+       * release after `hold` frames), then switched to DDA mode, and the steps follow as R0/R6 pairs
+       * at the cycle the timer interrupt writes them.  Only one sample at a time: a new one gives the
+       * old one's channel back first. */
+      sample: function (ref, ch) {
+        var lib = sampleModule();
+        var list = sampleList();
+        ch = intIn(ch, "a sample channel", 0, SOUND_CHANNELS - 1, "sample-range");
+        var idx = -1;
+        if (typeof ref === "string") {
+          for (var i = 0; i < list.length; i++) if (list[i].name === ref) idx = i;
+          if (idx < 0) {
+            refuse("sample-name", "sample(\"" + ref + "\"): this toy's samples.json has " +
+                   (list.length ? "no such sample; the names are " + lib.names(list).join(", ") : "no samples"));
+          }
+        } else {
+          if (!list.length) refuse("sample-name", "sample(): this toy has no samples.json");
+          idx = intIn(ref, "a sample index", 0, list.length - 1, "sample-name");
+        }
+        var s = list[idx];
+        if (sound.sample) host.release(sound.sample.ch);
+        host.sfx(ch, 0, 0, lib.holdFrames(s));
+        soundWrite(0, ch);
+        soundWrite(4, 0xC0 | lib.SAMPLE_VOLUME);
+        sound.sample = { ch: ch, s: s, f0: sound.frame };
+        sound.sampleWrites(0);
+        return ch;
+      },
+
       /* release(channel): give it back now.  Repeated release is harmless
        * (the engine tests inProgress first), and a channel no SFX owns is
        * left alone rather than silenced. */
@@ -1143,6 +1217,7 @@
         sound.sfx[ch].frames = 0;
         sound.sfx[ch].fx = null;
         sound.sfx[ch].noise = false;
+        if (sound.sample && sound.sample.ch === ch) sound.sample = null;
         if (sound.player) sound.player.release(ch);
         else needSong().releaseWrites(ch, soundWrite);
         return ch;
@@ -1159,6 +1234,7 @@
           if (!sound.sfx[ch].active) continue;
           sound.sfx[ch].frames--;
           if (sound.sfx[ch].frames <= 0) { host.release(ch); continue; }
+          if (sound.sample && sound.sample.ch === ch) sound.sampleWrites(f - sound.sample.f0);
           var fx = sound.sfx[ch].fx;
           if (!fx) continue;
           var o = sfxModel.tick(fx);
@@ -1352,6 +1428,7 @@
     SFX: sfxModel,
     SOUND_API: SOUND_API,
     /* the status register (#119), for the author's reference (#61) */
+    sample: sampleDep,
     SR_BITS: SR_BITS,
     STATUS_API: STATUS_API,
     REFUSALS: {
@@ -1369,6 +1446,9 @@
       "sfx-range": "an SFX channel, frequency, volume or length outside its range (an effect's attack plus decay past its length, noise off channels 4 and 5, too)",
       "sfx-lfo": "lfo() or sfx_lfo(): the PSG's LFO is not carried by the toy hand-off or the interpreter, so a call is refused (il-unsupported in the validator and the export)",
       "sfx-preset": "sfx_preset() with a name that is not one of the presets (the list is in the message)",
+      "sample-range": "a sample channel outside 0..5",
+      "sample-name": "sample() with a name or index that samples.json does not have (the names are in the message)",
+      "sample-file": "samples.json is not a sample file (renderer/pce-sample.js says which field)",
       "no-psg": "the PSG model or the song player is not loaded, so no toy can make sound",
       "asset-json": "a tile, sprite or palette file the importer reads is not JSON",
       "no-import": "the toy brings asset files and the picture models (renderer/pce-editor.js, renderer/pce-sat.js) are not loaded"

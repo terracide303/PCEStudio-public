@@ -38,7 +38,10 @@ if (target !== "llvm" && target !== "huc") {
 
 const source = fs.readFileSync(srcPath, "utf8");
 try {
-  const program = il.compile(source, { chunkName: path.basename(srcPath) });
+  /* the toy's samples (samples.json beside the Lua): sample("name", ch) names one */
+  const sampleFile = path.join(path.dirname(srcPath), "samples.json");
+  const sampleFiles = fs.existsSync(sampleFile) ? [{ name: "samples.json", source: fs.readFileSync(sampleFile, "utf8") }] : [];
+  const program = il.compile(source, { chunkName: path.basename(srcPath), files: sampleFiles });
   /* the songs music(index) plays: the toy folder's song.json and songs.json,
    * as the studio hands them to the runtime (pce-seq.js songsFromFiles) */
   const songFiles = [];
@@ -54,7 +57,8 @@ try {
   const songs = songFiles.length ? require("../../renderer/pce-seq.js").songsFromFiles(songFiles) : [];
   const report = validate.validateProgram(program, {
     chunkName: path.basename(srcPath),
-    songs: songs
+    songs: songs,
+    files: sampleFiles
   });
   if (!report.ok) {
     const first = report.problems.filter((p) => p.severity === "error")[0];

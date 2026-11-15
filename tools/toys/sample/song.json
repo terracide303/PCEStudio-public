@@ -1,0 +1,428 @@
+{
+  "version": 1,
+  "name": "Untitled",
+  "tempo": 150,
+  "swing": 0,
+  "key": 0,
+  "steps": 16,
+  "patterns": [
+    {
+      "name": "A",
+      "channels": [
+        [
+          {
+            "note": 36,
+            "instrument": 0,
+            "length": 2
+          },
+          null,
+          {
+            "note": 40,
+            "instrument": 0,
+            "length": 2
+          },
+          null,
+          {
+            "note": 43,
+            "instrument": 0,
+            "length": 2
+          },
+          null,
+          {
+            "note": 48,
+            "instrument": 0,
+            "length": 2
+          },
+          null,
+          {
+            "note": 43,
+            "instrument": 0,
+            "length": 2
+          },
+          null,
+          {
+            "note": 40,
+            "instrument": 0,
+            "length": 2
+          },
+          null,
+          {
+            "note": 36,
+            "instrument": 0,
+            "length": 2
+          },
+          null,
+          {
+            "note": 31,
+            "instrument": 0,
+            "length": 2
+          },
+          null
+        ],
+        [
+          {
+            "note": 24,
+            "instrument": 1,
+            "length": 6
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          {
+            "note": 19,
+            "instrument": 1,
+            "length": 6
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          {
+            "note": 48,
+            "instrument": 2,
+            "length": 2
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          {
+            "note": 55,
+            "instrument": 2,
+            "length": 2
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          {
+            "note": 40,
+            "instrument": 3,
+            "length": 4
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          {
+            "note": 38,
+            "instrument": 3,
+            "length": 4
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        [
+          {
+            "note": 36,
+            "instrument": 4,
+            "length": 1
+          },
+          null,
+          null,
+          null,
+          {
+            "note": 36,
+            "instrument": 4,
+            "length": 1
+          },
+          null,
+          null,
+          null,
+          {
+            "note": 36,
+            "instrument": 4,
+            "length": 1
+          },
+          null,
+          null,
+          null,
+          {
+            "note": 36,
+            "instrument": 4,
+            "length": 1
+          },
+          null,
+          null,
+          null
+        ],
+        [
+          null,
+          null,
+          null,
+          null,
+          {
+            "note": 36,
+            "instrument": 5,
+            "length": 1
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          {
+            "note": 36,
+            "instrument": 5,
+            "length": 1
+          },
+          null,
+          null,
+          null
+        ]
+      ]
+    }
+  ],
+  "order": [
+    0
+  ],
+  "instruments": [
+    {
+      "name": "lead",
+      "kind": "wave",
+      "env": {
+        "size": 1,
+        "data": [
+          31
+        ],
+        "loop": 255
+      },
+      "wave": [
+        31,
+        31,
+        31,
+        31,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "bass",
+      "kind": "wave",
+      "env": {
+        "size": 3,
+        "data": [
+          31,
+          28,
+          24
+        ],
+        "loop": 2
+      },
+      "wave": [
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        31,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "bell",
+      "kind": "wave",
+      "env": {
+        "size": 6,
+        "data": [
+          31,
+          27,
+          21,
+          13,
+          6,
+          0
+        ],
+        "loop": 255
+      },
+      "wave": [
+        16,
+        19,
+        22,
+        25,
+        27,
+        29,
+        30,
+        31,
+        31,
+        31,
+        30,
+        29,
+        27,
+        25,
+        22,
+        19,
+        16,
+        13,
+        10,
+        7,
+        5,
+        3,
+        2,
+        1,
+        1,
+        1,
+        2,
+        3,
+        5,
+        7,
+        10,
+        13
+      ]
+    },
+    {
+      "name": "strings",
+      "kind": "wave",
+      "env": {
+        "size": 3,
+        "data": [
+          20,
+          26,
+          31
+        ],
+        "loop": 2
+      },
+      "wave": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ]
+    },
+    {
+      "name": "kick",
+      "kind": "noise",
+      "env": {
+        "size": 5,
+        "data": [
+          31,
+          26,
+          15,
+          5,
+          0
+        ],
+        "loop": 255
+      },
+      "nf": 28
+    },
+    {
+      "name": "snare",
+      "kind": "noise",
+      "env": {
+        "size": 4,
+        "data": [
+          31,
+          23,
+          11,
+          0
+        ],
+        "loop": 255
+      },
+      "nf": 14
+    }
+  ]
+}

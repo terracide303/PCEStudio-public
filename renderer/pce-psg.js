@@ -710,6 +710,9 @@
       var Tk = frameT(frames, k);
       var list = byFrame[k];
       if (list) {
+        /* in time order (a sample's DDA writes sit late in the frame and are recorded before the
+         * frame's own later writes; the sort is stable, so equal times keep their order) */
+        list.sort(function (x, y) { return x.t - y.t; });
         for (var i = 0; i < list.length; i++)
           psg.write(list[i].t, list[i].reg, list[i].value);
       }

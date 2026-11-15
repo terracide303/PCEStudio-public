@@ -856,6 +856,15 @@
       });
       return 0;
     });
+    /* sample(name or index, channel): DDA playback, renderer/pce-sample.js */
+    setGlobalFn("sample", function (Lx) {
+      var ref;
+      if (lua.lua_type(Lx, 1) === lua.LUA_TSTRING) ref = F.to_jsstring(lua.lua_tostring(Lx, 1));
+      else ref = intArg(Lx, 1, "a sample index", 0, 0xFFFF, "sample-name");
+      var ch = intArg(Lx, 2, "a sample channel", 0, 5, "sample-range");
+      luaHost(Lx, function () { host.sample(ref, ch); });
+      return 0;
+    });
     setGlobalFn("sfx_preset", function (Lx) {
       var nm = lua.lua_tostring(Lx, 1);
       if (lua.lua_type(Lx, 1) !== lua.LUA_TSTRING || !nm) {

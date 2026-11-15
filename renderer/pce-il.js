@@ -221,7 +221,7 @@
    * and docs/TOYS.md §2 is the surface both runtimes share. */
   var SURFACE = ["reg", "pal", "sat", "sprite", "raster", "print",
                  "music", "sfx", "release", "timer",
-                 "sfx_noise", "sfx_slide", "sfx_fx", "sfx_preset"];
+                 "sfx_noise", "sfx_slide", "sfx_fx", "sfx_preset", "sample"];
   /* The effect calls' argument counts (renderer/pce-sfx.js is their model). */
   var SFX_FX_ARITY = { sfx_noise: 4, sfx_slide: 5, sfx_fx: 8, sfx_preset: 2 };
   var HELPERS = {
@@ -1178,6 +1178,14 @@
               } else {
                 for (var sx = 0; sx < ins.args.length; sx++) wantInt(ins.args[sx], line);
               }
+            } else if (rc.name === "sample") {
+              /* sample(name, channel): a constant string from samples.json (resolved to its index
+               * when the instruction is built) or an integer index; docs/TOYS.md "Samples" */
+              if (ins.args.length !== 2) errs.push({ code: "il-arity", line: line, message: "sample(name, channel) takes 2 arguments" });
+              else {
+                if (resolve(argTypes[0]).k !== "str") wantInt(ins.args[0], line);
+                wantInt(ins.args[1], line);
+              }
             } else if (rc.name === "release") {
               if (ins.args.length !== 1) errs.push({ code: "il-arity", line: line, message: "release(channel) takes 1 argument" });
               else wantInt(ins.args[0], line);
@@ -1683,6 +1691,22 @@
             }
             fxo.t = "sfxfx"; fxo.line = line;
             push(fxo);
+          } else if (calleeName === "sample") {
+            var smOp = ins.args[0], smName = null;
+            if (isStrConst(smOp)) smName = smOp.k.v;
+            else if (isRegOperand(smOp)) smName = findStrDefinition(fn.pre, p, smOp.r);
+            var smRef;
+            if (smName != null) {
+              var smIdx = (fn._ctx.sampleNames || []).indexOf(smName);
+              if (smIdx < 0) {
+                refuse("il-sample", "line " + line + ": sample(\"" + smName + "\") is not in the toy's samples.json" +
+                       ((fn._ctx.sampleNames || []).length ? "; the names are " + fn._ctx.sampleNames.join(", ") : " (the toy has none)"));
+              }
+              smRef = { k: { t: "int", v: smIdx } };
+            } else {
+              smRef = finalOperand(smOp, false);
+            }
+            push({ t: "sample", ref: smRef, ch: finalOperand(ins.args[1], false), line: line });
           } else if (calleeName === "release") {
             push({ t: "release", ch: finalOperand(ins.args[0], false), line: line });
           } else if (calleeName === "timer") {
@@ -1843,10 +1867,23 @@
 
   /* ---- compile: source -> an IL program -------------------------------- */
 
+  function sampleNamesOf(files) {
+    for (var i = 0; files && i < files.length; i++) {
+      if (files[i].name === "samples.json") {
+        try { return JSON.parse(files[i].source).samples.map(function (x) { return x.name; }); }
+        catch (e) { return []; }
+      }
+    }
+    return [];
+  }
+
   function compile(source, opts) {
     opts = opts || {};
     var proto = parse(source, opts.chunkName);
     var ctx = makeCtx();
+    /* the names sample("name", ch) may use, in samples.json order: opts.sampleNames, else read from the
+     * toy's files (the same file the host plays) */
+    ctx.sampleNames = opts.sampleNames || sampleNamesOf(opts.files);
     var globals = {};
     var root = lowerProto(proto, ctx);
     ctx.functions.forEach(function (f) { f._ctx = ctx; });
@@ -2263,6 +2300,10 @@
                      cnt(ins.frames));
           pc++;
           break;
+        case "sample":
+          host.sample(cnt(ins.ref), cnt(ins.ch));
+          pc++;
+          break;
         case "release":
           host.release(cnt(ins.ch));
           pc++;
@@ -2505,6 +2546,7 @@
       "il-pad-write": "writing a pad table",
       "il-key": "a table key the IL cannot use",
       "il-reg-name": "reg() without a constant name",
+      "il-sample": "sample() with a name that is not in the toy's samples.json",
       "il-sfx-preset": "sfx_preset() with a name that is not a constant string or not one of the presets",
       "il-surface-shadow": "a toy reassigns a surface builtin",
       "il-unsupported": "a helper the IL half does not provide",
