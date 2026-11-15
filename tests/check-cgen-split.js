@@ -39,14 +39,18 @@ check(big.length >= 2, "TOWER has functions over 150 IL instructions (" + big.jo
 const split = text(cgen.emitC(program, { target: "llvm", splitOver: 1, splitOnly: big }));
 big.forEach(function (fid) {
   const n = program.functions[fid].code.length;
-  const chunks = Math.ceil(n / 100);
-  check(new RegExp("static int32_t il_fn_" + fid + "\\(struct il_closure \\*cl").test(split),
-        "fn " + fid + ": the dispatcher keeps the function's name");
-  for (let k = 0; k < chunks; k++) {
-    check(split.indexOf("il_fn_" + fid + "_c" + k + "(struct il_closure *cl, int16_t pc, int32_t *rv)") >= 0,
-          "fn " + fid + ": chunk " + k + " of " + chunks + " exists");
-  }
-  check(split.indexOf("il_fn_" + fid + "_c" + chunks + "(") < 0, "fn " + fid + ": no chunk past the last");
+  /* #300: a cut moves up to 40% either way to keep a loop in one chunk, so the count is no longer
+   * ceil(n/100): every chunk is 60..140 instructions (the last may be shorter), numbered without gaps */
+  const found = new Set();
+  split.replace(new RegExp("il_fn_" + fid + "_c(\\d+)\\(struct il_closure \\*cl, int16_t pc, int32_t \\*rv\\)", "g"), function (m, k) { found.add(+k); return m; });
+  const chunks = found.size;
+  check(chunks >= Math.ceil(n / 140) && chunks <= Math.ceil(n / 60),
+        "fn " + fid + ": " + chunks + " chunks for " + n + " instructions (between ceil(n/140) and ceil(n/60))");
+  for (let k = 0; k < chunks; k++) check(found.has(k), "fn " + fid + ": chunk " + k + " of " + chunks + " exists");
+  const lens = []; split.replace(new RegExp("pc < (\\d+)\\) pc = IL_CHUNK_CALL\\(il_fn_" + fid + "_c", "g"), function (m, e) { lens.push(+e); return m; });
+  lens.push(n);
+  check(lens.every(function (e, i) { return e - (i ? lens[i - 1] : 0) <= 140 && (i === lens.length - 1 || e - (i ? lens[i - 1] : 0) >= 60); }),
+        "fn " + fid + ": every chunk is 60..140 instructions (" + lens.join(",") + ")");
   check(new RegExp("static int32_t il_fn_" + fid + "_r\\[\\d+\\]\\s+__attribute__\\(\\(section\\(\"\\.bss\"\\)\\)\\);").test(split),
         "fn " + fid + ": the register file is in .bss");
   check(split.indexOf("if (il_fn_" + fid + "_busy) { il_split_reentered = 1; return 0; }") >= 0,

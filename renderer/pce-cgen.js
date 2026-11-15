@@ -1342,7 +1342,37 @@
       var n = fn.code.length;
       var bounds = [];
       var lo, k, pc;
-      for (lo = 0; lo < n; lo += SPLIT_CHUNK) bounds.push([lo, Math.min(n, lo + SPLIT_CHUNK)]);
+      /* Cut points (#300): a loop cut by a chunk edge pays a dispatcher round trip on every iteration
+       * (NOVA TIDE's collision loop: ~45% of a video frame).  A cut goes where the fewest loops cross
+       * it, within +-40% of the nominal chunk length (an inner loop counts 8x its parent); every
+       * chunk stays within 1.4x SPLIT_CHUNK instructions. */
+      var spans = [];
+      fn.code.forEach(function (ij, p) {
+        if ((ij.t === "jmp" || ij.t === "br" || ij.t === "fornext") && ij.target != null && ij.target <= p) spans.push([ij.target, p]);
+      });
+      spans.forEach(function (sp) {
+        sp.w = 1;
+        spans.forEach(function (o) { if (o !== sp && o[0] <= sp[0] && o[1] >= sp[1] && (o[0] < sp[0] || o[1] > sp[1])) sp.w *= 8; });
+      });
+      function cutCost(c) {
+        var w = 0;
+        spans.forEach(function (sp) { if (sp[0] < c && c <= sp[1]) w += sp.w; });
+        return w;
+      }
+      lo = 0;
+      while (lo < n) {
+        var hi = lo + SPLIT_CHUNK;
+        if (n - lo > Math.round(SPLIT_CHUNK * 1.4)) {
+          var best = hi, bc = cutCost(hi), c0 = Math.round(SPLIT_CHUNK * 0.6), c1 = Math.round(SPLIT_CHUNK * 1.4);
+          for (var c = lo + c0; c <= lo + c1; c++) {
+            var cc = cutCost(c);
+            if (cc < bc || (cc === bc && Math.abs(c - lo - SPLIT_CHUNK) < Math.abs(best - lo - SPLIT_CHUNK))) { best = c; bc = cc; }
+          }
+          hi = best;
+        } else hi = n;
+        bounds.push([lo, Math.min(n, hi)]);
+        lo = hi;
+      }
       function chunkOf(p) {
         for (var c = 0; c < bounds.length; c++) if (p >= bounds[c][0] && p < bounds[c][1]) return c;
         return -1;
@@ -1360,6 +1390,7 @@
       line("static " + T + " il_fn_" + fid + "_r[" + Math.max(1, fn.registers) + "]");
       line("    __attribute__((section(\".bss\")));");
       line("static uint8_t il_fn_" + fid + "_busy;");
+      var splitAt = out.length, pcLines = [], declAt = [];
       for (k = 0; k < bounds.length; k++) {
         var cname = "il_fn_" + fid + "_c" + k;
         var proto = "static int16_t " + cname +
@@ -1368,6 +1399,7 @@
         line(proto + " {");
         line("  " + T + " *const r = il_fn_" + fid + "_r;");
         line("  (void)cl; (void)rv; (void)r;");
+        declAt[k] = out.length;
         line("  switch (pc) {");
         Object.keys(entries[k]).forEach(function (e) {
           line("  case " + e + ": goto L" + e + ";");
@@ -1377,7 +1409,9 @@
         chunkCtx = { lo: bounds[k][0], hi: bounds[k][1], name: cname };
         for (pc = bounds[k][0]; pc < bounds[k][1]; pc++) {
           if (labels[pc] || entries[k][pc]) line("L" + pc + ": ;");
+          var i0 = out.length;
           emitInstruction(fn, fid, fn.code[pc], pc);
+          pcLines[pc] = [i0, out.length];
         }
         chunkCtx = null;
         if (k === bounds.length - 1) line("  *rv = 0; return -1;");
@@ -1407,6 +1441,96 @@
       line("  il_fn_" + fid + "_busy = 0;");
       line("  return rv;");
       line("}");
+      if (!(options && options.noChunkLocals)) promoteChunkLocals(fn, bounds, entries, splitAt, pcLines, declAt);
+    }
+
+    /* #300: the registers of a split function are one static array (every chunk shares them), so each
+     * IL instruction stored its 32-bit result to memory, temporaries included.  A register that is
+     * named in one chunk only and is not live at any entry of that chunk (so every path through the
+     * chunk writes it before it reads it, and nothing outside ever reads it) is declared a local of that
+     * chunk and the compiler keeps it in a register.  Defs and uses are read off the C text emitted for
+     * each IL instruction: a line that starts `r[N] = ` is a def (a kill only when the instruction's text
+     * has no `if` or brace, i.e. is unconditional), every other mention a use.  Control flow: an
+     * instruction with a target goes to it and falls through, a jmp only to its target, a ret nowhere. */
+    function promoteChunkLocals(fn, bounds, entries, start, pcLines, declAt) {
+      var n = fn.code.length, reRef = /\br\[(\d+)\]/g, reDef = /^\s*r\[(\d+)\] = /;
+      var use = [], kill = [], pc, k, j, m, ln;
+      var chunkOfPc = [];
+      bounds.forEach(function (b, ci) { for (var q = b[0]; q < b[1]; q++) chunkOfPc[q] = ci; });
+      var where = {};                                   /* reg -> {chunk: count}; -1 = outside the chunks */
+      function note(rg, ci) { var w = where[rg] || (where[rg] = {}); w[ci] = (w[ci] || 0) + 1; }
+      var inChunk = new Array(out.length - start);
+      for (pc = 0; pc < n; pc++) {
+        var rg = pcLines[pc]; if (!rg) { use[pc] = {}; kill[pc] = {}; continue; }
+        var u = {}, kl = {}, txt = out.slice(rg[0], rg[1]);
+        var plain = txt.every(function (l) { return !/\bif\b|[{}]/.test(l); });
+        for (j = 0; j < txt.length; j++) {
+          ln = txt[j]; var dm = reDef.exec(ln), rest = ln;
+          if (dm) { if (plain) kl[dm[1]] = true; rest = ln.slice(dm[0].length); note(dm[1], chunkOfPc[pc]); }
+          while ((m = reRef.exec(rest))) { u[m[1]] = true; note(m[1], chunkOfPc[pc]); }
+        }
+        for (j = rg[0]; j < rg[1]; j++) inChunk[j - start] = true;
+        /* a use before the def in the same instruction counts as a use: kills apply after uses */
+        use[pc] = u; kill[pc] = kl;
+      }
+      /* every other mention (dispatcher, headers) is outside any chunk */
+      for (j = start; j < out.length; j++) {
+        if (inChunk[j - start]) continue;
+        while ((m = reRef.exec(out[j]))) note(m[1], -1);
+      }
+      /* backward liveness */
+      var liveIn = [], changed = true, succ = [];
+      for (pc = 0; pc < n; pc++) {
+        var ij = fn.code[pc], sc = [];
+        if (ij.t !== "ret") {
+          if (ij.target != null) sc.push(ij.target);
+          if (ij.t !== "jmp" && pc + 1 < n) sc.push(pc + 1);
+        }
+        succ[pc] = sc; liveIn[pc] = {};
+      }
+      var guard = 0;
+      while (changed && guard++ < 200) {
+        changed = false;
+        for (pc = n - 1; pc >= 0; pc--) {
+          var cur = {};
+          succ[pc].forEach(function (t) { Object.keys(liveIn[t]).forEach(function (r2) { cur[r2] = true; }); });
+          Object.keys(kill[pc]).forEach(function (r2) { delete cur[r2]; });
+          Object.keys(use[pc]).forEach(function (r2) { cur[r2] = true; });
+          if (Object.keys(cur).length !== Object.keys(liveIn[pc]).length) changed = true;
+          liveIn[pc] = cur;
+        }
+      }
+      if (changed) return;                              /* did not converge: promote nothing */
+      /* (chunk, register) is a local when the register is live at no entry of the chunk and along no edge
+       * leaving it: its value never crosses the chunk's border, whatever the other chunks do with the
+       * same register number (the Lua VM's stack slots are reused for unrelated temporaries) */
+      var locals = bounds.map(function () { return []; });
+      bounds.forEach(function (bd, ci) {
+        var mention = {}, blocked = {};
+        for (pc = bd[0]; pc < bd[1]; pc++) {
+          Object.keys(use[pc]).forEach(function (x) { mention[x] = true; });
+          Object.keys(kill[pc]).forEach(function (x) { mention[x] = true; });
+          var rg4 = pcLines[pc];
+          if (rg4) for (j = rg4[0]; j < rg4[1]; j++) { var mm; reDef.lastIndex = 0; if ((mm = reDef.exec(out[j]))) mention[mm[1]] = true; }
+          succ[pc].forEach(function (t) { if (t < bd[0] || t >= bd[1]) Object.keys(liveIn[t]).forEach(function (x) { blocked[x] = true; }); });
+        }
+        Object.keys(entries[ci]).forEach(function (e) { Object.keys(liveIn[+e]).forEach(function (x) { blocked[x] = true; }); });
+        if (ci === 0) Object.keys(liveIn[0]).forEach(function (x) { blocked[x] = true; });
+        Object.keys(mention).forEach(function (x) { if (!blocked[x]) locals[ci].push(+x); });
+      });
+      /* rewrite the text, then the declarations (last chunk first, so the indexes hold) */
+      for (k = 0; k < bounds.length; k++) {
+        if (!locals[k].length) continue;
+        var set = {}; locals[k].forEach(function (x) { set[x] = true; });
+        for (pc = bounds[k][0]; pc < bounds[k][1]; pc++) {
+          var rg3 = pcLines[pc]; if (!rg3) continue;
+          for (j = rg3[0]; j < rg3[1]; j++) out[j] = out[j].replace(reRef, function (all, x) { return set[x] ? "l" + x : all; });
+        }
+      }
+      for (k = bounds.length - 1; k >= 0; k--) {
+        if (!locals[k].length) continue;
+        out.splice(declAt[k], 0, "  " + T + " " + locals[k].sort(function (x, y) { return x - y; }).map(function (x) { return "l" + x; }).join(", ") + ";");
+      }
     }
 
     function emitFunction(fn, fid) {
@@ -1694,9 +1818,16 @@
                operand(ins.v) + ");");
         } else {
           /* toy_sat's own range check, in line (it folds away for constant i and k), then the 16-bit write */
-          line("  if ((uint32_t)" + operand(ins.i) + " <= 63u && (uint32_t)" + operand(ins.k) + " <= 3u) " +
-               "toy_vram_set16((uint16_t)(0x7F00 + " + operand(ins.i) + " * 4 + " + operand(ins.k) + "), (uint16_t)" +
-               operand(ins.v) + ");");
+          if (options && options.noSatPut) {
+            line("  if ((uint32_t)" + operand(ins.i) + " <= 63u && (uint32_t)" + operand(ins.k) + " <= 3u) " +
+                 "toy_vram_set16((uint16_t)(0x7F00 + " + operand(ins.i) + " * 4 + " + operand(ins.k) + "), (uint16_t)" +
+                 operand(ins.v) + ");");
+          } else {
+            /* #300: toy_sat_put writes the raster builds' RAM shadow in line; the others have it as toy_vram_set16 */
+            line("  if ((uint32_t)" + operand(ins.i) + " <= 63u && (uint32_t)" + operand(ins.k) + " <= 3u) " +
+                 "TOY_SAT_PUT((uint8_t)(" + operand(ins.i) + " * 4 + " + operand(ins.k) + "), (uint16_t)" +
+                 operand(ins.v) + ");");
+          }
         }
         break;
       case "sprite": {
@@ -1901,6 +2032,13 @@
     } else {
       line("#include <stdint.h>");
       line("#include \"toy_runtime.h\"");
+      if (!(options && options.noSatPut)) {
+        line("#ifdef TOY_RASTER_BUILD");
+        line("#define TOY_SAT_PUT(off, w) toy_sat_put(off, w)");
+        line("#else");
+        line("#define TOY_SAT_PUT(off, w) toy_vram_set16((uint16_t)(0x7F00u + (off)), w)");
+        line("#endif");
+      }
       if (a.usesSound) line("#include \"toy_sound.h\"");
       if (options && options.assets) line("#include \"toy_assets.h\"");
     }

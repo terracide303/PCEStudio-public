@@ -345,3 +345,53 @@ VRAM equals the bake word for word off the sprite list and the score row the gam
 `tools/native-compare.js` finds the picture 24 bytes from diff 0, all of them on row 16/17, the first raster split
 line: the same line-interrupt latency as STARFALL's row 24, not a wrong value. `tests/check-bake-art.js` checks all
 of it. Speed after the start is the sky gradient's cost (`tests/native-dusk-fast`), not this card's.
+
+## The speed of the raster games (2026-11-15, #300)
+
+`python3 -I tools/pctrace.py ROM.pce ROM.elf [SKIP] [FRAMES]` records every instruction of a few video frames in
+Geargrafx's trace log and adds up the CPU cycles per function (and, for an ELF built with `OPT="-Os -g"` and
+`LINES=1`, per line of the generated C). `tools/pcprof.py` samples once a video frame at the same phase, so a game
+that waits for the VBlank is sampled in its wait (STARFALL: 51% `main`, which is the wait loop); the trace is exact.
+It also prints the cycles a game frame works for, from the runtime's frame counter: that is the number to read.
+
+The first finding was not a cost in the game's code. A game frame is published to the line chain's TAIL stop,
+which also copies the sprite shadow into VRAM, and that stop sat one line after the last effect line: line 25 in
+STARFALL. A game frame starts at the VBlank, so it had 45 lines (about 0.17 of a video frame) to finish, and one
+that finished later waited a whole extra video frame. STARFALL worked for 1.05 video frames a game frame and so ran
+at 2.1. The stop is now at line 224 at the earliest (`TAIL_LINE` in `toy_runtime.c`): the 512-byte copy ends around
+line 232, before the VBlank at 240 that loads the VDC's own sprite table, and a game frame has about 0.94 of a video
+frame. Any raster game that works for less than that runs at 60 Hz.
+
+Measured with the trace (CPU cycles of work per game frame, after the 200th video frame) and the frame counter
+(game frames in the first 300 and 600 video frames, `tools/ggmcp.py ROM satdump N`):
+
+| game | cost found from the trace | fix | effect |
+|---|---|---|---|
+| STARFALL | publish deadline: the tail stop at line 25 gave 45 lines of 262 | stop at line 208, then 224 | 143 -> 286 game frames/300 (60 Hz); work 126k -> 79k cycles with the others below |
+| STARFALL | `raster(line)` x 224 a game frame, each with a 32-bit timer sum around it (about 10% of a video frame) | the per-line measurement is off (`-DTOY_MEASURE_RASTER` brings it back) | 143 -> 144 on its own: it only helps once the deadline is out of the way |
+| STARFALL, NOVA TIDE | `sat()` through `toy_vram_set16`: call, mode test, 32-bit address | `toy_sat_put` in line, two stores into the RAM shadow | STARFALL 85.8k -> 78.6k, NOVA TIDE 146.6k -> 139.5k cycles |
+| NOVA TIDE | its `play()` is split into 100-instruction chunks and the cut went through the collision loop: a dispatcher round trip per iteration (`il_fn_29_c2/c3`, `il_fn_29`: 41% of the time) | a cut goes where the fewest loops cross it, within 60..140 instructions | 185,995 -> 146,618 cycles a game frame (1.55 -> 1.23 video frames) |
+| NOVA TIDE | in a split function every register is one static array, so each IL temporary was a 32-bit store and load through memory | a register that is live at no entry of a chunk and along no edge leaving it is a local of that chunk (liveness read off the emitted C, `promoteChunkLocals`) | 139.5k -> 120.2k cycles (the compare-and-branch temporaries alone were 5.8k of it) |
+| NOVA TIDE | the same deadline: work is now 1.0 video frames, the stop allows 0.88 at line 208 | stop at line 224 | 119 -> 138 game frames/300, 287 -> 321/600 |
+
+Result (STARFALL, NOVA TIDE; the two pictures were checked after every step with
+`tests/check-native-raster-flicker.js`, which wants each of the last 24 consecutive video frames to equal a browser
+frame: NOVA TIDE diff 0, STARFALL at most the known 24 px on row 24): STARFALL 143 -> 286 game frames per 300 video
+frames and 586 per 600; NOVA TIDE 119 -> 138 and 240 -> 321. NOVA TIDE still works for 1.0 video frames a game
+frame (the deadline gives 0.94), so it runs at 30 Hz in the first 300 frames and crosses to 60 Hz only for a
+part of the run.
+
+What is next in NOVA TIDE's samples, after the above (share of its work): the split function 42%, `draw()` with its
+`spr`/`hide` calls 18% + 8%, `il_call` 11% (a call whose callee is in another bank goes through the fixed page's
+switch; a per-callee stub costs about 70 bytes of the fixed page, which this game has not got), the chunk dispatcher
+8%. Tried and not kept: the opt-in range analysis (branch `speed-range`, 84448be) changed no cycle count, its own
+commit says LTO already narrows these. The TAIL stop at line 224 and the 60..140 chunk window are the two numbers that
+can be moved; the sprite copy must end before line 240.
+
+Test notes: `tests/check-cgen-split.js` asserted `ceil(n/100)` chunks; it now asserts consecutive chunks of 60..140
+instructions. `tests/check-native-raster-flicker.js` compares against 700 browser frames, not 420, because a game at
+60 Hz reaches game frame 560 in its 10 second capture (it matched the last of the 420 and failed). The raster ROM
+pin in `tests/dumps/toyparallax/meta.json` moved twice, each time from the runtime's `TAIL_LINE` alone (the ROM with
+line 208 builds to 5287...; with the old runtime, to the old pin); the 40 compared frames are diff 0. Not covered by a
+test of its own: `promoteChunkLocals` (a split function's locals); it is exercised by NOVA TIDE's flicker check and by
+`tools/host-c-compare.js` with `PCE_SPLIT_OVER=1 PCE_SPLIT_CHUNK=30` (120 of 120 frames equal on all four games).
