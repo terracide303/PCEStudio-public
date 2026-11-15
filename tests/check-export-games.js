@@ -236,18 +236,16 @@ const GAME_PINS = {
   "STARFALL": {
     toy: "toys/demo-game/main.lua",
     galleryId: "starfall",
-    rom: "04599e66b5ab8e3fb9fd9c2d0e159b45939d87bd270708b1ef64eb2677dff3fd",
+    rom: "ce255bc08dafb5564a3905b24a965d71cae7d4669e93a7f82185ffad501b63c1",
     art: { blobBytes: 5520, copies: 3, tiles: 5, patterns: 14, sprites: 17 },
     /* The MCP's export_pce has no assets: the bytecode route still builds
      * the 40,960 B art-left-out ROM (the docs' `bytecodeOnly` sha). */
-    bytecode: { rom: "593232435c7b1420d3ca7827e3fcc8247dd0ac877589662a6ae28c20b228ba44" },
+    bytecode: { rom: "457a4f6b365bb8d2354cc883dd20576d90c0975ce5f1196cdc4923c5feccbd5f" },
     frames: [],
-    unmatched: "the art-banked ROM runs and draws; no captured frame " +
-               "is the browser's picture yet — the closest is N bytes " +
-               "off (the log line above names the closest browser frame " +
-               "and the byte count, and BANKED-DATA §5.10 names the " +
-               "difference); #288's host proof is diff 0, the " +
-               "console-half difference is measured, not matched",
+    /* #293 (2026-11-15): with the rebuilt interpreter image a captured frame IS a browser frame (23; two runs
+     * agreed), so the pin is framesAny, not unmatched.  This is observed, not explained: the pin stops
+     * asserting the old "no match" and will go red if the match is lost again. */
+    framesAny: true,
     measureFrames: 600,
     captureMs: 12000,
     captureTail: true,
@@ -266,10 +264,10 @@ const GAME_PINS = {
   "NOVA TIDE": {
     toy: "toys/nova-tide/main.lua",
     galleryId: "nova-tide",
-    rom: "d3d44b03c6bb3c7ca8edd793ea50e859f5a8cb804fe98e8422ebaaccaba66033",
+    rom: "7f4713540573d7e7b260e3ab5be78e6eac1245507ea6af1e0c262c5cf2eb0781",
     romBytes: 65536,
     art: { blobBytes: 9950, copies: 3, tiles: 140, patterns: 16, sprites: 16 },
-    bytecode: { rom: "9b49bb438f3547098b2bc79ef39f4d52d807af8f09435a072734ba70050c15ca", romBytes: 49152 },
+    bytecode: { rom: "6a2e2f052841006e8b4c6828f00279437678bf8a4bbea638bd7b23d961ab8cf1", romBytes: 49152 },
     black: "toy_boot stops at load: globals 62/32, registers 67/41, table slots 27/16, upvalue cells 91/72",
     measureFrames: 300,
     captureMs: 6000
@@ -291,7 +289,7 @@ const GAME_PINS = {
   "TOWER": {
     toy: "toys/tower/main.lua",
     galleryId: "tower",
-    rom: "c67d2f2ccdaea11c3237b27d2737a35ddcac05b00c6d9b86c9c94a68176bc29b",
+    rom: "74411a917087fbde7067a5fe12fec0c4e4d98bb41ef341761680a25975edca77",
     framesAny: true,
     measureFrames: 1800,
     captureMs: 40000,
@@ -316,7 +314,7 @@ const GAME_PINS = {
   "PLATFORMER": {
     toy: "toys/platformer/main.lua",
     galleryId: "platformer",
-    rom: "8681b1c897365f2f9a9ce132e32d228b5543496b709e6aaaa6593835fee34d44",
+    rom: "6bdc486d36f249f31911a34e93b5fe49c6ee7a121621d8248e6da50cf3812927",
     frames: [1261564552],
     measureFrames: 900,
     captureMs: 12000
@@ -343,7 +341,7 @@ const GAME_PINS = {
   "DUSK RUN": {
     toy: "toys/dusk-run/main.lua",
     galleryId: "dusk-run",
-    rom: "b955f58d7f454d8afd6c1c005bd53ddd0656e92f298755e369254ac1bd24f8bb",
+    rom: "65898f6e95ddd03c6fa70cb6a1bbeeed9d462aea3b91b5d6d1ca960c8fb70f3b",
     frames: [2819597916, 3584516448],
     measureFrames: 600,
     captureMs: 12000,
@@ -366,7 +364,7 @@ const GAME_PINS = {
   "RASTER TABLE": {
     kind: "toy",
     toy: "tools/toys/rastertable.lua",
-    rom: "28eaafd17f45afecdb0f0ebeadc774f74061548a8b25344989ea589d43cb3cdd",
+    rom: "6333da6c321268302266d76fd18223754ea2bf9f8b0b0650ffd8857482d61de9",
     framesAny: true,
     browserFrames: 120
   },
@@ -397,7 +395,7 @@ const CONTROL = {
  * cycle. */
 const WIDE = {
   toy: "tools/toys/arity.lua",
-  rom: "2b2294e0598c082bc9e9ee157baaeb5e7669369f3c0b1fd2bebe40ca7900a412",
+  rom: "f62eb7741d09131cea49211a96a6abbcb8771b4b9365f2e13a3adf7bfa551935",
   frames: [2193764624, 244294368, 1782875976, 2412359456, 4229270688,
            77057856, 2598679444, 284441580, 4128389208, 3185272652,
            1493917472, 1001242492, 3182251664, 971588316, 1975998004,
@@ -416,7 +414,7 @@ const WIDE = {
  * the controls'.) */
 const NOT = {
   toy: "tools/toys/not.lua",
-  rom: "b98a6ac8d5c1739743be59e21ec41db044c77c8633b8b7b35aca5c3a1d442edd",
+  rom: "da20696964cb57784a24d58dd7c91ac76ddd9e4f341f4f6e3c982e7888b7d265",
   frames: [2266090996, 2632876444, 887268600, 1464026320]
 };
 
