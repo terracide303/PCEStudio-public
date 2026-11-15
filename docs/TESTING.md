@@ -78,8 +78,8 @@ only if the toy's files are in it.
 |---|---|
 | `make`, Node | everything (`tests/all.sh`) |
 | native PCEAS 3.23 | `check-asm` (wasm vs native, byte for byte) |
-| PCEAS 4.x (`pceas4`) | `check-hutrack`, `check-hutrack-image`, `check-ilvm` (interpreter rebuild), `check-rom-sound`, `check-sfx-fx`, `check-export-song` |
-| llvm-mos | `check-il-console`, `check-ilvm`, `check-rom-sound`, `check-sfx-fx`, `check-native-*`, `check-cgen-*`, `check-bank-affinity`, `check-resources` |
+| PCEAS 4.x (`pceas4`) | `check-hutrack`, `check-hutrack-image`, `check-ilvm` (interpreter rebuild), `check-rom-sound`, `check-sfx-fx`, `check-sample`, `check-export-song` |
+| llvm-mos | `check-il-console`, `check-ilvm`, `check-rom-sound`, `check-sfx-fx`, `check-sample`, `check-native-*`, `check-cgen-*`, `check-bank-affinity`, `check-resources` |
 | HuC | `check-il-huc` |
 | Mednafen | the suites that run a ROM in it — `check-export-games`, `check-measure-rom`, `check-rom-sound`, `check-breaker-78`, `check-resources` (`MEDNAFEN`); suites such as `check.js`, `check-viewer` and `check-dma` compare its committed captures and need only the dumps |
 | Chrome headless shell | `check-browser`, `check-studio --browser`, `check-gamepad`, `check-pad-keys` |
