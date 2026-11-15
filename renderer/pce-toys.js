@@ -819,6 +819,54 @@
       return 0;
     });
 
+    /* The effect calls (renderer/pce-sfx.js): sfx_noise, sfx_slide, sfx_fx
+     * and sfx_preset all reach host.sfxFx / host.sfxPreset, whose ranges give
+     * every runtime the same codes. */
+    function ints(Lx, from, names) {
+      var out = [];
+      for (var i = 0; i < names.length; i++) {
+        out.push(intArg(Lx, from + i, names[i], 0, 0xFFFF, "sfx-range"));
+      }
+      return out;
+    }
+    setGlobalFn("sfx_noise", function (Lx) {
+      var a = ints(Lx, 1, ["an SFX channel", "a noise rate", "an SFX volume",
+                           "an SFX length in frames"]);
+      luaHost(Lx, function () {
+        host.sfxFx(a[0], 1, a[1], a[1], a[2], 0, 0, a[3]);
+      });
+      return 0;
+    });
+    setGlobalFn("sfx_slide", function (Lx) {
+      var a = ints(Lx, 1, ["an SFX channel", "a start frequency",
+                           "an end frequency", "an SFX volume",
+                           "an SFX length in frames"]);
+      luaHost(Lx, function () {
+        host.sfxFx(a[0], 0, a[1], a[2], a[3], 0, 0, a[4]);
+      });
+      return 0;
+    });
+    setGlobalFn("sfx_fx", function (Lx) {
+      var a = ints(Lx, 1, ["an SFX channel", "an effect wave",
+                           "a start frequency", "an end frequency",
+                           "an SFX volume", "an attack in frames",
+                           "a decay in frames", "an SFX length in frames"]);
+      luaHost(Lx, function () {
+        host.sfxFx(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+      });
+      return 0;
+    });
+    setGlobalFn("sfx_preset", function (Lx) {
+      var nm = lua.lua_tostring(Lx, 1);
+      if (lua.lua_type(Lx, 1) !== lua.LUA_TSTRING || !nm) {
+        luaFail(Lx, "sfx-preset", "sfx_preset()'s name must be a string");
+      }
+      var ch = intArg(Lx, 2, "an SFX channel", 0, 5, "sfx-range");
+      var name = F.to_jsstring(nm);
+      luaHost(Lx, function () { host.sfxPreset(name, ch); });
+      return 0;
+    });
+
     setGlobalFn("release", function (Lx) {
       var ch = intArg(Lx, 1, "an SFX channel", 0, 5, "sfx-range");
       luaHost(Lx, function () { host.release(ch); });

@@ -762,7 +762,11 @@ static int32_t exec(uint8_t fid, uint8_t clh,
       int32_t pargs[CALL_ARGS];
       for (i = 0; i < CALL_ARGS; i++) pargs[i] = operand(r, rb(pc++));
 #ifdef ILVM_HOST
-      ilvm_sfx((uint8_t)pargs[0], pargs[1], pargs[2], pargs[3]);
+      /* sfx_fx's two flagged ops (a0 bits 8..15) are not modelled here: the
+       * browser's renderer/pce-sfx.js is the reference and tests/check-sfx-fx.js
+       * proves the console against it. */
+      if (!(pargs[0] & 0x300))
+        ilvm_sfx((uint8_t)pargs[0], pargs[1], pargs[2], pargs[3]);
 #else
       ilvm_sfx(pargs);             /* console: pointer form */
 #endif

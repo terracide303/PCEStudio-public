@@ -165,6 +165,10 @@ These are the names and ranges the runtime enforces. A value past a range is ref
 | note(name or MIDI) | the PSG's 12-bit F divider for a note name (Lua only) or a MIDI number (both runtimes); feed it to sfx() | a MIDI number 0..127; the result is clamped to 0..4095, and the IL carries no strings so a cartridge uses the number |
 | music(index) | plays song index from the start — the whole engine restarts, as HuTrack's playSong does | an index into the songs the runtime was given: a toy's song.json / songs.json through pce-seq.js songsFromFiles (0..songs-1); no song file is music-range |
 | sfx(channel, freq, volume, frames) | writes the PSG's main amplitude R1 = $FF (HuTrack's Reset does, so an SFX alone is heard), takes the channel (HuTrack's reserve), loads a 32-step square, sets F = freq and AL = volume, and gives it back after frames | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 |
+| sfx_noise(channel, rate, volume, frames) | sfx() on the PSG's noise generator (R7), for hits and hiss | channel 4 or 5, rate 0..31 (31 the highest), volume 0..31, frames 1..255 |
+| sfx_slide(channel, from, to, volume, frames) | sfx() whose F slides from `from` to `to` (a larger F is a lower note) | channel 0..5, from and to 0..4095, volume 0..31, frames 1..255 |
+| sfx_fx(channel, wave, from, to, volume, attack, decay, frames) | the general effect: wave 0 square, 1 noise, 2 triangle, 3 saw, a slide, and a level that climbs over `attack` frames and falls over the last `decay` | as sfx_slide; wave 0..3; attack and decay 0..255, together no more than frames |
+| sfx_preset(name, channel) | a named effect from one shared table: jump, shoot, hit, coin, explosion, powerup, select, hurt, laser | name a constant string (`sfx-preset` if unknown); hit and explosion are noise: channel 4 or 5 |
 | release(channel) | gives a channel back now (HuTrack's release): control and noise off, and the music waits for a fresh note on it | channel 0..5; a channel no SFX owns is left alone |
 | password.pack(v) / password.unpack(code) | a save as a short code starting P1 | an integer -1073741824..1073741823, a string of at most 64 bytes, a table of at most 32 entries nested 6 deep; password-value, password-code |
 | print(...) | one line in the studio's log | at most 200 lines |
@@ -904,7 +908,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | C compiler (Export…) | sprite(i, spec) | one SAT entry from a spec table whose slot and fields are constants; a spec the encoder's walker cannot pin is cgen-op |
 | C compiler (Export…) | pad[n].field | the five controllers |
 | C compiler (Export…) | timer(period, fn) | the HuC6280 TMA timer and its callback |
-| C compiler (Export…) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | lowered to the engine's runtime calls toy_music/toy_sfx/toy_release/toy_note — a later engine link declares them, so a sound toy's C does not build until then (the browser host runs the same ops today) |
+| C compiler (Export…) | music(song), sfx(ch, freq, volume, frames), the effects sfx_noise / sfx_slide / sfx_fx / sfx_preset, release(ch) and note(midi) | lowered to the engine's runtime calls toy_music/toy_sfx/toy_release/toy_note — a later engine link declares them, so a sound toy's C does not build until then (the browser host runs the same ops today) |
 | bytecode (every .pce) | init(), frame(t, f) and raster(line) | the hooks are global slots the runtime calls |
 | bytecode (every .pce) | values, globals, closures and control flow | int/bool/nil and function values; upvalues; jumps, branches, numeric for and returns |
 | bytecode (every .pce) | 32-bit integer arithmetic and comparisons | add sub mul mod idiv band bor bxor shl shr; eq lt le; unm, bnot and logical not |
@@ -914,7 +918,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | bytecode (every .pce) | pad[n].field |  |
 | bytecode (every .pce) | sat(i, k, v) and sprite(i, spec) |  |
 | bytecode (every .pce) | raster(line, spec), the table form | bxr, byr and cr; cram is refused |
-| bytecode (every .pce) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | a sound toy's container is version 3, which the committed interpreter reads: note and sfx match the browser on the host harness, music runs on the engine with the ROM's song table (docs/ROM-SOUND.md). |
+| bytecode (every .pce) | music(song), sfx(ch, freq, volume, frames), the effects sfx_noise / sfx_slide / sfx_fx / sfx_preset, release(ch) and note(midi) | a sound toy's container is version 3, which the committed interpreter reads: note and sfx match the browser on the host harness, music runs on the engine with the ROM's song table (docs/ROM-SOUND.md). |
 
 ### Refused today
 
@@ -964,7 +968,7 @@ Every refusal is a named failure, not a silent drop: the studio shows `code: fil
 | pad-range | a pad number outside 1..5 |
 | il-pad-write | writing a pad table |
 | music-range | a song index outside the songs the runtime was given |
-| sfx-range | an SFX channel, frequency, volume or length outside its range |
+| sfx-range | an SFX channel, frequency, volume or length outside its range (an effect's attack plus decay past its length, noise off channels 4 and 5, too) |
 | no-psg | the PSG model or the song player is not loaded, so no toy can make sound |
 | password-value | a save value that cannot be packed |
 | password-code | a password that is not one |
@@ -1195,7 +1199,13 @@ A release does not resume the middle of a held note: the music waits for the nex
 | note(name or MIDI) | the PSG's 12-bit F divider for a note name (Lua only) or a MIDI number (both runtimes); feed it to sfx() | a MIDI number 0..127; the result is clamped to 0..4095, and the IL carries no strings so a cartridge uses the number |
 | music(index) | plays song index from the start — the whole engine restarts, as HuTrack's playSong does | an index into the songs the runtime was given: a toy's song.json / songs.json through pce-seq.js songsFromFiles (0..songs-1); no song file is music-range |
 | sfx(channel, freq, volume, frames) | writes the PSG's main amplitude R1 = $FF (HuTrack's Reset does, so an SFX alone is heard), takes the channel (HuTrack's reserve), loads a 32-step square, sets F = freq and AL = volume, and gives it back after frames | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 |
+| sfx_noise(channel, rate, volume, frames) | sfx() on the PSG's noise generator (R7), for hits and hiss | channel 4 or 5, rate 0..31 (31 the highest), volume 0..31, frames 1..255 |
+| sfx_slide(channel, from, to, volume, frames) | sfx() whose F slides from `from` to `to` (a larger F is a lower note) | channel 0..5, from and to 0..4095, volume 0..31, frames 1..255 |
+| sfx_fx(channel, wave, from, to, volume, attack, decay, frames) | the general effect: wave 0 square, 1 noise, 2 triangle, 3 saw, a slide, and a level that climbs over `attack` frames and falls over the last `decay` | as sfx_slide; wave 0..3; attack and decay 0..255, together no more than frames |
+| sfx_preset(name, channel) | a named effect from one shared table: jump, shoot, hit, coin, explosion, powerup, select, hurt, laser | name a constant string (`sfx-preset` if unknown); hit and explosion are noise: channel 4 or 5 |
 | release(channel) | gives a channel back now (HuTrack's release): control and noise off, and the music waits for a fresh note on it | channel 0..5; a channel no SFX owns is left alone |
+
+Effects: sfx_preset(name, channel) is the call to reach for, with no numbers to tune: jump, shoot, hit, coin, explosion, powerup, select, hurt, laser. The name is a constant string; an unknown one is sfx-preset (il-sfx-preset in the validator and the export). The presets are rows of renderer/pce-sfx.js, which the studio's AUDIO panel plays and the browser, the exported ROM and the native ROM all read (tests/check-sfx-fx.js proves the same PSG writes). Noise presets (hit, explosion) need channel 4 or 5. F is a divider: a rising pitch slides F down. An effect lasts 1..255 frames.
 
 | register | name | what a write does | manual |
 | --- | --- | --- | --- |
@@ -1216,6 +1226,13 @@ F is the PSG's 12-bit divider, so a note's F is 7,159,090 / (64 f). note(name or
 function frame(t, f)
   -- pad[1].ii is the II BUTTON, pressed with keyboard key M
   if pad[1].ii then sfx(3, note(76), 24, 10) end
+end
+```
+
+```lua
+function frame(t, f)
+  if pad[1].i then sfx_preset("jump", 0) end
+  if f % 120 == 0 then sfx_slide(1, 400, 150, 22, 20) end
 end
 ```
 

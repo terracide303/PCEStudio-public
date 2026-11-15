@@ -18,6 +18,8 @@ void toy_sound_boot(void);
 void toy_sound_tick(void);
 int32_t toy_note(int32_t midi);
 void toy_sfx(int32_t ch, int32_t freq, int32_t volume, int32_t frames);
+void toy_sfx_fx(int32_t ch, int32_t wave, int32_t from, int32_t to,
+                int32_t volume, int32_t attack, int32_t decay, int32_t frames);
 void toy_release(int32_t ch);
 void toy_music(int32_t song);
 

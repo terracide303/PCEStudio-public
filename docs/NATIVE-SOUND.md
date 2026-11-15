@@ -132,3 +132,33 @@ longer carries the song files as a JSON tail. `tests/check-export-songs.js` (14 
 code, the page's wiring, and the exported ROM played in Geargrafx: its notes are ones the studio's own player
 model writes. One song bank holds up to 8 songs and 8,160 bytes. The live site does not have this until it is
 deployed (needs the maintainer's go and the cPanel password). The MCP's `export_pce` is not changed.
+
+## Effects on the native route (2026-11-15)
+
+`sfx_noise`, `sfx_slide`, `sfx_fx` and `sfx_preset` (docs/TOYS.md "Sound
+effects", docs/ROM-SOUND.md §12) lower to `toy_sfx_fx`, which is the three
+`sfx` ops the interpreter runs, through the same glue entry (`SndGlueSfxOp`).
+`tests/check-sfx-fx.js` builds `tools/toys/fx.lua` natively with the PSG write
+log and compares the whole stream with the studio's, frame for frame.
+
+**What an effect costs per frame**, measured with `tools/native-measure.sh` on
+`tools/toys/fx-cost.lua` (N effects playing all the time, each a 250-frame
+slide with an attack and a decay, the dearest kind; the figure is the whole
+`toy_frame` including the sound tick, mean over about 630 frames, Mednafen's
+TMA counter, 1,024 cycles a tick):
+
+| effects playing | cycles per frame | over nothing playing | worst frame (a start) |
+|---|---|---|---|
+| 0 (glue linked, ticking) | 739 | - | 1 tick |
+| 1 | 1,324 | +585 | 8 ticks (8,200) |
+| 3 | 2,185 | +1,446 | 22 ticks (22,500) |
+| 6 | 3,188 | +2,449 | 40 ticks (41,000) |
+
+So about **400 cycles per active effect per frame** (0.34% of the 119,000 of a
+video frame; the mean includes one start in 250 frames), and **6,800 to 8,200
+cycles for the frame an effect starts** (a tone uploads its 32-step wave; a
+noise effect writes three registers instead). Six effects at once is 2.7% of
+a frame. Music on the other channels is not touched: an effect takes only its
+own channel's registers, and the engine's tick and the effects' tick are one
+pass of the glue's loop; `tests/check-native-sound.js`'s music fixtures still
+pass with the new glue.

@@ -238,18 +238,12 @@ int32_t ilvm_note(const int32_t *pargs) {
 }
 
 void ilvm_sfx(const int32_t *pargs) {
-  /* The glue clamps ch/freq/volume/frames (browser: sfx-range refusal);
-   * only the frames sign needs the i32 here — a negative frames count is
-   * the browser's "below 1", which clamps to 1. */
-  int32_t frames = pargs[3];
-  if (frames < 0) frames = 0;
-  set_eax0(0, (uint8_t)pargs[0]);
-  set_eax0(1, (uint8_t)pargs[1]);           /* EAX0.m: F lo */
-  set_eax0(2, (uint8_t)(pargs[1] >> 8));    /* EAX0.h: F hi */
-  set_eax0(3, (uint8_t)pargs[2]);           /* EAX0.u: volume */
-  *(volatile uint8_t *)(HUTRACK_SND_FRAMES) = (uint8_t)frames;
-  *(volatile uint8_t *)(HUTRACK_SND_FRAMES + 1) = (uint8_t)(frames >> 8);
-  GLUE_CALL(SND_SFX);
+  /* The glue decodes the four operands itself (SndGlueSfxOp): sfx(channel,
+   * freq, volume, frames) with its clamps, or one of sfx_fx's two flagged
+   * ops (renderer/pce-sfx.js).  All the wrapper passes is their address. */
+  set_eax0(0, (uint8_t)(uintptr_t)pargs);
+  set_eax0(1, (uint8_t)((uintptr_t)pargs >> 8));
+  GLUE_CALL(SND_SFXOP);
 }
 
 void ilvm_release(const int32_t *pargs) {

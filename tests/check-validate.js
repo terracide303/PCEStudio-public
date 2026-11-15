@@ -336,7 +336,7 @@ const GOLDEN_OP_CYCLES = {
   "forprep": 24, "fornext": 48, "reg": 24, "pal": 28, "sat": 24,
   "sprite": 28, "raster": 24, "print": 24, "vget": 28, "vset": 28,
   "padref": 8, "padget": 8, "builtin": 36,
-  "music": 64, "sfx": 64, "release": 24
+  "music": 64, "sfx": 64, "sfxfx": 192, "release": 24
 };
 const FIXED_IL_TOY = [
   "local g = 0",
