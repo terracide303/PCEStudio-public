@@ -162,3 +162,65 @@ a frame. Music on the other channels is not touched: an effect takes only its
 own channel's registers, and the engine's tick and the effects' tick are one
 pass of the glue's loop; `tests/check-native-sound.js`'s music fixtures still
 pass with the new glue.
+
+## Samples: DDA playback from the timer interrupt (2026-11-15)
+
+`sample(name, channel)` (docs/TOYS.md "Samples"; model `renderer/pce-sample.js`) plays a short sample on one PSG channel by
+writing its DDA register from the CPU. Real games spend about a third of a frame on this (docs/HUCARD-BUDGETS.md section 4:
+about 256 writes spread over the frame plus a roughly 6.7 kHz timer interrupt); the toy version is the smallest honest one.
+
+**The design.** One 8 KiB sample bank after the art banks (`tools/native-samples.js`: a count, an 8-byte entry per sample,
+the steps one byte each). `toy_sample()` (`tools/toyc/toy_sound.c`, only in a `TOY_SAMPLE_BUILD`) releases the old sample's
+channel, takes the new one with the sfx glue (`toy_sfx(ch, 0, 0, hold)`: the reserve, the square upload, the release after
+the hold frames, so the music yields the channel exactly as for `sfx()`), writes R0 and R4 = `$DF`, loads a zero-page pointer
+and arms the timer with reload `div - 1`. The timer interrupt (`irq_timer`, hand-written, A only) acknowledges TIQ, maps
+the sample bank into page 3 (`tma #8` / `tam #8`, restored before `rti`), selects the channel, writes ONE step to R6, puts the
+PSG's channel select back, advances the pointer and stops the timer after the last step. No step is written from the main
+loop; no frame work waits for it.
+
+**Two-writer problem, and what solves it.** The engine's tick selects channels with `stx $800` and then writes registers;
+an interrupt between the two would send the rest of the group to the sample's channel. The PSG's select register cannot
+be read back, so the engine records every select in a RAM byte `psg_sel`: `SAMPLE_SHADOW=1` in `tools/ilvm/build-engine.sh`
+turns each `stx $800` (the glue's six, written with the `PSGSEL_X` macro, and every vendor one, patched in the staged copy)
+into `stx psg_sel` THEN `stx $800` (that order: an interrupt between them sees the new channel). The handler restores the
+select from it. Without the define the macro is the plain store and **the engine image is byte-identical** to before
+(checked: `hutrack-code.bin` and `hutrack-tables.bin` equal the pre-change build), so `renderer/ilvm.bin`, the native kit's
+engine images and every pinned ROM hash are untouched; only a toy that calls `sample()` builds the shadowed engine, so the
+native kit (`tools/native-kit`) does not carry sample toys. `tests/check-sample.js` proves the restore: after every frame
+(outside the handler itself) the chip's channel select, read through Geargrafx, equals the engine's shadow; with the
+restore deleted from the handler that check fails.
+
+**What it costs**, measured with Geargrafx's profiler on `tools/toys/sample/cost.lua` (the thump at 3,496 Hz started again
+every 18 frames, so a sample plays all the time; the demo song on the other channels): the handler is **332 master clocks
+= 111 CPU cycles per interrupt** (min and max 332 to 366 over 8,907 interrupts; counting the instructions gives 117:
+8 for the interrupt entry, 109 in the handler) and it was 5.2% of all the CPU time over the window. That is, per 60 Hz frame
+of 119,665 cycles:
+
+| rate | interrupts per frame | cycles per frame | share of the frame |
+|---|---|---|---|
+| 1,748 Hz (`div` 4) | 29 | about 3,200 | 2.7% |
+| 3,496 Hz (`div` 2) | 58 | about 6,500 | 5.4% |
+| 6,991 Hz (`div` 1) | 117 | about 13,000 | 10.8% |
+
+so a sample is dearer than an effect (about 400 cycles per effect per frame) but well under the real games' third of a
+frame, because the toy writes one step per interrupt with no mixing, no volume scaling and no second channel. Starting a
+sample costs the sfx glue's start (a 32-step upload, 6,800 to 8,200 cycles) plus a few hundred. `tools/native-measure.sh`
+cannot measure it: it reads the timer's down-counter, which the sample interrupt reprograms; the profiler counts the handler
+directly. Interrupts are never masked for long: the engine's tick (up to 38,000 cycles on a busy row) is interrupted by
+the sample interrupt like any other code, which is the point of the shadow.
+
+**Limits.** Only one sample at a time; `timer()` and `sample()` cannot share the timer (`validate-sample-timer`); the sample
+bank is one bank (`validate-sample-bank`); the pitch/rate is the timer's four divisors; a toy whose raster interrupt chain is
+late by 111 cycles (a sample's interrupt can delay a line interrupt by that much) should not play samples during a split.
+The raster chain was not measured with a sample playing.
+
+**The interpreter ROM does not carry it.** The cost above is not the reason: the interpreter would need a new bytecode op,
+a sample bank in its container, the interrupt handler and the shadowed engine in its fixed image, so `renderer/ilvm.bin` and
+every pinned exported-ROM hash change. That is not built; `sample()` is refused there with `ilbc-sample`, and the validator
+warns (`validate-sample-native-only`) for any toy that the Export button would build.
+
+**The proof**, `tests/check-sample.js` (75 checks): the importer reproduces the committed `samples.json` from the committed WAVs
+and the generator reproduces the WAVs; the Lua and IL runtimes write the same stream; the native ROM (a trace build with a
+test-only RAM log of the steps, `DDA_LOG=1`, run in Geargrafx) wrote the same DDA values as the browser, step for step for a whole
+sample; the engine's own PSG writes (reserve, upload, release) equal the studio's write for write; with samples on channels 5 and
+4 the song's four tonal channels equal the studio's after every frame.

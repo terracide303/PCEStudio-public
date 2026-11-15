@@ -414,6 +414,40 @@ lasts 1..600 frames. `sfx()`'s waveform is a fixed square; `sfx_fx` has eight (a
 (`sound.overflow`), because the browser's real-time playback (#78) will feed
 the PSG incrementally instead of keeping the whole session.
 
+### Samples: `sample(name, channel)` (#306)
+
+A recorded sound (a voice, a drum with a real shape, a big hit) is a **sample**: a few hundred to a few thousand
+5-bit steps that the PSG plays by *DDA*: the channel is put in DDA mode (R4 = `$DF`: on, DDA, level 31) and the CPU writes
+one step into R6 for each timer tick. `sample("thump", 5)` takes channel 5 from the music like `sfx()` does, plays the
+sample from `samples.json` beside the toy's `main.lua`, and gives the channel back after it.
+
+- **One sample at a time.** A second `sample()` cuts the first (its channel is released) and starts. The music on the other
+  channels keeps playing; `tests/check-sample.js` compares the song's four tonal channels, frame by frame, while samples
+  play on the other two.
+- **The rate is the timer's.** The HuC6280 timer ticks every 1,024 CPU cycles (6,991 Hz) and fires every `div` ticks, so a
+  sample's rate is 6,991 / `div` Hz for `div` 1..4: 6,991, 3,496, 2,330 or 1,748 Hz. 3,496 Hz is the default (a thump or a
+  drum is dull above 2 kHz anyway; speech wants 6,991 Hz).
+- **The source** is `samples.json`: `{"samples": [{"name", "div", "bits", "data": base64}]}`, one byte per step, 0..31. Make
+  it from WAV files (8 or 16 bit PCM, any rate, any channel count) with
+  `node tools/wav2sample.js samples.json thump=thump.wav,div=2 click=click.wav,div=1,bits=4`; the converter is
+  `renderer/pce-sample.js` (a box filter down to the rate, the DC offset removed, the peak normalised, 5 bits, or 4 bits:
+  16 levels). `tools/gen-sample-wav.js` synthesises the repo's own `thump.wav` and `click.wav` (a falling sine with a short
+  noise burst, a 12 ms square click): `tools/toys/sample/` is the toy.
+- **The budget.** A ROM carries one 8 KiB sample bank: at most 8 samples and 8,120 bytes of steps in all
+  (`validate-sample-bank`); the validator checks it. A step is a byte, so 3,496 Hz fits about 2.3 seconds.
+- **Where it runs.** In the browser (the studio plays it: the host writes each step at the cycle the interrupt would) and
+  in the **native ROM** (`tools/build-toyc-banked.sh`: the timer interrupt writes the steps, docs/NATIVE-SOUND.md "Samples").
+  The **interpreter ROM the Export button builds does not carry it**: a toy that calls `sample()` is refused there with
+  `ilbc-sample`, and the validator says so with the warning `validate-sample-native-only`. Nothing is dropped silently.
+- **Refusals.** `sample-name` / `il-sample` (a name or index `samples.json` lacks), `sample-range` (a channel outside 0..5),
+  `sample-file` (a bad `samples.json`; `sample-div`, `sample-bits`, `sample-wav` from the converter),
+  `validate-sample-timer` (`sample()` and `timer()` in one toy: the sample's writes run from the timer interrupt).
+- **The arithmetic.** Step *n* of a sample is written at CPU cycle (*n* + 1) · `div` · 1,024 after the call; the channel is
+  held `framesFor` + 1 frames (`pce-sample.js` `holdFrames`: the writes end inside the hold).
+- **What the proof compares.** The sequence of DDA values written is the same in the browser and on the native ROM, step for
+  step, for a whole sample. A sample cut by another stops where the cycle of the second call falls, which the browser models
+  as the start of its frame: the console's cut sample is a prefix of the browser's.
+
 **Not in this half.** Effect columns, arpeggios and DDA/PCM samples in the
 player are the second half of #71; `pce-song.js` still refuses such a song by
 code (`song-fx`, `song-arp`, `song-pcm`).

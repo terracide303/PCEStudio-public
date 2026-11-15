@@ -2582,7 +2582,13 @@
                 "toy_release/toy_note — a later engine link declares them, " +
                 "so a sound toy's C does not build until then (the browser " +
                 "host runs the same ops today)",
-        ops: ["music", "sfx", "sfxfx", "release"] }
+        ops: ["music", "sfx", "sfxfx", "release"] },
+      { id: "sample", label: "sample(name, channel)",
+        detail: "DDA sample playback from the toy's samples.json: the timer " +
+                "interrupt writes one step at a time to a PSG channel in DDA " +
+                "mode (docs/NATIVE-SOUND.md \"Samples\"); one sample at a " +
+                "time, and the toy may not use timer()",
+        ops: ["sample"] }
     ],
     /* Everything else the bytecode route carries and this backend does not is
      * named by the cgen-op details in REFUSALS (the print surface and a

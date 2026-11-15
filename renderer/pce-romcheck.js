@@ -391,7 +391,7 @@
     var program = null;
     try {
       program = il.compile(String(source == null ? "" : source),
-                           { chunkName: chunkName });
+                           { chunkName: chunkName, files: options && options.files });
     } catch (e) {
       findings.push(finding(e && e.code || "il-error",
                             lineOfMessage(e && e.message),

@@ -303,7 +303,8 @@ function checkNumbers() {
   /* each budget row's value is re-read from the module field it names */
   const live = {
     host: host, editor: editor, toys: toys, cgen: cgen, ilbc: ilbc,
-    rom: rom, romcheck: romcheck, songbank: songbank
+    rom: rom, romcheck: romcheck, songbank: songbank,
+    sample: host.sample()
   };
   const byLabel = {};
   for (const L of romcheck.LIMITS) byLabel[L.id] = L;

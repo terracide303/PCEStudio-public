@@ -247,6 +247,17 @@
               "(noise needs channel " + host.SFX.NOISE_CHANNELS.join(" or ") +
               ")",
         from: "host.SFX.FRAMES_MAX" },
+      { label: "samples in the ROM", value: host.sample().MAX_SAMPLES, unit: "",
+        refusal: "validate-sample-bank",
+        what: "sample(name, channel) plays one of the toy's samples.json " +
+              "entries; the native ROM carries one sample bank, " +
+              host.sample().MAX_SAMPLES + " samples",
+        from: "sample.MAX_SAMPLES" },
+      { label: "the sample bank", value: host.sample().SAMPLE_DATA_MAX,
+        unit: " B of steps for all the samples together",
+        refusal: "validate-sample-bank",
+        what: "one byte per DDA step, so a couple of seconds of sound at the slower rates",
+        from: "sample.SAMPLE_DATA_MAX" },
       { label: "songs in the ROM", value: songbank.MAX_SONGS, unit: "",
         refusal: "toy-song-count",
         what: "music(n) plays the n-th song of the song bank",
@@ -681,7 +692,8 @@
     ["pal", "one pal() colour"],
     ["reg", "one reg() write"],
     ["sfx", "an sfx() or music() call"],
-    ["sfxfx", "an sfx_fx(), sfx_noise(), sfx_slide() or sfx_preset() call"]
+    ["sfxfx", "an sfx_fx(), sfx_noise(), sfx_slide() or sfx_preset() call"],
+    ["sample", "a sample() call"]
   ];
 
   /* The three example toys, with the usage keys their header comments list
@@ -829,7 +841,12 @@
           "the real drivers are small: " + C.psgWrites.text + ". For a " +
           "drum or any hit, use sfx_preset(\"hit\", " + f.noise[0] +
           ") or sfx_noise() on a noise channel (the sound chapter " +
-          "lists the presets). The sound-guide topic has the wave " +
+          "lists the presets). A recorded sound (a voice, a drum with a " +
+          "real shape) is sample(name, channel): it needs samples.json " +
+          "beside the toy, plays on the native ROM and in the browser, " +
+          "and is refused by the interpreter ROM the Export button builds " +
+          "(ilbc-sample), so a toy that must export uses sfx_preset(). The " +
+          "sound-guide topic has the wave " +
           "instruments, what each call costs per frame, and which " +
           "effects a ROM carries." },
 
@@ -1305,6 +1322,16 @@
             "frames frames. release(channel) gives a channel back now. If the " +
             "page did not load the PSG model or the song player, a sound call " +
             "is no-psg." },
+        { type: "p", text: "sample(name, channel) plays a sample from the " +
+            "toy's samples.json (tools/wav2sample.js makes it from a WAV) by " +
+            "DDA: the timer interrupt writes one 5-bit step to the channel's " +
+            "R6. It takes the channel like sfx() and gives it back at the " +
+            "end; ONE sample plays at a time, the music on the other channels " +
+            "continues, and the toy cannot also call timer() " +
+            "(validate-sample-timer). The browser and the native ROM carry " +
+            "it; the interpreter ROM does not (ilbc-sample). The bank holds " +
+            host.sample().MAX_SAMPLES + " samples, " +
+            host.sample().SAMPLE_DATA_MAX + " bytes (validate-sample-bank)." },
         { type: "p", text: "A release does not resume the middle of a held " +
             "note: the music waits for the next note row on that channel, and " +
             "that fresh note reloads the instrument's waveform (all " +

@@ -32,7 +32,7 @@
  *   6. The cold seat's transcript (docs/GUIDE-TRANSCRIPT.md) carries its
  *      main.lua; that file is run the same way, and must be visible,
  *      validator-clean, and move with the pad.
- *   7. The guide fits a chat: under 14,500 words, and it ends every code
+ *   7. The guide fits a chat: under 15,000 words, and it ends every code
  *      answer with the exact Paste & Run line.  (The limit was 14,000 until the
  *      sound effects (sfx_noise, sfx_slide, sfx_fx, sfx_preset: their four
  *      calls, one example and the refusal codes, about 470 words) and 12,000 until
@@ -81,7 +81,7 @@ const GUIDE_PATH = path.join(ROOT, "renderer", "pcestudio-for-claude.md");
 const TRANSCRIPT_PATH = path.join(ROOT, "docs", "GUIDE-TRANSCRIPT.md");
 const WIDTH = host.WIDTH;
 const HEIGHT = host.HEIGHT;
-const WORD_LIMIT = 14500;
+const WORD_LIMIT = 15000;
 
 let checks = 0;
 const failures = [];

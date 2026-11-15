@@ -2116,6 +2116,7 @@
 <script src="pce-bg.js"></script>
 <script src="pce-sprites.js"></script>
 <script src="pce-sfx.js"></script>
+<script src="pce-sample.js"></script>
 <script src="pce-toyhost.js"></script>
 <script src="pce-toys.js"></script>
 <script src="pce-il.js"></script>
@@ -4897,7 +4898,7 @@ function exportAnalysis() {
   }
   let program = null, encoded = null, art = null;
   try {
-    program = IL.compile(source, { chunkName: "@main.lua" });
+    program = IL.compile(source, { chunkName: "@main.lua", files: files });
   } catch (e) {
     findings.push(exportFinding("error", e && e.code || "il-error",
       e && e.message || String(e), null));

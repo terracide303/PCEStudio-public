@@ -169,6 +169,7 @@ These are the names and ranges the runtime enforces. A value past a range is ref
 | sfx_slide(channel, from, to, volume, frames) | sfx() whose F slides from `from` to `to` (a larger F is a lower note) | channel 0..5, from and to 0..4095, volume 0..31, frames 1..255 |
 | sfx_fx(channel, wave, from, to, volume, attack, decay, frames) | the general effect: wave 0 square, 1 noise, 2 triangle, 3 saw, 4 organ, 5 bass, 6 buzz (a pseudo-random tone), 7 sine, a slide, and a level that climbs over `attack` frames and falls over the last `decay` | as sfx_slide; wave 0..7; attack and decay 0..255, together no more than frames |
 | sfx_preset(name, channel) | a named effect from one shared table: jump, shoot, hit, coin, explosion, powerup, select, hurt, laser | name a constant string (`sfx-preset` if unknown); hit and explosion are noise: channel 4 or 5 |
+| sample(name, channel) | plays a sample from the toy's samples.json on one channel by writing the PSG's DDA register (R6, the channel in DDA mode) from a timer interrupt at the sample's own rate; the channel is taken from the music like sfx() takes it and given back after the sample. Only ONE sample plays at a time: a second sample() cuts the first. The browser and the native ROM carry it; the interpreter ROM (the Export button) refuses it (ilbc-sample) | name a constant string from samples.json (or its index); channel 0..5 (`sample-range`, `sample-name`); a toy that also uses timer() is refused (the sample owns the timer); the ROM's sample bank holds 8 samples and 8,120 bytes (validate-sample-bank) |
 | release(channel) | gives a channel back now (HuTrack's release): control and noise off, and the music waits for a fresh note on it | channel 0..5; a channel no SFX owns is left alone |
 | password.pack(v) / password.unpack(code) | a save as a short code starting P1 | an integer -1073741824..1073741823, a string of at most 64 bytes, a table of at most 32 entries nested 6 deep; password-value, password-code |
 | print(...) | one line in the studio's log | at most 200 lines |
@@ -909,6 +910,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | C compiler (Export…) | pad[n].field | the five controllers |
 | C compiler (Export…) | timer(period, fn) | the HuC6280 TMA timer and its callback |
 | C compiler (Export…) | music(song), sfx(ch, freq, volume, frames), the effects sfx_noise / sfx_slide / sfx_fx / sfx_preset, release(ch) and note(midi) | lowered to the engine's runtime calls toy_music/toy_sfx/toy_release/toy_note — a later engine link declares them, so a sound toy's C does not build until then (the browser host runs the same ops today) |
+| C compiler (Export…) | sample(name, channel) | DDA sample playback from the toy's samples.json: the timer interrupt writes one step at a time to a PSG channel in DDA mode (docs/NATIVE-SOUND.md "Samples"); one sample at a time, and the toy may not use timer() |
 | bytecode (every .pce) | init(), frame(t, f) and raster(line) | the hooks are global slots the runtime calls |
 | bytecode (every .pce) | values, globals, closures and control flow | int/bool/nil and function values; upvalues; jumps, branches, numeric for and returns |
 | bytecode (every .pce) | 32-bit integer arithmetic and comparisons | add sub mul mod idiv band bor bxor shl shr; eq lt le; unm, bnot and logical not |
@@ -945,6 +947,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | bytecode (every .pce) | ilbc-program | not a pce-il version 1 program, no functions, or a hook with no global slot |
 | bytecode (every .pce) | ilbc-range | a value past one byte: more than 127 constants, 128 registers, 255 functions or globals, or a setlist index/count |
 | bytecode (every .pce) | ilbc-raster-spec | a raster(line, spec) the encoder cannot read: a cram field, another key, or a spec built across a branch |
+| bytecode (every .pce) | ilbc-sample | sample(): DDA sample playback is carried by the browser and the native route, not the interpreter ROM |
 | bytecode (every .pce) | ilbc-table-escape | a table site that can run more than once and escapes; one static slot would alias two tables |
 | bytecode (every .pce) | ilbc-table-key | a table base that is not a register, or a key that is neither a string field nor an int operand |
 | bytecode (every .pce) | ilbc-table-ram | the table slots need more than the interpreter's 192 cells, or a key/field is past its slot's shape |
@@ -1192,6 +1195,8 @@ The player writes the song's wave instruments through the PSG's 32-step waveform
 
 sfx(channel, freq, volume, frames) takes a channel from the music the way HuTrack reserves one, loads a 32-step square, sets F and AL, and gives the channel back after frames frames. release(channel) gives a channel back now. If the page did not load the PSG model or the song player, a sound call is no-psg.
 
+sample(name, channel) plays a sample from the toy's samples.json (tools/wav2sample.js makes it from a WAV) by DDA: the timer interrupt writes one 5-bit step to the channel's R6. It takes the channel like sfx() and gives it back at the end; ONE sample plays at a time, the music on the other channels continues, and the toy cannot also call timer() (validate-sample-timer). The browser and the native ROM carry it; the interpreter ROM does not (ilbc-sample). The bank holds 8 samples, 8120 bytes (validate-sample-bank).
+
 A release does not resume the middle of a held note: the music waits for the next note row on that channel, and that fresh note reloads the instrument's waveform (all 32 steps) even when it has not changed — HuTrack's channel hand-off. The writes go to renderer/pce-psg.js in the frame's order, so a toy's sound is the model's own PCM.
 
 | call | what it does | limits and refusal |
@@ -1203,6 +1208,7 @@ A release does not resume the middle of a held note: the music waits for the nex
 | sfx_slide(channel, from, to, volume, frames) | sfx() whose F slides from `from` to `to` (a larger F is a lower note) | channel 0..5, from and to 0..4095, volume 0..31, frames 1..255 |
 | sfx_fx(channel, wave, from, to, volume, attack, decay, frames) | the general effect: wave 0 square, 1 noise, 2 triangle, 3 saw, 4 organ, 5 bass, 6 buzz (a pseudo-random tone), 7 sine, a slide, and a level that climbs over `attack` frames and falls over the last `decay` | as sfx_slide; wave 0..7; attack and decay 0..255, together no more than frames |
 | sfx_preset(name, channel) | a named effect from one shared table: jump, shoot, hit, coin, explosion, powerup, select, hurt, laser | name a constant string (`sfx-preset` if unknown); hit and explosion are noise: channel 4 or 5 |
+| sample(name, channel) | plays a sample from the toy's samples.json on one channel by writing the PSG's DDA register (R6, the channel in DDA mode) from a timer interrupt at the sample's own rate; the channel is taken from the music like sfx() takes it and given back after the sample. Only ONE sample plays at a time: a second sample() cuts the first. The browser and the native ROM carry it; the interpreter ROM (the Export button) refuses it (ilbc-sample) | name a constant string from samples.json (or its index); channel 0..5 (`sample-range`, `sample-name`); a toy that also uses timer() is refused (the sample owns the timer); the ROM's sample bank holds 8 samples and 8,120 bytes (validate-sample-bank) |
 | release(channel) | gives a channel back now (HuTrack's release): control and noise off, and the music waits for a fresh note on it | channel 0..5; a channel no SFX owns is left alone |
 
 Effects: sfx_preset(name, channel) is the call to reach for, with no numbers to tune: jump, shoot, hit, coin, explosion, powerup, select, hurt, laser. The name is a constant string; an unknown one is sfx-preset (il-sfx-preset in the validator and the export). The presets are rows of renderer/pce-sfx.js, which the studio's AUDIO panel plays and the browser, the exported ROM and the native ROM all read (tests/check-sfx-fx.js proves the same PSG writes). Noise presets (hit, explosion) need channel 4 or 5. F is a divider: a rising pitch slides F down. An effect lasts 1..255 frames.

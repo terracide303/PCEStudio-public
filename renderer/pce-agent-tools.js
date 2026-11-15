@@ -486,8 +486,8 @@
     });
   }
 
-  function compileToy(source) {
-    return il.compile(source, { chunkName: MAIN });
+  function compileToy(source, files) {
+    return il.compile(source, { chunkName: MAIN, files: files });
   }
 
   /* ---- source_add's picture forms (#153) --------------------------------- */
@@ -2134,7 +2134,7 @@
       const main = files.filter(function (f) { return f.name === MAIN; })[0];
       let program;
       try {
-        program = compileToy(main.source);
+        program = compileToy(main.source, files);
       } catch (e) {
         /* a refused write leaves the toy that was already loaded alone */
         refuse(errorCode(e), errorMessage(e));
@@ -2566,7 +2566,7 @@
        * whose song.json the sequencer refuses, leaves the session alone */
       let program;
       try {
-        program = compileToy(main.source);
+        program = compileToy(main.source, files);
       } catch (e) {
         refuse(errorCode(e), errorMessage(e));
       }
@@ -3176,7 +3176,7 @@
     function toolRomCheck(args) {
       requireToy();
       try {
-        const report = romcheck.check(session.source, { chunkName: MAIN });
+        const report = romcheck.check(session.source, { chunkName: MAIN, files: session.files });
         let usage = null;
         try {
           usage = usageReport(

@@ -984,6 +984,14 @@ window and drains and clears it after every video frame, so the whole stream
 (245 toy frames, 1,170 writes) comes back and is compared write for write and
 frame for frame, and again per preset on that preset's channel.
 
+## 13. `sample()` is not in the interpreter ROM
+
+DDA sample playback (docs/TOYS.md "Samples", docs/NATIVE-SOUND.md "Samples") runs in the browser and in the native ROM only. The
+interpreter ROM has no op, no sample bank and no sample interrupt for it, and adding them rebuilds `renderer/ilvm.bin` and re-pins every
+exported ROM, so a toy that calls `sample()` is refused with `ilbc-sample` (the validator warns, `validate-sample-native-only`). The
+engine glue gained one thing for the native route, off by default: the `PSGSEL_X` macro and the `SAMPLE_SHADOW` define, which leave this
+image byte-identical (`tools/ilvm/build-engine.sh`).
+
 ## What is not proven
 
 - **A note toy and an sfx toy run *and sound* in Mednafen, and §8's trace
