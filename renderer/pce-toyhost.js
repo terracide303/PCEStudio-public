@@ -299,7 +299,10 @@
 
   /* The three files the panels edit.  waves.json is the PSG's (#71), not the
    * picture, and is not touched here. */
-  var ASSET_FILES = ["tiles.json", "palettes.json", "sprites.json"];
+  var ASSET_FILES = ["tiles.json", "palettes.json", "sprites.json", "vram.json"];
+  var PICTURE_FILES = ["tiles.json", "palettes.json", "sprites.json"];   /* what the panels edit */
+  var RAW_FILE = "vram.json";
+  var RAW_SAT_ADDR = 0x7F00;     /* the SAT's word address (renderer/pce-editor.js SAT_ADDR) */
   var IMPORT_SAT_WORDS = 256;    /* 64 entries x 4 words */
 
   var editorLib = null, satLib = null;
@@ -333,6 +336,61 @@
    * could not read is refused here, by the panels' own parse, rather than
    * silently skipped. */
   function hasArt(files) {
+    return hasPictureArt(files) || readRaw(files) !== null;
+  }
+
+  /* vram.json: a RAW image of VRAM words (and optionally colours and registers) laid over what the
+   * panels' files give, or over an empty VRAM when there are none.  It exists for art a toy GENERATES
+   * (tools/bake-art.js runs the toy in this runtime and writes what it drew): the native ROM and the
+   * Export route load it at boot like any imported picture, instead of redoing the drawing on the
+   * console (DUSK RUN's 512 tiles took two minutes of software multiplies).  Format:
+   *   { "format": "pce-vram/1",
+   *     "runs": [ { "addr": <word address>, "words": "<base64, little-endian u16 words>" }, ... ],
+   *     "cram": [ { "addr": <colour index>, "words": "<base64>" }, ... ],      optional
+   *     "regs": { "BXR": n, "BYR": n, "MWR": n, "CR": n } }                      optional
+   * Runs may not leave the 32,768 VRAM words or the 512 colours.  Absent regs: BXR/BYR/MWR 0 and CR
+   * with the background on (the picture-less default). */
+  function b64bytes(text, where) {
+    var str = String(text == null ? "" : text);
+    var bytes;
+    try {
+      if (typeof Buffer !== "undefined") bytes = Uint8Array.from(Buffer.from(str, "base64"));
+      else { var bin = atob(str), k; bytes = new Uint8Array(bin.length); for (k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k); }
+    } catch (e) { refuse("asset-json", where + " is not base64"); }
+    return bytes;
+  }
+  function readRaw(files) {
+    var texts = assetTexts(files);
+    if (texts[RAW_FILE] == null || !texts[RAW_FILE].trim()) return null;
+    var t = parseAsset(texts[RAW_FILE], RAW_FILE);
+    if (!t || typeof t !== "object" || t.format !== "pce-vram/1") {
+      refuse("asset-json", RAW_FILE + " is not a pce-vram/1 image");
+    }
+    var runs = Array.isArray(t.runs) ? t.runs : [], crams = Array.isArray(t.cram) ? t.cram : [];
+    if (!runs.length && !crams.length) return null;
+    var out = { runs: [], cram: [], regs: t.regs && typeof t.regs === "object" ? t.regs : null };
+    runs.forEach(function (r, i) {
+      var w = b64bytes(r && r.words, RAW_FILE + " runs[" + i + "]");
+      var addr = r && r.addr;
+      if (typeof addr !== "number" || addr !== (addr | 0) || addr < 0 || w.length % 2 ||
+          addr + w.length / 2 > VRAM_WORDS) {
+        refuse("vram-range", RAW_FILE + " runs[" + i + "] leaves VRAM (0.." + (VRAM_WORDS - 1) + ")");
+      }
+      out.runs.push({ addr: addr, bytes: w });
+    });
+    crams.forEach(function (r, i) {
+      var w = b64bytes(r && r.words, RAW_FILE + " cram[" + i + "]");
+      var addr = r && r.addr;
+      if (typeof addr !== "number" || addr !== (addr | 0) || addr < 0 || w.length % 2 ||
+          addr + w.length / 2 > CRAM_ENTRIES) {
+        refuse("pal-range", RAW_FILE + " cram[" + i + "] leaves the 512 colours");
+      }
+      out.cram.push({ addr: addr, bytes: w });
+    });
+    return out;
+  }
+
+  function hasPictureArt(files) {
     var texts = assetTexts(files), t;
     if (texts["tiles.json"] != null) {
       t = parseAsset(texts["tiles.json"], "tiles.json");
@@ -356,29 +414,53 @@
   /* The files as the hardware would hold the picture.  null when there is no
    * art to import; `no-import` when the panels' models are not loaded. */
   function readAssets(files) {
-    if (!hasArt(files)) return null;
-    var editor = editorModule(), sat = satModule();
-    if (!editor || !sat) {
-      refuse("no-import", "this toy brings asset files, but the picture " +
-             "models (renderer/pce-editor.js, renderer/pce-sat.js) are not " +
-             "loaded, so the picture cannot reach VRAM");
+    var raw = readRaw(files);
+    if (!hasPictureArt(files) && !raw) return null;
+    var base = null;
+    if (hasPictureArt(files)) {
+      var editor = editorModule(), sat = satModule();
+      if (!editor || !sat) {
+        refuse("no-import", "this toy brings asset files, but the picture " +
+               "models (renderer/pce-editor.js, renderer/pce-sat.js) are not " +
+               "loaded, so the picture cannot reach VRAM");
+      }
+      var pic = sat.pictureFromFiles(files);
+      var data = editor.toPicture(pic);
+      var tiles = 0;
+      for (var c = editor.FIRST_CHAR; c < pic.nextChar; c++) if (pic.tiles[c]) tiles++;
+      base = {
+        picture: pic,
+        vram: data.vram,
+        cram: data.cram,
+        sat: data.vram.slice(editor.SAT_ADDR * 2,
+                             editor.SAT_ADDR * 2 + IMPORT_SAT_WORDS * 2),
+        regs: { BXR: data.regs.BXR, BYR: data.regs.BYR,
+                MWR: data.regs.MWR, CR: data.regs.CR },
+        tiles: tiles,
+        patterns: pic.spritePatterns.length,
+        sprites: pic.sprites.length
+      };
+      if (!raw) return base;
+    } else {
+      base = {
+        picture: null,
+        vram: new Uint8Array(VRAM_WORDS * 2),
+        cram: new Uint8Array(CRAM_ENTRIES * 2),
+        sat: null,
+        regs: { BXR: 0, BYR: 0, MWR: 0, CR: CR_BG_ON },
+        tiles: 0, patterns: 0, sprites: 0
+      };
     }
-    var pic = sat.pictureFromFiles(files);
-    var data = editor.toPicture(pic);
-    var tiles = 0;
-    for (var c = editor.FIRST_CHAR; c < pic.nextChar; c++) if (pic.tiles[c]) tiles++;
-    return {
-      picture: pic,
-      vram: data.vram,
-      cram: data.cram,
-      sat: data.vram.slice(editor.SAT_ADDR * 2,
-                           editor.SAT_ADDR * 2 + IMPORT_SAT_WORDS * 2),
-      regs: { BXR: data.regs.BXR, BYR: data.regs.BYR,
-              MWR: data.regs.MWR, CR: data.regs.CR },
-      tiles: tiles,
-      patterns: pic.spritePatterns.length,
-      sprites: pic.sprites.length
-    };
+    /* the raw image over the picture */
+    raw.runs.forEach(function (r) { base.vram.set(r.bytes, r.addr * 2); });
+    raw.cram.forEach(function (r) { base.cram.set(r.bytes, r.addr * 2); });
+    if (raw.regs) {
+      ["BXR", "BYR", "MWR", "CR"].forEach(function (k) {
+        if (typeof raw.regs[k] === "number") base.regs[k] = raw.regs[k] | 0;
+      });
+    }
+    base.sat = base.vram.slice(RAW_SAT_ADDR * 2, RAW_SAT_ADDR * 2 + IMPORT_SAT_WORDS * 2);
+    return base;
   }
 
   /* #288: the toy's art files as a banked-data plan (docs/BANKED-DATA.md
@@ -412,7 +494,8 @@
     }
     if (!w) return null;
     var editor = editorModule();
-    var satByte = editor.SAT_ADDR * 2;
+    var SAT_ADDR = editor ? editor.SAT_ADDR : RAW_SAT_ADDR;
+    var satByte = SAT_ADDR * 2;
     var vram = w.vram;
     var lo = null, hi = null;
     for (var i = 2048; i < satByte; i += 2) {
@@ -432,7 +515,7 @@
     if (lo != null) blob.set(vram.subarray(lo, hi), spanOff);
     var copies = [
       { vram: 0, blobOff: batOff, words: 1024 },
-      { vram: editor.SAT_ADDR, blobOff: satOff, words: IMPORT_SAT_WORDS }
+      { vram: SAT_ADDR, blobOff: satOff, words: IMPORT_SAT_WORDS }
     ];
     if (lo != null) {
       copies.push({ vram: lo / 2, blobOff: spanOff, words: spanBytes / 2 });

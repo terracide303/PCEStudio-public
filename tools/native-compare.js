@@ -164,7 +164,7 @@ function browserFrames(toyPath, count) {
   const source = fs.readFileSync(path.resolve(ROOT, toyPath), "utf8");
   /* the toy folder's art files, as the studio hands them to the runtime */
   const dir = path.dirname(path.resolve(ROOT, toyPath));
-  const files = ["tiles.json", "palettes.json", "sprites.json"]
+  const files = ["tiles.json", "palettes.json", "sprites.json", "vram.json"]   /* vram.json: baked art (tools/bake-art.js) */
     .filter((n) => fs.existsSync(path.join(dir, n)))
     .map((n) => ({ name: n, source: fs.readFileSync(path.join(dir, n), "utf8") }));
   const songFiles = ["song.json", "songs.json"].filter((n) => fs.existsSync(path.join(dir, n)))
