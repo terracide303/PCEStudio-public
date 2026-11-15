@@ -3111,6 +3111,38 @@
       return out;
     }
 
+    /* The usage object (the margin the author reads): the validator's
+     * hardware counts, plus the interpreter capacities when a rom_check
+     * budget is passed.  Each entry is { used, limit } or null-free. */
+    function usageReport(report, romBudget) {
+      const base = report && report.budgets && report.budgets.usage;
+      if (!base) return null;
+      const out = Object.assign({}, base);
+      const b = report.budgets;
+      if (b.route1) {
+        out.interpreter_frame_fraction = {
+          used: Math.round(b.route1.ratio60 * 1000) / 1000, limit: 1,
+          note: "the same frame through the exported ROM's interpreter " +
+                "(an estimate); over 1 means below 60 Hz"
+        };
+      }
+      if (romBudget && romBudget.rows) {
+        const names = { "data-bank": "bytecode_bytes", "constants": "constants",
+          "functions": "functions", "registers": "registers",
+          "upvalues": "upvalues", "upvalue-cells": "upvalue_cells",
+          "globals": "globals", "closures": "closures",
+          "table-slots": "table_slots", "table-cells": "table_cells",
+          "arguments": "arguments" };
+        for (const r of romBudget.rows) {
+          if (names[r.id]) {
+            out[names[r.id]] = { used: r.used, limit: r.limit,
+                                 percent: r.percent, status: r.status };
+          }
+        }
+      }
+      return out;
+    }
+
     function toolValidate(args) {
       requireToy();
       let frames = 8;
@@ -3133,6 +3165,7 @@
         code: report.code,
         problems: problems,
         budgets: report.budgets,
+        usage: usageReport(report, null),
         hooks: report.hooks,
         functions: report.functions,
         note: "renderer/pce-validate.js (#32); a finding whose source line the " +
@@ -3144,10 +3177,19 @@
       requireToy();
       try {
         const report = romcheck.check(session.source, { chunkName: MAIN });
+        let usage = null;
+        try {
+          usage = usageReport(
+            validateLib.validate(session.source,
+                                 { chunkName: MAIN, frames: 8,
+                                   songs: session.songs }),
+            report.budget);
+        } catch (e) { usage = null; }
         return {
           ok: report.ok,
           findings: report.findings,
           budget: report.budget,
+          usage: usage,
           carried: report.carried,
           refused: report.refused,
           routes: report.routes,

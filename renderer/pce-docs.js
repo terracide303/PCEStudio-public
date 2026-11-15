@@ -42,7 +42,8 @@
                              require("./pce-cgen.js"),
                              require("./pce-ilbc.js"),
                              require("./pce-rom.js"),
-                             require("./pce-romcheck.js"));
+                             require("./pce-romcheck.js"),
+                             require("./pce-songbank.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.docs = factory(root.PCEStudio.toyhost,
@@ -54,11 +55,12 @@
                                   root.PCEStudio.cgen,
                                   root.PCEStudio.ilbc,
                                   root.PCEStudio.rom,
-                                  root.PCEStudio.romcheck);
+                                  root.PCEStudio.romcheck,
+                                  root.PCEStudio.songbank);
   }
 })(typeof self !== "undefined" ? self : this,
    function (host, editor, toys, il, psg, validate, cgen, ilbc, rom,
-             romcheck) {
+             romcheck, songbank) {
   "use strict";
 
   function range(lo, hi) { return lo + ".." + hi; }
@@ -218,6 +220,64 @@
         refusal: "toy-rom-full", what: "the bytecode plus its asset banks",
         from: "rom.BANK" }
     ];
+    /* The music budgets: the PSG's voices, an effect's ranges, the song
+     * bank.  The refusals are the ones the host and the song bank raise. */
+    rows.push(
+      { label: "PSG channels", value: host.SOUND_CHANNELS, unit: "",
+        refusal: "sfx-range",
+        what: "sfx() and release() take a channel 0 to " +
+              (host.SOUND_CHANNELS - 1) + "; music() shares all of them",
+        from: "host.SOUND_CHANNELS" },
+      { label: "an effect's pitch", value: host.PITCH_MAX, unit: " (F)",
+        refusal: "sfx-range", what: "sfx() takes a 12-bit divider 0 to " +
+              host.PITCH_MAX + "; note(midi) makes one",
+        from: "host.PITCH_MAX" },
+      { label: "an effect's volume", value: host.SOUND_VOLUME_MAX, unit: "",
+        refusal: "sfx-range", what: "sfx() takes a level 0 to " +
+              host.SOUND_VOLUME_MAX, from: "host.SOUND_VOLUME_MAX" },
+      { label: "an effect's length", value: host.SFX_FRAMES_MAX,
+        unit: " frames", refusal: "sfx-range",
+        what: "sfx() takes 1 to " + host.SFX_FRAMES_MAX +
+              " frames, then gives the channel back",
+        from: "host.SFX_FRAMES_MAX" },
+      { label: "songs in the ROM", value: songbank.MAX_SONGS, unit: "",
+        refusal: "toy-song-count",
+        what: "music(n) plays the n-th song of the song bank",
+        from: "songbank.MAX_SONGS" },
+      { label: "the song bank", value: songbank.TRAILER, unit: " B for all " +
+        "the songs together",
+        refusal: "toy-song-bank-full",
+        what: "every song assembled, 16-byte aligned, before the trailer " +
+              "that lists them",
+        from: "songbank.TRAILER" }
+    );
+    /* The background budgets: one layer, its palettes, its scroll. */
+    rows.push(
+      { label: "background palettes", value: editor.PALETTES, unit: " of " +
+        editor.ENTRIES + " colours", refusal: "17th-palette",
+        what: "the background map's palette field is 4 bits",
+        from: "editor.PALETTES" },
+      { label: "sprite palettes", value: editor.SPRITE_PALETTES,
+        unit: " of " + editor.SPRITE_ENTRIES + " colours",
+        refusal: "pal-range", what: "colour table entries " + (editor.PALETTES * editor.ENTRIES) +
+              " on",
+        from: "editor.SPRITE_PALETTES" },
+      { label: "the background map", value: host.BAT_WORDS, unit: " words (" + (host.WIDTH / 8) +
+        " by " + (host.WIDTH / 8) + " cells)", refusal: "vram-range",
+        what: "one layer; the map size is fixed in this toy contract",
+        from: "host.BAT_WORDS" },
+      { label: "horizontal scroll (BXR)", value: host.REGISTERS[0].max,
+        unit: " pixels", refusal: "reg-range",
+        what: "wrap a growing scroll with a power-of-two remainder",
+        from: "host.REGISTERS.0.max" },
+      { label: "vertical scroll (BYR)", value: host.REGISTERS[1].max,
+        unit: " lines", refusal: "reg-range", what: "the same, for BYR",
+        from: "host.REGISTERS.1.max" },
+      { label: "tiles in a picture", value: editor.MAX_TILES, unit: "",
+        refusal: "tile-space",
+        what: "the picture editor's tile space",
+        from: "editor.MAX_TILES" }
+    );
     /* The interpreter's capacities, from the one table the drawer prints
      * (the data bank is the row above; the rest ride along). */
     for (var i = 0; i < romcheck.LIMITS.length; i++) {
@@ -230,32 +290,85 @@
     return rows;
   }
 
-  /* What the Export route does with the gallery's five games today
-   * (docs/ROM_SPEED.md is the long form).  tests/check-rom-rules.js runs
-   * rom_check on each toy named here and holds the verdict and the code. */
+  /* What the two export routes do with the gallery's five games today.
+   * Every figure is held by tests/check-rom-rules.js: `near` and `over` are
+   * the budget rows rom_check reports for the toy (id, used), re-read from
+   * the live check; `pace` is the game frames the native ROM completes in
+   * 300 video frames, re-read from docs/NATIVE.md's measured tables.
+   * docs/ROM_SPEED.md and docs/NATIVE.md are the long form. */
+  var STATE_WINDOW = 300;   /* the video frames a pace is counted over */
   var RULE_STATE = [
     { game: "PLATFORMER", toy: "toys/platformer/main.lua", builds: true,
-      code: null,
-      detail: "builds, and runs at " + host.FRAME_HZ +
-              " Hz (the measured run overran no frame; the picture is " +
-              "the browser's)" },
+      code: null, near: [], over: [],
+      verdict: "builds, runs at " + host.FRAME_HZ + " Hz (the measured run " +
+               "overran no frame; the picture is the browser's)",
+      native: "builds and plays at the full " + host.FRAME_HZ + " Hz pace " +
+              "in an emulator",
+      pace: 283 },
     { game: "TOWER", toy: "toys/tower/main.lua", builds: true, code: null,
-      detail: "builds, but too slow to play: its one-time init draw and " +
-              "each frame take several video frames" },
+      near: [["data-bank", 7862], ["constants", 104], ["globals", 30]],
+      over: [],
+      verdict: "builds, but is too slow to play: its one-time init draw " +
+               "and each frame take several video frames",
+      native: "builds and holds the full pace in an emulator (its sound is " +
+              "silent in that build)",
+      pace: 236 },
     { game: "STARFALL", toy: "toys/demo-game/main.lua", builds: true,
-      code: null,
-      detail: "builds (its art travels in its own ROM bank), but too " +
-              "slow, and no captured frame is the browser's picture yet" },
+      code: null, near: [["constants", 111]], over: [],
+      verdict: "builds (its art travels in its own ROM banks), but is too " +
+               "slow to play",
+      native: "builds banked with its art and sound, and holds the full " +
+              "pace; the picture is the browser's except a few pixels at " +
+              "the start of the first split line",
+      pace: 286 },
     { game: "DUSK RUN", toy: "toys/dusk-run/main.lua", builds: true,
       code: null,
-      detail: "builds, but too slow: its boot alone takes several " +
-              "seconds" },
+      near: [["data-bank", 7470], ["constants", 114], ["functions", 41],
+             ["registers", 41], ["upvalues", 19], ["upvalue-cells", 70],
+             ["globals", 31]],
+      over: [],
+      verdict: "builds, at the edge of seven limits, and is too slow: its " +
+               "boot alone takes several seconds",
+      native: "builds and runs, but crawls while it draws its background " +
+              "tiles at the start; baking those tiles into art files " +
+              "removes the phase",
+      pace: 9 },
     { game: "NOVA TIDE", toy: "toys/nova-tide/main.lua", builds: false,
       code: "rom-budget",
-      detail: "exports, but stops at load: it is over four interpreter " +
-              "limits (registers, boot upvalue cells, globals, table slots); " +
-              "its raster(line, spec) calls are carried" }
+      near: [["functions", 35], ["upvalues", 17], ["table-cells", 183],
+             ["arguments", 8]],
+      over: [["data-bank", 16384], ["registers", 67],
+             ["upvalue-cells", 91], ["globals", 62], ["table-slots", 27]],
+      verdict: "exports, but the interpreter ROM stops at load: it is over " +
+               "five limits",
+      native: "builds banked with its art and sound; the picture equals " +
+              "the browser's and its raster(line, spec) calls are carried",
+      pace: 138 }
   ];
+
+  /* "registers 67 of 41" for a budget row id and a used figure. */
+  function stateFigure(id, used) {
+    var limit = 0, label = id;
+    for (var i = 0; i < romcheck.LIMITS.length; i++) {
+      if (romcheck.LIMITS[i].id === id) {
+        limit = romcheck.LIMITS[i].limit;
+        label = romcheck.LIMITS[i].label;
+      }
+    }
+    return label + " " + used + " of " + limit;
+  }
+
+  function stateText(s) {
+    var text = s.verdict;
+    function list(rows) {
+      return rows.map(function (r) { return stateFigure(r[0], r[1]); })
+                 .join(", ");
+    }
+    if (s.over.length) text += ": " + list(s.over);
+    if (s.near.length) text += (s.over.length ? "; near " : " (near: ") +
+                               list(s.near) + (s.over.length ? "" : ")");
+    return text + (s.code ? " (" + s.code + ")" : "");
+  }
 
   /* The idioms that compile fast (docs/ORIGINAL-CODE-IDIOMS.md and
    * docs/ROUTINE-BENCH.md are the measured long form).  A row's `code` is
@@ -419,8 +532,8 @@
               r.refusal + " — " + r.what];
     });
     var stateRows = RULE_STATE.map(function (s) {
-      return [s.game, s.builds ? "builds" : "refused",
-              s.detail + (s.code ? " (" + s.code + ")" : "")];
+      return [s.game, s.builds ? "builds" : "refused", stateText(s),
+              s.native, s.pace + " of " + STATE_WINDOW];
     });
     var idiomRows = RULE_IDIOMS.map(function (d) {
       return [d.rule, d.why, d.code || ""];
@@ -457,11 +570,23 @@
           " percent is over and refuses the export with the named code. " +
           "A sprite spec the walker cannot pin to constants and a " +
           "raster(line, spec) with a cram field are findings, not capacities." },
-      { type: "h3", text: "What exports today", source: "the gallery's " +
-          "five games, held by tests/check-rom-rules.js (the long form " +
-          "is docs/ROM_SPEED.md)" },
-      { type: "table", headers: ["game", "verdict", "what that means"],
+      { type: "h3", text: "What runs today", source: "the gallery's " +
+          "five games, held by tests/check-rom-rules.js against rom_check " +
+          "and docs/NATIVE.md (the long forms are docs/ROM_SPEED.md and " +
+          "docs/NATIVE.md)" },
+      { type: "table", headers: ["game", "interpreter ROM",
+          "what that means", "native route (machine code)",
+          "game frames in " + STATE_WINDOW + " video frames"],
         rows: stateRows },
+      { type: "p", text: "The interpreter ROM is what the Export button and " +
+          "export_pce build today; the native route compiles the same " +
+          "toy to machine code and is built by the tools, not yet by the " +
+          "Export button. " + "Full pace, " + host.FRAME_HZ + " Hz, is " +
+          STATE_WINDOW + " game frames in " + STATE_WINDOW +
+          " video frames; the paces above were measured in an emulator, " +
+          "and none of the five games has been run on a real console yet " +
+          "(the one program the native route has been shown running on " +
+          "hardware is the maintainer's PCEHero intro; docs/NATIVE.md)." },
       { type: "h3", text: "Idioms that compile fast", source: "docs/" +
           "ORIGINAL-CODE-IDIOMS.md, docs/ROUTINE-BENCH.md" },
       { type: "table", headers: ["idiom", "why", "refusal it avoids"],
@@ -496,8 +621,255 @@
     return {
       id: "writing-for-the-rom",
       title: "Writing for the ROM",
-      blocks: romWritingBlocks().concat(romRulesBlocks())
+      blocks: romWritingBlocks().concat(romRulesBlocks(),
+                                        hardwareDesignBlocks())
     };
+  }
+
+  /* ---- the hardware-design topic ---------------------------------------- *
+   *
+   * A short plain page on what a game on this hardware looks like: the
+   * limits with their numbers, and what to do at each one.  Every number
+   * is read from the module that enforces it; the ranges real HuCards use
+   * are in my own words from docs/HUCARD-BUDGETS.md, each carrying the
+   * sentence of that study it comes from (`doc`) so
+   * tests/check-hardware-design.js can hold it to the study. */
+  var HW_COMMERCIAL = {
+    activeSprites: { text: "most of the time a shipped shooter shows five " +
+        "to 45 sprites, with a few reaching the whole table",
+        doc: "5–45 active entries" },
+    busiestLine: { text: "half the games measured never put more than " +
+        "eight to 14 strips on one line",
+        doc: "8–14 strips" },
+    spritePalettes: { text: "shooters use nine to 16 sprite palettes " +
+        "against two to six background ones",
+        doc: ["9–16 sprite palettes", "2–6 BG palettes"] },
+    rasterSplits: { text: "zero to three raster writes a frame is normal " +
+        "and twelve the most seen",
+        doc: "0–3 per frame, 12 at the extreme" },
+    sceneVram: { text: "a shipped scene holds roughly 5,000 to 23,000 " +
+        "words of tiles and sprite patterns in VRAM",
+        doc: "5,000–23,000 VRAM words" },
+    frameWrites: { text: "an ordinary frame writes only zero to 256 of " +
+        "them", doc: "0–256 words" },
+    psgWrites: { text: "a typical music driver writes about 35 PSG " +
+        "registers a frame, all in one burst",
+        doc: "about 35 PSG writes per frame" },
+    frameShare: { text: "shipped games spend 15 to 67 percent of a " +
+        "frame on their own work, and the guideline is to stay under " +
+        "70 percent",
+        doc: ["15–67% of it", "under 70% of 119,660 cycles"] },
+    maps: { text: "shipped games use background maps from 32 by 32 up to " +
+        "64 by 64 cells; this toy contract has the 32 by 32 one",
+        doc: "32x32 to 64x64 cells" }
+  };
+
+  /* The IL ops a author pays for most, priced by the validator's model. */
+  var HW_COST_OPS = [
+    ["arith", "an add, subtract, shift or mask"],
+    ["cmp", "a compare"],
+    ["call", "a call to a local function"],
+    ["mul", "a multiply"],
+    ["sat", "one sat() word"],
+    ["pal", "one pal() colour"],
+    ["reg", "one reg() write"],
+    ["sfx", "an sfx() or music() call"]
+  ];
+
+  /* The three example toys, with the usage keys their header comments list
+   * (tests/check-hardware-design.js re-measures them). */
+  var HW_EXAMPLES = [
+    { file: "toys/examples/shooter.lua", what: "a shooter: a ship, four " +
+      "bullets and four falling rocks, with sound effects" },
+    { file: "toys/examples/platformer.lua", what: "a platformer: a hero " +
+      "that runs and jumps over a pit onto three ledges" },
+    { file: "toys/examples/raster-scroll.lua", what: "a raster-scroll toy: " +
+      "one background layer cut into four bands scrolling at four speeds" }
+  ];
+
+  function hardwareFigures() {
+    var bpp = Math.round(Math.log(editor.ENTRIES) / Math.log(2));
+    var tileWords = editor.TILE * editor.TILE * bpp / 16;
+    var cellWords = editor.STRIP_PX * editor.STRIP_PX * bpp / 16;
+    var scene = { tiles: 256, patterns: 24 };
+    scene.words = host.BAT_WORDS + scene.tiles * tileWords +
+                  scene.patterns * cellWords;
+    scene.percent = Math.round(scene.words * 100 / host.VRAM_WORDS);
+    var model = validate.MODEL;
+    var cost = HW_COST_OPS.map(function (o) {
+      var cycles = model.OP_CYCLES[o[0]];
+      return { op: o[0], what: o[1], cycles: cycles,
+               perFrame: Math.floor(model.FRAME_CLOCKS / cycles) };
+    });
+    return { bpp: bpp, tileWords: tileWords, cellWords: cellWords,
+             scene: scene, cost: cost,
+             interpRaster: Math.round(model.ROUTE1.RASTER),
+             interpPlain: Math.round(model.ROUTE1.NO_RASTER),
+             halfRate: host.FRAME_HZ / 2,
+             songAverage: Math.floor(songbank.TRAILER / songbank.MAX_SONGS),
+             noise: songbank.NOISE_CHANNELS };
+  }
+
+  function hardwareDesignBlocks() {
+    var f = hardwareFigures();
+    var M = validate.MODEL;
+    var C = HW_COMMERCIAL;
+    var sizeRows = editor.SPRITE_SIZES.map(function (z) {
+      return [z.width + " x " + z.height,
+              z.cells * f.cellWords + " words",
+              String(z.width / editor.STRIP_PX)];
+    });
+    var costRows = f.cost.map(function (c) {
+      return [c.what, c.cycles + " cycles", "about " + c.perFrame];
+    });
+    var exampleRows = HW_EXAMPLES.map(function (e) {
+      return [e.file, e.what];
+    });
+    return [
+      { type: "p", text: "A game on this hardware is small and strict, and " +
+          "every limit below is checked: validate and rom_check report it " +
+          "and name the refusal. Stay under the numbers and the game " +
+          "plays; the numbers come from the code, and the figures about " +
+          "shipped games are ranges from the maintainer's own cards, " +
+          "measured in an emulator." },
+
+      { type: "h3", text: "One background layer, and raster splits",
+        source: "renderer/pce-toyhost.js, renderer/pce-editor.js" },
+      { type: "p", text: "There is one background layer: a map of " +
+          host.BAT_WORDS + " cells (" + (host.WIDTH / editor.TILE) +
+          " by " + (host.WIDTH / editor.TILE) + " tiles of " + editor.TILE +
+          " by " + editor.TILE + " pixels), and " + C.maps.text + ". " +
+          "Parallax is made by raster splits: a raster entry changes " +
+          "BXR, BYR or CR from one display line down, so a layer cut " +
+          "into bands scrolls each band at its own speed. A frame has " +
+          host.VDW_LINES + " display lines and one entry a line; " +
+          C.rasterSplits.text + ". Register the entries from frame() " +
+          "with raster(line, spec): it is cheap, and the ROM carries it. " +
+          "Wrap every scroll with a power-of-two remainder (BXR is " +
+          host.REGISTERS[0].bits + " bits)." },
+
+      { type: "h3", text: "Sprites: " + host.SAT_ENTRIES + " in all, " +
+          editor.LINE_STRIPS + " strips on a line",
+        source: "renderer/pce-editor.js SPRITE_SIZES, renderer/pce-toyhost.js" },
+      { type: "p", text: "The sprite table holds " + host.SAT_ENTRIES +
+          " entries. A sprite is cut into strips " + editor.STRIP_PX +
+          " pixels wide, and a display line draws at most " +
+          editor.LINE_STRIPS + " strips: the rest of the line's sprites " +
+          "are dropped. That line limit is the one that bites, not the " +
+          "table: " + C.activeSprites.text + ", and " + C.busiestLine.text +
+          "." },
+      { type: "table", headers: ["sprite size", "VRAM for its pattern",
+                                 "strips it costs on a line"],
+        rows: sizeRows },
+      { type: "p", text: "What to do. Stay under the line limit and no work " +
+          "is needed: validate counts the strips per line and refuses " +
+          "validate-sprite-line. Park idle sprites off the screen " +
+          "(a SAT Y far below the picture) so they cost nothing. Keep " +
+          "rows clear: do not line up more sprites than fit on one row " +
+          "(spread enemies over different heights). A sprite " +
+          editor.STRIP_PX + " pixels wide costs one strip, the cheapest. " +
+          "If you must " +
+          "show more than a line holds, multiplex: rotate which sprites " +
+          "take the first places in the table each frame so the dropped " +
+          "ones change, and the loss shows as flicker. Real games either " +
+          "accept a steady drop or flicker on purpose; a toy should not " +
+          "need either." },
+
+      { type: "h3", text: "Palettes", source: "renderer/pce-editor.js" },
+      { type: "p", text: "There are " + editor.PALETTES + " background " +
+          "palettes and " + editor.SPRITE_PALETTES + " sprite palettes, " +
+          "each of " + editor.ENTRIES + " colours; entry 0 of a " +
+          "palette is transparent. A colour is 3 bits each of red, green " +
+          "and blue (rgb(r, g, b), each 0 to " + (host.CRAM_WORD_MAX >> 6) +
+          "). The sprite half " +
+          "is the scarce one: " + C.spritePalettes.text + ". Give " +
+          "each enemy kind a palette and reuse one pattern for " +
+          "several colour schemes." },
+
+      { type: "h3", text: "Tiles and VRAM", source: "renderer/pce-toyhost.js, " +
+          "renderer/pce-editor.js" },
+      { type: "p", text: "VRAM is " + host.VRAM_WORDS + " words shared by " +
+          "the map, the tiles and the sprite patterns. A tile of " +
+          editor.TILE + " by " + editor.TILE + " pixels costs " +
+          f.tileWords + " words; a " + editor.STRIP_PX + " by " +
+          editor.STRIP_PX + " sprite pattern costs " + f.cellWords +
+          " words; the map costs " + host.BAT_WORDS + ". A small scene " +
+          "of " + f.scene.tiles + " tiles and " + f.scene.patterns +
+          " sprite patterns costs " + f.scene.words + " words, " +
+          f.scene.percent + " percent of VRAM; " + C.sceneVram.text +
+          ". Draw the scene once in init(); in a shipped game " +
+          C.frameWrites.text + " VRAM words. Re-use tiles and recolour " +
+          "them with palettes before drawing more." },
+
+      { type: "h3", text: "Music and sound", source: "renderer/pce-psg.js, " +
+          "renderer/pce-songbank.js, renderer/pce-toyhost.js" },
+      { type: "p", text: "The sound chip has " + psg.CHANNELS + " channels, " +
+          "each playing a " + psg.WAVE_STEPS + "-step waveform of " +
+          "5-bit samples. Noise is possible on two channels only: " +
+          f.noise.join(" and ") + " (counting from 0). The other " +
+          "channels play waveforms. music(n) plays the n-th song of the " +
+          "song bank and uses the channels the song uses; sfx(channel, " +
+          "freq, volume, frames) takes one channel for a square-wave " +
+          "effect for up to " + host.SFX_FRAMES_MAX + " frames and gives " +
+          "it back to the song; release(channel) gives it back at once. " +
+          "A ROM carries up to " + songbank.MAX_SONGS + " songs in one " +
+          "song bank of " + songbank.TRAILER + " bytes, about " +
+          f.songAverage + " bytes each if they share it evenly; a " +
+          "longer song takes more of the others' room, and an overfull " +
+          "bank is refused with toy-song-bank-full. In a ROM toy use a " +
+          "MIDI number with note(), never a name. For the song itself " +
+          "the real drivers are small: " + C.psgWrites.text + ". For a " +
+          "drum, use sfx() on a wave channel." },
+
+      { type: "h3", text: "Speed: the frame budget",
+        source: "renderer/pce-validate.js MODEL" },
+      { type: "p", text: "A video frame is " + M.FRAME_CLOCKS + " CPU " +
+          "cycles at " + host.FRAME_HZ + " Hz. frame() plus every " +
+          "raster call has to fit in that for " + host.FRAME_HZ + " frames " +
+          "a second. A toy that needs more than one frame's cycles runs " +
+          "below " + host.FRAME_HZ + " Hz (" + f.halfRate + " Hz at " +
+          "two frames' worth), and validate reports the rate as " +
+          "validate-slow-frame. Past " + M.HARD_FRAMES + " frames the " +
+          "validator refuses it (validate-frame-budget). For scale, " +
+          C.frameShare.text + ". Typical costs, by the validator's model " +
+          "of compiled code:" },
+      { type: "table", headers: ["operation", "cost", "how many fit in one " +
+          "frame (alone)"], rows: costRows },
+      { type: "p", text: "The interpreter ROM that Export builds is " +
+          "slower than the model: a toy with no raster hook costs about " +
+          f.interpPlain + " times the model, one with a raster hook about " +
+          f.interpRaster + " times. The usage report's " +
+          "frame_fraction is the model's; interpreter_frame_fraction is " +
+          "the interpreter's estimate. Cut the work: powers of two for " +
+          "divide and remainder, a table cell read once into a local, " +
+          "constants for sprite specs, and raster(line, spec) rather " +
+          "than a raster(line) callback." },
+
+      { type: "h3", text: "Three complete examples", source: "toys/examples/" },
+      { type: "p", text: "Each passes validate and export_pce, and its " +
+          "header lists the budgets it uses so you can read the margin " +
+          "before you grow it." },
+      { type: "table", headers: ["file", "what it is"], rows: exampleRows },
+
+      { type: "h3", text: "The self-check: the usage report" },
+      { type: "p", text: "validate and rom_check both return a usage " +
+          "object. Read it after every change: sprites (used of " +
+          host.SAT_ENTRIES + "), sprite_strips_on_busiest_line (of " +
+          editor.LINE_STRIPS + "), vram_words (non-zero words of " +
+          host.VRAM_WORDS + ", with the highest address written), " +
+          "bg_palettes and sprite_palettes (of " + editor.PALETTES +
+          "), raster_entries (of " + host.VDW_LINES + "), " +
+          "frame_fraction (of one frame), and, from rom_check, " +
+          "bytecode_bytes (of " + rom.SONG_TABLE_OFF + "), registers, " +
+          "functions, globals and table_slots against the interpreter's " +
+          "limits. Stop adding at " + romcheck.NEAR_PERCENT + " percent " +
+          "of any of them." }
+    ];
+  }
+
+  function hardwareDesignSection() {
+    return { id: "hardware-design", title: "Designing for the hardware",
+             blocks: hardwareDesignBlocks() };
   }
 
   /* ---- the reference --------------------------------------------------- */
@@ -986,6 +1358,7 @@
 
     /* 11. the ROM rules (the rom-rules docs topic) ------------------------ */
     sections.push(romRulesSection());
+    sections.push(hardwareDesignSection());
 
     /* 12. refusals -------------------------------------------------------- */
     var refusalBlocks = [
@@ -1180,12 +1553,20 @@ body +
     romSection: romSection,
     romWritingBlocks: romWritingBlocks,
     romRulesSection: romRulesSection,
+    hardwareDesignSection: hardwareDesignSection,
+    /* The hardware-design topic's data, for tests/check-hardware-design.js */
+    HARDWARE_DESIGN: {
+      commercial: HW_COMMERCIAL,
+      examples: HW_EXAMPLES,
+      figures: hardwareFigures
+    },
     /* The rom-rules data, for tests/check-rom-rules.js to hold to the
      * code: every named refusal is one the code raises, every number a
      * module constant. */
     ROM_RULES: {
       budgets: ruleBudgets,
       state: RULE_STATE,
+      stateWindow: STATE_WINDOW,
       idioms: RULE_IDIOMS,
       fixes: ruleFixes,
       template: RULE_TEMPLATE,

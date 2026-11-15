@@ -52,6 +52,7 @@ const cgen = require("../renderer/pce-cgen.js");
 const ilbc = require("../renderer/pce-ilbc.js");
 const rom = require("../renderer/pce-rom.js");
 const romcheck = require("../renderer/pce-romcheck.js");
+const songbank = require("../renderer/pce-songbank.js");
 const server = require("../tools/mcp/server.js");
 
 const ROOT = path.resolve(__dirname, "..");
@@ -156,11 +157,12 @@ function knownCodes() {
   for (const c in ilbc.REFUSALS) if (!out[c]) out[c] = ilbc.REFUSALS[c];
   for (const L of romcheck.LIMITS) if (!out[L.refusal])
     out[L.refusal] = "the budget finding for " + L.label;
-  const src = fs.readFileSync(path.join(ROOT, "renderer", "pce-rom.js"),
-                              "utf8");
-  const re = /refuse\(\s*"([a-z0-9-]+)"/g;
-  let m;
-  while ((m = re.exec(src))) if (!out[m[1]]) out[m[1]] = "pce-rom refusal";
+  for (const file of ["pce-rom.js", "pce-songbank.js"]) {
+    const src = fs.readFileSync(path.join(ROOT, "renderer", file), "utf8");
+    const re = /refuse\(\s*"([a-z0-9-]+)"/g;
+    let m;
+    while ((m = re.exec(src))) if (!out[m[1]]) out[m[1]] = file + " refusal";
+  }
   return out;
 }
 
@@ -252,6 +254,22 @@ function allowedNumbers() {
    256 - 1                                 /* a byte's top */
   ].forEach(add);
   for (const L of romcheck.LIMITS) add(L.limit);
+  /* the music and background budget rows: each value is re-read from its
+   * module field below; their unit and what strings quote these too */
+  for (const r of RULES.budgets()) add(r.value);
+  [editor.ENTRIES, editor.SPRITE_ENTRIES, editor.PALETTES,
+   editor.SPRITE_PALETTES, host.SOUND_CHANNELS - 1, host.WIDTH / 8,
+   editor.PALETTES * editor.ENTRIES, RULES.stateWindow,
+   0, 1,                                        /* first index, one */
+   Math.round(Math.log2(host.PITCH_MAX + 1)),   /* the divider's 12 bits */
+   Math.round(Math.log2(editor.ENTRIES))        /* a pixel's 4 bits */
+  ].forEach(add);
+  /* the state table's figures: each is held to the live rom_check or
+   * docs/NATIVE.md in checkState() */
+  for (const s of RULES.state) {
+    add(s.pace);
+    for (const row of s.near.concat(s.over)) add(row[1]);
+  }
   return set;
 }
 
@@ -285,7 +303,7 @@ function checkNumbers() {
   /* each budget row's value is re-read from the module field it names */
   const live = {
     host: host, editor: editor, toys: toys, cgen: cgen, ilbc: ilbc,
-    rom: rom, romcheck: romcheck
+    rom: rom, romcheck: romcheck, songbank: songbank
   };
   const byLabel = {};
   for (const L of romcheck.LIMITS) byLabel[L.id] = L;
@@ -304,14 +322,15 @@ function checkNumbers() {
            r.what, L.what);
       }
     } else {
-      const dot = r.from.indexOf(".");
-      const mod = live[r.from.slice(0, dot)];
-      const field = r.from.slice(dot + 1);
-      check(!!mod && mod[field] !== undefined,
+      /* a dotted path: module.field, or module.field.0.max */
+      const parts = r.from.split(".");
+      let val = live[parts[0]];
+      for (let k = 1; k < parts.length && val !== undefined; k++)
+        val = val[parts[k]];
+      check(val !== undefined,
             "budget row " + r.label + " names live field " + r.from);
-      if (mod && mod[field] !== undefined)
-        eq("budget " + r.label + " value is " + r.from,
-           r.value, mod[field]);
+      if (val !== undefined)
+        eq("budget " + r.label + " value is " + r.from, r.value, val);
     }
   }
 
@@ -325,6 +344,9 @@ function checkNumbers() {
 }
 
 /* ---- 4. the state table is the code's --------------------------------- */
+
+const nativeText = fs.readFileSync(path.join(ROOT, "docs", "NATIVE.md"),
+                                   "utf8");
 
 function checkState() {
   eq("the state table names the card's five games",
@@ -341,8 +363,22 @@ function checkState() {
       check(rep.ok && rep.findings.length === 0,
             s.game + " rom_checks clean today");
     }
-    check(typeof s.detail === "string" && s.detail.length > 0,
-          s.game + "'s row says what that means");
+    check(typeof s.verdict === "string" && s.verdict.length > 0 &&
+          typeof s.native === "string" && s.native.length > 0,
+          s.game + "'s row says what that means on both routes");
+    /* the near and over figures are rom_check's own, row for row */
+    const rows = rep.budget.rows;
+    const want = (st) => rows.filter((x) => x.status === st)
+      .map((x) => [x.id, x.used]);
+    eq(s.game + "'s near rows are rom_check's", s.near, want("near"));
+    eq(s.game + "'s over rows are rom_check's", s.over, want("over"));
+    /* the native pace is docs/NATIVE.md's measured figure, on a line that
+     * names the game */
+    const line = nativeText.split("\n").some((l) =>
+      l.indexOf(s.game) >= 0 &&
+      new RegExp("(^|[^0-9,])" + s.pace + "([^0-9,]|$)").test(l));
+    check(line, s.game + "'s pace " + s.pace +
+          " is a figure in docs/NATIVE.md's measured lines");
   }
 }
 
@@ -426,6 +462,8 @@ async function checkInstructions() {
         "the topic's markdown is the ROM rules chapter");
   check(value.markdown.indexOf("| sprites | 64 SAT entries |") >= 0,
         "the topic's markdown carries the budgets");
+  check(src.indexOf('topic \\"hardware-design\\"') >= 0,
+        "the instructions point at the hardware-design topic");
   const listing = await server.session.call("docs", {});
   const listed = listing && Array.isArray(listing.content)
     ? JSON.parse(listing.content[0].text) : listing;

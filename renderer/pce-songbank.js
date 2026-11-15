@@ -79,5 +79,6 @@
     return { bytes: bank, entries: entries, used: pos };
   }
 
-  return { build: build, adapt: adapt, BANK: BANK, TRAILER: TRAILER, MAX_SONGS: MAX_SONGS };
+  return { build: build, adapt: adapt, BANK: BANK, TRAILER: TRAILER, MAX_SONGS: MAX_SONGS,
+           NOISE_CHANNELS: hutrack.NOISE_CHANNELS };
 });

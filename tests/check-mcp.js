@@ -677,6 +677,64 @@ function usedChannels(song) {
     const good = await client.call("validate", {});
     check(!good.isError && good.body.ok, "the validator passes parallax");
 
+    /* the usage report: the margin the connected Claude reads (validate
+     * keeps every existing key and adds `usage`) */
+    {
+      const editorLib = require("../renderer/pce-editor.js");
+      const hostLib = require("../renderer/pce-toyhost.js");
+      const u = good.body.usage;
+      check(u && typeof u === "object", "validate returns a usage object");
+      check(good.body.budgets && good.body.hooks && good.body.problems,
+            "validate still returns budgets, hooks and problems");
+      if (u) {
+        eq("usage: sprites limit is the SAT", u.sprites.limit,
+           hostLib.SAT_ENTRIES);
+        eq("usage: the line limit is the editor's",
+           u.sprite_strips_on_busiest_line.limit, editorLib.LINE_STRIPS);
+        eq("usage: VRAM limit", u.vram_words.limit, hostLib.VRAM_WORDS);
+        eq("usage: palette limits",
+           [u.bg_palettes.limit, u.sprite_palettes.limit],
+           [editorLib.PALETTES, editorLib.SPRITE_PALETTES]);
+        eq("usage: raster limit is the display lines",
+           u.raster_entries.limit, hostLib.VDW_LINES);
+        eq("usage: parallax registers its four raster entries",
+           u.raster_entries.used, 4);
+        eq("usage: parallax draws no sprite", u.sprites.used, 0);
+        check(u.vram_words.used > 0 &&
+              u.vram_words.used <= u.vram_words.highest_written + 1,
+              "usage: parallax's VRAM words are counted (" +
+              u.vram_words.used + ")");
+        eq("usage: parallax uses four background palettes",
+           u.bg_palettes.used, 4);
+        check(Math.abs(u.frame_fraction.used -
+              good.body.budgets.ratio60) < 0.001,
+              "usage: frame_fraction is the budget's ratio60");
+        check(u.interpreter_frame_fraction &&
+              u.interpreter_frame_fraction.used > u.frame_fraction.used,
+              "usage: the interpreter's fraction is above the model's");
+      }
+      const rc = await client.call("rom_check", {});
+      check(!rc.isError && rc.body.budget && rc.body.findings,
+            "rom_check still returns budget and findings");
+      const ru = rc.body.usage;
+      check(ru && typeof ru === "object", "rom_check returns a usage object");
+      if (ru) {
+        const row = (id) => rc.body.budget.rows.filter((r) => r.id === id)[0];
+        eq("usage: bytecode bytes are the budget's data-bank row",
+           [ru.bytecode_bytes.used, ru.bytecode_bytes.limit],
+           [row("data-bank").used, row("data-bank").limit]);
+        for (const [key, id] of [["registers", "registers"],
+                                 ["functions", "functions"],
+                                 ["globals", "globals"],
+                                 ["table_slots", "table-slots"]]) {
+          eq("usage: " + key + " is the budget's " + id + " row",
+             [ru[key].used, ru[key].limit], [row(id).used, row(id).limit]);
+        }
+        eq("usage: rom_check's hardware counts are validate's",
+           ru.raster_entries, u.raster_entries);
+      }
+    }
+
     const exported = await client.call("export_pce", { name: "parallax-mcp" });
     check(!exported.isError && exported.body.ok, "export_pce writes a .pce");
     contains("the export names #100's browser route", exported.body.route,
