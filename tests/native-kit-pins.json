@@ -1,0 +1,9 @@
+{
+ "opt": "-Oz",
+ "roms": {
+  "platformer": "5b142c08a145d70401d916a0a1d1911ec2182f99f29b59f613041d783b37f761",
+  "tower": "7917bfbe89906371cab96c298ba1536b117448d2cb2289cf57968397da324c58",
+  "starfall": "200a49fdf65031c999d6ce653f4a4f9bdaef3a829900fb9f808865ecb1e2af4d",
+  "novatide": "3862d994f3a00b287d39f991db4de8f1dc8e984e588a61e8748a0a9c76ea0ce4"
+ }
+}

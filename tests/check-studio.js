@@ -1016,6 +1016,35 @@ async function checkExport(page) {
         "#115: … naming the interpreter image it could not fetch in the stub");
   check(studio.exportOpen() === true, "#115: the dialog stays open on that");
   studio.loadExample("palette", true);
+
+  /* the dialog's "Download native build kit" button: the page builds the kit's
+   * zip itself (docs/NATIVE-KIT.md; the build from it is tests/check-native-kit.js) */
+  check(!!page.dom.get("export-kit") && /id="export-kit"[^>]*>Download native build kit</.test(fs.readFileSync(PAGE, "utf8")),
+        "the Export dialog has a 'Download native build kit' button");
+  const nkSources = {
+    base: JSON.parse(fs.readFileSync(path.join(RENDERER, "native-kit-base.json"), "utf8")),
+    compiler: (url) => fs.readFileSync(path.resolve(RENDERER, url), "utf8")
+  };
+  const nkState = await studio.exportKit({ sources: nkSources });
+  check(nkState && nkState.phase === "kit" && nkState.bytes && nkState.bytes.length > 100000,
+        "the kit button builds a zip in the page (" + JSON.stringify(nkState && nkState.phase) + " " + JSON.stringify(nkState && nkState.findings) + ")");
+  if (nkState && nkState.bytes) {
+    const nkEntries = zipFormat.read(nkState.bytes);
+    const nkNames = nkEntries.map((e) => e.name);
+    check(nkNames.indexOf("pcestudio-native-kit/build.js") >= 0 && nkNames.indexOf("pcestudio-native-kit/game/main.lua") >= 0 &&
+          nkNames.indexOf("pcestudio-native-kit/toolchain.json") >= 0,
+          "… with the script, the toolchain pins and the game's main.lua");
+    const nkMain = nkEntries.find((e) => e.name === "pcestudio-native-kit/game/main.lua");
+    check(nkMain && /function frame/.test(Buffer.from(nkMain.bytes).toString("utf8")), "… and main.lua is the toy's code");
+    check(/native-kit\.zip$/.test(nkState.name), "… named <toy>-native-kit.zip (" + nkState.name + ")");
+  }
+  check(/node build\.js/.test(studio.exportDialog().lead), "… and the dialog says how to run it");
+  /* a toy the CONSOLE tab refuses gets no kit */
+  studio.setEditorText('function frame(t, f)\n  reg("NOPE", 0)\nend\n');
+  const nkBad = await studio.exportKit({ sources: nkSources });
+  check(nkBad && nkBad.phase === "blocked" && nkBad.findings.some((f) => f.code === "validate-range"),
+        "… a toy the compiler front end refuses gets its findings, not a zip");
+  studio.loadExample("palette", true);
 }
 
 /* ---- 2/3. 40 frames diff 0 against check-toys' expected state ---------- */
