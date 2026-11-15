@@ -1,0 +1,9 @@
+llvm-mos SDK
+------------
+This kit does not contain llvm-mos. build.js downloads the official release
+named in toolchain.json from https://github.com/llvm-mos/llvm-mos-sdk.
+
+llvm-mos and its SDK are licensed under the Apache License 2.0 with LLVM
+Exceptions (https://github.com/llvm-mos/llvm-mos-sdk/blob/main/LICENSE and
+https://llvm.org/LICENSE.txt). The "LLVM Exceptions" let you distribute programs
+you compile with it without carrying the Apache notice in your program.

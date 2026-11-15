@@ -1,0 +1,33 @@
+# The native build kit (docs/NATIVE-KIT.md) on a clean ubuntu, windows and macOS machine:
+# unzip the kit into an empty folder, let build.js download llvm-mos, build PLATFORMER, TOWER,
+# STARFALL and NOVA TIDE, and compare each ROM's SHA-256 with tests/native-kit-pins.json
+# (pinned from a Mac where the same ROMs equal tools/build-toyc-banked.sh's, byte for byte).
+#
+# Started by hand only: Actions > native-kit > Run workflow, or `gh workflow run native-kit.yml`.
+# It never runs on push: each run downloads 115-210 MB per system and costs Actions minutes.
+name: native-kit
+on:
+  workflow_dispatch:
+
+jobs:
+  kit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Show the machine
+        run: node -e "console.log(process.platform, process.arch, process.version)"
+      - name: Build the four games from an unzipped kit
+        env:
+          PCE_KIT_HOME: ${{ runner.temp }}/pcestudio-kit-home
+          TMPDIR: ${{ runner.temp }}
+        run: node tests/check-native-kit.js

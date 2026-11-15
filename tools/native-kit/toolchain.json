@@ -1,0 +1,41 @@
+{
+  "kit": 1,
+  "opt": "-Os",
+  "llvmMos": {
+    "release": "v23.4.0",
+    "licence": "Apache-2.0 WITH LLVM-exception",
+    "source": "https://github.com/llvm-mos/llvm-mos-sdk/releases/tag/v23.4.0",
+    "assets": {
+      "darwin-arm64": {
+        "url": "https://github.com/llvm-mos/llvm-mos-sdk/releases/download/v23.4.0/llvm-mos-macos.tar.xz",
+        "sha256": "089afeff92ad4a5321bea0118b678afa6c725206d32bd8e9691bbe65880f8b7c",
+        "bytes": 192247920,
+        "format": "tar.xz"
+      },
+      "darwin-x64": {
+        "url": "https://github.com/llvm-mos/llvm-mos-sdk/releases/download/v23.4.0/llvm-mos-macos.tar.xz",
+        "sha256": "089afeff92ad4a5321bea0118b678afa6c725206d32bd8e9691bbe65880f8b7c",
+        "bytes": 192247920,
+        "format": "tar.xz"
+      },
+      "linux-x64": {
+        "url": "https://github.com/llvm-mos/llvm-mos-sdk/releases/download/v23.4.0/llvm-mos-linux.tar.xz",
+        "sha256": "0b1dbc8a2b15db88a1a400a687ea24cf1a38548c5ba9fdd61a473e4580ba00c1",
+        "bytes": 115572452,
+        "format": "tar.xz"
+      },
+      "win32-x64": {
+        "url": "https://github.com/llvm-mos/llvm-mos-sdk/releases/download/v23.4.0/llvm-mos-windows.7z",
+        "sha256": "1ccfee003fd0cbbe9311b285ebb8c46548f036d3a32ac9cf2881fe46e9cb0a52",
+        "bytes": 208500952,
+        "format": "7z"
+      },
+      "win32-arm64": {
+        "url": "https://github.com/llvm-mos/llvm-mos-sdk/releases/download/v23.4.0/llvm-mos-windows.7z",
+        "sha256": "1ccfee003fd0cbbe9311b285ebb8c46548f036d3a32ac9cf2881fe46e9cb0a52",
+        "bytes": 208500952,
+        "format": "7z"
+      }
+    }
+  }
+}
