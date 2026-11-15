@@ -516,8 +516,12 @@ function checkTableEmitter() {
   eq("the encoder reports the same site count and cells",
      ilbc.encode(program).tables, { nslots: layout.nslots, cells: layout.cells });
 
+  /* #292: with cell narrowing on (the default) a slot whose stored values fit a byte lives in its own
+   * pool, so its base counts that pool's cells; the layout's base is the all-int32 pool's, which is what
+   * `noNarrowCells` emits. */
+  const cLayout = cgen.emitC(program, { noNarrowCells: true });
   const arrayOf = function (name) {
-    const m = c.match(new RegExp(name + "\\[IL_NSLOTS\\] = \\{ ([^}]*)\\};"));
+    const m = cLayout.match(new RegExp(name + "\\[IL_NSLOTS\\] = \\{ ([^}]*)\\};"));
     return m ? m[1].split(",").map(function (s) { return parseInt(s.trim(), 10); }) : null;
   };
   eq("the C's IL_NSLOTS is the layout's",

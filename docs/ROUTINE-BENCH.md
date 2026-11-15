@@ -107,3 +107,11 @@ to the meta-sprite expander from 7,983 to roughly 1,500.
   from a formula, not from a game.
 - The savings estimates in the ranking are arithmetic from the measured ingredient costs, not builds.
 - Table cells in the fixtures are the compiler's 32-bit cells; the proposed byte cells are not built.
+
+## After #292 (2026-11-15)
+
+Step 1 and the table half of step 3 above are built: a table with a known slot is one direct cell access,
+with byte or 16-bit cells when every stored value fits (docs/NATIVE.md, "Table access with a known slot").
+The `anatomy-table` fixture reads 209 cycles a call against 346 (resolution alone; the key there is a
+parameter, so a guard stays unless LLVM proves it away). The six routines were not re-measured. `sat()`
+inlining and the 8/16-bit arithmetic of steps 2 to 4 are not done.

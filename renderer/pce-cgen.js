@@ -467,7 +467,7 @@
    * written first needs no initial value and costs nothing.  (Linear order
    * is enough: the IL's registers are the Lua VM's, and a branch target
    * always has its value from a path that wrote it first.) */
-  function registersReadFirst(fn, functions) {
+  function registersReadFirst(fn, functions, loopVars) {
     var need = {};
     var written = {};
     var pc, j;
@@ -498,8 +498,11 @@
           if (ups[j].from === "reg") readReg(ups[j].index);
         }
       }
-      if (ins.t === "forprep") written[ins.base] = true;
-      else if (ins.t === "fornext") {
+      if (ins.t === "forprep") {
+        written[ins.base] = true;
+        /* #292 (range analysis): the body only runs after fornext has set the loop variable */
+        if (loopVars) written[ins.base + 3] = true;
+      } else if (ins.t === "fornext") {
         written[ins.base] = true;
         written[ins.base + 3] = true;
       } else if (ins.dst != null) written[ins.dst] = true;
@@ -959,6 +962,10 @@
         var d = code[q];
         if (d.dst === reg) {
           if (d.t === "closure") return { fid: d.fid, cid: a.closureAt[fi + ":" + q] };
+          /* #292: a constant (a loop limit kept in a local or a once-assigned global) */
+          if (d.t === "const" && d.k && d.k.t === "int") return { kint: d.k.v | 0 };
+          /* #292: the value is one `table` site's slot (a static table) */
+          if (d.t === "table") return { tsite: a.tableSiteAt[fi] ? a.tableSiteAt[fi][q] : null };
           if (d.t === "move" && d.src && d.src.r != null) return resolveReg(fi, q, d.src.r, depth + 1);
           if (d.t === "getupval") return resolveUp(fi, d.idx, depth + 1);
           if (d.t === "getglobal") return resolveGlobal(d.name, depth + 1);
@@ -983,6 +990,7 @@
       var sets = globalSets[name];
       if (!sets || sets.length !== 1 || depth > 8) return null;
       var st = sets[0];
+      if (st.src && st.src.k && st.src.k.t === "int") return { kint: st.src.k.v | 0 };
       if (!st.src || st.src.r == null) return null;
       return resolveReg(st.fn, st.pc, st.src.r, depth + 1);
     }
@@ -990,18 +998,290 @@
       var desc = a.functions[fi].upvalues && a.functions[fi].upvalues[u];
       var sites = sitesOfFid[fi];
       if (!desc || !sites || sites.length !== 1 || depth > 8) return null;
-      if (desc.from === "reg") return resolveReg(sites[0].fn, sites[0].pc, desc.index, depth + 1);
+      if (desc.from === "reg") {
+        var rr = resolveReg(sites[0].fn, sites[0].pc, desc.index, depth + 1);
+        if (rr) return rr;
+        /* #292: a main-chunk local kept for the whole run (`local N = 6`) has ONE writer: the constant */
+        var pcode = a.functions[sites[0].fn].code, writer = null, nw = 0;
+        pcode.forEach(function (w) {
+          if (w.dst === desc.index) { nw++; writer = w; }
+          else if ((w.t === "forprep" || w.t === "fornext") && desc.index >= w.base && desc.index <= w.base + 3) nw += 2;
+        });
+        if (a.functions[sites[0].fn].params.length > desc.index) nw += 2;
+        if (nw === 1 && writer.t === "const" && writer.k && writer.k.t === "int") return { kint: writer.k.v | 0 };
+        return null;
+      }
       if (desc.from === "upval") return resolveUp(sites[0].fn, desc.index, depth + 1);
       return null;
     }
     function directCallee(fi, pc, ins) {
       if (huc || NO_DIRECT) return null;
       var c = ins.callee && ins.callee.r != null ? resolveReg(fi, pc, ins.callee.r, 0) : null;
-      if (!c) return null;
+      if (!c || c.fid == null) return null;
       var target = a.functions[c.fid];
       /* a function that is also the toy's hook or called with an unknown arity still takes the shared signature */
       return target ? c : null;
     }
+
+    /* ---- #292: fast table access -------------------------------------------
+     * tableTarget(): the `table` site a base operand provably holds (resolveReg follows moves,
+     * upvalues and once-assigned globals), or null.  A known site's base, cap and field count are
+     * compile-time constants, so tget/tset/setlist/raster read the cell directly.  rangeRegs():
+     * conservative per-register intervals (idea borrowed from branch speed-range's rangeAnalysis:
+     * flow-insensitive, a fixed point, FULL when unmodelled), used to drop a bounds check and to pick a
+     * cell width.  slotKind[s]: 0 = int32 cells, 1 = uint8_t, 2 = int16_t, by the union of every
+     * value any store can put in the slot. */
+    var NO_STATIC_TABLES = !!(options && options.noStaticTables);   /* test aid: the helper path everywhere */
+    function tableTarget(fi, pc, op) {
+      if (huc || NO_STATIC_TABLES || !a.usesTables || !op || op.r == null) return null;
+      var c = resolveReg(fi, pc, op.r, 0);
+      return c && c.tsite != null ? c.tsite : null;
+    }
+    var rangeCache = {};
+    function rangeRegs(fid) {
+      if (rangeCache[fid]) return rangeCache[fid];
+      var fn = a.functions[fid], n = Math.max(1, fn.registers), FULL = [-2147483648, 2147483647];
+      var wdst = [], acc = [], forced = [], rng = [], q, r, iter;
+      for (r = 0; r < n; r++) { wdst.push(null); acc.push(null); forced.push(false); rng.push(null); }
+      for (r = 0; r < fn.params.length && r < n; r++) forced[r] = true;
+      fn.code.forEach(function (c) {
+        if (c.t === "forprep" || c.t === "fornext") forced[c.base] = true;
+      });
+      var rf = registersReadFirst(fn, a.functions, true), readFirst = {};
+      rf.forEach(function (x) { readFirst[x] = true; });
+      function fits(v) { return v >= FULL[0] && v <= FULL[1]; }
+      function mk(lo, hi) { return fits(lo) && fits(hi) && lo <= hi ? [lo, hi] : FULL.slice(); }
+      var atPc = null, depthLeft = 4;   /* while evaluating a local definition: the pc its operands are read at */
+      function opr(o) {
+        if (!o) return FULL;
+        if (o.r != null) {
+          var b = rng[o.r];
+          if (atPc != null && b) {
+            var l = localDef(atPc, o.r);
+            if (l && Math.max(b[0], l[0]) <= Math.min(b[1], l[1])) return [Math.max(b[0], l[0]), Math.min(b[1], l[1])];
+          }
+          return b;
+        }
+        if (o.k) {
+          if (o.k.t === "int") return [o.k.v | 0, o.k.v | 0];
+          if (o.k.t === "bool") return o.k.v ? [1, 1] : [0, 0];
+          if (o.k.t === "nil") return [0, 0];
+        }
+        return FULL;
+      }
+      function pow(k) { return Math.pow(2, k); }
+      function nextP2m1(x) { var m = 1; while (m <= x) m *= 2; return m - 1; }
+      function arithRange(c) {
+        if (c.type !== "int") return FULL.slice();
+        var A = opr(c.a), B = opr(c.b);
+        if (!A || !B) return null;
+        var cb = c.b && c.b.k && c.b.k.t === "int" ? c.b.k.v | 0 : null;
+        switch (c.op) {
+        case "add": return mk(A[0] + B[0], A[1] + B[1]);
+        case "sub": return mk(A[0] - B[1], A[1] - B[0]);
+        case "mul": {
+          var ps = [A[0] * B[0], A[0] * B[1], A[1] * B[0], A[1] * B[1]];
+          return mk(Math.min.apply(null, ps), Math.max.apply(null, ps));
+        }
+        case "mod":
+          if (cb != null && cb > 0) return [0, cb - 1];
+          if (cb != null && cb < 0) return [cb + 1, 0];
+          return FULL.slice();
+        case "idiv":
+          if (cb != null && cb > 0) return mk(Math.floor(A[0] / cb), Math.floor(A[1] / cb));
+          return FULL.slice();
+        case "band":
+          if (cb != null && cb >= 0) return [0, cb];
+          if (c.a && c.a.k && c.a.k.t === "int" && (c.a.k.v | 0) >= 0) return [0, c.a.k.v | 0];
+          if (A[0] >= 0 && B[0] >= 0) return [0, Math.min(A[1], B[1])];
+          return FULL.slice();
+        case "bor":
+        case "bxor":
+          if (A[0] >= 0 && B[0] >= 0) return [0, nextP2m1(Math.max(A[1], B[1]))];
+          return FULL.slice();
+        case "shl":
+          if (cb != null && cb >= 0 && cb < 32 && A[0] >= 0) return mk(A[0] * pow(cb), A[1] * pow(cb));
+          return FULL.slice();
+        case "shr":
+          if (cb != null && cb >= 0 && cb < 32 && A[0] >= 0) return [Math.floor(A[0] / pow(cb)), Math.floor(A[1] / pow(cb))];
+          return FULL.slice();
+        default: return FULL.slice();
+        }
+      }
+      function defRange(c) {
+        switch (c.t) {
+        case "const":
+          if (c.k && c.k.t === "int") return [c.k.v | 0, c.k.v | 0];
+          if (c.k && c.k.t === "bool") return c.k.v ? [1, 1] : [0, 0];
+          if (c.k && c.k.t === "nil") return [0, 0];
+          return FULL.slice();
+        case "move": { var m = opr(c.src); return m ? m.slice() : null; }
+        case "getglobal": case "getupval": {
+          var kr = c.t === "getglobal" ? resolveGlobal(c.name, 0) : resolveUp(fid, c.idx, 0);
+          return kr && kr.kint != null ? [kr.kint, kr.kint] : FULL.slice();
+        }
+        case "arith": return arithRange(c);
+        case "unm": {
+          var u = opr(c.a);
+          if (!u) return null;
+          return c.type === "int" && u[0] > FULL[0] ? mk(-u[1], -u[0]) : FULL.slice();
+        }
+        case "not": case "cmp": return [0, 1];
+        default: return FULL.slice();
+        }
+      }
+      function union(x, y) { return !x ? (y ? y.slice() : null) : !y ? x.slice() : [Math.min(x[0], y[0]), Math.max(x[1], y[1])]; }
+      function refresh(reg) {
+        var v = forced[reg] ? FULL.slice() : acc[reg];
+        if (!forced[reg] && readFirst[reg]) v = union(v, [0, 0]);
+        if (!forced[reg] && !v) v = [0, 0];   /* never written: the zero it starts with */
+        rng[reg] = v;
+      }
+      /* the range of `reg` as the nearest earlier write in straight-line code left it (a loop's start,
+       * limit and step are set just before its forprep); FULL past a join point or an unmodelled write */
+      function localDef(pc, reg) {
+        var tg = jumpTargets[fid];
+        if (tg[pc]) return FULL.slice();          /* paths join right here */
+        for (var j = pc - 1; j >= 0; j--) {
+          var d = fn.code[j];
+          if (d.dst === reg) {
+            var sp = atPc, sd = depthLeft, v;
+            if (sd > 0) { atPc = j; depthLeft = sd - 1; } else atPc = null;
+            v = defRange(d);
+            atPc = sp; depthLeft = sd;
+            return v;
+          }
+          if ((d.t === "forprep" || d.t === "fornext") && reg >= d.base && reg <= d.base + 3) return FULL.slice();
+          if (tg[j]) return FULL.slice();
+        }
+        return FULL.slice();
+      }
+      rng.localDef = localDef;
+      for (r = 0; r < n; r++) refresh(r);
+      var last = {};
+      for (iter = 0; iter < 12; iter++) {
+        var changed = false;
+        last = {};
+        for (q = 0; q < fn.code.length; q++) {
+          var c = fn.code[q], v = null, tgt = null;
+          if (c.dst != null && c.dst < n) {
+            tgt = c.dst;
+            v = defRange(c);
+            if (v) wdst[tgt] = union(wdst[tgt], v);
+          } else if (c.t === "fornext" && c.base + 3 < n) {
+            var fp = -1, fq;
+            for (fq = q - 1; fq >= 0; fq--) if (fn.code[fq].t === "forprep" && fn.code[fq].base === c.base) { fp = fq; break; }
+            var lo = fp < 0 ? FULL : localDef(fp, c.base), lm = fp < 0 ? FULL : localDef(fp, c.base + 1),
+                st = fp < 0 ? FULL : localDef(fp, c.base + 2);
+            tgt = c.base + 3;
+            if (!st || !lo || !lm) v = null;
+            else if (st[0] === st[1] && st[0] > 0) v = mk(lo[0], lm[1]);
+            else if (st[0] === st[1] && st[0] < 0) v = mk(lm[0], lo[1]);
+            else v = FULL.slice();
+          }
+          if (v && tgt != null) {
+            var na = union(acc[tgt], v);
+            if (!acc[tgt] || na[0] !== acc[tgt][0] || na[1] !== acc[tgt][1]) {
+              acc[tgt] = na; last[tgt] = true; changed = true;
+              refresh(tgt);
+            }
+          }
+        }
+        if (!changed) break;
+        if (iter === 11) {
+          Object.keys(last).forEach(function (k) { acc[k] = FULL.slice(); refresh(+k); });
+          iter = 9;
+        }
+      }
+      /* The loop variable r[base+3] as read at `pc` inside that loop's body, when nothing else in the
+       * loop writes it: the loop's own start..limit, however the register is reused elsewhere. */
+      rng.loopVar = function (pc, reg) {
+        var fp, fe, best = null;
+        for (fp = pc - 1; fp >= 0; fp--) {
+          var f0 = fn.code[fp];
+          if (f0.t !== "forprep" || f0.base + 3 !== reg) continue;
+          for (fe = fp + 1; fe < fn.code.length; fe++) {
+            var e0 = fn.code[fe];
+            if (e0.t === "fornext" && e0.base === f0.base && e0.target != null && e0.target === fp + 2) break;
+          }
+          if (fe >= fn.code.length || fe < pc) continue;
+          best = { fp: fp, fe: fe, base: f0.base };
+          break;
+        }
+        if (!best) return null;
+        for (var w = best.fp + 1; w <= best.fe; w++) {
+          var x = fn.code[w];
+          if (x.dst === reg) return null;
+          if ((x.t === "forprep" || x.t === "fornext") && reg >= x.base && reg <= x.base + 3 && x.base !== best.base) return null;
+        }
+        var lo = localDef(best.fp, best.base), lm = localDef(best.fp, best.base + 1), st = localDef(best.fp, best.base + 2);
+        if (!lo || !lm || !st) return null;
+        if (st[0] === st[1] && st[0] > 0) return mk(lo[0], lm[1]);
+        if (st[0] === st[1] && st[0] < 0) return mk(lm[0], lo[1]);
+        return null;
+      };
+      return (rangeCache[fid] = rng);
+    }
+    /* [lo, hi] of an operand, or FULL */
+    function opRange(fid, op, pc) {
+      var FULL = [-2147483648, 2147483647];
+      if (!op) return FULL;
+      if (op.k) {
+        if (op.k.t === "int") return [op.k.v | 0, op.k.v | 0];
+        if (op.k.t === "bool") return op.k.v ? [1, 1] : [0, 0];
+        if (op.k.t === "nil") return [0, 0];
+        return FULL;
+      }
+      if (op.r != null) {
+        var rgs = rangeRegs(fid), rr = rgs[op.r] || FULL;
+        if (pc == null) return rr;
+        /* every one of these holds at pc, so their intersection does too */
+        var out = rr.slice();
+        [rgs.loopVar(pc, op.r), rgs.localDef(pc, op.r)].forEach(function (x) {
+          if (x && Math.max(out[0], x[0]) <= Math.min(out[1], x[1])) { out[0] = Math.max(out[0], x[0]); out[1] = Math.min(out[1], x[1]); }
+        });
+        return out;
+      }
+      return FULL;
+    }
+    /* the cell kind of every table slot; 0 = int32 everywhere when narrowing is off or there are no tables */
+    var slotKind = [];
+    var NO_NARROW = !!(options && options.noNarrowCells);
+    (function () {
+      if (!a.usesTables || !a.table) return;
+      var ns = a.table.sites.length, s, un = [0, 0], per = [];
+      for (s = 0; s < ns; s++) { slotKind.push(0); per.push([0, 0]); }
+      if (huc || NO_NARROW) return;
+      function widen(arr, rg) { arr[0] = Math.min(arr[0], rg[0]); arr[1] = Math.max(arr[1], rg[1]); }
+      a.functions.forEach(function (f, fi) {
+        f.code.forEach(function (c, pc) {
+          var vals = c.t === "setlist" ? c.values : c.t === "tset" ? [c.value] : null;
+          if (!vals) return;
+          var ts = tableTarget(fi, pc, c.base);
+          vals.forEach(function (v) {
+            var rg = opRange(fi, v, pc);
+            if (ts != null) widen(per[ts], rg); else widen(un, rg);
+          });
+        });
+      });
+      for (s = 0; s < ns; s++) {
+        var u = [Math.min(per[s][0], un[0]), Math.max(per[s][1], un[1])];
+        slotKind[s] = (u[0] >= 0 && u[1] <= 255) ? 1 : (u[0] >= -32768 && u[1] <= 32767) ? 2 : 0;
+      }
+    })();
+    var KIND_CT = ["int32_t", "uint8_t", "int16_t"], KIND_POOL = ["il_table_cells", "il_cells8", "il_cells16"];
+    var poolBase = [], poolCells = [1, 1, 1], anyNarrow = false;
+    (function () {
+      if (!a.usesTables || !a.table) return;
+      var run = [0, 0, 0];
+      a.table.sites.forEach(function (site, s) {
+        var k = slotKind[s];
+        poolBase.push(run[k]);
+        run[k] += site.cap + site.nfields;
+        if (k) anyNarrow = true;
+      });
+      poolCells = [Math.max(1, run[0]), Math.max(1, run[1]), Math.max(1, run[2])];
+    })();
 
     /* Call affinity for the bank packer (tools/bank-toyc.py): a direct call is only fast when caller
      * and callee share a bank, so every direct call site carries a weight = how often it runs per
@@ -1185,6 +1465,54 @@
       if (!op || !op.k || op.k.t !== "int") return 0;
       var v = op.k.v | 0;
       return v > 0 && (v & (v - 1)) === 0 ? v : 0;
+    }
+
+    /* #292: a direct cell access for a base that provably holds one `table` site.  cellRef() is the C
+     * lvalue of the array cell for an int key operand (with its guard), fieldRef() of a field.  A guarded
+     * read yields 0 and a guarded write nothing, exactly as the helpers do (docs/TABLES-PLAN.md). */
+    function slotShape(ts) { return a.table.sites[ts]; }
+    function cellExpr(ts, off) {   /* off: a C expression or a number */
+      return KIND_POOL[slotKind[ts]] + "[" + (poolBase[ts] + (typeof off === "number" ? off : 0)) +
+             (typeof off === "number" ? "" : " + " + off) + "]";
+    }
+    function readCast(ts, e) { return slotKind[ts] ? "(" + T + ")" + e : e; }
+    function staticTget(fid, ins, pc, ts, d) {
+      var sh = slotShape(ts);
+      if (ins.key.k && ins.key.k.t === "str") {
+        var f = a.tableFieldIds[ins.key.k.v];
+        line("  " + d + " = " + (f >= sh.nfields ? "0" : readCast(ts, cellExpr(ts, sh.cap + f))) + ";");
+        return;
+      }
+      var rg = opRange(fid, ins.key, pc), K = operand(ins.key);
+      if (rg[0] === rg[1] && ins.key.k) {
+        line("  " + d + " = " + (rg[0] >= 1 && rg[0] <= sh.cap ? readCast(ts, cellExpr(ts, rg[0] - 1)) : "0") + ";");
+      } else if (sh.cap === 0 || rg[1] < 1 || rg[0] > sh.cap) {
+        line("  " + d + " = 0;");
+      } else if (rg[0] >= 1 && rg[1] <= sh.cap) {
+        line("  " + d + " = " + readCast(ts, cellExpr(ts, "(uint8_t)(" + K + " - 1)")) + ";");
+      } else {
+        line("  { " + U + " ti = (" + U + ")" + K + "; " + d + " = (ti <= " + sh.cap + "u && (uint8_t)ti) ? " +
+             readCast(ts, cellExpr(ts, "(uint8_t)ti - 1")) + " : 0; }");
+      }
+    }
+    function staticTset(fid, ins, pc, ts, keyOp, isField, fieldName, valOp) {
+      var sh = slotShape(ts), V = "(" + KIND_CT[slotKind[ts]] + ")(" + operand(valOp) + ")";
+      if (isField) {
+        var f = a.tableFieldIds[fieldName];
+        if (f < sh.nfields) line("  " + cellExpr(ts, sh.cap + f) + " = " + V + ";");
+        return;
+      }
+      var rg = opRange(fid, keyOp, pc), K = operand(keyOp);
+      if (rg[0] === rg[1] && keyOp.k) {
+        if (rg[0] >= 1 && rg[0] <= sh.cap) line("  " + cellExpr(ts, rg[0] - 1) + " = " + V + ";");
+      } else if (sh.cap === 0 || rg[1] < 1 || rg[0] > sh.cap) {
+        /* never in range: the write is ignored */
+      } else if (rg[0] >= 1 && rg[1] <= sh.cap) {
+        line("  " + cellExpr(ts, "(uint8_t)(" + K + " - 1)") + " = " + V + ";");
+      } else {
+        line("  { " + U + " ti = (" + U + ")" + K + "; if (ti <= " + sh.cap + "u && (uint8_t)ti) " +
+             cellExpr(ts, "(uint8_t)ti - 1") + " = " + V + "; }");
+      }
     }
 
     function emitInstruction(fn, fid, ins, pc) {
@@ -1403,7 +1731,11 @@
         ["bxr", "byr", "cr"].forEach(function (nm) {
           if (rkeys.indexOf(nm) >= 0) {
             rmask |= RASTER_KEYS[nm];
-            rvals.push("il_table_getf(" + operand(ins.spec) + ", " + a.tableFieldIds[nm] + ")");
+            var rts = tableTarget(fid, pc, ins.spec);
+            if (rts != null) {
+              var rsh = slotShape(rts), rf = a.tableFieldIds[nm];
+              rvals.push(rf >= rsh.nfields ? "0" : readCast(rts, cellExpr(rts, rsh.cap + rf)));
+            } else rvals.push("il_table_getf(" + operand(ins.spec) + ", " + a.tableFieldIds[nm] + ")");
           } else rvals.push("0");
         });
         line("  toy_raster_entry(" + operand(ins.lineArg) + ", " + rmask + ", " +
@@ -1508,12 +1840,19 @@
       case "setlist":
         /* One guarded write per value: a write past the slot's array part
          * writes nothing (the interpreter faults; the console cannot). */
+        var slts = tableTarget(fid, pc, ins.base);
         for (var vi = 0; vi < ins.values.length; vi++) {
+          if (slts != null) {
+            staticTset(fid, ins, pc, slts, { k: { t: "int", v: ins.index + vi } }, false, null, ins.values[vi]);
+            continue;
+          }
           line("  il_table_set(" + operand(ins.base) + ", " +
                (ins.index + vi) + ", " + operand(ins.values[vi]) + ");");
         }
         break;
       case "tget":
+        var tgts = tableTarget(fid, pc, ins.base);
+        if (tgts != null) { staticTget(fid, ins, pc, tgts, d); break; }
         if (ins.key.k && ins.key.k.t === "str") {
           /* A string key is a field: its program-wide id (first-appearance
            * order) indexes the slot's field cells. */
@@ -1525,6 +1864,12 @@
         }
         break;
       case "tset":
+        var tsts = tableTarget(fid, pc, ins.base);
+        if (tsts != null) {
+          var tsstr = ins.key.k && ins.key.k.t === "str";
+          staticTset(fid, ins, pc, tsts, ins.key, tsstr, tsstr ? ins.key.k.v : null, ins.value);
+          break;
+        }
         if (ins.key.k && ins.key.k.t === "str") {
           line("  il_table_setf(" + operand(ins.base) + ", " +
                a.tableFieldIds[ins.key.k.v] + ", " + operand(ins.value) + ");");
@@ -1626,12 +1971,23 @@
       /* The native pool is the toy's own cells, not the interpreter's fixed
        * 192: the pool is RAM, and 8 KiB is all the console has (DUSK RUN's
        * variables overflowed it by 146 B with three small tables in 768 B). */
-      line("#define IL_TABLE_CELLS " + Math.max(1, a.table.cells));
+      /* #292: cells of a slot whose stored values provably fit a byte or a signed 16-bit word live in
+       * il_cells8 / il_cells16; with no such slot the output is the one pool it always was. */
+      line("#define IL_TABLE_CELLS " + poolCells[0]);
       line("#define IL_NSLOTS " + a.table.nslots);
       line("static " + T + " il_table_cells[IL_TABLE_CELLS]");
       line("    __attribute__((section(\".bss\")));");
+      if (slotKind.indexOf(1) >= 0) {
+        line("static uint8_t il_cells8[" + poolCells[1] + "] __attribute__((section(\".bss\")));");
+      }
+      if (slotKind.indexOf(2) >= 0) {
+        line("static int16_t il_cells16[" + poolCells[2] + "] __attribute__((section(\".bss\")));");
+      }
       line("static const uint16_t il_slot_base[IL_NSLOTS] = { " +
-           a.table.sites.map(function (s) { return s.base; }).join(", ") + " };");
+           poolBase.join(", ") + " };");
+      if (anyNarrow) {
+        line("static const uint8_t il_slot_kind[IL_NSLOTS] = { " + slotKind.join(", ") + " };");
+      }
       line("static const uint8_t il_slot_cap[IL_NSLOTS] = { " +
            a.table.sites.map(function (s) { return s.cap; }).join(", ") + " };");
       line("static const uint8_t il_slot_fields[IL_NSLOTS] = { " +
@@ -1799,36 +2155,68 @@
      * nothing.  A field key indexes the slot's field cells after its array
      * cells; an int key indexes the array cells 1-based. */
     if (a.usesTables) {
+      /* cell(s, off): the cell of slot s at offset off from its base, in whichever pool its kind names */
+      var kinds = [0];
+      if (slotKind.indexOf(1) >= 0) kinds.push(1);
+      if (slotKind.indexOf(2) >= 0) kinds.push(2);
+      function access(off, assign) {   /* statements reading (return) or writing the cell at base + off */
+        var out = [];
+        if (!anyNarrow) {
+          out.push(assign ? "  il_table_cells[il_slot_base[s] + " + off + "] = v;"
+                          : "  return il_table_cells[il_slot_base[s] + " + off + "];");
+          return out;
+        }
+        out.push("  switch (il_slot_kind[s]) {");
+        kinds.forEach(function (k) {
+          out.push("  case " + k + ": " + (assign
+            ? KIND_POOL[k] + "[il_slot_base[s] + " + off + "] = (" + KIND_CT[k] + ")v; return;"
+            : "return (" + T + ")" + KIND_POOL[k] + "[il_slot_base[s] + " + off + "];"));
+        });
+        out.push("  default: " + (assign ? "return;" : "return 0;"));
+        out.push("  }");
+        return out;
+      }
       line("static " + T + " il_table_new(" + T + " s) {");
       line("  " + T + " i;");
       line("  if (s < 0 || s >= IL_NSLOTS) return s;");
-      line("  for (i = 0; i < il_slot_cap[s] + il_slot_fields[s]; i++)");
-      line("    il_table_cells[il_slot_base[s] + i] = 0;");
+      if (!anyNarrow) {
+        line("  for (i = 0; i < il_slot_cap[s] + il_slot_fields[s]; i++)");
+        line("    il_table_cells[il_slot_base[s] + i] = 0;");
+      } else {
+        line("  for (i = 0; i < il_slot_cap[s] + il_slot_fields[s]; i++) {");
+        line("    switch (il_slot_kind[s]) {");
+        kinds.forEach(function (k) {
+          line("    case " + k + ": " + KIND_POOL[k] + "[il_slot_base[s] + i] = 0; break;");
+        });
+        line("    default: break;");
+        line("    }");
+        line("  }");
+      }
       line("  return s;");
       line("}");
       line("");
       line("static " + T + " il_table_get(" + T + " s, " + T + " i) {");
       line("  if (s < 0 || s >= IL_NSLOTS) return 0;");
       line("  if (i < 1 || i > il_slot_cap[s]) return 0;");
-      line("  return il_table_cells[il_slot_base[s] + i - 1];");
+      access("i - 1", false).forEach(function (l) { line(l); });
       line("}");
       line("");
       line("static void il_table_set(" + T + " s, " + T + " i, " + T + " v) {");
       line("  if (s < 0 || s >= IL_NSLOTS) return;");
       line("  if (i < 1 || i > il_slot_cap[s]) return;");
-      line("  il_table_cells[il_slot_base[s] + i - 1] = v;");
+      access("i - 1", true).forEach(function (l) { line(l); });
       line("}");
       line("");
       line("static " + T + " il_table_getf(" + T + " s, " + T + " f) {");
       line("  if (s < 0 || s >= IL_NSLOTS) return 0;");
       line("  if (f >= il_slot_fields[s]) return 0;");
-      line("  return il_table_cells[il_slot_base[s] + il_slot_cap[s] + f];");
+      access("il_slot_cap[s] + f", false).forEach(function (l) { line(l); });
       line("}");
       line("");
       line("static void il_table_setf(" + T + " s, " + T + " f, " + T + " v) {");
       line("  if (s < 0 || s >= IL_NSLOTS) return;");
       line("  if (f >= il_slot_fields[s]) return;");
-      line("  il_table_cells[il_slot_base[s] + il_slot_cap[s] + f] = v;");
+      access("il_slot_cap[s] + f", true).forEach(function (l) { line(l); });
       line("}");
       line("");
     }

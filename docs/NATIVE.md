@@ -294,3 +294,33 @@ through the ceiling of the magnitude; everything else keeps `il_lua_idiv`/`il_lu
 Effect on whole games is small, because gallery games have only about 35 non-power-of-two division sites: TOWER 211 -> 218 game
 frames per 300 video frames, DUSK RUN's start-up (fast-sky copy) 12 -> 14 game frames per 700 video frames; NOVA TIDE is
 bound by its per-line interrupts (49 -> 48).
+
+## Table access with a known slot (2026-11-15, #292)
+
+`oy[i]` used to be `il_table_get(slot, i)`: a slot lookup, two 32-bit range checks and four byte loads of a
+32-bit cell, about 260 cycles (docs/ROUTINE-BENCH.md). `pce-cgen.js` now reads the cell directly when the
+table operand provably comes from ONE `table` site: `resolveReg` follows moves, captured locals and globals
+assigned at a single site, and returns the site; its base, capacity and field count are constants in the C.
+
+- **Bounds checks stay unless proven.** A constant key in range, a `for` variable whose start, limit and
+  step are constants (a literal, a local `N = 6` or a once-assigned global) inside `[1, cap]`, or an
+  expression with an interval inside it (`(k & 7) + 1`) needs none: the read is `cells[BASE + (uint8_t)(i - 1)]`.
+  Anything else keeps a guard (`ti <= cap && (uint8_t)ti`). Out of range still reads 0 and writes nothing.
+  The intervals are per register and flow-insensitive, tightened at the use by the loop's own range and by
+  the nearest straight-line definition (`rangeRegs`, `opRange`; the idea is branch `speed-range`'s).
+- **Cell width.** A slot whose every store (resolved ones, and every unresolved store anywhere in the
+  program) is provably in `[0, 255]` lives in `il_cells8` (`uint8_t`), in `[-32768, 32767]` in `il_cells16`;
+  anything else, or any unresolved store of an unknown value, keeps the int32 pool. The dynamic helpers
+  (a table that arrives as a parameter) dispatch on `il_slot_kind[]`; with no narrow slot the emitted
+  helpers are the old ones. `il_slot_base` is then the base inside the slot's own pool.
+- Not done: tables whose stored values come from other tables' cells (`t[i] = t[i] + 1` is unknown);
+  an interprocedural range for parameters; a HuC (16-bit) lowering (`target: "huc"` is unchanged).
+- Test aids: `emitC(program, { noStaticTables: true, noNarrowCells: true })` is the previous output.
+  `tests/check-cgen-tables.js` pins the resolution, the pools and the guards, and runs the C against the
+  browser and, out of range, against the helper path.
+
+Measured (game frames per 300 video frames, `tools/ggmcp.py ROM satdump 300`): STARFALL 126 -> 143,
+NOVA TIDE 79 -> 119, TOWER 236 and PLATFORMER 282 unchanged (frame-rate bound). Compiled code: NOVA TIDE
+57,125 -> 52,922 B, STARFALL 20,270 -> 14,231 B, TOWER 32,842 -> 26,266 B (`.text` of the objects). No game
+leaves a helper call. The anatomy fixture (`tools/bench-routine.py fixture anatomy-table`, index a parameter
+that LLVM proves in range) went 346 -> 209 cycles a call, of which about 36 are the call itself.
