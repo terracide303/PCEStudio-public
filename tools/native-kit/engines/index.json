@@ -1,0 +1,36 @@
+{
+ "zeroPage": "0x2080",
+ "stackFloor": "0x3E00",
+ "bases": [
+  {
+   "base": "0x2400",
+   "bssEnd": "0x285B",
+   "zeroPageEnd": "0x20DE"
+  },
+  {
+   "base": "0x2800",
+   "bssEnd": "0x2C5B",
+   "zeroPageEnd": "0x20DE"
+  },
+  {
+   "base": "0x2C00",
+   "bssEnd": "0x305B",
+   "zeroPageEnd": "0x20DE"
+  },
+  {
+   "base": "0x3000",
+   "bssEnd": "0x345B",
+   "zeroPageEnd": "0x20DE"
+  },
+  {
+   "base": "0x3400",
+   "bssEnd": "0x385B",
+   "zeroPageEnd": "0x20DE"
+  },
+  {
+   "base": "0x3800",
+   "bssEnd": "0x3C5B",
+   "zeroPageEnd": "0x20DE"
+  }
+ ]
+}

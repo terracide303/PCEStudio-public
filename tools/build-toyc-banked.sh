@@ -56,7 +56,11 @@ H
     export BANK_IDS="1,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30"
     ENG="$G.eng"; mkdir -p "$ENG"
     # pass 1: the engine at a placeholder RAM base, for the header the C needs
-    ENGINE_ZP_BASE=0x2080 ENGINE_BSS_BASE=0x2200 OUT="$ENG" tools/ilvm/build-engine.sh >/dev/null
+    # ENGINE_BASES="0x2400 0x2800 ..." (the native build kit, docs/NATIVE-KIT.md): the engine's RAM
+    # base is the smallest listed base at or above the program's __heap_start, so a prebuilt image
+    # exists for it.  Unset: the engine goes exactly at __heap_start, as before.
+    FIRST_BASE="0x2200"; [ -n "${ENGINE_BASES:-}" ] && FIRST_BASE="${ENGINE_BASES%% *}"
+    ENGINE_ZP_BASE=0x2080 ENGINE_BSS_BASE=$FIRST_BASE OUT="$ENG" tools/ilvm/build-engine.sh >/dev/null
     EXTRA="$EXTRA -I$ENG -Itools/toyc -mlto-zp=96"
     SRCS="$SRCS tools/toyc/toy_sound.c"
   fi
@@ -139,6 +143,12 @@ PY
   B=$(measure); ZPE=${B%% *}; HEAP=${B##* }
   [ $((ZPE)) -le $((0x2080)) ] || { echo "the toy's zero page ends at $ZPE, past the engine's \$2080" >&2; exit 1; }
   # pass 2: the engine against the measured heap, then the final link against its header
+  if [ -n "${ENGINE_BASES:-}" ]; then
+    PICK=""
+    for cand in $ENGINE_BASES; do [ $((cand)) -ge $((HEAP)) ] && { PICK=$cand; break; }; done
+    [ -n "$PICK" ] || { echo "no engine base in ENGINE_BASES fits the heap at $HEAP" >&2; exit 1; }
+    HEAP=$PICK
+  fi
   ENGINE_ZP_BASE=0x2080 ENGINE_BSS_BASE=$HEAP OUT="$ENG" PSG_TRACE="${PSG_TRACE:-0}" tools/ilvm/build-engine.sh >/dev/null
   link
   B2=$(measure)

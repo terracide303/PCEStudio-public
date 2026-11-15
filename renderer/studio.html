@@ -2004,7 +2004,11 @@
     <p id="export-route" class="export-route"></p>
     <p id="export-footer" class="export-footer">Experimental: frame timing is
       a static estimate, checked on an emulator, not on hardware.</p>
+    <p id="export-kit-note" class="export-footer">For a faster ROM, compiled to
+      machine code: the native build kit is a zip with your game and one script
+      (Node 18 or newer; it downloads the official compiler once).</p>
     <div class="modal-actions" id="export-actions">
+      <button type="button" class="btn" id="export-kit">Download native build kit</button>
       <button type="button" class="btn btn-accent" id="export-done">Close</button>
     </div>
   </div>
@@ -2170,6 +2174,7 @@
      modules with no dependency of their own, so they load before the page's
      inline script without the editor or a panel. -->
 <script src="pce-zip.js"></script>
+<script src="pce-native-kit.js"></script>
 <script src="pce-project.js"></script>
 <!-- #95: the SEQUENCER's staff view — a song spelled for a key, a clef, a
      note value and an octave mark, drawn by the SEQUENCER panel.  It reads
@@ -4796,6 +4801,70 @@ function concatBytes(parts) {
   return out;
 }
 
+/* The native build kit (docs/NATIVE-KIT.md): a zip of the game, the compiler front
+ * end, the C runtime, prebuilt sound-engine images and one Node script that builds
+ * game.pce with llvm-mos.  Built in this page from files the site serves; the
+ * C emitter has already run in the CONSOLE tab's checks, so a game it refuses
+ * gets the same findings here and no zip. */
+let nativeKitBaseCache = null;
+function exportKitFetchText(url) {
+  return fetch(url).then((res) => {
+    if (!res || !res.ok) {
+      throw toyRefuse("kit-fetch", url + ": HTTP " + (res ? res.status : "no response"));
+    }
+    return res.text();
+  });
+}
+function exportKitSources() {
+  const NK = PCEStudio.nativeKit;
+  if (nativeKitBaseCache) return Promise.resolve(nativeKitBaseCache);
+  if (typeof fetch !== "function") {
+    return Promise.reject(toyRefuse("kit-fetch", "the page cannot fetch() the kit's files"));
+  }
+  const texts = {};
+  return Promise.all([
+    exportKitFetchText("native-kit-base.json").then((t) => JSON.parse(t)),
+    Promise.all(NK.COMPILER_FILES.map((c) => exportKitFetchText(c.url).then((t) => { texts[c.url] = t; })))
+  ]).then((r) => {
+    nativeKitBaseCache = { base: r[0], compiler: (url) => texts[url] };
+    return nativeKitBaseCache;
+  });
+}
+
+/* `opts.sources` ({base, compiler}) is the test's injection point, as `bank0` is for exportToy. */
+function exportKit(opts) {
+  opts = opts || {};
+  const run = ++exportRun;
+  const NK = PCEStudio.nativeKit;
+  const name = exportFileName().replace(/\.pce$/, "") + "-native-kit.zip";
+  const con = exportConsole();
+  const findings = con ? con.findings.map((f) => exportFinding(f.severity, f.code, f.message, f.line)) : [];
+  if (!con) findings.push(exportFinding("error", "export-console",
+    "the CONSOLE tab did not report on this toy (studio-panel-console.js)"));
+  if (!NK) findings.push(exportFinding("error", "kit-module", "the kit builder did not load (pce-native-kit.js)"));
+  if (findings.some((f) => f.severity !== "warn")) {
+    return Promise.resolve(exportSetState({ phase: "blocked", name: name, findings: findings,
+      route1: con && con.stats ? con.stats.route1 : null, bytes: null, bytecodeBytes: 0, downloaded: false }));
+  }
+  exportSetState({ phase: "building-kit", name: name, findings: findings, route1: null,
+                   bytes: null, bytecodeBytes: 0, downloaded: false });
+  const src = opts.sources ? Promise.resolve(opts.sources) : exportKitSources();
+  return src.then((s) => {
+    if (run !== exportRun) return exportDialogState;
+    const gameName = exportFileName().replace(/\.pce$/, "");
+    const built = NK.build({ base: s.base, compiler: s.compiler, files: files, name: gameName });
+    const downloaded = downloadBytes(name, built.zip);
+    return exportSetState({ phase: "kit", name: name, findings: findings, route1: null,
+      bytes: built.zip, bytecodeBytes: 0, downloaded: downloaded, kitEntries: built.entries.length });
+  }).catch((e) => {
+    if (run !== exportRun) return exportDialogState;
+    return exportSetState({ phase: "blocked", name: name,
+      findings: findings.concat([exportFinding("error", e && e.code || "kit-error",
+        e && e.message || String(e), null)]),
+      route1: null, bytes: null, bytecodeBytes: 0, downloaded: false });
+  });
+}
+
 function exportConsole() {
   const api = panelApi("console");
   return api ? api.state() : null;
@@ -4939,6 +5008,16 @@ function exportLead(state) {
   if (state.phase === "building") {
     return "Building " + state.name + " in this page: IL bytecode and " +
            "renderer/ilvm.bin, no compiler.";
+  }
+  if (state.phase === "building-kit") {
+    return "Collecting the native build kit in this page.";
+  }
+  if (state.phase === "kit") {
+    return "Built " + state.name + " (" + Math.round(state.bytes.length / 1024) +
+           " KB) and downloaded it." + (state.downloaded ? "" :
+           " The browser did not start the download.") +
+           " Unzip it, open a terminal in the folder and run: node build.js" +
+           " (Node 18 or newer; the first run downloads the compiler). docs/NATIVE-KIT.md has the steps per system.";
   }
   if (state.phase === "built") {
     return "Built " + state.name + " (" + state.bytes.length + " B) and " +
@@ -6780,6 +6859,9 @@ function bind() {
   $("export-close").addEventListener("click", () => {
     $("export-modal").hidden = true;
   });
+  $("export-kit").addEventListener("click", () => {
+    exportKit();
+  });
   $("export-done").addEventListener("click", () => {
     $("export-modal").hidden = true;
   });
@@ -7984,6 +8066,7 @@ const studio = {
    * bytes up against Node's; `exportDialog()` is what the dialog shows. */
   exportToy: exportToy,
   exportBytes: (bank0) => exportBuild(bank0),
+  exportKit: exportKit,
   exportAnalysis: () => {
     const A = exportAnalysis();
     return { ok: A.ok, findings: A.findings, route1: A.route1,
