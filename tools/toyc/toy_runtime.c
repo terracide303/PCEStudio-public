@@ -108,7 +108,7 @@ volatile uint8_t toy_host_mode;
  * A BYR written from the interrupt at line L > 0 is stored plus one: Mednafen's VDC shows the row BYR
  * from the next line where the browser model (pce-bg.js, the manual's "BYR+1") shows BYR+1.
  * The TAIL stop is the last record, one line after the last effect: it copies the shadow SAT. */
-#define TAIL_LINE 208
+#define TAIL_LINE 224
 #define RBASE_COLOURS 32
 #define RHDR (1 + 4 * RBASE_COLOURS)       /* header: the base colour count, then the words (index 2, value 2) */
 #ifdef TOY_RASTER_TABLE
