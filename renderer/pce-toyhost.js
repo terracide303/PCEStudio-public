@@ -1367,6 +1367,7 @@
       "timer-range": "a timer reload value outside 0..127",
       "music-range": "a song index outside the songs the runtime was given",
       "sfx-range": "an SFX channel, frequency, volume or length outside its range (an effect's attack plus decay past its length, noise off channels 4 and 5, too)",
+      "sfx-lfo": "lfo() or sfx_lfo(): the PSG's LFO is not carried by the toy hand-off or the interpreter, so a call is refused (il-unsupported in the validator and the export)",
       "sfx-preset": "sfx_preset() with a name that is not one of the presets (the list is in the message)",
       "no-psg": "the PSG model or the song player is not loaded, so no toy can make sound",
       "asset-json": "a tile, sprite or palette file the importer reads is not JSON",

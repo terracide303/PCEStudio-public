@@ -329,7 +329,8 @@ const INSTRUCTIONS =
   "game on this hardware lives inside (sprites, palettes, VRAM, sound, " +
   "speed), and read the usage object validate and rom_check return to see " +
   "how much of each limit is left. Three complete example toys are in " +
-  "toys/examples/. " +
+  "toys/examples/. For sound (waves, noise, effects, what each call costs " +
+  "and what a ROM carries) read docs topic \"sound-guide\". " +
   "Every tool wraps the same modules the studio and the tests use; there is " +
   "no second model.";
 

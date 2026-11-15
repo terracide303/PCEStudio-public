@@ -333,8 +333,8 @@ numbers from it.
   of all eight on all three routes. A wave number past 7 is `sfx-range`.
   `note()` is only a pitch (the 12-bit F), so a note on a chosen wave is
   `sfx_fx(ch, 5, note("C2"), note("C2"), 28, 0, 6, 20)`. A song's own
-  instruments carry their waveforms in the song (the DMF's wavetables, up to 32
-  of them per song in the song bank); those play as written, with no extra call.
+  instruments carry their waveforms in the song (the DMF's wavetables, in the
+  song bank); those play as written, with no extra call.
 - **Slide** moves F (or the noise rate) a step per frame. The arithmetic is
   integer and the same on the console: F is kept times 16, the step is
   `floor(|to - from| * 16 / (frames - 1))`, the frame's value is the sum
@@ -364,6 +364,27 @@ numbers from it.
   (every preset, overlapping effects, a plain `sfx()` cutting into noise)
   equal, write for write and frame for frame, in the studio, in the exported
   interpreter ROM and in the native ROM.
+
+**The LFO is refused.** The PSG's LFO (channel 1's frequency modulated by
+channel 0) is not carried: the SFX hand-off turns it off whenever it reserves
+channel 0 or 1 (`reserveWrites` writes R9 = 0), and the interpreter has no op
+for it. `lfo()` and `sfx_lfo()` are refused, never a silent no-op: `sfx-lfo` in
+the studio's runtime, `il-unsupported` in the validator and the export
+(`tests/check-sound-guide.js`). A pitch sweep is `sfx_slide`/`sfx_fx`.
+
+**Music effects.** The song format and HuTrack's engine have arpeggio, slides,
+vibrato, volume slides, cuts and delays, and the exported ROM's engine would
+play them, but the studio's player does not model the effect columns, so a
+song that uses any is refused when it is loaded (`song-fx`; an arpeggio
+envelope `song-arp`; samples `song-pcm`) and the toy that plays it does not
+validate or export. What a toy gets instead is on the hand-off, on all three
+routes: a pitch slide (`sfx_slide`, `sfx_fx` from/to), a fade or swell
+(`attack`/`decay`), a cut (`release(channel)` or the effect's `frames`) and a
+delay (start the effect later). Vibrato, tremolo and arpeggio are not carried.
+The sound guide (docs topic `sound-guide`) lists the same, with the cost per
+call, and `toys/examples/` has three sound toys (`sound-jump-shoot.lua`,
+`song-effects/`, `noise-explosion.lua`). `export_pce` now carries the toy's
+songs in the song bank, as the studio's Export does.
 
 **Order within a frame.** The PSG writes of a frame are recorded in the order
 a console would make them: the song's VBlank tick (and an expired SFX's

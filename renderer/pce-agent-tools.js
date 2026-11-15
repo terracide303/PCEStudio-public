@@ -3223,7 +3223,17 @@
         const program = compileToy(session.source);
         const encoded = ilbc.encode(program);
         const bank0 = await host.readBank0();
-        const bytes = romLib.buildToyRom({ bank0: bank0, bytecode: encoded.bytes });
+        /* the toy's songs go into the song bank, as the studio's Export does
+         * (renderer/pce-songbank.js); without them the ROM would be silent */
+        const songbank = (typeof module === "object" && module.exports)
+          ? require("./pce-songbank.js")
+          : (typeof self !== "undefined" && self.PCEStudio && self.PCEStudio.songbank);
+        const build = { bank0: bank0, bytecode: encoded.bytes };
+        if (session.songs.length) {
+          if (!songbank) refuse("toy-song-bank", "the song bank module is not loaded");
+          build.songs = function (n) { return songbank.build(session.songs, n); };
+        }
+        const bytes = romLib.buildToyRom(build);
         const name = (args.name || "toy").toString().replace(/[^A-Za-z0-9._-]+/g, "-")
           .replace(/^[-.]+|[-.]+$/g, "") || "toy";
         const wrote = await host.writeRom({ bytes: bytes, name: name, out: args.out });
@@ -3236,6 +3246,7 @@
                  "renderer/pce-ilbc.js -> renderer/pce-rom.js buildToyRom over " +
                  "the committed renderer/ilvm.bin",
           bytecode_bytes: encoded.bytes.length,
+          songs: session.songs.length,
           ilvm_bytes: bank0.length,
           assets: session.files.filter(function (f) { return f.name !== MAIN; })
                               .map(function (f) { return f.name; }),

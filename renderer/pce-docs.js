@@ -829,7 +829,9 @@
           "the real drivers are small: " + C.psgWrites.text + ". For a " +
           "drum or any hit, use sfx_preset(\"hit\", " + f.noise[0] +
           ") or sfx_noise() on a noise channel (the sound chapter " +
-          "lists the presets)." },
+          "lists the presets). The sound-guide topic has the wave " +
+          "instruments, what each call costs per frame, and which " +
+          "effects a ROM carries." },
 
       { type: "h3", text: "Speed: the frame budget",
         source: "renderer/pce-validate.js MODEL" },
@@ -1341,6 +1343,134 @@
           "  if pad[1].i then sfx_preset(\"jump\", 0) end\n" +
           "  if f % 120 == 0 then sfx_slide(1, 400, 150, 22, 20) end\n" +
           "end" }
+      ]
+    });
+
+    /* 8b. the sound guide ------------------------------------------------ */
+    var guideWaves = host.SFX.WAVE_NAMES.map(function (n, i) {
+      return [String(i), n, i === 1 ? "the PSG's noise generator: channels " +
+        sfxNoise.join(" and ") + " only; no wave is loaded" :
+        "a " + psg.WAVE_STEPS + "-step, 5-bit wave loaded into the channel"];
+    });
+    var guidePresets = host.SFX.PRESETS.map(function (p) {
+      return [p.name, host.SFX.WAVE_NAMES[p.wave], p.frames + " frames",
+              p.wave === host.SFX.WAVE_NOISE ? "channel " + sfxNoise.join(" or ") : "any channel"];
+    });
+    sections.push({
+      id: "sound-guide", title: "Sound guide: what the chip does and what a call costs",
+      blocks: [
+        { type: "p", text: "Read this before you write a toy that makes sound. " +
+            "It says what the PC Engine's sound chip can do, which calls reach " +
+            "it from a toy, what each costs per frame, and which of them an " +
+            "exported ROM carries. Every call below exists and behaves the " +
+            "same in the studio, in the exported interpreter ROM and in the " +
+            "natively compiled ROM; a call a ROM cannot carry is refused by " +
+            "validate with a code, never dropped. tests/check-sfx-fx.js " +
+            "proves the PSG register writes equal on all three." },
+
+        { type: "h3", text: "What the chip can do" },
+        { type: "table", headers: ["part", "what it is", "from a toy"],
+          rows: [
+            [psg.CHANNELS + " channels", "each plays one " + psg.WAVE_STEPS +
+             "-step waveform of 5-bit samples at its own frequency (F, a 12-bit " +
+             "divider) and its own level (AL, 0.." + host.SOUND_VOLUME_MAX + ")",
+             "sfx(), sfx_fx(), a song"],
+            ["waveform RAM", "one " + psg.WAVE_STEPS + "-step wave per channel, " +
+             "loaded by writing the steps in order; the wave IS the instrument",
+             "sfx_fx's wave 0.." + host.SFX.WAVE_MAX + "; a song's own wavetables"],
+            ["noise", "a pseudo-random generator on channels " +
+             sfxNoise.join(" and ") + " only (counting from 0), with a 5-bit rate",
+             "sfx_noise(), sfx_fx wave 1, the hit and explosion presets"],
+            ["DDA", "a channel written one sample at a time (sampled sound); " +
+             "it costs about a third of the frame in real games",
+             "not carried: a song with samples is refused song-pcm"],
+            ["LFO", "channel 1's frequency modulated by channel 0 (vibrato, " +
+             "wobble)", "not carried: lfo() and sfx_lfo() are refused " +
+             "(sfx-lfo in the studio, il-unsupported in validate and the export). " +
+             "The SFX hand-off turns the LFO off whenever it reserves channel 0 or 1, " +
+             "and the interpreter has no op for it; for a pitch sweep use sfx_slide " +
+             "or sfx_fx"]
+          ] },
+
+        { type: "h3", text: "The calls, what each costs, and whether it exports" },
+        { type: "p", text: "Costs are CPU cycles of the HuC6280 per video frame " +
+            "(a frame is about 119,000), measured on the native route in an " +
+            "emulator (docs/NATIVE-SOUND.md); the interpreter ROM runs the same " +
+            "glue. Every call here exports, in the interpreter ROM that Export " +
+            "builds and in the native ROM." },
+        { type: "table", headers: ["call", "what it costs", "notes"],
+          rows: [
+            ["music(n)", "the song's tick costs about 15,500 cycles a frame on average " +
+             "(13 percent of a frame) for the sequencer's demo song, up to about 38,000 on " +
+             "the busiest row; the frame the song starts about 70,000",
+             "up to " + songbank.MAX_SONGS + " songs, " + songbank.TRAILER +
+             " bytes together; a song with effect columns is refused song-fx"],
+            ["sfx(ch, freq, volume, frames)", "the frame it starts uploads the " +
+             "32-step square: about 7,000 cycles, one frame", "a flat square"],
+            ["sfx_fx(...) and its short forms", "about 400 cycles a frame while it plays; " +
+             "6,800 to 8,200 on the frame a tone effect starts (the wave upload); " +
+             "a noise effect starts cheaper, with three register writes",
+             "six at once is about 3 percent of a frame; an effect lasts 1.." +
+             host.SFX.FRAMES_MAX + " frames; a channel past 5, a noise effect off " +
+             "channels " + sfxNoise.join(" or ") + ", or a wave past " +
+             host.SFX.WAVE_MAX + " is sfx-range"],
+            ["sfx_preset(name, ch)", "as sfx_fx", "a row of one table, no numbers to tune"],
+            ["release(ch)", "a few register writes; not measured on its own",
+             "the song waits for its next note on that channel"],
+            ["note(midi)", "a table read", "returns F; a MIDI number in a ROM toy"]
+          ] },
+        { type: "p", text: "A register-driver music engine in a commercial game " +
+            "writes about 35 PSG registers a frame; sample players take a third " +
+            "of the frame. Budget for the song's tick first, then count effects at " +
+            "about 400 cycles each; stagger starts so two tone effects do not begin " +
+            "on the same frame." },
+
+        { type: "h3", text: "Wave instruments" },
+        { type: "p", text: "sfx_fx's wave argument is the instrument. The same " +
+            "32-byte tables are in renderer/pce-sfx.js (the studio) and in the " +
+            "interpreter's glue (the ROM); a test compares them byte for byte. " +
+            "note() gives a pitch, not a wave, so a note on a wave is " +
+            "sfx_fx(ch, wave, note(m), note(m), volume, 0, decay, frames). A " +
+            "song's own instruments carry their wavetables in the song and play " +
+            "as written." },
+        { type: "table", headers: ["wave", "name", "what it is"], rows: guideWaves },
+
+        { type: "h3", text: "The presets" },
+        { type: "table", headers: ["preset", "wave", "length", "channels"],
+          rows: guidePresets },
+
+        { type: "h3", text: "Music effects: what is carried and what is not" },
+        { type: "p", text: "The song format and HuTrack's engine know arpeggio, " +
+            "slides, vibrato, volume slides, cuts and delays, but a toy's songs " +
+            "must play the same in the studio and the ROM, and the studio's " +
+            "player does not model the effect columns yet: a song that uses any " +
+            "is refused with song-fx (an arpeggio envelope song-arp, samples " +
+            "song-pcm) when it is loaded, so no sound is silently dropped. The " +
+            "same sounds, made with the hand-off, are carried on all three routes:" },
+        { type: "table", headers: ["music effect", "in a song", "on the hand-off"],
+          rows: [
+            ["pitch slide up or down", "refused song-fx", "sfx_slide(), or sfx_fx's from and to"],
+            ["volume slide, fade in, fade out", "refused song-fx", "sfx_fx's attack and decay"],
+            ["note cut", "the song's own cut row is carried", "release(ch), or the effect's frames"],
+            ["note delay", "refused song-fx", "start the effect on the frame you want"],
+            ["vibrato, tremolo", "refused song-fx", "not carried (the LFO is refused too); " +
+             "call sfx_slide again each few frames if you must, at the start cost each time"],
+            ["arpeggio", "refused song-fx / song-arp", "call sfx_fx with the next note each " +
+             "frame or two, at the start cost each time"]
+          ] },
+
+        { type: "h3", text: "Three short example toys", source: "toys/examples/" },
+        { type: "p", text: "Each passes validate and export_pce; tests/check-sound-guide.js " +
+            "plays each with scripted button presses." },
+        { type: "table", headers: ["file", "what it is"],
+          rows: [
+            ["toys/examples/sound-jump-shoot.lua", "a jump (the jump preset) and a shot whose voice " +
+             "(saw, organ, bass) you pick with left and right"],
+            ["toys/examples/song-effects/", "a song with a sweeping sine, a bass drop and a coin " +
+             "on the channels the song shares, taken and given back by the hand-off"],
+            ["toys/examples/noise-explosion.lua", "the noise generator: the explosion and hit " +
+             "presets, and a held hiss"]
+          ] }
       ]
     });
 

@@ -867,6 +867,15 @@
       return 0;
     });
 
+    /* The PSG's LFO is not carried (docs/TOYS.md "The LFO"): a call is a
+     * refusal with a code, never a silent no-op. */
+    ["lfo", "sfx_lfo"].forEach(function (name) {
+      setGlobalFn(name, function (Lx) {
+        luaFail(Lx, "sfx-lfo", name + "(): the PSG's LFO (channel 1 modulated by channel 0) is not carried: the SFX hand-off turns it off whenever it reserves channel 0 or 1, and the interpreter has no op for it; use sfx_slide or sfx_fx for a pitch sweep");
+        return 0;
+      });
+    });
+
     setGlobalFn("release", function (Lx) {
       var ch = intArg(Lx, 1, "an SFX channel", 0, 5, "sfx-range");
       luaHost(Lx, function () { host.release(ch); });

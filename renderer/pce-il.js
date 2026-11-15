@@ -263,7 +263,9 @@
     string: "strings are not values in the IL",
     table: "the table library is not in the IL subset",
     math: "call the numeric helpers directly (min/max/floor/abs/sqrt/sin/cos)",
-    utf8: "strings are not values in the IL"
+    utf8: "strings are not values in the IL",
+    lfo: "the PSG's LFO (channel 1 modulated by channel 0) is not carried: the SFX hand-off turns it off whenever it reserves channel 0 or 1, and the interpreter has no op for it; use sfx_slide or sfx_fx for a pitch sweep",
+    sfx_lfo: "the PSG's LFO (channel 1 modulated by channel 0) is not carried: the SFX hand-off turns it off whenever it reserves channel 0 or 1, and the interpreter has no op for it; use sfx_slide or sfx_fx for a pitch sweep"
   };
 
   /* ---- the front end: Lua source -> Fengari Proto ---------------------- */

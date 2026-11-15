@@ -246,8 +246,11 @@ async function checkExamples() {
       "toys/examples/raster-scroll.lua"]);
   const listed = fs.readdirSync(path.join(ROOT, "toys", "examples"))
     .filter((n) => /\.lua$/.test(n)).sort();
+  /* the sound guide's two single-file examples live beside them
+   * (tests/check-sound-guide.js holds those) */
   eq("toys/examples holds exactly the named toys", listed,
-     HW.examples.map((e) => path.basename(e.file)).sort());
+     HW.examples.map((e) => path.basename(e.file))
+       .concat(["sound-jump-shoot.lua", "noise-explosion.lua"]).sort());
   const topicText = blocksText(section().blocks);
 
   for (const ex of HW.examples) {
