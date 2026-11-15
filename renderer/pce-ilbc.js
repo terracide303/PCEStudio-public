@@ -19,7 +19,7 @@
  *             and then the version 2 layout below.  The committed
  *             interpreter reads 1, 2 and 3 since #215: the sound ops call
  *             the HuTrack engine bank.)
- *     5  u8 flags             bit 0: the toy has a raster() callback
+ *     5  u8 flags             bit 0: the toy has a raster() callback; bit 1: it calls raster(line, spec) (reg 0x10..0x1F)
  *     6  u8 initSlot          0xFF when the toy has no init()
  *     7  u8 frameSlot         0xFF when the toy has no frame()
  *     8  u8 rasterSlot        0xFF when the toy has no raster()
@@ -215,6 +215,7 @@
   var FUNC_ENTRY = 10;
   var OP_NONE = 0xFF;
   var OP_CONST = 0x80;
+  var INTERP_REGS = 41;        /* tools/ilvm/ilvm.c MAX_REGS */
   var MAX_REGS = 128;          /* operand encoding: 0x00..0x7F */
   var MAX_CONST = 127;         /* 0x80..0xFE */
   var MAX_ARGS = 8;            /* a call's n and a function's parameters:
@@ -239,7 +240,8 @@
     /* 0x23 copyv (#281, #288): the interpreter has the op since #281
      * (docs/IL.md §14.1) and the IL's instruction since #288 — the art
      * prologue emits it for the importer's VRAM regions (docs/BANKED-DATA.md
-     * §5.10).  CALLASM takes 0x24 (docs/ASM.md §4.2), not this slot. */
+     * §5.10).  CALLASM takes 0x24 (docs/ASM.md §4.2), not this slot.
+     * The table form raster(line, spec) has no opcode: it is tgets and reg writes (docs/IL.md §14.1). */
   };
   var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
   var SOUND_OPS = { music: 1, sfx: 1, release: 1 };
@@ -457,9 +459,59 @@
     if (ins.song) fn(ins.song, ins.line);
     if (ins.ch) fn(ins.ch, ins.line);
     if (ins.freq) fn(ins.freq, ins.line);
+    if (ins.lineArg) fn(ins.lineArg, ins.line);
     if (ins.volume) fn(ins.volume, ins.line);
     if (ins.frames) fn(ins.frames, ins.line);
     if (ins.args) for (var i = 0; i < ins.args.length; i++) fn(ins.args[i], ins.line);
+  }
+
+  /* The table form raster(line, spec) (docs/IL.md §14.1, tgets and reg writes): which of bxr, byr and cr the spec table
+   * sets, read off the IL (the `table` site and the `tset`s with a string key before the call, in one straight
+   * run: a branch landing inside it, or a key that is not bxr/byr/cr, is refused rather than guessed at; cram is
+   * not carried).  The VALUES are read by the interpreter from the table's field cells at the call, as the C
+   * backend reads il_table_getf there, so a register the earlier tset used may be reused freely. */
+  var RASTER_KEYS = { bxr: 1, byr: 2, cr: 4 };
+  var RASTER_POP = [0, 1, 1, 2, 1, 2, 2, 3];
+  /* Sets ins.rasterMask (the keys the spec sets) before the instruction is sized; refuses what it cannot lower. */
+  function annotateRaster(code, pc, fn) {
+    var ins = code[pc];
+    var rk = rasterSpecKeys(code, pc);
+    if (typeof rk === "string") refuse("ilbc-raster-spec", "line " + ins.line + ": " + rk, ins.line);
+    if (fn.registers + 3 > INTERP_REGS) {
+      refuse("ilbc-range", fn.name + " has " + fn.registers + " registers; raster(line, spec) needs 3 more " +
+             "(the interpreter has " + INTERP_REGS + ")", ins.line);
+    }
+    if (!rk.mask) refuse("ilbc-raster-spec", "line " + ins.line + ": the spec sets none of bxr, byr and cr", ins.line);
+    ins.rasterMask = rk.mask;
+  }
+  function rasterSpecKeys(code, pc) {
+    var ins = code[pc];
+    if (!ins.spec || ins.spec.r == null) return "the spec is not a table value";
+    var reg = ins.spec.r, targets = {}, q, mask = 0;
+    for (q = 0; q < code.length; q++) {
+      var t = code[q];
+      if ((t.t === "jmp" || t.t === "br" || t.t === "fornext") && t.target != null) targets[t.target] = true;
+    }
+    for (q = pc - 1; q >= 0; q--) {
+      var c = code[q];
+      if (c.t === "table" && c.dst === reg) {
+        if (targets[q]) return "the spec table is built across a branch";
+        return { mask: mask };
+      }
+      if (targets[q + 1] && q + 1 !== pc) return "the spec table is built across a branch";
+      if (c.t === "tset" && c.base && c.base.r === reg) {
+        if (!c.key || !c.key.k || c.key.k.t !== "str") return "the spec has a key that is not a field name";
+        if (!RASTER_KEYS[c.key.k.v]) {
+          return "the spec field `" + c.key.k.v + "` is not bxr, byr or cr (cram is not carried)";
+        }
+        mask |= RASTER_KEYS[c.key.k.v];
+      } else if (c.t === "move" && c.dst === reg && c.src && c.src.r != null) {
+        reg = c.src.r;   /* the argument copy of a table held in another register: follow it */
+      } else if (c.dst === reg) {
+        return "the spec register is rewritten before the call";
+      }
+    }
+    return "the spec table is not built in this function";
   }
 
   /* ---- instruction sizes and validation ------------------------------- */
@@ -481,6 +533,7 @@
     if (t === "music" || t === "release") return 2;
     if (t === "sfx") return 5;
     if (t === "copyv") return 8;
+    if (t === "raster") return 5 * RASTER_POP[ins.rasterMask] + 3 * (RASTER_POP[ins.rasterMask] + 2);   /* tgets, reg writes */
     if (t === "arith" || t === "cmp") return 5;
     if (t === "table") return 3;
     if (t === "setlist") return 4 + (ins.values || []).length;
@@ -498,7 +551,7 @@
   }
 
   function validateInstruction(ins, fnid, pc) {
-    if (!ins || !OPS[ins.t]) {
+    if (!ins || (!OPS[ins.t] && ins.t !== "raster")) {
       refuse("ilbc-op", "instruction " + (ins && ins.t) +
              " (function " + fnid + ", pc " + pc + ") has no bytecode form");
     }
@@ -781,6 +834,7 @@
       for (pc = 0; pc < code.length; pc++) {
         var ins = code[pc];
         validateInstruction(ins, f, pc);
+        if (ins.t === "raster") annotateRaster(code, pc, fn);
         var size = sizeOf(ins);
         if (size < 0) refuse("ilbc-op", "instruction " + ins.t);
         offsets[pc] = at;
@@ -948,7 +1002,15 @@
     buf.bytes([MAGIC.charCodeAt(0), MAGIC.charCodeAt(1),
                MAGIC.charCodeAt(2), MAGIC.charCodeAt(3)]);
     buf.u8(version);
-    buf.u8(program.hooks && program.hooks.raster != null ? 1 : 0);
+    /* flags: bit 0 the toy has a raster() callback, bit 1 it registers lines with raster(line, spec) (op 0x25) */
+    var usesRasterTable = false;
+    (program.functions || []).forEach(function (rf) {
+      (rf.code || []).forEach(function (rc) { if (rc.t === "raster") usesRasterTable = true; });
+    });
+    if (usesRasterTable && program.hooks && program.hooks.raster != null) {
+      refuse("ilbc-raster-spec", "the toy has a raster() callback and calls raster(line, spec): the interpreter runs one of the two");
+    }
+    buf.u8((program.hooks && program.hooks.raster != null ? 1 : 0) | (usesRasterTable ? 2 : 0));
     buf.u8(initSlot); buf.u8(frameSlot); buf.u8(rasterSlot);
     buf.u8(functions.length); buf.u8(globals.length); buf.u8(constKeys.length);
     buf.u16(funcTabOff); buf.u16(upTabOff); buf.u16(constTabOff);
@@ -970,7 +1032,7 @@
       buf.u16(fnCodeAt[f]);
       buf.u16(fnCodeAt[f] + fnSizes[f]);
       buf.u16(upAt);
-      buf.u8(fnu.registers);
+      buf.u8(fnu.registers + ((fnu.code || []).some(function (rc) { return rc.t === "raster"; }) ? 3 : 0));
       buf.u8(fnu.params.length);
       buf.u8(fnu.upvalues.length);
       buf.u8(banked ? fnBank[f] : 0);
@@ -1189,7 +1251,7 @@
         refuse("ilbc-program", "internal: function " + fid + " pc " + pc +
                " at " + (codeStart + offsets[pc]) + ", buffer " + buf.a.length);
       }
-      buf.u8(OPS[ins.t]);
+      if (ins.t !== "raster") buf.u8(OPS[ins.t]);   /* raster writes its own: its tgets come first */
       switch (ins.t) {
       case "const":
         buf.u8(reg(ins.dst));
@@ -1331,6 +1393,27 @@
       case "release":
         buf.u8(op(ins.ch));
         break;
+      case "raster": {
+        /* No opcode (the fixed interpreter image has no room): the spec's fields are read into temporaries
+         * past the function's registers with ordinary tgets at the call (so a register the earlier tsets used
+         * may be reused), then reg writes carry them: reg 0x10 the line, 0x11 bxr, 0x12 byr, 0x13 cr, and
+         * reg 0x18 | mask registers the entry (the operand is unread). */
+        var rm = ins.rasterMask, rbase = fn.registers;
+        var rkeyNames = ["bxr", "byr", "cr"];
+        rkeyNames.forEach(function (nm, ni) {
+          if (!(rm & RASTER_KEYS[nm])) return;
+          var fid8 = fieldIds[nm];
+          if (fid8 == null || fid8 > 254) refuse("ilbc-table-key", "field `" + nm + "` has no usable id", ins.line);
+          buf.u8(OPS.tget); buf.u8(rbase + ni); buf.u8(tableBase(ins.spec, ins.line));
+          buf.u8(fid8); buf.u8(1);
+        });
+        buf.u8(OPS.reg); buf.u8(0x10); buf.u8(op(ins.lineArg));
+        rkeyNames.forEach(function (nm, ni) {
+          if (rm & RASTER_KEYS[nm]) { buf.u8(OPS.reg); buf.u8(0x11 + ni); buf.u8(rbase + ni); }
+        });
+        buf.u8(OPS.reg); buf.u8(0x18 | rm); buf.u8(OP_NONE);
+        break;
+      }
       case "copyv":
         /* #288: all four operands are raw immediates — no pool constants.
          * vram is a word address, bank the container data bank, off the
@@ -2088,6 +2171,7 @@
              * waiting for the container-wide encode() pass. */
             if (ins.t === "const") operandKey(ins);
             eachOperand(ins, function (op) { operandKey(op); });
+            if (ins.t === "raster") annotateRaster(code, at, fn);
             var size = sizeOf(ins);
             if (size < 0) {
               throw new ILBCError("ilbc-op", "instruction " + ins.t);
@@ -2130,8 +2214,8 @@
     "ilbc-program": "not a pce-il version 1 program, no functions, or a hook " +
                     "with no global slot",
     "ilbc-op": "an instruction the bytecode has no form for (print, " +
-               "raster(table), vget) or a sprite whose spec the walker " +
-               "cannot resolve",
+               "vget) or a sprite whose spec the walker cannot resolve",
+    "ilbc-raster-spec": "a raster(line, spec) the encoder cannot read: a cram field, another key, or a spec built across a branch",
     "ilbc-fixed": "fixed-point arithmetic, comparison or constant",
     "ilbc-key": "a constant or operand with no bytecode form",
     "ilbc-arity": "more than " + MAX_ARGS + " parameters or arguments",
@@ -2186,6 +2270,9 @@
         ops: ["padref", "padget"] },
       { id: "sprites", label: "sat(i, k, v) and sprite(i, spec)",
         detail: "", ops: ["sat", "sprite"] },
+      { id: "raster-table", label: "raster(line, spec), the table form",
+        detail: "bxr, byr and cr; cram is refused",
+        ops: ["raster"] },
       { id: "sound", label: "music(song), sfx(ch, freq, volume, frames), " +
         "release(ch) and note(midi)",
         detail: "a sound toy's container is version 3, which the committed " +

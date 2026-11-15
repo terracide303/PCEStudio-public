@@ -77,6 +77,7 @@ extern void toy_frame(int32_t f);
  * when the bytecode has one; ilvm_has_raster() is the boot-time test). */
 extern void toy_raster(int32_t line);
 extern int ilvm_has_raster(void);
+extern uint8_t ilvm_raster_table;   /* the toy registers lines with raster(line, spec), reg 0x10..0x1F */
 
 #define VDW_LINES 224          /* the toy's frame (pce-toyhost.js HEIGHT) */
 #define RCR_BASE 0x40          /* RCR R06 = 0x40 + VDW line (#15) */
@@ -232,8 +233,7 @@ static void joy_scan(void) {
 }
 
 int32_t toy_pad(int32_t n, int32_t field) {
-  if (!joy_ready || n < 1 || n > 5) return 0;
-  if (field < 0 || field > 7) return 0;
+  if (!joy_ready || (uint32_t)(n - 1) >= 5u || (uint32_t)field > 7u) return 0;
   return (joy_pads[n - 1] >> field) & 1;
 }
 
@@ -297,8 +297,10 @@ void toy_pal(int32_t addr, int32_t word) {
 #endif
 }
 
+static void raster_reg(uint8_t which, uint16_t v);
 void toy_reg(int32_t which, int32_t value) {
   uint16_t v = (uint16_t)value;
+  if (which >= 0x10) { raster_reg((uint8_t)which, v); return; }
 #ifdef TOY_RASTER_BUILD
   if (toy_host_mode == MODE_RASTER) {
     uint8_t l = toy_collect_line;
@@ -400,7 +402,7 @@ void toy_vram_set(int32_t addr, int32_t word) {
  * bytecode's sat instruction (#186) calls this, so an interpreted sat lands
  * in SATB exactly where the compiled route's does. */
 void toy_sat(int32_t i, int32_t k, int32_t v) {
-  if (i < 0 || i > 63 || k < 0 || k > 3) return;
+  if ((uint32_t)i > 63u || (uint32_t)k > 3u) return;
   toy_vram_set(0x7F00 + i * 4 + k, v);
 }
 
@@ -463,6 +465,16 @@ static uint16_t elapsed_ticks(uint8_t t0, uint8_t v0,
   return (uint16_t)((e2 + 1) >> 1);
 }
 
+/* Adds v to the little-endian counter of n bytes at p (the measurement cells; one body, three callers). */
+static void meas_add(volatile uint8_t *p, uint8_t n, uint16_t v) {
+  uint8_t i;
+  for (i = 0; i < n; i++) {
+    v = (uint16_t)(v + p[i]);
+    p[i] = (uint8_t)v;
+    v >>= 8;
+  }
+}
+
 void toy_measure_begin(void) {
   measure_t0 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
   measure_v0 = toy_vblank_count;
@@ -472,21 +484,10 @@ void toy_measure_end(void) {
   uint8_t t1 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
   uint16_t d = elapsed_ticks(measure_t0, measure_v0,
                              t1, toy_vblank_count, 1);
-  uint16_t count = (uint16_t)(MEAS[MEAS_COUNT] | (MEAS[MEAS_COUNT + 1] << 8));
-  uint32_t sum = (uint32_t)MEAS[MEAS_SUM] |
-                 ((uint32_t)MEAS[MEAS_SUM + 1] << 8) |
-                 ((uint32_t)MEAS[MEAS_SUM + 2] << 16) |
-                 ((uint32_t)MEAS[MEAS_SUM + 3] << 24);
-  sum += d;
-  count++;
-  MEAS[MEAS_SUM] = (uint8_t)sum;
-  MEAS[MEAS_SUM + 1] = (uint8_t)(sum >> 8);
-  MEAS[MEAS_SUM + 2] = (uint8_t)(sum >> 16);
-  MEAS[MEAS_SUM + 3] = (uint8_t)(sum >> 24);
-  MEAS[MEAS_COUNT] = (uint8_t)count;
-  MEAS[MEAS_COUNT + 1] = (uint8_t)(count >> 8);
+  meas_add(&MEAS[MEAS_SUM], 4, d);
+  meas_add(&MEAS[MEAS_COUNT], 2, 1);
   if (d > MEAS[MEAS_MAX]) MEAS[MEAS_MAX] = (uint8_t)(d > 255 ? 255 : d);
-  if (count == 1 || d < MEAS[MEAS_MIN]) MEAS[MEAS_MIN] = (uint8_t)(d > 255 ? 255 : d);
+  if ((MEAS[MEAS_COUNT] == 1 && MEAS[MEAS_COUNT + 1] == 0) || d < MEAS[MEAS_MIN]) MEAS[MEAS_MIN] = (uint8_t)(d > 255 ? 255 : d);
 }
 
 #ifdef TOY_RASTER_BUILD
@@ -501,20 +502,8 @@ void toy_measure_raster_end(void) {
   uint8_t t1 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
   uint16_t d = elapsed_ticks(raster_t0, raster_v0,
                              t1, toy_vblank_count, 0);
-  uint16_t count = (uint16_t)(MEAS[MEAS_RCOUNT] |
-                              (MEAS[MEAS_RCOUNT + 1] << 8));
-  uint32_t sum = (uint32_t)MEAS[MEAS_RSUM] |
-                 ((uint32_t)MEAS[MEAS_RSUM + 1] << 8) |
-                 ((uint32_t)MEAS[MEAS_RSUM + 2] << 16) |
-                 ((uint32_t)MEAS[MEAS_RSUM + 3] << 24);
-  sum += d;
-  count++;
-  MEAS[MEAS_RSUM] = (uint8_t)sum;
-  MEAS[MEAS_RSUM + 1] = (uint8_t)(sum >> 8);
-  MEAS[MEAS_RSUM + 2] = (uint8_t)(sum >> 16);
-  MEAS[MEAS_RSUM + 3] = (uint8_t)(sum >> 24);
-  MEAS[MEAS_RCOUNT] = (uint8_t)count;
-  MEAS[MEAS_RCOUNT + 1] = (uint8_t)(count >> 8);
+  meas_add(&MEAS[MEAS_RSUM], 4, d);
+  meas_add(&MEAS[MEAS_RCOUNT], 2, 1);
   if (d > MEAS[MEAS_RMAX]) MEAS[MEAS_RMAX] = (uint8_t)(d > 255 ? 255 : d);
 }
 #endif /* TOY_RASTER_BUILD */
@@ -601,12 +590,12 @@ static void toy_update_end(void) {
   } else {
     lines = (uint16_t)((uint16_t)(d << 1) + ((uint16_t)(d + 2) >> 2));
   }
-  meas16_set(UPD_OFF_UPDATES, (uint16_t)(meas16(UPD_OFF_UPDATES) + 1));
+  meas_add(&MEAS[UPD_OFF_UPDATES], 2, 1);
   if (v1 != upd_v0) {
-    meas16_set(UPD_OFF_OVERRUNS, (uint16_t)(meas16(UPD_OFF_OVERRUNS) + 1));
+    meas_add(&MEAS[UPD_OFF_OVERRUNS], 2, 1);
   }
   if (lines > meas16(UPD_OFF_WORST)) meas16_set(UPD_OFF_WORST, lines);
-  meas32_set(UPD_OFF_TOTAL, meas32(UPD_OFF_TOTAL) + (uint32_t)lines);
+  meas_add(&MEAS[UPD_OFF_TOTAL], 4, lines);
 }
 
 /* ---- the RCR chain ---------------------------------------------------
@@ -844,6 +833,54 @@ static void apply_base(void) {
   toy_pend_nvram = 0;
 }
 
+/* ---- the table form: raster(line, spec) (docs/IL.md §14.1) ---------------------------------------- */
+/* The table form needs no list and no RAM of its own: the entries are written into the line table's own
+ * arrays, which a table-form toy does not otherwise use (cram is not carried, so the colour-word arrays are
+ * free).  An entry registered on line L parks its values in toy_r_a1_lo/hi (bxr), toy_r_v1_lo/hi (byr) and
+ * toy_r_a2_lo (cr), and its field mask in the op byte's bits 5-7, which the chain's walker never tests.  The
+ * committed values (toy_r_bxr_* ...) are what the chain replays while frame() registers, so they must not move
+ * until the collection window: commit_table() then copies each parked entry over, and clears the lines nobody
+ * registered this frame.  Entries registered while the toy boots (init and the main chunk) are static:
+ * toy_r_v2_lo[L] marks them, and the commit leaves such a line alone.  A line holds one entry (the last
+ * registered; the browser refuses a second).  Measured before this layout: a pending list of 16 entries cost
+ * 122 B of RAM and the trace build's stack margin (docs/ROM-SOUND.md §5) was 93 B short. */
+static uint8_t rq_line;
+
+/* The table form's operands arrive as reg() writes (the fixed image has no room for an opcode): which 0x10
+ * is the line, 0x11 bxr, 0x12 byr, 0x13 cr, and 0x18 | mask (1..7) registers the entry. */
+__attribute__((noinline)) static void raster_reg(uint8_t which, uint16_t v) {
+  uint8_t l = rq_line;
+  if (which == 0x10) {
+    rq_line = (v < VDW_LINES) ? (uint8_t)v : 0xFF;
+  } else if (l < VDW_LINES) {
+    switch (which) {
+    case 0x11: toy_r_a1_lo[l] = (uint8_t)v; toy_r_a1_hi[l] = (uint8_t)(v >> 8); break;
+    case 0x12: toy_r_v1_lo[l] = (uint8_t)v; toy_r_v1_hi[l] = (uint8_t)(v >> 8); break;
+    case 0x13: toy_r_a2_lo[l] = (uint8_t)v; break;
+    default:
+      toy_r_op[l] = (uint8_t)((toy_r_op[l] & 0x1F) | (uint8_t)(which << 5));
+      if (toy_host_mode == MODE_DIRECT) toy_r_v2_lo[l] = 1;
+    }
+  }
+}
+
+static void commit_table(void) {
+  uint8_t l, p;
+  for (l = 0; l < VDW_LINES; l++) {
+    p = (uint8_t)(toy_r_op[l] >> 5);
+    if (p) {
+      toy_r_bxr_lo[l] = toy_r_a1_lo[l];
+      toy_r_bxr_hi[l] = toy_r_a1_hi[l];
+      toy_r_byr_lo[l] = toy_r_v1_lo[l];
+      toy_r_byr_hi[l] = toy_r_v1_hi[l];
+      toy_r_cr[l] = toy_r_a2_lo[l];
+      toy_r_op[l] = p;
+    } else if (!toy_r_v2_lo[l]) {
+      toy_r_op[l] = 0;
+    }
+  }
+}
+
 /* One frame's raster(0..223), back to back.  The display is not armed while
  * this runs, so the video keeps the previous frame's last values; the
  * collection is the toy's own cost and the timer sum is the measurement. */
@@ -910,7 +947,7 @@ int main(void) {
   toy_boot();
 
 #ifdef TOY_RASTER_BUILD
-  if (!ilvm_has_raster()) {
+  if (!ilvm_has_raster() && !ilvm_raster_table) {
 #endif
     /* ilvm: no raster() callback.  An interpreted frame() is slower than a
      * compiled one (docs/IL.md §14), so it runs into MODE_BASE during the
@@ -980,8 +1017,6 @@ int main(void) {
     for (f = 0;; f++) {
       uint8_t c0, c1, cv0, cv1;
       uint16_t cd;
-      uint32_t csum;
-      uint16_t ccount;
 
       /* ---- compute while the last collected table is replayed ----
        * The VBlank handler re-arms the chain on every display frame, so the
@@ -1017,26 +1052,19 @@ int main(void) {
       toy_host_mode = MODE_RASTER;
       c0 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
       cv0 = toy_vblank_count;
-      collect_all();
+      if (!ilvm_raster_table) {
+        collect_all();
+      } else {
+        commit_table();
+      }
       c1 = (uint8_t)(*IO_TIMER_COUNTER & 0x7F);
       cv1 = toy_vblank_count;
       toy_update_end();
       toy_host_mode = MODE_DIRECT;
 
       cd = elapsed_ticks(c0, cv0, c1, cv1, 1);
-      ccount = (uint16_t)(MEAS[MEAS_CCOUNT] | (MEAS[MEAS_CCOUNT + 1] << 8));
-      csum = (uint32_t)MEAS[MEAS_CSUM] |
-             ((uint32_t)MEAS[MEAS_CSUM + 1] << 8) |
-             ((uint32_t)MEAS[MEAS_CSUM + 2] << 16) |
-             ((uint32_t)MEAS[MEAS_CSUM + 3] << 24);
-      csum += cd;
-      ccount++;
-      MEAS[MEAS_CSUM] = (uint8_t)csum;
-      MEAS[MEAS_CSUM + 1] = (uint8_t)(csum >> 8);
-      MEAS[MEAS_CSUM + 2] = (uint8_t)(csum >> 16);
-      MEAS[MEAS_CSUM + 3] = (uint8_t)(csum >> 24);
-      MEAS[MEAS_CCOUNT] = (uint8_t)ccount;
-      MEAS[MEAS_CCOUNT + 1] = (uint8_t)(ccount >> 8);
+      meas_add(&MEAS[MEAS_CSUM], 4, cd);
+      meas_add(&MEAS[MEAS_CCOUNT], 2, 1);
 
       /* ---- apply the base, then let the next VBlank arm the chain ----
        * The base writes land while the display is static (nothing armed), so

@@ -50,6 +50,7 @@
 
 const uint8_t *ilvm_program;
 int ilvm_has_raster(void);
+extern uint8_t ilvm_raster_table;
 
 void toy_boot(void);
 void toy_frame(int32_t f);
@@ -74,11 +75,39 @@ void toy_pal(int32_t addr, int32_t word) {
   cram[addr & 0x1FF] = (uint16_t)(word & 0x1FF);
 }
 
-void toy_reg(int32_t which, int32_t value) {
-  if (which >= 0 && which < 3) regs[which] = value;
+void toy_display_on(void) {}
+
+/* The table form raster(line, spec) (reg 0x10..0x1F): the entries the toy registers, one line per entry, recorded
+ * per frame in raster.txt as "frame line mask bxr byr cr" in registration order.  The browser host's rule
+ * (renderer/pce-toyhost.js): a line takes one entry; a second on the same line in the same class is refused,
+ * which stops the toy, so the host counts it in raster_refused and ignores it. */
+#define RASTER_LOG_MAX 4096
+static int32_t rl_frame[RASTER_LOG_MAX], rl_line[RASTER_LOG_MAX], rl_mask[RASTER_LOG_MAX];
+static int32_t rl_bxr[RASTER_LOG_MAX], rl_byr[RASTER_LOG_MAX], rl_cr[RASTER_LOG_MAX];
+static int32_t nrl, raster_refused;
+static int32_t host_cur_frame_for_raster;
+static int32_t rq_line, rq_bxr, rq_byr, rq_cr;
+static void raster_entry(int32_t mask) {
+  int32_t i, line = rq_line;
+  if (line < 0 || line > 223) { raster_refused++; return; }
+  for (i = 0; i < nrl; i++) {
+    if (rl_frame[i] == host_cur_frame_for_raster && rl_line[i] == line) { raster_refused++; return; }
+  }
+  if (nrl >= RASTER_LOG_MAX) return;
+  rl_frame[nrl] = host_cur_frame_for_raster; rl_line[nrl] = line; rl_mask[nrl] = mask;
+  rl_bxr[nrl] = rq_bxr; rl_byr[nrl] = rq_byr; rl_cr[nrl] = rq_cr;
+  nrl++;
 }
 
-void toy_display_on(void) {}
+/* which >= 0x10: the table form raster(line, spec)'s operands, see ilvm_runtime.c's raster_reg. */
+void toy_reg(int32_t which, int32_t value) {
+  if (which >= 0 && which < 3) regs[which] = value;
+  else if (which == 0x10) rq_line = value;
+  else if (which == 0x11) rq_bxr = value;
+  else if (which == 0x12) rq_byr = value;
+  else if (which == 0x13) rq_cr = value;
+  else if (which > 0x18 && which <= 0x1F) raster_entry(which & 7);
+}
 
 /* toy_rgb is the shared header's (tools/toyc/toy_runtime.h), the same
  * 9-bit formula the console runs. */
@@ -241,6 +270,7 @@ int main(int argc, char **argv) {
       }
     }
     cur_frame = i;
+    host_cur_frame_for_raster = i;
     ilvm_sound_tick();             /* before frame(), the browser's order */
     toy_frame(i);
     if (ilvm_has_raster()) {
@@ -261,6 +291,13 @@ int main(int argc, char **argv) {
   snprintf(path, sizeof path, "%s/pool.bin", argv[2]);
   f = fopen(path, "wb");
   put_u32(f, ilvm_table_cells(), ilvm_table_cell_count());
+  fclose(f);
+  snprintf(path, sizeof path, "%s/raster.txt", argv[2]);
+  f = fopen(path, "w");
+  fprintf(f, "refused %d\n", raster_refused);
+  for (i = 0; i < nrl; i++) {
+    fprintf(f, "%d %d %d %d %d %d\n", rl_frame[i], rl_line[i], rl_mask[i], rl_bxr[i], rl_byr[i], rl_cr[i]);
+  }
   fclose(f);
   snprintf(path, sizeof path, "%s/psg.txt", argv[2]);
   f = fopen(path, "w");

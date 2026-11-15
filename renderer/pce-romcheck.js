@@ -180,7 +180,13 @@
     for (f = 0; f < functions.length; f++) {
       var fn = functions[f];
       var code = fn.code || [];
-      maxRegs = Math.max(maxRegs, fn.registers || 0);
+      /* the table form raster(line, spec) reads its fields into three temporaries past the function's own
+       * registers (renderer/pce-ilbc.js, docs/IL.md §14.1) */
+      var fnRegs = fn.registers || 0;
+      for (pc = 0; pc < code.length; pc++) {
+        if (code[pc].t === "raster") { fnRegs += 3; break; }
+      }
+      maxRegs = Math.max(maxRegs, fnRegs);
       maxUps = Math.max(maxUps, (fn.upvalues || []).length);
       maxArgs = Math.max(maxArgs, (fn.params || []).length);
       for (pc = 0; pc < code.length; pc++) {
@@ -267,8 +273,8 @@
       note: "each limit is the console interpreter's (tools/ilvm/ilvm.c); " +
             "near is past " + NEAR_PERCENT + "%, over past " + OVER_PERCENT +
             "% and is refused by the finding in `refusal`. A sprite spec the " +
-            "walker cannot resolve and a raster(line, spec) table are " +
-            "findings, not capacities. A row with approximate:true is a " +
+            "walker cannot resolve (and a raster(line, spec) " +
+            "whose spec sets cram or another key) is a finding, not a capacity. A row with approximate:true is a " +
             "static count of closure sites; a loop can create more."
     };
   }
