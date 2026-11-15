@@ -46,9 +46,8 @@ means the sprite's rows intersect the display window.
 
 Sprite size kinds, in how many of the 80 point samples each appears: 16x16 in
 68, 32x16 in 57, 32x32 in 48, 16x32 in 39, 32x64 in 22, 16x64 in 9. Sixteen
-pixels wide is the workhorse; 32-wide is common; 64-tall sprites appear on
-demo set pieces and bosses (R-Type, Air Zonk, Super Star Soldier, Bomberman
-'93).
+pixels wide is the workhorse; 32-wide is common; 64-tall sprites appear in
+shooter set pieces (R-Type, Air Zonk, Super Star Soldier, Bomberman '93).
 
 What the numbers say:
 
@@ -207,11 +206,11 @@ times and idle 33–61%. A frame is 119,660 CPU cycles; a game's actual work is
    measured top for half the corpus is 8–14 strips). A game that sits over it
    can accept the hardware's drop in SAT order (Air Zonk and Bomberman '93
    lose one strip a frame forever and ship that) or multiplex with flicker
-   (R-Type, Galaga: 39–50 entries rotated through one line, 30–49 entries
+   (R-Type, Galaga: 32–50 entries rotated through one line, 30–49 entries
    rewritten a frame). **The guideline for a Lua game: stay under 16 strips
    per line and no work is needed; the validator should count strips per
    line, not sprites per frame.** Flicker is a deliberate extra only
-   bullet-pattern games need.
+   formation- and bullet-pattern games need.
 3. **Sprite sizes: 16x16 and 16x32 first, 32x16 and 32x32 second, 32x64
    rarely.** The API should make the 16-wide forms the cheap case.
 4. **A scene is one BAT of 32x32 to 64x64 cells plus 5,000–23,000 VRAM words
@@ -251,7 +250,7 @@ times and idle 33–61%. A frame is 119,660 CPU cycles; a game's actual work is
   multiplexing is not captured — the traces show the games' SAT DMA once per
   frame, which argues it is rare).
 - Flicker is inferred from SAT rotation across frames, not from screen
-  captures: "R-Type and Galaga multiplex" rests on 39–50 entries serving one
+  captures: "R-Type and Galaga multiplex" rests on 32–50 entries serving one
   line over 30 frames while the line stays over budget and 30–49 entries are
   rewritten between consecutive frames.
 - The scroll-per-line replay assigns each BXR/BYR write to the line its
