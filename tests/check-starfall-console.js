@@ -338,7 +338,7 @@ function checkCapacity() {
 
 /* ---- 6. the write-up's citations --------------------------------------- */
 const CITATIONS = [
-  ["renderer/studio.html", 4890, "if (errors) return"],
+  ["renderer/studio.html", 4891, "if (errors) return"],
   ["renderer/studio-panel-console.js", 145, "emitC"],
   ["renderer/studio-panel-console.js", 148, "severity: \"error\""],
   ["renderer/pce-cgen.js", 660, "fn|vram|int|bool|padset|table"],
@@ -346,13 +346,13 @@ const CITATIONS = [
   ["renderer/pce-cgen.js", 776, "case \"padref\""],
   ["renderer/pce-cgen.js", 796, "builtin `"],
   ["renderer/pce-cgen.js", 718, "refuse(\"cgen-op\""],
-  ["renderer/pce-ilbc.js", 234, "var OPS = {"],
-  ["renderer/pce-ilbc.js", 257, "var BUILTIN = {"],
-  ["renderer/pce-ilbc.js", 566, "refuse(\"ilbc-op\""],
-  ["renderer/pce-ilbc.js", 607, "refuse(\"ilbc-builtin\""],
-  ["renderer/pce-ilbc.js", 706, "hookSlot(\"raster\""],
+  ["renderer/pce-ilbc.js", 235, "var OPS = {"],
+  ["renderer/pce-ilbc.js", 258, "var BUILTIN = {"],
+  ["renderer/pce-ilbc.js", 572, "refuse(\"ilbc-op\""],
+  ["renderer/pce-ilbc.js", 613, "refuse(\"ilbc-builtin\""],
+  ["renderer/pce-ilbc.js", 712, "hookSlot(\"raster\""],
   ["renderer/pce-rom.js", 666, "if (bytecode.length > SONG_TABLE_OFF)"],
-  ["renderer/pce-il.js", 1638, "t: \"raster\""]
+  ["renderer/pce-il.js", 1646, "t: \"raster\""]
 ];
 
 function checkCitations() {
