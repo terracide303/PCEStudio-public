@@ -194,7 +194,7 @@ async function checkFailures() {
   r = runKit(kd, [], { LLVM_MOS: path.join(SCRATCH, "nothing here") });
   /* runKit deletes LLVM_MOS from the environment: call directly */
   r = cp.spawnSync(process.execPath, [path.join(kd, "build.js")], { cwd: kd, encoding: "utf8", env: Object.assign({}, process.env, { LLVM_MOS: path.join(SCRATCH, "nothing here") }) });
-  check(r.status === 1 && /bin\/mos-pce-clang/.test(r.stderr), "an LLVM_MOS with no compiler in it is named in the error");
+  check(r.status === 1 && /bin\/(mos-pce-clang|mos-clang\.exe)/.test(r.stderr), "an LLVM_MOS with no compiler in it is named in the error");
   r = runKit(kd, ["--print-toolchain"]);
   check(r.status === 0 && /llvm-mos v[\d.]+ for /.test(r.stdout), "--print-toolchain says what would be downloaded");
 }

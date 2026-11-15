@@ -95,7 +95,8 @@ function fail(what, r) {
 function hostKey() { return process.platform + "-" + process.arch; }
 
 function sdkRootOf(dir) {
-  const exe = "mos-pce-clang" + (WIN ? ".exe" : "");
+  /* Windows has no mos-pce-clang.exe: the SDK's mos-pce-clang.bat only runs mos-clang.exe --config mos-pce.cfg */
+  const exe = WIN ? "mos-clang.exe" : "mos-pce-clang";
   for (const c of [dir, path.join(dir, "llvm-mos")]) {
     if (fs.existsSync(path.join(c, "bin", exe))) return c;
   }
@@ -206,7 +207,7 @@ async function ensureToolchain(opts, tc) {
   const envRoot = opts.toolchain || process.env.LLVM_MOS;
   if (envRoot) {
     const root = sdkRootOf(envRoot);
-    if (!root) die("LLVM_MOS / --toolchain is " + envRoot + ", but bin/mos-pce-clang" + (WIN ? ".exe" : "") + " is not in it or in its llvm-mos folder");
+    if (!root) die("LLVM_MOS / --toolchain is " + envRoot + ", but bin/" + (WIN ? "mos-clang.exe" : "mos-pce-clang") + " is not in it or in its llvm-mos folder");
     return root;
   }
   const home = opts.home || process.env.PCESTUDIO_HOME || path.join(os.homedir(), ".pcestudio");
@@ -266,7 +267,7 @@ async function ensureToolchain(opts, tc) {
   fs.rmSync(tmp, { recursive: true, force: true });
   log("unpacking (this takes a minute)");
   extractArchive(archive, tmp);
-  if (!sdkRootOf(tmp)) { fs.rmSync(tmp, { recursive: true, force: true }); die("the archive unpacked, but has no bin/mos-pce-clang" + (WIN ? ".exe" : "") + " in it: " + archive); }
+  if (!sdkRootOf(tmp)) { fs.rmSync(tmp, { recursive: true, force: true }); die("the archive unpacked, but has no bin/" + (WIN ? "mos-clang.exe" : "mos-pce-clang") + " in it: " + archive); }
   fs.rmSync(dir, { recursive: true, force: true });
   fs.renameSync(tmp, dir);
   fs.writeFileSync(path.join(dir, ".verified"), JSON.stringify({ sha256: asset.sha256, url: asset.url, verified: new Date().toISOString() }) + "\n");
@@ -481,7 +482,9 @@ async function main() {
 
   const sdk = await ensureToolchain(opts, tc);
   const llvm = (name) => path.join(sdk, "bin", name + (WIN ? ".exe" : ""));
-  const CC = llvm("mos-pce-clang");
+  /* the PC Engine driver: mos-pce-clang picks its configuration from its own name; on Windows the same is mos-clang.exe --config mos-pce.cfg */
+  const CC = WIN ? llvm("mos-clang") : llvm("mos-pce-clang");
+  const CC_PRE = WIN ? ["--config", "mos-pce.cfg"] : [];
   log("compiler: " + sdk);
 
   /* the game's files, with CRLF turned into LF, in a clean working folder */
@@ -528,7 +531,7 @@ async function main() {
       srcs.push("tools/toyc/toy_sound.c");
     }
     const compileObj = () => {
-      const r = run(CC, [OPT].concat(extra, ["-fno-lto", "-c", "-Itools/toyc", "-o", G + ".o", G + ".c"]), { cwd: KIT_DIR });
+      const r = run(CC, CC_PRE.concat([OPT], extra, ["-fno-lto", "-c", "-Itools/toyc", "-o", G + ".o", G + ".c"]), { cwd: KIT_DIR });
       if (r.status !== 0) fail("the compiler failed", r);
       if (r.stderr.trim()) warn(r.stderr.trim());
     };
@@ -574,7 +577,7 @@ async function main() {
       if (r.stderr.trim()) log(r.stderr.trim());
     }
     const defs = banks.map((b) => "-Wl,--defsym=__rom_bank" + b + "_size=0x2000");
-    const link = () => run(CC, [OPT].concat(extra, defs, ["-Itools/toyc", "-o", G + ".pce"], srcs), { cwd: KIT_DIR });
+    const link = () => run(CC, CC_PRE.concat([OPT], extra, defs, ["-Itools/toyc", "-o", G + ".pce"], srcs), { cwd: KIT_DIR });
     let lr = link();
     if (lr.status !== 0) {
       const logText = lr.stdout + lr.stderr;
