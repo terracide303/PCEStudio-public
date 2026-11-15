@@ -4,32 +4,32 @@
  "bases": [
   {
    "base": "0x2400",
-   "bssEnd": "0x285B",
+   "bssEnd": "0x28BA",
    "zeroPageEnd": "0x20DE"
   },
   {
    "base": "0x2800",
-   "bssEnd": "0x2C5B",
+   "bssEnd": "0x2CBA",
    "zeroPageEnd": "0x20DE"
   },
   {
    "base": "0x2C00",
-   "bssEnd": "0x305B",
+   "bssEnd": "0x30BA",
    "zeroPageEnd": "0x20DE"
   },
   {
    "base": "0x3000",
-   "bssEnd": "0x345B",
+   "bssEnd": "0x34BA",
    "zeroPageEnd": "0x20DE"
   },
   {
    "base": "0x3400",
-   "bssEnd": "0x385B",
+   "bssEnd": "0x38BA",
    "zeroPageEnd": "0x20DE"
   },
   {
    "base": "0x3800",
-   "bssEnd": "0x3C5B",
+   "bssEnd": "0x3CBA",
    "zeroPageEnd": "0x20DE"
   }
  ]
