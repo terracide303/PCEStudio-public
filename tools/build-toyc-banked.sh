@@ -15,6 +15,11 @@
 # 4.x for the engine (PCEAS4=, default pceas4, then the huc-toyc copy).
 #   PSG_TRACE=1   the engine's test-only PSG write log (tests/check-native-sound.js)
 #   SILENT_SFX=1  link a do-nothing toy_sfx instead of the engine (measuring only)
+#   DDA_LOG=1     a toy that calls sample(): keep a RAM log of the steps the timer interrupt writes
+#                 (tests/check-sample.js; the engine's own PSG log does not see them)
+# A toy that calls sample() (DDA playback, docs/NATIVE-SOUND.md "Samples") also gets its
+# samples.json as one ROM data bank after the art banks, the sample interrupt (TOY_SAMPLE_BUILD,
+# tools/toyc/toy_sound.c) and an engine built with SAMPLE_SHADOW (the channel-select shadow).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SRC="${1:?usage: tools/build-toyc-banked.sh TOY.lua [NAME]}"
@@ -31,6 +36,8 @@ grep -q "void toy_raster(int32_t line)" "$G.c" && EXTRA="$EXTRA -DTOY_RASTER_BUI
 grep -q "toy_raster_entry(" "$G.c" && EXTRA="$EXTRA -DTOY_RASTER_BUILD -DTOY_RASTER_TABLE"
 grep -qE "toy_pad\(|toy_timer_set\(|toy_sat\(|toy_sprite\(" "$G.c" && EXTRA="$EXTRA -DTOY_INPUT_BUILD"
 SOUND=0
+SAMPLES=0
+grep -q "toy_sample(" "$G.c" && { SAMPLES=1; EXTRA="$EXTRA -DTOY_SAMPLE_BUILD"; [ "${DDA_LOG:-0}" = "1" ] && EXTRA="$EXTRA -DTOY_DDA_LOG"; export SAMPLE_SHADOW=1; }
 SRCS="tools/toyc/toy_runtime.c $G.banked.c"
 if grep -q '#include "toy_sound.h"' "$G.c"; then
   if [ "${SILENT_SFX:-0}" = "1" ]; then
@@ -42,6 +49,7 @@ static inline void toy_sound_tick(void){}
 static inline int32_t toy_note(int32_t m){(void)m;return 0;}
 static inline void toy_sfx(int32_t a,int32_t b,int32_t c,int32_t d){(void)a;(void)b;(void)c;(void)d;}
 static inline void toy_sfx_fx(int32_t a,int32_t b,int32_t c,int32_t d,int32_t e,int32_t f,int32_t g,int32_t h){(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;(void)h;}
+static inline void toy_sample(int32_t a,int32_t b){(void)a;(void)b;}
 static inline void toy_release(int32_t a){(void)a;}
 static inline void toy_music(int32_t a){(void)a;}
 H
@@ -104,6 +112,12 @@ if grep -q '#include "toy_assets.h"' "$G.c"; then
     BANKS*) BANKS="$BANKS ${ART#BANKS }"; SRCS="$SRCS $G.art.c tools/toyc/toy_assets.c"; EXTRA="$EXTRA -DTOY_INPUT_BUILD -Itools/toyc" ;;
     *) echo "the toy has art files but the importer read none" >&2; exit 1 ;;
   esac
+fi
+if [ $SAMPLES -eq 1 ]; then
+  LAST=0; for b in $BANKS; do [ "$b" -gt "$LAST" ] && LAST=$b; done
+  [ "$LAST" -lt 4 ] && LAST=4
+  SMP=$(node tools/native-samples.js "$(dirname "$SRC")" $((LAST + 1)) "$G.smp.c") || exit 1
+  BANKS="$BANKS ${SMP#BANKS }"; SRCS="$SRCS $G.smp.c"
 fi
 DEFS=""
 for b in $BANKS; do DEFS="$DEFS -Wl,--defsym=__rom_bank${b}_size=0x2000"; done

@@ -271,8 +271,11 @@ int32_t toy_timer_pending(void) {
   return n;
 }
 
-/* Vector $FFFA.  A write to $1403 acknowledges TIQ (H8-15). */
-#ifdef TOY_RASTER_BUILD
+/* Vector $FFFA.  A write to $1403 acknowledges TIQ (H8-15).  A sample build (TOY_SAMPLE_BUILD)
+ * has its own handler in toy_sound.c: the sample's writes run from the timer interrupt, so a toy
+ * that calls sample() cannot use timer() (the validator refuses the pair). */
+#if defined(TOY_SAMPLE_BUILD)
+#elif defined(TOY_RASTER_BUILD)
 /* A hand-written handler (A only, ~25 cycles): the compiled interrupt function saves the whole
  * soft-register file, several hundred cycles and 60 bytes of the fixed bank, and a line interrupt
  * queued behind it ran late. */

@@ -137,6 +137,37 @@ if __name__ == "__main__":
                     if count >= cap:
                         sys.exit("psgstream: a frame filled the %d-entry log" % cap)
             print(json.dumps({"ok": g.ram(tr["psg_trace_ok"], 1)[0], "events": events}))
+        elif len(sys.argv) > 6 and sys.argv[2] == "ddastream":
+            # ddastream IMAGE.json LOG_ADDR PTR_ADDR FRAMES [SHADOW_ADDR]: psgstream's events plus the sample
+            # interrupt's step log (a DDA_LOG build: the steps are in RAM at LOG_ADDR, the zero-page
+            # pointer after the last one at PTR_ADDR) and the log's length after every frame
+            tr = json.load(open(sys.argv[3]))["psg_trace"]
+            log_addr, ptr_addr = int(sys.argv[4], 0), int(sys.argv[5], 0)
+            for _ in range(120):
+                g.tool("debug_step_frame", {"frames": 1, "mode": "sync"})
+                if g.ram(tr["psg_trace_ok"], 1)[0] == 0xA5:
+                    break
+            g.tool("write_memory", {"area": 0, "offset": "%04X" % (tr["psg_trace_limit"] - 0x2000), "bytes": "FF"})
+            events, cap, per_frame, selects = [], tr["capacity"], [], []
+            shadow = int(sys.argv[7], 0) if len(sys.argv) > 7 else None
+            for _ in range(int(sys.argv[6])):
+                g.tool("debug_step_frame", {"frames": 1, "mode": "sync"})
+                count = g.ram(tr["psg_trace_count"], 1)[0]
+                if count:
+                    f, r, v = (g.ram(tr[k], count) for k in ("psg_trace_f", "psg_trace_r", "psg_trace_v"))
+                    events += [[f[i], r[i], v[i]] for i in range(count)]
+                    g.tool("write_memory", {"area": 0, "offset": "%04X" % (tr["psg_trace_count"] - 0x2000), "bytes": "00"})
+                    if count >= cap:
+                        sys.exit("ddastream: a frame filled the %d-entry log" % cap)
+                p = g.ram(ptr_addr, 2)
+                per_frame.append(p[0] | (p[1] << 8))
+                if shadow is not None:    # the hardware's channel select against the engine's shadow of it
+                    selects.append([json.loads(g.tool("get_psg_status"))["channel_select"], g.ram(shadow, 1)[0],
+                                    int(json.loads(g.tool("get_huc6280_status"))["PC"], 16)])
+            n = per_frame[-1] - log_addr
+            print(json.dumps({"ok": g.ram(tr["psg_trace_ok"], 1)[0], "events": events,
+                              "dda": list(g.ram(log_addr, n)) if n > 0 else [],
+                              "ptr_per_frame": per_frame, "selects": selects}))
         elif len(sys.argv) > 3 and sys.argv[2] == "vramdump":
             g.tool("debug_step_frame", {"frames": int(sys.argv[4]) if len(sys.argv) > 4 else 60, "mode": "sync"})
             areas = {a["name"]: a for a in json.loads(g.tool("list_memory_areas"))["areas"]}

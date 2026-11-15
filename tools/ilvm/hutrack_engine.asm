@@ -49,6 +49,7 @@ COPYV_PTR = $20F1
 ; `PSG_TRACE = 1` when PSG_TRACE=1, and with nothing otherwise.  The shipped
 ; image is assembled with the token commented out, so none of the trace code
 ; or RAM below exists in it (docs/ROM-SOUND.md §8).
+@@SAMPLE_SHADOW_DEFINE@@
 @@PSG_TRACE_DEFINE@@
 PSG_TRACE_FRAMES = 24          ; the window the trace covers: frames 0..23
 PSG_TRACE_CAP    = 100         ; entries held by the three arrays below
@@ -59,6 +60,9 @@ EngineZp.start:
     .bss
     .org ENGINE_BSS_BASE
 EngineBss.start:
+    .ifdef SAMPLE_SHADOW
+psg_sel:         .ds 1         ; the PSG channel last selected by any engine write (sample())
+    .endif
 
 ; #200's PSG write trace (docs/ROM-SOUND.md §8).  Only a PSG_TRACE build
 ; carries it, and it sits at the BOTTOM of the engine's .bss: the llvm-mos
@@ -169,6 +173,12 @@ EngineZp.end:
 ; preserves X, Y and P; A may be clobbered, and every call site leaves A
 ; dead (the vendor patches too — the line after each write reloads it or
 ; branches on a flag the routine preserved).
+PSGSEL_X .macro                 ; select channel X: shadow first, then the register
+    .ifdef SAMPLE_SHADOW
+    stx psg_sel
+    .endif
+    stx $800
+    .endm
 PSGT_A .macro                  ; the value is in A
     .ifdef PSG_TRACE
     sta psg_trace_val
@@ -411,7 +421,7 @@ SndGlueSfx:
     ldx <_hk.EAX0.l
 .reserved:
     ; the 32-step square: reset the waveform pointer, fill R6, start WAVEFORM
-    stx $800
+    PSGSEL_X
     PSGT_X 0
     lda snd_fx,x           ; a channel an effect left in noise mode: R7 off
     and #FX_NOISE
@@ -433,7 +443,7 @@ SndGlueSfx:
     iny
     cpy #32
     bne .wave
-    stx $800
+    PSGSEL_X
     PSGT_X 0
     lda <_hk.EAX0.m
     sta $802
@@ -1088,7 +1098,7 @@ SndFxStart:
     jmp .noise
 .istone:
     ; tone: R0, [R7 off], the wave upload, R0, F, level
-    stx $800
+    PSGSEL_X
     PSGT_X 0
     lda snd_tmp
     and #FX_NOISE
@@ -1114,7 +1124,7 @@ SndFxStart:
     dex
     bne .wave
     ldx snd_fx_ch
-    stx $800
+    PSGSEL_X
     PSGT_X 0
     lda snd_f16_lo,x           ; F = f16 >> 4
     lsr a
@@ -1139,7 +1149,7 @@ SndFxStart:
     PSGT_A 3
     jmp .level
 .noise:
-    stx $800
+    PSGSEL_X
     PSGT_X 0
     lda snd_fx,x
     ora #FX_NOISE
@@ -1266,7 +1276,7 @@ SndFxStep:
     bne .write
     rts
 .write:
-    stx $800
+    PSGSEL_X
     PSGT_X 0
     lda snd_fx_fl
     and #1

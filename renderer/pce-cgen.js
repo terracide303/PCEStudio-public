@@ -299,7 +299,7 @@
     for (f = 0; f < functions.length && !usesSound; f++) {
       for (pc = 0; pc < functions[f].code.length; pc++) {
         var ost = functions[f].code[pc];
-        if (ost.t === "music" || ost.t === "sfx" || ost.t === "sfxfx" || ost.t === "release" ||
+        if (ost.t === "music" || ost.t === "sfx" || ost.t === "sfxfx" || ost.t === "release" || ost.t === "sample" ||
             (ost.t === "builtin" && ost.name === "note")) { usesSound = true; break; }
       }
     }
@@ -820,6 +820,11 @@
           if (["ch", "wave", "from", "to", "volume", "attack", "decay", "frames"]
                 .some(function (k) { return staticType(ins[k]) !== "int"; })) {
             refuse("cgen-op", where + ": the sfx effect call's operands must be ints");
+          }
+          break;
+        case "sample":
+          if (staticType(ins.ref) !== "int" || staticType(ins.ch) !== "int") {
+            refuse("cgen-op", where + ": sample()'s name (an index) and channel must be ints");
           }
           break;
         case "release":
@@ -1968,6 +1973,9 @@
       case "sfxfx":
         line("  toy_sfx_fx(" + ["ch", "wave", "from", "to", "volume", "attack", "decay", "frames"]
              .map(function (k) { return operand(ins[k]); }).join(", ") + ");");
+        break;
+      case "sample":
+        line("  toy_sample(" + operand(ins.ref) + ", " + operand(ins.ch) + ");");
         break;
       case "release":
         line("  toy_release(" + operand(ins.ch) + ");");

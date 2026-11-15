@@ -22,5 +22,7 @@ void toy_sfx_fx(int32_t ch, int32_t wave, int32_t from, int32_t to,
                 int32_t volume, int32_t attack, int32_t decay, int32_t frames);
 void toy_release(int32_t ch);
 void toy_music(int32_t song);
+/* sample(name, channel): DDA playback from the timer interrupt (TOY_SAMPLE_BUILD, docs/NATIVE-SOUND.md) */
+void toy_sample(int32_t ref, int32_t ch);
 
 #endif

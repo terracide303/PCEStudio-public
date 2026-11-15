@@ -59,6 +59,12 @@ ENGINE_BSS_BASE="${ENGINE_BSS_BASE:-0x2200}"
 # ~10 B of code per traced write; the shipped
 # builds leave it unset and the image is byte-identical to before.
 PSG_TRACE="${PSG_TRACE:-0}"
+# sample(): SAMPLE_SHADOW=1 makes every channel-select write ($800) also store the channel in
+# psg_sel (a RAM byte at the bottom of the engine's .bss), so the sample interrupt can put the
+# select back where the interrupted engine code had it (docs/NATIVE-SOUND.md "Samples").  The
+# glue's own writes use the PSGSEL_X macro; the vendor's are patched in the staged copy (every
+# `stx $800`).  Unset: the macro is the plain `stx $800` and the image is byte-identical.
+SAMPLE_SHADOW="${SAMPLE_SHADOW:-0}"
 
 if ! command -v "$PCEAS4" >/dev/null 2>&1 && [ ! -x "$PCEAS4" ]; then
   echo "PCEAS 4.x not found: set PCEAS4 or install pceas4 (docs/BUILD.md)" >&2
@@ -90,12 +96,13 @@ if ! cmp -s "$NT_SCRATCH/note-table.inc" "$STAGE/note-table.inc" || \
 fi
 
 python3 -I - "$ROOT" "$STAGE" "$ENGINE_ZP_BASE" "$ENGINE_BSS_BASE" \
-  "$PSG_TRACE" <<'PY'
+  "$PSG_TRACE" "$SAMPLE_SHADOW" <<'PY'
 import os
 import sys
 
-root, stage, zp_base, bss_base, psg_trace = sys.argv[1:6]
+root, stage, zp_base, bss_base, psg_trace, sample_shadow = sys.argv[1:7]
 trace_build = psg_trace == "1"
+shadow_build = sample_shadow == "1"
 
 # #214: the RAM addresses are measured from the interpreter image by
 # build.sh, not written into the asm.  Both must be plain 16-bit hex values;
@@ -117,6 +124,9 @@ with open(asm, encoding="utf-8") as fh:
     text = fh.read()
 for token, value in (("@@ENGINE_ZP_BASE@@", zp_base),
                      ("@@ENGINE_BSS_BASE@@", bss_base),
+                     ("@@SAMPLE_SHADOW_DEFINE@@",
+                      "SAMPLE_SHADOW = 1" if shadow_build
+                      else "; sample shadow not enabled"),
                      ("@@PSG_TRACE_DEFINE@@",
                       "PSG_TRACE = 1" if trace_build
                      else "; PSG trace not enabled")):
@@ -194,6 +204,25 @@ if trace_build:
             fh.writelines(lines)
         print("traced %s:%d (%s): %s" % (rel, line_no, expected, macro))
 
+# sample(): every vendor channel-select write also records the channel (the order matters: the
+# shadow first, so an interrupt between the two stores sees the NEW channel and restores it).
+if shadow_build:
+    import re
+    n_sites = 0
+    for dirpath, _, names in os.walk(os.path.join(stage, "lib")):
+        for name in names:
+            if not name.endswith(".asm"):
+                continue
+            p = os.path.join(dirpath, name)
+            with open(p, newline="") as fh:
+                text = fh.read()
+            text, n = re.subn(r"(?m)^([ \t]*)stx \$800([ \t]*)(\r?)$", r"\1PSGSEL_X\3", text)
+            if n:
+                with open(p, "w", newline="") as fh:
+                    fh.write(text)
+                n_sites += n
+    print("shadowed %d vendor channel-select writes" % n_sites)
+
 # The narrowed window is the whole patch: no full-window mapping may survive
 # in the code sources.  (hutrack.inc keeps the MAP_BANK.4 macro definition
 # itself — an unused macro is harmless — so only .asm call sites count.)
@@ -213,14 +242,15 @@ PY
 
 #---------------------------------------------------------------- extract + header + report
 python3 -I - "$ROOT" "$STAGE" "$OUT" "$PCEAS4" "$ENGINE_ZP_BASE" \
-  "$ENGINE_BSS_BASE" "$PSG_TRACE" <<'PY'
+  "$ENGINE_BSS_BASE" "$PSG_TRACE" "$SAMPLE_SHADOW" <<'PY'
 import json
 import os
 import subprocess
 import sys
 
-root, stage, out, pceas, zp_base, bss_base, psg_trace = sys.argv[1:8]
+root, stage, out, pceas, zp_base, bss_base, psg_trace, sample_shadow = sys.argv[1:9]
 trace_build = psg_trace == "1"
+shadow_build = sample_shadow == "1"
 
 BANK_BYTES = 8192
 CODE_BANK = 2
@@ -421,6 +451,8 @@ INTERFACE = [
     ("snd_args_frames", "HUTRACK_SND_FRAMES", "sfx()'s frames argument cell"),
     ("CopyvShim", "HUTRACK_COPYV", "COPYV (#281): map and stream a data bank to VRAM"),
 ]
+if shadow_build:
+    INTERFACE.append(("psg_sel", "HUTRACK_PSG_SEL", "the PSG channel last selected by engine code (sample())"))
 interface = []
 for symbol, define, what in INTERFACE:
     if symbol not in symbols:
