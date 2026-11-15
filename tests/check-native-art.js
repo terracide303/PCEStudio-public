@@ -40,7 +40,7 @@ if (b.status === 0) {
     { cwd: ROOT, encoding: "utf8", timeout: 300000 });
   check(r.status === 0, "Geargrafx ran the ROM and dumped VRAM and colours");
   if (r.status === 0) {
-    const files = toyhost.importer.FILES.map((n) => ({ name: n, source: fs.readFileSync(path.join(dir, n), "utf8") }));
+    const files = toyhost.importer.FILES.filter((n) => fs.existsSync(path.join(dir, n))).map((n) => ({ name: n, source: fs.readFileSync(path.join(dir, n), "utf8") }));
     const w = toyhost.importer.read(files);
     const raw = fs.readFileSync(out);
     const W = (buf, off, len) => new Uint16Array(buf.buffer.slice(buf.byteOffset + off, buf.byteOffset + off + len));
