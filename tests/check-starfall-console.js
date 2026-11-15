@@ -352,7 +352,7 @@ const CITATIONS = [
   ["renderer/pce-ilbc.js", 607, "refuse(\"ilbc-builtin\""],
   ["renderer/pce-ilbc.js", 706, "hookSlot(\"raster\""],
   ["renderer/pce-rom.js", 666, "if (bytecode.length > SONG_TABLE_OFF)"],
-  ["renderer/pce-il.js", 1636, "t: \"raster\""]
+  ["renderer/pce-il.js", 1638, "t: \"raster\""]
 ];
 
 function checkCitations() {

@@ -203,7 +203,7 @@ the page still stops — at this gate, not at a kind.
 Two notes that matter for whoever closes these:
 
 - **`raster` is only refused in the table form.** `raster(line, spec)` is an
-  IL instruction (`pce-il.js:1636`) with no ILBC opcode. The **callback** form,
+  IL instruction (`pce-il.js:1638`) with no ILBC opcode. The **callback** form,
   `function raster(line)`, is carried (`pce-ilbc.js:382` records the hook
   slot) — that is how `toys/parallax.lua` exports and runs. STARFALL chose the
   table form, and the table form is the *cheaper* one on the console: two RCR
