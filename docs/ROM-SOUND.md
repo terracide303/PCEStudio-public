@@ -902,6 +902,60 @@ entry, not gated on a new ownership (the #239 defense):
            else lib.reserveWrites(ch, soundWrite);
 ```
 
+## 12. Effects: `sfx_noise`, `sfx_slide`, `sfx_fx`, `sfx_preset`
+
+The toy-language contract is in docs/TOYS.md ("Sound effects"); the model is
+`renderer/pce-sfx.js` (the one table of presets, and `start()`/`tick()`, the
+integer arithmetic). This is how the console carries it.
+
+**One op, three encodings.** The four calls are one IL instruction (`sfxfx`,
+eight operands: channel, wave, from, to, volume, attack, decay, frames;
+`sfx_preset` fills its constants from the shared table at compile time, so the
+interpreter holds no preset data and an unknown name is refused,
+`il-sfx-preset`). The interpreter's `sfx` op (0x21) takes four operands and
+the fixed image had 150 bytes of slack, so the instruction is **three `sfx`
+ops** whose first operand is a constant with the op kind in bits 8..15: kind 1
+carries from, to, volume; kind 2 carries wave, attack, decay; kind 3 carries
+the channel and the frames and starts the effect. 15 bytes of bytecode, no new
+opcode, no container version change (the stage ops are plain `sfx` ops with a
+kind the old glue would have treated as channel 256+: nothing, since a ROM
+with effects is built with this glue).
+
+**The wrapper got smaller.** `ilvm_sfx` now passes the address of the four
+int32 operands in `_hk.EAX0` and calls `SndGlueSfxOp`, which decodes them
+(kind 0 is the old `sfx(channel, freq, volume, frames)`, with its clamps, then
+`SndGlueSfx` as before). The C image's `exec` went from 10,591 to 10,397 bytes
+doing it, which is what made room for the op. The native route calls the same
+`SndGlueSfxOp` from `toy_sfx_fx` (`tools/toyc/toy_sound.c`): one glue, one
+proof.
+
+**State** (95 B of the engine's BSS, per channel): flags, F x16 and its step,
+level x256 and the attack and decay steps, the attack threshold and the
+decay length (one byte each: an effect is at most 255 frames). A division
+(`SndDiv16`, restoring, 16 iterations) runs at the start for each ramp; a tick
+is adds and compares. The shipped stack headroom went 1,121 -> 1,026 B
+(margin 787). The trace build carries the 307 B log as well and its headroom
+fell to 718 B, under the shipped margin, so `tools/ilvm/build.sh` holds a
+TRACE image to 700 B: a test fixture, never shipped, and `check-rom-sound`
+and `check-sfx-fx` still show the log's unfilled tail intact (the stack did
+not reach it).
+
+**What the console clamps** where the browser refuses (a ROM has no error
+channel): a channel past 5 or noise off channels 4/5 is a no-op; frames,
+attack and decay above 255 clamp to 255, frames 0 to 1, and attack and decay
+are cut to fit the frames. The browser refuses all of them (`sfx-range`), so
+a legal call means the same on both.
+
+**The proof.** `tests/check-sfx-fx.js`: `tools/toys/fx.lua` (all nine presets,
+overlapping effects, the short forms, a plain `sfx()` cutting into a noise
+effect, corner cases: attack only, one frame, the widest slide) runs in the
+studio runtime, in the interpreter ROM (a TRACE build of the interpreter) and
+in the native ROM (a PSG_TRACE banked build), the last two in Geargrafx. The
+log is the engine's own write log; `ggmcp.py psgstream` lifts its 24-frame
+window and drains and clears it after every video frame, so the whole stream
+(245 toy frames, 1,170 writes) comes back and is compared write for write and
+frame for frame, and again per preset on that preset's channel.
+
 ## What is not proven
 
 - **A note toy and an sfx toy run *and sound* in Mednafen, and §8's trace

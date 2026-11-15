@@ -41,6 +41,7 @@ static inline void toy_sound_boot(void){}
 static inline void toy_sound_tick(void){}
 static inline int32_t toy_note(int32_t m){(void)m;return 0;}
 static inline void toy_sfx(int32_t a,int32_t b,int32_t c,int32_t d){(void)a;(void)b;(void)c;(void)d;}
+static inline void toy_sfx_fx(int32_t a,int32_t b,int32_t c,int32_t d,int32_t e,int32_t f,int32_t g,int32_t h){(void)a;(void)b;(void)c;(void)d;(void)e;(void)f;(void)g;(void)h;}
 static inline void toy_release(int32_t a){(void)a;}
 static inline void toy_music(int32_t a){(void)a;}
 H

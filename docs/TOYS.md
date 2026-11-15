@@ -150,6 +150,10 @@ frames. `t` is deterministic (`f/60`), not wall-clock: a frame is reproducible.
 | `note(name or MIDI)` | the PSG's 12-bit F for a note | `toy-error` on a bad name |
 | `music(index)` | play song `index` from the start (#71) | an index into the songs the runtime was given; none or past them is `music-range` |
 | `sfx(channel, freq, volume, frames)` | write R1 `$FF` (the PSG's main amplitude), take `channel`, play a 32-step square at F = `freq`, AL = `volume`, for `frames` frames, then give it back | channel 0..5, freq 0..4095, volume 0..31, frames 1..600 (`sfx-range`) |
+| `sfx_noise(channel, rate, volume, frames)` | `sfx()` with the PSG's noise generator: R7 = `$80 \| rate`, then AL = `volume` | channel 4 or 5 (the two noise channels), rate 0..31 (31 the highest hiss), volume 0..31, frames 1..255 (`sfx-range`) |
+| `sfx_slide(channel, from, to, volume, frames)` | `sfx()` whose F slides in a straight line from `from` to `to` over the frames | channel 0..5, from and to 0..4095 (a larger F is a LOWER note), volume 0..31, frames 1..255 (`sfx-range`) |
+| `sfx_fx(channel, wave, from, to, volume, attack, decay, frames)` | the general effect: wave 0 square, 1 noise, 2 triangle, 3 saw; a slide; the level climbs over `attack` frames, holds, and falls to 0 over the last `decay` frames | as above; wave 0..3; attack, decay 0..255 and attack + decay no more than frames (`sfx-range`) |
+| `sfx_preset(name, channel)` | a named effect from one shared table: `"jump"`, `"shoot"`, `"hit"`, `"coin"`, `"explosion"`, `"powerup"`, `"select"`, `"hurt"`, `"laser"` | the name is a constant string; any other name is `sfx-preset` (`il-sfx-preset` in the validator and the export); `"hit"` and `"explosion"` are noise and need channel 4 or 5 |
 | `release(channel)` | give a channel back now; the music waits for a fresh note | channel 0..5 (`sfx-range`); a channel no SFX owns is left alone |
 | `password.pack(v)` / `password.unpack(code)` | a save as a short code | `password-value` / `password-code` |
 | `print(...)` | the page's log (not the console) | captured, 200 lines |
@@ -306,6 +310,49 @@ The whole hand-off lives in `pce-song.js` (`createPlayer`'s `reserve`/
 `release` and its `sfx`/`waitNote` gating), so the engine has one
 implementation for the batch `trace()` and the live toy alike.
 
+**Sound effects (noise, slide, envelope, presets).** `sfx()` is a flat
+square beep. `sfx_noise`, `sfx_slide`, `sfx_fx` and `sfx_preset` add what a game
+needs for a jump, a laser or an explosion, and they are one engine, not four:
+the first three are short forms of `sfx_fx(channel, wave, from, to, volume,
+attack, decay, frames)` and a preset is a row of one table
+(`renderer/pce-sfx.js`) that the compiler expands to constants, so the studio,
+the exported interpreter ROM and the natively compiled ROM all take their
+numbers from it.
+
+- **Noise** is the PSG's own noise generator, which only channels 4 and 5
+  (the chip's channels 5 and 6) have: R7 = `$80 | rate`, and the channel's
+  wave is not loaded. `rate` is R7's NF field, 0..31, 31 the highest hiss
+  (the divider is 31 - NF). A noise effect on channel 0..3 is `sfx-range`.
+- **Slide** moves F (or the noise rate) a step per frame. The arithmetic is
+  integer and the same on the console: F is kept times 16, the step is
+  `floor(|to - from| * 16 / (frames - 1))`, the frame's value is the sum
+  shifted down by 4. `from == to`, or one frame, is no slide and no per-frame
+  write.
+- **Envelope**: the level (AL) is kept times 256; on the first `attack`
+  frames it climbs by `floor(volume * 256 / attack)` a frame from 0, on the
+  last `decay` frames it falls by `floor(volume * 256 / decay)` a frame from
+  the peak, between them it holds. `attack` 0 starts at the peak; `decay` 0
+  never falls (the channel is released at the end anyway).
+- **Writes**: the first frame is `sfx()`'s (R1, the reserve, the wave upload
+  for a tone, F or R7, then R4); each later frame writes R0, then R2 and R3
+  (or R7) while sliding and R4 while the level moves, and nothing at all when
+  neither does. That is a register write or three per active effect per frame,
+  measured on the native route at about 400 cycles per effect per frame
+  (docs/NATIVE-SOUND.md "Effects").
+- **Music is untouched**: an effect takes its channel exactly as `sfx()` does
+  (the reserve), so the music's other channels keep playing and the music
+  waits for a fresh note on the channel when the effect ends. A plain `sfx()`
+  on a channel an effect is using cancels the effect and turns noise off.
+- **The cartridge** carries all four calls. It clamps where the browser
+  refuses (a channel past 5 or noise off channels 4/5 is a no-op, frames,
+  attack and decay clamp to 255, attack and decay are cut to fit the frames),
+  because a ROM has no error channel; an effect lasts at most 255 frames in
+  the browser too, so the two never disagree on a legal call.
+  `tests/check-sfx-fx.js` proves the PSG register writes of `tools/toys/fx.lua`
+  (every preset, overlapping effects, a plain `sfx()` cutting into noise)
+  equal, write for write and frame for frame, in the studio, in the exported
+  interpreter ROM and in the native ROM.
+
 **Order within a frame.** The PSG writes of a frame are recorded in the order
 a console would make them: the song's VBlank tick (and an expired SFX's
 release) first, at `beginFrame`, then whatever the toy's `frame()` asks for —
@@ -329,8 +376,8 @@ every write to BaseRAM and refuses to replace `renderer/ilvm.bin`
 
 **Limits.** 6 channels; F is the PSG's 12-bit divider (`note()` returns it; the
 same value from a MIDI number in both runtimes); volume is AL, 0..31; an SFX
-lasts 1..600 frames. The SFX waveform is fixed (a square) — a toy with more
-than one effect shape is a later card. The recording keeps
+lasts 1..600 frames. `sfx()`'s waveform is a fixed square; `sfx_fx` also has a triangle, a saw and
+noise (above). The recording keeps
 `SOUND_EVENTS_MAX` = 65,536 writes per runtime and then stops recording
 (`sound.overflow`), because the browser's real-time playback (#78) will feed
 the PSG incrementally instead of keeping the whole session.

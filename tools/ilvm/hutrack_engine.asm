@@ -76,6 +76,7 @@ psg_trace_ok:    .ds 1         ; $A5 once SndGlueReset ran; corruption check
 psg_trace_count: .ds 1         ; 0..PSG_TRACE_CAP
 psg_trace_frame: .ds 2         ; the toy frame, set by SndGlueTick
 psg_trace_seen:  .ds 1         ; the first tick is frame 0, not an increment
+psg_trace_limit: .ds 1         ; the window's end; a streaming test raises it
 psg_trace_reg:   .ds 1         ; the write's register (A at the call)
 psg_trace_val:   .ds 1         ; the write's value
 psg_trace_f:     .ds PSG_TRACE_CAP
@@ -110,12 +111,45 @@ snd_tick:        .ds 1
 snd_active:      .ds 1
 snd_tmp:         .ds 1
 snd_args_frames: .ds 2
+; Effects (sfx_fx, renderer/pce-sfx.js is the model; this is it in 65C02).
+; Per channel: the flags, the frequency and level kept x16 / x256 with their
+; per-frame steps, the attack threshold and the decay length.  An effect
+; lasts at most 255 frames, so the thresholds are one byte.
+snd_fx:          .ds 6         ; FX_SLOPE | FX_ENV | FX_NOISE
+snd_f16_lo:      .ds 6
+snd_f16_hi:      .ds 6
+snd_fst_lo:      .ds 6
+snd_fst_hi:      .ds 6
+snd_v16_lo:      .ds 6
+snd_v16_hi:      .ds 6
+snd_su_lo:       .ds 6
+snd_su_hi:       .ds 6
+snd_sd_lo:       .ds 6
+snd_sd_hi:       .ds 6
+snd_thr:         .ds 6         ; frames - attack: attack while left > thr
+snd_dec:         .ds 6         ; decay while left <= dec
+snd_st_from:     .ds 2         ; staged by the first op of an sfx_fx call
+snd_st_to:       .ds 2
+snd_st_vol:      .ds 1
+snd_fx_ch:       .ds 1
+snd_fx_wave:     .ds 1
+snd_fx_att:      .ds 1
+snd_fx_dcy:      .ds 1
+snd_fx_frm:      .ds 1
+snd_fx_fl:       .ds 1         ; SndFxStep: bit 0 slide, bit 1 level
+snd_dn:          .ds 2         ; SndDiv16: dividend in, quotient out
+snd_dd:          .ds 2
+snd_dr:          .ds 2
 ; #281: COPYV's copy state (CopyvShim below).  The source pointer is in zero
 ; page at COPYV_PTR because the byte reads are [zp],y.
 copyv_cnt:       .ds 2
 copyv_bank:      .ds 1
 copyv_saved:     .ds 1
 SndGlueBss.end:
+
+FX_SLOPE = 1
+FX_ENV   = 2
+FX_NOISE = 4
 
     .include "HuTrack/HuTrack_vars.inc"
 
@@ -279,6 +313,7 @@ SndGlueReset:
     ldx #5
 .loop:
     stz snd_owned,x
+    stz snd_fx,x
     stz snd_frames_lo,x
     stz snd_frames_hi,x
     dex
@@ -378,6 +413,13 @@ SndGlueSfx:
     ; the 32-step square: reset the waveform pointer, fill R6, start WAVEFORM
     stx $800
     PSGT_X 0
+    lda snd_fx,x           ; a channel an effect left in noise mode: R7 off
+    and #FX_NOISE
+    beq .nonoise
+    stz $807
+    PSGT_Z 7
+.nonoise:
+    stz snd_fx,x           ; a plain sfx() cancels an effect's slide/envelope
     lda #$40
     sta $804
     PSGT_A 4
@@ -422,6 +464,7 @@ SndGlueRelease:
     lda snd_owned,x
     beq .out
     stz snd_owned,x
+    stz snd_fx,x
     stz snd_frames_lo,x
     stz snd_frames_hi,x
     lda <_hk.EAX0.l
@@ -510,10 +553,18 @@ SndGlueTick:
     dec snd_frames_lo,x
     lda snd_frames_lo,x
     ora snd_frames_hi,x
-    bne .next
+    bne .stillgoing
     txa
     sta <_hk.EAX0.l
     jsr SndGlueRelease
+    bra .next
+.stillgoing:
+    lda snd_fx,x
+    and #(FX_SLOPE | FX_ENV)
+    beq .next
+    phy
+    jsr SndFxStep
+    ply
 .next:
     iny
     bra .loop
@@ -544,6 +595,8 @@ PsgTraceReset:
     lda #$A5                   ; the test's "reset ran" and corruption check
     sta psg_trace_ok
     stz psg_trace_count
+    lda #PSG_TRACE_FRAMES
+    sta psg_trace_limit
     stz psg_trace_frame
     stz psg_trace_frame+1
     stz psg_trace_seen
@@ -578,7 +631,7 @@ PsgTraceLog:
     lda psg_trace_frame+1
     bne .out
     lda psg_trace_frame
-    cmp #PSG_TRACE_FRAMES
+    cmp psg_trace_limit
     bcs .out
     ldy psg_trace_count
     cpy #PSG_TRACE_CAP
@@ -712,9 +765,567 @@ CopyvShim:
     sta <COPYV_PTR+1
     rts
 
+
+; ---- SndGlueSfxOp: the interpreter's `sfx` op.  _hk.EAX0 holds the address
+; of the op's four int32 operands; bits 8..15 of the first are the op kind:
+; 0 is sfx(channel, freq, volume, frames) — decoded here (the C wrapper is
+; just the pointer) and run by SndGlueSfx — and 1..3 are sfx_fx's ops below.
+SndGlueSfxOp:
+    ldy #1
+    lda [<_hk.EAX0],y
+    beq .plain
+    jmp SndGlueFxOp
+.plain:
+    ldy #4
+    lda [<_hk.EAX0],y
+    sta snd_dn                 ; freq low
+    iny
+    lda [<_hk.EAX0],y
+    sta snd_dn+1               ; freq bits 8..15
+    ldy #8
+    lda [<_hk.EAX0],y
+    sta snd_dd                 ; volume
+    ldy #12
+    lda [<_hk.EAX0],y
+    sta snd_args_frames
+    iny
+    lda [<_hk.EAX0],y
+    sta snd_args_frames+1
+    ldy #15
+    lda [<_hk.EAX0],y          ; a negative frames count clamps to 1
+    bpl .fpos
+    stz snd_args_frames
+    stz snd_args_frames+1
+.fpos:
+    cly
+    lda [<_hk.EAX0],y
+    sta <_hk.EAX0.l
+    lda snd_dn
+    sta <_hk.EAX0.m
+    lda snd_dn+1
+    sta <_hk.EAX0.h
+    lda snd_dd
+    sta <_hk.EAX0.u
+    jmp SndGlueSfx
+
+; ======================================================================
+; Effects: sfx_fx(channel, wave, from, to, volume, attack, decay, frames)
+; (renderer/pce-sfx.js is the model and the proof's reference).
+;
+; The interpreter's `sfx` op carries four operands, so an effect is three
+; ops whose first operand is a constant with the op kind in bits 8..15:
+;   kind 1 (stage): a1 = from, a2 = to, a3 = volume
+;   kind 2 (stage): a1 = wave, a2 = attack, a3 = decay
+;   kind 3 (fire):  a1 = channel, a2 = frames — the effect starts
+; _hk.EAX0 holds the address of the four int32 operands (little-endian).
+; Out-of-range operands clamp (the console's substitute for the browser's
+; sfx-range refusal): a channel past 5, or noise off channels 4/5, is a
+; no-op; frames, attack and decay clamp to 255 (an effect's limit), frames
+; to at least 1, and attack and decay are cut to fit the frames.
+; ======================================================================
+SndGlueFxOp:
+    cmp #2
+    beq .kind2
+    bcs .fire
+    ; kind 1: from, to (low 12 bits), volume (low 5 bits)
+    ldy #4
+    lda [<_hk.EAX0],y
+    sta snd_st_from
+    iny
+    lda [<_hk.EAX0],y
+    and #$0F
+    sta snd_st_from+1
+    ldy #8
+    lda [<_hk.EAX0],y
+    sta snd_st_to
+    iny
+    lda [<_hk.EAX0],y
+    and #$0F
+    sta snd_st_to+1
+    ldy #12
+    lda [<_hk.EAX0],y
+    and #$1F
+    sta snd_st_vol
+    rts
+.kind2:
+    ldy #4
+    lda [<_hk.EAX0],y
+    and #3
+    sta snd_fx_wave
+    ldy #8
+    jsr SndFxByte
+    sta snd_fx_att
+    ldy #12
+    jsr SndFxByte
+    sta snd_fx_dcy
+    rts
+.fire:
+    ldy #4
+    lda [<_hk.EAX0],y
+    cmp #6
+    bcc .chok
+    rts
+.chok:
+    sta snd_fx_ch
+    lda snd_fx_wave
+    cmp #1
+    bne .wok
+    lda snd_fx_ch              ; noise: channels 4 and 5 only
+    cmp #4
+    bcs .wok
+    rts
+.wok:
+    ldy #8
+    jsr SndFxByte              ; frames
+    bne .fset
+    lda #1
+.fset:
+    sta snd_fx_frm
+    lda snd_fx_att             ; attack <= frames
+    cmp snd_fx_frm
+    bcc .aok
+    lda snd_fx_frm
+    sta snd_fx_att
+.aok:
+    lda snd_fx_frm             ; decay <= frames - attack
+    sec
+    sbc snd_fx_att
+    cmp snd_fx_dcy
+    bcs .dok
+    sta snd_fx_dcy
+.dok:
+    ; from, to: the low 12 bits (noise: the low 5 bits)
+    lda snd_fx_wave
+    cmp #1
+    bne SndFxStart
+    lda snd_st_from
+    and #$1F
+    sta snd_st_from
+    stz snd_st_from+1
+    lda snd_st_to
+    and #$1F
+    sta snd_st_to
+    stz snd_st_to+1
+    ; fall into SndFxStart
+
+; ---- SndFxStart: the effect's first frame (the model's start()).
+SndFxStart:
+    jsr SndGlueMap
+    lda #$FF
+    sta $801                   ; R1, as sfx() does
+    PSGT_A 1
+    lda #1
+    sta snd_active
+    ldx snd_fx_ch
+    lda snd_owned,x
+    bne .reserved
+    lda #1
+    sta snd_owned,x
+    stx <_hk.EAX0.l            ; the engine's reserve takes the channel here
+    jsr HuTrackEngine.setChanForSFX
+    ldx snd_fx_ch
+.reserved:
+    ; ---- the integer state
+    lda snd_fx_frm
+    sta snd_frames_lo,x
+    stz snd_frames_hi,x
+    lda snd_fx,x
+    pha                        ; the old flags (noise?)
+    stz snd_fx,x
+    ; frequency: f16 = from << 4
+    lda snd_st_from
+    sta snd_f16_lo,x
+    lda snd_st_from+1
+    sta snd_f16_hi,x
+    asl snd_f16_lo,x
+    rol snd_f16_hi,x
+    asl snd_f16_lo,x
+    rol snd_f16_hi,x
+    asl snd_f16_lo,x
+    rol snd_f16_hi,x
+    asl snd_f16_lo,x
+    rol snd_f16_hi,x
+    stz snd_fst_lo,x
+    stz snd_fst_hi,x
+    ; slide: from != to and frames > 1
+    lda snd_fx_frm
+    cmp #2
+    bcs .chk
+    jmp .noslide
+.chk:
+    lda snd_st_from
+    cmp snd_st_to
+    bne .slide
+    lda snd_st_from+1
+    cmp snd_st_to+1
+    bne .slide
+    jmp .noslide
+.slide:
+    lda snd_fx,x
+    ora #FX_SLOPE
+    sta snd_fx,x
+    ; |to - from|; the flag (1 when to >= from) rides the stack
+    sec
+    lda snd_st_to
+    sbc snd_st_from
+    sta snd_dn
+    lda snd_st_to+1
+    sbc snd_st_from+1
+    sta snd_dn+1
+    lda #0
+    rol a
+    pha
+    bne .up
+    sec                        ; negate
+    lda #0
+    sbc snd_dn
+    sta snd_dn
+    lda #0
+    sbc snd_dn+1
+    sta snd_dn+1
+.up:
+    asl snd_dn
+    rol snd_dn+1
+    asl snd_dn
+    rol snd_dn+1
+    asl snd_dn
+    rol snd_dn+1
+    asl snd_dn
+    rol snd_dn+1
+    lda snd_fx_frm
+    dec a
+    sta snd_dd
+    stz snd_dd+1
+    phx
+    jsr SndDiv16
+    plx
+    lda snd_dn
+    sta snd_fst_lo,x
+    lda snd_dn+1
+    sta snd_fst_hi,x
+    pla
+    bne .noslide               ; to >= from: the step is positive
+    sec                        ; else two's complement
+    lda #0
+    sbc snd_fst_lo,x
+    sta snd_fst_lo,x
+    lda #0
+    sbc snd_fst_hi,x
+    sta snd_fst_hi,x
+.noslide:
+    ; level: v16 = volume << 8 with the attack/decay shape
+    stz snd_v16_lo,x
+    lda snd_st_vol
+    sta snd_v16_hi,x
+    stz snd_su_lo,x
+    stz snd_su_hi,x
+    stz snd_sd_lo,x
+    stz snd_sd_hi,x
+    lda snd_fx_frm
+    sec
+    sbc snd_fx_att
+    sta snd_thr,x
+    lda snd_fx_dcy
+    sta snd_dec,x
+    lda snd_fx_att
+    ora snd_fx_dcy
+    beq .noenv
+    lda snd_fx,x
+    ora #FX_ENV
+    sta snd_fx,x
+    lda snd_fx_att
+    beq .noatt
+    stz snd_dn
+    lda snd_st_vol
+    sta snd_dn+1
+    lda snd_fx_att
+    sta snd_dd
+    stz snd_dd+1
+    phx
+    jsr SndDiv16
+    plx
+    lda snd_dn
+    sta snd_su_lo,x
+    sta snd_v16_lo,x
+    lda snd_dn+1
+    sta snd_su_hi,x
+    sta snd_v16_hi,x
+.noatt:
+    lda snd_fx_dcy
+    beq .noenv
+    stz snd_dn
+    lda snd_st_vol
+    sta snd_dn+1
+    lda snd_fx_dcy
+    sta snd_dd
+    stz snd_dd+1
+    phx
+    jsr SndDiv16
+    plx
+    lda snd_dn
+    sta snd_sd_lo,x
+    lda snd_dn+1
+    sta snd_sd_hi,x
+    lda snd_fx_att
+    bne .noenv                 ; an attack starts the level at su
+    lda snd_fx_dcy
+    cmp snd_fx_frm
+    bcc .noenv                 ; decay shorter than the effect: starts at peak
+    sec                        ; decay == frames: the first frame is one step down
+    lda snd_v16_lo,x
+    sbc snd_sd_lo,x
+    sta snd_v16_lo,x
+    lda snd_v16_hi,x
+    sbc snd_sd_hi,x
+    sta snd_v16_hi,x
+.noenv:
+    ; ---- the writes
+    pla
+    sta snd_tmp                ; the old flags
+    lda snd_fx_wave
+    cmp #1
+    bne .istone
+    jmp .noise
+.istone:
+    ; tone: R0, [R7 off], the wave upload, R0, F, level
+    stx $800
+    PSGT_X 0
+    lda snd_tmp
+    and #FX_NOISE
+    beq .tone
+    stz $807
+    PSGT_Z 7
+.tone:
+    lda #$40
+    sta $804
+    PSGT_A 4
+    stz $804
+    PSGT_Z 4
+    ldy snd_fx_wave
+    lda SndWaveOff,y
+    tay
+    sta snd_tmp
+    ldx #32
+.wave:
+    lda SndGlueWave,y
+    sta $806
+    PSGT_A 6
+    iny
+    dex
+    bne .wave
+    ldx snd_fx_ch
+    stx $800
+    PSGT_X 0
+    lda snd_f16_lo,x           ; F = f16 >> 4
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    sta snd_tmp
+    lda snd_f16_hi,x
+    asl a
+    asl a
+    asl a
+    asl a
+    ora snd_tmp
+    sta $802
+    PSGT_A 2
+    lda snd_f16_hi,x
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    sta $803
+    PSGT_A 3
+    jmp .level
+.noise:
+    stx $800
+    PSGT_X 0
+    lda snd_fx,x
+    ora #FX_NOISE
+    sta snd_fx,x
+    lda snd_f16_lo,x           ; rate = (f16 >> 4) & 31, from <= 31 so f16 < 512
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    sta snd_tmp
+    lda snd_f16_hi,x
+    asl a
+    asl a
+    asl a
+    asl a
+    ora snd_tmp
+    and #$1F
+    ora #$80
+    sta $807
+    PSGT_A 7
+.level:
+    lda snd_v16_hi,x
+    ora #$80
+    sta $804
+    PSGT_A 4
+    rts
+
+; ---- SndFxByte: the byte at EAX0[y] as a clamped count: nonzero high bytes
+; (or a negative) give 255.
+SndFxByte:
+    phy
+    iny
+    lda [<_hk.EAX0],y          ; byte 1
+    bne .big
+    iny
+    lda [<_hk.EAX0],y          ; byte 2
+    bne .big
+    iny
+    lda [<_hk.EAX0],y          ; byte 3
+    bne .big
+    ply
+    lda [<_hk.EAX0],y
+    rts
+.big:
+    ply
+    lda #255
+    rts
+
+; ---- SndDiv16: snd_dn / snd_dd (nonzero) -> snd_dn, restoring division.
+SndDiv16:
+    stz snd_dr
+    stz snd_dr+1
+    ldy #16
+.l:
+    asl snd_dn
+    rol snd_dn+1
+    rol snd_dr
+    rol snd_dr+1
+    sec
+    lda snd_dr
+    sbc snd_dd
+    tax
+    lda snd_dr+1
+    sbc snd_dd+1
+    bcc .no
+    sta snd_dr+1
+    stx snd_dr
+    inc snd_dn
+.no:
+    dey
+    bne .l
+    rts
+
+; ---- SndFxStep: one tick of an effect on channel X (the model's tick()).
+; Writes R0, then the frequency (R2/R3, or R7 for noise) while sliding, then
+; R4 while the level moves; a frame that changes neither writes nothing.
+SndFxStep:
+    stz snd_fx_fl
+    lda snd_fx,x
+    and #FX_SLOPE
+    beq .noslide
+    lda #1
+    sta snd_fx_fl
+    clc
+    lda snd_f16_lo,x
+    adc snd_fst_lo,x
+    sta snd_f16_lo,x
+    lda snd_f16_hi,x
+    adc snd_fst_hi,x
+    sta snd_f16_hi,x
+.noslide:
+    lda snd_fx,x
+    and #FX_ENV
+    beq .noenv
+    lda snd_frames_lo,x        ; left
+    cmp snd_thr,x
+    beq .notatt
+    bcc .notatt
+    clc                        ; left > thr: attack, level += su
+    lda snd_v16_lo,x
+    adc snd_su_lo,x
+    sta snd_v16_lo,x
+    lda snd_v16_hi,x
+    adc snd_su_hi,x
+    sta snd_v16_hi,x
+    bra .level
+.notatt:
+    lda snd_dec,x
+    cmp snd_frames_lo,x
+    bcc .noenv                 ; dec < left: holding
+    sec                        ; left <= dec: decay, level -= sd
+    lda snd_v16_lo,x
+    sbc snd_sd_lo,x
+    sta snd_v16_lo,x
+    lda snd_v16_hi,x
+    sbc snd_sd_hi,x
+    sta snd_v16_hi,x
+.level:
+    lda snd_fx_fl
+    ora #2
+    sta snd_fx_fl
+.noenv:
+    lda snd_fx_fl
+    bne .write
+    rts
+.write:
+    stx $800
+    PSGT_X 0
+    lda snd_fx_fl
+    and #1
+    beq .nofreq
+    lda snd_f16_lo,x
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    sta snd_tmp
+    lda snd_f16_hi,x
+    asl a
+    asl a
+    asl a
+    asl a
+    ora snd_tmp
+    sta snd_dr                 ; F low byte (scratch)
+    lda snd_fx,x
+    and #FX_NOISE
+    beq .tone
+    lda snd_dr
+    and #$1F
+    ora #$80
+    sta $807
+    PSGT_A 7
+    bra .nofreq
+.tone:
+    lda snd_dr
+    sta $802
+    PSGT_A 2
+    lda snd_f16_hi,x
+    lsr a
+    lsr a
+    lsr a
+    lsr a
+    sta $803
+    PSGT_A 3
+.nofreq:
+    lda snd_fx_fl
+    and #2
+    beq .done
+    lda snd_v16_hi,x
+    ora #$80
+    sta $804
+    PSGT_A 4
+.done:
+    rts
+
 SndGlueWave:
     .db 31,31,31,31,31,31,31,31,31,31,31,31,31,31,31,31
     .db 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+    ; triangle (SndGlueWave + 32): up 0..30 by two, down 31..1 by two
+    .db 0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30
+    .db 31,29,27,25,23,21,19,17,15,13,11,9,7,5,3,1
+    ; sawtooth (SndGlueWave + 64)
+    .db 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15
+    .db 16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
+SndWaveOff:
+    .db 0,0,32,64
 SndGlueEnd:
 
     .if (SndGlueEnd > $A000)

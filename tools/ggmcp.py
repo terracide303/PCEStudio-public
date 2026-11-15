@@ -14,6 +14,12 @@ a profiler.  docs/GEARGRAFX-MCP.md has the recipe and the gotchas.
                                                         run FRAMES video frames (default 120) of a
                                                         PSG_TRACE build and print its write log as
                                                         JSON (image.json = the engine's hutrack-image.json)
+    python3 -I tools/ggmcp.py ROM.pce psgstream IMAGE.json [FRAMES]
+                                                        like psgtrace for a PSG_TRACE build, but with no 24-frame window or
+                                                        100-write cap: the log's window is lifted and it is drained and
+                                                        cleared after every video frame, so a toy's whole PSG write stream
+                                                        (up to 255 toy frames) comes back as JSON [frame, reg, value] --
+                                                        for tests/check-sfx-fx.js
     python3 -I tools/ggmcp.py ROM.pce satdump [FRAMES]
                                                         step FRAMES video frames (default 400) and print, as JSON, the
                                                         runtime's toy-frame counter ($2104) and the sprite list in VRAM
@@ -113,6 +119,24 @@ if __name__ == "__main__":
             print(json.dumps({"ok": g.ram(tr["psg_trace_ok"], 1)[0], "count": count,
                               "events": [[f[i], r[i], v[i]] for i in range(count)],
                               "tail": all(f[i] == 0xEE and r[i] == 0xEE and v[i] == 0xEE for i in range(count, cap))}))
+        elif len(sys.argv) > 3 and sys.argv[2] == "psgstream":
+            tr = json.load(open(sys.argv[3]))["psg_trace"]
+            for _ in range(120):                       # step until the boot's SndGlueReset has run
+                g.tool("debug_step_frame", {"frames": 1, "mode": "sync"})
+                if g.ram(tr["psg_trace_ok"], 1)[0] == 0xA5:
+                    break
+            g.tool("write_memory", {"area": 0, "offset": "%04X" % (tr["psg_trace_limit"] - 0x2000), "bytes": "FF"})
+            events, cap = [], tr["capacity"]
+            for _ in range(int(sys.argv[4]) if len(sys.argv) > 4 else 120):
+                g.tool("debug_step_frame", {"frames": 1, "mode": "sync"})
+                count = g.ram(tr["psg_trace_count"], 1)[0]
+                if count:
+                    f, r, v = (g.ram(tr[k], count) for k in ("psg_trace_f", "psg_trace_r", "psg_trace_v"))
+                    events += [[f[i], r[i], v[i]] for i in range(count)]
+                    g.tool("write_memory", {"area": 0, "offset": "%04X" % (tr["psg_trace_count"] - 0x2000), "bytes": "00"})
+                    if count >= cap:
+                        sys.exit("psgstream: a frame filled the %d-entry log" % cap)
+            print(json.dumps({"ok": g.ram(tr["psg_trace_ok"], 1)[0], "events": events}))
         elif len(sys.argv) > 3 and sys.argv[2] == "vramdump":
             g.tool("debug_step_frame", {"frames": int(sys.argv[4]) if len(sys.argv) > 4 else 60, "mode": "sync"})
             areas = {a["name"]: a for a in json.loads(g.tool("list_memory_areas"))["areas"]}

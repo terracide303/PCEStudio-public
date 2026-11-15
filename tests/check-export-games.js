@@ -371,7 +371,7 @@ const GAME_PINS = {
   "SPRITE": {
     kind: "toy",
     toy: "tools/toys/sprite.lua",
-    rom: "a67291860e49e8aef11032e66720ead7b43ece2640b10948715dc7bc22d019b3",
+    rom: "86770716c21eb515f97bd221e25b928814961c120107e3ad094ae5f2d143909d",
     frames: [1994475180]
   }
 };
@@ -382,7 +382,7 @@ const GAME_PINS = {
  * they were written for; the card's games run the studio's route above. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "a315dd32bc20602cfd56bbb448e38c7fe34e640956a1279bbdacf72f1b3bccee",
+  rom: "d4d063ba1cbb5aa9b69d406681fffe3e54a5f31a87ba159b4f6d08f6238479b6",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };

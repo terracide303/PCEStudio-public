@@ -49,6 +49,25 @@ void toy_sfx(int32_t ch, int32_t freq, int32_t volume, int32_t frames) {
   GLUE_CALL(SND_SFX);
 }
 
+/* sfx_fx(channel, wave, from, to, volume, attack, decay, frames): the same
+ * three ops the interpreter runs (tools/ilvm/hutrack_engine.asm SndGlueFxOp):
+ * the op kind in bits 8..15 of the first operand, the rest the call's own. */
+static void fx_op(int32_t kind, int32_t a, int32_t b, int32_t c) {
+  int32_t op[4];
+  op[0] = kind << 8; op[1] = a; op[2] = b; op[3] = c;
+  set_eax0(0, (uint8_t)(uintptr_t)op);
+  set_eax0(1, (uint8_t)((uintptr_t)op >> 8));
+  GLUE_CALL(SND_SFXOP);
+}
+
+void toy_sfx_fx(int32_t ch, int32_t wave, int32_t from, int32_t to,
+                int32_t volume, int32_t attack, int32_t decay,
+                int32_t frames) {
+  fx_op(1, from, to, volume);
+  fx_op(2, wave, attack, decay);
+  fx_op(3, ch, frames, 0);
+}
+
 void toy_release(int32_t ch) {
   set_eax0(0, (uint8_t)ch);
   GLUE_CALL(SND_RELEASE);
