@@ -161,7 +161,11 @@ function studioFiles(id) {
   return out;
 }
 
-/* The card's five games and the outcome docs/ROM_SPEED.md records
+/* #293 (2026-11-15): NOVA TIDE left this table — the interpreter now carries the table-form raster(line, spec)
+ * (docs/IL.md §14.1), so the studio no longer refuses it; it is a pin in GAME_PINS below.  The table is empty
+ * until a game is refused again.
+ *
+ * The card's five games and the outcome docs/ROM_SPEED.md records
  * (re-routed by #284, 2026-11-04): the studio's Export button runs the
  * CONSOLE tab's three stages first, so NOVA TIDE was refused by the C
  * emitter (its `raster(0, { bxr = 0 })` call — the spec-table form has no
@@ -184,21 +188,7 @@ function studioFiles(id) {
  * itself can say (the data bank's plain Error names no line).
  * `bytecode` records the MCP route's own refusal where it differs (NOVA
  * TIDE), still checked so export_pce's verdict stays tripwired. */
-const GAMES = [
-  {
-    name: "NOVA TIDE", toy: "toys/nova-tide/main.lua", galleryId: "nova-tide",
-    /* 2026-11-13: the C emitter now lowers raster(line, spec) (the native
-     * route runs NOVA TIDE), so the Export button's CONSOLE stages pass and
-     * the refusal comes one step later, from the bytecode encoder: the
-     * interpreter has no form for the table-form raster call. */
-    expect: { code: "ilbc-op",
-              message: "instruction raster (function 34, pc 53) has no bytecode form" },
-    where: "main.lua:530",
-    bytecode: { code: "ilbc-op",
-                message: "instruction raster (function 34, pc 53) has no bytecode form" },
-    bytecodeWhere: "main.lua:530"
-  }
-];
+const GAMES = [];
 
 /* A game that builds gets {rom, frames} here (its ROM sha, its
  * picture-cycle hashes, and the measure/capture wall time its boot needs —
@@ -262,6 +252,27 @@ const GAME_PINS = {
     captureMs: 12000,
     captureTail: true,
     browserFrames: 600
+  },
+  /* NOVA TIDE builds on the studio's route since #293 (2026-11-15): the interpreter carries the table form
+   * raster(line, spec) (docs/IL.md §14.1; before, the encoder refused it as `ilbc-op` raster, pc 53).  The art
+   * exports as a banked-data plan (9,950 B, two whole banks after a two-bank container).  It does NOT play:
+   * the container is over four of the interpreter's capacities (rom_check: registers 67 of 41, upvalue cells
+   * at boot 91 of 72, globals 62 of 32, table slots 27 of 16; the bytecode is 7,998 B but the tables bank and
+   * code bank make 16,384 B), so toy_boot stops at load and the screen is blank.  The pin is that black screen
+   * and the ROM sha; trimming the game under those limits is the rework card (EXPORT REWORK 3/5).  The
+   * raster path itself is proved on the host by tests/check-ilvm-raster-table.js (NOVA TIDE's entries against
+   * the browser's, with the limits raised in a scratch build) and on the console by the raster-table toy in
+   * that suite's Mednafen part. */
+  "NOVA TIDE": {
+    toy: "toys/nova-tide/main.lua",
+    galleryId: "nova-tide",
+    rom: "d3d44b03c6bb3c7ca8edd793ea50e859f5a8cb804fe98e8422ebaaccaba66033",
+    romBytes: 65536,
+    art: { blobBytes: 9950, copies: 3, tiles: 140, patterns: 16, sprites: 16 },
+    bytecode: { rom: "9b49bb438f3547098b2bc79ef39f4d52d807af8f09435a072734ba70050c15ca", romBytes: 49152 },
+    black: "toy_boot stops at load: globals 62/32, registers 67/41, table slots 27/16, upvalue cells 91/72",
+    measureFrames: 300,
+    captureMs: 6000
   },
   /* TOWER builds on the studio's route (no art files; the C emitter
    * accepts it): the bytecode is 7,862 B of the 8,160 B data bank and no
@@ -346,10 +357,23 @@ const GAME_PINS = {
    * same every frame: one pinned hash is the whole cycle.  The console's
    * SAT words for this toy are compared in tests/check-ilvm.js's
    * tests/dumps/toysprite-ilvm dump. */
+  /* #293: tools/toys/rastertable.lua, the table form raster(line, spec) on the exported route: eight lines of a
+   * checkered background each take their own scroll (bxr, byr or both) and the values move every frame.  The
+   * console's toy frame is slower than the browser's, so the pin is the ROM sha and "the captured picture is
+   * one of the browser's frames" (framesAny): a Mednafen capture equal to a browser frame is the console proof
+   * the entries reach the line table and the RCR chain.  The host-side entry parity is
+   * tests/check-ilvm-raster-table.js. */
+  "RASTER TABLE": {
+    kind: "toy",
+    toy: "tools/toys/rastertable.lua",
+    rom: "28eaafd17f45afecdb0f0ebeadc774f74061548a8b25344989ea589d43cb3cdd",
+    framesAny: true,
+    browserFrames: 120
+  },
   "SPRITE": {
     kind: "toy",
     toy: "tools/toys/sprite.lua",
-    rom: "dec7c595be8fc537d7f6bef81da1387fbcc603c69d5e4e25ad20310afa9df7f0",
+    rom: "a67291860e49e8aef11032e66720ead7b43ece2640b10948715dc7bc22d019b3",
     frames: [1994475180]
   }
 };
@@ -360,7 +384,7 @@ const GAME_PINS = {
  * they were written for; the card's games run the studio's route above. */
 const CONTROL = {
   toy: "tools/toys/palette.lua",
-  rom: "8d21e951b63f694b176602512a71f0034c863dbbeb3b375cda102a256ba83811",
+  rom: "a315dd32bc20602cfd56bbb448e38c7fe34e640956a1279bbdacf72f1b3bccee",
   frames: [3869706156, 2643445924, 3538915532, 947327828,
            812752556, 3014706084, 1954942252, 1817623796]
 };
@@ -910,7 +934,7 @@ async function main() {
          * cannot drift silently. */
         const banks = Math.ceil(pin.art.blobBytes / 8192);
         eq(n + ": builds a ROM with the art on whole banks",
-           out.rom.length, ROM_BYTES + banks * 8192);
+           out.rom.length, pin.romBytes || ROM_BYTES + banks * 8192);
         eq(n + ": the plan carries the pinned blob",
            out.art && out.art.blobBytes, pin.art.blobBytes);
         eq(n + ": the plan carries the pinned copies",
@@ -919,13 +943,13 @@ async function main() {
            out.art && [out.art.tiles, out.art.patterns, out.art.sprites]
              .join("/"),
            [pin.art.tiles, pin.art.patterns, pin.art.sprites].join("/"));
-        check(out.rom.subarray(ROM_BYTES,
-                               ROM_BYTES + out.art.blobBytes)
+        const artAt = pin.romBytes ? pin.romBytes - banks * 8192 : ROM_BYTES;
+        check(out.rom.subarray(artAt, artAt + out.art.blobBytes)
               .equals(out.art.blob),
               n + ": the art blob sits whole on the bank after the container");
         const bc = exportToy(pin.toy);
         eq(n + ": the bytecode route still builds the artless ROM",
-           bc.rom ? bc.rom.length : 0, ROM_BYTES);
+           bc.rom ? bc.rom.length : 0, pin.bytecode.romBytes || ROM_BYTES);
         eq(n + ": … and its sha is the pinned one (the docs' bytecodeOnly)",
            bc.rom ? sha256(bc.rom) : "refused", pin.bytecode.rom);
       }
@@ -933,11 +957,9 @@ async function main() {
     if (out.rom) {
       (pin.bytecodeOnly ? bytecodeBuilt : studioBuilt)
         .push({ game: pin, name: n, out: out });
-      eq(n + ": builds a " + (ROM_BYTES +
-           (pin.art ? Math.ceil(pin.art.blobBytes / 8192) * 8192 : 0)) +
-         "-byte ROM",
-         out.rom.length, ROM_BYTES +
-           (pin.art ? Math.ceil(pin.art.blobBytes / 8192) * 8192 : 0));
+      const wantBytes = pin.romBytes || ROM_BYTES +
+        (pin.art ? Math.ceil(pin.art.blobBytes / 8192) * 8192 : 0);
+      eq(n + ": builds a " + wantBytes + "-byte ROM", out.rom.length, wantBytes);
       eq(n + ": the ROM is the pinned one", sha256(out.rom), pin.rom);
       continue;
     }
@@ -951,8 +973,7 @@ async function main() {
   /* NOVA TIDE's asset tail: the table records it (192,089 B) as the data
    * bank's next refusal after the C emitter's, so the suite computes it. */
   {
-    const nova = GAMES.find(function (g) { return g.name === "NOVA TIDE"; });
-    const tail = assetTail(studioFiles(nova.galleryId));
+    const tail = assetTail(studioFiles(GAME_PINS["NOVA TIDE"].galleryId));
     eq("NOVA TIDE's asset tail is the table's 192,089 B",
        tail ? tail.length : 0, 192089);
   }

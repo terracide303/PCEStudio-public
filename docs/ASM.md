@@ -42,24 +42,41 @@ with `rts` and never jumps out of itself**, and **a stated zero-page budget**.
 
 ### 2.1 ROM banks
 
-`LLVM_MOS=/Volumes/External/pce-tools/llvm-mos PCEAS4=pceas4
-tools/ilvm/build.sh` was run in this worktree on 2026-11-13 (#282's re-pin).
+`LLVM_MOS=/Volumes/External II/pce-tools/llvm-mos PCEAS4=pceas4
+tools/ilvm/build.sh` was run in this worktree on 2026-11-15 (#293).
 It printed:
 
 ```
-built renderer/ilvm.bin: 32768 bytes, sha256 b39d4266070eb4e4
+built renderer/ilvm.bin: 32768 bytes, sha256 1163acb5ab3dfbdd
 zero page   interpreter $2020-$2080 (96 B) | engine $2080-$20DE (94 B) | 34 B free
-BaseRAM     interpreter heap starts $3742 | engine $3742-$3B9D (1115 B) | stack headroom 1123 B (margin 787)
+BaseRAM     interpreter heap starts $3744 | engine $3744-$3B9F (1115 B) | stack headroom 1121 B (margin 787)
 ```
 
 The sha matches the committed `renderer/ilvm.bin` and `tools/gen/ilvm.json`
-(`b39d4266070eb4e4…`), so the table is the shipped image, not a rebuild
-variant.  #281 moved it from `d68a1b5f567d824b…`: #280 made the interpreter
-map a function's bank and #281 added COPYV with its shim; the engine `.bss`
-grew 1,111 → 1,115 B, so the interpreter heap and stack headroom moved with
-it.  (#227 moved it from `46ccefb656d18ca9…`: the raster chain now
-re-arms every VBlank and writes from a zero-page preload; the HuTrack banks
-at bytes 16,384–32,767 compare byte for byte with the old image.)
+(`1163acb5ab3dfbdd…`), so the table is the shipped image, not a rebuild
+variant.  #293 moved it from `b39d4266070eb4e4…`: the table form
+`raster(line, spec)` (docs/IL.md §14.1) must take entries while the chain
+replays the last table, and commit them.  The entries are parked in the line
+table's own colour-word arrays, which a table-form toy never uses (the field
+mask rides in the op byte's bits 5-7, which the chain's walker never tests),
+so the RAM cost is one byte: the heap start moved `$3742` → `$3744` and the
+stack headroom 1,123 → 1,121 B.  A first version kept a 16-entry pending list
+in 122 B of BSS; `tests/check-rom-sound.js`'s trace image then fell to 694 B of
+headroom, 93 B under the 787 B margin (the trace build carries ~307 B more
+than the shipped one), so the list went.  It has **no opcode**: a `0x25` case in `exec` cost 420 B and the layout had
+17 B of slack, so the encoder lowers the instruction to `tget`s and `reg`
+writes the runtime's `toy_reg` already dispatches (`which` >= 0x10).  The
+rest of the bytes were bought back inside the same files, behaviour
+unchanged: the three copies of the measurement counters' 32-bit add became
+one `meas_add`, and four signed range tests became one unsigned compare
+(`toy_pad`, `toy_sat`, two shifts and the closure index).  The layout is
+still full: `.text` 16,232 + `.rodata` 98 + `.early_start` 44 + `.vector`
+10 = 16,384, and `.early_start` ends on its pinned `$FFD3`.  (#281 moved it
+from `d68a1b5f567d824b…`: #280 made the interpreter map a function's bank
+and #281 added COPYV with its shim.  #227 moved it from
+`46ccefb656d18ca9…`: the raster chain now re-arms every VBlank and writes
+from a zero-page preload; the HuTrack banks at bytes 16,384–32,767 compare
+byte for byte with the old image.)
 
 | physical bank | CPU window | content | used | free | where the number comes from |
 |---|---|---|---|---|---|

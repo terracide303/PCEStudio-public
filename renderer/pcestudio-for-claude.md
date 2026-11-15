@@ -913,6 +913,7 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | bytecode (every .pce) | tables: int array keys and string fields | the interpreter's fixed pool of 192 cells |
 | bytecode (every .pce) | pad[n].field |  |
 | bytecode (every .pce) | sat(i, k, v) and sprite(i, spec) |  |
+| bytecode (every .pce) | raster(line, spec), the table form | bxr, byr and cr; cram is refused |
 | bytecode (every .pce) | music(song), sfx(ch, freq, volume, frames), release(ch) and note(midi) | a sound toy's container is version 3, which the committed interpreter reads: note and sfx match the browser on the host harness, music runs on the engine with the ROM's song table (docs/ROM-SOUND.md). |
 
 ### Refused today
@@ -936,9 +937,10 @@ The Studio's ROM CHECK drawer checks both routes as you type, marks the lines in
 | bytecode (every .pce) | ilbc-fixed | fixed-point arithmetic, comparison or constant |
 | bytecode (every .pce) | ilbc-jump | a jump target that is not an instruction boundary |
 | bytecode (every .pce) | ilbc-key | a constant or operand with no bytecode form |
-| bytecode (every .pce) | ilbc-op | an instruction the bytecode has no form for (print, raster(table), vget) or a sprite whose spec the walker cannot resolve |
+| bytecode (every .pce) | ilbc-op | an instruction the bytecode has no form for (print, vget) or a sprite whose spec the walker cannot resolve |
 | bytecode (every .pce) | ilbc-program | not a pce-il version 1 program, no functions, or a hook with no global slot |
 | bytecode (every .pce) | ilbc-range | a value past one byte: more than 127 constants, 128 registers, 255 functions or globals, or a setlist index/count |
+| bytecode (every .pce) | ilbc-raster-spec | a raster(line, spec) the encoder cannot read: a cram field, another key, or a spec built across a branch |
 | bytecode (every .pce) | ilbc-table-escape | a table site that can run more than once and escapes; one static slot would alias two tables |
 | bytecode (every .pce) | ilbc-table-key | a table base that is not a register, or a key that is neither a string field nor an int operand |
 | bytecode (every .pce) | ilbc-table-ram | the table slots need more than the interpreter's 192 cells, or a key/field is past its slot's shape |

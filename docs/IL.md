@@ -1243,6 +1243,32 @@ or a constant int index encoded `0x80|k`); `kind` 1 means the key byte is a
 constant pool, so `MAX_CONST = 127` is unaffected. A `table` value in a
 register is its slot id. `table` is 3 bytes, `setlist` 4+n, `tget`/`tset` 5.
 
+The **table form `raster(line, spec)`** (#293) has no opcode of its own:
+the fixed interpreter image had 17 bytes of slack, and `0x25` as an op case
+cost 420 bytes in `exec`. The encoder lowers the IL `raster` instruction to
+ordinary ops, so the interpreter's only change is in the runtime's `toy_reg`:
+
+1. for each of `bxr`, `byr`, `cr` that the spec table sets, a `tget` of that
+   field into a temporary register past the function's own registers (the
+   container's `nregs` grows by 3 for a function that calls `raster`; the
+   interpreter's limit of 41 still holds, `ilbc-range` otherwise). The values
+   are read **at the call**, as the C backend's `il_table_getf` does, so a
+   register the earlier `tset`s used may have been reused;
+2. `reg` writes to pseudo-registers: `which` 0x10 is the line, 0x11 `bxr`,
+   0x12 `byr`, 0x13 `cr`, and `0x18 | mask` (mask 1 bxr, 2 byr, 4 cr) registers
+   the entry — the operand of that last write is unread.
+
+Which keys the spec sets is read off the IL by `rasterSpecKeys()`
+(`renderer/pce-ilbc.js`, the C backend's rule): a spec built across a branch,
+rewritten before the call, with a key other than `bxr`/`byr`/`cr`, or with no
+key at all is refused as `ilbc-raster-spec`. **`cram` is not carried.** A toy
+with a `raster()` callback and a table-form call is refused too.
+Container flags bit 1 says the toy uses the form; the runtime then takes its
+lines from the registered entries and calls no per-line callback. Entries
+registered while `init()` and the main chunk run are static; a frame's own entries are dropped at the start of the next frame (the browser host's `staticEntries` / `tableEntries`). The runtime keeps no list: an entry on line L parks its values in the line table's colour-word arrays (a table-form toy never uses them) and its field mask in the op byte's bits 5-7, and the collection window copies the parked entries over the committed ones, so the table never changes under the chain. Any number of lines up to 224 works; a line outside 0..223 is ignored, where the browser stops the toy; a line takes the last entry registered for it (the browser refuses a second one). `tools/ilvm/hostvm.c` records every entry in
+`raster.txt`; `tests/check-ilvm-raster-table.js` compares it with the browser
+model.
+
 A **`copyv`** (#281) streams static asset data to VRAM. Its operands are
 **immediates, not pool constants** — a picture's blob must not spend the
 127-constant pool #218 relieves. `vram` is the first VRAM word address;

@@ -205,6 +205,7 @@ static uint16_t constTabOff;
 static uint16_t funcTabOff;
 static uint8_t code_cur;
 static uint8_t init_slot, frame_slot, raster_slot;
+uint8_t ilvm_raster_table;     /* header flags bit 1: the toy calls raster(line, spec) (reg 0x10..0x1F) */
 static uint8_t clos_next;       /* the ring's next slot, after boot */
 static uint8_t boot_end;        /* the first slot the ring may reuse */
 static uint8_t perm_next;       /* the first free permanent upvalue cell */
@@ -358,12 +359,12 @@ __attribute__((noinline)) static int32_t lua_idiv(int32_t x, int32_t y) {
 }
 
 __attribute__((noinline)) static int32_t lua_shl(int32_t x, int32_t n) {
-  if (n < 0 || n >= 32) return 0;
+  if ((uint32_t)n >= 32u) return 0;
   return (int32_t)((uint32_t)x << n);
 }
 
 __attribute__((noinline)) static int32_t lua_shr(int32_t x, int32_t n) {
-  if (n < 0 || n >= 32) return 0;
+  if ((uint32_t)n >= 32u) return 0;
   return (int32_t)((uint32_t)x >> n);
 }
 
@@ -513,7 +514,7 @@ static int32_t exec(uint8_t fid, uint8_t clh,
        * the closure handle.  Reading the operand byte as the handle was the
        * first run's bug: a call to register 12 ran closure 12 instead. */
       ch = operand(r, rb(pc++));
-      if (ch < 0 || ch >= MAX_CLOS) { fault = 1; return 0; }
+      if ((uint32_t)ch >= MAX_CLOS) { fault = 1; return 0; }
       u = (uint8_t)ch;
       n = rb(pc++);
       if (n > MAX_ARGS) { fault = 1; return 0; }
@@ -854,7 +855,7 @@ void toy_boot(void) {
   trans_next = UP_PERM;
   in_boot = 1;
   nfunc = 0; nglobal = 0; nconst = 0; nslots = 0;
-  init_slot = 0xFF; frame_slot = 0xFF; raster_slot = 0xFF;
+  init_slot = 0xFF; frame_slot = 0xFF; raster_slot = 0xFF; ilvm_raster_table = 0;
   map_sound_banks();           /* the glue's reset/tick jsr page 4 */
   ilvm_sound_reset();
 
@@ -880,6 +881,7 @@ void toy_boot(void) {
   init_slot = rb(6);
   frame_slot = rb(7);
   raster_slot = rb(8);
+  ilvm_raster_table = rb(5) & 2;
 
   if (nfunc > MAX_FUNCS || nglobal > MAX_GLOBALS || nconst > 127) {
     fault = 1;
@@ -950,8 +952,7 @@ void toy_boot(void) {
   perm_next = fns[0].nups;
   (void)exec(0, 0, 0, 0, 0, 0);
 
-  if (init_slot != 0xFF && globals[init_slot] >= 0 &&
-      globals[init_slot] < MAX_CLOS) {
+  if (init_slot != 0xFF && (uint32_t)globals[init_slot] < MAX_CLOS) {
     uint8_t h = (uint8_t)globals[init_slot];
     (void)exec(clos[h].fid, h, 0, 0, 0, 0);
   }
@@ -964,8 +965,7 @@ void toy_boot(void) {
 }
 
 int ilvm_has_raster(void) {
-  return raster_slot != 0xFF && globals[raster_slot] >= 0 &&
-         globals[raster_slot] < MAX_CLOS;
+  return raster_slot != 0xFF && (uint32_t)globals[raster_slot] < MAX_CLOS;
 }
 
 void toy_frame(int32_t f) {

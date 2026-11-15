@@ -251,9 +251,10 @@
       detail: "builds, but too slow: its boot alone takes several " +
               "seconds" },
     { game: "NOVA TIDE", toy: "toys/nova-tide/main.lua", builds: false,
-      code: "ilbc-op",
-      detail: "refused: its raster(line, spec) table call has no " +
-              "bytecode form, so the interpreter cannot carry it yet" }
+      code: "rom-budget",
+      detail: "exports, but stops at load: it is over four interpreter " +
+              "limits (registers, boot upvalue cells, globals, table slots); " +
+              "its raster(line, spec) calls are carried" }
   ];
 
   /* The idioms that compile fast (docs/ORIGINAL-CODE-IDIOMS.md and
@@ -320,8 +321,8 @@
       { code: "ilbc-op",
         fix: "replace the uncarried form: drop print() or log a number, " +
              "never read vram back (keep the value you wrote), and a " +
-             "raster(line, spec) table has no form yet — the raster(line) " +
-             "callback does, and costs only the lines that change" },
+             "raster(line, spec) with a cram field has no form — the " +
+             "raster(line) callback does" },
       { code: "cgen-op",
         fix: "the C route's own gaps: fixed-point helpers, print, and a " +
              "sprite spec it cannot pin — the bytecode-route fixes above " +
@@ -455,7 +456,7 @@
           " percent is near, past " + romcheck.OVER_PERCENT +
           " percent is over and refuses the export with the named code. " +
           "A sprite spec the walker cannot pin to constants and a " +
-          "raster(line, spec) table are findings, not capacities." },
+          "raster(line, spec) with a cram field are findings, not capacities." },
       { type: "h3", text: "What exports today", source: "the gallery's " +
           "five games, held by tests/check-rom-rules.js (the long form " +
           "is docs/ROM_SPEED.md)" },
