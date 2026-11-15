@@ -1342,7 +1342,37 @@
       var n = fn.code.length;
       var bounds = [];
       var lo, k, pc;
-      for (lo = 0; lo < n; lo += SPLIT_CHUNK) bounds.push([lo, Math.min(n, lo + SPLIT_CHUNK)]);
+      /* Cut points (#300): a loop cut by a chunk edge pays a dispatcher round trip on every iteration
+       * (NOVA TIDE's collision loop: ~45% of a video frame).  A cut goes where the fewest loops cross
+       * it, within +-40% of the nominal chunk length (an inner loop counts 8x its parent); every
+       * chunk stays within 1.4x SPLIT_CHUNK instructions. */
+      var spans = [];
+      fn.code.forEach(function (ij, p) {
+        if ((ij.t === "jmp" || ij.t === "br" || ij.t === "fornext") && ij.target != null && ij.target <= p) spans.push([ij.target, p]);
+      });
+      spans.forEach(function (sp) {
+        sp.w = 1;
+        spans.forEach(function (o) { if (o !== sp && o[0] <= sp[0] && o[1] >= sp[1] && (o[0] < sp[0] || o[1] > sp[1])) sp.w *= 8; });
+      });
+      function cutCost(c) {
+        var w = 0;
+        spans.forEach(function (sp) { if (sp[0] < c && c <= sp[1]) w += sp.w; });
+        return w;
+      }
+      lo = 0;
+      while (lo < n) {
+        var hi = lo + SPLIT_CHUNK;
+        if (n - lo > Math.round(SPLIT_CHUNK * 1.4)) {
+          var best = hi, bc = cutCost(hi), c0 = Math.round(SPLIT_CHUNK * 0.6), c1 = Math.round(SPLIT_CHUNK * 1.4);
+          for (var c = lo + c0; c <= lo + c1; c++) {
+            var cc = cutCost(c);
+            if (cc < bc || (cc === bc && Math.abs(c - lo - SPLIT_CHUNK) < Math.abs(best - lo - SPLIT_CHUNK))) { best = c; bc = cc; }
+          }
+          hi = best;
+        } else hi = n;
+        bounds.push([lo, Math.min(n, hi)]);
+        lo = hi;
+      }
       function chunkOf(p) {
         for (var c = 0; c < bounds.length; c++) if (p >= bounds[c][0] && p < bounds[c][1]) return c;
         return -1;
@@ -1694,9 +1724,16 @@
                operand(ins.v) + ");");
         } else {
           /* toy_sat's own range check, in line (it folds away for constant i and k), then the 16-bit write */
-          line("  if ((uint32_t)" + operand(ins.i) + " <= 63u && (uint32_t)" + operand(ins.k) + " <= 3u) " +
-               "toy_vram_set16((uint16_t)(0x7F00 + " + operand(ins.i) + " * 4 + " + operand(ins.k) + "), (uint16_t)" +
-               operand(ins.v) + ");");
+          if (options && options.noSatPut) {
+            line("  if ((uint32_t)" + operand(ins.i) + " <= 63u && (uint32_t)" + operand(ins.k) + " <= 3u) " +
+                 "toy_vram_set16((uint16_t)(0x7F00 + " + operand(ins.i) + " * 4 + " + operand(ins.k) + "), (uint16_t)" +
+                 operand(ins.v) + ");");
+          } else {
+            /* #300: toy_sat_put writes the raster builds' RAM shadow in line; the others have it as toy_vram_set16 */
+            line("  if ((uint32_t)" + operand(ins.i) + " <= 63u && (uint32_t)" + operand(ins.k) + " <= 3u) " +
+                 "TOY_SAT_PUT((uint8_t)(" + operand(ins.i) + " * 4 + " + operand(ins.k) + "), (uint16_t)" +
+                 operand(ins.v) + ");");
+          }
         }
         break;
       case "sprite": {
@@ -1901,6 +1938,13 @@
     } else {
       line("#include <stdint.h>");
       line("#include \"toy_runtime.h\"");
+      if (!(options && options.noSatPut)) {
+        line("#ifdef TOY_RASTER_BUILD");
+        line("#define TOY_SAT_PUT(off, w) toy_sat_put(off, w)");
+        line("#else");
+        line("#define TOY_SAT_PUT(off, w) toy_vram_set16((uint16_t)(0x7F00u + (off)), w)");
+        line("#endif");
+      }
       if (a.usesSound) line("#include \"toy_sound.h\"");
       if (options && options.assets) line("#include \"toy_assets.h\"");
     }

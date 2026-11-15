@@ -30,6 +30,18 @@ void toy_vram_set(int32_t addr, int32_t word);
 /* The same write with 16-bit arguments: what the compiled route's generated C calls.  A VRAM address and a
  * word are 16 bits to the VDC; passing them as int32 cost four argument bytes each for nothing. */
 void toy_vram_set16(uint16_t addr, uint16_t word);
+#ifdef TOY_RASTER_BUILD
+/* A SAT word from frame() (#300): in a raster build the SAT lives in a RAM shadow (toy_runtime.c, toy_vram_set16),
+ * so the usual case, frame() running (toy_host_mode 1), is two stores in line; boot time and the raster
+ * callback take the full function.  `off` is the word's index in the SAT (0..255). */
+extern volatile uint8_t toy_host_mode;
+extern volatile uint16_t toy_sat_sh[256];
+extern volatile uint8_t toy_sat_dirty;
+static inline __attribute__((always_inline)) void toy_sat_put(uint8_t off, uint16_t word) {
+  if (toy_host_mode == 1) { toy_sat_sh[off] = word; toy_sat_dirty = 1; }
+  else toy_vram_set16((uint16_t)(0x7F00u + off), word);
+}
+#endif
 
 /* Four consecutive VRAM words from `addr`: one MAWR load and eight data stores instead of four of each
  * (a sprite's SAT entry, which the generated C knows is four consecutive constants). */

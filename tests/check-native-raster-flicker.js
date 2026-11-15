@@ -26,7 +26,7 @@ const MEDNAFEN = "/opt/homebrew/bin/mednafen";
 const llvm = (process.env.LLVM_MOS || "/Volumes/External II/pce-tools/llvm-mos/llvm-mos") + "/bin/mos-pce-clang";
 if (!fs.existsSync(MEDNAFEN) || !fs.existsSync(llvm)) { console.log("SKIP: Mednafen or llvm-mos not found"); process.exit(0); }
 const toys = require(ROOT + "/renderer/pce-toys.js");
-const TAIL = 24, BROWSER_FRAMES = 420;
+const TAIL = 24, BROWSER_FRAMES = 700;   /* a game at 60 Hz reaches game frame ~560 in the 10 s capture (was 420 when STARFALL ran at 28 fps) */
 let checks = 0;
 const failures = [];
 function check(ok, name) { checks++; if (!ok) { failures.push(name); console.log("FAIL  " + name); } else console.log("  ok  " + name); }

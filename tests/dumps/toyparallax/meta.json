@@ -39,7 +39,7 @@
  "name": "toyparallax",
  "rom": "tools/gen/toyparallax.pce",
  "rom_bytes": 8192,
- "rom_sha256": "e9e6e93da3ab7dfba3eb14a8b8a857042a74b6d8f227edfb515a77189386365a",
+ "rom_sha256": "52873114fa702bec3a08988788fe6bba4007e067a7ebb1b49ae0e6ca28067abd",
  "section_sizes": {
   ".bss": 3244,
   ".data": 16,

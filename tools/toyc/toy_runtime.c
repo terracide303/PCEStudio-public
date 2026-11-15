@@ -108,6 +108,7 @@ volatile uint8_t toy_host_mode;
  * A BYR written from the interrupt at line L > 0 is stored plus one: Mednafen's VDC shows the row BYR
  * from the next line where the browser model (pce-bg.js, the manual's "BYR+1") shows BYR+1.
  * The TAIL stop is the last record, one line after the last effect: it copies the shadow SAT. */
+#define TAIL_LINE 208
 #define RBASE_COLOURS 32
 #define RHDR (1 + 4 * RBASE_COLOURS)       /* header: the base colour count, then the words (index 2, value 2) */
 #ifdef TOY_RASTER_TABLE
@@ -900,7 +901,12 @@ static void rec_put(void) {
  * tail stop had passed, the swap waits one more video frame (the old picture stays whole).  Copying
  * the shadow in the VBlank handler instead put the sprites one video frame behind the scroll. */
 static void publish_frame(void) {
+  /* The tail stop sits after the last effect line, but not before TAIL_LINE: the game has until the stop
+   * to publish (a frame published after it waits a whole video frame), and a game frame starts at the
+   * VBlank, so a stop at line 25 left it 45 lines (STARFALL: 143 game frames in 300 video frames).  The
+   * copy takes ~8 lines and must end before the VBlank (line 240) that loads the VDC's own SAT. */
   cur_line = (uint8_t)(wlast + 1);
+  if (cur_line < TAIL_LINE) cur_line = TAIL_LINE;
   if (cur_line > 224) cur_line = 224;
   cur_op = 0x80;
   rec_put();
@@ -972,9 +978,13 @@ static void collect_all(void) {
   for (l = 0; l < VDW_LINES; l++) {
     if (l) cur_op = 0; else rec0_begin();
     cur_line = l;
-    toy_measure_raster_begin();
+#ifdef TOY_MEASURE_RASTER
+    toy_measure_raster_begin();   /* off by default: a 32-bit sum around each of 224 calls cost ~12% of a video frame (#300) */
+#endif
     toy_raster(l);
+#ifdef TOY_MEASURE_RASTER
     toy_measure_raster_end();
+#endif
     if (cur_op || !l) rec_put();
   }
 }
