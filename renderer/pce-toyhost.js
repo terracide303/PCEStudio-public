@@ -544,7 +544,7 @@
     host.state.regs.MWR = w.regs.MWR;
     host.state.regs.CR = w.regs.CR;
     return {
-      files: ASSET_FILES.slice(),
+      files: PICTURE_FILES.concat(readRaw(files) ? [RAW_FILE] : []),   /* vram.json only when the toy brings one */
       tiles: w.tiles,
       patterns: w.patterns,
       sprites: w.sprites,
