@@ -72,3 +72,13 @@ in the IL, and in the exported ROM, where the console runtime's `joy_scan()`
 fills the pads.  [`docs/PADS.md`](../docs/PADS.md) tells that story and
 `tests/check-pad-buttons.js` pins it, alongside the ROM sha and picture pin
 in `tests/check-export-games.js`.
+
+## `examples/` — three small complete toys for the ROM route
+
+`examples/shooter.lua`, `examples/platformer.lua` and `examples/raster-scroll.lua`
+are short, finished toys written to the ROM rules: each passes validate and
+rom_check with every budget under 80 percent and exports with export_pce. The
+header comment of each lists the budgets it uses (sprites, strips on a line,
+palettes, raster entries, bytecode, registers), and `tests/check-hardware-design.js`
+re-measures them, so the numbers cannot drift. They are the examples the
+`hardware-design` docs topic points at.

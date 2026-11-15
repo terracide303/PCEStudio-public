@@ -325,7 +325,11 @@ const INSTRUCTIONS =
   "Before writing a game, call docs with topic \"rom-rules\" and follow " +
   "it: run validate and rom_check after every change and fix every " +
   "finding, undo a change that turns the budget red, and call export_pce " +
-  "at the end. " +
+  "at the end. Also read docs topic \"hardware-design\" for the limits a " +
+  "game on this hardware lives inside (sprites, palettes, VRAM, sound, " +
+  "speed), and read the usage object validate and rom_check return to see " +
+  "how much of each limit is left. Three complete example toys are in " +
+  "toys/examples/. " +
   "Every tool wraps the same modules the studio and the tests use; there is " +
   "no second model.";
 

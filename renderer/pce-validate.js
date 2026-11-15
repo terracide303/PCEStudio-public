@@ -380,6 +380,58 @@
              coloursOver: coloursOver };
   }
 
+  /* ---- the usage report ------------------------------------------------- *
+   * The margin the author reads: what the toy's last probed frame uses of
+   * each hardware limit, as { used, limit } pairs the MCP tools hand to the
+   * connected Claude.  Every limit is the toy host's or the editor's own
+   * constant; every `used` is counted from the run's host state. */
+  function usageOf(host, raster, maxVram, spr, collection) {
+    var st = host.state;
+    var i, sprites = 0;
+    for (i = 0; i < toyhost.SAT_ENTRIES; i++) {
+      var y = st.sat[i * 8] | (st.sat[i * 8 + 1] << 8);
+      var x = st.sat[i * 8 + 2] | (st.sat[i * 8 + 3] << 8);
+      var w3 = st.sat[i * 8 + 6] | (st.sat[i * 8 + 7] << 8);
+      var h = [16, 32, 64, 64][(w3 >> 12) & 3];
+      var w = (w3 >> 8) & 1 ? 32 : 16;
+      y &= 0x3FF; x &= 0x3FF;
+      if (y + h > 64 && y < 64 + HEIGHT && x + w > 32 && x < 32 + WIDTH) sprites++;
+    }
+    var nonzero = 0, words = st.vram.length >> 1;
+    for (i = 0; i < words; i++) {
+      if (st.vram[2 * i] | st.vram[2 * i + 1]) nonzero++;
+    }
+    function palettes(first) {
+      var used = 0;
+      for (var p = first; p < first + 16; p++) {
+        for (var c = 0; c < 16; c++) {
+          var e = (p * 16 + c) * 2;
+          if (st.cram[e] | st.cram[e + 1]) { used++; break; }
+        }
+      }
+      return used;
+    }
+    return {
+      sprites: { used: sprites, limit: toyhost.SAT_ENTRIES },
+      sprite_strips_on_busiest_line: { used: spr.worst.requested,
+                                       limit: 16,   /* editor.LINE_STRIPS; check-mcp pins it */
+                                       line: spr.worst.line,
+                                       sprites_on_it: spr.worst.sprites },
+      vram_words: { used: nonzero, limit: toyhost.VRAM_WORDS,
+                    highest_written: maxVram },
+      bg_palettes: { used: palettes(0), limit: 16 },
+      sprite_palettes: { used: palettes(16), limit: 16 },
+      raster_entries: { used: raster && raster.entries
+                              ? raster.entries.length : 0,
+                        limit: toyhost.VDW_LINES },
+      frame_fraction: { used: Math.round(collection / FRAME_CLOCKS * 1000) / 1000,
+                        limit: 1,
+                        note: "frame() plus the raster() calls as a share " +
+                              "of one 60 Hz frame (the native model; over " +
+                              "1 means below 60 Hz)" }
+    };
+  }
+
   /* ---- the run ---------------------------------------------------------- */
 
   /* Run the toy for `frames` frames through the IL interpreter, counting the
@@ -656,6 +708,8 @@
              limit: ROM_LIMIT },
       sprites: spr.worst,
       spriteOverflowLines: spr.overflowLines,
+      usage: usageOf(run.host, run.runtime.lastRaster, run.maxVram, spr,
+                     collection),
       blank: blank.worst,
       blankOverLines: blank.over,
       tolerance: TOLERANCE
