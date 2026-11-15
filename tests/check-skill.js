@@ -452,14 +452,24 @@ function firstLuaBlock(text) {
       }
 
       if (name.indexOf("01-parallax") === 0) {
-        /* SKILL.md states the export route is background-only and that a
-         * table makes export_pce refuse.  All seven recipes use tables, so
-         * the refusal is the documented, tested behaviour — and a
-         * background-only toy is exported to prove the route itself works. */
-        const refused = await client.call("export_pce", { name: "parallax" });
-        check(refused.isError, "export_pce refuses a table toy (SKILL.md's limit)");
-        eq("the refusal is ilbc-op", refused.body && refused.body.code, "ilbc-op");
-        contains("SKILL.md states the ilbc-op limit", skillText, "ilbc-op");
+        /* SKILL.md states what export_pce carries and refuses.  Tables are
+         * carried now (#136-#183 and the table ops): the parallax recipe is a
+         * table toy and exports.  The table shape it still refuses is a table
+         * a repeated call builds and that escapes (ilbc-table-escape); that is
+         * the tested limit, and a background-only toy is exported to prove the
+         * route itself works. */
+        const tableToy = await client.call("export_pce", { name: "parallax" });
+        check(!tableToy.isError, "export_pce exports a table toy (the parallax recipe)" +
+              (tableToy.isError ? " (" + JSON.stringify(tableToy.body) + ")" : ""));
+        const escapes = "local keep = nil\nfunction frame(t, f)\n" +
+                        "  keep = { x = f }\n  reg(\"BXR\", f)\nend\n";
+        await client.call("toy_write", {
+          files: [{ name: "main.lua", source: escapes }]
+        });
+        const refused = await client.call("export_pce", { name: "escapes" });
+        check(refused.isError, "export_pce refuses a table built each frame that escapes (SKILL.md's limit)");
+        eq("the refusal is ilbc-table-escape", refused.body && refused.body.code, "ilbc-table-escape");
+        contains("SKILL.md states the ilbc-table-escape limit", skillText, "ilbc-table-escape");
 
         const bg = "function init()\n  pal(0, rgb(0, 0, 3))\n" +
                    "  for i = 0, 895 do vram[i] = 0x40 end\nend\n" +

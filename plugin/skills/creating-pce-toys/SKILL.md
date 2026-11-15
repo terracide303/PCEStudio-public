@@ -226,11 +226,12 @@ only see an empty picture:
 `toy_write` compiles through the same IL the validator and the exporter use.
 These come back by code with `file:line` — they are not style opinions:
 
-- Tables — the IL reads a table *the toy built* back (`t[i]`, `t.x`), but the
-  console back end does not lower tables, so a toy with a table read runs in
-  the browser and fails export (`cgen-op`). For a cartridge, write if-chains
-  or a `vram[]` array instead. (Passing a table literal straight to
-  `sprite()` is fine.)
+- Tables — the IL reads a table *the toy built* back (`t[i]`, `t.x`), and the
+  export carries it. The one shape `export_pce` refuses is a table that a
+  repeated call builds and that escapes, e.g. `keep = { x = f }` in `frame()`
+  (`ilbc-table-escape`): build it once in `init()` or at file level, or keep
+  it local to the frame. (Passing a table literal straight to `sprite()` is
+  fine.)
 - `il-op` — a tail call (`return f(x)`) is not lowered. Assign to a local and
   return that.
 - Strings are not values in the IL. A string exists only as the name in
@@ -482,22 +483,22 @@ refuses `sfx()` as `rom_check` reports.
 ### What `export_pce` can and cannot build
 
 `export_pce` turns the toy into bytecode for a HuC6280 interpreter and glues
-that into a `.pce` — the route that needs no compiler. **The bytecode format is
-background-only in this beta.** It encodes `reg`, `pal`, `vram[]` writes,
-`rgb`, integer arithmetic and control flow. It refuses, by code:
+that into a `.pce` — the route that needs no compiler. It carries values,
+control flow, integer arithmetic, `rgb`, `note`, `pal`, `reg`, `vram[]` writes,
+tables, `sat()` and `sprite()`, `pad[n]`, the `raster(line, {…})` table form
+(`bxr`, `byr`, `cr`) and the `raster(line)` callback. It refuses, by code:
 
 | the toy uses | `export_pce` refuses with |
 | --- | --- |
-| a table (`sprite()`, `sat()`, `raster(line, {…})`) | `ilbc-op` — "instruction table … has no bytecode form" |
-| `pad[1].…` | `ilbc-op` — `padref` |
-| `print`, `music`, `sfx`, `timer` | `ilbc-op` — the instruction, by name |
-| `note(n)` (a value builtin) | `ilbc-builtin` |
+| a table a repeated call builds and that escapes | `ilbc-table-escape` |
+| `raster(line, {…})` with a `cram` field, or a spec built across a branch | `ilbc-raster-spec` |
+| `print`, `vget` (a VRAM read), a sprite spec the walker cannot resolve | `ilbc-op` — the instruction, by name |
+| `min`, `max`, `floor`, `abs`, `clamp`, `sr` (builtins) | `ilbc-builtin` |
 | a fixed-point value | `ilbc-fixed` |
 
-So: **tell the person which half they have.** A picture-and-motion toy with
-sprites and the pad runs in the studio and validates, and cannot be exported
-yet; a background toy (tiles, palettes, `reg`, the `raster(line)` callback)
-exports. The exported `.pce` is 16 KiB of interpreter plus one 8 KiB data bank;
+So: **quote the code it returns.** Each refusal names the line; a toy that
+validates and runs in the studio can still refuse here, and the table above
+names the shapes. The exported `.pce` is 16 KiB of interpreter plus one 8 KiB data bank;
 a payload past 8 KiB is refused by `toy-data-bank-full`. Every recipe here uses
 sprites or tables, so `export_pce` refuses all seven with `ilbc-op` — that is
 tested, not a guess.
