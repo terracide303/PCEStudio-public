@@ -338,7 +338,7 @@ function checkCapacity() {
 
 /* ---- 6. the write-up's citations --------------------------------------- */
 const CITATIONS = [
-  ["renderer/studio.html", 4820, "if (errors) return"],
+  ["renderer/studio.html", 4889, "if (errors) return"],
   ["renderer/studio-panel-console.js", 145, "emitC"],
   ["renderer/studio-panel-console.js", 148, "severity: \"error\""],
   ["renderer/pce-cgen.js", 660, "fn|vram|int|bool|padset|table"],
