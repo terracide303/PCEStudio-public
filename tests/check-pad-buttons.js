@@ -66,7 +66,9 @@ const ROM_DUMP = path.join(ROOT, "tests", "dumps", "pads",
 /* The exported ROM's pinned bytes (2 below): the sha moves with any
  * interpreter or bytecode change, like every GAME_PINS entry. */
 const ROM_PIN = {
-  sha: "c44be76f5f233c760148dae63c7776fb662c3bbacf5ef0573dfc654ec686be66",
+  /* re-pinned after #302's sound glue grew renderer/ilvm.bin (7880de8): the
+   * old ilvm.bin (13a7332) still exports c44be76f…, the new one 5ba0d0ea… */
+  sha: "5ba0d0ea1133e1a1ab14e61aa24f7b87bbbb14fa8ab639c923e462b7b01cecba",
   bytes: 40960,
   bytecodeBytes: 2063
 };

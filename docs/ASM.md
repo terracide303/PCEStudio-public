@@ -82,7 +82,7 @@ byte for byte with the old image.)
 |---|---|---|---|---|---|
 | 0–1 | `$C000–$FFFF` | crt0, vectors, runtime, interpreter | **16,384 B** | see below | `tools/ilvm/build.sh:131` asserts the image is exactly 16,384 B; `tools/gen/ilvm.json` `section_sizes` after #281: `.text` 16,238 + `.rodata` 98 + `.early_start` 38 + `.vector` 10 = 16,384; #281's 14 B came out of ICF shrinking `.early_start` 54 → 38 B, so the layout is full |
 | 2 | `$A000–$BFFF` (MPR5) | HuTrack engine code | **7,876 B** (`$A000–$BEC4`) | **316 B** | `tools/ilvm/build-engine.sh:500` print (this run) |
-| 3 | `$8000–$9FFF` (MPR4) | 2,868 B pitch tables + 1,024 B note table + 680 B sound glue and COPYV shim (`#281`) | **4,784 B** (`$8000–$92A8`) | **3,408 B** | `tools/ilvm/build-engine.sh` print (`#281` run) |
+| 3 | `$8000–$9FFF` (MPR4) | 2,868 B pitch tables + 1,024 B note table + 1,988 B sound glue (with COPYV's shim, `#281`, and `#302`'s sfx_fx and wave instruments) | **6,084 B** (`$8000–$97C4`) | **2,312 B** (2,108 B after the glue, 204 B gap) | `tools/ilvm/build-engine.sh` print; `check-hutrack-image` |
 | 4 | `$4000–$5FFF` (MPR2) | the toy's ILBC container, then assets; **last 32 B = the song trailer** | toy-specific | **8,160 − data** (see 2.2) | `renderer/pce-rom.js:149–154, 610–648`; `tools/ilvm/ilvm.c:56` |
 | **5 (this note)** | **`$6000–$7FFF` (MPR3)** | **the toy's assembly routines** | routine bytes | **8,192 − routine bytes** | new in this note; MPR3 is untouched by the interpreter (`tools/ilvm/ilvm.c:187` maps only MPR2; `:199–200` map MPR4/5) |
 
@@ -283,10 +283,10 @@ No `asm` → the same five-bank ROM, byte for byte (section 7.1).
 
 The fixed bank has ~35 B of slack (§2.1), and the probes in §6 show that
 operand decoding inside `exec()` does not fit. So the CALLASM case is kept
-as small as a call, and the body lives in bank 3's measured 3,408 B free
+as small as a call, and the body lives in bank 3's measured 2,312 B unused
 space (`#281` used 164 B of the former 3,580 B for COPYV's shim), reached
 by a fixed address exactly like the sound glue
-(`tools/ilvm/ilvm_sound.c:200–213`; the bank-3 glue extent is 680 B,
+(`tools/ilvm/ilvm_sound.c:200–213`; the bank-3 glue extent is 1,988 B,
 including `CopyvShim`). Its fixed address comes from the bank-3 staging
 assembly's `.sym` into the generated header, resolved by the same two-pass
 build #215 already uses for the engine's RAM base (`tools/ilvm/build.sh:55–90`).
@@ -338,8 +338,8 @@ own use of `jsr`/`rts` inside bank 5.
 The shim is hand-written assembly in the bank-3 staging source because the
 interpreter's C image is exactly 16 KiB and has no second link (the same
 reason the sound glue is PCEAS assembly, `docs/ROM-SOUND.md` §7). Its size
-is not yet measured; bank 3 has 3,408 B free and the glue precedent is
-680 B (the sound glue plus `#281`'s COPYV shim).
+is not yet measured; bank 3 has 2,312 B unused and the glue precedent is
+1,988 B (the sound glue with `#281`'s COPYV shim and `#302`'s sfx_fx).
 
 ---
 

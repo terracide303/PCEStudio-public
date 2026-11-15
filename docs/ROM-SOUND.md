@@ -94,6 +94,14 @@ window patch. The vendored tree itself is never edited.
 | **code, combined, with the three-site window patch (§3)** | **7,876 B** | `$A000-$BEC4`; 316 B free in the bank |
 | pitch tables | **2,868 B** | `HuTrack.Tables` `$8000` → `HuTrack.Tables.end` `$8B34` |
 | **tables bank free** | **5,324 B** | `$8B34-$9FFF` |
+| note(midi) table (#215) | 1,024 B | `$8C00-$9000` |
+| sound-op glue (#220, #239, #113, #281's COPYV shim, #302's sfx_fx and wave instruments) | **1,988 B** | `SndGlueMap` `$9000` → `$97C4` (`tools/gen/hutrack-image.json` `sound_glue`) |
+| **tables bank unused after the glue** | **2,312 B** | `$8B34-$8BFF` (204 B alignment gap) and `$97C4-$9FFF` (2,108 B) |
+
+The two rows above are the current bank 3 layout. The glue was 680 B at
+`13a7332` and grew to 1,856 B in `48f46ac` (sfx_fx) and to 1,988 B in
+`7880de8` (wave instruments 4..7); `tests/check-hutrack-image.js` pins the
+1,988 B and fails on any byte past `$97C4`.
 
 `HuTrackTick` is four instructions plus a two-byte return vector write
 (measured 14 B):
@@ -282,6 +290,26 @@ bytes, `$20DC-$20DD`, which an address-of-last-label count drops).
 | **HuTrack `.bss`** | **1,111** | `$373E-$3B94` | `.sym`: `HuTrack.returnVec` → `EngineBss.end` |
 | **both** | **6,549 of 7,680** | | |
 | **stack headroom** | **1,131** | `$3B95-$4000` | `0x4000 − engine end` |
+
+**The shipped partition now (after #281 and #302, `7880de8`).** The rows
+above are the layout of their own commits and are kept as history. The
+image `renderer/ilvm.bin` (sha `49e4e37c…`) was rebuilt from `HEAD` by
+`tools/ilvm/build.sh` in a scratch worktree and reproduces the committed
+bytes; its `tools/gen/ilvm.json` `ram_budget` and `hutrack-symbols.h` give:
+
+| fact | now | source |
+|---|---|---|
+| interpreter heap start (BaseRAM) | **`$3744`** | `ilvm.json` `interpreter_heap_start` 14148 |
+| engine `.bss` (starts with the glue's `.bss`) | `$3744-$3BFD`, **1,210 B** | `ilvm.json` `engine_start`/`engine_end` |
+| `snd_args_frames` (the `sfx()` frames cell) | **`$3773`** | `hutrack-symbols.h` `HUTRACK_SND_FRAMES` |
+| `HuTrack.returnVec` (HuTrack's variables start here) | **`$37D8`** | `hutrack-symbols.h` `HUTRACK_RETURN_VEC` |
+| **stack headroom** | **1,026 B** (`$3BFE-$4000`; `build.sh` asserts 787) | `ilvm.json` `stack_headroom` |
+
+The glue's `.bss` grew by 95 B in `48f46ac`: `snd_args_frames` stayed at
+`$222F` in the placeholder scratch build (`build-engine.sh` alone, base
+`$2200`), and `HuTrack.returnVec` moved from `$2235` to `$2294` there; the
+`13a7332` build reproduces `$2235`. `check-hutrack-image.js` pins the scratch
+values; the shipped addresses above are the ones the build prints.
 
 The engine's `.bss` is placed at the llvm image's `__heap_start` (the
 staging assembly gets it from `build-engine.sh`, which `build.sh` hands

@@ -14,26 +14,26 @@
   "sha256": "97f29190ae379485af3c0be908445ab794e7c8242ebd258fd5bbc85b6db09b3d"
  },
  "capture": {
-  "frames": 469,
-  "last_frame": "frame0468.png",
+  "frames": 466,
+  "last_frame": "frame0465.png",
   "measure": {
    "collect_sum_ticks_7bit": 0,
    "collections": 0,
-   "count": 220,
+   "count": 203,
    "cycles_per_collection": null,
-   "cycles_per_frame": 2238.836363636364,
+   "cycles_per_frame": 2350.6600985221676,
    "cycles_per_raster_call": null,
    "flags": 0,
    "max_ticks": 3,
-   "mean_ticks": 2.1863636363636365,
-   "mean_update_lines": 6.218181818181818,
+   "mean_ticks": 2.2955665024630543,
+   "mean_update_lines": 6.438423645320197,
    "min_ticks": 2,
    "overruns": 0,
    "raster_calls": 0,
    "raster_max_ticks": 0,
    "raster_sum_ticks": 0,
-   "sum_ticks": 481,
-   "updates": 220,
+   "sum_ticks": 466,
+   "updates": 203,
    "worst_update_lines": 7
   },
   "slend": 234,
@@ -41,12 +41,12 @@
  },
  "ilvm": {
   "bytes": 32768,
-  "sha256": "1163acb5ab3dfbddeb99ceeeddf3dab1e9e4fd3726aae1e6405a50f23843a417"
+  "sha256": "49e4e37c849a563a1bbb1a4856431c595d46aea36e429eaa7cbd905ea2c803da"
  },
  "name": "cave-style-ilvm",
  "rom": "tools/gen/cave-style-ilvm.pce",
  "rom_bytes": 40960,
- "rom_sha256": "3a06a2affd94ab7586fb406aef93ace73c4da0c01904f2fd385a195b3819e166",
+ "rom_sha256": "cd4ae572abbf60b4e76d4b94aa94460b70e6ee3aa80fb9f3986c73898d63697f",
  "source": "tests/cave-style/main.lua",
  "source_sha256": "1c6aa1d4e4c4e507e4210d371b2faf6ee2bed2b5b026f63408e2dab2eb3a58fd"
 }
