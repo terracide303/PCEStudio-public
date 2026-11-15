@@ -56,17 +56,19 @@
                              function () { return require("./pce-song.js"); },
                              function () { return require("./pce-psg.js"); },
                              function () { return require("./pce-editor.js"); },
-                             function () { return require("./pce-sat.js"); });
+                             function () { return require("./pce-sat.js"); },
+                             require("./pce-sfx.js"));
   } else {
     root.PCEStudio = root.PCEStudio || {};
     root.PCEStudio.toyhost = factory(root.PCEStudio.sprites,
       function () { return root.PCEStudio.song; },
       function () { return root.PCEStudio.psg; },
       function () { return root.PCEStudio.editor; },
-      function () { return root.PCEStudio.sat; });
+      function () { return root.PCEStudio.sat; },
+      root.PCEStudio.sfx);
   }
 })(typeof self !== "undefined" ? self : this, function (sprites, songDep, psgDep,
-                                                        editorDep, satDep) {
+                                                        editorDep, satDep, sfxModel) {
   "use strict";
 
   var WIDTH = 256;               /* the toy frame: 32 BAT columns, 28 rows */
@@ -232,6 +234,25 @@
             "reserve), loads a 32-step square, sets F = freq and AL = " +
             "volume, and gives it back after frames",
       limits: "channel 0..5, freq 0..4095, volume 0..31, frames 1..600" },
+    { call: "sfx_noise(channel, rate, volume, frames)",
+      what: "sfx() on the PSG's noise generator (R7), for hits and hiss",
+      limits: "channel 4 or 5, rate 0..31 (31 the highest), volume 0..31, " +
+              "frames 1..255" },
+    { call: "sfx_slide(channel, from, to, volume, frames)",
+      what: "sfx() whose F slides from `from` to `to` (a larger F is a " +
+            "lower note)",
+      limits: "channel 0..5, from and to 0..4095, volume 0..31, frames 1..255" },
+    { call: "sfx_fx(channel, wave, from, to, volume, attack, decay, frames)",
+      what: "the general effect: wave 0 square, 1 noise, 2 triangle, 3 saw, " +
+            "a slide, and a level that climbs over `attack` frames and " +
+            "falls over the last `decay`",
+      limits: "as sfx_slide; wave 0..3; attack and decay 0..255, together " +
+              "no more than frames" },
+    { call: "sfx_preset(name, channel)",
+      what: "a named effect from one shared table: jump, shoot, hit, coin, " +
+            "explosion, powerup, select, hurt, laser",
+      limits: "name a constant string (`sfx-preset` if unknown); hit and " +
+              "explosion are noise: channel 4 or 5" },
     { call: "release(channel)",
       what: "gives a channel back now (HuTrack's release): control and noise " +
             "off, and the music waits for a fresh note on it",
@@ -583,7 +604,7 @@
     };
     for (var si = 0; si < SOUND_CHANNELS; si++) {
       sound.sfx.push({ active: false, frames: 0, freq: 0, volume: 0,
-                       owned: false });
+                       owned: false, fx: null, noise: false });
     }
     var songLib = null;
     var psgLib = null;
@@ -1016,6 +1037,7 @@
         s.frames = frames;
         s.freq = freq;
         s.volume = volume;
+        s.fx = null;
         /* .copy.wave's shape: wave off ($40 -> $00) resets the PSG's 32-step
          * pointer, the 32 R6 writes fill it, then F and control start it in
          * WAVEFORM mode ($80 | AL, bit 7 the channel enable, bit 6 clear).
@@ -1023,6 +1045,7 @@
          * level and the 32 steps are never clocked.  Reserve has already set
          * the balance to both sides full. */
         soundWrite(0, ch);
+        if (s.noise) { soundWrite(7, 0); s.noise = false; }
         soundWrite(4, 0x40);
         soundWrite(4, 0x00);
         for (var i = 0; i < 32; i++) soundWrite(6, SFX_WAVE[i]);
@@ -1031,6 +1054,82 @@
         soundWrite(3, (freq >> 8) & 0x0f);
         soundWrite(4, 0x80 | volume);
         return ch;
+      },
+
+      /* sfx_fx(channel, wave, from, to, volume, attack, decay, frames): an
+       * effect with a noise or wave shape, a frequency slide and a volume
+       * envelope (renderer/pce-sfx.js is the model, the cartridge's glue the
+       * same arithmetic).  Everything else is sfx()'s: R1, the reserve, the
+       * release after `frames`. */
+      sfxFx: function (ch, wave, from, to, volume, attack, decay, frames) {
+        var lib = needSong();
+        ch = intIn(ch, "an SFX channel", 0, SOUND_CHANNELS - 1, "sfx-range");
+        wave = intIn(wave, "an effect wave", 0, 3, "sfx-range");
+        var noise = wave === sfxModel.WAVE_NOISE;
+        if (noise && sfxModel.NOISE_CHANNELS.indexOf(ch) < 0) {
+          refuse("sfx-range", "a noise effect needs channel 4 or 5, the " +
+                 "PSG's noise generators (got " + ch + ")");
+        }
+        var fmax = noise ? sfxModel.NOISE_RATE_MAX : PITCH_MAX;
+        var fwhat = noise ? "a noise rate" : "an effect frequency";
+        from = intIn(from, fwhat, 0, fmax, "sfx-range");
+        to = intIn(to, fwhat, 0, fmax, "sfx-range");
+        volume = intIn(volume, "an SFX volume", 0, SOUND_VOLUME_MAX,
+                       "sfx-range");
+        frames = intIn(frames, "an effect's length in frames", 1,
+                       sfxModel.FRAMES_MAX, "sfx-range");
+        attack = intIn(attack, "an attack in frames", 0, sfxModel.FRAMES_MAX,
+                       "sfx-range");
+        decay = intIn(decay, "a decay in frames", 0, sfxModel.FRAMES_MAX,
+                      "sfx-range");
+        if (attack + decay > frames) {
+          refuse("sfx-range", "attack " + attack + " + decay " + decay +
+                 " is more than the effect's " + frames + " frames");
+        }
+        soundWrite(1, 0xff);
+        if (!sound.sfx[ch].owned) {
+          sound.sfx[ch].owned = true;
+          if (sound.player) sound.player.reserve(ch);
+          else lib.reserveWrites(ch, soundWrite);
+        }
+        var s = sound.sfx[ch];
+        s.active = true;
+        s.frames = frames;
+        s.freq = from;
+        s.volume = volume;
+        var st = sfxModel.start({ wave: wave, from: from, to: to,
+                                  volume: volume, attack: attack,
+                                  decay: decay, frames: frames });
+        s.fx = (st.slope || st.env) ? st : null;
+        soundWrite(0, ch);
+        if (noise) {
+          soundWrite(7, 0x80 | st.freq);
+          soundWrite(4, 0x80 | st.level);
+          s.noise = true;
+        } else {
+          if (s.noise) { soundWrite(7, 0); s.noise = false; }
+          var w = sfxModel.WAVES[wave];
+          soundWrite(4, 0x40);
+          soundWrite(4, 0x00);
+          for (var i = 0; i < 32; i++) soundWrite(6, w[i]);
+          soundWrite(0, ch);
+          soundWrite(2, st.freq & 0xff);
+          soundWrite(3, (st.freq >> 8) & 0x0f);
+          soundWrite(4, 0x80 | st.level);
+        }
+        return ch;
+      },
+
+      /* sfx_preset(name, channel): a named effect from renderer/pce-sfx.js's
+       * one table.  An unknown name is `sfx-preset`. */
+      sfxPreset: function (name, ch) {
+        var p = sfxModel.findPreset(name);
+        if (!p) {
+          refuse("sfx-preset", "sfx_preset(\"" + name + "\"): no such " +
+                 "preset; the names are " + sfxModel.presetNames().join(", "));
+        }
+        return host.sfxFx(ch, p.wave, p.from, p.to, p.volume, p.attack,
+                          p.decay, p.frames);
       },
 
       /* release(channel): give it back now.  Repeated release is harmless
@@ -1042,6 +1141,8 @@
         sound.sfx[ch].owned = false;
         sound.sfx[ch].active = false;
         sound.sfx[ch].frames = 0;
+        sound.sfx[ch].fx = null;
+        sound.sfx[ch].noise = false;
         if (sound.player) sound.player.release(ch);
         else needSong().releaseWrites(ch, soundWrite);
         return ch;
@@ -1057,7 +1158,21 @@
         for (var ch = 0; ch < SOUND_CHANNELS; ch++) {
           if (!sound.sfx[ch].active) continue;
           sound.sfx[ch].frames--;
-          if (sound.sfx[ch].frames <= 0) host.release(ch);
+          if (sound.sfx[ch].frames <= 0) { host.release(ch); continue; }
+          var fx = sound.sfx[ch].fx;
+          if (!fx) continue;
+          var o = sfxModel.tick(fx);
+          if (!o.any) continue;
+          soundWrite(0, ch);
+          if (o.slide) {
+            if (fx.noise) {
+              soundWrite(7, 0x80 | o.freq);
+            } else {
+              soundWrite(2, o.freq & 0xff);
+              soundWrite(3, (o.freq >> 8) & 0x0f);
+            }
+          }
+          if (o.env) soundWrite(4, 0x80 | o.level);
         }
         if (sound.player) sound.player.step();
       },
@@ -1234,6 +1349,7 @@
     SOUND_CYCLE_STEP: SOUND_CYCLE_STEP,
     SOUND_EVENTS_MAX: SOUND_EVENTS_MAX,
     SFX_WAVE: SFX_WAVE,
+    SFX: sfxModel,
     SOUND_API: SOUND_API,
     /* the status register (#119), for the author's reference (#61) */
     SR_BITS: SR_BITS,
@@ -1250,7 +1366,8 @@
       "pad-range": "a pad number outside 1..5",
       "timer-range": "a timer reload value outside 0..127",
       "music-range": "a song index outside the songs the runtime was given",
-      "sfx-range": "an SFX channel, frequency, volume or length outside its range",
+      "sfx-range": "an SFX channel, frequency, volume or length outside its range (an effect's attack plus decay past its length, noise off channels 4 and 5, too)",
+      "sfx-preset": "sfx_preset() with a name that is not one of the presets (the list is in the message)",
       "no-psg": "the PSG model or the song player is not loaded, so no toy can make sound",
       "asset-json": "a tile, sprite or palette file the importer reads is not JSON",
       "no-import": "the toy brings asset files and the picture models (renderer/pce-editor.js, renderer/pce-sat.js) are not loaded"

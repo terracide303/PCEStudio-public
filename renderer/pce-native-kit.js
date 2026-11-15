@@ -39,7 +39,7 @@
   /* the closure of tools/toyc/emit.js, tools/native-assets.js, tools/native-songs.js */
   const COMPILER_FILES = [
     "pce-il.js", "pce-sprites.js", "pce-bg.js", "pce-vram.js", "pce-toyhost.js",
-    "pce-song.js", "pce-psg.js", "pce-editor.js", "pce-sat.js", "pce-screen.js",
+    "pce-song.js", "pce-psg.js", "pce-sfx.js", "pce-editor.js", "pce-sat.js", "pce-screen.js",
     "pce-cgen.js", "pce-ilbc.js", "pce-validate.js", "pce-seq.js", "pce-wave.js",
     "pce-hutrack.js"
   ].map((n) => ({ kit: "renderer/" + n, url: n })).concat([

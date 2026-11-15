@@ -44,6 +44,7 @@
  *   il-pad-write    writing a pad table
  *   il-key          a table key that is not a constant or an integer register
  *   il-reg-name     reg()'s first argument is not a constant string
+ *   il-sfx-preset   sfx_preset()'s name is not a constant string, or no preset has it
  *   il-surface-shadow  a toy reassigns a surface builtin (reg, pal, ...)
  *   il-unsupported  a known-unsupported helper (pairs, tostring, note, ...)
  *   il-undefined    using a global that is never defined
@@ -219,7 +220,10 @@
    * The signatures are what the typer checks; the implementations are below
    * and docs/TOYS.md §2 is the surface both runtimes share. */
   var SURFACE = ["reg", "pal", "sat", "sprite", "raster", "print",
-                 "music", "sfx", "release", "timer"];
+                 "music", "sfx", "release", "timer",
+                 "sfx_noise", "sfx_slide", "sfx_fx", "sfx_preset"];
+  /* The effect calls' argument counts (renderer/pce-sfx.js is their model). */
+  var SFX_FX_ARITY = { sfx_noise: 4, sfx_slide: 5, sfx_fx: 8, sfx_preset: 2 };
   var HELPERS = {
     rgb: { sig: [T.INT, T.INT, T.INT], ret: T.INT },
     min: { sig: [T.INT, T.INT], ret: T.INT, numeric: true },
@@ -1159,6 +1163,19 @@
             } else if (rc.name === "sfx") {
               if (ins.args.length !== 4) errs.push({ code: "il-arity", line: line, message: "sfx(channel, freq, volume, frames) takes 4 arguments" });
               else for (var sf = 0; sf < 4; sf++) wantInt(ins.args[sf], line);
+            } else if (SFX_FX_ARITY[rc.name]) {
+              if (ins.args.length !== SFX_FX_ARITY[rc.name]) {
+                errs.push({ code: "il-arity", line: line,
+                            message: rc.name + "() takes " + SFX_FX_ARITY[rc.name] + " arguments" });
+              } else if (rc.name === "sfx_preset") {
+                if (resolve(argTypes[0]).k !== "str") {
+                  errs.push({ code: "il-sfx-preset", line: line,
+                              message: "sfx_preset()'s name must be a constant string" });
+                }
+                wantInt(ins.args[1], line);
+              } else {
+                for (var sx = 0; sx < ins.args.length; sx++) wantInt(ins.args[sx], line);
+              }
             } else if (rc.name === "release") {
               if (ins.args.length !== 1) errs.push({ code: "il-arity", line: line, message: "release(channel) takes 1 argument" });
               else wantInt(ins.args[0], line);
@@ -1628,6 +1645,42 @@
                    freq: finalOperand(ins.args[1], false),
                    volume: finalOperand(ins.args[2], false),
                    frames: finalOperand(ins.args[3], false), line: line });
+          } else if (SFX_FX_ARITY[calleeName]) {
+            /* every effect call is one sfxfx instruction over eight
+             * operands; the short forms and the presets fill in constants
+             * (renderer/pce-sfx.js is the one table both read) */
+            var fxa = ins.args.map(function (a) { return finalOperand(a, false); });
+            var ic = function (n) { return { k: { t: "int", v: n } }; };
+            var fxo;
+            if (calleeName === "sfx_noise") {
+              fxo = { ch: fxa[0], wave: ic(1), from: fxa[1], to: fxa[1],
+                      volume: fxa[2], attack: ic(0), decay: ic(0), frames: fxa[3] };
+            } else if (calleeName === "sfx_slide") {
+              fxo = { ch: fxa[0], wave: ic(0), from: fxa[1], to: fxa[2],
+                      volume: fxa[3], attack: ic(0), decay: ic(0), frames: fxa[4] };
+            } else if (calleeName === "sfx_fx") {
+              fxo = { ch: fxa[0], wave: fxa[1], from: fxa[2], to: fxa[3],
+                      volume: fxa[4], attack: fxa[5], decay: fxa[6], frames: fxa[7] };
+            } else {
+              var pnOp = ins.args[0];
+              var pname = isStrConst(pnOp) ? pnOp.k.v : null;
+              if (pname == null && isRegOperand(pnOp)) {
+                pname = findStrDefinition(fn.pre, p, pnOp.r);
+              }
+              if (pname == null) {
+                refuse("il-sfx-preset", "line " + line + ": sfx_preset()'s name must be a constant string");
+              }
+              var pre = toyhost.SFX.findPreset(pname);
+              if (!pre) {
+                refuse("il-sfx-preset", "line " + line + ": sfx_preset(\"" + pname + "\") is not a preset; the names are " +
+                       toyhost.SFX.presetNames().join(", "));
+              }
+              fxo = { ch: fxa[1], wave: ic(pre.wave), from: ic(pre.from), to: ic(pre.to),
+                      volume: ic(pre.volume), attack: ic(pre.attack), decay: ic(pre.decay),
+                      frames: ic(pre.frames) };
+            }
+            fxo.t = "sfxfx"; fxo.line = line;
+            push(fxo);
           } else if (calleeName === "release") {
             push({ t: "release", ch: finalOperand(ins.args[0], false), line: line });
           } else if (calleeName === "timer") {
@@ -2202,6 +2255,12 @@
           host.sfx(cnt(ins.ch), cnt(ins.freq), cnt(ins.volume), cnt(ins.frames));
           pc++;
           break;
+        case "sfxfx":
+          host.sfxFx(cnt(ins.ch), cnt(ins.wave), cnt(ins.from), cnt(ins.to),
+                     cnt(ins.volume), cnt(ins.attack), cnt(ins.decay),
+                     cnt(ins.frames));
+          pc++;
+          break;
         case "release":
           host.release(cnt(ins.ch));
           pc++;
@@ -2444,6 +2503,7 @@
       "il-pad-write": "writing a pad table",
       "il-key": "a table key the IL cannot use",
       "il-reg-name": "reg() without a constant name",
+      "il-sfx-preset": "sfx_preset() with a name that is not a constant string or not one of the presets",
       "il-surface-shadow": "a toy reassigns a surface builtin",
       "il-unsupported": "a helper the IL half does not provide",
       "il-undefined": "a global that is never defined",

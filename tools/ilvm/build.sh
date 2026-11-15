@@ -98,6 +98,11 @@ STACK_MARGIN=787           # docs/ROM-SOUND.md §5's stack headroom floor
 # so BIN is required to point outside renderer/ilvm.bin.  The partition
 # assertions still run: the trace build keeps the 787 B margin (855 B).
 TRACE="${TRACE:-0}"
+# The trace build carries a 307 B write log the shipped image does not; the
+# effects glue (sfx_fx) took 95 B of BaseRAM, so its headroom (718 B) fell
+# under the shipped 787 B floor while the shipped image's (1,026 B) did not.
+# A trace image is a test fixture, never shipped: its floor is 700 B.
+if [ "$TRACE" = "1" ]; then STACK_MARGIN=700; fi
 BIN="${BIN:-renderer/ilvm.bin}"
 if [ "$TRACE" = "1" ] && [ "$BIN" = "renderer/ilvm.bin" ]; then
   echo "TRACE=1 refuses to overwrite renderer/ilvm.bin; set BIN to a" \

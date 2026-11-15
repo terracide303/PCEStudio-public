@@ -382,7 +382,7 @@ bss_bytes = bss_end - bss_start
 psg_trace_report = None
 if trace_build:
     names = ["psg_trace_ok", "psg_trace_count", "psg_trace_frame",
-             "psg_trace_seen", "psg_trace_reg", "psg_trace_val",
+             "psg_trace_seen", "psg_trace_limit", "psg_trace_reg", "psg_trace_val",
              "psg_trace_f", "psg_trace_r", "psg_trace_v"]
     psg_trace_report = {name: need(name) for name in names}
     psg_trace_report.update({"frames": 24, "capacity": 100,
@@ -415,6 +415,7 @@ INTERFACE = [
     ("SndGlueNote", "HUTRACK_SND_NOTE", "note(midi): table read"),
     ("SndGlueSfx", "HUTRACK_SND_SFX", "sfx(): reserve, upload, start"),
     ("SndGlueRelease", "HUTRACK_SND_RELEASE", "release(): give the channel back"),
+    ("SndGlueSfxOp", "HUTRACK_SND_SFXOP", "the sfx op: EAX0 = the address of its four int32 operands (sfx and sfx_fx)"),
     ("SndGlueMusic", "HUTRACK_SND_MUSIC", "music(): init, queue, play"),
     ("SndGlueTick", "HUTRACK_SND_TICK", "per-toy-frame timers and engine tick"),
     ("snd_args_frames", "HUTRACK_SND_FRAMES", "sfx()'s frames argument cell"),

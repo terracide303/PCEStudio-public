@@ -240,6 +240,13 @@
         what: "sfx() takes 1 to " + host.SFX_FRAMES_MAX +
               " frames, then gives the channel back",
         from: "host.SFX_FRAMES_MAX" },
+      { label: "an effect's frames", value: host.SFX.FRAMES_MAX,
+        unit: " frames", refusal: "sfx-range",
+        what: "sfx_fx(), sfx_noise(), sfx_slide() and sfx_preset() take 1 " +
+              "to " + host.SFX.FRAMES_MAX + " frames; attack and decay too " +
+              "(noise needs channel " + host.SFX.NOISE_CHANNELS.join(" or ") +
+              ")",
+        from: "host.SFX.FRAMES_MAX" },
       { label: "songs in the ROM", value: songbank.MAX_SONGS, unit: "",
         refusal: "toy-song-count",
         what: "music(n) plays the n-th song of the song bank",
@@ -673,7 +680,8 @@
     ["sat", "one sat() word"],
     ["pal", "one pal() colour"],
     ["reg", "one reg() write"],
-    ["sfx", "an sfx() or music() call"]
+    ["sfx", "an sfx() or music() call"],
+    ["sfxfx", "an sfx_fx(), sfx_noise(), sfx_slide() or sfx_preset() call"]
   ];
 
   /* The three example toys, with the usage keys their header comments list
@@ -819,7 +827,9 @@
           "bank is refused with toy-song-bank-full. In a ROM toy use a " +
           "MIDI number with note(), never a name. For the song itself " +
           "the real drivers are small: " + C.psgWrites.text + ". For a " +
-          "drum, use sfx() on a wave channel." },
+          "drum or any hit, use sfx_preset(\"hit\", " + f.noise[0] +
+          ") or sfx_noise() on a noise channel (the sound chapter " +
+          "lists the presets)." },
 
       { type: "h3", text: "Speed: the frame budget",
         source: "renderer/pce-validate.js MODEL" },
@@ -1256,6 +1266,7 @@
     var psgRegs = psg.REGISTERS.map(function (r) {
       return ["R" + r.n, r.name, r.what, r.manual];
     });
+    var sfxNoise = host.SFX.NOISE_CHANNELS;
     var soundRows = host.SOUND_API.map(function (a) {
       return [a.call, a.what, a.limits];
     });
@@ -1301,6 +1312,18 @@
         { type: "table",
           headers: ["call", "what it does", "limits and refusal"],
           rows: soundRows },
+        { type: "p", text: "Effects: sfx_preset(name, channel) is the call " +
+            "to reach for, with no numbers to tune: " +
+            host.SFX.presetNames().join(", ") + ". The name is a " +
+            "constant string; an unknown one is sfx-preset (il-sfx-preset " +
+            "in the validator and the export). The presets are rows of " +
+            "renderer/pce-sfx.js, which the studio's AUDIO panel plays and " +
+            "the browser, the exported ROM and the native ROM all read " +
+            "(tests/check-sfx-fx.js proves the same PSG writes). Noise " +
+            "presets (hit, explosion) need channel " +
+            sfxNoise.join(" or ") + ". F is a divider: a rising pitch " +
+            "slides F down. An effect lasts 1.." + host.SFX.FRAMES_MAX +
+            " frames." },
         { type: "table", tight: true,
           headers: ["register", "name", "what a write does", "manual"],
           rows: psgRegs },
@@ -1312,6 +1335,11 @@
           "function frame(t, f)\n" +
           "  -- pad[1].ii is the II BUTTON, pressed with keyboard key M\n" +
           "  if pad[1].ii then sfx(3, note(76), 24, 10) end\n" +
+          "end" },
+        { type: "code", lang: "lua", text:
+          "function frame(t, f)\n" +
+          "  if pad[1].i then sfx_preset(\"jump\", 0) end\n" +
+          "  if f % 120 == 0 then sfx_slide(1, 400, 150, 22, 20) end\n" +
           "end" }
       ]
     });

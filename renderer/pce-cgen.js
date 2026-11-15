@@ -299,7 +299,7 @@
     for (f = 0; f < functions.length && !usesSound; f++) {
       for (pc = 0; pc < functions[f].code.length; pc++) {
         var ost = functions[f].code[pc];
-        if (ost.t === "music" || ost.t === "sfx" || ost.t === "release" ||
+        if (ost.t === "music" || ost.t === "sfx" || ost.t === "sfxfx" || ost.t === "release" ||
             (ost.t === "builtin" && ost.name === "note")) { usesSound = true; break; }
       }
     }
@@ -814,6 +814,12 @@
               staticType(ins.frames) !== "int") {
             refuse("cgen-op", where + ": sfx()'s channel, freq, volume and " +
                    "frames must be ints");
+          }
+          break;
+        case "sfxfx":
+          if (["ch", "wave", "from", "to", "volume", "attack", "decay", "frames"]
+                .some(function (k) { return staticType(ins[k]) !== "int"; })) {
+            refuse("cgen-op", where + ": the sfx effect call's operands must be ints");
           }
           break;
         case "release":
@@ -1959,6 +1965,10 @@
         line("  toy_sfx(" + operand(ins.ch) + ", " + operand(ins.freq) + ", " +
              operand(ins.volume) + ", " + operand(ins.frames) + ");");
         break;
+      case "sfxfx":
+        line("  toy_sfx_fx(" + ["ch", "wave", "from", "to", "volume", "attack", "decay", "frames"]
+             .map(function (k) { return operand(ins[k]); }).join(", ") + ");");
+        break;
       case "release":
         line("  toy_release(" + operand(ins.ch) + ");");
         break;
@@ -2558,12 +2568,13 @@
         detail: "the HuC6280 TMA timer and its callback",
         ops: ["timer"] },
       { id: "sound", label: "music(song), sfx(ch, freq, volume, frames), " +
+        "the effects sfx_noise / sfx_slide / sfx_fx / sfx_preset, " +
         "release(ch) and note(midi)",
         detail: "lowered to the engine's runtime calls toy_music/toy_sfx/" +
                 "toy_release/toy_note — a later engine link declares them, " +
                 "so a sound toy's C does not build until then (the browser " +
                 "host runs the same ops today)",
-        ops: ["music", "sfx", "release"] }
+        ops: ["music", "sfx", "sfxfx", "release"] }
     ],
     /* Everything else the bytecode route carries and this backend does not is
      * named by the cgen-op details in REFUSALS (the print surface and a

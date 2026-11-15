@@ -801,12 +801,12 @@ program is identical and the only variable is the interpreter.
 
 | toy | old ROM sha256 | new ROM sha256 | frames old / new | distinct pictures old / new | shared | old-only / new-only | frame 0 / last |
 |---|---|---|---|---|---|---|---|
-| palette | `b12ec9c961006cff…` | `a315dd32bc20602c…` | 354 / 357 | 9 / 9 | 9 | 0 / 0 | same; same picture at another index |
+| palette | `b12ec9c961006cff…` | `d4d063ba1cbb5aa9…` | 354 / 357 | 9 / 9 | 9 | 0 / 0 | same; same picture at another index |
 | arity | `ea4f014915bb5975…` | `2b2294e0598c082b…` | 355 / 353 | 16 / 16 | 16 | 0 / 0 | differs (OSD splash); same picture at another index |
 | not | `fe9672f4ee2b93a7…` | `b98a6ac8d5c17397…` | 354 / 326 | 5 / 5 | 5 | 0 / 0 | same; same picture at another index |
-| sprite | `4f212ee9128f76d5…` | `a67291860e49e8ae…` | 353 / 354 | 2 / 2 | 2 | 0 / 0 | identical; identical |
-| parallax | `5f303972300305dc…` | `08d543506930d9c1…` | 352 / 357 | 1 / 1 | 1 | 0 / 0 | identical; identical |
-| status-bar | `ce08f5d066a7062f…` | `160ba9914ad2c7a9…` | 356 / 354 | 1 / 1 | 1 | 0 / 0 | identical; identical |
+| sprite | `4f212ee9128f76d5…` | `86770716c21eb515…` | 353 / 354 | 2 / 2 | 2 | 0 / 0 | identical; identical |
+| parallax | `5f303972300305dc…` | `148d8aefdb5c2b09…` | 352 / 357 | 1 / 1 | 1 | 0 / 0 | identical; identical |
+| status-bar | `ce08f5d066a7062f…` | `73fa9b882fa58b38…` | 356 / 354 | 1 / 1 | 1 | 0 / 0 | identical; identical |
 | platformer | `c067d74ac688c1ac…` | `8681b1c897365f2f…` | 707 / 664 | 3 / 3 | 3 | 0 / 0 | identical; identical |
 | DUSK RUN | `cabf674e632725d6…` | `b955f58d7f454d8a…` | 709 / 697 | 10 / 14 | 5 | 5 / 9 | identical; identical |
 | STARFALL | `a9f5140e1143f47a…` | `593232435c7b1420…` | 12 / 12 (tail) | 2 / 2 | 0 | 2 / 2 | differs; differs |

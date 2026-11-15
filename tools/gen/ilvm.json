@@ -8,7 +8,7 @@
  "data_bank": "physical 4, appended per toy by renderer/pce-rom.js",
  "flags": "-Os -mlto-zp=96 -Itools/toyc -Itools/gen -Wl,--defsym,__rom_bank0=0xc000 -Wl,--defsym,__rom_bank0_size=0x4000 + HuTrack banks from tools/ilvm/build-engine.sh",
  "functions": {
-  "exec": 10591,
+  "exec": 10397,
   "lua_idiv": 170,
   "lua_mod": 184,
   "main": 2309,
@@ -17,15 +17,15 @@
  },
  "image": "renderer/ilvm.bin",
  "llvm_bytes": 16384,
- "llvm_sha256": "fe8ee08fc55361f1b729458f6f0f26e6e3240175a76afbdd61b3280cbeaefac5",
+ "llvm_sha256": "f939e994607efe4a2be558e74e231b91751a07c2733a0d7a15d5ab4586ca4aaf",
  "ram_budget": {
   "base_ram": {
-   "engine_bytes": 1115,
-   "engine_end": 15263,
+   "engine_bytes": 1210,
+   "engine_end": 15358,
    "engine_start": 14148,
    "interpreter_heap_start": 14148,
    "stack_base": 16384,
-   "stack_headroom": 1121,
+   "stack_headroom": 1026,
    "stack_margin": 787
   },
   "zero_page": {
@@ -43,20 +43,20 @@
   ".bss": 5422,
   ".comment": 204,
   ".data": 0,
-  ".early_start": 44,
+  ".early_start": 238,
   ".llvm_sympart": 30,
   ".noinit": 21,
   ".rodata": 98,
   ".shstrtab": 125,
   ".strtab": 8655,
   ".symtab": 9440,
-  ".text": 16232,
+  ".text": 16038,
   ".vector": 10,
   ".zp": 3,
   ".zp.bss": 93,
   ".zp.data": 0
  },
- "sha256": "1163acb5ab3dfbddeb99ceeeddf3dab1e9e4fd3726aae1e6405a50f23843a417",
+ "sha256": "ae70e81382e8083be8ace23eab6d89117edb44623ec7e32e357d35be1f0cc3a9",
  "sizes": {
   "bss": 5539,
   "data": 0,

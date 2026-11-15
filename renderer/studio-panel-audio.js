@@ -398,7 +398,46 @@
           line.appendChild(pick);
           waveTab.appendChild(line);
         }
+        buildEffects();
         built = true;
+      }
+
+      /* The toy's sound effects (sfx_preset, renderer/pce-sfx.js): one button
+       * per named preset.  A button runs the preset through the toy host's own
+       * model on a scratch host (the writes a toy's sfx_preset() makes, then
+       * pce-psg.js renders them) and plays the result, so what is heard is what
+       * the studio's toy and the exported ROM write.  Noise presets play on
+       * channel 5 (a noise channel), the others on channel 1. */
+      function buildEffects() {
+        var rowsHost = studio.$("aud-rows");
+        if (!rowsHost || !P.sfx || !P.toyhost || studio.$("aud-effects")) return;
+        var box = el("div", "aud-effects", "aud-line aud-effects");
+        box.appendChild(text("span", "aud-kicker", "sound effects"));
+        P.sfx.presetNames().forEach(function (name) {
+          var b = el("button", "aud-fx-" + name, "btn-mini aud-fx");
+          b.type = "button";
+          b.textContent = name;
+          b.title = "Play sfx_preset(\"" + name + "\", channel) — the same " +
+                    "writes the toy and the exported ROM make";
+          b.addEventListener("click", function () { playPreset(name); });
+          box.appendChild(b);
+        });
+        rowsHost.parentNode.appendChild(box);
+      }
+
+      /* One preset's audio: its PSG writes (a scratch toy host), rendered. */
+      function playPreset(name) {
+        var S = P.sfx, preset = S.findPreset(name);
+        if (!preset) return null;
+        var h = P.toyhost.createHost({});
+        var ch = preset.wave === S.WAVE_NOISE ? 5 : 1;
+        h.beginFrame(0);
+        h.sfxPreset(name, ch);
+        for (var f = 1; f <= preset.frames + 4; f++) h.beginFrame(f);
+        var got = h.renderSound(preset.frames + 5);
+        playPcm(got.pcm, got.sampleRate);
+        return { name: name, channel: ch, samples: got.pcm.length,
+                 writes: h.sound.events.length };
       }
 
       /* The picker's options, in ppu.toys' order:
@@ -953,6 +992,7 @@
       /* ---- the evidence surface ------------------------------------------- */
 
       var api = {
+        playPreset: playPreset,
         state: function () {
           var m = state();
           return {

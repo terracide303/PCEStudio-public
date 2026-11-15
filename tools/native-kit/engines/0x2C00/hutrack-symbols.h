@@ -24,18 +24,19 @@
 #define HUTRACK_STOP                 0xA179u  /* stop the song */
 #define HUTRACK_SET_CHAN_SFX         0xA26Du  /* reserve an SFX channel */
 #define HUTRACK_CHAN_RELEASE_SFX     0xA298u  /* release it */
-#define HUTRACK_RETURN_VEC           0x2C35u  /* EngineCall's rts vector */
+#define HUTRACK_RETURN_VEC           0x2C94u  /* EngineCall's rts vector */
 #define HUTRACK_HK_R1                0x2080u  /* scratch register */
 #define HUTRACK_HK_EAX0              0x2086u  /* 4-byte argument register */
 #define HUTRACK_NOTE_TABLE           0x8C00u  /* note(midi)'s 512-word table */
 #define HUTRACK_SND_RESET            0x9046u  /* the sound ops' per-boot reset */
 #define HUTRACK_SND_MAP              0x9000u  /* map engine banks, read song trailer */
-#define HUTRACK_SND_NOTE             0x9067u  /* note(midi): table read */
-#define HUTRACK_SND_SFX              0x9098u  /* sfx(): reserve, upload, start */
-#define HUTRACK_SND_RELEASE          0x9130u  /* release(): give the channel back */
-#define HUTRACK_SND_MUSIC            0x914Eu  /* music(): init, queue, play */
-#define HUTRACK_SND_TICK             0x91A6u  /* per-toy-frame timers and engine tick */
+#define HUTRACK_SND_NOTE             0x906Au  /* note(midi): table read */
+#define HUTRACK_SND_SFX              0x909Bu  /* sfx(): reserve, upload, start */
+#define HUTRACK_SND_RELEASE          0x9140u  /* release(): give the channel back */
+#define HUTRACK_SND_SFXOP            0x92A9u  /* the sfx op: EAX0 = the address of its four int32 operands (sfx and sfx_fx) */
+#define HUTRACK_SND_MUSIC            0x9161u  /* music(): init, queue, play */
+#define HUTRACK_SND_TICK             0x91B9u  /* per-toy-frame timers and engine tick */
 #define HUTRACK_SND_FRAMES           0x2C2Fu  /* sfx()'s frames argument cell */
-#define HUTRACK_COPYV                0x91E4u  /* COPYV (#281): map and stream a data bank to VRAM */
+#define HUTRACK_COPYV                0x9205u  /* COPYV (#281): map and stream a data bank to VRAM */
 
 #endif /* HUTRACK_SYMBOLS_H */

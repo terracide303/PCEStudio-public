@@ -140,6 +140,10 @@
  *              can have; the interpreter links the engine in #198)
  *   21 sfx    ch:op freq:op volume:op frames:op  (#197: one play effect on
  *              one channel, the browser host's own sfx)
+ *              sfx_fx / sfx_noise / sfx_slide / sfx_preset: the IL's `sfxfx`
+ *              is THREE of these ops, each with a constant first operand
+ *              carrying the op kind in bits 8..15 (1: from to volume; 2: wave
+ *              attack decay; 3: channel frames 0) — docs/ROM-SOUND.md §12
  *   22 release ch:op               (#197: stop the channel; the interpreter
  *              links the engine's chanReleaseSFX in #198)
  *
@@ -236,7 +240,8 @@
     table: 0x18, setlist: 0x19, tget: 0x1A, tset: 0x1B,
     padref: 0x1C, padget: 0x1D, sat: 0x1E, sprite: 0x1F,
     music: 0x20, sfx: 0x21, release: 0x22,
-    copyv: 0x23
+    copyv: 0x23,
+    sfxfx: 0x21     /* sfx_fx emits three sfx ops (the case below writes the other two) */
     /* 0x23 copyv (#281, #288): the interpreter has the op since #281
      * (docs/IL.md §14.1) and the IL's instruction since #288 — the art
      * prologue emits it for the importer's VRAM regions (docs/BANKED-DATA.md
@@ -244,7 +249,7 @@
      * The table form raster(line, spec) has no opcode: it is tgets and reg writes (docs/IL.md §14.1). */
   };
   var TABLE_OPS = { table: 1, setlist: 1, tget: 1, tset: 1 };
-  var SOUND_OPS = { music: 1, sfx: 1, release: 1 };
+  var SOUND_OPS = { music: 1, sfx: 1, sfxfx: 1, release: 1 };
   var ARITH = { add: 0, sub: 1, mul: 2, mod: 3, idiv: 4, band: 5,
                 bor: 6, bxor: 7, shl: 8, shr: 9 };
   var CMP = { eq: 0, lt: 1, le: 2 };
@@ -462,6 +467,11 @@
     if (ins.lineArg) fn(ins.lineArg, ins.line);
     if (ins.volume) fn(ins.volume, ins.line);
     if (ins.frames) fn(ins.frames, ins.line);
+    if (ins.wave) fn(ins.wave, ins.line);          /* sfxfx's own operands */
+    if (ins.to) fn(ins.to, ins.line);
+    if (ins.from) fn(ins.from, ins.line);
+    if (ins.attack) fn(ins.attack, ins.line);
+    if (ins.decay) fn(ins.decay, ins.line);
     if (ins.args) for (var i = 0; i < ins.args.length; i++) fn(ins.args[i], ins.line);
   }
 
@@ -532,6 +542,7 @@
     if (t === "sprite") return 7;
     if (t === "music" || t === "release") return 2;
     if (t === "sfx") return 5;
+    if (t === "sfxfx") return 15;      /* three sfx ops (sfx_fx, docs/ROM-SOUND.md) */
     if (t === "copyv") return 8;
     if (t === "raster") return 5 * RASTER_POP[ins.rasterMask] + 3 * (RASTER_POP[ins.rasterMask] + 2);   /* tgets, reg writes */
     if (t === "arith" || t === "cmp") return 5;
@@ -846,6 +857,13 @@
         if (ins.t === "sat") {
           seeOperand(ins.i, ins.line); seeOperand(ins.k, ins.line);
           seeOperand(ins.v, ins.line);
+        }
+        /* sfx_fx's three sfx ops carry the op kind (bits 8..15 of the first
+         * operand) and a zero filler as constants of their own */
+        if (ins.t === "sfxfx") {
+          [256, 512, 768, 0].forEach(function (kv) {
+            seeOperand({ k: { t: "int", v: kv } }, ins.line);
+          });
         }
         /* A sprite's six operand bytes are the resolved constants (#133);
          * the walker already refused anything it could not prove. */
@@ -1390,6 +1408,20 @@
         buf.u8(op(ins.ch)); buf.u8(op(ins.freq));
         buf.u8(op(ins.volume)); buf.u8(op(ins.frames));
         break;
+      case "sfxfx": {
+        /* sfx_fx is three sfx ops (the glue's SndGlueFxOp, docs/ROM-SOUND.md):
+         * the first operand is a constant carrying the op kind in bits 8..15.
+         * 1: from, to, volume.  2: wave, attack, decay.  3: channel, frames
+         * (the effect starts), the fourth operand unused. */
+        var fxk = function (kind) { return op({ k: { t: "int", v: kind << 8 } }); };
+        buf.u8(fxk(1));                  /* the opcode byte is already written */
+        buf.u8(op(ins.from)); buf.u8(op(ins.to)); buf.u8(op(ins.volume));
+        buf.u8(OPS.sfx); buf.u8(fxk(2));
+        buf.u8(op(ins.wave)); buf.u8(op(ins.attack)); buf.u8(op(ins.decay));
+        buf.u8(OPS.sfx); buf.u8(fxk(3));
+        buf.u8(op(ins.ch)); buf.u8(op(ins.frames)); buf.u8(op({ k: { t: "int", v: 0 } }));
+        break;
+      }
       case "release":
         buf.u8(op(ins.ch));
         break;
@@ -2274,12 +2306,13 @@
         detail: "bxr, byr and cr; cram is refused",
         ops: ["raster"] },
       { id: "sound", label: "music(song), sfx(ch, freq, volume, frames), " +
+        "the effects sfx_noise / sfx_slide / sfx_fx / sfx_preset, " +
         "release(ch) and note(midi)",
         detail: "a sound toy's container is version 3, which the committed " +
                 "interpreter reads: note and sfx match the " +
                 "browser on the host harness, music runs on the engine " +
                 "with the ROM's song table (docs/ROM-SOUND.md).",
-        ops: ["music", "sfx", "release"] }
+        ops: ["music", "sfx", "sfxfx", "release"] }
     ],
     refused: REFUSALS
   };
