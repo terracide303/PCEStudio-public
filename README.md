@@ -4,8 +4,8 @@
 model of the console's real graphics and sound chips, look inside the machine while it runs, and export a `.pce`
 ROM. Make a game by hand, or let an AI such as Claude make it with you.
 
-> **Beta 1.** It works and you can play and build with it, but parts are unfinished. The honest list is below, in
-> [What does not work yet](#what-does-not-work-yet).
+> **Beta 2.** It is released, and you can play and build with it, but parts are unfinished. Its tests on a real
+> console are not finished. The honest list is below, in [What does not work yet](#what-does-not-work-yet).
 
 **Try it:** <https://pcestudio.terracides.com> · **Testers' guide:** <https://pcestudio.terracides.com/renderer/testers.html>
 · **Claude Code manual:** <https://pcestudio.terracides.com/renderer/claude-code.html>

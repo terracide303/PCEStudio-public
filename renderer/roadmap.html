@@ -58,18 +58,27 @@
 </header>
 
 <main class="tg">
-  <span class="kicker">Beta 1 · planned work, not promises</span>
+  <span class="kicker">Beta 2 · planned work, not promises</span>
   <h1>Roadmap</h1>
   <p class="lede">PCEStudio should be somewhere you can make a <b>real PC Engine game</b>, whether you write Lua, ask an
   AI, or program the chip in assembly. This is what we plan to build, and the reason for each part. Dates are
   not promised. What is already finished is on the <a href="release-notes.html">release notes</a>.</p>
-  <div class="box"><b>Beta 2: the next milestone.</b> The goal is that a game you make here runs on a real PC Engine, fast, and that anyone can build it. It means: compiled games (Lua turned into real machine code) running on a real console, not only in an emulator; a native build kit that works on macOS, Windows and Linux, so the compiled route does not depend on one machine; an AI connected through the MCP server that writes games inside the hardware's limits, guided by measured numbers from real HuCards; and the music in exported ROMs heard on a real console. It also needs a test of an Export-button ROM on a real console. A compiled intro has run on a real console and an FPGA core, but a compiled game and an exported ROM have not, so Beta 2 will not be declared without those tests. Writing games in assembly inside the studio is a later milestone. No date is promised.</div>
+  <div class="box"><b>Beta 2: this release.</b> It contains: a native build kit for macOS, Windows and Linux (a
+  developer preview, which builds the same ROM on all three); sound effects with noise, slides and envelopes on all
+  three routes; digital samples on the native route (a developer preview); a hardware-design guide for the MCP Claude,
+  with real HuCard budgets; faster compiled games and the flicker fix; and measured speeds, written in the release
+  notes. Beta 2 is released, but its real-console tests are not finished. Only the PCEHero intro has run on a real
+  console so far.</div>
+  <div class="box"><b>What comes next.</b> The real-console results of STARFALL, NOVA TIDE and the exported PLATFORMER
+  are being tested by the maintainer, and they will be written here when they are in. Known now: NOVA TIDE through the
+  Export button shows a black screen; NOVA TIDE and DUSK RUN are not yet 60 frames a second. Writing whole games in
+  assembly stays planned after Beta 2. No date is promised.</div>
   <div class="box"><b>How to read the state column.</b>
     <span class="status ok">works</span> is built and tested.
     <span class="status soon">in progress</span> is being built now.
     <span class="status no">planned</span> is decided but not started.</div>
   <h2>1. Games that really export</h2>
-  <p>A studio is only as good as what you can play outside it. Today PLATFORMER, TOWER, STARFALL, DUSK RUN and the simple example toys all export and run in an emulator, but only PLATFORMER holds 60 Hz through the interpreter; the others are too slow. NOVA TIDE exports, but its ROM shows a black screen: it is over the interpreter's limits and stops at load. A faster route that turns a game into real machine code exists as a developer preview outside the Export button, and a small intro built that way has run on a real console and on an FPGA core.</p>
+  <p>A studio is only as good as what you can play outside it. Today PLATFORMER, TOWER, STARFALL, DUSK RUN and the simple example toys all export and run in an emulator, but only PLATFORMER holds 60 Hz through the interpreter; the others are too slow. NOVA TIDE exports, but its ROM shows a black screen: it is over the interpreter's limits and stops at load. A faster route that turns a game into real machine code exists as a developer preview outside the Export button, and only the PCEHero intro built that way has run on a real console (and on an FPGA core).</p>
   <table>
     <tr><th>Feature</th><th>Why we want it</th><th>State</th></tr>
     <tr><td>The five example games export</td><td>They are the test of every limit in the exporter. Each refusal teaches us what is missing. PLATFORMER exports and holds 60 Hz; TOWER, STARFALL and DUSK RUN export but are too slow on the interpreter; NOVA TIDE exports, but its ROM shows a black screen (it is over the interpreter's limits).</td><td class="status soon">in progress</td></tr>
@@ -78,7 +87,7 @@
     <tr><td>A compiler from Lua to console code</td><td>Instead of an interpreter in the ROM, the studio translates a game once into HuC6280 machine code. That is how games reach 60 Hz and fit in real cartridges, and it is what ppu.toys does for the SNES. A developer preview exists and all five example games compile; it is not on the Export button, because the compiler (llvm-mos) cannot run in a browser yet.</td><td class="status soon">in progress</td></tr>
     <tr><td>Faster output</td><td>PLATFORMER holds 60 Hz through the interpreter, but the larger games are far slower. Through the compiled route TOWER fits a 60 Hz frame; STARFALL and NOVA TIDE run on the native route with correct pictures every frame in the emulator, but are not yet at 60 frames a second; DUSK RUN is still slow. Getting that onto the Export button is the next large step.</td><td class="status soon">in progress</td></tr>
     <tr><td>Save data (backup RAM)</td><td>Many games need to remember progress.</td><td class="status no">planned</td></tr>
-    <tr><td>A test on real hardware</td><td>Nothing is proven until a console or a flash cart runs it. A compiled intro with music has run on a real console and on an FPGA core. ROMs from the Export button still need their own test.</td><td class="status soon">in progress</td></tr>
+    <tr><td>A test on real hardware</td><td>Nothing is proven until a console or a flash cart runs it. Only the PCEHero intro, a compiled intro with music, has run on a real console (and on an FPGA core). Beta 2's real-console tests are not finished, and ROMs from the Export button still need their own test.</td><td class="status soon">in progress</td></tr>
   </table>
   <h2>2. Sound and music</h2>
   <p>A game without sound is half a game, and a song should sound the same in the studio and in the ROM.</p>
@@ -102,7 +111,7 @@
   <table>
     <tr><th>Feature</th><th>Why we want it</th><th>State</th></tr>
     <tr><td>The assembler in your browser</td><td>PCEAS compiled to WebAssembly, so .s files assemble on the page. The WebAssembly proof works; wiring it into a project is planned.</td><td class="status soon">in progress</td></tr>
-    <tr><td>A native compiler (Lua to machine code)</td><td>Compile the game to real HuC6280 code instead of running it in the interpreter, with banked code, the sound engine and your art loaded at start. A developer preview exists outside the Export button, because the compiler cannot run in a browser. Four of the five gallery games compile and their logic matches the studio's; a small intro built this way runs on a real console and on an FPGA core. Games with per-line scroll effects are still slow or not yet supported.</td><td class="status soon">in progress</td></tr>
+    <tr><td>A native compiler (Lua to machine code)</td><td>Compile the game to real HuC6280 code instead of running it in the interpreter, with banked code, the sound engine and your art loaded at start. A developer preview exists outside the Export button, because the compiler cannot run in a browser. Four of the five gallery games compile and their logic matches the studio's; only the PCEHero intro, built this way, has run on a real console (and on an FPGA core). Games with per-line scroll effects are still slow or not yet supported.</td><td class="status soon">in progress</td></tr>
     <tr><td>Assembly projects and a HuCard builder</td><td>Write a whole game in assembly with our register include file, and build a .pce.</td><td class="status no">planned, after Beta 2</td></tr>
     <tr><td>A HuC6280 CPU in the studio</td><td>Run any program live next to the chip panels, instead of only toys.</td><td class="status no">planned</td></tr>
     <tr><td>Open an existing ROM in the studio</td><td>Drop in a .pce you made (or own) to look inside it: its picture, palettes, sprites and sound, and to step through its code. Good for checking your own builds and learning from your own homebrew.</td><td class="status no">planned</td></tr>

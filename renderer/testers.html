@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PCEStudio Beta Guide</title>
-<meta name="description" content="How to test PCEStudio beta 1: play, make a toy with an AI, report bugs on GitHub, and what does not work yet.">
+<title>PCEStudio Beta 2 Guide</title>
+<meta name="description" content="How to test PCEStudio beta 2: play, make a toy with an AI, test the native build kit and sound, report bugs on GitHub, and what does not work yet.">
 <link rel="stylesheet" href="pce-gallery.css">
 <style>
   /* the testers' page: pce-gallery.css's tokens and site header, a reading column of its own */
@@ -58,7 +58,7 @@
 </header>
 
 <main class="tg">
-  <span class="kicker">Beta 1 · November 2026</span>
+  <span class="kicker">Beta 2 · November 2026</span>
   <h1>Welcome, tester</h1>
   <p class="lede">PCEStudio is a PC Engine (TurboGrafx-16) studio that runs in your browser. You write small
   programs, called <b>toys</b>, in Lua. They run on a model of the console's real graphics and sound chips, and
@@ -233,8 +233,19 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
     <li><b>Export</b> a simple toy (try <i>Sky gradient</i>) and run the <code>.pce</code> in an emulator
     (Mednafen, Ares, …) or on real hardware. If you own a real PC Engine with a flash cart, we'd especially
     like to hear from you: no ROM from the Export button has run on real hardware yet.</li>
+    <li><b>Build the native kit</b> (the Export dialog's “Download native build kit” button) on macOS, Windows or Linux.
+    Does it find or download the compiler, check it, and build the ROM? Do you get the same ROM as the others?</li>
+    <li><b>Hear the sound effects</b> in a toy (the sound guide lists them). Do they sound the same in the studio and
+    in the ROM you run in an emulator?</li>
+    <li><b>Try samples on the native route</b> (<code>sample(name, channel)</code>, a developer preview). Does the
+    sample play in an emulator, and does anything else in the game stop?</li>
+    <li><b>Read the hardware-design guide</b> that the MCP Claude uses. Does a game written from it stay inside the
+    console's limits?</li>
     <li><b>Your browser and computer.</b> Tell us what you use, even if everything works.</li>
   </ul>
+  <p><b>Real console results:</b> if you own a real PC Engine with a flash cart and run a ROM from PCEStudio, tell us
+  which ROM, which cart and what you saw, in one report (see section 7). A result from a real console is the most
+  valuable report we can get.</p>
 
   <h2 id="not-yet">6. What does not work yet</h2>
   <p>Known and on the board. No need to report these, but tell us if one of them stops you completely.</p>
@@ -247,7 +258,7 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
       console (a black picture); Build 8 fixes it. <code>docs/ROM_SPEED.md</code> records every code, Lua line
       and refusing <code>file:line</code>. All five run in the browser.</td>
       <td class="status soon">next big job</td></tr>
-    <tr><td>Real hardware</td><td>Exports from the Export button are checked in an emulator only. A game compiled by the separate developer preview (a small intro with music) has run on a real console and on an FPGA core.</td><td class="status soon">partly tested</td></tr>
+    <tr><td>Real hardware</td><td>Beta 2 is released, but its real-console tests are not finished. Exports from the Export button are checked in an emulator only. Of the developer preview, only the PCEHero intro has run on a real console.</td><td class="status soon">tests not finished</td></tr>
     <tr><td>Dropping a <code>.lua</code> file</td><td>A dropped or pasted single <code>.lua</code> starts a new
       toy (<code>main.lua</code> and no asset files), so the SCREEN panel shows only the new toy's state — it can
       no longer show the previous toy's art. If the old toy has unsaved edits, the studio asks before replacing
@@ -302,6 +313,8 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
     file), or paste the Lua inside a code block. If it's one of the games in Browse, its name is enough.</li>
     <li><b>Your browser and system</b>, for example <i>Chrome 141 on macOS 26</i>.</li>
     <li><b>A screenshot or a short screen recording</b> when it's something you see or hear.</li>
+    <li><b>A result from a real console:</b> name the console, the cart or flash cart, the ROM and the game, and say
+    what you saw and heard, in plain words. Say so even when it works.</li>
   </ol>
   <p>Please don't put passwords, API keys or private information in an issue: issues are public.</p>
   <h3>What happens next</h3>

@@ -58,13 +58,14 @@
 </header>
 
 <main class="tg">
-  <span class="kicker">Beta 1 · builds from Sunday 1 November 2026</span>
+  <span class="kicker">Beta 2 · Build 9 is the Beta 2 build, Monday 16 November 2026</span>
   <h1>Release notes</h1>
   <p class="lede">What changed in each build, newest first, in plain words. Each line says whether it was
   <b>tested</b> and how. Anything not listed under "works" is not finished. What comes next, and why, is on the <a href="roadmap.html">roadmap</a>. The honest list of gaps is in the
   <a href="testers.html#not-yet">beta guide</a>.</p>
 
-  <h2 id="b9">Build 9 · Monday 16 November</h2>
+  <h2 id="b9">Build 9 · Monday 16 November · the Beta 2 build</h2>
+  <p>Beta 2 is released with this build. Its tests on a real console are not finished: only the PCEHero intro has run on a real console so far.</p>
   <h3>Compiled games no longer flicker</h3>
   <ul>
     <li><b>Fixed.</b> In Build 8, a compiled game that changes colours or scrolls on screen lines (STARFALL, NOVA TIDE) computed each frame while the line interrupts were switched off. On the screen, one video frame in three was right and two were wrong, which looked like flicker. The runtime was redesigned: the line data is streamed from a double buffer and the first line's record comes first, so every video frame is drawn from complete data.
