@@ -35,52 +35,69 @@ if os.environ.get("BANK_PIN_HOT","1")!="0":
             sizes.pop(k); print("pinned in the fixed page: il_fn_"+k,file=sys.stderr)
 # first-fit decreasing into 8 KiB banks; the sizes come from a non-LTO object, so
 # leave 1 KiB for the difference to the LTO link
-CAP=8192-int(os.environ.get("BANK_SLACK","1024"))   # build-toyc-banked.sh retries with more slack if the link overflows
-banks=[]; assign={}
+# (build-toyc-banked.sh retries with more slack if the link overflows)
+edges={}
+use_affinity=os.environ.get("BANK_AFFINITY","1")!="0"
 # Call affinity.  A direct call (IL_DIRECT) is a plain call only when caller and callee share a bank
 # (or the callee is in the fixed page); across banks it falls back to il_call, ~500 cycles dearer.
 # pce-cgen.js marks every direct call site `/* AFF caller callee weight */` (weight: how often the
 # site runs per frame, relative).  Cluster greedily along the heaviest edges while a cluster still
 # fits one bank (union-find, deterministic tie-breaks), then first-fit-decreasing the clusters.
 # BANK_AFFINITY=0 packs by size alone, the way it was before (for the measurements).
-edges={}
-use_affinity=os.environ.get("BANK_AFFINITY","1")!="0"
-if True:
-    for m in re.finditer(r"/\* AFF il_fn_(\d+(?:_c\d+)?) il_fn_(\d+(?:_c\d+)?) (\d+) \*/",text):
-        a_,b_,w=m.group(1),m.group(2),int(m.group(3))
-        if a_ in sizes and b_ in sizes and a_!=b_:
-            k=(a_,b_) if a_<b_ else (b_,a_)
-            edges[k]=edges.get(k,0)+w
-        elif a_ in sizes and b_ not in sizes:
-            pass   # the callee is in the fixed page (a split function's dispatcher): already free
-parent={k:k for k in sizes}; csize=dict(sizes)
-def find(x):
-    while parent[x]!=x:
-        parent[x]=parent[parent[x]]; x=parent[x]
-    return x
-same_w=0
-for (a_,b_),w in sorted(edges.items() if use_affinity else [],key=lambda e:(-e[1],e[0])):
-    ra,rb=find(a_),find(b_)
-    if ra==rb: continue
-    if csize[ra]+csize[rb]<=CAP:
-        parent[rb]=ra; csize[ra]+=csize[rb]
-clusters={}
-for k in sorted(sizes): clusters.setdefault(find(k),[]).append(k)
-for root,members in sorted(clusters.items(),key=lambda c:(-sum(sizes[m] for m in c[1]),c[0])):
-    total=sum(sizes[m] for m in members)
-    if total>CAP and len(members)==1:   # a single oversized function: the SPLIT path below handles it
-        banks.append(total); assign[members[0]]=len(banks); continue
-    for b,used in enumerate(banks):
-        if used+total<=CAP:
-            banks[b]+=total
-            for m in members: assign[m]=b+1
-            break
-    else:
-        banks.append(total)
-        for m in members: assign[m]=len(banks)
-if edges:
+for m in re.finditer(r"/\* AFF il_fn_(\d+(?:_c\d+)?) il_fn_(\d+(?:_c\d+)?) (\d+) \*/",text):
+    a_,b_,w=m.group(1),m.group(2),int(m.group(3))
+    if a_ in sizes and b_ in sizes and a_!=b_:
+        k=(a_,b_) if a_<b_ else (b_,a_)
+        edges[k]=edges.get(k,0)+w
+    # the callee in the fixed page (a split function's dispatcher) is already free
+def pack(slack):
+    CAP=8192-slack
+    banks=[]; assign={}
+    parent={k:k for k in sizes}; csize=dict(sizes)
+    def find(x):
+        while parent[x]!=x:
+            parent[x]=parent[parent[x]]; x=parent[x]
+        return x
+    for (a_,b_),w in sorted(edges.items() if use_affinity else [],key=lambda e:(-e[1],e[0])):
+        ra,rb=find(a_),find(b_)
+        if ra==rb: continue
+        if csize[ra]+csize[rb]<=CAP:
+            parent[rb]=ra; csize[ra]+=csize[rb]
+    clusters={}
+    for k in sorted(sizes): clusters.setdefault(find(k),[]).append(k)
+    for root,members in sorted(clusters.items(),key=lambda c:(-sum(sizes[m] for m in c[1]),c[0])):
+        total=sum(sizes[m] for m in members)
+        if total>CAP and len(members)==1:   # a single oversized function: the SPLIT path below handles it
+            banks.append(total); assign[members[0]]=len(banks); continue
+        for b,used in enumerate(banks):
+            if used+total<=CAP:
+                banks[b]+=total
+                for m in members: assign[m]=b+1
+                break
+        else:
+            banks.append(total)
+            for m in members: assign[m]=len(banks)
     tw=sum(edges.values()); sw=sum(w for (a_,b_),w in edges.items() if assign[a_]==assign[b_])
-    print("call affinity (%s): %d of %d edge weight is same-bank (%d%%), %d edges"%("on" if use_affinity else "off",sw,tw,100*sw//max(tw,1),len(edges)),file=sys.stderr)
+    return banks,assign,sw,tw
+SLACK=int(os.environ.get("BANK_SLACK","1024"))
+banks,assign,sw,tw=pack(SLACK)
+# A game whose hot calls cross banks (NOVA TIDE: 55% of the call weight stayed in a bank, its draw()
+# fills a bank and leaves no room for spr() and hide()) pays ~500 cycles a cross-bank call.  Below 90%
+# try a smaller slack for the packing and keep the best share; a link that overflows is retried by
+# build-toyc-banked.sh with BANK_SLACK set, which takes this path once only.  A game at 90% or more
+# keeps its packing byte for byte.  BANK_SLACK_SEARCH=0 turns the search off.
+if edges and use_affinity and sw*100<tw*90 and "BANK_SLACK" not in os.environ and os.environ.get("BANK_SLACK_SEARCH","1")!="0":
+    best=(sw,SLACK,banks,assign,tw)
+    for sl in (768,512,384,256):
+        b2,a2,s2,t2=pack(sl)
+        if s2>best[0]: best=(s2,sl,b2,a2,t2)
+    sw,SLACK,banks,assign,tw=best
+if edges:
+    print("call affinity (%s): %d of %d edge weight is same-bank (%d%%), %d edges, slack %d"%("on" if use_affinity else "off",sw,tw,100*sw//max(tw,1),len(edges),SLACK),file=sys.stderr)
+CAP=8192-SLACK
+if os.environ.get("BANK_DEBUG"):
+    for (a_,b_),w in sorted(edges.items(),key=lambda e:-e[1])[:12]:
+        print("  edge %s %s weight %d, banks %s %s, sizes %d %d"%(a_,b_,w,assign[a_],assign[b_],sizes[a_],sizes[b_]),file=sys.stderr)
 # physical bank numbers for the packed banks: 1, 2, 3, ... or, when the ROM
 # keeps banks for the sound engine, BANK_IDS="1,5,6,..." (tools/build-toyc-banked.sh)
 ids=[int(x) for x in os.environ.get("BANK_IDS","").split(",") if x] or list(range(1,200))

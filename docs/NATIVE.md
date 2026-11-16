@@ -395,3 +395,32 @@ pin in `tests/dumps/toyparallax/meta.json` moved twice, each time from the runti
 line 208 builds to 5287...; with the old runtime, to the old pin); the 40 compared frames are diff 0. Not covered by a
 test of its own: `promoteChunkLocals` (a split function's locals); it is exercised by NOVA TIDE's flicker check and by
 `tools/host-c-compare.js` with `PCE_SPLIT_OVER=1 PCE_SPLIT_CHUNK=30` (120 of 120 frames equal on all four games).
+
+## Bank packing for a game whose hot calls cross banks (2026-11-16, #308)
+
+A call between two functions in different switched banks goes through `il_call` and a bank map each way
+(about 500 cycles more than a plain call). `bank-toyc.py` clusters functions along the heaviest call edges while a
+cluster fits one bank, but it leaves 1 KiB of each bank free for the difference between the non-LTO sizes it
+reads and the linked sizes. NOVA TIDE's `draw()` alone is 6,867 B, so with 1 KiB of slack its `spr()` and `hide()`
+(about 830 B, called 38 times a frame) could not join it: the packing kept 85% of the call weight inside a bank,
+and 12,000 cycles a game frame went to `il_call` (`tools/pctrace.py`).
+
+Now a packing below 90% of the call weight is tried again with 768, 512, 384 and 256 bytes of slack and the best
+share is kept (`pack()` in `tools/bank-toyc.py`, the same in `tools/native-kit/build.js`; `BANK_SLACK_SEARCH=0`
+turns it off, an explicit `BANK_SLACK`, as the overflow retry sets, does not search). A game at 90% or more keeps its
+packing byte for byte: STARFALL, PLATFORMER, TOWER (98 to 100%) have the same ROM hashes. `BANK_DEBUG=1` lists the
+heaviest edges and the banks they landed in.
+
+Measured (game frames per 300 video frames, `python3 -I tools/ggmcp.py ROM satdump 300`, `OPT=-Oz`):
+
+| game | before | after |
+|---|---|---|
+| NOVA TIDE | 138 (85% of the call weight in a bank) | 169 (92%, slack 384; 6 banks, was 7) |
+| TOWER | 233 | 233 (unchanged ROM) |
+| PLATFORMER | 281 | 281 (unchanged ROM) |
+| STARFALL (`-Oz`) | 144 | 144 (unchanged ROM) |
+
+The NOVA TIDE pin in `tests/native-kit-pins.json` moved (7820af20... to 65734066...) from the packing alone; the
+other three pins did not. `check-native-raster-flicker` (diff 0 on every compared frame), `check-native-vblank`,
+`check-native-art`, `check-native-sound`, `check-native-raster-sprites`, `check-cgen-host`, `check-cgen-tables`,
+`check-bank-affinity` and `check-native-kit` pass. NOVA TIDE still misses the 60 Hz deadline on its busiest frames.

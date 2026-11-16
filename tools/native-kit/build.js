@@ -326,9 +326,6 @@ function pack(text, sizes, o) {
       if (sizes.has(k) && sizes.get(k) <= o.hotMax) { sizes.delete(k); warn("pinned in the fixed page: il_fn_" + k); }
     }
   }
-  const CAP = 8192 - o.slack;
-  const banks = [];
-  const assign = new Map();
   const edges = new Map();
   for (const m of text.matchAll(/\/\* AFF il_fn_(\d+(?:_c\d+)?) il_fn_(\d+(?:_c\d+)?) (\d+) \*\//g)) {
     const a = m[1], b = m[2], w = parseInt(m[3], 10);
@@ -337,36 +334,50 @@ function pack(text, sizes, o) {
       edges.set(k, (edges.get(k) || 0) + w);
     }
   }
-  const parent = new Map(), csize = new Map();
-  for (const [k, v] of sizes) { parent.set(k, k); csize.set(k, v); }
-  const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
   const sortedEdges = [...edges.entries()].map(([k, w]) => { const ab = k.split("\u0000"); return { a: ab[0], b: ab[1], w: w }; });
   sortedEdges.sort((x, y) => (y.w - x.w) || cmpStr(x.a, y.a) || cmpStr(x.b, y.b));
-  for (const e of sortedEdges) {
-    const ra = find(e.a), rb = find(e.b);
-    if (ra === rb) continue;
-    if (csize.get(ra) + csize.get(rb) <= CAP) { parent.set(rb, ra); csize.set(ra, csize.get(ra) + csize.get(rb)); }
-  }
-  const clusters = new Map();
-  for (const k of [...sizes.keys()].sort(cmpStr)) {
-    const r = find(k);
-    if (!clusters.has(r)) clusters.set(r, []);
-    clusters.get(r).push(k);
-  }
-  const order = [...clusters.entries()].map(([root, members]) => ({ root: root, members: members, total: members.reduce((s, m) => s + sizes.get(m), 0) }));
-  order.sort((x, y) => (y.total - x.total) || cmpStr(x.root, y.root));
-  for (const c of order) {
-    if (c.total > CAP && c.members.length === 1) { banks.push(c.total); assign.set(c.members[0], banks.length); continue; }
-    let placed = false;
-    for (let b = 0; b < banks.length; b++) {
-      if (banks[b] + c.total <= CAP) { banks[b] += c.total; for (const m of c.members) assign.set(m, b + 1); placed = true; break; }
+  const place = (slack) => {
+    const CAP = 8192 - slack;
+    const banks = [];
+    const assign = new Map();
+    const parent = new Map(), csize = new Map();
+    for (const [k, v] of sizes) { parent.set(k, k); csize.set(k, v); }
+    const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+    for (const e of sortedEdges) {
+      const ra = find(e.a), rb = find(e.b);
+      if (ra === rb) continue;
+      if (csize.get(ra) + csize.get(rb) <= CAP) { parent.set(rb, ra); csize.set(ra, csize.get(ra) + csize.get(rb)); }
     }
-    if (!placed) { banks.push(c.total); for (const m of c.members) assign.set(m, banks.length); }
-  }
-  if (edges.size) {
+    const clusters = new Map();
+    for (const k of [...sizes.keys()].sort(cmpStr)) {
+      const r = find(k);
+      if (!clusters.has(r)) clusters.set(r, []);
+      clusters.get(r).push(k);
+    }
+    const order = [...clusters.entries()].map(([root, members]) => ({ root: root, members: members, total: members.reduce((s, m) => s + sizes.get(m), 0) }));
+    order.sort((x, y) => (y.total - x.total) || cmpStr(x.root, y.root));
+    for (const c of order) {
+      if (c.total > CAP && c.members.length === 1) { banks.push(c.total); assign.set(c.members[0], banks.length); continue; }
+      let placed = false;
+      for (let b = 0; b < banks.length; b++) {
+        if (banks[b] + c.total <= CAP) { banks[b] += c.total; for (const m of c.members) assign.set(m, b + 1); placed = true; break; }
+      }
+      if (!placed) { banks.push(c.total); for (const m of c.members) assign.set(m, banks.length); }
+    }
     let tw = 0, sw = 0;
     for (const e of sortedEdges) { tw += e.w; if (assign.get(e.a) === assign.get(e.b)) sw += e.w; }
-    warn("call affinity (on): " + sw + " of " + tw + " edge weight is same-bank (" + Math.floor(100 * sw / Math.max(tw, 1)) + "%), " + edges.size + " edges");
+    return { banks: banks, assign: assign, sw: sw, tw: tw, CAP: CAP, slack: slack };
+  };
+  /* as tools/bank-toyc.py: below 90% of the call weight inside a bank, try a smaller slack and keep the
+   * best share (NOVA TIDE: its draw() fills a bank and spr() and hide() land in another).  A retry from a
+   * link overflow (BANK_SLACK set, or o.slack raised) does not search. */
+  let pl = place(o.slack);
+  if (edges.size && pl.sw * 100 < pl.tw * 90 && o.searchSlack !== false) {
+    for (const sl of [768, 512, 384, 256]) { const q = place(sl); if (q.sw > pl.sw) pl = q; }
+  }
+  const { banks, assign, CAP } = pl;
+  if (edges.size) {
+    warn("call affinity (on): " + pl.sw + " of " + pl.tw + " edge weight is same-bank (" + Math.floor(100 * pl.sw / Math.max(pl.tw, 1)) + "%), " + edges.size + " edges" + (pl.slack !== o.slack ? ", slack " + pl.slack : ""));
   }
   const ids = o.bankIds.length ? o.bankIds : Array.from({ length: 199 }, (_, i) => i + 1);
   for (const [k, v] of [...assign.entries()]) assign.set(k, ids[v - 1]);
@@ -540,7 +551,7 @@ async function main() {
       if (nm.status !== 0) fail("llvm-nm failed", nm);
       const sizes = functionSizes(nm.stdout);
       return pack(readC(), sizes, {
-        slack: slack, pinHot: pinHot, hotMax: 600,
+        slack: slack, pinHot: pinHot, hotMax: 600, searchSlack: !process.env.BANK_SLACK && slack === 1024,
         bankIds: sound ? [1, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30] : []
       });
     };
