@@ -243,8 +243,7 @@ ln -s "$PWD/plugin/skills/creating-pce-toys" ~/.claude/skills/creating-pce-toys<
     <tr><td>Export to <code>.pce</code></td><td>The simple example toys export, and so do PLATFORMER (it holds
       60 Hz) and the sprite toy. TOWER, STARFALL and DUSK RUN also build (a game's art travels in its own
       ROM banks since Build 7) but run too slowly on the interpreter in the ROM. DUSK RUN's displayed picture is
-      the browser's; STARFALL's is not yet. NOVA TIDE is still refused: the interpreter has no form for its
-      <code>raster(line, spec)</code> calls. Build 7 had a bug that left an exported game's art unloaded on the
+      the browser's; STARFALL's is not yet. NOVA TIDE exports, but its ROM shows a black screen. Build 7 had a bug that left an exported game's art unloaded on the
       console (a black picture); Build 8 fixes it. <code>docs/ROM_SPEED.md</code> records every code, Lua line
       and refusing <code>file:line</code>. All five run in the browser.</td>
       <td class="status soon">next big job</td></tr>

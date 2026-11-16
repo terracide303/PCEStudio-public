@@ -64,6 +64,72 @@
   <b>tested</b> and how. Anything not listed under "works" is not finished. What comes next, and why, is on the <a href="roadmap.html">roadmap</a>. The honest list of gaps is in the
   <a href="testers.html#not-yet">beta guide</a>.</p>
 
+  <h2 id="b9">Build 9 · Monday 16 November</h2>
+  <h3>Compiled games no longer flicker</h3>
+  <ul>
+    <li><b>Fixed.</b> In Build 8, a compiled game that changes colours or scrolls on screen lines (STARFALL, NOVA TIDE) computed each frame while the line interrupts were switched off. On the screen, one video frame in three was right and two were wrong, which looked like flicker. The runtime was redesigned: the line data is streamed from a double buffer and the first line's record comes first, so every video frame is drawn from complete data.
+      <span class="status ok">tested: a strict test records STARFALL and NOVA TIDE in Mednafen and requires the last 24 consecutive video frames of each to equal a browser frame; all 24 do for both (STARFALL's known one-row difference on the status bar is allowed)</span>
+      <span class="status soon">not yet run on a real console</span></li>
+  </ul>
+  <h3>Faster compiled games</h3>
+  <ul>
+    <li>Reading and writing a game's tables is now a direct access when the compiler can prove which table it is and that the index is in range. Out-of-range reads still give 0 and writes still do nothing. Measured in an emulator, game frames per 300 video frames on the native route: STARFALL 143 to 286, NOVA TIDE 119 to 138. These numbers also include other compiler speed changes made the same week.
+      <span class="status ok">tested: measured in Mednafen over 300 video frames; the game logic still equals the browser's frame for frame</span>
+      <span class="status soon">NOVA TIDE and DUSK RUN are not yet at 60 frames a second; not yet run on a real console</span></li>
+    <li>DUSK RUN's background is now drawn ahead of time and stored in the game's art, instead of being computed on the console when it starts. The first toy frame now shows at video frame 20 (about 7,000 before), and sprites by frame 60.
+      <span class="status ok">tested: tests/check-bake-art.js (13 checks); the console's video memory equals the bake except the sprite list and score row, with one 24-byte difference on rows 16 and 17 at the first raster split</span>
+      <span class="status soon">speed after the start-up is not improved by this; not yet run on a real console</span></li>
+  </ul>
+  <h3>Native build kit for macOS, Windows and Linux (developer preview)</h3>
+  <ul>
+    <li>A downloadable kit (the Export dialog's "Download native build kit" button) builds a game's ROM with the native compiler. One Node script, with no Python or bash needed, finds or downloads the pinned llvm-mos toolchain, checks its checksum and builds the ROM. The kit's ROM hashes are the same on all three systems.
+      <span class="status ok">tested: the GitHub Actions run of the kit on macOS, Ubuntu and Windows passes on the same commit (fa85413), and all three produce the same four ROM hashes; the kit's ROMs equal the Mac build byte for byte</span>
+      <span class="status soon">only the native route; not yet run on a real console</span></li>
+  </ul>
+  <h3>Sound engine</h3>
+  <ul>
+    <li>Sound effects can now use noise, pitch slides, volume envelopes and named presets, on all three routes (the studio, the Export button's ROM and the native ROM). The browser, the interpreter ROM and the native ROM write the same sound-chip registers.
+      <span class="status ok">tested: tests/check-sfx-fx compares the sound-chip writes of the studio and both ROMs</span></li>
+    <li>Wave instruments 4 to 7 (organ, bass, buzz, sine) are available to effects on all three routes; the sound checks pass with 99 checks.
+      <span class="status ok">tested: tests/check-sfx-fx, 99 checks; the sound is the same on the studio, the interpreter ROM and the native ROM</span></li>
+    <li>LFO (one channel modulating another) is refused by the validator with the code sfx-lfo. It is not on any route.
+      <span class="status soon">refused on purpose; not built</span></li>
+    <li>Music effects from the song format (arpeggio, slides, vibrato and the rest) are refused with the code song-fx on the toy path. The hand-off equivalents are documented for the MCP Claude.
+      <span class="status soon">refused; not built</span></li>
+    <li>A sound guide for the MCP Claude says what the chip can do, what each call costs per frame, which calls export and the preset list. Three example toys (jump and shoot, a song with effects, a noise explosion) pass validate and export.
+      <span class="status ok">tested: tests/check-sound-guide, 79 checks; the examples pass validate and export</span></li>
+  </ul>
+  <h3>Digital samples on the native route (developer preview)</h3>
+  <ul>
+    <li><code>sample(name, channel)</code> plays a digital sample (speech, drums, big hits) from an 8 KiB sample bank, on the native route only. A timer interrupt plays it; on the native route it takes about 111 CPU cycles a step, 5.4 percent of a frame at 3,496 Hz (measured). The Export button refuses it with the code ilbc-sample, so an exported ROM from the studio does not play samples.
+      <span class="status ok">tested: tests/check-sample, 75 checks; the steps equal the browser's and the native ROM's; the cost measured with Geargrafx's profiler</span>
+      <span class="status soon">not yet run on a real console</span></li>
+  </ul>
+  <h3>Guidelines for the MCP Claude</h3>
+  <ul>
+    <li>A new docs topic, hardware-design, tells the MCP Claude what the console can and cannot do: the screen, sprites, video memory, music and background budgets, and a self-check to run before a game is handed over. Real HuCard budgets, measured in an emulator on the maintainer's own ROMs, are in the same docs. Only counts were kept.
+      <span class="status ok">tested: tests/check-docs (496 checks): the topic is generated from the code's own tables</span></li>
+  </ul>
+  <h3>Speeds we measured (emulator only)</h3>
+  <ul>
+    <li>On the native route, STARFALL runs 286 game frames per 300 video frames and NOVA TIDE 138. 300 video frames is 5 seconds at 60 Hz, so that is about 57 and 28 game frames a second. Neither reaches 60 frames a second; this is measured in an emulator, not on a console.
+      <span class="status ok">tested: measured in Mednafen over 300 video frames</span>
+      <span class="status soon">not yet run on a real console</span></li>
+  </ul>
+  <h3>Export and NOVA TIDE</h3>
+  <ul>
+    <li>The Export button now accepts NOVA TIDE and builds a 65,536-byte ROM for it. <b>The ROM shows a black screen.</b> It is over four of the interpreter's limits (registers, boot cells, globals, table slots), so the game stops at load. The limits are the next thing to fix.
+      <span class="status ok">tested: the ROM builds; the black screen is recorded in the emulator test notes (docs/ROM_SPEED.md)</span>
+      <span class="status soon">broken: black screen; not fixed</span></li>
+  </ul>
+  <h3>Not finished</h3>
+  <ul>
+    <li>Nothing in this build has run on a real PC Engine, except the PCEHero intro from Build 7. The speed, sound and kit results above are emulator results.
+      <span class="status soon">in progress</span></li>
+    <li>NOVA TIDE and DUSK RUN are not yet at 60 frames a second, and NOVA TIDE shows a black screen when exported.
+      <span class="status soon">in progress</span></li>
+  </ul>
+
   <h2 id="b8">Build 8 · Friday 13 November (evening)</h2>
   <h3>Exported games with art now show their art</h3>
   <ul>
@@ -94,10 +160,10 @@
   </ul>
   <h3>Not finished</h3>
   <ul>
-    <li>The Export button still refuses NOVA TIDE: the interpreter in the ROM has no form for its per-line scroll calls. Apart from the small PCEHero intro, nothing compiled this way has run on a real console yet.
-      <span class="status soon">in progress</span></li>
-    <li>Compiled games that change colours or scroll on screen lines (STARFALL, NOVA TIDE, DUSK RUN and similar) show their picture correctly on only about one video frame in three, so they flicker. The fix is a redesign of how the ROM drives those per-line changes; until it lands, expect flicker on the console and treat these builds as previews.
-      <span class="status soon">in progress</span></li>
+    <li>Fixed in Build 9 (see below): the Export button now accepts NOVA TIDE, but its ROM shows a black screen. Apart from the small PCEHero intro, nothing compiled this way has run on a real console yet.
+      <span class="status soon">NOVA TIDE black screen: open</span></li>
+    <li>Fixed in Build 9 (see below): compiled games with colour or scroll changes on screen lines flickered, because one video frame in three was right. The strict test now shows every frame correct in STARFALL and NOVA TIDE.
+      <span class="status ok">fixed; tested in Build 9</span></li>
   </ul>
 
   <h2 id="b7">Build 7 · Friday 13 November</h2>
