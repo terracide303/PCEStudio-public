@@ -208,3 +208,7 @@ version** ([`LICENSE`](LICENSE)).
   is shown on the website; it is **not part of this repository** and **not covered by the GPL**. All other art in the toys was drawn for them.
 - *PC Engine* and *TurboGrafx-16* are trademarks of their owners. PCEStudio is a fan project and is not affiliated with
   NEC, Hudson Soft or Konami.
+
+## Community and support
+
+- **Discord:** join the PC Engine FPGA community: https://discord.gg/zsYdGqHXS
